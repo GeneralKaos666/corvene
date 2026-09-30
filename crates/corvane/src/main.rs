@@ -214,7 +214,7 @@ fn main() {
         cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
         cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
         cx.on_action(|_: &InstallCli, cx| Dispatcher::install_cli(cx));
-        cx.on_action(|_: &ImportFromGitHubDesktop, cx| {
+        on_menu_action(cx, |_: &ImportFromGitHubDesktop, cx| {
             let enabled = corvane_core::AppState::global(cx)
                 .read(cx)
                 .flags
@@ -223,13 +223,13 @@ fn main() {
                 Dispatcher::show_popup(Popup::ImportFromGitHubDesktop, cx)
             }
         });
-        cx.on_action(|_: &AddLocalRepository, cx| {
+        on_menu_action(cx, |_: &AddLocalRepository, cx| {
             Dispatcher::show_popup(Popup::AddExistingRepository { path: None }, cx)
         });
-        cx.on_action(|_: &NewRepository, cx| {
+        on_menu_action(cx, |_: &NewRepository, cx| {
             Dispatcher::show_popup(Popup::CreateRepository { path: None }, cx)
         });
-        cx.on_action(|_: &CloneRepository, cx| {
+        on_menu_action(cx, |_: &CloneRepository, cx| {
             Dispatcher::show_popup(Popup::CloneRepository { url: None }, cx)
         });
         // CORVANE_DEV_ACCOUNTS="login@api-base,…" adds token-less accounts to
@@ -375,24 +375,24 @@ fn main() {
             })
             .detach();
         }
-        cx.on_action(|_: &RemoveRepository, cx| {
+        on_menu_action(cx, |_: &RemoveRepository, cx| {
             if let Some(id) = corvane_core::AppState::global(cx).read(cx).selected {
                 Dispatcher::request_remove_repository(id, cx);
             }
         });
-        cx.on_action(|_: &OpenFlags, cx| Dispatcher::open_flags(None, cx));
+        on_menu_action(cx, |_: &OpenFlags, cx| Dispatcher::open_flags(None, cx));
         // Corvane (`610-diff-mode-shortcut`): Diff Settings › Unified / Split
-        cx.on_action(|_: &ToggleDiffDisplayMode, cx| {
+        on_menu_action(cx, |_: &ToggleDiffDisplayMode, cx| {
             let split = corvane_core::AppState::global(cx)
                 .read(cx)
                 .settings
                 .show_side_by_side_diff;
             Dispatcher::set_show_side_by_side_diff(!split, cx);
         });
-        cx.on_action(|_: &OpenSettings, cx| {
+        on_menu_action(cx, |_: &OpenSettings, cx| {
             Dispatcher::open_preferences(corvane_core::PreferencesTab::Accounts, cx)
         });
-        cx.on_action(|_: &About, cx| {
+        on_menu_action(cx, |_: &About, cx| {
             Dispatcher::show_popup(
                 Popup::About {
                     version: env!("CARGO_PKG_VERSION").to_string(),
@@ -405,7 +405,7 @@ fn main() {
             let repo = s.selected_repository()?;
             Some((repo.id, repo.path.clone()))
         };
-        cx.on_action(move |_: &AddLicense, cx| {
+        on_menu_action(cx, move |_: &AddLicense, cx| {
             let enabled = corvane_core::AppState::global(cx)
                 .read(cx)
                 .flags
@@ -414,7 +414,7 @@ fn main() {
                 Dispatcher::show_popup(Popup::AddLicense { repo: id }, cx);
             }
         });
-        cx.on_action(move |_: &RepositorySettings, cx| {
+        on_menu_action(cx, move |_: &RepositorySettings, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::open_repository_settings(
                     id,
@@ -423,57 +423,57 @@ fn main() {
                 );
             }
         });
-        cx.on_action(move |_: &OpenInEditor, cx| {
+        on_menu_action(cx, move |_: &OpenInEditor, cx| {
             if let Some((_, path)) = selected_path(cx) {
                 Dispatcher::open_in_editor(path, cx);
             }
         });
-        cx.on_action(move |_: &OpenInShell, cx| {
+        on_menu_action(cx, move |_: &OpenInShell, cx| {
             if let Some((_, path)) = selected_path(cx) {
                 Dispatcher::open_in_shell(&path, cx);
             }
         });
-        cx.on_action(move |_: &ShowInFinder, cx| {
+        on_menu_action(cx, move |_: &ShowInFinder, cx| {
             if let Some((_, path)) = selected_path(cx) {
                 Dispatcher::show_in_finder(&path, cx);
             }
         });
-        cx.on_action(move |_: &OpenWith, cx| {
+        on_menu_action(cx, move |_: &OpenWith, cx| {
             if let Some((_, path)) = selected_path(cx) {
                 Dispatcher::open_with(path, cx);
             }
         });
-        cx.on_action(move |_: &ViewOnGitHub, cx| {
+        on_menu_action(cx, move |_: &ViewOnGitHub, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::view_on_github(id, cx);
             }
         });
-        cx.on_action(move |_: &ViewUpstreamOnGitHub, cx| {
+        on_menu_action(cx, move |_: &ViewUpstreamOnGitHub, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::view_upstream_on_github(id, cx);
             }
         });
-        cx.on_action(move |_: &CreateIssue, cx| {
+        on_menu_action(cx, move |_: &CreateIssue, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::create_issue(id, cx);
             }
         });
-        cx.on_action(move |_: &CompareOnGitHub, cx| {
+        on_menu_action(cx, move |_: &CompareOnGitHub, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::compare_on_github(id, cx);
             }
         });
-        cx.on_action(move |_: &ViewBranchOnGitHub, cx| {
+        on_menu_action(cx, move |_: &ViewBranchOnGitHub, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::view_branch_on_github(id, cx);
             }
         });
-        cx.on_action(move |_: &CreatePullRequest, cx| {
+        on_menu_action(cx, move |_: &CreatePullRequest, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::create_pull_request(id, cx);
             }
         });
-        cx.on_action(move |_: &PreviewPullRequest, cx| {
+        on_menu_action(cx, move |_: &PreviewPullRequest, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::start_pull_request(id, cx);
             }
@@ -610,15 +610,15 @@ fn main() {
 
         // View / Window actions are global so the menu items stay enabled whatever has focus.
         let ws = workspace.clone();
-        cx.on_action(move |_: &ShowChanges, cx| {
+        on_menu_action(cx, move |_: &ShowChanges, cx| {
             ws.update(cx, |w, cx| w.switch_section(Section::Changes, cx))
         });
         let ws = workspace.clone();
-        cx.on_action(move |_: &ShowHistory, cx| {
+        on_menu_action(cx, move |_: &ShowHistory, cx| {
             ws.update(cx, |w, cx| w.switch_section(Section::History, cx))
         });
         let ws = workspace.clone();
-        cx.on_action(move |_: &ToggleSection, cx| {
+        on_menu_action(cx, move |_: &ToggleSection, cx| {
             ws.update(cx, |w, cx| {
                 let next = match w.section() {
                     Section::Changes => Section::History,
@@ -628,7 +628,7 @@ fn main() {
             })
         });
         let ws = workspace.clone();
-        cx.on_action(move |_: &ShowRepositoryList, cx| {
+        on_menu_action(cx, move |_: &ShowRepositoryList, cx| {
             if let Some(window) = cx.active_window() {
                 let ws = ws.clone();
                 window
@@ -639,7 +639,7 @@ fn main() {
             }
         });
         let ws = workspace.clone();
-        cx.on_action(move |_: &ShowBranchesList, cx| {
+        on_menu_action(cx, move |_: &ShowBranchesList, cx| {
             if let Some(window) = cx.active_window() {
                 let ws = ws.clone();
                 window
@@ -650,7 +650,7 @@ fn main() {
             }
         });
         let ws = workspace.clone();
-        cx.on_action(move |_: &ShowWorktreesList, cx| {
+        on_menu_action(cx, move |_: &ShowWorktreesList, cx| {
             if let Some(window) = cx.active_window() {
                 let ws = ws.clone();
                 window
@@ -662,12 +662,12 @@ fn main() {
         });
         // Corvane (`801-history-review-mode`)
         let ws = workspace.clone();
-        cx.on_action(move |_: &ToggleHistoryReviewMode, cx| {
+        on_menu_action(cx, move |_: &ToggleHistoryReviewMode, cx| {
             ws.update(cx, |w, cx| w.toggle_review_mode(cx))
         });
         // Corvane (`612-navigation-shortcuts`)
         let ws = workspace.clone();
-        cx.on_action(move |_: &ShowPullRequestsList, cx| {
+        on_menu_action(cx, move |_: &ShowPullRequestsList, cx| {
             if let Some(window) = cx.active_window() {
                 let ws = ws.clone();
                 window
@@ -678,7 +678,7 @@ fn main() {
             }
         });
         let ws = workspace.clone();
-        cx.on_action(move |_: &FocusDiff, cx| {
+        on_menu_action(cx, move |_: &FocusDiff, cx| {
             if let Some(window) = cx.active_window() {
                 let ws = ws.clone();
                 window
@@ -709,10 +709,12 @@ fn main() {
                 Dispatcher::select_repository(id, cx);
             }
         };
-        cx.on_action(move |_: &NextRepository, cx| step_repository(1, cx));
-        cx.on_action(move |_: &PreviousRepository, cx| step_repository(-1, cx));
+        on_menu_action(cx, move |_: &NextRepository, cx| step_repository(1, cx));
+        on_menu_action(cx, move |_: &PreviousRepository, cx| {
+            step_repository(-1, cx)
+        });
         let ws = workspace.clone();
-        cx.on_action(move |_: &GoToSummary, cx| {
+        on_menu_action(cx, move |_: &GoToSummary, cx| {
             if let Some(window) = cx.active_window() {
                 let ws = ws.clone();
                 window
@@ -734,7 +736,7 @@ fn main() {
             }
         });
         let ws = workspace.clone();
-        cx.on_action(move |_: &ToggleChangesFilter, cx| {
+        on_menu_action(cx, move |_: &ToggleChangesFilter, cx| {
             ws.update(cx, |w, cx| w.toggle_changes_filter(cx))
         });
         // View › Reset Zoom / Zoom In / Zoom Out (GHD `zoom(ZoomDirection)`)
@@ -745,7 +747,7 @@ fn main() {
         let ws = workspace.clone();
         cx.on_action(move |_: &ResetZoom, cx| ws.update(cx, |w, cx| w.zoom(0, cx)));
         let ws = workspace.clone();
-        cx.on_action(move |_: &CompareToBranch, cx| {
+        on_menu_action(cx, move |_: &CompareToBranch, cx| {
             if let Some(window) = cx.active_window() {
                 let ws = ws.clone();
                 window
@@ -758,7 +760,7 @@ fn main() {
         // Branch menu
         let selected = |cx: &App| corvane_core::AppState::global(cx).read(cx).selected;
         let ws = workspace.clone();
-        cx.on_action(move |_: &NewBranch, cx| {
+        on_menu_action(cx, move |_: &NewBranch, cx| {
             if let Some(id) = selected(cx) {
                 // `847-new-branch-from-filter`: like the foldout's New Branch
                 // button, start from the branch filter's text
@@ -781,7 +783,7 @@ fn main() {
                 );
             }
         });
-        cx.on_action(move |_: &NewWorktree, cx| {
+        on_menu_action(cx, move |_: &NewWorktree, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::show_popup(
                     Popup::AddWorktree {
@@ -806,17 +808,17 @@ fn main() {
                 .clone();
             Some((id, name))
         };
-        cx.on_action(move |_: &RenameBranch, cx| {
+        on_menu_action(cx, move |_: &RenameBranch, cx| {
             if let Some((id, name)) = current_branch(cx) {
                 Dispatcher::show_popup(Popup::RenameBranch { repo: id, name }, cx);
             }
         });
-        cx.on_action(move |_: &DeleteBranch, cx| {
+        on_menu_action(cx, move |_: &DeleteBranch, cx| {
             if let Some((id, name)) = current_branch(cx) {
                 Dispatcher::show_popup(Popup::DeleteBranch { repo: id, name }, cx);
             }
         });
-        cx.on_action(move |_: &MergeIntoCurrentBranch, cx| {
+        on_menu_action(cx, move |_: &MergeIntoCurrentBranch, cx| {
             if let Some((id, _)) = current_branch(cx)
                 && !Dispatcher::refuse_merge_while_conflicted(id, cx)
             {
@@ -829,7 +831,7 @@ fn main() {
                 );
             }
         });
-        cx.on_action(move |_: &SquashAndMergeIntoCurrentBranch, cx| {
+        on_menu_action(cx, move |_: &SquashAndMergeIntoCurrentBranch, cx| {
             if let Some((id, _)) = current_branch(cx)
                 && !Dispatcher::refuse_merge_while_conflicted(id, cx)
             {
@@ -842,22 +844,22 @@ fn main() {
                 );
             }
         });
-        cx.on_action(move |_: &Push, cx| {
+        on_menu_action(cx, move |_: &Push, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::push(id, false, None, cx);
             }
         });
-        cx.on_action(move |_: &Pull, cx| {
+        on_menu_action(cx, move |_: &Pull, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::pull(id, cx);
             }
         });
-        cx.on_action(move |_: &Fetch, cx| {
+        on_menu_action(cx, move |_: &Fetch, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::fetch(id, false, cx);
             }
         });
-        cx.on_action(move |_: &FetchAllRepositories, cx| {
+        on_menu_action(cx, move |_: &FetchAllRepositories, cx| {
             Dispatcher::fetch_all_repositories(cx);
         });
         Dispatcher::start_background_tasks(cx);
@@ -872,31 +874,31 @@ fn main() {
         Dispatcher::start_update_checks(cx);
         // on-demand packs installed earlier (extended grammars)
         Dispatcher::load_installed_packs(cx);
-        cx.on_action(move |_: &RebaseCurrentBranch, cx| {
+        on_menu_action(cx, move |_: &RebaseCurrentBranch, cx| {
             if let Some((id, _)) = current_branch(cx)
                 && !Dispatcher::refuse_merge_while_conflicted(id, cx)
             {
                 Dispatcher::start_rebase_flow(id, cx);
             }
         });
-        cx.on_action(move |_: &UpdateFromDefaultBranch, cx| {
+        on_menu_action(cx, move |_: &UpdateFromDefaultBranch, cx| {
             if let Some((id, _)) = current_branch(cx)
                 && !Dispatcher::refuse_merge_while_conflicted(id, cx)
             {
                 Dispatcher::update_from_default_branch(id, cx);
             }
         });
-        cx.on_action(move |_: &StashAllChanges, cx| {
+        on_menu_action(cx, move |_: &StashAllChanges, cx| {
             if let Some((id, _)) = current_branch(cx) {
                 Dispatcher::stash_all_changes(id, cx);
             }
         });
-        cx.on_action(move |_: &ToggleStashedChanges, cx| {
+        on_menu_action(cx, move |_: &ToggleStashedChanges, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::toggle_stash_view(id, cx);
             }
         });
-        cx.on_action(move |_: &DiscardAllChanges, cx| {
+        on_menu_action(cx, move |_: &DiscardAllChanges, cx| {
             if let Some(id) = selected(cx) {
                 let paths: Vec<String> = corvane_core::AppState::global(cx)
                     .read(cx)
@@ -1000,6 +1002,19 @@ fn resolve_theme_with(
 
 /// GHD `focusWindow`: bring Corvane forward and show its window, even when
 /// it was hidden with ⌘W.
+/// Registers the handler of a menu item GitHub Desktop disables while a
+/// popup is open (`menu-update.ts` `getMenuState` → `allMenuIds`): with a
+/// dialog up, its shortcut or menu item does nothing instead of acting on the
+/// window behind it. The keymap binds these shortcuts in `!Popup`, so a text
+/// field in the dialog keeps the key (⌘⌫ deletes to the line start).
+fn on_menu_action<A: Action>(cx: &mut App, f: impl Fn(&A, &mut App) + 'static) {
+    cx.on_action(move |action: &A, cx| {
+        if corvane_core::AppState::global(cx).read(cx).popup.is_none() {
+            f(action, cx)
+        }
+    });
+}
+
 fn focus_main_window(cx: &mut App) {
     cx.activate(true);
     #[cfg(target_os = "macos")]

@@ -6,7 +6,7 @@
 //! in the browser (`ui/sign-in/sign-in.tsx`); a GHES server does not know
 //! Corvane's, so its client ID has to come from the user.
 //!
-//! Deviation (flag `enterprise-plain-http`, off except in Everything): an
+//! Deviation (flag `enterprise-plain-http`, off in every preset): an
 //! Enterprise address typed with `http://` keeps plain HTTP (GHD forces
 //! HTTPS since 3.4.7).
 
