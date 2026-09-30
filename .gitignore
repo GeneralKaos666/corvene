@@ -8,3 +8,7 @@
 .env
 /target-check
 /.scratch
+
+# local notes, not part of the repo
+/.docs
+__pycache__/
