@@ -6,7 +6,7 @@ A native, fast, low-memory GitHub Desktop clone written in Rust.
 
 The UI is a one-to-one recreation of GitHub Desktop 3.6.6: same layout, buttons, menus, dialogs and workflow. The engine is different: GPUI (Zed's GPU-accelerated UI framework) for rendering, gitoxide for in-process git reads, and the git CLI for writes so behaviour matches GitHub Desktop exactly.
 
-Status: early development.
+Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus a few gaps. No binary release yet. Windows and Linux are planned.
 
 ## Requirements
 
