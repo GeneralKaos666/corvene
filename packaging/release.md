@@ -45,8 +45,8 @@ requirement is the binary's hash, so every build and every update would ask
 for the login password again. Corvane is therefore signed with a
 self-signed certificate: its requirement, `identifier
 "com.wasimaster.corvane" and certificate leaf = H"…"`, stays the same across
-builds. Gatekeeper treats it like an ad-hoc signature (the `--no-quarantine`
-advice stands).
+builds. Gatekeeper treats it like an ad-hoc signature (hence the cask's
+quarantine-clearing `postflight_steps`).
 
 ```bash
 packaging/signing-cert.sh create   # → login keychain, ~/.corvane-signing/corvane-signing.{p12,password}
