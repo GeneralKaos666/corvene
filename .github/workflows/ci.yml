@@ -12,7 +12,7 @@ env:
 jobs:
   check:
     name: fmt · clippy · test (macOS)
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -46,6 +46,8 @@ jobs:
           MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
         run: |
           if [ -n "$MACOS_SIGNING_P12" ]; then packaging/signing-cert.sh ci; else echo "no MACOS_SIGNING_P12 secret: ad-hoc"; fi
+      # Xcode 26's actool crashes on a macOS 15 host (its AssetCatalogAgent
+      # links CoreMedia symbols only macOS 26 has), hence the macos-26 runner
       - name: bundle (Liquid Glass icon needs Xcode 26 actool)
         run: |
           export DEVELOPER_DIR="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)/Contents/Developer"
