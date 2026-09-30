@@ -69,7 +69,9 @@ packaging/signing-cert.sh create   # → login keychain, ~/.corvane-signing/corv
 
 1. Bump `version` in `Cargo.toml` (`[workspace.package]`), run
    `packaging/acknowledgements.sh` if dependencies changed, commit,
-   `git tag v<version>`.
+   `git tag v<version>`. Pushing the tag runs steps 2, 3 and 5 in CI
+   ([Releasing from CI](#releasing-from-ci)); the steps below are the local
+   path.
 2. `packaging/release.sh` (see `packaging/release.sh --help`): release build
    with the public key, `packaging/bundle.sh release`, the universal binary
    when both target directories exist, `Corvane-<version>-macos-universal.zip`
@@ -89,44 +91,29 @@ packaging/signing-cert.sh create   # → login keychain, ~/.corvane-signing/corv
 5. Upload `packs-manifest.json` (+ `.minisig`) and the pack archives to the
    same release when a pack changed (`crates/corvane-packs`).
 
-## Signing in CI
+## Releasing from CI
 
-`.github/workflows/release.yml` (to be added with the first tagged release)
-runs on `macos-15`. Before `packaging/release.sh`, import the code-signing
-certificate into a temporary keychain (`.github/workflows/ci.yml` does the
-same for its bundle artifact):
+`.github/workflows/release.yml` runs on a `v*` tag push (`macos-15`, Xcode
+26): fmt, clippy and tests; a `--no-default-features` release build for
+`aarch64-apple-darwin` and `x86_64-apple-darwin`; `packaging/release.sh`
+with `SKIP_BUILD=1 UPDATE_CASK=1` (lipo, bundle signed with the certificate
+from `packaging/signing-cert.sh ci`, zip, dmg, packs); the same for
+`Corvane-Full`; minisign signatures for every `.zip`, `.dmg` and
+`packs-manifest.json`, checked against `packaging/corvane-release.pub`; and a
+**draft** release with every asset. It fails when the tag is not
+`v<Cargo.toml version>`.
 
-```yaml
-- name: Code-signing certificate
-  env:
-    MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
-    MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
-  run: packaging/signing-cert.sh ci
-```
+Repository secrets: `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`,
+`MINISIGN_SECRET_KEY`, `MINISIGN_PASSWORD`, and optionally
+`CORVANE_GITHUB_CLIENT_SECRET` (without it the `307-sign-in-flow` "auto"
+default uses the device flow).
 
-and after it sign the assets:
-
-```yaml
-- name: Sign release assets
-  env:
-    MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-    MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-  run: |
-    brew install minisign
-    umask 077
-    printf '%s' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/corvane-release.key"
-    for asset in target/release-assets/*.zip target/release-assets/*.dmg target/release-assets/packs-manifest.json; do
-      printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$RUNNER_TEMP/corvane-release.key" \
-        -t "corvane $GITHUB_REF_NAME $(basename "$asset")" -m "$asset"
-    done
-    rm -f "$RUNNER_TEMP/corvane-release.key"
-```
-
-The build step exports the public key the same way `release.sh` does:
-
-```yaml
-- run: echo "CORVANE_UPDATE_PUBLIC_KEY=$(tail -n1 packaging/corvane-release.pub)" >> "$GITHUB_ENV"
-```
+After the run: write the release notes in the draft, publish it (the
+self-updater ignores drafts), then copy the `cask` artifact's `corvane.rb`
+(version and sha256 already filled in, also in the run summary) to the tap.
+"Run workflow" by hand builds and signs the same assets as a workflow
+artifact without a release (`full` input: skip the Full variant for a faster
+run).
 
 ## How the updater uses the assets
 
