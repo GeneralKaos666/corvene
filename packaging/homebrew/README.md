@@ -6,7 +6,7 @@ folder holds the tap's contents so a release can copy them over:
 
 ```
 homebrew-corvane/            # github.com/wasi-master/homebrew-corvane
-├─ README.md                 # the install instructions below
+├─ README.md                 # install instructions, kept in the tap itself
 └─ Casks/
    └─ corvane.rb             # packaging/homebrew/Casks/corvane.rb
 ```
@@ -16,7 +16,6 @@ remotes). Once it exists:
 
 ```bash
 cp packaging/homebrew/Casks/corvane.rb ../homebrew-corvane/Casks/corvane.rb
-cp packaging/homebrew/README.md ../homebrew-corvane/README.md
 (cd ../homebrew-corvane && git commit -am "corvane <version>" && git push)
 ```
 
