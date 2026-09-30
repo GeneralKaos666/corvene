@@ -1,0 +1,184 @@
+name: Release
+
+# A `v<version>` tag builds, signs and uploads the release assets
+# (packaging/release.md) to a *draft* GitHub release. The self-updater skips
+# drafts, so nothing reaches users until the maintainer writes the notes
+# ([New] / [Improved] / [Fixed] items) and publishes it.
+#
+# Run by hand (Actions → Release → Run workflow) to build and sign the assets
+# as a workflow artifact without creating a release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Also build the Corvane-Full variant (every pack compiled in)
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # C code (tree-sitter, grammars) targets Info.plist's LSMinimumSystemVersion
+  MACOSX_DEPLOYMENT_TARGET: '15.0'
+  TARGETS: aarch64-apple-darwin x86_64-apple-darwin
+
+jobs:
+  release:
+    name: build · sign · upload (macOS universal)
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: version
+        id: version
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" || "${{ inputs.full }}" == "true" ]]; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Xcode 26: actool for the Liquid Glass icon, metal for precompiled shaders
+      - name: select Xcode 26
+        run: echo "DEVELOPER_DIR=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)/Contents/Developer" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+
+      # grammar sources for the tests, the tree-sitter packs and the full build;
+      # packs.sh generates the grammars without a committed parser.c
+      - name: tree-sitter CLI
+        run: |
+          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
+          echo "CORVANE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/ts-cli/bin" >> "$GITHUB_PATH"
+      - name: cache grammar sources
+        id: grammar-src
+        uses: actions/cache@v4
+        with:
+          path: target/grammar-src
+          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
+      - name: fetch grammar sources
+        if: steps.grammar-src.outputs.cache-hit != 'true'
+        run: python3 tools/ts-queries/fetch.py
+
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+
+      - name: update public key
+        run: echo "CORVANE_UPDATE_PUBLIC_KEY=$(tail -n1 packaging/corvane-release.pub)" >> "$GITHUB_ENV"
+
+      - name: code-signing certificate
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+        run: packaging/signing-cert.sh ci
+
+      - name: build (both architectures)
+        env:
+          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+        run: |
+          # an empty secret must not count as "has a client secret" (307-sign-in-flow)
+          [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
+          for t in $TARGETS; do
+            cargo build --release -p corvane --no-default-features --target "$t"
+          done
+      - name: assets
+        run: UPDATE_CASK=1 SKIP_BUILD=1 packaging/release.sh
+
+      - name: build Corvane-Full (both architectures)
+        if: steps.version.outputs.full == 'true'
+        env:
+          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+        run: |
+          [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
+          for t in $TARGETS; do
+            cargo build --release -p corvane --no-default-features --features full --target "$t"
+          done
+      - name: Corvane-Full assets
+        if: steps.version.outputs.full == 'true'
+        run: FULL=1 SKIP_BUILD=1 packaging/release.sh
+
+      - name: sign release assets
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          brew install minisign
+          umask 077
+          key="$RUNNER_TEMP/corvane-release.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+          cd target/release-assets
+          for asset in *.zip *.dmg packs-manifest.json; do
+            [[ -f "$asset" ]] || continue
+            printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" \
+              -t "corvane v$VERSION $asset" -x "$asset.minisig" -m "$asset"
+          done
+          minisign -V -p ../../packaging/corvane-release.pub -m "Corvane-$VERSION-macos-universal.zip"
+          ls -l
+
+      - name: summary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## Corvane $VERSION"
+            echo
+            echo "Cask sha256: \`$(shasum -a 256 "target/release-assets/Corvane-$VERSION-macos-universal.zip" | cut -d' ' -f1)\`"
+            echo
+            echo "Copy the \`cask\` artifact's corvane.rb to wasi-master/homebrew-corvane after publishing the release."
+            echo
+            echo '```'
+            ls -l target/release-assets | tail -n +2
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cask
+          path: packaging/homebrew/Casks/corvane.rb
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type != 'tag'
+        with:
+          name: release-assets
+          path: |
+            target/release-assets/*
+            !target/release-assets/packs
+
+      - name: draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Corvane ${GITHUB_REF_NAME#v}" \
+            --notes "- [New] …" \
+            target/release-assets/*.zip target/release-assets/*.dmg \
+            target/release-assets/*.minisig target/release-assets/packs-manifest.json

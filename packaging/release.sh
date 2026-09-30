@@ -45,11 +45,13 @@ fi
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   echo "building $VARIANT $VERSION (release)…"
-  (cd "$ROOT" && cargo build --release -p corvane "${FEATURES[@]}")
+  # --no-default-features: precompiled Metal shaders (needs Xcode), not the
+  # development builds' runtime compilation
+  (cd "$ROOT" && cargo build --release -p corvane --no-default-features "${FEATURES[@]}")
 fi
 
 # a universal binary when both per-target builds exist (CI: two `cargo build
-# --target` runs), else the native one
+# --target` runs with SKIP_BUILD=1), else the native one
 ARCH_TAG="$(uname -m)"
 [[ "$ARCH_TAG" == "arm64" ]] && ARCH_TAG="arm64" || ARCH_TAG="x86_64"
 BIN="$ROOT/target/release/corvane"
