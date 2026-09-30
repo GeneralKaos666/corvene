@@ -23,10 +23,10 @@ Development builds compile Metal shaders at runtime so a full Xcode install is n
 
 ## Install
 
-Homebrew (recommended, avoids Gatekeeper prompts because the app is not notarized):
+Homebrew (recommended; the cask clears the quarantine attribute, so Gatekeeper does not block the unnotarized app):
 
 ```bash
-brew install --cask wasi-master/corvane/corvane --no-quarantine
+brew install --cask wasi-master/corvane/corvane
 ```
 
 Direct download from GitHub Releases: after the first launch is blocked, open System Settings → Privacy & Security and click "Open Anyway", or run `xattr -d com.apple.quarantine /Applications/Corvane.app`.

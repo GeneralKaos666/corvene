@@ -23,14 +23,14 @@ cp packaging/homebrew/README.md ../homebrew-corvane/README.md
 ## Installing Corvane
 
 ```bash
-brew install --cask wasi-master/corvane/corvane --no-quarantine
+brew install --cask wasi-master/corvane/corvane
 ```
 
-`--no-quarantine` is required: Corvane is signed with a self-signed
-certificate (a hobby project without an Apple Developer ID), and macOS 15 blocks a quarantined,
-unnotarized app on first launch. Without the flag, open it once through
-System Settings › Privacy & Security › Open Anyway, or run
-`xattr -d com.apple.quarantine /Applications/Corvane.app`.
+Corvane is signed with a self-signed certificate (a hobby project without an
+Apple Developer ID), and macOS 15 blocks a quarantined, unnotarized app on
+first launch. Homebrew 7 removed `--no-quarantine` and always quarantines cask
+downloads, so the cask's `postflight_steps` runs
+`xattr -dr com.apple.quarantine /Applications/Corvane.app` itself.
 
 Upgrade with `brew upgrade corvane`; the in-app updater recognises a
 Homebrew install and only points at that command.
@@ -39,5 +39,6 @@ Homebrew install and only points at that command.
 
 `packaging/release.sh` prints the zip's sha256 and, with `UPDATE_CASK=1`,
 rewrites `version` and `sha256` in `packaging/homebrew/Casks/corvane.rb`.
-Then copy the file to the tap and push. `brew audit --cask corvane` and
-`brew install --cask ./Casks/corvane.rb --no-quarantine` check it locally.
+Then copy the file to the tap and push. Homebrew 7 only loads casks from a
+tap, so check it with `brew style Casks/corvane.rb` in the tap checkout, then
+`brew audit --cask --strict --online wasi-master/corvane/corvane` once pushed.
