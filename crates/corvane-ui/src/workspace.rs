@@ -85,6 +85,9 @@ pub struct Workspace {
     /// The open foldout as of the last state change (to focus its filter
     /// once when it opens).
     last_foldout: Option<corvane_core::Foldout>,
+    /// Whether a popup was open at the last state change, to refocus the
+    /// root when it closes.
+    popup_was_open: bool,
     /// A tab click or View › Show Changes / History asked for the section's
     /// list to take focus at the next render (`603-focus-list-on-section-switch`).
     focus_section_list: bool,
@@ -133,7 +136,13 @@ impl Workspace {
             let s = state.read(cx);
             let overlay_open = s.popup.is_some() || s.foldout.is_some();
             let foldout = s.foldout;
-            if !overlay_open && !this.focus_handle.contains_focused(window, cx) {
+            let popup_closed = this.popup_was_open && s.popup.is_none();
+            this.popup_was_open = s.popup.is_some();
+            // A closing dialog's focused field is still in the last frame, so
+            // `contains_focused` says yes; once it is gone nothing would have
+            // focus and no shortcut would match (`keymap::MENU` needs the
+            // `Workspace` context).
+            if !overlay_open && (popup_closed || !this.focus_handle.contains_focused(window, cx)) {
                 window.focus(&this.focus_handle, cx);
             }
             // GHD foldouts put the caret in their filter box when they open,
@@ -208,6 +217,7 @@ impl Workspace {
             toolbar_resize: Rc::new(ToolbarResize::default()),
             ci_popover,
             last_foldout: None,
+            popup_was_open: false,
             focus_section_list: false,
             launch_focus_pending: true,
             review_mode: false,
@@ -951,9 +961,16 @@ impl Render for Workspace {
             .flags
             .bool(corvane_core::flags::ids::CLONE_CANCEL);
         let bare = self.welcome.is_some() || blank_slate;
+        // `Popup` turns off the menu shortcuts (`keymap::MENU`) while a
+        // dialog is open
+        let mut key_context = KeyContext::default();
+        key_context.add("Workspace");
+        if self.state.read(cx).popup.is_some() {
+            key_context.add("Popup");
+        }
         div()
             .id("workspace")
-            .key_context("Workspace")
+            .key_context(key_context)
             .track_focus(&self.focus_handle)
             .relative()
             .size_full()
