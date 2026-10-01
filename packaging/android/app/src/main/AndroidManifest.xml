@@ -8,6 +8,17 @@
     <!-- pull request notifications; asked for at run time on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- CorvaneTransferService: a clone, fetch or push goes on after the
+         user leaves the application -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- "Open in Termux": Termux's RUN_COMMAND intent -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
     <!-- wgpu draws with Vulkan and falls back to OpenGL ES 3 -->
     <uses-feature
         android:name="android.hardware.vulkan.level"
@@ -61,6 +72,11 @@
                 <data android:scheme="x-corvane-auth" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".CorvaneTransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- The clones live in app-private storage; this shows them to
              editors and file managers through the system's file picker. -->

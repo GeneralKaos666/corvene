@@ -407,6 +407,14 @@ impl Dispatcher {
     /// then `open -a <app> <repository>`. Also a changed file's "Open With…"
     /// (Corvane `713-open-file-with`), whose error names the file.
     pub fn open_with(path: PathBuf, cx: &mut App) {
+        // Android: the system's chooser lists the applications that open it
+        #[cfg(target_os = "android")]
+        if let Some(bridge) = corvane_platform::android::bridge() {
+            if let Err(err) = bridge.view_path_with_chooser(&path) {
+                Self::show_error("Unable to Open", err, cx);
+            }
+            return;
+        }
         let (title, what) = if path.is_dir() {
             ("Unable to Open Repository", "the repository")
         } else {

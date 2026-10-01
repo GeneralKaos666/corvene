@@ -3,5 +3,7 @@
     <string name="app_name">Corvane</string>
     <string name="documents_summary">Repositories</string>
     <string name="channel_pull_requests">Pull requests</string>
+    <string name="channel_transfers">Network operations</string>
+    <string name="transfer_running">Corvane is talking to a remote</string>
     <string name="importing">Importing %1$s into Corvane…</string>
 </resources>

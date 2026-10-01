@@ -1514,6 +1514,23 @@ impl Dispatcher {
     /// Start the periodic background fetch and sidebar indicator refresh
     /// (`BackgroundFetcher`, `RepositoryIndicatorUpdater`). Call once.
     pub fn start_background_tasks(cx: &mut App) {
+        // Android: WorkManager wakes the process about once an hour, also
+        // while its timers are frozen in the background
+        #[cfg(target_os = "android")]
+        {
+            corvane_git::process::set_network_observer(corvane_platform::android::network_command);
+            let (tx, rx) = async_channel::unbounded::<()>();
+            corvane_platform::android::set_background_fetch_handler(move || {
+                let _ = tx.try_send(());
+            });
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                while rx.recv().await.is_ok() {
+                    info!("background fetch woken by WorkManager");
+                    cx.update(Self::background_fetch_tick);
+                }
+            })
+            .detach();
+        }
         cx.spawn(async move |cx: &mut AsyncApp| {
             // skew the first run so several instances do not sync up
             cx.background_executor()

@@ -150,3 +150,26 @@ pub(crate) fn open_url(url: &str) {
         super::jni::open_url(url);
     }
 }
+
+type PathOpener = Box<dyn Fn(&std::path::Path, bool) + Send + Sync>;
+
+static PATH_OPENER: Mutex<Option<PathOpener>> = Mutex::new(None);
+
+/// Lets the application implement `Platform::open_with_system` (`reveal`
+/// false) and `Platform::reveal_path` (`reveal` true), which need intents
+/// only it can build.
+pub fn set_path_opener(opener: impl Fn(&std::path::Path, bool) + Send + Sync + 'static) {
+    *PATH_OPENER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(opener));
+}
+
+pub(crate) fn open_path(path: &std::path::Path, reveal: bool) {
+    if let Some(opener) = PATH_OPENER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+    {
+        opener(path, reveal);
+    }
+}

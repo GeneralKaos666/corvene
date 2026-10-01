@@ -1,6 +1,12 @@
 package com.wasimaster.corvane;
 
 import android.app.NativeActivity;
+import android.content.ActivityNotFoundException;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+import android.webkit.MimeTypeMap;
+import java.io.FileInputStream;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -66,6 +72,12 @@ public class CorvaneActivity extends NativeActivity {
         if (ACTION_NOTIFICATION.equals(getIntent().getAction())) {
             handleIntent(getIntent());
         }
+        CorvaneFetchWorker.schedule(this);
+    }
+
+    /** Whether the native application runs in this process. */
+    static boolean isRunning() {
+        return instance != null;
     }
 
     @Override
@@ -259,6 +271,11 @@ public class CorvaneActivity extends NativeActivity {
         return Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager();
     }
 
+    /** This build may run native code it downloaded (the foss flavour). */
+    public static boolean allowsDownloadedCode() {
+        return BuildConfig.DOWNLOADED_CODE;
+    }
+
     /** This build declares MANAGE_EXTERNAL_STORAGE (the foss flavour). */
     public static boolean canRequestAllFilesAccess() {
         final CorvaneActivity activity = instance;
@@ -424,6 +441,186 @@ public class CorvaneActivity extends NativeActivity {
                 .build();
         manager.notify(identifier, 0, notification);
     }
+
+    // ── other applications ──────────────────────────────────────────────
+
+    private static final String TERMUX = "com.termux";
+    private static final String TERMUX_PERMISSION = "com.termux.permission.RUN_COMMAND";
+    private static final int REQUEST_TERMUX = 3;
+
+    public static boolean packageInstalled(String name) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return false;
+        }
+        try {
+            activity.getPackageManager().getPackageInfo(name, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
+    /** viewPath, always with the system's list of applications. */
+    public static String choosePath(String path) {
+        return view(path, true);
+    }
+
+    /**
+     * Opens a file in the application the user picks for it and a folder in
+     * the file manager. Other applications cannot read Corvane's storage, so
+     * the intent carries a document of CorvaneDocumentsProvider with a grant
+     * to read and write it. Returns an error message, empty when it worked.
+     */
+    public static String viewPath(String path) {
+        return view(path, false);
+    }
+
+    private static String view(String path, boolean chooser) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "Corvane is not open.";
+        }
+        File file = new File(path);
+        String id = CorvaneDocumentsProvider.idOf(activity, file);
+        if (id == null) {
+            return "Other applications cannot open " + path + ".";
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        if (file.isDirectory()) {
+            // the file manager shows shared storage under its own provider
+            Uri uri = id.equals("shared") || id.startsWith("shared/")
+                    ? DocumentsContract.buildDocumentUri(EXTERNAL_STORAGE,
+                            "primary:" + (id.length() > 7 ? id.substring(7) : ""))
+                    : DocumentsContract.buildDocumentUri(
+                            activity.getPackageName() + ".documents", id);
+            intent.setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR);
+        } else {
+            Uri uri = DocumentsContract.buildDocumentUri(
+                    activity.getPackageName() + ".documents", id);
+            intent.setDataAndType(uri, mimeType(file));
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        try {
+            activity.startActivity(chooser ? Intent.createChooser(intent, null) : intent);
+            return "";
+        } catch (ActivityNotFoundException e) {
+            return "No application on this device can open " + file.getName() + ".";
+        } catch (RuntimeException e) {
+            return String.valueOf(e.getMessage());
+        }
+    }
+
+    /** By extension; a file without a known one is text unless it has a NUL. */
+    private static String mimeType(File file) {
+        String name = file.getName();
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0) {
+            String type = MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(name.substring(dot + 1).toLowerCase());
+            if (type != null) {
+                return type;
+            }
+        }
+        byte[] head = new byte[8000];
+        try (InputStream in = new FileInputStream(file)) {
+            int read = in.read(head);
+            for (int i = 0; i < read; i++) {
+                if (head[i] == 0) {
+                    return "application/octet-stream";
+                }
+            }
+        } catch (IOException e) {
+            return "application/octet-stream";
+        }
+        return "text/plain";
+    }
+
+    /**
+     * A Termux session in `directory`, through Termux's RUN_COMMAND intent
+     * (https://github.com/termux/termux-app/wiki/RUN_COMMAND-Intent): needs
+     * its permission, which Android asks for here, and
+     * `allow-external-apps = true` in ~/.termux/termux.properties. Returns an
+     * error message, empty when the intent was sent.
+     */
+    public static String openTermux(String directory) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "Corvane is not open.";
+        }
+        if (activity.checkSelfPermission(TERMUX_PERMISSION)
+                != PackageManager.PERMISSION_GRANTED) {
+            activity.runOnUiThread(() -> activity.requestPermissions(
+                    new String[] {TERMUX_PERMISSION}, REQUEST_TERMUX));
+            return "Allow Corvane to run commands in Termux, then try again.";
+        }
+        Intent intent = new Intent("com.termux.RUN_COMMAND")
+                .setClassName(TERMUX, "com.termux.app.RunCommandService")
+                .putExtra("com.termux.RUN_COMMAND_PATH",
+                        "/data/data/com.termux/files/usr/bin/login")
+                .putExtra("com.termux.RUN_COMMAND_WORKDIR", directory)
+                .putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
+                // switch to the new session and open Termux
+                .putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
+        try {
+            activity.startService(intent);
+            return "";
+        } catch (RuntimeException e) {
+            return "Could not reach Termux: " + e.getMessage();
+        }
+    }
+
+    // ── network operations ──────────────────────────────────────────────
+
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    private static boolean transferServiceStarted;
+    private static final Runnable START_TRANSFER_SERVICE = () -> {
+        final CorvaneActivity activity = instance;
+        if (activity == null || transferServiceStarted) {
+            return;
+        }
+        try {
+            activity.startForegroundService(new Intent(activity, CorvaneTransferService.class));
+            transferServiceStarted = true;
+        } catch (RuntimeException e) {
+            // not allowed from the background (a fetch WorkManager started)
+            Log.w("corvane", "transfer service: " + e);
+        }
+    };
+
+    /**
+     * A clone, fetch, pull or push runs (or the last one ended): while one
+     * does, CorvaneTransferService keeps the process from being stopped when
+     * the user leaves the application. Short operations end before the
+     * service is started.
+     */
+    public static void transferActive(boolean active) {
+        MAIN.removeCallbacks(START_TRANSFER_SERVICE);
+        if (active) {
+            MAIN.postDelayed(START_TRANSFER_SERVICE, 1500);
+            return;
+        }
+        MAIN.post(() -> {
+            final CorvaneActivity activity = instance;
+            if (activity == null || !transferServiceStarted) {
+                return;
+            }
+            transferServiceStarted = false;
+            try {
+                activity.startService(new Intent(activity, CorvaneTransferService.class)
+                        .setAction(CorvaneTransferService.ACTION_STOP));
+            } catch (RuntimeException e) {
+                activity.stopService(new Intent(activity, CorvaneTransferService.class));
+            }
+        });
+    }
+
+    /** WorkManager's hourly work: fetch like the background fetcher. */
+    static native boolean nativeBackgroundFetch();
+
+    /** Whether a network operation runs. */
+    static native boolean nativeNetworkBusy();
 
     static native void nativeNotificationClicked(String identifier, String payload);
 

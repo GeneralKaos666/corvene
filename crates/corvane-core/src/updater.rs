@@ -126,6 +126,11 @@ pub struct UpdateState {
 /// Updates run in release builds, and in debug builds with
 /// `CORVANE_UPDATE_CHECK=1` (GHD: never on the development channel).
 pub fn updates_enabled() -> bool {
+    // Android packages are updated by the store or by installing the next
+    // release; the application cannot replace itself
+    if cfg!(target_os = "android") {
+        return false;
+    }
     !cfg!(debug_assertions) || std::env::var_os("CORVANE_UPDATE_CHECK").is_some()
 }
 

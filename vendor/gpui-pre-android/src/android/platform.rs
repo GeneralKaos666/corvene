@@ -294,9 +294,13 @@ impl Platform for AndroidPlatform {
         false
     }
 
-    fn reveal_path(&self, _path: &Path) {}
+    fn reveal_path(&self, path: &Path) {
+        super::activity_events::open_path(path, true);
+    }
 
-    fn open_with_system(&self, _path: &Path) {}
+    fn open_with_system(&self, path: &Path) {
+        super::activity_events::open_path(path, false);
+    }
 
     fn on_quit(&self, callback: Box<dyn FnMut() -> bool>) {
         self.callbacks.borrow_mut().quit = Some(callback);

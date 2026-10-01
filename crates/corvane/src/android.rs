@@ -30,6 +30,7 @@ fn android_main(android_app: AndroidApp) {
     gpui_android::set_soft_keyboard_handler(show_keyboard);
     gpui_android::set_path_prompt_handler(pick_folder);
     gpui_android::set_url_handler(open_url);
+    gpui_android::set_path_opener(open_path);
     corvane_platform::android::set_bridge(Box::new(ActivityBridge));
     std::panic::set_hook(Box::new(|info| {
         // stderr goes nowhere; `logging` sends tracing to logcat
@@ -268,6 +269,34 @@ macro_rules! activity_strings {
     }};
 }
 
+/// A static method of `CorvaneActivity` that takes one string and returns an
+/// error message, empty for success.
+macro_rules! activity_result {
+    ($name:literal, $arg:expr) => {{
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let arg = env.new_string($arg).map_err(|err| err.to_string())?;
+            let message = env
+                .call_static_method(
+                    &class,
+                    jni::jni_str!($name),
+                    jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/String;"),
+                    &[jni::objects::JValue::Object(&arg)],
+                )
+                .and_then(|value| value.l())
+                .map_err(|err| err.to_string())?;
+            Ok(gpui_android::jni::get_string(env, &message))
+        })
+        .and_then(|message| {
+            if message.is_empty() {
+                Ok(())
+            } else {
+                Err(message)
+            }
+        })
+    }};
+}
+
 /// `CorvaneActivity.showKeyboard(boolean)`.
 fn show_keyboard(show: bool) {
     activity_call!("showKeyboard", "(Z)V", &[jni::objects::JValue::Bool(show)]);
@@ -284,6 +313,12 @@ impl corvane_platform::android::Bridge for ActivityBridge {
 
     fn can_request_all_files_access(&self) -> bool {
         activity_call!("canRequestAllFilesAccess", "()Z", &[])
+            .flatten()
+            .unwrap_or(false)
+    }
+
+    fn allows_downloaded_code(&self) -> bool {
+        activity_call!("allowsDownloadedCode", "()Z", &[])
             .flatten()
             .unwrap_or(false)
     }
@@ -312,6 +347,69 @@ impl corvane_platform::android::Bridge for ActivityBridge {
             [identifier, title, body, payload]
         );
     }
+
+    fn package_installed(&self, package: &str) -> bool {
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let package = env.new_string(package).map_err(|err| err.to_string())?;
+            env.call_static_method(
+                &class,
+                jni::jni_str!("packageInstalled"),
+                jni::jni_sig!("(Ljava/lang/String;)Z"),
+                &[jni::objects::JValue::Object(&package)],
+            )
+            .and_then(|value| value.z())
+            .map_err(|err| err.to_string())
+        })
+        .unwrap_or(false)
+    }
+
+    fn view_path(&self, path: &Path) -> Result<(), String> {
+        activity_result!("viewPath", &path.to_string_lossy())
+    }
+
+    fn view_path_with_chooser(&self, path: &Path) -> Result<(), String> {
+        activity_result!("choosePath", &path.to_string_lossy())
+    }
+
+    fn open_termux(&self, dir: &Path) -> Result<(), String> {
+        activity_result!("openTermux", &dir.to_string_lossy())
+    }
+
+    fn transfer_active(&self, active: bool) {
+        activity_call!(
+            "transferActive",
+            "(Z)V",
+            &[jni::objects::JValue::Bool(active)]
+        );
+    }
+}
+
+/// `Platform::open_with_system` and `Platform::reveal_path`.
+fn open_path(path: &Path, reveal: bool) {
+    let target = match path.parent() {
+        Some(parent) if reveal && !path.is_dir() => parent,
+        _ => path,
+    };
+    if let Err(err) = corvane_platform::android::view_path(target) {
+        tracing::warn!(path = %path.display(), "could not open: {err}");
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeNetworkBusy(
+    _env: *mut c_void,
+    _class: *mut c_void,
+) -> u8 {
+    u8::from(corvane_platform::android::network_busy())
+}
+
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeBackgroundFetch(
+    _env: *mut c_void,
+    _class: *mut c_void,
+) -> u8 {
+    u8::from(corvane_platform::android::background_fetch())
 }
 
 /// `Platform::open_url`: sign-in pages open in a Custom Tab over Corvane (the

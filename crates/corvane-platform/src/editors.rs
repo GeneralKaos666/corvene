@@ -331,6 +331,10 @@ pub fn code_workspace_file(editor: &FoundEditor, dir: &Path) -> Option<PathBuf> 
 pub const SUGGESTED_EDITOR_NAME: &str = "Visual Studio Code";
 pub const SUGGESTED_EDITOR_URL: &str = "https://code.visualstudio.com";
 
+/// Android: the name of the one "editor", an `ACTION_VIEW` intent.
+#[cfg(target_os = "android")]
+pub const ANDROID_EDITOR_NAME: &str = "Another App";
+
 /// GHD `FoundEditor`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FoundEditor {
@@ -346,6 +350,17 @@ pub struct FoundEditor {
 /// [`EXTRA_EDITORS`] when `extras`). Costs one LaunchServices lookup (or
 /// `stat`) per candidate; run it off the main thread.
 pub fn available_editors(extras: bool) -> Vec<FoundEditor> {
+    // Android has no editor executables to look for: one entry stands for
+    // whichever application the user picks for the file ([`launch`]).
+    #[cfg(target_os = "android")]
+    if crate::android::bridge().is_some() {
+        let _ = extras;
+        return vec![FoundEditor {
+            name: ANDROID_EDITOR_NAME.to_string(),
+            bundle_id: "android.intent.action.VIEW".to_string(),
+            path: PathBuf::from("/system"),
+        }];
+    }
     let extra: &[(&str, &[&str])] = if extras { EXTRA_EDITORS } else { &[] };
     #[cfg(target_os = "macos")]
     let find = apps::first_installed;
@@ -422,8 +437,10 @@ pub fn launch(editor: &FoundEditor, target: &Path) -> Result<(), EditorError> {
     }
     #[cfg(target_os = "macos")]
     let launched = apps::open_with_app(&editor.path, target);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let launched = apps::spawn_detached(&editor.path, &[&target.to_string_lossy()]);
+    #[cfg(target_os = "android")]
+    let launched = crate::android::view_path(target);
     launched.map_err(|err| EditorError {
         message: if err.kind() == std::io::ErrorKind::PermissionDenied {
             format!(

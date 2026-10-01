@@ -126,6 +126,39 @@ pub fn set_network_stall_timeout(seconds: u32) {
     LOW_SPEED_TIME.store(seconds, Ordering::Relaxed);
 }
 
+/// Told when a network command starts (`true`) and ends (`false`): Android
+/// keeps the process alive with a foreground service while one runs.
+static NETWORK_OBSERVER: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
+
+pub fn set_network_observer(observer: fn(bool)) {
+    let _ = NETWORK_OBSERVER.set(observer);
+}
+
+/// Reports a running network command to [`NETWORK_OBSERVER`] until dropped.
+struct NetworkGuard(fn(bool));
+
+impl NetworkGuard {
+    fn for_command(command: &GitCommand) -> Option<Self> {
+        let observer = *NETWORK_OBSERVER.get()?;
+        // the subcommand follows any `-c name=value` pairs (clone)
+        let mut args = command.args.iter();
+        let mut subcommand = args.next();
+        while subcommand.is_some_and(|arg| arg == "-c") {
+            subcommand = args.nth(1);
+        }
+        is_network_command(subcommand).then(|| {
+            observer(true);
+            Self(observer)
+        })
+    }
+}
+
+impl Drop for NetworkGuard {
+    fn drop(&mut self) {
+        (self.0)(false);
+    }
+}
+
 /// Commands that talk to a remote.
 fn is_network_command(arg: Option<&OsString>) -> bool {
     arg.is_some_and(|a| {
@@ -252,6 +285,7 @@ impl GitCommand {
     /// background thread (GPUI `background_spawn`).
     pub fn run(&self) -> Result<GitOutput> {
         let started = Instant::now();
+        let _network = NetworkGuard::for_command(self);
         let args = self.describe();
         let output = match &self.stdin {
             None => self.command().output().map_err(GitError::Spawn)?,
@@ -313,6 +347,7 @@ impl GitCommand {
         mut on_line: impl FnMut(&str),
     ) -> Result<GitOutput> {
         let started = Instant::now();
+        let _network = NetworkGuard::for_command(self);
         let args = self.describe();
         let mut child = self
             .command()

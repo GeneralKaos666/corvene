@@ -19,6 +19,9 @@ pub trait Bridge: Send + Sync {
     fn has_all_files_access(&self) -> bool;
     /// This build may ask for it (the `foss` flavour declares it).
     fn can_request_all_files_access(&self) -> bool;
+    /// This build may load native code it downloaded (the `foss` flavour;
+    /// Google Play forbids it).
+    fn allows_downloaded_code(&self) -> bool;
     /// Opens the system page where the user grants it.
     fn request_all_files_access(&self);
     /// Whether notifications may be posted: `None` before the user was
@@ -29,6 +32,72 @@ pub trait Bridge: Send + Sync {
     /// Posts a notification; a tap on it comes back through
     /// [`crate::notifications::clicked`].
     fn show_notification(&self, identifier: &str, title: &str, body: &str, payload: &str);
+    /// Whether the application `package` is installed.
+    fn package_installed(&self, package: &str) -> bool;
+    /// Opens a file with the application the user picks for it, or a folder
+    /// in the file manager (`ACTION_VIEW` on a document of
+    /// `CorvaneDocumentsProvider`).
+    fn view_path(&self, path: &Path) -> Result<(), String>;
+    /// Like [`Bridge::view_path`], always offering the choice of application.
+    fn view_path_with_chooser(&self, path: &Path) -> Result<(), String>;
+    /// Opens a Termux session in `dir` (Termux's `RUN_COMMAND` intent).
+    fn open_termux(&self, dir: &Path) -> Result<(), String>;
+    /// A network operation runs (or the last one ended): the activity keeps
+    /// a foreground service while one does.
+    fn transfer_active(&self, active: bool);
+}
+
+static NETWORK_COMMANDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A git command that talks to a remote started or ended (the observer of
+/// `corvane_git::process`): keeps the process alive while one runs.
+pub fn network_command(started: bool) {
+    use std::sync::atomic::Ordering;
+    let running = if started {
+        NETWORK_COMMANDS.fetch_add(1, Ordering::SeqCst) + 1
+    } else {
+        NETWORK_COMMANDS
+            .fetch_sub(1, Ordering::SeqCst)
+            .saturating_sub(1)
+    };
+    if ((started && running == 1) || (!started && running == 0))
+        && let Some(bridge) = bridge()
+    {
+        bridge.transfer_active(started);
+    }
+}
+
+/// Whether a network command runs.
+pub fn network_busy() -> bool {
+    NETWORK_COMMANDS.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+/// Termux, the terminal most Android git users already have.
+pub const TERMUX_PACKAGE: &str = "com.termux";
+
+/// Opens `path` for [`crate::apps::show_item_in_folder`] and the editor
+/// integration.
+pub fn view_path(path: &Path) -> std::io::Result<()> {
+    let bridge = bridge().ok_or_else(|| std::io::Error::other("no activity"))?;
+    bridge.view_path(path).map_err(std::io::Error::other)
+}
+
+static BACKGROUND_FETCH: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+
+/// What [`background_fetch`] runs: set once by the application.
+pub fn set_background_fetch_handler(handler: impl Fn() + Send + Sync + 'static) {
+    let _ = BACKGROUND_FETCH.set(Box::new(handler));
+}
+
+/// WorkManager's periodic work woke the process; false when nothing listens.
+pub fn background_fetch() -> bool {
+    match BACKGROUND_FETCH.get() {
+        Some(handler) => {
+            handler();
+            true
+        }
+        None => false,
+    }
 }
 
 /// The URL [`crate::notifications::settings_url`] gives on Android; the
