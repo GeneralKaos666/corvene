@@ -1,0 +1,5 @@
+.gradle/
+build/
+local.properties
+# cargo-ndk puts libcorvane.so here (build.sh)
+app/src/main/jniLibs/

@@ -97,6 +97,21 @@ impl CancelToken {
     }
 }
 
+/// A token for streamed commands that were given none: lets a caller stop
+/// whatever network command runs (Android's headless fetch, when the
+/// application itself is opened).
+static DEFAULT_CANCEL: Mutex<Option<CancelToken>> = Mutex::new(None);
+
+pub fn set_default_cancel_token(token: Option<CancelToken>) {
+    if let Ok(mut slot) = DEFAULT_CANCEL.lock() {
+        *slot = token;
+    }
+}
+
+fn default_cancel_token() -> Option<CancelToken> {
+    DEFAULT_CANCEL.lock().ok().and_then(|slot| slot.clone())
+}
+
 fn terminate(pid: u32) {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return;
@@ -124,6 +139,39 @@ static LOW_SPEED_TIME: AtomicU32 = AtomicU32::new(0);
 
 pub fn set_network_stall_timeout(seconds: u32) {
     LOW_SPEED_TIME.store(seconds, Ordering::Relaxed);
+}
+
+/// Told when a network command starts (`true`) and ends (`false`): Android
+/// keeps the process alive with a foreground service while one runs.
+static NETWORK_OBSERVER: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
+
+pub fn set_network_observer(observer: fn(bool)) {
+    let _ = NETWORK_OBSERVER.set(observer);
+}
+
+/// Reports a running network command to [`NETWORK_OBSERVER`] until dropped.
+struct NetworkGuard(fn(bool));
+
+impl NetworkGuard {
+    fn for_command(command: &GitCommand) -> Option<Self> {
+        let observer = *NETWORK_OBSERVER.get()?;
+        // the subcommand follows any `-c name=value` pairs (clone)
+        let mut args = command.args.iter();
+        let mut subcommand = args.next();
+        while subcommand.is_some_and(|arg| arg == "-c") {
+            subcommand = args.nth(1);
+        }
+        is_network_command(subcommand).then(|| {
+            observer(true);
+            Self(observer)
+        })
+    }
+}
+
+impl Drop for NetworkGuard {
+    fn drop(&mut self) {
+        (self.0)(false);
+    }
 }
 
 /// Commands that talk to a remote.
@@ -252,7 +300,20 @@ impl GitCommand {
     /// background thread (GPUI `background_spawn`).
     pub fn run(&self) -> Result<GitOutput> {
         let started = Instant::now();
+        let _network = NetworkGuard::for_command(self);
         let args = self.describe();
+        // Android: without `fork` (`spawn.rs`)
+        #[cfg(target_os = "android")]
+        let output = {
+            let mut child = crate::spawn::spawn(self.command(), self.stdin.is_some())
+                .map_err(GitError::Spawn)?;
+            if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
+                use std::io::Write;
+                let _ = stdin.write_all(bytes);
+            }
+            child.wait_with_output().map_err(GitError::Spawn)?
+        };
+        #[cfg(not(target_os = "android"))]
         let output = match &self.stdin {
             None => self.command().output().map_err(GitError::Spawn)?,
             Some(bytes) => {
@@ -313,14 +374,20 @@ impl GitCommand {
         mut on_line: impl FnMut(&str),
     ) -> Result<GitOutput> {
         let started = Instant::now();
+        let _network = NetworkGuard::for_command(self);
         let args = self.describe();
+        let cancel = self.cancel.clone().or_else(default_cancel_token);
+        #[cfg(not(target_os = "android"))]
         let mut child = self
             .command()
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(GitError::Spawn)?;
-        if let Some(token) = &self.cancel {
+        #[cfg(target_os = "android")]
+        let mut child =
+            crate::spawn::spawn(self.command(), self.stdin.is_some()).map_err(GitError::Spawn)?;
+        if let Some(token) = &cancel {
             token.attach(child.id());
         }
         if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
@@ -367,12 +434,12 @@ impl GitCommand {
         }
 
         let status = child.wait();
-        if let Some(token) = &self.cancel {
+        if let Some(token) = &cancel {
             token.detach();
         }
         let status = status.map_err(GitError::Spawn)?;
         let drained = drain_thread.join().unwrap_or_default();
-        if self.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+        if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
             debug!(git = %args, "git cancelled");
             return Err(GitError::Cancelled(args));
         }

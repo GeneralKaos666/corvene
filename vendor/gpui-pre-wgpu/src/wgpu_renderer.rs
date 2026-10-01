@@ -1242,7 +1242,15 @@ impl WgpuRenderer {
             return false;
         }
 
+        // Corvane patch: see `ANDROID_LAST_PRESENT_NANOS`
+        #[cfg(target_os = "android")]
+        let presenting = std::time::Instant::now();
         frame.present();
+        #[cfg(target_os = "android")]
+        crate::wgpu_context::ANDROID_LAST_PRESENT_NANOS.store(
+            presenting.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         true
     }
 }
@@ -1664,11 +1672,16 @@ impl WgpuRendererCore {
         instance_offset: &mut u64,
     ) -> Result<InstanceBindings> {
         Ok(InstanceBindings {
-            quads: self.write_instance_binding(
-                "quads_bind_group",
-                instance_offset,
-                &scene.quads,
-            )?,
+            quads: {
+                // Corvane patch: see `without_hidden_quads`
+                #[cfg(target_os = "android")]
+                let visible = without_hidden_quads(&scene.quads);
+                #[cfg(target_os = "android")]
+                let quads = visible.as_deref().unwrap_or(&scene.quads);
+                #[cfg(not(target_os = "android"))]
+                let quads = &scene.quads;
+                self.write_instance_binding("quads_bind_group", instance_offset, quads)?
+            },
             shadows: self.write_instance_binding(
                 "shadows_bind_group",
                 instance_offset,
@@ -3030,4 +3043,113 @@ fn read_texture(core: &WgpuRendererCore, texture: &wgpu::Texture) -> anyhow::Res
     }
     image::RgbaImage::from_raw(width, height, pixels)
         .ok_or_else(|| anyhow::anyhow!("Failed to create an image from the readback"))
+}
+
+/// Corvane patch (Android): the quads of a scene with those emptied that a
+/// later opaque quad covers completely, or `None` when there is none.
+///
+/// GPUI paints back to front: the window's background, each panel's over it,
+/// each row's over that. On a desktop GPU the hidden layers cost nothing
+/// worth saving; a phone's fills the whole window several times a frame for
+/// pixels nobody sees. An emptied quad keeps its place (batches refer to
+/// quads by index) and rasterizes to nothing.
+#[cfg(target_os = "android")]
+fn without_hidden_quads(quads: &[gpui::Quad]) -> Option<Vec<gpui::Quad>> {
+    // enough to hold the panels of a window; small quads hide little
+    const OCCLUDERS: usize = 24;
+    let visible = |quad: &gpui::Quad| quad.bounds.intersect(&quad.content_mask.bounds);
+    let area = |bounds: &Bounds<ScaledPixels>| bounds.size.width.0 * bounds.size.height.0;
+    let square = |quad: &gpui::Quad| {
+        let radii = &quad.corner_radii;
+        radii.top_left.0 == 0.0
+            && radii.top_right.0 == 0.0
+            && radii.bottom_left.0 == 0.0
+            && radii.bottom_right.0 == 0.0
+    };
+
+    let mut occluders: Vec<(usize, Bounds<ScaledPixels>, f32)> = quads
+        .iter()
+        .enumerate()
+        .filter(|(_, quad)| quad.background.is_opaque_solid() && square(quad))
+        .map(|(index, quad)| {
+            let bounds = visible(quad);
+            (index, bounds, area(&bounds))
+        })
+        .filter(|(_, _, area)| *area > 0.0)
+        .collect();
+    if occluders.is_empty() {
+        return None;
+    }
+    occluders.sort_by(|a, b| b.2.total_cmp(&a.2));
+    occluders.truncate(OCCLUDERS);
+
+    // rectangles as [left, top, right, bottom]
+    let rect = |bounds: &Bounds<ScaledPixels>| {
+        [
+            bounds.origin.x.0,
+            bounds.origin.y.0,
+            bounds.origin.x.0 + bounds.size.width.0,
+            bounds.origin.y.0 + bounds.size.height.0,
+        ]
+    };
+    let covers: Vec<(usize, [f32; 4])> = occluders
+        .iter()
+        .map(|(index, bounds, _)| (*index, rect(bounds)))
+        .collect();
+    // What is left of `bounds` once every later occluder is taken away:
+    // nothing, when the panels over it cover it between them (a window's
+    // background under a sidebar and a content pane).
+    let hidden_by_later = |index: usize, quad: &gpui::Quad, bounds: &Bounds<ScaledPixels>| {
+        let mut left = vec![rect(bounds)];
+        for (occluder, cover) in &covers {
+            if *occluder <= index || quads[*occluder].order < quad.order {
+                continue;
+            }
+            let mut next = Vec::with_capacity(left.len());
+            for piece in left {
+                let [l, t, r, b] = piece;
+                let [cl, ct, cr, cb] = *cover;
+                if cl >= r || cr <= l || ct >= b || cb <= t {
+                    next.push(piece);
+                    continue;
+                }
+                // the parts of the piece outside the cover: above, below,
+                // left and right of the overlap
+                if ct > t {
+                    next.push([l, t, r, ct]);
+                }
+                if cb < b {
+                    next.push([l, cb, r, b]);
+                }
+                let (top, bottom) = (t.max(ct), b.min(cb));
+                if cl > l {
+                    next.push([l, top, cl, bottom]);
+                }
+                if cr < r {
+                    next.push([cr, top, r, bottom]);
+                }
+            }
+            left = next;
+            if left.is_empty() {
+                return true;
+            }
+            // a pathological scene: give up rather than splinter further
+            if left.len() > 16 {
+                return false;
+            }
+        }
+        false
+    };
+    let mut result: Option<Vec<gpui::Quad>> = None;
+    for (index, quad) in quads.iter().enumerate() {
+        let bounds = visible(quad);
+        if area(&bounds) <= 0.0 {
+            continue;
+        }
+        if hidden_by_later(index, quad, &bounds) {
+            let emptied = result.get_or_insert_with(|| quads.to_vec());
+            emptied[index].bounds.size = Default::default();
+        }
+    }
+    result
 }

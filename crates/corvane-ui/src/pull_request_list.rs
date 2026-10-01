@@ -315,6 +315,7 @@ pub fn quick_view(
         .id("pull-request-quick-view")
         .relative()
         .occlude()
+        .child(crate::widgets::touch_drag_occluder())
         .px(SPACING())
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(

@@ -1918,6 +1918,9 @@ impl ChangesSidebar {
                 })
                 .enabled(!deleted),
             ];
+            // Android: the share sheet
+            #[cfg(target_os = "android")]
+            let share = default.clone();
             // `713-open-file-with`
             if open_file_with {
                 items.push(
@@ -1927,6 +1930,13 @@ impl ChangesSidebar {
                     .enabled(!deleted),
                 );
             }
+            #[cfg(target_os = "android")]
+            items.push(
+                MenuItem::new("Share…", move |_, cx| {
+                    Dispatcher::share_file(share.clone(), cx)
+                })
+                .enabled(!deleted),
+            );
             items
         };
 
@@ -2600,7 +2610,7 @@ impl ChangesSidebar {
             .role(Role::List)
             .aria_label(label)
             .flex_1()
-            .min_h(zpx(100.))
+            .min_h(zpx(if crate::theme::short() { 58. } else { 100. }))
             .bg(t.background)
             .flex()
             .flex_col()
@@ -3812,7 +3822,9 @@ impl ChangesSidebar {
                                     .pl(zpx(1.))
                                     .pr(zpx(1.))
                                     .text_size(FONT_SIZE())
-                                    .h(zpx(80.))
+                                    // a short window (a phone on its
+                                    // side) keeps one line of it
+                                    .h(zpx(if crate::theme::short() { 22. } else { 80. }))
                                     .context_menu(move |m, window, cx| menu(m, window, cx)),
                             )
                             .children(self.spell_overlay(CommitField::Description, cx))
@@ -3826,6 +3838,7 @@ impl ChangesSidebar {
                             .gap(SPACING_HALF())
                             // `.action-bar { padding: var(--spacing) }`
                             .p(SPACING())
+                            .when(crate::theme::short(), |d| d.py(zpx(2.)))
                             .when(is_github, |d| {
                                 // `.co-authors-toggle`
                                 let toggle_label = if co_authors_visible {
@@ -3998,11 +4011,16 @@ impl Render for ChangesSidebar {
         if let Some(email) = identity_email {
             Dispatcher::request_avatar_for_email(&email, cx);
         }
+        // a phone's sidebar can be lower than the commit form: the list
+        // keeps two rows and the column scrolls
+        let tight = crate::theme::compact(window) || crate::theme::short();
         div()
+            .id("changes-sidebar")
             .size_full()
             .flex()
             .flex_col()
             .min_h_0()
+            .when(tight, |d| d.overflow_y_scroll())
             .child(
                 div()
                     .id("changes-list-container")
@@ -4067,7 +4085,13 @@ impl Render for ChangesSidebar {
                         }
                     }))
                     .flex_1()
-                    .min_h_0()
+                    .map(|d| {
+                        if tight {
+                            d.min_h(zpx(124.))
+                        } else {
+                            d.min_h_0()
+                        }
+                    })
                     .flex()
                     .flex_col()
                     .on_mouse_down(

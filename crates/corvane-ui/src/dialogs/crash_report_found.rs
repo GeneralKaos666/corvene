@@ -43,7 +43,7 @@ impl Render for CrashReportFoundDialog {
         };
         let newest = self.reports.first().cloned();
         let content = div()
-            .w(zpx(420.))
+            .w(crate::theme::fit_width(420.))
             .flex()
             .flex_col()
             .gap(SPACING())

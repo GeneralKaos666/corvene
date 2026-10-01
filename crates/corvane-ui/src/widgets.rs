@@ -1740,3 +1740,127 @@ pub fn wrapped_ref(
             )
         }))
 }
+
+/// Which dialog an [`android_storage_note`] is for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StorageNote {
+    /// Clone and Create: where the repository goes.
+    NewRepository,
+    /// Add Local Repository: what Choose… does.
+    AddLocal,
+}
+
+/// Android only (`None` elsewhere): what the Local Path of a dialog means
+/// there. Repositories live in Corvane's own storage, which uninstalling
+/// the application deletes; a folder picked from elsewhere is imported, or
+/// used in place once "All files access" is granted (builds that may ask
+/// for it offer the link).
+pub fn android_storage_note(note: StorageNote, cx: &App) -> Option<AnyElement> {
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (note, cx);
+        None
+    }
+    #[cfg(target_os = "android")]
+    {
+        let t = cx.ghd();
+        let bridge = corvane_platform::android::bridge();
+        let in_place = bridge.is_some_and(|bridge| bridge.has_all_files_access());
+        let can_ask =
+            !in_place && bridge.is_some_and(|bridge| bridge.can_request_all_files_access());
+        let text = match (note, in_place) {
+            (StorageNote::NewRepository, false) => {
+                "Corvane keeps repositories in its own storage. Uninstalling Corvane deletes \
+                 them, so push what you want to keep."
+            }
+            (StorageNote::NewRepository, true) => {
+                "Corvane keeps repositories in its own storage, which uninstalling Corvane \
+                 deletes. A path under /storage/emulated/0 puts the repository on shared \
+                 storage instead, where Termux and other apps reach it (without symbolic \
+                 links and file modes)."
+            }
+            (StorageNote::AddLocal, false) => {
+                "Choose… imports a repository: the folder is copied into Corvane's own storage, \
+                 which uninstalling Corvane deletes."
+            }
+            (StorageNote::AddLocal, true) => {
+                "A repository on shared storage is used in place (without symbolic links and \
+                 file modes). One picked from another app is copied into Corvane's own storage."
+            }
+        };
+        let mut parts: Vec<Inline> = vec![text.into()];
+        if can_ask {
+            parts.push(" ".into());
+            parts.push(
+                link_button(
+                    "android-all-files-access",
+                    match note {
+                        StorageNote::AddLocal => {
+                            "Allow \"All files access\" to use folders in place."
+                        }
+                        StorageNote::NewRepository => {
+                            "Allow \"All files access\" to use shared storage, which Termux \
+                             reaches too."
+                        }
+                    },
+                    cx,
+                )
+                .on_click(|_, _, cx| corvane_core::Dispatcher::request_all_files_access(cx))
+                .into_any_element()
+                .into(),
+            );
+        }
+        Some(
+            paragraph(parts)
+                .text_color(t.text_secondary)
+                .into_any_element(),
+        )
+    }
+}
+
+/// Android: marks the element it fills (a dialog's backdrop, a menu, a
+/// foldout) as covering the drag handles painted before it, so a tap on a
+/// link over a hidden handle is not taken for a drag
+/// (`corvane_platform::android::add_drag_occluder`). Nothing elsewhere.
+pub fn touch_drag_occluder() -> impl IntoElement {
+    // in the paint phase: what counts is the order things are painted in
+    canvas(
+        |_, _, _| {},
+        |bounds, _, _, _| {
+            #[cfg(target_os = "android")]
+            corvane_platform::android::add_drag_occluder(
+                bounds.origin.x.into(),
+                bounds.origin.y.into(),
+                (bounds.origin.x + bounds.size.width).into(),
+                (bounds.origin.y + bounds.size.height).into(),
+            );
+            #[cfg(not(target_os = "android"))]
+            let _ = bounds;
+        },
+    )
+    .absolute()
+    .size_full()
+}
+
+/// Android: marks the element it fills as a handle a finger can drag (see
+/// `corvane_platform::android::add_drag_handle`); put it inside a resizable
+/// group's handle. Nothing elsewhere: a mouse drags the handle as it is.
+pub fn touch_drag_handle() -> impl IntoElement {
+    // in the paint phase: what counts is the order things are painted in
+    canvas(
+        |_, _, _| {},
+        |bounds, _, _, _| {
+            #[cfg(target_os = "android")]
+            corvane_platform::android::add_drag_handle(
+                bounds.origin.x.into(),
+                bounds.origin.y.into(),
+                (bounds.origin.x + bounds.size.width).into(),
+                (bounds.origin.y + bounds.size.height).into(),
+            );
+            #[cfg(not(target_os = "android"))]
+            let _ = bounds;
+        },
+    )
+    .absolute()
+    .size_full()
+}

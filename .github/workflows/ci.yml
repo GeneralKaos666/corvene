@@ -159,3 +159,66 @@ jobs:
           dpkg-deb --contents "$deb" | grep -E 'usr/lib/corvane/corvane$|usr/lib/corvane/bin/corvane$|usr/bin/corvane -> |applications/com.wasimaster.corvane.desktop$'
           CORVANE_CLI_DRY_RUN=1 packaging/linux/corvane.sh open . | grep -q '^x-corvane://openLocalRepo/'
 
+
+  # Both Android packages (foss and play) from one native library per ABI,
+  # on a Linux runner: cargo-ndk cross-compiles, Gradle packages. The bundled
+  # git (packaging/android/git) is cross-built once and cached.
+  android:
+    name: clippy · package (Android)
+    needs: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NDK_VERSION: 27.3.13750724
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: install the NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: cache the bundled git
+        uses: actions/cache@v4
+        with:
+          path: packaging/android/app/src/main/jniLibs
+          key: android-git-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
+      # rustc reports this lint for thread locals only on Android targets
+      - name: clippy
+        run: >
+          cargo ndk -t arm64-v8a -P 26 clippy -p corvane --lib --
+          -D warnings -A clippy::missing_const_for_thread_local
+      - name: package (foss and play)
+        run: packaging/android/build.sh debug
+      # the bundle Google Play takes, with one grammar in the on-demand
+      # module (release.yml builds them all)
+      - name: bundle (play, with the grammar module)
+        run: |
+          UNITS=json packaging/android/grammars.sh
+          cd packaging/android && ./gradlew --no-daemon :app:bundlePlayDebug
+          unzip -l app/build/outputs/bundle/playDebug/app-play-debug.aab | grep -q 'grammars/lib/arm64-v8a/libcorvane_ts_index.so'
+      - name: the play package asks for no all files access
+        run: |
+          aapt="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)"
+          "$aapt" dump permissions packaging/android/app/build/outputs/apk/foss/debug/app-foss-debug.apk | grep -q MANAGE_EXTERNAL_STORAGE
+          ! "$aapt" dump permissions packaging/android/app/build/outputs/apk/play/debug/app-play-debug.apk | grep -q MANAGE_EXTERNAL_STORAGE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corvane-android-debug
+          path: packaging/android/app/build/outputs/apk/*/debug/*.apk
+          if-no-files-found: error

@@ -1,6 +1,6 @@
 //! Corvane entry point: logging, persisted settings, GPUI application, window.
 
-mod askpass;
+pub(crate) mod askpass;
 mod assets;
 mod dev_samples;
 mod logging;
@@ -17,17 +17,20 @@ use corvane_ui::workspace::Workspace;
 use gpui_kit::*;
 use tracing::{debug, error, info, warn};
 
-fn main() {
+// `pub(crate)`: on Android this file is a module of the activity's native
+// library (`android.rs`), whose `android_main` calls it
+pub(crate) fn main() {
     // `GIT_ASKPASS` runs this same binary; answer git and exit before touching GPUI.
     if std::env::var_os("CORVANE_ASKPASS").is_some() {
         askpass::run();
     }
     // GHD `requestSingleInstanceLock`: a second launch (the `.desktop` file's
     // URL handler, the command line tool) hands its URLs to the running
-    // Corvane and exits before touching the store it holds
-    #[cfg(not(target_os = "macos"))]
+    // Corvane and exits before touching the store it holds. Android keeps a
+    // single activity itself (`launchMode="singleTask"`).
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let launch_urls = corvane_platform::single_instance::url_arguments(std::env::args().skip(1));
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let instance = match corvane_platform::single_instance::claim(&launch_urls) {
         corvane_platform::single_instance::Claim::Forwarded => return,
         corvane_platform::single_instance::Claim::First(listener) => listener,
@@ -66,7 +69,12 @@ fn main() {
     let launch_flags = corvane_core::Flags::resolve(&flag_overrides, &flags_env);
     phase(started, "store opened");
 
+    #[cfg(not(target_os = "android"))]
     let app = gpui_kit::application().with_assets(assets::Assets);
+    // gpui-kit leaves the platform to mobile applications
+    #[cfg(target_os = "android")]
+    let app = Application::with_platform(gpui_android::current_platform(crate::android_app()))
+        .with_assets(assets::Assets);
     phase(started, "application created");
     // `app.on('activate')`: the Dock icon shows the hidden window again.
     #[cfg(target_os = "macos")]
@@ -84,7 +92,7 @@ fn main() {
     // in Corvane", links) may arrive before launch has finished: queue them
     let url_inbox = corvane_core::app_url::AppUrlInbox::default();
     let url_sender = url_inbox.sender();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         for url in launch_urls {
             url_sender.send(url);
@@ -550,6 +558,17 @@ fn main() {
 
         // Same size as the GitHub Desktop reference captures in .docs.
         let window_size = size(px(1367.), px(814.));
+        // CORVANE_WINDOW_SIZE=<width>x<height> (build with `--features
+        // snapshots`): another size, also below the minimum, for snapshots
+        // of the compact layout phones get.
+        #[cfg(feature = "snapshots")]
+        let forced_size = std::env::var("CORVANE_WINDOW_SIZE").ok().and_then(|spec| {
+            let (width, height) = spec.split_once('x')?;
+            Some(size(px(width.parse().ok()?), px(height.parse().ok()?)))
+        });
+        #[cfg(not(feature = "snapshots"))]
+        let forced_size = None::<Size<Pixels>>.filter(|_| false);
+        let window_size = forced_size.unwrap_or(window_size);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("Corvane".into()),
@@ -564,17 +583,17 @@ fn main() {
                 cx,
             ))),
             // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400
-            window_min_size: Some(
-                if state
-                    .read(cx)
-                    .flags
-                    .bool(corvane_core::flags::ids::SMALLER_MINIMUM_SIZES)
-                {
-                    size(px(600.), px(400.))
-                } else {
-                    size(px(960.), px(660.))
-                },
-            ),
+            window_min_size: Some(if let Some(forced) = forced_size {
+                forced
+            } else if state
+                .read(cx)
+                .flags
+                .bool(corvane_core::flags::ids::SMALLER_MINIMUM_SIZES)
+            {
+                size(px(600.), px(400.))
+            } else {
+                size(px(960.), px(660.))
+            }),
             app_id: Some(corvane_platform::BUNDLE_ID.into()),
             // X11 `_NET_WM_ICON` (Electron sets the app icon on its window)
             #[cfg(not(target_os = "macos"))]
@@ -985,6 +1004,10 @@ fn main() {
             }
         });
         cx.on_action(|_: &ToggleFullScreen, cx| {
+            // Android: the window always fills the screen; the item shows
+            // or hides the system's bars
+            #[cfg(target_os = "android")]
+            corvane_platform::android::toggle_full_screen();
             if let Some(window) = cx.active_window() {
                 window
                     .update(cx, |_, window, _| window.toggle_fullscreen())

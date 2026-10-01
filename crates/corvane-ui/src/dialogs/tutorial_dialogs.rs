@@ -48,7 +48,7 @@ impl Render for CreateTutorialRepositoryDialog {
         let site = html_url(&self.account.endpoint);
         let friendly = self.account.host();
         let content = div()
-            .w(zpx(410.))
+            .w(crate::theme::fit_width(410.))
             .flex()
             .flex_col()
             .child(paragraph(vec![

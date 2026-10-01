@@ -9,7 +9,7 @@
 //!
 //! The callback arrives as `x-corvane-auth://oauth?code=…&state=…` through
 //! `Dispatcher::handle_app_url`, or on the loopback listener
-//! (`http://127.0.0.1:<port>/callback`) when the URL scheme cannot be used
+//! (`http://127.0.0.1:<port>`) when the URL scheme cannot be used
 //! (a bare binary outside the bundle, on Linux one whose `.desktop` entry
 //! is not the scheme's handler, or `CORVANE_OAUTH_LOOPBACK=1`).
 //! `state` must match the flow that opened the browser; the token only ever
@@ -100,6 +100,9 @@ impl Dispatcher {
             };
             cx.spawn(async move |cx: &mut gpui_kit::AsyncApp| {
                 if let Ok(Some((code, state))) = rx.recv().await {
+                    // Android: the browser's tab sits over the activity
+                    #[cfg(target_os = "android")]
+                    corvane_platform::android::bring_to_front();
                     cx.update(|cx| Self::complete_web_flow(code, state, cx));
                 }
             })

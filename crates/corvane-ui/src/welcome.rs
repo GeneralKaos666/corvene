@@ -945,7 +945,13 @@ impl Render for WelcomeView {
             Step::ConfigureGit => self.configure_git(window, cx).into_any_element(),
         };
         let viewport = crate::theme::page_size(window);
-        let left_w = viewport.width * 0.6;
+        // a phone has no room for the illustration column
+        let compact = crate::theme::compact(window);
+        let left_w = if compact {
+            viewport.width
+        } else {
+            viewport.width * 0.6
+        };
         let right_w = viewport.width - left_w;
         // `.welcome-right .welcome-graphic { height: 100%; object-fit: cover;
         // object-position: left }` in a flex box centred inside 40 px
@@ -973,7 +979,7 @@ impl Render for WelcomeView {
                     .h_full()
                     .flex()
                     .items_center()
-                    .p(px(40.))
+                    .p(px(if compact { 24. } else { 40. }))
                     .overflow_y_scroll()
                     .child(
                         img("illustrations/welcome-illustration-left-top.svg")
@@ -1000,21 +1006,23 @@ impl Render for WelcomeView {
                             .child(content),
                     ),
             )
-            .child(
-                div()
-                    .relative()
-                    .w(right_w)
-                    .h_full()
-                    .bg(rgb(0x28373b))
-                    .overflow_hidden()
-                    .child(
-                        img("illustrations/welcome-illustration-right.svg")
-                            .absolute()
-                            .left(graphic_x)
-                            .top(px(40.))
-                            .w(graphic_w)
-                            .h(graphic_h),
-                    ),
-            )
+            .when(!compact, |d| {
+                d.child(
+                    div()
+                        .relative()
+                        .w(right_w)
+                        .h_full()
+                        .bg(rgb(0x28373b))
+                        .overflow_hidden()
+                        .child(
+                            img("illustrations/welcome-illustration-right.svg")
+                                .absolute()
+                                .left(graphic_x)
+                                .top(px(40.))
+                                .w(graphic_w)
+                                .h(graphic_h),
+                        ),
+                )
+            })
     }
 }

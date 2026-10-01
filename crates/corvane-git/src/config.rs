@@ -33,6 +33,18 @@ pub fn global_config_value(git: Arc<GitBinary>, key: &str) -> Option<String> {
     value_of(GitCommand::new(git).args(["config", "--global", "--get", key]))
 }
 
+/// `git config --global --get-all <key>`: every value of a multi-valued key.
+pub fn global_config_values(git: Arc<GitBinary>, key: &str) -> Vec<String> {
+    GitCommand::new(git)
+        .args(["config", "--global", "--get-all", key])
+        .allow_exit_code(1)
+        .run()
+        .ok()
+        .and_then(|out| out.stdout_string().ok())
+        .map(|out| out.lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
 /// `git config --local <key> <value>`.
 pub fn set_local_config_value(
     git: Arc<GitBinary>,

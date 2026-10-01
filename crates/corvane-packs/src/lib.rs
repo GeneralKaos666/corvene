@@ -88,7 +88,12 @@ const GRAMMAR_INDEX: &str = "index.json";
 /// `<os>-<arch>` (`macos-aarch64`, `linux-x86_64`). Native packs are per
 /// architecture rather than universal: the grammar tables are large.
 pub fn pack_target() -> &'static str {
-    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    // Android has its own C library: a Linux pack does not load there
+    if cfg!(all(target_os = "android", target_arch = "aarch64")) {
+        "android-aarch64"
+    } else if cfg!(target_os = "android") {
+        "android-x86_64"
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-aarch64"
     } else if cfg!(target_os = "macos") {
         "macos-x86_64"
@@ -165,6 +170,15 @@ impl PackManifest {
     /// The newest entry of `kind` for this platform that this app version
     /// can use.
     pub fn entry_for(&self, kind: PackKind, app_version: &str) -> Option<&PackEntry> {
+        // Android's `play` flavour runs no code it downloaded; data packs
+        // (the extended syntaxes) stay available
+        #[cfg(target_os = "android")]
+        if kind != PackKind::SyntaxExtended
+            && !corvane_platform::android::bridge()
+                .is_some_and(|bridge| bridge.allows_downloaded_code())
+        {
+            return None;
+        }
         self.packs
             .iter()
             .filter(|p| p.kind == kind)
@@ -185,8 +199,52 @@ pub struct InstalledPack {
 impl InstalledPack {
     /// The file the consumer opens.
     pub fn entry_path(&self) -> PathBuf {
+        #[cfg(target_os = "android")]
+        if self.version == PLAY_MODULE_VERSION {
+            return self.path.join(PLAY_MODULE_INDEX);
+        }
         self.path.join(self.kind.entry_file())
     }
+}
+
+/// Android's `play` flavour: the tree-sitter grammars are an on-demand
+/// feature module Google Play installs (`packaging/android/grammars`), its
+/// units native libraries and its index a file among them under this name.
+#[cfg(target_os = "android")]
+pub const PLAY_MODULE_INDEX: &str = "libcorvane_ts_index.so";
+
+/// The "version" of the pack the Play module stands for (Play versions it
+/// with the application).
+#[cfg(target_os = "android")]
+pub const PLAY_MODULE_VERSION: &str = "Google Play";
+
+/// Whether `kind` comes from Google Play instead of Corvane's releases: the
+/// grammars for every language in a build that may not download code.
+pub fn store_delivered(kind: PackKind) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        kind == PackKind::TreeSitterAll
+            && corvane_platform::android::bridge()
+                .is_some_and(|bridge| !bridge.allows_downloaded_code())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = kind;
+        false
+    }
+}
+
+/// The installed Play module as a pack.
+#[cfg(target_os = "android")]
+fn play_module() -> Option<InstalledPack> {
+    let dir = corvane_platform::android::bridge()?.grammar_module_dir()?;
+    dir.join(PLAY_MODULE_INDEX)
+        .is_file()
+        .then(|| InstalledPack {
+            kind: PackKind::TreeSitterAll,
+            version: PLAY_MODULE_VERSION.to_string(),
+            path: dir,
+        })
 }
 
 /// The marker written after a successful install.
@@ -297,6 +355,10 @@ pub fn parse_manifest(body: &[u8]) -> Result<PackManifest, PackError> {
 
 /// The installed version of `kind`, newest first when several are present.
 pub fn installed(kind: PackKind) -> Option<InstalledPack> {
+    #[cfg(target_os = "android")]
+    if store_delivered(kind) {
+        return play_module();
+    }
     let dir = packs_dir().join(kind.name());
     let mut versions: Vec<(String, PathBuf)> = std::fs::read_dir(&dir)
         .ok()?

@@ -202,6 +202,11 @@ impl Unit {
 /// cache is keyed by pack version). Written to a temporary name and renamed:
 /// a library must never be rewritten in place.
 fn unpack(file: &UnitFile) -> Result<PathBuf, String> {
+    // a unit listed without `.gz` is a library already (Android's Play
+    // module installs them as native libraries): opened where it is
+    if file.gz.extension().is_none_or(|ext| ext != "gz") {
+        return Ok(file.gz.clone());
+    }
     if file.cache.metadata().is_ok_and(|m| m.len() > 0) {
         return Ok(file.cache.clone());
     }
@@ -706,5 +711,17 @@ mod tests {
             assert!(spans.iter().filter(|s| !s.is_empty()).count() > lines.len() / 2);
         }
         unload_library("tree-sitter-all");
+    }
+
+    #[test]
+    fn a_unit_without_gz_is_opened_in_place() {
+        let file = UnitFile {
+            gz: PathBuf::from("/libs/libcorvane_ts_rust.so"),
+            cache: PathBuf::from("/nowhere/rust.so"),
+        };
+        assert_eq!(
+            unpack(&file),
+            Ok(PathBuf::from("/libs/libcorvane_ts_rust.so"))
+        );
     }
 }

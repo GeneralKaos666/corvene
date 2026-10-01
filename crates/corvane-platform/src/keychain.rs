@@ -1,9 +1,41 @@
-//! Access tokens live in the OS keychain (macOS Keychain via `keyring`),
-//! one item per (host, login), like GitHub Desktop's token store.
+//! Access tokens live in the OS keychain (macOS Keychain via `keyring`,
+//! the secret service on Linux, the Android Keystore), one item per
+//! (host, login), like GitHub Desktop's token store.
 
 use tracing::debug;
 
+/// The `keyring` crate's entry type. Android: `keyring`'s own API has no
+/// store there; its Android store (shared preferences encrypted with a key
+/// in the Android Keystore) plugs into `keyring-core`, whose `Entry` and
+/// `Error` are the same types.
+#[cfg(not(target_os = "android"))]
+use keyring::Entry;
+#[cfg(target_os = "android")]
+use keyring_core::Entry;
+
 const SERVICE: &str = crate::BUNDLE_ID;
+
+/// Makes the Android Keystore store `keyring-core`'s default, once. The
+/// store finds the Java VM through `ndk-context`, which android-activity
+/// sets up before `android_main` runs.
+#[cfg(target_os = "android")]
+fn ensure_store() -> keyring::Result<()> {
+    use std::sync::OnceLock;
+    static READY: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    READY
+        .get_or_init(|| {
+            android_native_keyring_store::Store::new()
+                .map(|store| keyring_core::set_default_store(store))
+                .map_err(|err| err.to_string())
+        })
+        .clone()
+        .map_err(|err| keyring::Error::NoStorageAccess(err.into()))
+}
+
+#[cfg(not(target_os = "android"))]
+fn ensure_store() -> keyring::Result<()> {
+    Ok(())
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum KeychainError {
@@ -13,9 +45,10 @@ pub enum KeychainError {
 
 pub type Result<T> = std::result::Result<T, KeychainError>;
 
-fn entry(host: &str, login: &str) -> Result<keyring::Entry> {
+fn entry(host: &str, login: &str) -> Result<Entry> {
+    ensure_store()?;
     // Account column shows as "login@host" in Keychain Access.
-    Ok(keyring::Entry::new(SERVICE, &format!("{login}@{host}"))?)
+    Ok(Entry::new(SERVICE, &format!("{login}@{host}"))?)
 }
 
 pub fn store_token(host: &str, login: &str, token: &str) -> Result<()> {
@@ -34,11 +67,9 @@ pub fn token(host: &str, login: &str) -> Result<Option<String>> {
 
 /// Generic git server credentials (GHD `setGenericPassword`): one item per
 /// (host, username), separate from the GitHub token entries.
-fn generic_entry(host: &str, username: &str) -> Result<keyring::Entry> {
-    Ok(keyring::Entry::new(
-        SERVICE,
-        &format!("git:{username}@{host}"),
-    )?)
+fn generic_entry(host: &str, username: &str) -> Result<Entry> {
+    ensure_store()?;
+    Ok(Entry::new(SERVICE, &format!("git:{username}@{host}"))?)
 }
 
 pub fn store_generic_password(host: &str, username: &str, password: &str) -> Result<()> {
@@ -64,11 +95,9 @@ pub fn delete_token(host: &str, login: &str) -> Result<()> {
 
 /// A GitHub Enterprise OAuth app's client secret (the browser flow's token
 /// exchange), one item per (host, client ID).
-fn oauth_secret_entry(host: &str, client_id: &str) -> Result<keyring::Entry> {
-    Ok(keyring::Entry::new(
-        SERVICE,
-        &format!("oauth:{client_id}@{host}"),
-    )?)
+fn oauth_secret_entry(host: &str, client_id: &str) -> Result<Entry> {
+    ensure_store()?;
+    Ok(Entry::new(SERVICE, &format!("oauth:{client_id}@{host}"))?)
 }
 
 pub fn store_oauth_client_secret(host: &str, client_id: &str, secret: &str) -> Result<()> {

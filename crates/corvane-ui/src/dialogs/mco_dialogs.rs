@@ -376,7 +376,7 @@ impl McoDialog {
         let selected_for_ok = selected.clone();
         let query_for_ok = query.clone();
         let content = div()
-            .w(zpx(450.))
+            .w(crate::theme::fit_width(450.))
             .mx(zpx(-20.))
             .mt(zpx(-20.))
             .flex()
@@ -500,7 +500,7 @@ impl McoDialog {
         };
         let p = mco.progress.clone();
         let content = div()
-            .w(zpx(400.))
+            .w(crate::theme::fit_width(400.))
             .flex()
             .flex_col()
             .child(
@@ -582,7 +582,7 @@ impl McoDialog {
         let resolved_count = resolved_files(&status, &resolutions).len();
         let close = move |_: &mut Window, cx: &mut App| Dispatcher::hide_conflicts(repo, cx);
 
-        let mut content = div().w(zpx(460.)).flex().flex_col();
+        let mut content = div().w(crate::theme::fit_width(460.)).flex().flex_col();
         // flag `841`: which commit stopped (the progress step's details)
         // (a cherry-pick's count only moves once a pick is done, so it is
         // left out rather than naming the previous commit)
@@ -1406,7 +1406,7 @@ impl Render for SquashCommitMessageDialog {
             self.count,
         );
         let content = div()
-            .w(zpx(450.))
+            .w(crate::theme::fit_width(450.))
             .flex()
             .flex_col()
             .gap(SPACING())

@@ -550,6 +550,8 @@ fn no_repositories(
         .as_ref()
         .map(|account| with_zoom(z, || view.repository_pane(account, list_h, z, window, cx)));
     let with_list = repository_pane.is_some();
+    // a phone: one column, less padding, no fixed widths
+    let compact = crate::theme::compact(window);
     // Corvane extra (flag 206): GitHub Desktop's data is on this machine
     let show_import = view.ghd_installed
         && view
@@ -566,31 +568,40 @@ fn no_repositories(
         .flex()
         .flex_col()
         .items_center()
-        .p(s(60.))
+        .p(s(if compact { 20. } else { 60. }))
         .bg(t.background)
-        .child(
-            img("illustrations/welcome-illustration-left-top.svg")
-                .absolute()
-                .right(s(80.))
-                .top(s(40.))
-                .h(top_h)
-                .w(top_h * (42.2971 / 43.835956)),
-        )
-        .child(
-            img("illustrations/welcome-illustration-left-bottom.svg")
-                .absolute()
-                .right(s(10.))
-                .bottom(s(10.))
-                .h(bottom_h)
-                .w(bottom_h * (113.99702 / 172.30263)),
-        )
+        .when(!compact, |d| {
+            d
+            .child(
+                img("illustrations/welcome-illustration-left-top.svg")
+                    .absolute()
+                    .right(s(80.))
+                    .top(s(40.))
+                    .h(top_h)
+                    .w(top_h * (42.2971 / 43.835956)),
+            )
+            .child(
+                img("illustrations/welcome-illustration-left-bottom.svg")
+                    .absolute()
+                    .right(s(10.))
+                    .bottom(s(10.))
+                    .h(bottom_h)
+                    .w(bottom_h * (113.99702 / 172.30263)),
+            )
+        })
         .child(
             // `section`: as wide as the action pane's content (536 px for
             // these titles), the full height; with the repository list, as
             // wide as the view
             div()
                 .flex_1()
-                .map(|d| if with_list { d.w_full() } else { d.w(s(536.1)) })
+                .map(|d| {
+                    if with_list || compact {
+                        d.w_full()
+                    } else {
+                        d.w(s(536.1))
+                    }
+                })
                 .min_w_0()
                 .flex()
                 .flex_col()
@@ -618,22 +629,28 @@ fn no_repositories(
                     // Clone button hangs under the list
                     div()
                         .flex()
-                        .flex_row()
+                        .map(|d| if compact { d.flex_col() } else { d.flex_row() })
                         .map(|d| {
-                            if with_list {
+                            if with_list && !compact {
                                 d.flex_none().min_h(list_h)
                             } else {
                                 d.flex_1()
                             }
                         })
-                        .children(repository_pane)
+                        .children(repository_pane.map(|pane| {
+                            if compact {
+                                pane.w_full().h(viewport.height * 0.4).flex_none()
+                            } else {
+                                pane
+                            }
+                        }))
                         .child(
                     // `.content > .content-pane`: 50 %, the button group
                     // growing above the ProTip
                     div()
-                        .w_1_2()
+                        .map(|d| if compact { d.w_full() } else { d.w_1_2() })
                         .flex_none()
-                        .when(with_list, |d| d.pl(s(10.)))
+                        .when(with_list && !compact, |d| d.pl(s(10.)))
                         .flex()
                         .flex_col()
                         .child(

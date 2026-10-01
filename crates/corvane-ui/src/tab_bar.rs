@@ -1,6 +1,7 @@
 //! `.tab-bar.tabs` - the Changes | History switcher (29 px).
 //! Tabs and bar share `--background-color`; hover uses `--tab-bar-hover-background-color`.
 
+use crate::widgets::IconButtonA11y;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -23,6 +24,18 @@ pub struct VerticalTab {
 pub fn vertical_tab_bar(
     tabs: Vec<VerticalTab>,
     selected: usize,
+    on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    vertical_tab_bar_sized(tabs, selected, false, on_select, cx)
+}
+
+/// [`vertical_tab_bar`]; `icons_only` for the compact (phone) layout, where
+/// the labels would leave the tab's content no room.
+pub fn vertical_tab_bar_sized(
+    tabs: Vec<VerticalTab>,
+    selected: usize,
+    icons_only: bool,
     on_select: impl Fn(usize, &mut Window, &mut App) + Clone + 'static,
     cx: &App,
 ) -> impl IntoElement {
@@ -49,9 +62,14 @@ pub fn vertical_tab_bar(
             };
             div()
                 .id(tab.id)
-                .min_w(zpx(150.))
+                .when(!icons_only, |d| d.min_w(zpx(150.)))
+                .when(icons_only, |d| d.icon_button_label(tab.label.clone()))
                 .my(SPACING_THIRD())
-                .mx(SPACING_DOUBLE())
+                .mx(if icons_only {
+                    SPACING_HALF()
+                } else {
+                    SPACING_DOUBLE()
+                })
                 .p(SPACING())
                 .rounded(BORDER_RADIUS())
                 .flex()
@@ -65,8 +83,8 @@ pub fn vertical_tab_bar(
                 .cursor_pointer()
                 .when(!is_selected, move |d| d.hover(move |s| s.bg(hover_bg)))
                 .on_click(move |_, window, cx| on_select(ix, window, cx))
-                .child(octicon(tab.icon, icon).mr(SPACING()))
-                .child(tab.label)
+                .child(octicon(tab.icon, icon).when(!icons_only, |d| d.mr(SPACING())))
+                .when(!icons_only, |d| d.child(tab.label))
         }))
 }
 

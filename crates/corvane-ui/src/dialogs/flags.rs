@@ -887,9 +887,14 @@ impl FlagsDialog {
             .child(
                 div()
                     .flex()
-                    .flex_row()
+                    .map(|d| {
+                        if crate::theme::compact(window) {
+                            d.flex_col()
+                        } else {
+                            d.flex_row().gap(SPACING_HALF())
+                        }
+                    })
                     .items_start()
-                    .gap(SPACING_HALF())
                     .text_size(FONT_SIZE_SM())
                     .line_height(zpx(16.))
                     .text_color(t.text_secondary)
@@ -899,7 +904,17 @@ impl FlagsDialog {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child("GitHub Desktop:"),
                     )
-                    .child(div().flex_1().min_w_0().child(def.ghd_behaviour)),
+                    .child(
+                        div()
+                            .map(|d| {
+                                if crate::theme::compact(window) {
+                                    d.w_full()
+                                } else {
+                                    d.flex_1().min_w_0()
+                                }
+                            })
+                            .child(def.ghd_behaviour),
+                    ),
             )
             .when_some(unavailable_reason, |d, reason| {
                 d.child(
@@ -922,13 +937,18 @@ impl FlagsDialog {
                 })
             });
 
+        // the compact (phone) layout has no room for a fixed column: a
+        // switch takes its own width, a select goes under the text
+        let compact = crate::theme::compact(window);
+        let stacked = compact && matches!(def.kind, Kind::Select { .. });
         let control = self.control(def, &value, disabled, window, cx);
         let control_column = div()
             .flex_none()
-            .w(if matches!(def.kind, Kind::Select { .. }) {
-                zpx(200.)
-            } else {
-                zpx(140.)
+            .map(|d| match def.kind {
+                _ if stacked => d.w_full(),
+                _ if compact => d,
+                Kind::Select { .. } => d.w(zpx(200.)),
+                _ => d.w(zpx(140.)),
             })
             .flex()
             .flex_col()
@@ -968,9 +988,9 @@ impl FlagsDialog {
             .pl(SPACING_DOUBLE())
             .pr(SPACING_DOUBLE())
             .py(zpx(14.))
-            .gap(SPACING_DOUBLE())
+            .gap(if compact { SPACING() } else { SPACING_DOUBLE() })
             .flex()
-            .flex_row()
+            .map(|d| if stacked { d.flex_col() } else { d.flex_row() })
             .items_start()
             .border_b_1()
             .border_color(t.box_border_contrast.opacity(0.35))
@@ -1352,6 +1372,7 @@ impl FlagsDialog {
         div()
             .id("flags-confirm-layer")
             .occlude()
+            .child(crate::widgets::touch_drag_occluder())
             .absolute()
             .inset_0()
             .flex()
@@ -1364,7 +1385,7 @@ impl FlagsDialog {
                     .id("flags-confirm")
                     .role(Role::AlertDialog)
                     .aria_label(title.clone())
-                    .w(zpx(420.))
+                    .w(crate::theme::fit_width(420.))
                     .flex()
                     .flex_col()
                     .rounded(BORDER_RADIUS())
@@ -1590,9 +1611,17 @@ impl Render for FlagsDialog {
             }
             label
         });
+        let compact = crate::theme::compact(window);
         let toolbar = div()
             .flex_none()
-            .h(zpx(45.))
+            .map(|d| {
+                if compact {
+                    // the search box, the switch and the checkbox wrap
+                    d.min_h(zpx(45.)).py(SPACING_HALF()).flex_wrap()
+                } else {
+                    d.h(zpx(45.))
+                }
+            })
             .px(SPACING_DOUBLE())
             .flex()
             .flex_row()
@@ -1630,7 +1659,7 @@ impl Render for FlagsDialog {
                     cx,
                 ))
             })
-            .child(div().flex_1())
+            .when(!compact, |d| d.child(div().flex_1()))
             .when_some(modified_label, |d, label| {
                 d.child(
                     div()
@@ -1774,7 +1803,9 @@ impl Render for FlagsDialog {
             .flex()
             .flex_row()
             .items_stretch()
-            .child(nav)
+            // a phone: the search box and the filter chips find flags; the
+            // category list would leave the flags no room
+            .when(!crate::theme::compact(window), |d| d.child(nav))
             .child(content);
 
         // ---- restart bar ----
@@ -1831,6 +1862,7 @@ impl Render for FlagsDialog {
                     .ok();
             }
         });
+        let compact_footer = crate::theme::compact(window);
         let footer = div()
             .flex_none()
             .p(SPACING_DOUBLE())
@@ -1847,40 +1879,52 @@ impl Render for FlagsDialog {
                     .text_color(t.text)
                     .child("Preset"),
             )
-            .child(div().flex_none().w(zpx(180.)).child(select_button(
-                "flags-preset",
-                preset_shown,
-                preset_labels,
-                preset_ix,
-                preset_from_env,
-                on_preset,
-                cx,
-            )))
             .child(
                 div()
-                    .id("flags-preset-description")
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(FONT_SIZE_SM())
-                    .text_color(t.text_secondary)
-                    .child(if preset_from_env {
-                        format!("{} Set by CORVANE_FLAGS.", preset.description())
-                    } else {
-                        preset.description().to_string()
+                    .map(|d| {
+                        if compact_footer {
+                            d.flex_1().min_w_0()
+                        } else {
+                            d.flex_none().w(zpx(180.))
+                        }
                     })
-                    .when(self.nav != Nav::Presets, |d| {
-                        d.cursor_pointer()
-                            .ghd_tooltip("Compare the presets")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.nav = Nav::Presets;
-                                cx.notify();
-                            }))
-                    }),
+                    .child(select_button(
+                        "flags-preset",
+                        preset_shown,
+                        preset_labels,
+                        preset_ix,
+                        preset_from_env,
+                        on_preset,
+                        cx,
+                    )),
             )
+            .when(!compact_footer, |d| {
+                d.child(
+                    div()
+                        .id("flags-preset-description")
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(FONT_SIZE_SM())
+                        .text_color(t.text_secondary)
+                        .child(if preset_from_env {
+                            format!("{} Set by CORVANE_FLAGS.", preset.description())
+                        } else {
+                            preset.description().to_string()
+                        })
+                        .when(self.nav != Nav::Presets, |d| {
+                            d.cursor_pointer()
+                                .ghd_tooltip("Compare the presets")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.nav = Nav::Presets;
+                                    cx.notify();
+                                }))
+                        }),
+                )
+            })
             .child(
                 primary_button("flags-done", "Done", false, cx)
-                    .min_w(zpx(120.))
+                    .min_w(zpx(if compact_footer { 72. } else { 120. }))
                     .on_click(|_, _, cx| FlagsDialog::close(cx)),
             );
 
@@ -1912,6 +1956,7 @@ impl Render for FlagsDialog {
                     .id("flags-overlay")
                     // modal: the views underneath get no hover, clicks or wheel
                     .occlude()
+                    .child(crate::widgets::touch_drag_occluder())
                     .relative()
                     .w(viewport.width)
                     .h(viewport.height)

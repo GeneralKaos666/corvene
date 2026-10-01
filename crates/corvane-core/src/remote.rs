@@ -98,7 +98,7 @@ pub enum ForcePushState {
     Recommended,
 }
 
-const BACKGROUND_FETCH_INTERVAL: Duration = Duration::from_secs(60 * 60);
+pub(crate) const BACKGROUND_FETCH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const BACKGROUND_FETCH_MINIMUM: Duration = Duration::from_secs(5 * 60);
 const INDICATOR_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const INDICATOR_REFRESH_MINIMUM: Duration = Duration::from_secs(60);
@@ -1514,13 +1514,33 @@ impl Dispatcher {
     /// Start the periodic background fetch and sidebar indicator refresh
     /// (`BackgroundFetcher`, `RepositoryIndicatorUpdater`). Call once.
     pub fn start_background_tasks(cx: &mut App) {
+        // Android: WorkManager wakes the process about once an hour, also
+        // while its timers are frozen in the background
+        #[cfg(target_os = "android")]
+        {
+            corvane_git::process::set_network_observer(corvane_platform::android::network_command);
+            let (tx, rx) = async_channel::unbounded::<()>();
+            corvane_platform::android::set_background_fetch_handler(move || {
+                let _ = tx.try_send(());
+            });
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                while rx.recv().await.is_ok() {
+                    info!("background fetch woken by WorkManager");
+                    cx.update(Self::background_fetch_tick);
+                }
+            })
+            .detach();
+        }
         cx.spawn(async move |cx: &mut AsyncApp| {
             // skew the first run so several instances do not sync up
             cx.background_executor()
                 .timer(Duration::from_secs(20))
                 .await;
             loop {
-                cx.update(Self::background_fetch_tick);
+                // in the background WorkManager drives the fetch (above)
+                if !crate::pull_requests::android_in_background() {
+                    cx.update(Self::background_fetch_tick);
+                }
                 cx.background_executor()
                     .timer(BACKGROUND_FETCH_MINIMUM)
                     .await;
@@ -1529,10 +1549,13 @@ impl Dispatcher {
         .detach();
         // `217-prompt-indicator-refresh`: the first indicator refresh runs
         // right after launch (GHD's updater starts on its delayed cadence)
-        let first_indicators = if Self::state(cx)
-            .read(cx)
-            .flags
-            .bool(crate::flags::ids::PROMPT_INDICATOR_REFRESH)
+        // Android: starting git twice per listed repository right at launch
+        // competes with drawing the first frames, so the delayed cadence
+        let first_indicators = if !cfg!(target_os = "android")
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::PROMPT_INDICATOR_REFRESH)
         {
             Duration::from_secs(1)
         } else {
@@ -1541,7 +1564,9 @@ impl Dispatcher {
         cx.spawn(async move |cx: &mut AsyncApp| {
             cx.background_executor().timer(first_indicators).await;
             loop {
-                cx.update(Self::refresh_indicators);
+                if !crate::pull_requests::android_in_background() {
+                    cx.update(Self::refresh_indicators);
+                }
                 cx.background_executor()
                     .timer(INDICATOR_REFRESH_INTERVAL)
                     .await;

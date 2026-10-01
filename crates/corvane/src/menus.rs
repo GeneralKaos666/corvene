@@ -40,12 +40,14 @@ impl MenuOptions {
             editor: s.editor_label(),
             shell: s.shell_label(),
             show_release_notes: s.flags.bool(ids::RELEASE_NOTES_MENU_ITEM),
-            show_import: s.flags.bool(ids::IMPORT_FROM_GITHUB_DESKTOP),
+            // GitHub Desktop does not run on Android
+            show_import: !cfg!(target_os = "android")
+                && s.flags.bool(ids::IMPORT_FROM_GITHUB_DESKTOP),
             show_view_upstream: s.flags.bool(ids::VIEW_UPSTREAM_ON_GITHUB),
             show_main_window: s.flags.bool(ids::WINDOW_MENU_MAIN_WINDOW),
             show_add_license: s.flags.bool(ids::ADD_LICENSE),
             fetch_all: s.flags.bool(ids::FETCH_ALL_REPOSITORIES),
-            install_cli: s.flags.bool(ids::LINUX_INSTALL_CLI),
+            install_cli: !cfg!(target_os = "android") && s.flags.bool(ids::LINUX_INSTALL_CLI),
             keymap: corvane_ui::keymap::KeymapFlags::from_flags(&s.flags),
         }
     }
@@ -327,7 +329,10 @@ pub fn install(cx: &mut App, options: &MenuOptions) {
         if options.install_cli {
             file_items.push(MenuItem::action("Install command line &tool…", InstallCli));
         }
-        file_items.extend([MenuItem::separator(), MenuItem::action("E&xit", Quit)]);
+        // Android applications are left, not quit
+        if !cfg!(target_os = "android") {
+            file_items.extend([MenuItem::separator(), MenuItem::action("E&xit", Quit)]);
+        }
     }
     menus.extend([
         Menu::new(l("File", "&File")).items(file_items),

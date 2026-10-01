@@ -144,6 +144,53 @@ impl CosmicTextSystem {
         }))
     }
 
+    /// Corvane patch: fontdb does not look for system fonts on Android, so
+    /// the platform points it at `/system/fonts`. The files are memory
+    /// mapped when a face is first used.
+    #[cfg(target_os = "android")]
+    pub fn load_fonts_dir(&self, dir: &std::path::Path) {
+        self.load_fonts_dirs(&[dir], || {});
+    }
+
+    /// [`Self::load_fonts_dir`] for several directories under one lock;
+    /// `locked` runs once the lock is held. A caller that loads on another
+    /// thread waits for it: every use of the text system then waits for the
+    /// fonts instead of seeing the database without them.
+    #[cfg(target_os = "android")]
+    pub fn load_fonts_dirs(&self, dirs: &[&std::path::Path], locked: impl FnOnce()) {
+        let mut state = self.0.write();
+        locked();
+        let db = state.font_system.db_mut();
+        for dir in dirs {
+            db.load_fonts_dir(dir);
+        }
+        // Android 13's NotoColorEmoji.ttf is COLR v1, which swash cannot
+        // draw (the glyphs come out blank). The system keeps the bitmap
+        // font it replaced as NotoColorEmojiLegacy.ttf, under the same
+        // family name: with both present, only the legacy one stays.
+        let file_name = |face: &cosmic_text::fontdb::FaceInfo| match &face.source {
+            cosmic_text::fontdb::Source::File(path)
+            | cosmic_text::fontdb::Source::SharedFile(path, _) => path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+            cosmic_text::fontdb::Source::Binary(_) => None,
+        };
+        let has_legacy = db
+            .faces()
+            .any(|face| file_name(face).as_deref() == Some("NotoColorEmojiLegacy.ttf"));
+        if has_legacy {
+            let vector: Vec<_> = db
+                .faces()
+                .filter(|face| file_name(face).as_deref() == Some("NotoColorEmoji.ttf"))
+                .map(|face| face.id)
+                .collect();
+            for id in vector {
+                db.remove_face(id);
+            }
+        }
+        state.font_ids_by_family_cache.clear();
+    }
+
     pub fn new_without_system_fonts(system_font_fallback: &str) -> Self {
         let font_system = FontSystem::new_with_locale_and_db(
             "en-US".to_string(),

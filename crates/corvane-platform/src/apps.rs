@@ -99,6 +99,23 @@ pub fn open_with_bundle(bundle_id: &str, target: &Path) -> std::io::Result<()> {
 /// without a file manager service, `xdg-open` on the folder.
 #[cfg(not(target_os = "macos"))]
 pub fn show_item_in_folder(path: &Path) -> std::io::Result<()> {
+    // Android: the system's file manager on the folder, through the
+    // documents provider
+    #[cfg(target_os = "android")]
+    {
+        let dir = if path.is_dir() {
+            path
+        } else {
+            path.parent().unwrap_or(path)
+        };
+        crate::android::view_path(dir)
+    }
+    #[cfg(not(target_os = "android"))]
+    show_item_with_file_manager(path)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
+fn show_item_with_file_manager(path: &Path) -> std::io::Result<()> {
     let shown = zbus::blocking::Connection::session().and_then(|bus| {
         bus.call_method(
             Some("org.freedesktop.FileManager1"),

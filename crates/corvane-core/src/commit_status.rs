@@ -374,6 +374,9 @@ impl Dispatcher {
                 cx.background_executor()
                     .timer(BACKGROUND_REFRESH_INTERVAL)
                     .await;
+                if crate::pull_requests::android_in_background() {
+                    continue;
+                }
                 cx.update(Self::refresh_eligible_commit_statuses);
             }
         })

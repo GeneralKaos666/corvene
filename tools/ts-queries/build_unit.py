@@ -3,6 +3,8 @@
 
     python3 tools/ts-queries/build_unit.py <unit> <out.dylib> [--target aarch64-apple-darwin]
     python3 tools/ts-queries/build_unit.py <unit> <out.so> [--target x86_64-unknown-linux-gnu]
+    CORVANE_CC=<ndk clang> CORVANE_CXX=<ndk clang++> \
+        python3 tools/ts-queries/build_unit.py <unit> <out.so> --target aarch64-linux-android26
 
 A unit is a grammar package (`typescript`: typescript + tsx) or a grammar
 built from source. The library holds the grammars' parser.c / scanner and a
@@ -122,6 +124,10 @@ def main(argv: list[str]) -> int:
         arch = ["-target", target]
     else:
         arch = []
+    # a cross compiler (the Android NDK's) instead of the host's clang
+    cc = os.environ.get("CORVANE_CC", "clang")
+    cxx = os.environ.get("CORVANE_CXX", "clang++")
+    android = bool(target) and "-android" in target
     with tempfile.TemporaryDirectory() as tmp:
         tmpd = Path(tmp)
         (tmpd / "table.c").write_text(table)
@@ -129,7 +135,7 @@ def main(argv: list[str]) -> int:
         cflags = ["-O2", "-fPIC", "-fvisibility=hidden", "-w", *arch]
         if not macos:
             cflags += ["-ffunction-sections", "-fdata-sections"]
-        subprocess.run(["clang", "-c", "-std=c11", *cflags, str(tmpd / "table.c"), "-o", str(objs[0])], check=True)
+        subprocess.run([cc, "-c", "-std=c11", *cflags, str(tmpd / "table.c"), "-o", str(objs[0])], check=True)
         for i, src in enumerate(sources):
             for f in ["parser.c", "scanner.c", "scanner.cc"]:
                 path = src / f
@@ -138,21 +144,24 @@ def main(argv: list[str]) -> int:
                 obj = tmpd / f"{i}-{f}.o"
                 if f.endswith(".cc"):
                     cpp = True
-                    subprocess.run(["clang++", "-c", "-std=c++14", *cflags, "-I", str(src), str(path), "-o", str(obj)], check=True)
+                    subprocess.run([cxx, "-c", "-std=c++14", *cflags, "-I", str(src), str(path), "-o", str(obj)], check=True)
                 else:
-                    subprocess.run(["clang", "-c", "-std=c11", *cflags, "-I", str(src), str(path), "-o", str(obj)], check=True)
+                    subprocess.run([cc, "-c", "-std=c11", *cflags, "-I", str(src), str(path), "-o", str(obj)], check=True)
                 objs.append(obj)
         out.parent.mkdir(parents=True, exist_ok=True)
         if macos:
-            link = ["clang++" if cpp else "clang", "-dynamiclib", *arch, "-Wl,-dead_strip", "-Wl,-x",
+            link = [cxx if cpp else cc, "-dynamiclib", *arch, "-Wl,-dead_strip", "-Wl,-x",
                     "-install_name", f"@rpath/{out.name}", *map(str, objs), "-o", str(out)]
         else:
             # ELF: a shared object with the C++ runtime linked in statically,
             # so a unit needs nothing beyond libc
-            link = ["clang++" if cpp else "clang", "-shared", *arch, "-Wl,--gc-sections", "-Wl,-s",
+            link = [cxx if cpp else cc, "-shared", *arch, "-Wl,--gc-sections", "-Wl,-s",
                     "-Wl,-soname," + out.name, *map(str, objs), "-o", str(out)]
             if cpp:
                 link[1:1] = ["-static-libstdc++"]
+            if android:
+                # devices with 16 KB pages (Android 15+) load nothing less
+                link[1:1] = ["-Wl,-z,max-page-size=16384"]
         subprocess.run(link, check=True)
     return 0
 

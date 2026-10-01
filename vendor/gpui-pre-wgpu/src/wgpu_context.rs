@@ -3,8 +3,8 @@ use anyhow::Context as _;
 #[cfg(not(target_family = "wasm"))]
 use gpui_util::ResultExt;
 use parking_lot::Mutex;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use wgpu::TextureFormat;
 
 pub struct WgpuContext {
@@ -112,6 +112,19 @@ impl raw_window_handle::HasDisplayHandle for WebDisplaySource {
         Ok(raw_window_handle::DisplayHandle::web())
     }
 }
+
+/// Corvane patch: how long the last `present` blocked, in nanoseconds. On
+/// Android the buffer queue holds a frame back until the GPU finished the
+/// one before, so this is the GPU's share of a frame; the platform reports
+/// it to the system's performance hints.
+#[cfg(target_os = "android")]
+pub static ANDROID_LAST_PRESENT_NANOS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Corvane patch: makes [`WgpuContext::instance`] offer OpenGL ES only.
+#[cfg(target_os = "android")]
+pub static ANDROID_GL_ONLY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 pub struct CompositorGpuHint {
@@ -441,8 +454,18 @@ impl WgpuContext {
 
     #[cfg(not(target_family = "wasm"))]
     pub fn instance(display: Option<Box<dyn wgpu::wgt::WgpuHasDisplayHandle>>) -> wgpu::Instance {
+        // Corvane patch: the Android platform retries with OpenGL ES alone
+        // when a Vulkan driver loses its device at start-up (the emulator's)
+        #[cfg(target_os = "android")]
+        let backends = if ANDROID_GL_ONLY.load(std::sync::atomic::Ordering::Relaxed) {
+            wgpu::Backends::GL
+        } else {
+            wgpu::Backends::VULKAN | wgpu::Backends::GL
+        };
+        #[cfg(not(target_os = "android"))]
+        let backends = wgpu::Backends::VULKAN | wgpu::Backends::GL;
         wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            backends,
             flags: wgpu::InstanceFlags::default(),
             backend_options: wgpu::BackendOptions::default(),
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
@@ -737,7 +760,7 @@ fn parse_pci_id(id: &str) -> anyhow::Result<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DeviceErrorState, parse_pci_id};
+    use super::{parse_pci_id, DeviceErrorState};
 
     #[test]
     fn device_errors_are_observed_independently() {

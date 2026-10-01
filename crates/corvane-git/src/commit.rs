@@ -269,7 +269,7 @@ pub fn discard_changes(
         match file.status.kind {
             FileStatusKind::New | FileStatusKind::Untracked => {
                 let full = workdir.join(&file.path);
-                if !move_to_trash || trash::delete(&full).is_err() {
+                if !move_to_trash || !trashed(&full) {
                     let _ = std::fs::remove_file(&full).or_else(|_| std::fs::remove_dir_all(&full));
                 }
             }
@@ -299,6 +299,19 @@ pub fn discard_changes(
             .run()?;
     }
     Ok(())
+}
+
+/// Whether `path` went to the Trash. Android has none, so the caller deletes.
+fn trashed(path: &Path) -> bool {
+    #[cfg(not(target_os = "android"))]
+    {
+        trash::delete(path).is_ok()
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = path;
+        false
+    }
 }
 
 /// Check out a submodule's modified files and trash its untracked ones.
@@ -331,7 +344,7 @@ fn discard_inside_submodule(
         let text = String::from_utf8_lossy(&out.stdout);
         for path in text.split('\0').filter(|p| !p.is_empty()) {
             let full = submodule.join(path.trim_end_matches('/'));
-            if !move_to_trash || trash::delete(&full).is_err() {
+            if !move_to_trash || !trashed(&full) {
                 let _ = std::fs::remove_file(&full).or_else(|_| std::fs::remove_dir_all(&full));
             }
         }

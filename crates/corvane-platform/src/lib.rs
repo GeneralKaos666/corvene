@@ -7,6 +7,8 @@
 pub const BUNDLE_ID: &str = "com.wasimaster.corvane";
 
 pub mod accessibility;
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod app_location;
 pub mod apps;
 pub mod cli;
@@ -91,11 +93,19 @@ pub mod paths {
     }
 
     /// GitHub Desktop's default clone location: `~/Documents/GitHub`.
+    /// Android: `files/repositories` in the app-private storage.
     pub fn default_clone_dir() -> PathBuf {
-        dirs::document_dir()
-            .or_else(dirs::home_dir)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("GitHub")
+        #[cfg(target_os = "android")]
+        {
+            crate::android::repositories_dir()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            dirs::document_dir()
+                .or_else(dirs::home_dir)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("GitHub")
+        }
     }
 
     /// Candidate clone locations offered during onboarding, existing ones only
@@ -140,7 +150,7 @@ pub mod fonts {
     /// named family that is installed as itself (fontconfig substitutes only
     /// for the generic `monospace`), else what `monospace` matches
     /// (DejaVu Sans Mono on a stock Ubuntu).
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     pub fn ghd_monospace_family() -> String {
         [
             "SFMono-Regular",
@@ -162,7 +172,7 @@ pub mod fonts {
     /// is the desktop's UI font (GTK's `gtk-font-name`, fontconfig's
     /// `sans-serif` without a desktop), and the named families after it only
     /// count when installed as themselves.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     pub fn ghd_ui_family() -> String {
         fc_match("sans-serif")
             .or_else(|| {
@@ -179,7 +189,7 @@ pub mod fonts {
     /// desktop's XSETTINGS (GNOME: `font-antialiasing` 'rgba') or the
     /// `Xft.rgba` X resource, and "none" (grayscale) otherwise. fontconfig's
     /// own `rgba` is not consulted.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     pub fn subpixel_antialiasing() -> bool {
         let gnome = std::process::Command::new("gsettings")
             .args(["get", "org.gnome.desktop.interface", "font-antialiasing"])
@@ -208,8 +218,29 @@ pub mod fonts {
             })
     }
 
+    /// Android's `monospace` family (`/system/etc/fonts.xml`): what Chrome
+    /// for Android resolves the stack to, none of its named families being
+    /// installed.
+    #[cfg(target_os = "android")]
+    pub fn ghd_monospace_family() -> String {
+        "Droid Sans Mono".to_string()
+    }
+
+    /// Android's `system-ui`.
+    #[cfg(target_os = "android")]
+    pub fn ghd_ui_family() -> String {
+        "Roboto".to_string()
+    }
+
+    /// Phone and tablet panels rotate and come in PenTile layouts; Android
+    /// antialiases text in grayscale.
+    #[cfg(target_os = "android")]
+    pub fn subpixel_antialiasing() -> bool {
+        false
+    }
+
     /// `fc-match -f '%{family[0]}' <pattern>`: the family fontconfig picks.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     fn fc_match(pattern: &str) -> Option<String> {
         let out = std::process::Command::new("fc-match")
             .args(["-f", "%{family[0]}", pattern])

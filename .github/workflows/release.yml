@@ -311,16 +311,145 @@ jobs:
           name: packs-manifest-linux-${{ matrix.arch }}
           path: target/linux/packs-manifest-linux-${{ matrix.arch }}.json
 
+  # The Android packages (foss and play, both ABIs in each) and the Android
+  # tree-sitter packs, on a Linux runner; also the play flavour's bundle
+  # (.aab, with the grammars as an on-demand module), which stays a workflow
+  # artifact: it is uploaded to Google Play by hand. The APKs are signed with the
+  # keystore in the CORVANE_ANDROID_KEYSTORE_BASE64 secret and only then
+  # added to the draft release; without it they stay workflow artifacts,
+  # unsigned. A failure here does not hold up the other platforms.
+  android:
+    name: build · sign · upload (Android)
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    continue-on-error: true
+    env:
+      NDK_VERSION: 27.3.13750724
+    steps:
+      - uses: actions/checkout@v4
+      - name: system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends minisign
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: install the NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: tree-sitter CLI
+        run: |
+          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
+          echo "CORVANE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter" >> "$GITHUB_ENV"
+      - name: cache grammar sources
+        id: grammar-src
+        uses: actions/cache@v4
+        with:
+          path: target/grammar-src
+          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
+      - name: fetch grammar sources
+        if: steps.grammar-src.outputs.cache-hit != 'true'
+        run: python3 tools/ts-queries/fetch.py
+      - name: cache the bundled git
+        uses: actions/cache@v4
+        with:
+          path: packaging/android/app/src/main/jniLibs
+          key: android-git-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
+      - name: build and package
+        env:
+          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+          CORVANE_ANDROID_KEYSTORE_BASE64: ${{ secrets.CORVANE_ANDROID_KEYSTORE_BASE64 }}
+          CORVANE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CORVANE_ANDROID_KEYSTORE_PASSWORD }}
+          CORVANE_ANDROID_KEY_ALIAS: ${{ secrets.CORVANE_ANDROID_KEY_ALIAS }}
+          CORVANE_ANDROID_KEY_PASSWORD: ${{ secrets.CORVANE_ANDROID_KEY_PASSWORD }}
+        run: |
+          [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
+          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          suffix=-unsigned
+          if [[ -n "$CORVANE_ANDROID_KEYSTORE_BASE64" ]]; then
+            umask 077
+            printf '%s' "$CORVANE_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/corvane.jks"
+            export CORVANE_ANDROID_KEYSTORE="$RUNNER_TEMP/corvane.jks"
+            suffix=
+            echo "ANDROID_SIGNED=1" >> "$GITHUB_ENV"
+          fi
+          # BUNDLE=1: also the .aab for Google Play with the grammar module
+          BUNDLE=1 packaging/android/build.sh release
+          rm -f "$RUNNER_TEMP/corvane.jks"
+          mkdir -p target/android
+          cp packaging/android/app/build/outputs/bundle/playRelease/*.aab "target/android/Corvane-$version-android-play$suffix.aab"
+          for flavour in foss play; do
+            apk="$(ls packaging/android/app/build/outputs/apk/$flavour/release/*.apk | head -1)"
+            cp "$apk" "target/android/Corvane-$version-android-$flavour$suffix.apk"
+          done
+          ls -l target/android
+      - name: tree-sitter packs
+        run: |
+          PACK_OS=android PACKS="tree-sitter-all tree-sitter-rest" packaging/packs.sh target/android/packs
+          mv target/android/packs/*.zip target/android/
+          mv target/android/packs/packs-manifest.json target/android/packs-manifest-android.json
+          ls -l target/android
+      - name: sign
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          umask 077
+          key="$RUNNER_TEMP/corvane-release.key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+          cd target/android
+          for asset in *.apk tree-sitter-*.zip; do
+            printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" \
+              -t "corvane v$version $asset" -x "$asset.minisig" -m "$asset"
+            minisign -V -p ../../packaging/corvane-release.pub -m "$asset"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-android
+          path: target/android/*
+      - name: upload the packs to the draft release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" target/android/tree-sitter-*.zip target/android/tree-sitter-*.zip.minisig
+      - name: upload the signed packages to the draft release
+        if: github.ref_type == 'tag' && env.ANDROID_SIGNED == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" target/android/*.apk target/android/*.apk.minisig
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        with:
+          name: packs-manifest-android
+          path: target/android/packs-manifest-android.json
+
   packs-manifest:
-    name: add the Linux packs to the packs manifest
-    needs: linux
+    name: add the Linux and Android packs to the packs manifest
+    needs: [linux, android]
+    # Android may have failed (or been skipped); the Linux packs still go in
     if: ${{ !cancelled() && needs.linux.result == 'success' && (github.ref_type == 'tag' || inputs.linux_release) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: packs-manifest-linux-*
+          pattern: packs-manifest-*
           merge-multiple: true
           path: fragments
       - name: merge, sign and replace

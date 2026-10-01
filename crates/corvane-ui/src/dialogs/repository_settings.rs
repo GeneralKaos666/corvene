@@ -19,7 +19,7 @@ use gpui_kit::*;
 use crate::context_menu::{IS_MAC, mac_or};
 use crate::dialog::DialogButton;
 use crate::icons::Octicon;
-use crate::tab_bar::{VerticalTab, vertical_tab_bar};
+use crate::tab_bar::VerticalTab;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
@@ -697,7 +697,8 @@ impl Render for RepositorySettingsDialog {
         }
         let selected = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
         let weak = cx.weak_entity();
-        let nav = vertical_tab_bar(
+        let compact = crate::theme::compact(window);
+        let nav = crate::tab_bar::vertical_tab_bar_sized(
             vec![
                 VerticalTab {
                     id: "repo-settings-tab-remote",
@@ -723,6 +724,7 @@ impl Render for RepositorySettingsDialog {
             }))
             .collect(),
             selected,
+            compact,
             move |ix, _, cx| {
                 weak.update(cx, |this, cx| {
                     this.tab = TABS[ix];
@@ -740,7 +742,7 @@ impl Render for RepositorySettingsDialog {
         };
         // `#repository-settings { width: 600px; .dialog-content { min-height: 305px } }`
         let content = div()
-            .w(zpx(600.))
+            .w(crate::theme::fit_bleed_width(600.))
             .mx(zpx(-20.))
             .my(zpx(-20.))
             .min_h(zpx(305.))

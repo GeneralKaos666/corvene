@@ -29,8 +29,12 @@ pub fn parse_prompt(prompt: &str) -> Option<(&'static str, String, Option<String
 }
 
 fn logins() -> HashMap<String, String> {
-    std::env::var("CORVANE_ASKPASS_LOGINS")
-        .unwrap_or_default()
+    parse_logins(&std::env::var("CORVANE_ASKPASS_LOGINS").unwrap_or_default())
+}
+
+/// `host=login;host2=login2`
+pub fn parse_logins(logins: &str) -> HashMap<String, String> {
+    logins
         .split(';')
         .filter_map(|pair| {
             let (host, login) = pair.split_once('=')?;
@@ -41,8 +45,21 @@ fn logins() -> HashMap<String, String> {
 
 /// Answer one prompt, or `None` when Corvane knows nothing about the host.
 pub fn answer(prompt: &str) -> Option<String> {
+    answer_with(prompt, logins())
+}
+
+/// [`answer`] with the host → login map given (Android: the helper process
+/// passes its `CORVANE_ASKPASS_LOGINS` along with the prompt).
+pub fn answer_with(prompt: &str, logins: HashMap<String, String>) -> Option<String> {
     let (kind, host, user) = parse_prompt(prompt)?;
-    let logins = logins();
+    // git names the port (`host:8443`); logins and stored credentials are
+    // kept by host name alone
+    let host = match host.rsplit_once(':') {
+        Some((name, port)) if !logins.contains_key(&host) && port.parse::<u16>().is_ok() => {
+            name.to_string()
+        }
+        _ => host,
+    };
     match kind {
         "username" => logins.get(&host).cloned(),
         _ => {
@@ -89,5 +106,14 @@ mod tests {
             Some(("password", "github.com".into(), Some("octocat".into())))
         );
         assert_eq!(parse_prompt("Enter passphrase for key '/x': "), None);
+    }
+
+    #[test]
+    fn a_port_in_the_prompt_does_not_hide_the_login() {
+        let logins = parse_logins("ghe.corp=me");
+        assert_eq!(
+            answer_with("Username for 'https://ghe.corp:8443': ", logins).as_deref(),
+            Some("me")
+        );
     }
 }

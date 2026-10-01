@@ -128,6 +128,19 @@ impl Dispatcher {
     /// process has exited (the updater's path: `open -n` the bundle on
     /// macOS, the AppImage or executable on Linux), then quit.
     pub fn relaunch(cx: &mut App) {
+        // Android: the activity starts itself again and ends the process
+        #[cfg(target_os = "android")]
+        {
+            let _ = cx;
+            info!("relaunching for flags");
+            corvane_platform::android::relaunch();
+        }
+        #[cfg(not(target_os = "android"))]
+        Self::relaunch_from_bundle(cx);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn relaunch_from_bundle(cx: &mut App) {
         let Some(bundle) = corvane_platform::app_location::relaunch_target() else {
             Self::show_error(
                 "Could not relaunch Corvane",
@@ -161,6 +174,17 @@ impl Dispatcher {
     /// keeps the device flow, as its secret lives in the keychain.
     pub fn browser_sign_in_first(endpoint: &corvane_github::Endpoint, cx: &App) -> bool {
         match Self::state(cx).read(cx).flags.text(ids::SIGN_IN_FLOW) {
+            // Android: a build without the client secret cannot finish the
+            // browser flow on GitHub.com, and a phone has no terminal to
+            // find out why; the one-time code works. The browser flow stays
+            // one link away in the dialog.
+            "browser"
+                if cfg!(target_os = "android")
+                    && endpoint.is_dotcom()
+                    && corvane_github::CLIENT_SECRET.is_none() =>
+            {
+                false
+            }
             "browser" => true,
             "auto" => endpoint.is_dotcom() && corvane_github::CLIENT_SECRET.is_some(),
             _ => false,

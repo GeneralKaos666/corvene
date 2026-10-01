@@ -11,6 +11,9 @@ gix.workspace = true
 libc = "0.2"
 thiserror.workspace = true
 tracing.workspace = true
+
+# Android has no Trash; discarded files are deleted there
+[target.'cfg(not(target_os = "android"))'.dependencies]
 trash = "5"
 
 [dev-dependencies]

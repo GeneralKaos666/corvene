@@ -288,6 +288,7 @@ fn popup_with_priority(
                 div()
                     .id("autocompletion-popup")
                     .occlude()
+                    .child(crate::widgets::touch_drag_occluder())
                     .w(width)
                     .h(height)
                     .flex()

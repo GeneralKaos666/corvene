@@ -477,7 +477,7 @@ impl Render for IntegrationErrorDialog {
             id,
             DialogKind::Error,
             title,
-            div().w(zpx(450.)).child(message),
+            div().w(crate::theme::fit_width(450.)).child(message),
             buttons,
             close,
             window,

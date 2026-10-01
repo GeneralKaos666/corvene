@@ -27,7 +27,7 @@ use gpui_kit::*;
 use crate::context_menu::mac_or;
 use crate::dialog::{DialogButton, dialog};
 use crate::icons::Octicon;
-use crate::tab_bar::{TabModel, VerticalTab, tab_bar, vertical_tab_bar};
+use crate::tab_bar::{TabModel, VerticalTab, tab_bar};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
@@ -572,8 +572,14 @@ impl PreferencesDialog {
         let use_custom_editor = self.draft.use_custom_editor;
         let use_custom_shell = self.draft.use_custom_shell;
         // `CustomIntegrationValue`: the last option configures a custom integration.
+        // Android: applications are intents, not executables with arguments,
+        // so there is no custom integration to configure
+        let android = cfg!(target_os = "android");
         let mut editor_options = editors.clone();
-        editor_options.push(mac_or("Configure Custom Editor…", "Configure custom editor…").into());
+        if !android {
+            editor_options
+                .push(mac_or("Configure Custom Editor…", "Configure custom editor…").into());
+        }
         let editor_value = if use_custom_editor {
             mac_or("Configure Custom Editor…", "Configure custom editor…").to_string()
         } else {
@@ -589,7 +595,9 @@ impl PreferencesDialog {
             editors.iter().position(|e| e.as_ref() == editor_value)
         };
         let mut shell_options = shells.clone();
-        shell_options.push(mac_or("Configure Custom Shell…", "Configure custom shell…").into());
+        if !android {
+            shell_options.push(mac_or("Configure Custom Shell…", "Configure custom shell…").into());
+        }
         let shell_value = if use_custom_shell {
             mac_or("Configure Custom Shell…", "Configure custom shell…").to_string()
         } else {
@@ -706,6 +714,10 @@ impl PreferencesDialog {
                     window,
                     cx,
                 ))
+            })
+            .when(android, |d| {
+                d.child(android_shell_note(shells.is_empty(), cx))
+                    .child(android_ssh_key(cx))
             })
             .into_any_element()
     }
@@ -1716,6 +1728,13 @@ impl PreferencesDialog {
             PackKind::GitPortable => "A private copy of Git for machines without one.",
             PackKind::GitLfs => "Git Large File Storage for repositories that use it.",
         };
+        // Android's `play` flavour gets the grammars from Google Play
+        let description = if corvane_packs::store_delivered(kind) {
+            "Tree-sitter grammars for every language, for Appearance › Syntax \
+             highlighting. Installed by Google Play."
+        } else {
+            description
+        };
         let id = format!("prefs-pack-{}", kind.name());
         let (status, action) = self.pack_state(kind, &id, cx);
         let error = packs.errors.get(&kind).map(|e| capitalize(e));
@@ -1831,7 +1850,13 @@ impl PreferencesDialog {
             }
             (None, None, _) => "Not installed.".to_string(),
         };
-        let enabled = entry.is_some();
+        let store = corvane_packs::store_delivered(kind);
+        let enabled = entry.is_some() || store;
+        let text = if store {
+            "Not installed.".to_string()
+        } else {
+            text
+        };
         (
             text,
             Some(
@@ -1906,7 +1931,8 @@ impl Render for PreferencesDialog {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let selected = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
         let weak = cx.weak_entity();
-        let nav = vertical_tab_bar(
+        let compact = crate::theme::compact(window);
+        let nav = crate::tab_bar::vertical_tab_bar_sized(
             vec![
                 VerticalTab {
                     id: "prefs-tab-accounts",
@@ -1950,6 +1976,7 @@ impl Render for PreferencesDialog {
                 },
             ],
             selected,
+            compact,
             move |ix, _, cx| {
                 weak.update(cx, |this, cx| {
                     this.tab = TABS[ix];
@@ -1985,7 +2012,7 @@ impl Render for PreferencesDialog {
                     }
                 }),
             )
-            .w(zpx(598.))
+            .w(crate::theme::fit_bleed_width(598.))
             .mx(zpx(-20.))
             .my(zpx(-20.))
             .flex()
@@ -2017,7 +2044,7 @@ impl Render for PreferencesDialog {
                             // Advanced carries Corvane's extra sections (crash
                             // reports, optional components): it scrolls inside
                             // GHD's 440 px instead of growing the dialog
-                            .when(self.tab == PreferencesTab::Advanced, |d| {
+                            .when(self.tab == PreferencesTab::Advanced || compact, |d| {
                                 d.max_h(zpx(440.)).overflow_y_scroll()
                             })
                             .child(body),
@@ -2081,4 +2108,150 @@ fn accounts_call_to_action(
                         .on_click(move |_, window, cx| on_action(window, cx)),
                 ),
         )
+}
+
+/// Android, under the Shell select: Termux is the one terminal that opens in
+/// a folder, and only after the user allowed it.
+fn android_shell_note(missing: bool, cx: &App) -> AnyElement {
+    const TERMUX_URL: &str = "https://f-droid.org/packages/com.termux/";
+    let t = cx.ghd();
+    let text: Vec<Inline> = if missing {
+        vec![
+            "Termux is not installed. ".into(),
+            link_button("prefs-install-termux", "Install Termux?", cx)
+                .on_click(|_, _, cx| Dispatcher::open_url(TERMUX_URL, cx))
+                .into_any_element()
+                .into(),
+        ]
+    } else {
+        vec![
+            "Termux and Corvane share repositories on shared storage (a folder under \
+             /storage/emulated/0), not the ones in Corvane's own storage. Run the setup commands \
+             in Termux once: they allow \"Open in Termux\", trust shared storage in Termux's git \
+             and add two commands, corvane (opens a folder here) and corvane-git-config \
+             (brings Termux's Git settings over; Corvane has a Git of its own and cannot \
+             read Termux's)."
+                .into(),
+        ]
+    };
+    let note = paragraph(text).text_color(t.text_secondary);
+    if missing {
+        return note.into_any_element();
+    }
+    #[cfg(target_os = "android")]
+    let setup = corvane_platform::android::TERMUX_SETUP;
+    #[cfg(not(target_os = "android"))]
+    let setup = "";
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACING_HALF())
+        .child(note)
+        .child(div().flex().child(
+            button("prefs-termux-setup", "Copy Termux setup commands", cx).on_click(
+                move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(setup.into())),
+            ),
+        ))
+        .into_any_element()
+}
+
+/// Android: the system's file picker, then `Dispatcher::import_ssh_key`.
+#[cfg(target_os = "android")]
+fn pick_ssh_key(window: &mut Window, cx: &mut App) {
+    let receiver = cx.prompt_for_paths(PathPromptOptions {
+        files: true,
+        directories: false,
+        multiple: false,
+        prompt: Some("Import".into()),
+    });
+    window
+        .spawn(cx, async move |cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                cx.update(|_, cx| Dispatcher::import_ssh_key(path, None, cx))
+                    .ok();
+            }
+        })
+        .detach();
+}
+
+/// Android, Options › Integrations: the SSH key of the bundled ssh client.
+/// Other platforms use the system's ssh and whatever keys it has.
+fn android_ssh_key(cx: &App) -> AnyElement {
+    #[cfg(target_os = "android")]
+    {
+        const ADD_KEY_URL: &str = "https://github.com/settings/ssh/new";
+        let t = cx.ghd();
+        let section = div()
+            .flex()
+            .flex_col()
+            .gap(SPACING_HALF())
+            .mt(SPACING())
+            .child(div().font_weight(FontWeight::SEMIBOLD).child("SSH key"));
+        match corvane_platform::android::ssh_public_key() {
+            Some(key) => {
+                let copy = key.clone();
+                section
+                    .child(
+                        div()
+                            .p(SPACING_HALF())
+                            .rounded(zpx(4.))
+                            .border_1()
+                            .border_color(t.box_border)
+                            .font_family(crate::theme::mono_font())
+                            .text_size(FONT_SIZE_SM())
+                            .child(key),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(SPACING())
+                            .child(button("prefs-ssh-copy", "Copy public key", cx).on_click(
+                                move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                                },
+                            ))
+                            .child(
+                                link_button("prefs-ssh-add", "Add it to your GitHub account", cx)
+                                    .on_click(|_, _, cx| Dispatcher::open_url(ADD_KEY_URL, cx)),
+                            )
+                            .child(
+                                link_button("prefs-ssh-replace", "Use another key…", cx)
+                                    .on_click(|_, window, cx| pick_ssh_key(window, cx)),
+                            ),
+                    )
+                    .into_any_element()
+            }
+            None => section
+                .child(
+                    div()
+                        .text_color(t.text_secondary)
+                        .child("Remotes with an SSH address (git@…) need a key on this device."),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap(SPACING())
+                        .child(
+                            button("prefs-ssh-create", "Create SSH key", cx)
+                                .on_click(|_, _, cx| Dispatcher::create_ssh_key(cx)),
+                        )
+                        .child(
+                            button("prefs-ssh-import", "Import a key…", cx)
+                                .on_click(|_, window, cx| pick_ssh_key(window, cx)),
+                        ),
+                )
+                .into_any_element(),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = cx;
+        div().into_any_element()
+    }
 }

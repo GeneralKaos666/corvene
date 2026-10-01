@@ -538,6 +538,8 @@ pub fn toolbar_button(
 ) -> AnyElement {
     let t = cx.ghd();
     let resize = model.resize.zip(model.width);
+    // the push/pull button with its ▾ (the compact layout narrows it)
+    let split_width = model.width.unwrap_or_else(TOOLBAR_BUTTON_WIDTH);
     let hover_bg = t.toolbar_button_hover_background;
     let hover_text = t.toolbar_button_hover_text;
     let (bg, text, secondary) = if model.open {
@@ -787,6 +789,7 @@ pub fn toolbar_button(
                     .right(zpx(-3.))
                     .w(zpx(6.))
                     .occlude()
+                    .child(crate::widgets::touch_drag_occluder())
                     .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(MouseButton::Left, move |ev, window, cx| {
                         cx.stop_propagation();
@@ -819,8 +822,8 @@ pub fn toolbar_button(
         .flex()
         .flex_row()
         .flex_none()
-        .w(TOOLBAR_BUTTON_WIDTH())
-        .child(button.w(TOOLBAR_BUTTON_WIDTH() - TOOLBAR_ARROW_WIDTH()))
+        .w(split_width)
+        .child(button.w(split_width - TOOLBAR_ARROW_WIDTH()))
         .child(
             div()
                 .id("toolbar-push-pull-arrow")

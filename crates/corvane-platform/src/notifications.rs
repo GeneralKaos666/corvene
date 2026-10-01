@@ -449,7 +449,7 @@ pub fn install_click_handler(handler: impl Fn(NotificationClick) + Send + Sync +
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 mod linux {
     use std::sync::OnceLock;
 
@@ -463,12 +463,12 @@ mod linux {
 }
 
 /// No permission model on Linux (see the module docs).
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 pub fn permission() -> NotificationPermission {
     NotificationPermission::Unsupported
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 pub fn request_permission() {}
 
 /// Post to `org.freedesktop.Notifications` like Chromium's HTML5
@@ -476,7 +476,7 @@ pub fn request_permission() {}
 /// desktop entry hint lets the shell show Corvane's icon and name. A thread
 /// waits for the notification to be clicked or closed; a click goes to the
 /// installed click handler with `identifier` and `payload`.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 pub fn show(
     identifier: &str,
     title: &str,
@@ -519,21 +519,87 @@ pub fn show(
 
 /// GHD `onNotificationEvent`: every click on a Corvane notification goes to
 /// `handler` (on the notification's waiting thread).
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 pub fn install_click_handler(handler: impl Fn(NotificationClick) + Send + Sync + 'static) {
     let _ = linux::CLICK_HANDLER.set(Box::new(handler));
 }
 
 /// GHD `getNotificationSettingsUrl`: System Settings › Notifications for this app.
 pub fn settings_url(bundle_id: &str) -> String {
+    #[cfg(target_os = "android")]
+    {
+        let _ = bundle_id;
+        crate::android::NOTIFICATION_SETTINGS_URL.to_string()
+    }
+    #[cfg(not(target_os = "android"))]
     format!("x-apple.systempreferences:com.apple.preference.notifications?id={bundle_id}")
+}
+
+// Android: a notification channel behind the activity's bridge. Posting
+// needs the `POST_NOTIFICATIONS` permission from Android 13 on, asked for
+// like macOS's authorization; a tap reopens the activity, which reports the
+// click with the identifier and payload the notification carried, also for
+// notifications of an earlier session.
+
+#[cfg(target_os = "android")]
+static ANDROID_CLICK_HANDLER: std::sync::OnceLock<Box<dyn Fn(NotificationClick) + Send + Sync>> =
+    std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+pub fn permission() -> NotificationPermission {
+    match crate::android::bridge().map(|bridge| bridge.notifications_allowed()) {
+        Some(Some(true)) => NotificationPermission::Granted,
+        Some(Some(false)) => NotificationPermission::Denied,
+        Some(None) => NotificationPermission::Default,
+        None => NotificationPermission::Unsupported,
+    }
+}
+
+#[cfg(target_os = "android")]
+pub fn request_permission() {
+    if let Some(bridge) = crate::android::bridge() {
+        bridge.request_notification_permission();
+    }
+}
+
+#[cfg(target_os = "android")]
+pub fn show(
+    identifier: &str,
+    title: &str,
+    body: &str,
+    payload: Option<&str>,
+    done: impl FnOnce(Result<(), NotificationError>) + Send + 'static,
+) {
+    let Some(bridge) = crate::android::bridge() else {
+        done(Err(NotificationError::Unsupported));
+        return;
+    };
+    if bridge.notifications_allowed() == Some(false) {
+        done(Err(NotificationError::NotGranted(None)));
+        return;
+    }
+    bridge.show_notification(identifier, title, body, payload.unwrap_or_default());
+    done(Ok(()));
+}
+
+#[cfg(target_os = "android")]
+pub fn install_click_handler(handler: impl Fn(NotificationClick) + Send + Sync + 'static) {
+    let _ = ANDROID_CLICK_HANDLER.set(Box::new(handler));
+}
+
+/// The activity was opened from a notification.
+#[cfg(target_os = "android")]
+pub fn clicked(click: NotificationClick) {
+    if let Some(handler) = ANDROID_CLICK_HANDLER.get() {
+        handler(click);
+    }
 }
 
 /// A stand-in `org.freedesktop.Notifications` server on the session bus
 /// (CI runs the tests under `dbus-run-session`): it records the posted
 /// notification and "clicks" it. Skipped without a session bus or when a
 /// real notification server owns the name.
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, not(any(target_os = "macos", target_os = "android"))))]
 mod linux_tests {
     use std::collections::HashMap;
     use std::sync::mpsc;

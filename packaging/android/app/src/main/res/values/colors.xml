@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- GitHub Desktop's toolbar (`-toolbar-background-color`, #24292e):
+         what shows until the first frame is drawn -->
+    <color name="window_background">#24292e</color>
+</resources>

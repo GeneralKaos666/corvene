@@ -1,0 +1,1 @@
+A native Git client in the style of GitHub Desktop

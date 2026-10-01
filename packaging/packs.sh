@@ -3,6 +3,8 @@
 #
 #   packaging/packs.sh [out-dir]        # default: target/release-assets/packs
 #   PACKS=tree-sitter-all packaging/packs.sh   # only some (space-separated)
+#   PACK_OS=android PACKS="tree-sitter-all tree-sitter-rest" packaging/packs.sh
+#                                       # the Android packs, from any host
 #
 # Produces in <out>:
 # - syntax-extended-<v>.zip: two-face's grammar collection as a syntect dump;
@@ -46,7 +48,13 @@ ENTRIES="$WORK/entries.jsonl"
 : > "$ENTRIES"
 
 OS="$(uname -s)"
-if [[ "$OS" == Darwin ]]; then
+if [[ "${PACK_OS:-}" == android ]]; then
+  # PACK_OS=android cross-builds the grammar packs with the NDK's clang
+  # (ANDROID_NDK_HOME) on any host, for both of Corvane's Android ABIs
+  LIB_EXT=so
+  NDK_BIN="$(dirname "$(find "${ANDROID_NDK_HOME:?PACK_OS=android needs ANDROID_NDK_HOME}/toolchains/llvm/prebuilt" -name llvm-nm | head -1)")"
+  export CORVANE_CC="$NDK_BIN/clang" CORVANE_CXX="$NDK_BIN/clang++"
+elif [[ "$OS" == Darwin ]]; then
   PACK_OS=macos LIB_EXT=dylib
 else
   PACK_OS=linux LIB_EXT=so
@@ -86,7 +94,10 @@ if wants syntax-extended; then
 fi
 
 TARGETS=()
-if [[ "$PACK_OS" == macos ]]; then
+if [[ "$PACK_OS" == android ]]; then
+  # API 26, the application's minimum
+  TARGETS=(aarch64-linux-android26 x86_64-linux-android26)
+elif [[ "$PACK_OS" == macos ]]; then
   for t in aarch64-apple-darwin x86_64-apple-darwin; do
     if rustup target list --installed 2>/dev/null | grep -qx "$t"; then
       TARGETS+=("$t")
@@ -124,7 +135,7 @@ build_units() {
       codesign --force --sign - --timestamp=none "$lib" 2>/dev/null
       nm -gU "$lib" | grep -q '_corvane_grammars_v1$' || { echo "$lib does not export corvane_grammars_v1" >&2; exit 1; }
     else
-      nm -D --defined-only "$lib" | grep -q ' corvane_grammars_v1$' || { echo "$lib does not export corvane_grammars_v1" >&2; exit 1; }
+      "${NDK_BIN:+$NDK_BIN/llvm-}nm" -D --defined-only "$lib" | grep -q ' corvane_grammars_v1$' || { echo "$lib does not export corvane_grammars_v1" >&2; exit 1; }
     fi
     gzip -9 -n -c "$lib" > "$lib.gz"
     rm "$lib"

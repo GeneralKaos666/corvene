@@ -20,7 +20,12 @@ pub fn auth_callback_registered() -> bool {
     {
         crate::app_location::running_bundle().is_some()
     }
-    #[cfg(not(target_os = "macos"))]
+    // Android: the manifest's intent filter takes the scheme
+    #[cfg(target_os = "android")]
+    {
+        true
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         default_handler("x-corvane-auth").as_deref() == Some(DESKTOP_ID)
     }

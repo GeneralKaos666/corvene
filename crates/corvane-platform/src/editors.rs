@@ -331,6 +331,11 @@ pub fn code_workspace_file(editor: &FoundEditor, dir: &Path) -> Option<PathBuf> 
 pub const SUGGESTED_EDITOR_NAME: &str = "Visual Studio Code";
 pub const SUGGESTED_EDITOR_URL: &str = "https://code.visualstudio.com";
 
+/// Android: the name of the "editor" that asks the system which application
+/// opens the file (an `ACTION_VIEW` intent without a target).
+#[cfg(target_os = "android")]
+pub const ANDROID_EDITOR_NAME: &str = "Another App";
+
 /// GHD `FoundEditor`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FoundEditor {
@@ -346,6 +351,27 @@ pub struct FoundEditor {
 /// [`EXTRA_EDITORS`] when `extras`). Costs one LaunchServices lookup (or
 /// `stat`) per candidate; run it off the main thread.
 pub fn available_editors(extras: bool) -> Vec<FoundEditor> {
+    // Android has no editor executables to look for. The editors are the
+    // applications that open a text file (`bundle_id` is the activity,
+    // "package/class"), after one entry that leaves the choice to the
+    // system each time ([`launch`]).
+    #[cfg(target_os = "android")]
+    if let Some(bridge) = crate::android::bridge() {
+        let _ = extras;
+        let app = |name: String, component: String| FoundEditor {
+            name,
+            bundle_id: component,
+            path: PathBuf::from("/system"),
+        };
+        let mut editors = vec![app(ANDROID_EDITOR_NAME.to_string(), String::new())];
+        editors.extend(
+            bridge
+                .view_apps()
+                .into_iter()
+                .map(|(label, component)| app(label, component)),
+        );
+        return editors;
+    }
     let extra: &[(&str, &[&str])] = if extras { EXTRA_EDITORS } else { &[] };
     #[cfg(target_os = "macos")]
     let find = apps::first_installed;
@@ -422,8 +448,16 @@ pub fn launch(editor: &FoundEditor, target: &Path) -> Result<(), EditorError> {
     }
     #[cfg(target_os = "macos")]
     let launched = apps::open_with_app(&editor.path, target);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let launched = apps::spawn_detached(&editor.path, &[&target.to_string_lossy()]);
+    // a folder goes to the file manager: editors take files
+    #[cfg(target_os = "android")]
+    let launched = match crate::android::bridge() {
+        Some(bridge) if !editor.bundle_id.is_empty() && target.is_file() => bridge
+            .view_path_with(target, &editor.bundle_id)
+            .map_err(std::io::Error::other),
+        _ => crate::android::view_path(target),
+    };
     launched.map_err(|err| EditorError {
         message: if err.kind() == std::io::ErrorKind::PermissionDenied {
             format!(

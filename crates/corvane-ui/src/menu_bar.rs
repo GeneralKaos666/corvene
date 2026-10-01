@@ -26,10 +26,16 @@ use gpui_kit::*;
 
 use crate::views_menu::{self, Anchor, Entry, EntryKind, Palette, Source};
 
-pub const HEIGHT: f32 = 28.;
+/// Android: as low and tight as the labels allow; a phone's screen has
+/// little room for a desktop's menu bar.
+pub const HEIGHT: f32 = if cfg!(target_os = "android") {
+    22.
+} else {
+    28.
+};
 /// The open button's background covers the bar minus its last row.
-const OPEN_HEIGHT: f32 = 27.;
-const BUTTON_PADDING: f32 = 6.;
+const OPEN_HEIGHT: f32 = HEIGHT - 1.;
+const BUTTON_PADDING: f32 = if cfg!(target_os = "android") { 5. } else { 6. };
 
 /// GHD's menu id for one of Corvane's menu actions (`menu-update.ts` works
 /// on ids).
@@ -227,8 +233,9 @@ impl MenuBar {
             return;
         };
         let entries = entries(&menu.items, window, cx);
+        let origin = bar_origin();
         let rect = Bounds::new(
-            point(px(button.x), px(0.)),
+            point(origin.x + px(button.x), origin.y),
             size(px(button.width), px(OPEN_HEIGHT)),
         );
         // the bar keeps the keyboard position while its menu is open
@@ -249,11 +256,20 @@ impl MenuBar {
         cx.notify();
     }
 
+    /// The button under the window coordinate `x`.
     fn button_at(&self, x: f32) -> Option<usize> {
+        let x = x - f32::from(bar_origin().x);
         self.buttons
             .iter()
             .position(|b| x >= b.x && x < b.x + b.width)
     }
+}
+
+/// The bar's top-left corner in the window: the window's own, except on
+/// Android, where the shell keeps clear of the system bars.
+fn bar_origin() -> Point<Pixels> {
+    let area = crate::theme::safe_area();
+    point(area.left, area.top)
 }
 
 /// The views menu rows for a GPUI menu's items.
@@ -508,20 +524,38 @@ impl MenuBarShell {
 }
 
 impl Render for MenuBarShell {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let menu_bar = self.menu_bar.clone();
-        div()
-            .id("menu-bar-shell")
-            .size_full()
-            .flex()
-            .flex_col()
+        crate::theme::update_safe_area(window);
+        // the handles a finger can drag are collected again by this frame
+        #[cfg(target_os = "android")]
+        corvane_platform::android::clear_drag_handles();
+        let shell = div().id("menu-bar-shell").size_full().flex().flex_col();
+        // Android: stay clear of the system bars and the keyboard; the bar's
+        // colour runs on under the status bar
+        #[cfg(target_os = "android")]
+        let shell = {
+            let area = crate::theme::safe_area();
+            shell
+                .pt(area.top)
+                .pl(area.left)
+                .pr(area.right)
+                .pb(area.bottom)
+                .bg(Palette::for_window(window).bar_background)
+        };
+        shell
             .capture_any_mouse_down(move |event, _, cx| {
+                let y = f32::from(event.position.y - bar_origin().y);
+                // a press on a menu drawn in this window (Android) is the
+                // menu's
+                if views_menu::contains(event.position, cx) {
+                    return;
+                }
                 // the bar handles presses on itself
-                if f32::from(event.position.y) >= HEIGHT && views_menu::dismiss_on_outside_click(cx)
-                {
+                if y >= HEIGHT && views_menu::dismiss_on_outside_click(cx) {
                     cx.stop_propagation();
                 }
-                if f32::from(event.position.y) >= HEIGHT {
+                if y >= HEIGHT {
                     menu_bar.update(cx, |bar, cx| bar.unfocus(cx));
                 }
             })
@@ -533,5 +567,22 @@ impl Render for MenuBarShell {
                     .w_full()
                     .child(self.content.clone()),
             )
+            .children(Self::menus_in_window(cx))
+    }
+}
+
+impl MenuBarShell {
+    /// Android: the open menus, drawn over the page (an activity has no
+    /// popup windows). Nothing elsewhere.
+    fn menus_in_window(cx: &App) -> Vec<AnyElement> {
+        #[cfg(target_os = "android")]
+        {
+            views_menu::overlay(cx)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = cx;
+            Vec::new()
+        }
     }
 }

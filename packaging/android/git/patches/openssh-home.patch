@@ -1,0 +1,14 @@
+--- a/ssh.c
++++ b/ssh.c
+@@ -668,6 +668,11 @@
+ 	}
+ 	/* Take a copy of the returned structure. */
+ 	pw = pwcopy(pw);
++	/* Android: an application's home is $HOME, not its passwd entry's. */
++	if (getenv("HOME") != NULL) {
++		free(pw->pw_dir);
++		pw->pw_dir = xstrdup(getenv("HOME"));
++	}
+ 
+ 	/*
+ 	 * Set our umask to something reasonable, as some files are created

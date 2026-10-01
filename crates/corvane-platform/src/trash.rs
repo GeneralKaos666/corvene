@@ -48,12 +48,21 @@ pub fn move_to_trash(path: &Path) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 pub fn move_to_trash(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("{} does not exist", path.display()));
     }
     trash::delete(path).map_err(|err| err.to_string())
+}
+
+/// Android has no Trash: callers fall back to deleting.
+#[cfg(target_os = "android")]
+pub fn move_to_trash(path: &Path) -> Result<(), String> {
+    Err(format!(
+        "{} cannot be moved to a Trash on Android",
+        path.display()
+    ))
 }
 
 #[cfg(test)]
@@ -68,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     fn trashes_into_the_xdg_trash() {
         let data = tempfile::tempdir().unwrap();
         let name = format!("corvane-trash-test-{}.txt", std::process::id());

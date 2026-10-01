@@ -277,7 +277,7 @@ impl Render for AddWorktreeDialog {
                 .flex()
                 .flex_col()
                 .gap(SPACING())
-                .w(zpx(460.))
+                .w(crate::theme::fit_width(460.))
                 .child(labeled(
                     mac_or("Worktree Name", "Worktree name"),
                     text_box("worktree-name", &self.name, None, window, cx),
@@ -426,7 +426,7 @@ impl Render for RenameWorktreeDialog {
         dialog(
             "rename-worktree",
             mac_or("Rename Worktree", "Rename worktree"),
-            div().w(zpx(400.)).child(labeled(
+            div().w(crate::theme::fit_width(400.)).child(labeled(
                 "Name",
                 text_box("rename-worktree-name", &self.name, None, window, cx),
                 cx,
@@ -592,7 +592,7 @@ impl Render for DeleteWorktreeFailedDialog {
             .flex()
             .flex_col()
             .gap(SPACING())
-            .w(zpx(460.))
+            .w(crate::theme::fit_width(460.))
             .child(paragraph(vec![
                 "Deleting the worktree ".into(),
                 Inline::Element(ref_chip(name.clone(), cx).into_any_element()),

@@ -7,10 +7,14 @@ use std::path::PathBuf;
 mod darwin;
 #[cfg(target_os = "macos")]
 pub use darwin::*;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 mod linux;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "android")))]
 pub use linux::*;
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+pub use android::*;
 
 /// GHD `FoundShell`.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -108,11 +108,12 @@ pub mod sizes {
     }
     #[allow(non_snake_case)]
     pub fn TOOLBAR_HEIGHT() -> Pixels {
-        zpx(50.)
+        // a short window (a phone on its side) has no 50 px to give
+        zpx(if super::short() { 38. } else { 50. })
     }
     #[allow(non_snake_case)]
     pub fn TOOLBAR_BUTTON_HEIGHT() -> Pixels {
-        zpx(49.)
+        TOOLBAR_HEIGHT() - zpx(1.)
     }
     #[allow(non_snake_case)]
     pub fn TOOLBAR_BUTTON_WIDTH() -> Pixels {
@@ -227,24 +228,149 @@ pub mod sizes {
     }
 }
 
+/// What the system covers at the window's edges: nothing on the desktop.
+/// Android draws the status and navigation bars over the window and opens
+/// the on-screen keyboard above it; `menu_bar::MenuBarShell` keeps clear of
+/// them and records the edges here on every frame.
+pub fn safe_area() -> gpui_kit::Edges<gpui_kit::Pixels> {
+    #[cfg(target_os = "android")]
+    {
+        SAFE_AREA.with(|area| area.get())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        gpui_kit::Edges::default()
+    }
+}
+
+/// Below this window height (logical pixels) the touch layout saves rows:
+/// a lower toolbar, a one-line description box, lower menu items.
+pub const SHORT_HEIGHT: f32 = 480.;
+
+thread_local! {
+    static SHORT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the phone layouts may be used at all: on Android, and with
+/// `CORVANE_COMPACT=1` elsewhere (to work on them without a device).
+fn phone_layouts() -> bool {
+    static ALLOWED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALLOWED.get_or_init(|| {
+        cfg!(target_os = "android") || std::env::var_os("CORVANE_COMPACT").is_some()
+    })
+}
+
+/// Whether the window is short (a phone held sideways), as of the last
+/// [`update_safe_area`]. GHD's window is at least 660 px tall. Android only,
+/// like [`compact`].
+pub fn short() -> bool {
+    SHORT.with(|short| short.get())
+}
+
+#[cfg(target_os = "android")]
+thread_local! {
+    static SAFE_AREA: std::cell::Cell<gpui_kit::Edges<gpui_kit::Pixels>> =
+        std::cell::Cell::new(gpui_kit::Edges::default());
+}
+
+/// Reads [`safe_area`] from the window (Android; a no-op elsewhere).
+pub fn update_safe_area(window: &gpui_kit::Window) {
+    SHORT.with(|short| {
+        short.set(phone_layouts() && window.viewport_size().height < gpui_kit::px(SHORT_HEIGHT))
+    });
+    #[cfg(target_os = "android")]
+    {
+        let viewport = window.viewport_size();
+        let visible = window.fully_visible_bounds();
+        SAFE_AREA.with(|area| {
+            area.set(gpui_kit::Edges {
+                top: visible.top(),
+                left: visible.left(),
+                right: viewport.width - visible.right(),
+                bottom: viewport.height - visible.bottom(),
+            })
+        });
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = window;
+    }
+}
+
 /// Where GHD's page starts in the window: below Electron's menu bar on
-/// Linux (`crate::menu_bar`), at the top on macOS.
+/// Linux (`crate::menu_bar`), at the top on macOS. Android: the menu bar
+/// sits under the status bar.
 pub fn page_top() -> gpui_kit::Pixels {
     #[cfg(target_os = "macos")]
     {
         gpui_kit::px(0.)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         gpui_kit::px(crate::menu_bar::HEIGHT)
+    }
+    #[cfg(target_os = "android")]
+    {
+        safe_area().top + gpui_kit::px(crate::menu_bar::HEIGHT)
     }
 }
 
 /// GHD's viewport (`100vh`, `innerHeight`): the window's content minus
-/// the menu bar on Linux.
+/// the menu bar on Linux (Android: and what the system covers).
 pub fn page_size(window: &gpui_kit::Window) -> gpui_kit::Size<gpui_kit::Pixels> {
     let viewport = window.viewport_size();
+    #[cfg(target_os = "android")]
+    let viewport = {
+        let area = safe_area();
+        gpui_kit::size(
+            viewport.width - area.left - area.right,
+            viewport.height - area.bottom,
+        )
+    };
     gpui_kit::size(viewport.width, viewport.height - page_top())
+}
+
+/// Below this page width (logical pixels) Android lays the window out for a
+/// phone: one column instead of GHD's sidebar beside the content.
+pub const COMPACT_WIDTH: f32 = 600.;
+
+/// Whether the window gets the compact (phone) layout. GHD has none: its
+/// window cannot be narrower than 960 px. Android only; `CORVANE_COMPACT=1`
+/// turns it on elsewhere, to work on it without a device.
+pub fn compact(window: &gpui_kit::Window) -> bool {
+    phone_layouts() && window.viewport_size().width < gpui_kit::px(COMPACT_WIDTH)
+}
+
+thread_local! {
+    /// The page width while the compact layout is on (set every frame by
+    /// the workspace), for the fixed widths GHD's dialogs have.
+    static COMPACT_PAGE_WIDTH: std::cell::Cell<Option<gpui_kit::Pixels>> =
+        const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn set_compact_page_width(width: Option<gpui_kit::Pixels>) {
+    COMPACT_PAGE_WIDTH.with(|cell| cell.set(width));
+}
+
+/// A width from GHD's stylesheet (`width: 450px` of a dialog's content),
+/// narrowed in the compact layout to what a dialog's content has there: the
+/// page less the dialog's margin, border and padding.
+pub fn fit_width(width: f32) -> gpui_kit::Pixels {
+    let width = sizes::zpx(width);
+    match COMPACT_PAGE_WIDTH.with(|cell| cell.get()) {
+        Some(page) => width.min(page - sizes::zpx(58.)),
+        None => width,
+    }
+}
+
+/// [`fit_width`] for content that cancels the dialog's padding with negative
+/// margins (Settings, Repository Settings).
+pub fn fit_bleed_width(width: f32) -> gpui_kit::Pixels {
+    let width = sizes::zpx(width);
+    match COMPACT_PAGE_WIDTH.with(|cell| cell.get()) {
+        Some(page) => width.min(page - sizes::zpx(18.)),
+        None => width,
+    }
 }
 
 /// Chromium's `line-height: normal` (and an inline box's content area) for
@@ -262,15 +388,19 @@ pub fn normal_line_height(size: gpui_kit::Pixels, cx: &gpui_kit::App) -> gpui_ki
 /// The page's top-left corner in window coordinates: where a full-page
 /// overlay (`anchored()` positions are window coordinates) starts.
 pub fn page_origin() -> gpui_kit::Point<gpui_kit::Pixels> {
-    gpui_kit::point(gpui_kit::px(0.), page_top())
+    #[cfg(not(target_os = "android"))]
+    {
+        gpui_kit::point(gpui_kit::px(0.), page_top())
+    }
+    #[cfg(target_os = "android")]
+    {
+        gpui_kit::point(safe_area().left, page_top())
+    }
 }
 
 /// [`page_size`] where it sits in window coordinates.
 pub fn page_bounds(window: &gpui_kit::Window) -> gpui_kit::Bounds<gpui_kit::Pixels> {
-    gpui_kit::Bounds::new(
-        gpui_kit::point(gpui_kit::px(0.), page_top()),
-        page_size(window),
-    )
+    gpui_kit::Bounds::new(page_origin(), page_size(window))
 }
 
 pub const UI_FONT: &str = ".SystemUIFont";
