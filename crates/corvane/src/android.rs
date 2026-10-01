@@ -493,6 +493,10 @@ impl corvane_platform::android::Bridge for ActivityBridge {
         );
     }
 
+    fn bring_to_front(&self) {
+        activity_call!("bringToFront", "()V", &[]);
+    }
+
     fn relaunch(&self) {
         activity_call!("relaunch", "()V", &[]);
     }

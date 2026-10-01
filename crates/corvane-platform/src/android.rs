@@ -65,6 +65,8 @@ pub trait Bridge: Send + Sync {
     fn toggle_full_screen(&self);
     /// Starts the application again in a new process and ends this one.
     fn relaunch(&self);
+    /// Shows the activity again, closing a browser tab opened over it.
+    fn bring_to_front(&self);
 }
 
 static NETWORK_COMMANDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -91,6 +93,13 @@ pub fn network_command(started: bool) {
 pub fn toggle_full_screen() {
     if let Some(bridge) = bridge() {
         bridge.toggle_full_screen();
+    }
+}
+
+/// Back to Corvane from the browser tab a sign-in ran in.
+pub fn bring_to_front() {
+    if let Some(bridge) = bridge() {
+        bridge.bring_to_front();
     }
 }
 

@@ -77,6 +77,14 @@
                 <data android:scheme="x-corvane" />
                 <data android:scheme="x-corvane-auth" />
             </intent-filter>
+
+            <!-- A repository's address shared from a browser or another
+                 application: the Clone dialog opens with it. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <service

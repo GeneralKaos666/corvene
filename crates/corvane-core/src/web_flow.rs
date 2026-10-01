@@ -29,7 +29,11 @@ use crate::state::{PendingWebFlow, SignInState, SignInStep};
 
 /// Whether the callback must come over the loopback listener.
 fn use_loopback() -> bool {
-    std::env::var_os("CORVANE_OAUTH_LOOPBACK").is_some()
+    // Android: always. An OAuth app has one callback URL, and GitHub lets
+    // only a loopback one vary (by port); the scheme is "not associated
+    // with this application" unless the app was registered with it.
+    cfg!(target_os = "android")
+        || std::env::var_os("CORVANE_OAUTH_LOOPBACK").is_some()
         || !corvane_platform::url_schemes::auth_callback_registered()
 }
 
@@ -100,6 +104,9 @@ impl Dispatcher {
             };
             cx.spawn(async move |cx: &mut gpui_kit::AsyncApp| {
                 if let Ok(Some((code, state))) = rx.recv().await {
+                    // Android: the browser's tab sits over the activity
+                    #[cfg(target_os = "android")]
+                    corvane_platform::android::bring_to_front();
                     cx.update(|cx| Self::complete_web_flow(code, state, cx));
                 }
             })

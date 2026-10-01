@@ -104,11 +104,13 @@ public class CorvaneActivity extends NativeActivity {
             getWindow().setAttributes(attributes);
         }
         applyFullScreen();
+        acceptDrops();
         inputView = new InputView(this);
         addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
         inputView.requestFocus();
         // a link is read by the platform (`getIntent().getDataString()`)
-        if (ACTION_NOTIFICATION.equals(getIntent().getAction())) {
+        if (ACTION_NOTIFICATION.equals(getIntent().getAction())
+                || Intent.ACTION_SEND.equals(getIntent().getAction())) {
             handleIntent(getIntent());
         }
         CorvaneFetchWorker.schedule(this);
@@ -193,6 +195,27 @@ public class CorvaneActivity extends NativeActivity {
                 activity.startActivity(Intent.makeRestartActivityTask(launch.getComponent()));
                 Runtime.getRuntime().exit(0);
             }, 300);
+        });
+    }
+
+    /**
+     * Back to the activity from a browser tab opened over it (the sign-in's
+     * callback arrived on the loopback listener): the activity is the root
+     * of its task, so starting it again closes what is above it.
+     */
+    static void bringToFront() {
+        CorvaneActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            try {
+                activity.startActivity(new Intent(activity, CorvaneActivity.class)
+                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
+                                | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+            } catch (RuntimeException e) {
+                // the page says to return to Corvane
+            }
         });
     }
 
@@ -582,10 +605,60 @@ public class CorvaneActivity extends NativeActivity {
                     intent.getStringExtra(EXTRA_PAYLOAD));
             return;
         }
+        if (Intent.ACTION_SEND.equals(intent.getAction())) {
+            openRepositoryAddress(intent.getStringExtra(Intent.EXTRA_TEXT));
+            return;
+        }
         String url = intent.getDataString();
         if (url != null) {
             nativeOpenUrl(url);
         }
+    }
+
+    /**
+     * Text shared with or dropped on Corvane: when it holds a repository's
+     * address (https, ssh or git@host:path) the native side opens it like an
+     * x-corvane://openRepo link, which offers to clone it.
+     */
+    private static boolean openRepositoryAddress(String text) {
+        if (text == null) {
+            return false;
+        }
+        for (String word : text.trim().split("\\s+")) {
+            if (word.matches("(?i)(https?|ssh|git)://[^/\\s]+/\\S+")
+                    || word.matches("[\\w.-]+@[\\w.-]+:\\S+")) {
+                nativeOpenUrl("x-corvane://openRepo/" + word);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Drag and drop from another window (split screen, a desktop mode): a
+     * dropped link or text with a repository's address opens it.
+     */
+    private void acceptDrops() {
+        getWindow().getDecorView().setOnDragListener((view, event) -> {
+            switch (event.getAction()) {
+                case android.view.DragEvent.ACTION_DRAG_STARTED:
+                    android.content.ClipDescription description = event.getClipDescription();
+                    return description != null && (description.hasMimeType("text/*")
+                            || description.hasMimeType(
+                                    android.content.ClipDescription.MIMETYPE_TEXT_URILIST));
+                case android.view.DragEvent.ACTION_DROP:
+                    android.content.ClipData clip = event.getClipData();
+                    for (int i = 0; clip != null && i < clip.getItemCount(); i++) {
+                        CharSequence text = clip.getItemAt(i).coerceToText(this);
+                        if (text != null && openRepositoryAddress(text.toString())) {
+                            return true;
+                        }
+                    }
+                    return false;
+                default:
+                    return true;
+            }
+        });
     }
 
     /** 0: not asked yet, 1: allowed, 2: denied. */
