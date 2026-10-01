@@ -24,7 +24,7 @@ Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus 
 
 ### Android
 
-- Android 8.0 or newer on arm64 or x86_64, with a [Vulkan](https://www.vulkan.org/) driver ([OpenGL ES](https://www.khronos.org/opengles/) is the fallback)
+- Android 8.0 or newer on arm64, armv7, x86_64 or x86, with a [Vulkan](https://www.vulkan.org/) driver ([OpenGL ES](https://www.khronos.org/opengles/) is the fallback)
 - Nothing else: git, [OpenSSH](https://www.openssh.com/) and [Git LFS](https://git-lfs.com/) are included inside the app prebuilt
 
 ## Install
@@ -58,7 +58,7 @@ File → Install Command Line Tool links `corvane` into `~/.local/bin`, the same
 
 ### Android
 
-Download `Corvane-<version>-android-foss-arm64.apk` (phones and tablets; `-x86_64` for most Chromebooks and emulators, `-universal` has both) from [GitHub Releases](https://github.com/wasi-master/corvane/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The play package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
+Download `Corvane-<version>-android-foss-arm64.apk` (most phones and tablets; `-armv7` for 32-bit ones, `-x86_64` for most Chromebooks and emulators, `-universal` has every architecture) from [GitHub Releases](https://github.com/wasi-master/corvane/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The play package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
 
 ## Building
 
