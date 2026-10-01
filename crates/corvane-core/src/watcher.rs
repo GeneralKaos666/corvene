@@ -41,6 +41,16 @@ pub fn watch(
     let (raw_tx, raw_rx) = mpsc::channel::<Vec<PathBuf>>();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
+            // inotify also reports files being opened: git reading
+            // `.git/HEAD` during a refresh would ask for the next refresh,
+            // without end
+            #[cfg(target_os = "android")]
+            if matches!(
+                event.kind,
+                notify::EventKind::Access(notify::event::AccessKind::Open(_))
+            ) {
+                return;
+            }
             let _ = raw_tx.send(event.paths);
         }
     })?;
