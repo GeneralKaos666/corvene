@@ -627,6 +627,7 @@ pub fn overlay(cx: &App) -> Vec<AnyElement> {
                             .w(level.bounds.size.width)
                             .h(level.bounds.size.height)
                             .occlude()
+                            .child(crate::widgets::touch_drag_occluder())
                             .shadow_md()
                             .child(level.view.clone()),
                     ),

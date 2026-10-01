@@ -1818,12 +1818,38 @@ pub fn android_storage_note(note: StorageNote, cx: &App) -> Option<AnyElement> {
     }
 }
 
+/// Android: marks the element it fills (a dialog's backdrop, a menu, a
+/// foldout) as covering the drag handles painted before it, so a tap on a
+/// link over a hidden handle is not taken for a drag
+/// (`corvane_platform::android::add_drag_occluder`). Nothing elsewhere.
+pub fn touch_drag_occluder() -> impl IntoElement {
+    // in the paint phase: what counts is the order things are painted in
+    canvas(
+        |_, _, _| {},
+        |bounds, _, _, _| {
+            #[cfg(target_os = "android")]
+            corvane_platform::android::add_drag_occluder(
+                bounds.origin.x.into(),
+                bounds.origin.y.into(),
+                (bounds.origin.x + bounds.size.width).into(),
+                (bounds.origin.y + bounds.size.height).into(),
+            );
+            #[cfg(not(target_os = "android"))]
+            let _ = bounds;
+        },
+    )
+    .absolute()
+    .size_full()
+}
+
 /// Android: marks the element it fills as a handle a finger can drag (see
 /// `corvane_platform::android::add_drag_handle`); put it inside a resizable
 /// group's handle. Nothing elsewhere: a mouse drags the handle as it is.
 pub fn touch_drag_handle() -> impl IntoElement {
+    // in the paint phase: what counts is the order things are painted in
     canvas(
-        |bounds, _, _| {
+        |_, _, _| {},
+        |bounds, _, _, _| {
             #[cfg(target_os = "android")]
             corvane_platform::android::add_drag_handle(
                 bounds.origin.x.into(),
@@ -1834,7 +1860,6 @@ pub fn touch_drag_handle() -> impl IntoElement {
             #[cfg(not(target_os = "android"))]
             let _ = bounds;
         },
-        |_, _, _, _| {},
     )
     .absolute()
     .size_full()

@@ -495,6 +495,7 @@ fn dialog_impl(
                 // modal: the views underneath get no hover, clicks or wheel
                 // (GHD's `<dialog>` makes the rest of the page inert)
                 .occlude()
+                .child(crate::widgets::touch_drag_occluder())
                 .w(viewport.width)
                 .h(viewport.height)
                 .flex()

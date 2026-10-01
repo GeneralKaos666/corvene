@@ -1372,6 +1372,7 @@ impl FlagsDialog {
         div()
             .id("flags-confirm-layer")
             .occlude()
+            .child(crate::widgets::touch_drag_occluder())
             .absolute()
             .inset_0()
             .flex()
@@ -1955,6 +1956,7 @@ impl Render for FlagsDialog {
                     .id("flags-overlay")
                     // modal: the views underneath get no hover, clicks or wheel
                     .occlude()
+                    .child(crate::widgets::touch_drag_occluder())
                     .relative()
                     .w(viewport.width)
                     .h(viewport.height)

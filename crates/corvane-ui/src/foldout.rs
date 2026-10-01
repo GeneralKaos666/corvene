@@ -57,6 +57,7 @@ pub fn foldout_layer(
                             // the content underneath neither hovers nor scrolls
                             // (GHD's `.overlay` div covers it)
                             .occlude()
+                            .child(crate::widgets::touch_drag_occluder())
                             .absolute()
                             .inset_0()
                             .bg(t.overlay)

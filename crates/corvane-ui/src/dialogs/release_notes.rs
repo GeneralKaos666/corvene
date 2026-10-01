@@ -133,6 +133,7 @@ impl Render for ReleaseNotesDialog {
                     .id("release-notes-overlay")
                     // modal: nothing underneath takes hover, clicks or wheel
                     .occlude()
+                    .child(crate::widgets::touch_drag_occluder())
                     .w(viewport.width)
                     .h(viewport.height)
                     .flex()

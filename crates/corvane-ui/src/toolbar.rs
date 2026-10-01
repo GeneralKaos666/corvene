@@ -789,6 +789,7 @@ pub fn toolbar_button(
                     .right(zpx(-3.))
                     .w(zpx(6.))
                     .occlude()
+                    .child(crate::widgets::touch_drag_occluder())
                     .cursor(CursorStyle::ResizeLeftRight)
                     .on_mouse_down(MouseButton::Left, move |ev, window, cx| {
                         cx.stop_propagation();
