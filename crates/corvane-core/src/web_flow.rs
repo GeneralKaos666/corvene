@@ -9,7 +9,7 @@
 //!
 //! The callback arrives as `x-corvane-auth://oauth?code=…&state=…` through
 //! `Dispatcher::handle_app_url`, or on the loopback listener
-//! (`http://127.0.0.1:<port>/callback`) when the URL scheme cannot be used
+//! (`http://127.0.0.1:<port>`) when the URL scheme cannot be used
 //! (a bare binary outside the bundle, on Linux one whose `.desktop` entry
 //! is not the scheme's handler, or `CORVANE_OAUTH_LOOPBACK=1`).
 //! `state` must match the flow that opened the browser; the token only ever
@@ -29,11 +29,7 @@ use crate::state::{PendingWebFlow, SignInState, SignInStep};
 
 /// Whether the callback must come over the loopback listener.
 fn use_loopback() -> bool {
-    // Android: always. An OAuth app has one callback URL, and GitHub lets
-    // only a loopback one vary (by port); the scheme is "not associated
-    // with this application" unless the app was registered with it.
-    cfg!(target_os = "android")
-        || std::env::var_os("CORVANE_OAUTH_LOOPBACK").is_some()
+    std::env::var_os("CORVANE_OAUTH_LOOPBACK").is_some()
         || !corvane_platform::url_schemes::auth_callback_registered()
 }
 

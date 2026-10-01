@@ -265,7 +265,7 @@ fn url_encode(value: &str) -> String {
 }
 
 /// The `code` and `state` of a callback URL's query
-/// (`x-corvane-auth://oauth?code=…&state=…`, `http://127.0.0.1:1234/callback?…`).
+/// (`x-corvane-auth://oauth?code=…&state=…`, `http://127.0.0.1:1234/?…`).
 pub fn parse_callback_query(query: &str) -> Option<(String, String)> {
     let mut code = None;
     let mut state = None;
@@ -301,7 +301,7 @@ fn url_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// The loopback fallback (`http://127.0.0.1:<port>/callback`): a one-shot
+/// The loopback fallback (`http://127.0.0.1:<port>`): a one-shot
 /// HTTP listener on an ephemeral port for browsers that cannot hand the
 /// custom URL scheme to the app. `on_callback` runs on the listener thread
 /// with the request's `code` and `state`.
@@ -369,7 +369,7 @@ impl LoopbackListener {
                         }
                     }
                     let request = String::from_utf8_lossy(&raw);
-                    // `GET /callback?code=…&state=… HTTP/1.1`
+                    // `GET /?code=…&state=… HTTP/1.1`
                     let query = request
                         .lines()
                         .next()
@@ -398,7 +398,9 @@ impl LoopbackListener {
             })
             .map_err(|err| GitHubError::Auth(err.to_string()))?;
         Ok(Self {
-            redirect_uri: format!("http://127.0.0.1:{port}/callback"),
+            // no path: GitHub's strict matching of a registered
+            // `http://127.0.0.1` lets the port vary and nothing else
+            redirect_uri: format!("http://127.0.0.1:{port}"),
             stop,
             port,
         })
