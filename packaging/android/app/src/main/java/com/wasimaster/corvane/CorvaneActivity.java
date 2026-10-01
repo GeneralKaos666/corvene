@@ -75,6 +75,27 @@ public class CorvaneActivity extends NativeActivity {
         // only come up when a text field is focused (showKeyboard).
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN
                 | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        // What the system bars, a cutout and the keyboard cover. Edge to
+        // edge (enforced when targeting Android 16) the window is not
+        // resized for them, so the native side is told.
+        getWindow().getDecorView().setOnApplyWindowInsetsListener((view, insets) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                int types = android.view.WindowInsets.Type.systemBars()
+                        | android.view.WindowInsets.Type.displayCutout();
+                // Not edge to edge, the window is resized above the keyboard
+                // (adjustResize) and counting it here would count it twice.
+                if (Build.VERSION.SDK_INT >= 36
+                        && getApplicationInfo().targetSdkVersion >= 36) {
+                    types |= android.view.WindowInsets.Type.ime();
+                }
+                android.graphics.Insets covered = insets.getInsets(types);
+                nativeInsets(covered.left, covered.top, covered.right, covered.bottom);
+            } else {
+                nativeInsets(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                        insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            }
+            return view.onApplyWindowInsets(insets);
+        });
         inputView = new InputView(this);
         addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
         inputView.requestFocus();
@@ -767,6 +788,8 @@ public class CorvaneActivity extends NativeActivity {
     static native void nativeKey(int keyCode, boolean down, int metaState, int unicode);
 
     static native void nativeOpenUrl(String url);
+
+    static native void nativeInsets(int left, int top, int right, int bottom);
 
     /** The view the input method is connected to. It draws nothing. */
     private static final class InputView extends View {

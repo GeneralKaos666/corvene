@@ -344,27 +344,44 @@ impl AndroidWindow {
         self.state.borrow().native_window.is_some()
     }
 
+    /// The activity reported new window insets.
+    pub(crate) fn insets_changed(&self) {
+        if self.update_insets() {
+            self.request_forced_frame();
+        }
+    }
+
     /// Reads the content rectangle (the part of the window the system bars
-    /// leave free) into the safe area; true when it changed.
+    /// leave free) and the insets the activity reports into the safe area,
+    /// whichever covers more at an edge; true when it changed.
     fn update_insets(&self) -> bool {
         let rect = self.app.content_rect();
+        let [left, top, right, bottom] = super::activity_events::window_insets();
         let insets = {
             let state = self.state.borrow();
             let scale = state.scale_factor;
             let (width, height) = (state.size.width.0, state.size.height.0);
             // an empty rectangle means the system has not reported one yet
-            if rect.right <= rect.left || rect.bottom <= rect.top {
-                WindowInsets::default()
+            let rect = if rect.right <= rect.left || rect.bottom <= rect.top {
+                [0; 4]
             } else {
-                WindowInsets {
-                    safe_area: Edges {
-                        top: px(rect.top.max(0) as f32 / scale),
-                        left: px(rect.left.max(0) as f32 / scale),
-                        right: px((width - rect.right).max(0) as f32 / scale),
-                        bottom: px((height - rect.bottom).max(0) as f32 / scale),
-                    },
-                    ime: state.insets.ime,
-                }
+                [
+                    rect.left,
+                    rect.top,
+                    width - rect.right,
+                    height - rect.bottom,
+                ]
+            };
+            let edge =
+                |from_rect: i32, reported: i32| px(from_rect.max(reported).max(0) as f32 / scale);
+            WindowInsets {
+                safe_area: Edges {
+                    top: edge(rect[1], top),
+                    left: edge(rect[0], left),
+                    right: edge(rect[2], right),
+                    bottom: edge(rect[3], bottom),
+                },
+                ime: state.insets.ime,
             }
         };
         if self.state.borrow().insets == insets {

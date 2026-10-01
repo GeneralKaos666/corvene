@@ -405,6 +405,7 @@ impl AndroidPlatform {
             match (event, &window) {
                 (ActivityEvent::OpenUrl(url), _) => self.open_urls(vec![url]),
                 (_, None) => {}
+                (ActivityEvent::InsetsChanged, Some(window)) => window.insets_changed(),
                 (ActivityEvent::CommitText(text), Some(window)) => {
                     // Enter is a key (submit, new line), not text
                     if text == "\n" {

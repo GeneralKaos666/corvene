@@ -43,7 +43,7 @@ use std::rc::Rc;
 
 pub use android::activity_events::{
     post, set_path_opener, set_path_prompt_handler, set_soft_keyboard_handler, set_url_handler,
-    ActivityEvent, PathPromptReply,
+    set_window_insets, ActivityEvent, PathPromptReply,
 };
 pub use android::display::AndroidDisplay;
 pub use android::init_logger;

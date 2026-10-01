@@ -670,6 +670,18 @@ extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeKey(
 }
 
 #[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeInsets(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+) {
+    gpui_android::set_window_insets(left, top, right, bottom);
+}
+
+#[unsafe(no_mangle)]
 extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeOpenUrl(
     _env: *mut c_void,
     _class: *mut c_void,

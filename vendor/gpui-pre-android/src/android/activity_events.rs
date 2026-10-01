@@ -32,6 +32,30 @@ pub enum ActivityEvent {
     },
     /// A URL the activity was opened with (`onNewIntent`).
     OpenUrl(String),
+    /// The window's insets changed ([`set_window_insets`]).
+    InsetsChanged,
+}
+
+/// What the system bars, a display cutout and the on-screen keyboard cover
+/// at each edge of the window, in device pixels: left, top, right, bottom.
+static WINDOW_INSETS: Mutex<Option<[i32; 4]>> = Mutex::new(None);
+
+/// From the activity's `OnApplyWindowInsetsListener`. In an edge-to-edge
+/// window (enforced for applications that target Android 16) NativeActivity's
+/// content rectangle is the whole window and the keyboard no longer resizes
+/// it; these insets say what is covered instead.
+pub fn set_window_insets(left: i32, top: i32, right: i32, bottom: i32) {
+    *WINDOW_INSETS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some([left, top, right, bottom]);
+    post(ActivityEvent::InsetsChanged);
+}
+
+pub(crate) fn window_insets() -> [i32; 4] {
+    WINDOW_INSETS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_default()
 }
 
 static QUEUE: Mutex<Vec<ActivityEvent>> = Mutex::new(Vec::new());
