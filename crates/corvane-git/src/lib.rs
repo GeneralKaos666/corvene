@@ -21,6 +21,8 @@ pub mod process;
 pub mod rebase_ops;
 pub mod remote_ops;
 pub mod repo;
+#[cfg(any(target_os = "android", all(test, unix)))]
+mod spawn;
 pub mod status;
 pub mod worktree;
 

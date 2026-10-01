@@ -287,6 +287,18 @@ impl GitCommand {
         let started = Instant::now();
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
+        // Android: without `fork` (`spawn.rs`)
+        #[cfg(target_os = "android")]
+        let output = {
+            let mut child = crate::spawn::spawn(self.command(), self.stdin.is_some())
+                .map_err(GitError::Spawn)?;
+            if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
+                use std::io::Write;
+                let _ = stdin.write_all(bytes);
+            }
+            child.wait_with_output().map_err(GitError::Spawn)?
+        };
+        #[cfg(not(target_os = "android"))]
         let output = match &self.stdin {
             None => self.command().output().map_err(GitError::Spawn)?,
             Some(bytes) => {
@@ -349,12 +361,16 @@ impl GitCommand {
         let started = Instant::now();
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
+        #[cfg(not(target_os = "android"))]
         let mut child = self
             .command()
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(GitError::Spawn)?;
+        #[cfg(target_os = "android")]
+        let mut child =
+            crate::spawn::spawn(self.command(), self.stdin.is_some()).map_err(GitError::Spawn)?;
         if let Some(token) = &self.cancel {
             token.attach(child.id());
         }
