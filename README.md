@@ -6,7 +6,7 @@ A native, fast, low-memory [GitHub Desktop](https://github.com/apps/desktop) clo
 
 The UI is a one-to-one recreation of [GitHub Desktop 3.6.6](https://github.com/desktop/desktop/releases/tag/release-3.6.6): same layout, buttons, menus, dialogs and workflow. The engine is different: [GPUI](https://gpui.rs/) ([Zed](https://zed.dev/)'s GPU-accelerated UI framework) for rendering, [gitoxide](https://github.com/gitoxidelabs/gitoxide) for in-process git reads, and the [git](https://git-scm.com/) CLI for writes so behaviour matches GitHub Desktop exactly.
 
-Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus a few gaps. Linux ([X11](https://en.wikipedia.org/wiki/X_Window_System) and [Wayland](https://wayland.freedesktop.org/), x86_64 and arm64) runs the same app with GitHub Desktop's Linux menus and wording; it is newer and not yet pixel-identical to GitHub Desktop everywhere (expect <5% differences). Binaries for both are on [GitHub Releases](https://github.com/wasi-master/corvane/releases). Android (phones, tablets, Chromebooks) is experimental and built from source for now. Windows is planned.
+Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus a few gaps. Linux ([X11](https://en.wikipedia.org/wiki/X_Window_System) and [Wayland](https://wayland.freedesktop.org/), x86_64 and arm64) runs the same app with GitHub Desktop's Linux menus and wording; it is newer and not yet pixel-identical to GitHub Desktop everywhere (expect <5% differences). Binaries for both are on [GitHub Releases](https://github.com/wasi-master/corvane/releases). [Android](https://www.android.com/) (phones, tablets, [Chromebooks](https://www.google.com/chromebook/)) is experimental, with packages on the same page. Windows is planned.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus 
 ### Android
 
 - Android 8.0 or newer on arm64 or x86_64, with a [Vulkan](https://www.vulkan.org/) driver (OpenGL ES is the fallback)
-- Nothing else: git, [OpenSSH](https://www.openssh.com/) and [Git LFS](https://git-lfs.com/) are inside the app
+- Nothing else: git, [OpenSSH](https://www.openssh.com/) and [Git LFS](https://git-lfs.com/) are included inside the app prebuilt
 
 ## Install
 
@@ -58,7 +58,7 @@ File → Install Command Line Tool links `corvane` into `~/.local/bin`, the same
 
 ### Android
 
-No release carries an Android package yet; [build one](#android-2) and install it with `adb install`. It was tested on one phone (Android 15, Mali GPU), so expect rough edges.
+Download `Corvane-<version>-android-foss.apk` from [GitHub Releases](https://github.com/wasi-master/corvane/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The `play` package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
 
 The window is the desktop one on a tablet, a Chromebook or a phone held sideways, and a one-column layout on a phone held upright. A long press is a right click, a double tap and drag selects text, and View → Toggle full screen shows the system bars again.
 
