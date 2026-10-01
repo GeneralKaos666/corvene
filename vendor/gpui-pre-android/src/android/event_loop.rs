@@ -81,6 +81,77 @@ impl FrameStats {
     }
 }
 
+/// Lowers the window's render scale when frames keep taking longer than
+/// the display gives them, and raises it again when there is room.
+///
+/// What a frame costs on a phone is mostly the GPU filling pixels (measured
+/// on a Mali-G57: 29 ms a frame at 1080 × 2400, 13 ms at 720 × 1600, with
+/// 8 ms of that on the CPU either way), so fewer pixels is what helps. The
+/// steps keep at least 1.5 device pixels per logical one.
+#[derive(Default)]
+struct RenderScaleGovernor {
+    frames: u32,
+    total: Duration,
+}
+
+impl RenderScaleGovernor {
+    const STEPS: [f32; 3] = [1.0, 0.75, 0.6];
+    const WINDOW: u32 = 90;
+    const MIN_DEVICE_SCALE: f32 = 1.5;
+
+    fn frame(
+        &mut self,
+        window: &AndroidWindow,
+        gap: Option<Duration>,
+        took: Duration,
+        period: Duration,
+    ) {
+        // only frames that follow each other (an animation, a scroll) and
+        // drew something say what a frame costs
+        if !gap.is_some_and(|gap| gap < Duration::from_millis(100))
+            || took < Duration::from_millis(2)
+        {
+            return;
+        }
+        self.frames += 1;
+        self.total += took;
+        if self.frames < Self::WINDOW {
+            return;
+        }
+        let average = self.total / self.frames;
+        *self = Self::default();
+
+        let current = window.render_scale();
+        let step = Self::STEPS
+            .iter()
+            .position(|scale| (*scale - current).abs() < 0.01)
+            .unwrap_or(0);
+        let next = if average > period.mul_f32(1.15) {
+            Self::STEPS
+                .get(step + 1)
+                .copied()
+                .filter(|scale| window.density_scale() * scale >= Self::MIN_DEVICE_SCALE)
+        } else if step > 0 {
+            // back up only when the frame would still fit with the pixels
+            // of the higher step
+            let higher = Self::STEPS[step - 1];
+            let pixels = (higher / current) * (higher / current);
+            (average.mul_f32(pixels) < period.mul_f32(0.7)).then_some(higher)
+        } else {
+            None
+        };
+        if let Some(next) = next {
+            log::info!(
+                "frames average {:.1} ms of {:.1} ms: render scale {current} -> {next}",
+                average.as_secs_f32() * 1000.0,
+                period.as_secs_f32() * 1000.0
+            );
+            window.set_render_scale(next);
+            super::activity_events::render_scale_changed(next);
+        }
+    }
+}
+
 thread_local! {
     static FRAME_STATS: std::cell::RefCell<FrameStats> = std::cell::RefCell::new(FrameStats::default());
 }
@@ -133,6 +204,8 @@ impl AndroidPlatform {
                 "unavailable"
             }
         );
+        let mut overran = false;
+        let mut render_scale = RenderScaleGovernor::default();
         // when the frame that is wanted now was first wanted
         let mut wanted_since: Option<Instant> = None;
 
@@ -146,6 +219,9 @@ impl AndroidPlatform {
             let frame = match self.window() {
                 Some(window) if window.wants_frame() => match &vsync {
                     // the tick wakes the loop; the timeout is the fallback
+                    // the last frame took the whole period or more: the next
+                    // one starts now, not a tick later
+                    Some(_) if overran => Some(Duration::ZERO),
                     Some(vsync) => {
                         vsync.request();
                         let since = *wanted_since.get_or_insert_with(Instant::now);
@@ -208,6 +284,7 @@ impl AndroidPlatform {
                 let due = match &vsync {
                     Some(vsync) => {
                         vsync.take_tick()
+                            || overran
                             || wanted_since.is_some_and(|since| since.elapsed() >= TICK_TIMEOUT)
                     }
                     None => last_frame.is_none_or(|last| last.elapsed() >= FRAME_INTERVAL),
@@ -219,10 +296,15 @@ impl AndroidPlatform {
                     last_frame = Some(start);
                     window.frame();
                     let took = start.elapsed();
+                    let period = vsync
+                        .as_ref()
+                        .and_then(|vsync| vsync.period())
+                        .unwrap_or(FRAME_INTERVAL);
+                    overran = took >= period.mul_f32(0.95);
                     if let Some(hint) = perf_hint.as_mut() {
-                        let period = vsync.as_ref().and_then(|vsync| vsync.period());
-                        hint.frame(took, period.unwrap_or(FRAME_INTERVAL));
+                        hint.frame(took, period);
                     }
+                    render_scale.frame(&window, gap, took, period);
                     FRAME_STATS.with(|stats| stats.borrow_mut().record(gap, took));
                 }
             }
@@ -304,6 +386,7 @@ impl AndroidPlatform {
             native_window,
             self.gpu_context(),
             scale_factor,
+            super::activity_events::initial_render_scale(),
             self.appearance(),
         ) {
             Ok(window) => {

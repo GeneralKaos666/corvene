@@ -197,3 +197,34 @@ pub(crate) fn open_path(path: &std::path::Path, reveal: bool) {
         opener(path, reveal);
     }
 }
+
+type RenderScaleListener = Box<dyn Fn(f32) + Send + Sync>;
+
+static RENDER_SCALE: Mutex<(f32, Option<RenderScaleListener>)> = Mutex::new((1.0, None));
+
+/// The render scale the window starts with (what the event loop settled on
+/// in an earlier run) and who to tell when it changes it, so the
+/// application can keep it. See `RenderScaleGovernor`.
+pub fn set_render_scale(initial: f32, changed: impl Fn(f32) + Send + Sync + 'static) {
+    *RENDER_SCALE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        (initial.clamp(0.5, 1.0), Some(Box::new(changed)));
+}
+
+pub(crate) fn initial_render_scale() -> f32 {
+    RENDER_SCALE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .0
+}
+
+pub(crate) fn render_scale_changed(render_scale: f32) {
+    let mut state = RENDER_SCALE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.0 = render_scale;
+    if let Some(listener) = &state.1 {
+        listener(render_scale);
+    }
+}

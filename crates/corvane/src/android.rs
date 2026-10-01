@@ -34,6 +34,19 @@ fn android_main(android_app: AndroidApp) {
     gpui_android::set_path_prompt_handler(pick_folder);
     gpui_android::set_url_handler(open_url);
     gpui_android::set_path_opener(open_path);
+    // The render scale the platform settled on last time (it lowers the
+    // resolution it draws at when the GPU cannot keep up), so a start does
+    // not begin slow again.
+    let render_scale = files.join("render-scale");
+    gpui_android::set_render_scale(
+        std::fs::read_to_string(&render_scale)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+            .unwrap_or(1.0),
+        move |scale| {
+            let _ = std::fs::write(&render_scale, scale.to_string());
+        },
+    );
     corvane_platform::android::set_bridge(Box::new(ActivityBridge));
     std::panic::set_hook(Box::new(|info| {
         // stderr goes nowhere; `logging` sends tracing to logcat

@@ -137,6 +137,9 @@ struct WindowState {
     renderer: WgpuRenderer,
     size: Size<DevicePixels>,
     scale_factor: f32,
+    /// What part of the window's resolution is rendered (1 or less); the
+    /// system scales the frames up. See [`AndroidWindow::set_render_scale`].
+    render_scale: f32,
     insets: WindowInsets,
     appearance: WindowAppearance,
     active: bool,
@@ -196,6 +199,14 @@ fn surface_config(size: Size<DevicePixels>) -> WgpuSurfaceConfig {
     }
 }
 
+/// The size frames are rendered at: the window's, times the render scale.
+fn render_size(size: Size<DevicePixels>, render_scale: f32) -> Size<DevicePixels> {
+    let scaled = |pixels: DevicePixels| {
+        DevicePixels(((pixels.0 as f32 * render_scale).round() as i32).max(1))
+    };
+    gpui::size(scaled(size.width), scaled(size.height))
+}
+
 fn window_size(native_window: &NativeWindow) -> Size<DevicePixels> {
     size(
         DevicePixels(native_window.width().max(1)),
@@ -209,6 +220,7 @@ impl AndroidWindow {
         native_window: NativeWindow,
         gpu_context: GpuContext,
         scale_factor: f32,
+        render_scale: f32,
         appearance: WindowAppearance,
     ) -> Result<Rc<Self>> {
         let size = window_size(&native_window);
@@ -216,7 +228,7 @@ impl AndroidWindow {
             WgpuRenderer::new(
                 gpu_context.clone(),
                 &RawAndroidWindow::new(&native_window),
-                surface_config(size),
+                surface_config(render_size(size, render_scale)),
                 None,
             )
         };
@@ -238,7 +250,7 @@ impl AndroidWindow {
         }
         let renderer = renderer.context("failed to create the wgpu renderer")?;
         log::info!(
-            "window {}×{} at {scale_factor}×",
+            "window {}×{} at {scale_factor}×, rendered at {render_scale}",
             size.width.0,
             size.height.0
         );
@@ -252,6 +264,7 @@ impl AndroidWindow {
                 renderer,
                 size,
                 scale_factor,
+                render_scale,
                 insets: WindowInsets::default(),
                 appearance,
                 active: false,
@@ -292,10 +305,11 @@ impl AndroidWindow {
                 .borrow()
                 .as_ref()
                 .map(|context| context.instance.clone());
+            let rendered = render_size(size, state.render_scale);
             let replaced = match instance {
                 Some(instance) => state.renderer.replace_surface(
                     &RawAndroidWindow::new(&native_window),
-                    surface_config(size),
+                    surface_config(rendered),
                     &instance,
                 ),
                 None => Err(anyhow::anyhow!("no GPU context")),
@@ -338,7 +352,8 @@ impl AndroidWindow {
             let size = window_size(native_window);
             let changed = state.size != size || state.scale_factor != scale_factor;
             if state.size != size {
-                state.renderer.update_drawable_size(size);
+                let rendered = render_size(size, state.render_scale);
+                state.renderer.update_drawable_size(rendered);
             }
             state.size = size;
             state.scale_factor = scale_factor;
@@ -351,6 +366,39 @@ impl AndroidWindow {
         if changed || insets_changed {
             self.request_forced_frame();
         }
+    }
+
+    /// Renders the window at `render_scale` of its resolution from now on
+    /// (the system scales the frames up to the window). Logical sizes stay;
+    /// GPUI is told a smaller scale factor and lays out again.
+    ///
+    /// A phone's GPU can be too slow to fill a 1080 × 2400 window sixty
+    /// times a second with GPUI's shaders: the event loop lowers the scale
+    /// when frames keep taking longer than the display's refresh period.
+    pub(crate) fn set_render_scale(&self, render_scale: f32) {
+        {
+            let mut state = self.state.borrow_mut();
+            if state.render_scale == render_scale {
+                return;
+            }
+            state.render_scale = render_scale;
+            if state.native_window.is_some() {
+                let rendered = render_size(state.size, render_scale);
+                state.renderer.update_drawable_size(rendered);
+            }
+        }
+        self.fire_resize();
+        self.request_forced_frame();
+    }
+
+    pub(crate) fn render_scale(&self) -> f32 {
+        self.state.borrow().render_scale
+    }
+
+    /// Device pixels per logical pixel of the window itself (the display's
+    /// density), whatever it is rendered at.
+    pub(crate) fn density_scale(&self) -> f32 {
+        self.state.borrow().scale_factor
     }
 
     pub(crate) fn has_surface(&self) -> bool {
@@ -412,7 +460,10 @@ impl AndroidWindow {
     fn fire_resize(&self) {
         let (size, scale) = {
             let state = self.state.borrow();
-            (logical_size(&state), state.scale_factor)
+            (
+                logical_size(&state),
+                state.scale_factor * state.render_scale,
+            )
         };
         let callback = self.callbacks.borrow_mut().resize.take();
         if let Some(mut callback) = callback {
@@ -931,7 +982,10 @@ impl PlatformWindow for AndroidPlatformWindow {
     fn resize(&mut self, _size: Size<Pixels>) {}
 
     fn scale_factor(&self) -> f32 {
-        self.0.state.borrow().scale_factor
+        // what GPUI draws at: fewer device pixels per logical one when the
+        // window is rendered below its resolution
+        let state = self.0.state.borrow();
+        state.scale_factor * state.render_scale
     }
 
     fn appearance(&self) -> WindowAppearance {
