@@ -6,12 +6,12 @@
 //! x-scheme-handler/…`); like Electron's `setAsDefaultProtocolClient`
 //! (`xdg-settings set default-url-scheme-handler`), every launch makes
 //! Corvane's entry the default handler with `xdg-mime` when that entry is
-//! installed. A bare binary without an installed entry registers nothing
-//! and signs in over the loopback callback instead.
+//! installed: by the `.deb`, or by Corvane itself when it runs from an
+//! AppImage (`crate::desktop_entry`). A bare binary without an installed
+//! entry registers nothing and signs in over the loopback callback instead.
 
-/// The `.desktop` file's name (the GPUI `app_id` / `WM_CLASS`).
 #[cfg(not(target_os = "macos"))]
-pub const DESKTOP_ID: &str = "com.wasimaster.corvane.desktop";
+pub use crate::desktop_entry::DESKTOP_ID;
 
 /// Whether an `x-corvane-auth://` callback from the browser reaches this
 /// process (through the OS and, on Linux, the single-instance socket).
@@ -30,15 +30,11 @@ pub fn auth_callback_registered() -> bool {
 /// (`$XDG_DATA_HOME`, then `$XDG_DATA_DIRS`).
 #[cfg(not(target_os = "macos"))]
 pub fn installed_desktop_entry() -> Option<std::path::PathBuf> {
-    let home = dirs::data_dir();
-    let system = std::env::var("XDG_DATA_DIRS")
-        .ok()
-        .filter(|d| !d.is_empty())
-        .unwrap_or_else(|| "/usr/local/share:/usr/share".to_string());
-    home.into_iter()
-        .chain(system.split(':').map(std::path::PathBuf::from))
-        .map(|dir| dir.join("applications").join(DESKTOP_ID))
-        .find(|path| path.is_file())
+    let system = std::env::var("XDG_DATA_DIRS").ok();
+    dirs::data_dir()
+        .map(|home| crate::desktop_entry::user_entry_path(&home))
+        .filter(|path| path.is_file())
+        .or_else(|| crate::desktop_entry::system_entry(system.as_deref()))
 }
 
 /// `xdg-mime query default x-scheme-handler/<scheme>`
@@ -53,9 +49,11 @@ fn default_handler(scheme: &str) -> Option<String> {
 }
 
 /// Make Corvane the handler of its schemes (blocking; run off the main
-/// thread). Nothing happens without an installed `.desktop` file.
+/// thread). An AppImage installs its `.desktop` file first; nothing happens
+/// without an installed one.
 #[cfg(not(target_os = "macos"))]
 pub fn register() {
+    crate::desktop_entry::ensure();
     if installed_desktop_entry().is_none() {
         tracing::debug!("no installed desktop entry: URL schemes not registered");
         return;

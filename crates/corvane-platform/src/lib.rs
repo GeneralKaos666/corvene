@@ -12,6 +12,7 @@ pub mod apps;
 pub mod cli;
 pub mod crash_reports;
 pub mod custom_integration;
+pub mod desktop_entry;
 pub mod editors;
 pub mod ghd_import;
 pub mod keychain;
