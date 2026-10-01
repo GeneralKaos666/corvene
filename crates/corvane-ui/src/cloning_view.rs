@@ -24,7 +24,7 @@ pub fn cloning_view(clone: &CloneState, cancellable: bool, cx: &App) -> impl Int
         .bg(t.background)
         .child(
             div()
-                .w(zpx(600.))
+                .w(crate::theme::fit_width(600.))
                 .mt(zpx(-60.))
                 .p(SPACING_DOUBLE())
                 .flex()

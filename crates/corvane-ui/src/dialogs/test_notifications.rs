@@ -157,7 +157,7 @@ impl Render for TestNotificationsDialog {
             .gap(SPACING_HALF())
             .children(buttons);
         let content = div()
-            .w(zpx(460.))
+            .w(crate::theme::fit_width(460.))
             .flex()
             .flex_col()
             .gap(SPACING())

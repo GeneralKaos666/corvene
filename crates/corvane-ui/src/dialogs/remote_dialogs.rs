@@ -323,7 +323,7 @@ impl Render for PublishRepositoryDialog {
             }
         };
         let content = div()
-            .w(zpx(450.))
+            .w(crate::theme::fit_width(450.))
             .mx(zpx(-20.))
             .mt(zpx(-20.))
             .flex()
@@ -399,7 +399,7 @@ impl Render for PushNeedsPullDialog {
             "dialog-push-needs-pull",
             DialogKind::Warning,
             mac_or("Newer Commits on Remote", "Newer commits on remote"),
-            div().w(zpx(450.)).child(
+            div().w(crate::theme::fit_width(450.)).child(
                 "Corvane is unable to push commits to this branch because there are commits on the remote that are not present on your local branch. Fetch these new commits before pushing in order to reconcile them with your local commits.",
             ),
             vec![
@@ -572,7 +572,7 @@ impl Render for GenericGitAuthDialog {
                 .child(text)
         };
         let content = div()
-            .w(zpx(450.))
+            .w(crate::theme::fit_width(450.))
             .flex()
             .flex_col()
             .gap(SPACING())
@@ -696,7 +696,7 @@ impl Render for InitializeLfsDialog {
         };
         let plural = repos.len() != 1;
         let content = div()
-            .w(zpx(450.))
+            .w(crate::theme::fit_width(450.))
             .flex()
             .flex_col()
             .gap(SPACING())

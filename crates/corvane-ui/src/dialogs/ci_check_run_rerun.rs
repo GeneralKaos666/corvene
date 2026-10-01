@@ -234,7 +234,7 @@ impl Render for CiCheckRunRerunDialog {
         dialog(
             "rerun-check-runs",
             self.title(true),
-            div().w(zpx(460.)).child(content),
+            div().w(crate::theme::fit_width(460.)).child(content),
             vec![
                 DialogButton {
                     id: "rerun-cancel",

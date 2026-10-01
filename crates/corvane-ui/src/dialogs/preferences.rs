@@ -27,7 +27,7 @@ use gpui_kit::*;
 use crate::context_menu::mac_or;
 use crate::dialog::{DialogButton, dialog};
 use crate::icons::Octicon;
-use crate::tab_bar::{TabModel, VerticalTab, tab_bar, vertical_tab_bar};
+use crate::tab_bar::{TabModel, VerticalTab, tab_bar};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
@@ -1931,7 +1931,8 @@ impl Render for PreferencesDialog {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let selected = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
         let weak = cx.weak_entity();
-        let nav = vertical_tab_bar(
+        let compact = crate::theme::compact(window);
+        let nav = crate::tab_bar::vertical_tab_bar_sized(
             vec![
                 VerticalTab {
                     id: "prefs-tab-accounts",
@@ -1975,6 +1976,7 @@ impl Render for PreferencesDialog {
                 },
             ],
             selected,
+            compact,
             move |ix, _, cx| {
                 weak.update(cx, |this, cx| {
                     this.tab = TABS[ix];
@@ -2010,7 +2012,7 @@ impl Render for PreferencesDialog {
                     }
                 }),
             )
-            .w(zpx(598.))
+            .w(crate::theme::fit_bleed_width(598.))
             .mx(zpx(-20.))
             .my(zpx(-20.))
             .flex()
@@ -2042,7 +2044,7 @@ impl Render for PreferencesDialog {
                             // Advanced carries Corvane's extra sections (crash
                             // reports, optional components): it scrolls inside
                             // GHD's 440 px instead of growing the dialog
-                            .when(self.tab == PreferencesTab::Advanced, |d| {
+                            .when(self.tab == PreferencesTab::Advanced || compact, |d| {
                                 d.max_h(zpx(440.)).overflow_y_scroll()
                             })
                             .child(body),

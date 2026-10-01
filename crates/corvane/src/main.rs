@@ -558,6 +558,17 @@ pub(crate) fn main() {
 
         // Same size as the GitHub Desktop reference captures in .docs.
         let window_size = size(px(1367.), px(814.));
+        // CORVANE_WINDOW_SIZE=<width>x<height> (build with `--features
+        // snapshots`): another size, also below the minimum, for snapshots
+        // of the compact layout phones get.
+        #[cfg(feature = "snapshots")]
+        let forced_size = std::env::var("CORVANE_WINDOW_SIZE").ok().and_then(|spec| {
+            let (width, height) = spec.split_once('x')?;
+            Some(size(px(width.parse().ok()?), px(height.parse().ok()?)))
+        });
+        #[cfg(not(feature = "snapshots"))]
+        let forced_size = None::<Size<Pixels>>.filter(|_| false);
+        let window_size = forced_size.unwrap_or(window_size);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("Corvane".into()),
@@ -572,17 +583,17 @@ pub(crate) fn main() {
                 cx,
             ))),
             // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400
-            window_min_size: Some(
-                if state
-                    .read(cx)
-                    .flags
-                    .bool(corvane_core::flags::ids::SMALLER_MINIMUM_SIZES)
-                {
-                    size(px(600.), px(400.))
-                } else {
-                    size(px(960.), px(660.))
-                },
-            ),
+            window_min_size: Some(if let Some(forced) = forced_size {
+                forced
+            } else if state
+                .read(cx)
+                .flags
+                .bool(corvane_core::flags::ids::SMALLER_MINIMUM_SIZES)
+            {
+                size(px(600.), px(400.))
+            } else {
+                size(px(960.), px(660.))
+            }),
             app_id: Some(corvane_platform::BUNDLE_ID.into()),
             // X11 `_NET_WM_ICON` (Electron sets the app icon on its window)
             #[cfg(not(target_os = "macos"))]

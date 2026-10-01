@@ -73,7 +73,7 @@ impl Render for ImportGitHubDesktopDialog {
             let weak = cx.weak_entity();
             let hover_bg = t.list_item_hover_background;
             div()
-                .w(zpx(460.))
+                .w(crate::theme::fit_width(460.))
                 .flex()
                 .flex_col()
                 .gap(SPACING())

@@ -302,6 +302,52 @@ pub fn page_size(window: &gpui_kit::Window) -> gpui_kit::Size<gpui_kit::Pixels> 
     gpui_kit::size(viewport.width, viewport.height - page_top())
 }
 
+/// Below this page width (logical pixels) Android lays the window out for a
+/// phone: one column instead of GHD's sidebar beside the content.
+pub const COMPACT_WIDTH: f32 = 600.;
+
+/// Whether the window gets the compact (phone) layout. GHD has none: its
+/// window cannot be narrower than 960 px. Android only; `CORVANE_COMPACT=1`
+/// turns it on elsewhere, to work on it without a device.
+pub fn compact(window: &gpui_kit::Window) -> bool {
+    static ALLOWED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALLOWED.get_or_init(|| {
+        cfg!(target_os = "android") || std::env::var_os("CORVANE_COMPACT").is_some()
+    }) && window.viewport_size().width < gpui_kit::px(COMPACT_WIDTH)
+}
+
+thread_local! {
+    /// The page width while the compact layout is on (set every frame by
+    /// the workspace), for the fixed widths GHD's dialogs have.
+    static COMPACT_PAGE_WIDTH: std::cell::Cell<Option<gpui_kit::Pixels>> =
+        const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn set_compact_page_width(width: Option<gpui_kit::Pixels>) {
+    COMPACT_PAGE_WIDTH.with(|cell| cell.set(width));
+}
+
+/// A width from GHD's stylesheet (`width: 450px` of a dialog's content),
+/// narrowed in the compact layout to what a dialog's content has there: the
+/// page less the dialog's margin, border and padding.
+pub fn fit_width(width: f32) -> gpui_kit::Pixels {
+    let width = sizes::zpx(width);
+    match COMPACT_PAGE_WIDTH.with(|cell| cell.get()) {
+        Some(page) => width.min(page - sizes::zpx(58.)),
+        None => width,
+    }
+}
+
+/// [`fit_width`] for content that cancels the dialog's padding with negative
+/// margins (Settings, Repository Settings).
+pub fn fit_bleed_width(width: f32) -> gpui_kit::Pixels {
+    let width = sizes::zpx(width);
+    match COMPACT_PAGE_WIDTH.with(|cell| cell.get()) {
+        Some(page) => width.min(page - sizes::zpx(18.)),
+        None => width,
+    }
+}
+
 /// Chromium's `line-height: normal` (and an inline box's content area) for
 /// the UI font at `size`: the font's ascent plus descent, each rounded to a
 /// pixel. SF gives about 1.19 em, Noto Sans 1.36 em, so boxes GHD sizes by

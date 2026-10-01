@@ -14,7 +14,6 @@ use gpui_kit::*;
 
 use crate::context_menu::mac_or;
 use crate::dialog::{DialogButton, DialogKind, dialog_with_kind};
-use crate::theme::sizes::zpx;
 use crate::widgets::{Inline, code_ref, paragraph};
 
 pub struct InvalidatedTokenDialog {
@@ -88,7 +87,7 @@ impl Render for WorkflowPushRejectedDialog {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let repo = self.repo;
         let content = div()
-            .w(zpx(460.))
+            .w(crate::theme::fit_width(460.))
             .flex()
             .flex_col()
             .gap(crate::theme::sizes::SPACING())
@@ -174,7 +173,7 @@ impl Render for SamlReauthRequiredDialog {
         let enterprise = self.enterprise;
         let (repo, retry) = (self.repo, self.retry.clone());
         let content = div()
-            .w(zpx(460.))
+            .w(crate::theme::fit_width(460.))
             .flex()
             .flex_col()
             .gap(crate::theme::sizes::SPACING())

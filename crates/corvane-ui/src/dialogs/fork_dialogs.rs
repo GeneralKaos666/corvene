@@ -125,7 +125,7 @@ impl Render for CreateForkDialog {
         };
         let content: AnyElement = match &self.error {
             None => div()
-                .w(zpx(460.))
+                .w(crate::theme::fit_width(460.))
                 .flex()
                 .flex_col()
                 .gap(SPACING())
@@ -141,7 +141,7 @@ impl Render for CreateForkDialog {
                 ]))
                 .into_any_element(),
             Some(error) => div()
-                .w(zpx(460.))
+                .w(crate::theme::fit_width(460.))
                 .flex()
                 .flex_col()
                 .gap(SPACING())
@@ -272,7 +272,7 @@ impl Render for ChooseForkSettingsDialog {
         let own_name = github.full_name();
         let selected = self.target;
         let content = div()
-            .w(zpx(440.))
+            .w(crate::theme::fit_width(440.))
             .flex()
             .flex_col()
             .child(
@@ -400,7 +400,7 @@ impl Render for UpstreamAlreadyExistsDialog {
                 .child(paragraph(vec![label.into(), chip(value)]))
         };
         let content = div()
-            .w(zpx(460.))
+            .w(crate::theme::fit_width(460.))
             .flex()
             .flex_col()
             .gap(SPACING())

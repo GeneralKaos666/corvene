@@ -21,7 +21,7 @@
 
 use corvane_core::{AppState, CommittedFileChange, Dispatcher, Popup, UnreachableCommitsTab};
 use gpui_kit::component::resizable::{
-    ResizablePanelEvent, ResizableState, h_resizable, resizable_panel,
+    ResizablePanelEvent, ResizableState, h_resizable, resizable_panel, v_resizable,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -1223,6 +1223,7 @@ fn commit_file_row(
 
 impl Render for SelectedCommitView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let compact = crate::theme::compact(window);
         self.file_list_focused = self.file_list_focus.is_focused(window);
         let author_email = self.state.read(cx).selected_state().and_then(|rs| {
             let sha = rs.selected_commit.as_ref()?;
@@ -1327,70 +1328,78 @@ impl Render for SelectedCommitView {
             .bg(t.background)
             .children(self.summary(id, cx))
             .child(
-                h_resizable("commit-details")
-                    .with_state(&self.resizable)
-                    .with_handle_appearance(std::rc::Rc::new(|_, _, _| {
-                        Some(div().into_any_element())
-                    }))
-                    .child(
-                        resizable_panel()
-                            .size(self.file_list_width)
-                            .size_range(FILE_LIST_MIN()..FILE_LIST_MAX())
-                            .child(
-                                crate::active_resizable::active_resizable(
-                                    "commit-file-list-resizable",
-                                    &self.resizable,
-                                    Some(&self.file_list_focus),
-                                    crate::active_resizable::ResizableDescription::new(
-                                        "Selected commit file list",
-                                        FILE_LIST_MIN()..FILE_LIST_MAX(),
-                                    ),
-                                    self.file_list(id, cx),
-                                )
-                                .key_context("CommitFileList")
-                                .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| {
-                                    this.select_relative(1, cx)
-                                }))
-                                .on_action(cx.listener(|this, _: &SelectPreviousFile, _, cx| {
-                                    this.select_relative(-1, cx)
-                                }))
-                                .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| {
-                                    this.select_edge(false, cx)
-                                }))
-                                .on_action(cx.listener(|this, _: &SelectLastFile, _, cx| {
-                                    this.select_edge(true, cx)
-                                }))
-                                .on_action(cx.listener(|this, _: &ExtendSelectionDown, _, cx| {
-                                    this.extend_selection(1, cx)
-                                }))
-                                .on_action(cx.listener(|this, _: &ExtendSelectionUp, _, cx| {
-                                    this.extend_selection(-1, cx)
-                                }))
-                                .on_action(cx.listener(|this, _: &CopySelectedFilePaths, _, cx| {
-                                    this.copy_selected_path(true, cx)
-                                }))
-                                .on_action(cx.listener(
-                                    |this, _: &CopySelectedRelativeFilePaths, _, cx| {
-                                        this.copy_selected_path(false, cx)
-                                    },
-                                ))
-                                .on_action(cx.listener(
-                                    |this, _: &OpenSelectedFileInEditor, _, cx| {
-                                        if let Some(path) = this.selected_file_on_disk(cx) {
-                                            Dispatcher::open_in_editor(path, cx)
-                                        }
-                                    },
-                                ))
-                                .on_action(cx.listener(
-                                    |this, _: &OpenSelectedFileWithDefaultProgram, _, cx| {
-                                        if let Some(path) = this.selected_file_on_disk(cx) {
-                                            cx.open_with_system(&path)
-                                        }
-                                    },
-                                )),
-                            ),
-                    )
-                    .child(resizable_panel().child(diff_pane)),
+                // a phone: the files above the diff instead of beside it
+                if compact {
+                    v_resizable("commit-details-compact")
+                } else {
+                    h_resizable("commit-details").with_state(&self.resizable)
+                }
+                .with_handle_appearance(std::rc::Rc::new(|_, _, _| Some(div().into_any_element())))
+                .child(
+                    resizable_panel()
+                        .size(if compact {
+                            zpx(96.)
+                        } else {
+                            self.file_list_width
+                        })
+                        .size_range(if compact {
+                            zpx(48.)..zpx(600.)
+                        } else {
+                            FILE_LIST_MIN()..FILE_LIST_MAX()
+                        })
+                        .child(
+                            crate::active_resizable::active_resizable(
+                                "commit-file-list-resizable",
+                                &self.resizable,
+                                Some(&self.file_list_focus),
+                                crate::active_resizable::ResizableDescription::new(
+                                    "Selected commit file list",
+                                    FILE_LIST_MIN()..FILE_LIST_MAX(),
+                                ),
+                                self.file_list(id, cx),
+                            )
+                            .key_context("CommitFileList")
+                            .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| {
+                                this.select_relative(1, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectPreviousFile, _, cx| {
+                                this.select_relative(-1, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectFirstFile, _, cx| {
+                                this.select_edge(false, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectLastFile, _, cx| {
+                                this.select_edge(true, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendSelectionDown, _, cx| {
+                                this.extend_selection(1, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendSelectionUp, _, cx| {
+                                this.extend_selection(-1, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &CopySelectedFilePaths, _, cx| {
+                                this.copy_selected_path(true, cx)
+                            }))
+                            .on_action(cx.listener(
+                                |this, _: &CopySelectedRelativeFilePaths, _, cx| {
+                                    this.copy_selected_path(false, cx)
+                                },
+                            ))
+                            .on_action(cx.listener(|this, _: &OpenSelectedFileInEditor, _, cx| {
+                                if let Some(path) = this.selected_file_on_disk(cx) {
+                                    Dispatcher::open_in_editor(path, cx)
+                                }
+                            }))
+                            .on_action(cx.listener(
+                                |this, _: &OpenSelectedFileWithDefaultProgram, _, cx| {
+                                    if let Some(path) = this.selected_file_on_disk(cx) {
+                                        cx.open_with_system(&path)
+                                    }
+                                },
+                            )),
+                        ),
+                )
+                .child(resizable_panel().child(diff_pane)),
             )
             .into_any_element()
     }

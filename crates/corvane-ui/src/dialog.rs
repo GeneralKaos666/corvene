@@ -482,6 +482,12 @@ fn dialog_impl(
         focus_close,
     } = frame;
     let viewport = crate::theme::page_size(window);
+    // a phone: no dialog is wider than the window
+    let widest = if crate::theme::compact(window) {
+        viewport.width - zpx(16.)
+    } else {
+        Pixels::MAX
+    };
     deferred(
         anchored().position(crate::theme::page_origin()).child(
             div()
@@ -506,9 +512,9 @@ fn dialog_impl(
                         .role(Role::Dialog)
                         .when_some(plain_title.clone(), |d, title| d.aria_label(title))
                         .children(plain_title.map(window_title))
-                        .min_w(zpx(400.))
-                        .max_w(zpx(600.))
-                        .when_some(ghd_dialog_width(id), |d, w| d.w(zpx(w)))
+                        .min_w(zpx(400.).min(widest))
+                        .max_w(zpx(600.).min(widest))
+                        .when_some(ghd_dialog_width(id), |d, w| d.w(zpx(w).min(widest)))
                         // a `<dialog>` never outgrows the viewport; the content scrolls
                         .max_h(viewport.height)
                         .flex()

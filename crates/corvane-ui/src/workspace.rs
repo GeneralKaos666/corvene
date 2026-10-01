@@ -9,7 +9,7 @@ use std::rc::Rc;
 use corvane_core::{AppState, Dispatcher, Section};
 use corvane_platform::editors::SETTINGS_LABEL;
 use gpui_kit::component::resizable::{
-    ResizablePanelEvent, ResizableState, h_resizable, resizable_panel,
+    ResizablePanelEvent, ResizableState, h_resizable, resizable_panel, v_resizable,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -61,6 +61,11 @@ pub struct Workspace {
     section: Section,
     sidebar_width: Pixels,
     resizable: Entity<ResizableState>,
+    /// The compact (phone) layout, see `theme::compact`: the sidebar above
+    /// the content instead of beside it, this tall.
+    compact: bool,
+    compact_sidebar_height: Pixels,
+    compact_resizable: Entity<ResizableState>,
     /// `#window-zoom-info`: the factor to show and when it was set
     /// (GHD `ZoomInfo`: 750 ms hold after a 100 ms transition).
     zoom_info: Option<(f32, std::time::Instant)>,
@@ -178,6 +183,20 @@ impl Workspace {
         })
         .detach();
 
+        let compact_resizable = cx.new(|_| ResizableState::default());
+        cx.subscribe(
+            &compact_resizable,
+            |this, state, _: &ResizablePanelEvent, cx| {
+                if let Some(height) = state.read(cx).sizes().first().copied()
+                    && height != this.compact_sidebar_height
+                {
+                    this.compact_sidebar_height = height;
+                    cx.notify();
+                }
+            },
+        )
+        .detach();
+
         let changes = cx.new(|cx| ChangesSidebar::new(state.clone(), window, cx));
         let history = cx.new(|cx| HistorySidebar::new(state.clone(), window, cx));
         let selected_commit = cx.new(|cx| SelectedCommitView::new(state.clone(), cx));
@@ -204,6 +223,9 @@ impl Workspace {
             section: Section::Changes,
             sidebar_width: sidebar_width.max(sidebar_min),
             resizable,
+            compact: false,
+            compact_sidebar_height: zpx(0.),
+            compact_resizable,
             zoom_info: None,
             zoom_info_nonce: 0,
             changes,
@@ -706,6 +728,54 @@ impl Workspace {
                 .child(self.content(cx))
                 .into_any_element();
         }
+        if self.compact {
+            // a phone: the list on top, what it selects below, the seam
+            // between them a handle to drag
+            return div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .border_t_1()
+                .border_color(t.box_border)
+                .child(
+                    v_resizable("repository-compact")
+                        .with_state(&self.compact_resizable)
+                        .with_handle_appearance(std::rc::Rc::new(move |_, _, cx| {
+                            let t = cx.ghd();
+                            Some(
+                                div()
+                                    .w_full()
+                                    .h(zpx(12.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(t.toolbar_background)
+                                    .border_y_1()
+                                    .border_color(t.box_border)
+                                    .child(
+                                        div()
+                                            .w(zpx(36.))
+                                            .h(zpx(4.))
+                                            .rounded(zpx(2.))
+                                            .bg(t.text_secondary),
+                                    )
+                                    .into_any_element(),
+                            )
+                        }))
+                        .child(
+                            resizable_panel()
+                                .size(self.compact_sidebar_height)
+                                .size_range(zpx(120.)..zpx(2000.))
+                                // the handle lies over the seam, half on each side
+                                .child(div().size_full().pb(zpx(6.)).child(self.sidebar(cx))),
+                        )
+                        .child(
+                            resizable_panel()
+                                .child(div().size_full().pt(zpx(6.)).child(self.content(cx))),
+                        ),
+                )
+                .into_any_element();
+        }
         div()
             .flex_1()
             .min_h_0()
@@ -849,6 +919,14 @@ impl Render for Workspace {
             self.section = section;
         }
         self.place_launch_focus(window, cx);
+        self.compact = crate::theme::compact(window);
+        let page = crate::theme::page_size(window);
+        crate::theme::set_compact_page_width(self.compact.then_some(page.width));
+        if self.compact && self.compact_sidebar_height == zpx(0.) {
+            // the list and the commit form get a little over half of what
+            // the toolbar leaves
+            self.compact_sidebar_height = ((page.height - TOOLBAR_HEIGHT()) * 0.55).max(zpx(160.));
+        }
         let review = self.review_mode_active(cx);
         self.selected_commit
             .update(cx, |v, cx| v.set_file_list_hidden(review, cx));
@@ -909,7 +987,7 @@ impl Render for Workspace {
             }
         };
         let (
-            buttons,
+            mut buttons,
             foldout,
             popup,
             has_repos,
@@ -941,6 +1019,16 @@ impl Render for Workspace {
                 widths,
             )
         };
+
+        if self.compact {
+            // the toolbar's buttons share the width; nothing to resize
+            let width = page.width / buttons.len().max(1) as f32;
+            for button in &mut buttons {
+                button.width = Some(width);
+                button.resize = None;
+            }
+        }
+        let compact = self.compact;
 
         // GHD `inNoRepositoriesViewState` (repositories.length === 0, or a
         // paused tutorial): no toolbar (`renderToolbar`) and, like the welcome
@@ -1058,6 +1146,8 @@ impl Render for Workspace {
                 // at least 365 px
                 let foldout_width = |width: Pixels| width.max(zpx(365.));
                 let (x, width) = match foldout {
+                    // a phone: every foldout spans the window
+                    _ if compact => (zpx(0.), page.width),
                     corvane_core::Foldout::Repository => (zpx(0.), self.sidebar_width),
                     corvane_core::Foldout::Worktree => {
                         (self.sidebar_width, foldout_width(worktree_width))

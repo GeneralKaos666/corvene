@@ -222,7 +222,7 @@ impl Render for PushProtectionErrorDialog {
             })
             .collect();
         let content = div()
-            .w(zpx(460.))
+            .w(crate::theme::fit_width(460.))
             .flex()
             .flex_col()
             .gap(SPACING())
@@ -342,7 +342,7 @@ impl Render for BypassPushProtectionDialog {
         let count = items.len();
         let content =
             div()
-                .w(zpx(440.))
+                .w(crate::theme::fit_width(440.))
                 .flex()
                 .flex_col()
                 .child(div().mb(SPACING()).child(format!(

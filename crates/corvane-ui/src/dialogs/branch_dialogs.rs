@@ -883,7 +883,7 @@ impl Render for StashAndSwitchBranchDialog {
         let discard = offer_discard && self.discard;
         // `dialog#stash-changes` is 450 px wide
         let content = div()
-            .w(zpx(408.))
+            .w(crate::theme::fit_width(408.))
             .flex()
             .flex_col()
             .gap(SPACING())

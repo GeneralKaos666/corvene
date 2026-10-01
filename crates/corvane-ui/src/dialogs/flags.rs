@@ -1364,7 +1364,7 @@ impl FlagsDialog {
                     .id("flags-confirm")
                     .role(Role::AlertDialog)
                     .aria_label(title.clone())
-                    .w(zpx(420.))
+                    .w(crate::theme::fit_width(420.))
                     .flex()
                     .flex_col()
                     .rounded(BORDER_RADIUS())
@@ -1774,7 +1774,9 @@ impl Render for FlagsDialog {
             .flex()
             .flex_row()
             .items_stretch()
-            .child(nav)
+            // a phone: the search box and the filter chips find flags; the
+            // category list would leave the flags no room
+            .when(!crate::theme::compact(window), |d| d.child(nav))
             .child(content);
 
         // ---- restart bar ----

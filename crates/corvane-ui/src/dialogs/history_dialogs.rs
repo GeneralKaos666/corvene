@@ -786,7 +786,7 @@ impl Render for UnreachableCommitsDialog {
         );
         // `.unreachable-commits { max-width: 400px }`, list ≥ 160 px
         let content = div()
-            .w(zpx(400.))
+            .w(crate::theme::fit_width(400.))
             .mx(zpx(-20.))
             .my(zpx(-20.))
             .flex()
