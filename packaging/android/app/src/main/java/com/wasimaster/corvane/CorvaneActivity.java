@@ -219,6 +219,17 @@ public class CorvaneActivity extends NativeActivity {
         });
     }
 
+    /** A short message over whatever is on screen. */
+    public static String toast(final String message) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "no activity";
+        }
+        activity.runOnUiThread(
+                () -> Toast.makeText(activity, message, Toast.LENGTH_LONG).show());
+        return null;
+    }
+
     /** View > Toggle full screen. */
     static void toggleFullScreen() {
         CorvaneActivity activity = instance;

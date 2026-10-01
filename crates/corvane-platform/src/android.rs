@@ -67,6 +67,8 @@ pub trait Bridge: Send + Sync {
     fn relaunch(&self);
     /// Shows the activity again, closing a browser tab opened over it.
     fn bring_to_front(&self);
+    /// A short message over whatever is on screen (a toast).
+    fn toast(&self, message: &str);
 }
 
 static NETWORK_COMMANDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -93,6 +95,13 @@ pub fn network_command(started: bool) {
 pub fn toggle_full_screen() {
     if let Some(bridge) = bridge() {
         bridge.toggle_full_screen();
+    }
+}
+
+/// A toast: a short message that shows over the browser too.
+pub fn toast(message: &str) {
+    if let Some(bridge) = bridge() {
+        bridge.toast(message);
     }
 }
 

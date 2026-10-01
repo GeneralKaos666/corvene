@@ -493,6 +493,10 @@ impl corvane_platform::android::Bridge for ActivityBridge {
         );
     }
 
+    fn toast(&self, message: &str) {
+        let _ = activity_result!("toast", message);
+    }
+
     fn bring_to_front(&self) {
         activity_call!("bringToFront", "()V", &[]);
     }

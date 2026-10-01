@@ -4504,6 +4504,18 @@ impl Dispatcher {
                                     },
                                     cx,
                                 );
+                                // Android: the browser covers the dialog,
+                                // so the code goes along on the clipboard
+                                #[cfg(target_os = "android")]
+                                {
+                                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                                        code.user_code.clone(),
+                                    ));
+                                    corvane_platform::android::toast(&format!(
+                                        "Code {} copied. Paste it on the page.",
+                                        code.user_code
+                                    ));
+                                }
                                 Self::open_url(&uri, cx);
                             });
                         }
