@@ -98,7 +98,7 @@ pub enum ForcePushState {
     Recommended,
 }
 
-const BACKGROUND_FETCH_INTERVAL: Duration = Duration::from_secs(60 * 60);
+pub(crate) const BACKGROUND_FETCH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const BACKGROUND_FETCH_MINIMUM: Duration = Duration::from_secs(5 * 60);
 const INDICATOR_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const INDICATOR_REFRESH_MINIMUM: Duration = Duration::from_secs(60);

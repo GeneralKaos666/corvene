@@ -73,6 +73,7 @@ gpui-pre-linux = { version = "=0.3.7", optional = true }
 gpui-pre-android = { path = "../../vendor/gpui-pre-android" }
 # calls into packaging/android's CorvaneActivity
 jni = "0.22"
+ndk-context = "0.1"
 # the assets are compiled in even in debug builds: the device has no
 # checkout to read them from
 rust-embed = { workspace = true, features = ["debug-embed"] }

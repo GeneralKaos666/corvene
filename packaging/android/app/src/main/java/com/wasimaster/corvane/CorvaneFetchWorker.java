@@ -14,11 +14,11 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * The background fetch while Corvane is not on screen: its own timer stops
- * when Android freezes the process, so WorkManager wakes it about once an
- * hour, with a network. The fetch is the application's (the selected
- * repository, with the credentials of the signed-in accounts), which means
- * the process must still hold the activity; in a process started only for
- * this work there is nothing to ask and the work ends.
+ * when Android freezes the process, so WorkManager runs this about once an
+ * hour, with a network. While the process holds the activity the fetch is
+ * the application's own (nativeBackgroundFetch). In a process started only
+ * for this work the native library fetches the selected repository by
+ * itself (nativeHeadlessFetch), with the credentials in the Keystore.
  */
 public class CorvaneFetchWorker extends Worker {
     private static final String NAME = "background-fetch";
@@ -42,7 +42,13 @@ public class CorvaneFetchWorker extends Worker {
 
     @Override
     public Result doWork() {
-        if (!CorvaneActivity.isRunning() || !CorvaneActivity.nativeBackgroundFetch()) {
+        if (!CorvaneActivity.isRunning()) {
+            // no application in this process: fetch without it
+            Context context = getApplicationContext();
+            CorvaneActivity.nativeHeadlessFetch(context, context.getFilesDir().getAbsolutePath());
+            return Result.success();
+        }
+        if (!CorvaneActivity.nativeBackgroundFetch()) {
             return Result.success();
         }
         // the fetch starts on the native thread; stay until it has ended

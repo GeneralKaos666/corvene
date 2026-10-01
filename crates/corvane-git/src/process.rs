@@ -97,6 +97,21 @@ impl CancelToken {
     }
 }
 
+/// A token for streamed commands that were given none: lets a caller stop
+/// whatever network command runs (Android's headless fetch, when the
+/// application itself is opened).
+static DEFAULT_CANCEL: Mutex<Option<CancelToken>> = Mutex::new(None);
+
+pub fn set_default_cancel_token(token: Option<CancelToken>) {
+    if let Ok(mut slot) = DEFAULT_CANCEL.lock() {
+        *slot = token;
+    }
+}
+
+fn default_cancel_token() -> Option<CancelToken> {
+    DEFAULT_CANCEL.lock().ok().and_then(|slot| slot.clone())
+}
+
 fn terminate(pid: u32) {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return;
@@ -361,6 +376,7 @@ impl GitCommand {
         let started = Instant::now();
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
+        let cancel = self.cancel.clone().or_else(default_cancel_token);
         #[cfg(not(target_os = "android"))]
         let mut child = self
             .command()
@@ -371,7 +387,7 @@ impl GitCommand {
         #[cfg(target_os = "android")]
         let mut child =
             crate::spawn::spawn(self.command(), self.stdin.is_some()).map_err(GitError::Spawn)?;
-        if let Some(token) = &self.cancel {
+        if let Some(token) = &cancel {
             token.attach(child.id());
         }
         if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
@@ -418,12 +434,12 @@ impl GitCommand {
         }
 
         let status = child.wait();
-        if let Some(token) = &self.cancel {
+        if let Some(token) = &cancel {
             token.detach();
         }
         let status = status.map_err(GitError::Spawn)?;
         let drained = drain_thread.join().unwrap_or_default();
-        if self.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+        if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
             debug!(git = %args, "git cancelled");
             return Err(GitError::Cancelled(args));
         }

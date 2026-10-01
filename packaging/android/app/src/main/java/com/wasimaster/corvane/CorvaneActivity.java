@@ -58,6 +58,10 @@ public class CorvaneActivity extends NativeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // a background fetch WorkManager started in this process without an
+        // activity (CorvaneFetchWorker) has to let go before the native
+        // side starts
+        nativeEndHeadless();
         super.onCreate(savedInstanceState);
         instance = this;
         // NativeActivity leaves the keyboard's initial state to the system,
@@ -670,6 +674,15 @@ public class CorvaneActivity extends NativeActivity {
             }
         });
     }
+
+    /**
+     * The background fetch in a process without an activity: true when a
+     * fetch ran. Does nothing once an activity was created.
+     */
+    static native boolean nativeHeadlessFetch(Context context, String filesDir);
+
+    /** Stops nativeHeadlessFetch and waits for it to return. */
+    static native void nativeEndHeadless();
 
     /** WorkManager's hourly work: fetch like the background fetcher. */
     static native boolean nativeBackgroundFetch();

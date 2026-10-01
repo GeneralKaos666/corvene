@@ -25,7 +25,10 @@ pub(crate) fn android_app() -> AndroidApp {
 
 #[unsafe(no_mangle)]
 fn android_main(android_app: AndroidApp) {
-    prepare_environment(&android_app);
+    let files = android_app
+        .internal_data_path()
+        .unwrap_or_else(|| PathBuf::from("/data/local/tmp/corvane"));
+    prepare_environment(&files);
     let _ = ANDROID_APP.set(android_app);
     gpui_android::set_soft_keyboard_handler(show_keyboard);
     gpui_android::set_path_prompt_handler(pick_folder);
@@ -52,10 +55,7 @@ fn android_main(android_app: AndroidApp) {
 /// * `cache`: `XDG_CACHE_HOME`, which the system may clear
 /// * `cache/tmp`: `TMPDIR`
 /// * `files/git/bin`: the bundled git ([`bundled_git`])
-fn prepare_environment(android_app: &AndroidApp) {
-    let files = android_app
-        .internal_data_path()
-        .unwrap_or_else(|| PathBuf::from("/data/local/tmp/corvane"));
+fn prepare_environment(files: &Path) {
     let home = files.join("home");
     let cache = files
         .parent()
@@ -65,7 +65,7 @@ fn prepare_environment(android_app: &AndroidApp) {
     for dir in [&home, &tmp] {
         let _ = std::fs::create_dir_all(dir);
     }
-    let git = bundled_git(&files);
+    let git = bundled_git(files);
     // SAFETY: nothing else in the process reads the environment yet: this
     // runs first on the native thread, before any Rust thread is spawned
     unsafe {
@@ -663,4 +663,145 @@ fn serve_askpass() {
     if let Err(err) = spawned {
         tracing::warn!("askpass thread: {err}");
     }
+}
+
+// ── the background fetch without an activity ────────────────────────────────
+//
+// WorkManager starts the process for `CorvaneFetchWorker` also when the
+// application is not open. Then there is no `android_main`: the worker calls
+// `nativeHeadlessFetch`, which sets up what `android_main` would (the
+// environment, the Keystore's Java context, the askpass socket) and runs
+// `corvane_core::headless::background_fetch`. Should the user open the
+// application meanwhile, the activity calls `nativeEndHeadless` before it
+// starts the native side: git is stopped, the fetch returns, and the Java
+// context is handed back so android-activity can install its own.
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Headless {
+    Idle,
+    Running,
+    /// An activity was created: this process belongs to the application.
+    Activity,
+}
+
+static HEADLESS: std::sync::Mutex<Headless> = std::sync::Mutex::new(Headless::Idle);
+static HEADLESS_DONE: std::sync::Condvar = std::sync::Condvar::new();
+static HEADLESS_CANCEL: std::sync::Mutex<Option<corvane_core::headless::CancelToken>> =
+    std::sync::Mutex::new(None);
+
+/// `CorvaneActivity.nativeHeadlessFetch(Context, String)`: true when a fetch
+/// ran to its end.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeHeadlessFetch(
+    env: *mut jni::sys::JNIEnv,
+    _class: *mut c_void,
+    context: jni::sys::jobject,
+    files_dir: jni::sys::jstring,
+) -> u8 {
+    {
+        let mut state = HEADLESS.lock().unwrap_or_else(|p| p.into_inner());
+        if *state != Headless::Idle || ANDROID_APP.get().is_some() {
+            return 0;
+        }
+        *state = Headless::Running;
+    }
+    let fetched =
+        std::panic::catch_unwind(|| headless_fetch(env, context, files_dir)).unwrap_or(false);
+    let mut state = HEADLESS.lock().unwrap_or_else(|p| p.into_inner());
+    if *state == Headless::Running {
+        *state = Headless::Idle;
+    }
+    HEADLESS_DONE.notify_all();
+    u8::from(fetched)
+}
+
+fn headless_fetch(
+    env: *mut jni::sys::JNIEnv,
+    context: jni::sys::jobject,
+    files_dir: jni::sys::jstring,
+) -> bool {
+    // SAFETY: `env` is the JNI environment of the running native call and
+    // `context` / `files_dir` are its arguments
+    let prepared = unsafe {
+        let mut unowned = jni::EnvUnowned::from_raw(env);
+        unowned
+            .with_env(|env| -> jni::errors::Result<_> {
+                let vm = env.get_java_vm()?;
+                let context = jni::objects::JObject::from_raw(env, context);
+                let global = env.new_global_ref(&context)?;
+                let files = jni::objects::JString::from_raw(env, files_dir);
+                Ok((vm, global, files.try_to_string(env)?))
+            })
+            .into_outcome()
+    };
+    let (vm, context, files) = match prepared {
+        jni::Outcome::Ok(prepared) => prepared,
+        _ => return false,
+    };
+    let files = PathBuf::from(files);
+    // SAFETY: nothing else in the process reads the environment (no
+    // `android_main` ran), and the context is taken back below before an
+    // activity can start (`nativeEndHeadless` waits for this function)
+    unsafe {
+        prepare_environment(&files);
+        ndk_context::initialize_android_context(vm.get_raw().cast(), context.as_raw().cast());
+    }
+    let cancel = corvane_core::headless::CancelToken::new();
+    *HEADLESS_CANCEL.lock().unwrap_or_else(|p| p.into_inner()) = Some(cancel.clone());
+    corvane_core::headless::set_cancel_token(Some(cancel));
+    serve_askpass();
+
+    // `paths::app_support_dir` follows HOME, which is set now
+    let outcome =
+        corvane_core::headless::background_fetch(&corvane_platform::paths::app_support_dir());
+    match &outcome {
+        Ok(outcome) => log_line(&format!("headless background fetch: {outcome:?}")),
+        Err(err) => log_line(&format!("headless background fetch failed: {err}")),
+    }
+
+    corvane_core::headless::set_cancel_token(None);
+    *HEADLESS_CANCEL.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    // SAFETY: initialised above; nothing uses the Keystore after the fetch
+    unsafe { ndk_context::release_android_context() };
+    drop(context);
+    matches!(outcome, Ok(corvane_core::headless::Outcome::Fetched))
+}
+
+/// logcat without the tracing setup `main` installs.
+fn log_line(message: &str) {
+    if let Ok(message) = std::ffi::CString::new(message) {
+        // SAFETY: two NUL-terminated strings
+        unsafe {
+            __android_log_write(4, c"corvane".as_ptr(), message.as_ptr());
+        }
+    }
+}
+
+unsafe extern "C" {
+    fn __android_log_write(
+        priority: std::ffi::c_int,
+        tag: *const std::ffi::c_char,
+        text: *const std::ffi::c_char,
+    ) -> std::ffi::c_int;
+}
+
+/// `CorvaneActivity.nativeEndHeadless()`, from `onCreate` before the native
+/// side starts: stops a headless fetch and waits until it has let go.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeEndHeadless(
+    _env: *mut c_void,
+    _class: *mut c_void,
+) {
+    if let Some(cancel) = HEADLESS_CANCEL
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .as_ref()
+    {
+        cancel.cancel();
+    }
+    let mut state = HEADLESS.lock().unwrap_or_else(|p| p.into_inner());
+    while *state == Headless::Running {
+        state = HEADLESS_DONE.wait(state).unwrap_or_else(|p| p.into_inner());
+    }
+    *state = Headless::Activity;
 }
