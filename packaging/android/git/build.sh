@@ -100,6 +100,33 @@ build_abi() {
     ) >"$build/openssl.log" 2>&1 || { tail -40 "$build/openssl.log" >&2; exit 1; }
   fi
 
+  # ── nghttp2 (static): HTTP/2 for curl ─────────────────────────────────
+  if [ ! -f "$prefix/lib/libnghttp2.a" ]; then
+    unpack "$(fetch "$NGHTTP2_URL" "$NGHTTP2_SHA256")" "$build/nghttp2"
+    (
+      cd "$build/nghttp2"
+      ./configure --host="$triple" --prefix="$prefix" --enable-lib-only \
+        --disable-shared --enable-static --disable-examples --disable-python-bindings
+      make -j"$JOBS" -C lib
+      make -C lib install
+    ) >"$build/nghttp2.log" 2>&1 || { tail -40 "$build/nghttp2.log" >&2; exit 1; }
+    # curl was configured without it
+    rm -f "$prefix/lib/libcurl.a" "$build/git/git"
+  fi
+
+  # ── libiconv (static): bionic has iconv only from API 28 ──────────────
+  if [ ! -f "$prefix/lib/libiconv.a" ]; then
+    unpack "$(fetch "$LIBICONV_URL" "$LIBICONV_SHA256")" "$build/libiconv"
+    (
+      cd "$build/libiconv"
+      ./configure --host="$triple" --prefix="$prefix" \
+        --disable-shared --enable-static --disable-nls --enable-extra-encodings
+      make -j"$JOBS"
+      make install
+    ) >"$build/libiconv.log" 2>&1 || { tail -40 "$build/libiconv.log" >&2; exit 1; }
+    rm -f "$build/git/git"
+  fi
+
   # ── curl (static, HTTP and HTTPS only) ────────────────────────────────
   if [ ! -f "$prefix/lib/libcurl.a" ]; then
     unpack "$(fetch "$CURL_URL" "$CURL_SHA256")" "$build/curl"
@@ -109,7 +136,7 @@ build_abi() {
         --disable-shared --enable-static \
         --with-openssl="$prefix" --with-zlib \
         --with-ca-path=/system/etc/security/cacerts --without-ca-bundle \
-        --without-libpsl --without-brotli --without-zstd --without-nghttp2 \
+        --without-libpsl --without-brotli --without-zstd --with-nghttp2="$prefix" \
         --without-libidn2 --without-librtmp --without-libssh2 \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
         --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
@@ -138,8 +165,9 @@ build_abi() {
       sed -i.orig 's|^\$(SHELL_PATH) |/bin/sh |' shared.mak
       # uname_S (on the command line, config.mak is read too late): the
       # Makefile configures for the machine it runs on. Bionic
-      # before API 28 has no iconv and no getrandom; there is no gettext,
-      # Perl, Python or Tcl on the device, and the shell is /system/bin/sh.
+      # before API 28 has no iconv (GNU libiconv is linked in) and no
+      # getrandom; there is no gettext, Perl, Python or Tcl on the device,
+      # and the shell is /system/bin/sh.
       cat >config.mak <<MAK
 CC = $cc
 AR = llvm-ar
@@ -154,7 +182,8 @@ NO_PERL = 1
 NO_PYTHON = 1
 NO_TCLTK = 1
 NO_EXPAT = 1
-NO_ICONV = 1
+ICONVDIR = $prefix
+NEEDS_LIBICONV = 1
 NO_OPENSSL = 1
 NO_INSTALL_HARDLINKS = 1
 NO_NSEC = 1
@@ -166,7 +195,7 @@ CSPRNG_METHOD =
 HAVE_GETDELIM = 1
 CURL_CONFIG = $prefix/bin/curl-config
 CURL_CFLAGS = -I$prefix/include
-CURL_LDFLAGS = -L$prefix/lib -lcurl -lssl -lcrypto -lz
+CURL_LDFLAGS = -L$prefix/lib -lcurl -lnghttp2 -lssl -lcrypto -lz
 MAK
       make -j"$JOBS" SHELL=/bin/sh uname_S=Linux uname_O=Android git git-remote-http git-sh-setup git-sh-i18n \
         git-submodule git-mergetool git-mergetool--lib
@@ -180,7 +209,7 @@ MAK
 
   # ── OpenSSH client ────────────────────────────────────────────────────
   if [ -z "${SKIP_SSH:-}" ]; then
-    if [ ! -f "$build/openssh/ssh" ]; then
+    if [ ! -f "$build/openssh/ssh-keygen" ]; then
       unpack "$(fetch "$OPENSSH_URL" "$OPENSSH_SHA256")" "$build/openssh"
       (
         cd "$build/openssh"
@@ -225,10 +254,12 @@ STUB
           ac_cv_func_strnvis=no ac_cv_header_sys_un_h=yes \
           ac_cv_lib_crypt_crypt=no ac_cv_search_getrrsetbyname=no \
           ac_cv_func_bzero=yes ac_cv_member_struct_passwd_pw_gecos=no
-        make -j"$JOBS" ssh
+        make -j"$JOBS" ssh ssh-keygen
       ) >"$build/openssh.log" 2>&1 || { tail -40 "$build/openssh.log" >&2; exit 1; }
     fi
     llvm-strip -o "$out/libssh.so" "$build/openssh/ssh"
+    # Options › Git › SSH key creates keys with it
+    llvm-strip -o "$out/libssh-keygen.so" "$build/openssh/ssh-keygen"
   fi
 
   # ── git-lfs ───────────────────────────────────────────────────────────
