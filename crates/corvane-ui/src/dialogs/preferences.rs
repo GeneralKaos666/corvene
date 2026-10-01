@@ -2155,6 +2155,27 @@ fn android_shell_note(missing: bool, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// Android: the system's file picker, then `Dispatcher::import_ssh_key`.
+#[cfg(target_os = "android")]
+fn pick_ssh_key(window: &mut Window, cx: &mut App) {
+    let receiver = cx.prompt_for_paths(PathPromptOptions {
+        files: true,
+        directories: false,
+        multiple: false,
+        prompt: Some("Import".into()),
+    });
+    window
+        .spawn(cx, async move |cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                cx.update(|_, cx| Dispatcher::import_ssh_key(path, None, cx))
+                    .ok();
+            }
+        })
+        .detach();
+}
+
 /// Android, Options › Integrations: the SSH key of the bundled ssh client.
 /// Other platforms use the system's ssh and whatever keys it has.
 fn android_ssh_key(cx: &App) -> AnyElement {
@@ -2196,6 +2217,10 @@ fn android_ssh_key(cx: &App) -> AnyElement {
                             .child(
                                 link_button("prefs-ssh-add", "Add it to your GitHub account", cx)
                                     .on_click(|_, _, cx| Dispatcher::open_url(ADD_KEY_URL, cx)),
+                            )
+                            .child(
+                                link_button("prefs-ssh-replace", "Use another key…", cx)
+                                    .on_click(|_, window, cx| pick_ssh_key(window, cx)),
                             ),
                     )
                     .into_any_element()
@@ -2207,10 +2232,19 @@ fn android_ssh_key(cx: &App) -> AnyElement {
                         .child("Remotes with an SSH address (git@…) need a key on this device."),
                 )
                 .child(
-                    div().flex().child(
-                        button("prefs-ssh-create", "Create SSH key", cx)
-                            .on_click(|_, _, cx| Dispatcher::create_ssh_key(cx)),
-                    ),
+                    div()
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .gap(SPACING())
+                        .child(
+                            button("prefs-ssh-create", "Create SSH key", cx)
+                                .on_click(|_, _, cx| Dispatcher::create_ssh_key(cx)),
+                        )
+                        .child(
+                            button("prefs-ssh-import", "Import a key…", cx)
+                                .on_click(|_, window, cx| pick_ssh_key(window, cx)),
+                        ),
                 )
                 .into_any_element(),
         }

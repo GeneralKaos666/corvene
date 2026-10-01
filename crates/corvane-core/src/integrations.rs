@@ -403,6 +403,29 @@ impl Dispatcher {
         }
     }
 
+    /// Android, Options › Integrations: use the private key in `path` (a
+    /// copy the file picker made) as the bundled ssh client's key. An
+    /// encrypted key asks for its passphrase (`Popup::SshKeyPassphrase`).
+    #[cfg(target_os = "android")]
+    pub fn import_ssh_key(path: PathBuf, passphrase: Option<String>, cx: &mut App) {
+        use corvane_platform::android::SshImportError;
+        let wrong = passphrase.as_ref().is_some_and(|p| !p.is_empty());
+        let file = path.clone();
+        spawn_bg(
+            cx,
+            move || corvane_platform::android::import_ssh_key(&file, passphrase.as_deref()),
+            move |result, cx| match result {
+                Ok(_) => Self::state(cx).update(cx, |_, cx| cx.notify()),
+                Err(SshImportError::Passphrase) => {
+                    Self::show_popup(Popup::SshKeyPassphrase { path, wrong }, cx)
+                }
+                Err(SshImportError::Other(err)) => {
+                    Self::show_error("Could not import the SSH key", err, cx)
+                }
+            },
+        );
+    }
+
     /// Android, Options › Integrations: create the SSH key the bundled ssh
     /// client uses (`corvane_platform::android::create_ssh_key`).
     #[cfg(target_os = "android")]

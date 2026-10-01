@@ -32,6 +32,7 @@ mod remote_dialogs;
 mod repository_settings;
 mod sign_in;
 mod simple;
+mod ssh_key_passphrase;
 mod test_notifications;
 mod tutorial_dialogs;
 mod unknown_authors;
@@ -546,6 +547,16 @@ impl DialogHost {
                 .into(),
             Popup::ImportGitConfig { settings, skipped } => cx
                 .new(|_| import_git_config::ImportGitConfigDialog::new(settings.clone(), *skipped))
+                .into(),
+            Popup::SshKeyPassphrase { path, wrong } => cx
+                .new(|cx| {
+                    ssh_key_passphrase::SshKeyPassphraseDialog::new(
+                        path.clone(),
+                        *wrong,
+                        window,
+                        cx,
+                    )
+                })
                 .into(),
             Popup::TestNotifications { repo } => cx
                 .new(|cx| test_notifications::TestNotificationsDialog::new(*repo, cx))

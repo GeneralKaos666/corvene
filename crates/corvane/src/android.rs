@@ -591,11 +591,6 @@ static PICKING: std::sync::Mutex<Option<gpui_android::PathPromptReply>> =
 /// a folder of its own storage, one on shared storage with "All files
 /// access", or the imported copy of a repository picked anywhere else.
 fn pick_folder(options: gpui_kit::PathPromptOptions, reply: gpui_android::PathPromptReply) {
-    if !options.directories {
-        // nothing in Corvane picks single files on Android yet
-        reply(None);
-        return;
-    }
     let previous = PICKING
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -603,7 +598,13 @@ fn pick_folder(options: gpui_kit::PathPromptOptions, reply: gpui_android::PathPr
     if let Some(previous) = previous {
         previous(None);
     }
-    if activity_call!("pickFolder", "()V", &[]).is_none() {
+    // a file is copied into the cache directory, whose path is the answer
+    let shown = if options.directories {
+        activity_call!("pickFolder", "()V", &[])
+    } else {
+        activity_call!("pickFile", "()V", &[])
+    };
+    if shown.is_none() {
         let reply = PICKING
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

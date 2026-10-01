@@ -268,9 +268,76 @@ public class CorvaneActivity extends NativeActivity {
         });
     }
 
+    private static final int REQUEST_PICK_FILE = 4;
+    /** The largest file the file picker copies (an SSH key is a few kB). */
+    private static final long PICKED_FILE_LIMIT = 16L << 20;
+
+    /**
+     * Called from the native thread: the system's file picker. The picked
+     * document is copied into the cache directory (a document has no path)
+     * and that copy's path goes to nativePathPicked.
+     */
+    public static void pickFile() {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            nativePathPicked(null, null);
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                        .addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                activity.startActivityForResult(intent, REQUEST_PICK_FILE);
+            } catch (RuntimeException e) {
+                nativePathPicked(null, "No file picker is available on this device.");
+            }
+        });
+    }
+
+    private void copyPickedFile(Uri document) {
+        File folder = new File(new File(getCacheDir(), "tmp"), "picked");
+        folder.mkdirs();
+        File[] old = folder.listFiles();
+        if (old != null) {
+            for (File file : old) {
+                file.delete();
+            }
+        }
+        File copy = new File(folder, "file");
+        try (java.io.InputStream in = getContentResolver().openInputStream(document);
+                java.io.OutputStream out = new java.io.FileOutputStream(copy)) {
+            if (in == null) {
+                throw new java.io.IOException("the document cannot be read");
+            }
+            byte[] buffer = new byte[65536];
+            long total = 0;
+            for (int n; (n = in.read(buffer)) > 0;) {
+                total += n;
+                if (total > PICKED_FILE_LIMIT) {
+                    throw new java.io.IOException("the file is too large");
+                }
+                out.write(buffer, 0, n);
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            copy.delete();
+            nativePathPicked(null, "Could not read the file: " + e.getMessage());
+            return;
+        }
+        nativePathPicked(copy.getPath(), null);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_PICK_FILE) {
+            final Uri document = resultCode == RESULT_OK && data != null ? data.getData() : null;
+            if (document == null) {
+                nativePathPicked(null, null);
+            } else {
+                new Thread(() -> copyPickedFile(document), "pick-file").start();
+            }
+            return;
+        }
         if (requestCode != REQUEST_PICK_FOLDER) {
             return;
         }
