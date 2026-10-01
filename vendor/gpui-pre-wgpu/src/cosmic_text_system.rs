@@ -150,7 +150,32 @@ impl CosmicTextSystem {
     #[cfg(target_os = "android")]
     pub fn load_fonts_dir(&self, dir: &std::path::Path) {
         let mut state = self.0.write();
-        state.font_system.db_mut().load_fonts_dir(dir);
+        let db = state.font_system.db_mut();
+        db.load_fonts_dir(dir);
+        // Android 13's NotoColorEmoji.ttf is COLR v1, which swash cannot
+        // draw (the glyphs come out blank). The system keeps the bitmap
+        // font it replaced as NotoColorEmojiLegacy.ttf, under the same
+        // family name: with both present, only the legacy one stays.
+        let file_name = |face: &cosmic_text::fontdb::FaceInfo| match &face.source {
+            cosmic_text::fontdb::Source::File(path)
+            | cosmic_text::fontdb::Source::SharedFile(path, _) => path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned()),
+            cosmic_text::fontdb::Source::Binary(_) => None,
+        };
+        let has_legacy = db
+            .faces()
+            .any(|face| file_name(face).as_deref() == Some("NotoColorEmojiLegacy.ttf"));
+        if has_legacy {
+            let vector: Vec<_> = db
+                .faces()
+                .filter(|face| file_name(face).as_deref() == Some("NotoColorEmoji.ttf"))
+                .map(|face| face.id)
+                .collect();
+            for id in vector {
+                db.remove_face(id);
+            }
+        }
         state.font_ids_by_family_cache.clear();
     }
 
