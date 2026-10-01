@@ -49,14 +49,6 @@ fn linux_only() -> Availability {
     }
 }
 
-fn packs_availability() -> Availability {
-    if corvane_highlight::syntaxes::extended_bundled() {
-        Availability::BuiltIn("This build compiles every grammar in.")
-    } else {
-        Availability::Available
-    }
-}
-
 fn product_name(s: &str) -> Result<(), &'static str> {
     let s = s.trim();
     if s.is_empty() {
@@ -1926,20 +1918,6 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[],
         code: &["crates/corvane-ui/src/dialogs/preferences.rs", "crates/corvane-core/src/crash_reports.rs"],
-    },
-
-    /// Settings › Advanced › Optional components and pack loading.
-    OPTIONAL_COMPONENTS = 502 "optional-components" {
-        title: "Optional components",
-        summary: "Settings › Advanced offers downloadable packs (the syntax-extended grammar \
-                  collection), and installed packs load at launch.",
-        ghd_behaviour: "Ships every grammar; no packs section.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvane: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: true, visible: true, availability: packs_availability,
-        upstream: &[],
-        code: &["crates/corvane-ui/src/dialogs/preferences.rs", "crates/corvane-core/src/packs.rs"],
     },
 
     /// Background update-check errors stay in the log.
@@ -4178,7 +4156,10 @@ registry! {
 }
 
 /// Ids and slugs that once existed; never reused.
-pub const RETIRED: &[(u16, &str)] = &[];
+pub const RETIRED: &[(u16, &str)] = &[
+    // the syntax-extended pack it offered is compiled in
+    (502, "optional-components"),
+];
 
 pub fn find(id: FlagId) -> Option<&'static FlagDef> {
     REGISTRY.iter().find(|def| def.id == id)

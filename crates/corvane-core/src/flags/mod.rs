@@ -762,13 +762,9 @@ mod tests {
         );
         stored
             .overrides
-            .insert("optional-components".into(), Value::Bool(false));
+            .insert("wiki-not-github".into(), Value::Bool(false));
         let now = Flags::resolve(&stored, &EnvFlags::default());
-        if now.is_available(ids::OPTIONAL_COMPONENTS) {
-            assert_eq!(now.restart_pending(&launch), vec![ids::OPTIONAL_COMPONENTS]);
-        } else {
-            assert!(now.restart_pending(&launch).is_empty());
-        }
+        assert_eq!(now.restart_pending(&launch), vec![ids::WIKI_NOT_GITHUB]);
     }
 
     #[test]

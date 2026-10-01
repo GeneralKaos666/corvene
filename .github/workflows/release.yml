@@ -1,13 +1,20 @@
 name: Release
 
-# A `v<version>` tag builds, signs and uploads the release assets
-# (packaging/release.md) to a *draft* GitHub release. The self-updater skips
-# drafts, so nothing reaches users until the maintainer writes the notes
-# ([New] / [Improved] / [Fixed] items) and publishes it.
+# A `v<version>` tag builds the release assets (packaging/release.md) and
+# uploads them to a *draft* GitHub release. The self-updater skips drafts, so
+# nothing reaches users until the maintainer writes the notes ([New] /
+# [Improved] / [Fixed] items) and publishes it.
 #
-# Run by hand (Actions → Release → Run workflow) to build and sign the assets
-# as a workflow artifact without creating a release. With `linux_release` set
-# to an existing release's tag, a run by hand skips the macOS job and adds
+# Every platform builds at once, as workflow artifacts; `publish` collects
+# them once all of them are through. Nothing here runs fmt, clippy or the
+# tests: ci.yml does on every push to main, so tag a commit CI has passed. The on-demand packs do
+# not go on the app's release: they live on the rolling `packs` release
+# (never the latest one), and are only built when it lacks the pack version
+# in the tree.
+#
+# Run by hand (Actions → Release → Run workflow) to build the assets as
+# workflow artifacts without creating a release. With `linux_release` set to
+# an existing release's tag, a run by hand skips macOS and Android and adds
 # the Linux assets (built from the branch it runs on) to that release.
 
 on:
@@ -16,13 +23,17 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: Also build the Corvane-Full variant (every pack compiled in)
+        description: Also build the Corvane-Full variant (the tree-sitter grammars compiled in)
         type: boolean
         default: true
       linux_release:
-        description: Add the Linux assets to this existing release (its tag, like v0.1.0) and skip the macOS job
+        description: Add the Linux assets to this existing release (its tag, like v0.1.0) and skip macOS and Android
         type: string
         default: ''
+      publish_packs:
+        description: Rebuild every pack and publish it to the `packs` release
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,170 +47,169 @@ env:
   CARGO_INCREMENTAL: 0
   # C code (tree-sitter, grammars) targets Info.plist's LSMinimumSystemVersion
   MACOSX_DEPLOYMENT_TARGET: '10.15'
-  TARGETS: aarch64-apple-darwin x86_64-apple-darwin
-  # the release the Linux jobs add to: the pushed tag, or `linux_release`
+  # the release the assets go to: the pushed tag, or `linux_release`
   RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.linux_release }}
+  # the rolling release the packs and their manifest live on
+  PACKS_TAG: packs
 
 jobs:
-  release:
-    name: build · sign · upload (macOS universal)
-    if: ${{ !inputs.linux_release }}
-    runs-on: macos-26
-    timeout-minutes: 180
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      variants: ${{ steps.version.outputs.variants }}
+      packs: ${{ steps.packs.outputs.packs }}
     steps:
       - uses: actions/checkout@v4
-
       - name: version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FULL: ${{ inputs.full }}
         run: |
           version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+          if [[ -n "$RELEASE_TAG" && "$RELEASE_TAG" != "v$version" ]]; then
+            echo "::error::release $RELEASE_TAG does not match Cargo.toml version $version"
             exit 1
           fi
-          if [[ "$GITHUB_REF_TYPE" == "tag" || "${{ inputs.full }}" == "true" ]]; then
-            echo "full=true" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" != "tag" && -n "$RELEASE_TAG" ]]; then
+            gh release view "$RELEASE_TAG" --json tagName > /dev/null
           fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" || "$FULL" == "true" ]]; then
+            echo 'variants=["default","full"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'variants=["default"]' >> "$GITHUB_OUTPUT"
+          fi
+      # A pack is installed by version, so one that is published is never
+      # built again: bump its version to ship new grammars.
+      - name: packs to build
+        id: packs
+        env:
+          FORCE: ${{ inputs.publish_packs }}
+          LINUX_ONLY: ${{ inputs.linux_release }}
+        run: |
+          want="$(packaging/packs.sh --version)"
+          curl -fsSL -o have.json \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$PACKS_TAG/packs-manifest.json" \
+            || echo '{"packs": []}' > have.json
+          python3 - "$want" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, os, sys
+          want = sys.argv[1]
+          jobs = [
+              {"name": "macos", "runner": "macos-26", "targets": ["macos-aarch64", "macos-x86_64"]},
+              {"name": "linux-x86_64", "runner": "ubuntu-24.04", "targets": ["linux-x86_64"]},
+              {"name": "linux-aarch64", "runner": "ubuntu-24.04-arm", "targets": ["linux-aarch64"]},
+              {"name": "android", "runner": "ubuntu-24.04", "targets": ["android-aarch64", "android-x86_64"]},
+          ]
+          have = {(p["name"], p["version"], p.get("target")) for p in json.load(open("have.json"))["packs"]}
+          force = os.environ["FORCE"] == "true"
+          build = []
+          for job in jobs:
+              if os.environ["LINUX_ONLY"] and not job["name"].startswith("linux"):
+                  continue
+              targets = job.pop("targets")
+              missing = any(
+                  (f"tree-sitter-{variant}", want, target) not in have
+                  for variant in ("all", "rest")
+                  for target in targets
+              )
+              if force or missing:
+                  build.append(job)
+          print("packs=" + json.dumps(build))
+          PY
+          cat "$GITHUB_OUTPUT"
 
-      # Xcode 26: actool for the Liquid Glass icon (crashes on a macOS 15 host,
-      # hence macos-26), metal for precompiled shaders
+  # One runner per architecture and variant: the release profile (fat LTO,
+  # one codegen unit) takes a quarter of an hour per binary.
+  macos-build:
+    name: build (macOS ${{ matrix.target }}, ${{ matrix.variant }})
+    needs: plan
+    if: ${{ !inputs.linux_release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      # Xcode 26: metal for the precompiled shaders
       - name: select Xcode 26
         run: echo "DEVELOPER_DIR=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)/Contents/Developer" >> "$GITHUB_ENV"
-
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release
-
-      # grammar sources for the tests, the tree-sitter packs and the full build;
-      # packs.sh generates the grammars without a committed parser.c
-      - name: tree-sitter CLI
-        run: |
-          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
-          echo "CORVANE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter" >> "$GITHUB_ENV"
-          echo "$RUNNER_TEMP/ts-cli/bin" >> "$GITHUB_PATH"
-      - name: cache grammar sources
-        id: grammar-src
-        uses: actions/cache@v4
-        with:
-          path: target/grammar-src
-          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
-      - name: fetch grammar sources
-        if: steps.grammar-src.outputs.cache-hit != 'true'
-        run: python3 tools/ts-queries/fetch.py
-
-      - name: rustfmt
-        run: cargo fmt --all -- --check
-      - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: test
-        run: cargo test --workspace
-
-      - name: update public key
-        run: echo "CORVANE_UPDATE_PUBLIC_KEY=$(tail -n1 packaging/corvane-release.pub)" >> "$GITHUB_ENV"
-
-      - name: code-signing certificate
-        env:
-          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
-          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
-        run: packaging/signing-cert.sh ci
-
-      - name: build (both architectures)
+          shared-key: release-${{ matrix.target }}
+          # a tag's run reads main's caches, never another tag's: only a run
+          # by hand on main (which every later tag can read) saves one
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.variant == 'default' }}
+      # the full build links every grammar in
+      - uses: ./.github/actions/grammar-sources
+        if: matrix.variant == 'full'
+      - name: build
         env:
           CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
         run: |
           # an empty secret must not count as "has a client secret" (307-sign-in-flow)
           [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
-          for t in $TARGETS; do
-            cargo build --release -p corvane --no-default-features --target "$t"
-          done
+          cargo build --release -p corvane --no-default-features \
+            ${{ matrix.variant == 'full' && '--features full' || '' }} --target "${{ matrix.target }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.variant }}-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/corvane
+          retention-days: 1
+
+  macos-assets:
+    name: bundle · sign (macOS universal)
+    needs: [plan, macos-build]
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # Xcode 26: actool for the Liquid Glass icon (crashes on a macOS 15 host,
+      # hence macos-26)
+      - name: select Xcode 26
+        run: echo "DEVELOPER_DIR=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)/Contents/Developer" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: bins
+      - name: code-signing certificate
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+        run: packaging/signing-cert.sh ci
       - name: assets
-        run: UPDATE_CASK=1 SKIP_BUILD=1 packaging/release.sh
-
-      - name: build Corvane-Full (both architectures)
-        if: steps.version.outputs.full == 'true'
         env:
-          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+          VARIANTS: ${{ join(fromJSON(needs.plan.outputs.variants), ' ') }}
         run: |
-          [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
-          for t in $TARGETS; do
-            cargo build --release -p corvane --no-default-features --features full --target "$t"
+          for variant in $VARIANTS; do
+            for t in aarch64-apple-darwin x86_64-apple-darwin; do
+              mkdir -p "target/$t/release"
+              cp "bins/bin-$variant-$t/corvane" "target/$t/release/corvane"
+              chmod +x "target/$t/release/corvane"
+            done
+            FULL="$([[ "$variant" == full ]] && echo 1 || echo 0)" SKIP_BUILD=1 packaging/release.sh
           done
-      - name: Corvane-Full assets
-        if: steps.version.outputs.full == 'true'
-        run: FULL=1 SKIP_BUILD=1 packaging/release.sh
-
-      - name: sign release assets
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          brew install minisign
-          umask 077
-          key="$RUNNER_TEMP/corvane-release.key"
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
-          trap 'rm -f "$key"' EXIT
-          cd target/release-assets
-          for asset in *.zip *.dmg packs-manifest.json; do
-            [[ -f "$asset" ]] || continue
-            printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" \
-              -t "corvane v$VERSION $asset" -x "$asset.minisig" -m "$asset"
-          done
-          minisign -V -p ../../packaging/corvane-release.pub -m "Corvane-$VERSION-macos-universal.zip"
-          ls -l
-
-      - name: summary
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          {
-            echo "## Corvane $VERSION"
-            echo
-            echo "Cask sha256: \`$(shasum -a 256 "target/release-assets/Corvane-$VERSION-macos-universal.zip" | cut -d' ' -f1)\`"
-            echo
-            echo "The \`cask\` job adds the Linux hashes: copy its \`cask\` artifact's corvane.rb to wasi-master/homebrew-corvane after publishing the release."
-            echo
-            echo '```'
-            ls -l target/release-assets | tail -n +2
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # version and the macOS sha256; the `cask` job below adds the Linux ones
+          ls -l target/release-assets
       - uses: actions/upload-artifact@v4
         with:
-          name: cask-macos
-          path: packaging/homebrew/Casks/corvane.rb
-      - uses: actions/upload-artifact@v4
-        if: github.ref_type != 'tag'
-        with:
-          name: release-assets
+          name: assets-macos
           path: |
-            target/release-assets/*
-            !target/release-assets/packs
-
-      - name: draft release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          shopt -s nullglob
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
-            --title "Corvane ${GITHUB_REF_NAME#v}" \
-            --notes "- [New] …" \
-            target/release-assets/*.zip target/release-assets/*.dmg \
-            target/release-assets/*.minisig target/release-assets/packs-manifest.json
+            target/release-assets/*.zip
+            target/release-assets/*.dmg
+          compression-level: 0
 
   linux:
-    name: build · sign · upload (Linux ${{ matrix.arch }})
-    # after the macOS job: it creates the draft release this job adds to
-    # (`linux_release`: that job is skipped and the release already exists)
-    needs: release
-    if: ${{ !cancelled() && (needs.release.result == 'success' || (needs.release.result == 'skipped' && inputs.linux_release)) }}
+    name: build · package (Linux ${{ matrix.arch }})
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
@@ -209,44 +219,21 @@ jobs:
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: check the release to add to
-        if: inputs.linux_release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          if [[ "$RELEASE_TAG" != "v$version" ]]; then
-            echo "::error::release $RELEASE_TAG does not match Cargo.toml version $version"
-            exit 1
-          fi
-          gh release view "$RELEASE_TAG" --json tagName > /dev/null
       - name: system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang mold pkg-config minisign \
+            clang mold pkg-config \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libfontconfig-dev libfreetype-dev libvulkan-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-linux-${{ matrix.arch }}
-      - name: tree-sitter CLI
-        run: |
-          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
-          echo "CORVANE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter" >> "$GITHUB_ENV"
-      - name: cache grammar sources
-        id: grammar-src
-        uses: actions/cache@v4
-        with:
-          path: target/grammar-src
-          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
-      - name: fetch grammar sources
-        if: steps.grammar-src.outputs.cache-hit != 'true'
-        run: python3 tools/ts-queries/fetch.py
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: appimagetool
         run: |
           curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
@@ -260,67 +247,27 @@ jobs:
           CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
         run: |
           [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
-          export CORVANE_UPDATE_PUBLIC_KEY="$(tail -n1 packaging/corvane-release.pub)"
           packaging/linux/package.sh
           ls -l target/linux
-      # this architecture's tree-sitter packs (.so units); the macOS job's
-      # manifest gets their entries in `packs-manifest` below
-      - name: tree-sitter packs
-        run: |
-          PACKS="tree-sitter-all tree-sitter-rest" packaging/packs.sh target/linux/packs
-          mv target/linux/packs/*.zip target/linux/
-          mv target/linux/packs/packs-manifest.json "target/linux/packs-manifest-linux-${{ matrix.arch }}.json"
-          ls -l target/linux
-      - name: sign
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-        run: |
-          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          umask 077
-          key="$RUNNER_TEMP/corvane-release.key"
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
-          trap 'rm -f "$key"' EXIT
-          cd target/linux
-          for asset in *.deb *.AppImage tree-sitter-*.zip; do
-            printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" \
-              -t "corvane v$version $asset" -x "$asset.minisig" -m "$asset"
-            minisign -V -p ../../packaging/corvane-release.pub -m "$asset"
-          done
-      - uses: actions/upload-artifact@v4
-        if: env.RELEASE_TAG == ''
-        with:
-          name: release-assets-linux-${{ matrix.arch }}
-          path: target/linux/*
-      # the Homebrew cask's sha256 for this architecture's AppImage (`cask` job)
-      - name: cask sha256
-        run: sha256sum target/linux/*.AppImage | cut -d' ' -f1 > "$RUNNER_TEMP/cask-sha256-${{ matrix.arch }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: cask-sha256-${{ matrix.arch }}
-          path: ${{ runner.temp }}/cask-sha256-${{ matrix.arch }}
-      - name: upload to the release
-        if: env.RELEASE_TAG != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        # `linux_release`: a second run replaces what the first one uploaded
-        run: gh release upload "$RELEASE_TAG" ${{ inputs.linux_release && '--clobber' || '' }} target/linux/*.deb target/linux/*.AppImage target/linux/tree-sitter-*.zip target/linux/*.minisig
-      - uses: actions/upload-artifact@v4
-        if: env.RELEASE_TAG != ''
-        with:
-          name: packs-manifest-linux-${{ matrix.arch }}
-          path: target/linux/packs-manifest-linux-${{ matrix.arch }}.json
+          name: assets-linux-${{ matrix.arch }}
+          path: |
+            target/linux/*.deb
+            target/linux/*.AppImage
+          compression-level: 0
 
-  # The Android packages (foss and play, both ABIs in each) and the Android
-  # tree-sitter packs, on a Linux runner; also the play flavour's bundle
-  # (.aab, with the grammars as an on-demand module), which stays a workflow
-  # artifact: it is uploaded to Google Play by hand. The APKs are signed with the
-  # keystore in the CORVANE_ANDROID_KEYSTORE_BASE64 secret and only then
-  # added to the draft release; without it they stay workflow artifacts,
-  # unsigned. A failure here does not hold up the other platforms.
+  # The Android packages (foss and play, both ABIs in each) on a Linux
+  # runner; also the play flavour's bundle (.aab, with the grammars as an
+  # on-demand module), which stays a workflow artifact: it is uploaded to
+  # Google Play by hand. The APKs are signed with the keystore in the
+  # CORVANE_ANDROID_KEYSTORE_BASE64 secret and only then added to the draft
+  # release; without it they stay workflow artifacts, unsigned. A failure
+  # here does not hold up the other platforms.
   android:
-    name: build · sign · upload (Android)
-    needs: release
+    name: build · sign (Android)
+    needs: plan
+    if: ${{ !inputs.linux_release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     continue-on-error: true
@@ -328,16 +275,13 @@ jobs:
       NDK_VERSION: 27.3.13750724
     steps:
       - uses: actions/checkout@v4
-      - name: system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends minisign
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-android
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -349,21 +293,11 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-      - name: install cargo-ndk
-        run: cargo install cargo-ndk --locked
-      - name: tree-sitter CLI
-        run: |
-          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
-          echo "CORVANE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter" >> "$GITHUB_ENV"
-      - name: cache grammar sources
-        id: grammar-src
-        uses: actions/cache@v4
+      - uses: taiki-e/install-action@v2
         with:
-          path: target/grammar-src
-          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
-      - name: fetch grammar sources
-        if: steps.grammar-src.outputs.cache-hit != 'true'
-        run: python3 tools/ts-queries/fetch.py
+          tool: cargo-ndk
+      # the play bundle's grammar module
+      - uses: ./.github/actions/grammar-sources
       - name: cache the bundled git
         uses: actions/cache@v4
         with:
@@ -376,96 +310,121 @@ jobs:
           CORVANE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CORVANE_ANDROID_KEYSTORE_PASSWORD }}
           CORVANE_ANDROID_KEY_ALIAS: ${{ secrets.CORVANE_ANDROID_KEY_ALIAS }}
           CORVANE_ANDROID_KEY_PASSWORD: ${{ secrets.CORVANE_ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
-          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
           suffix=-unsigned
           if [[ -n "$CORVANE_ANDROID_KEYSTORE_BASE64" ]]; then
             umask 077
             printf '%s' "$CORVANE_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/corvane.jks"
             export CORVANE_ANDROID_KEYSTORE="$RUNNER_TEMP/corvane.jks"
             suffix=
-            echo "ANDROID_SIGNED=1" >> "$GITHUB_ENV"
           fi
           # BUNDLE=1: also the .aab for Google Play with the grammar module
           BUNDLE=1 packaging/android/build.sh release
           rm -f "$RUNNER_TEMP/corvane.jks"
           mkdir -p target/android
-          cp packaging/android/app/build/outputs/bundle/playRelease/*.aab "target/android/Corvane-$version-android-play$suffix.aab"
+          cp packaging/android/app/build/outputs/bundle/playRelease/*.aab "target/android/Corvane-$VERSION-android-play$suffix.aab"
           for flavour in foss play; do
             apk="$(ls packaging/android/app/build/outputs/apk/$flavour/release/*.apk | head -1)"
-            cp "$apk" "target/android/Corvane-$version-android-$flavour$suffix.apk"
+            cp "$apk" "target/android/Corvane-$VERSION-android-$flavour$suffix.apk"
           done
           ls -l target/android
-      - name: tree-sitter packs
-        run: |
-          PACK_OS=android PACKS="tree-sitter-all tree-sitter-rest" packaging/packs.sh target/android/packs
-          mv target/android/packs/*.zip target/android/
-          mv target/android/packs/packs-manifest.json target/android/packs-manifest-android.json
-          ls -l target/android
-      - name: sign
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-        run: |
-          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          umask 077
-          key="$RUNNER_TEMP/corvane-release.key"
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
-          trap 'rm -f "$key"' EXIT
-          cd target/android
-          for asset in *.apk tree-sitter-*.zip; do
-            printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" \
-              -t "corvane v$version $asset" -x "$asset.minisig" -m "$asset"
-            minisign -V -p ../../packaging/corvane-release.pub -m "$asset"
-          done
       - uses: actions/upload-artifact@v4
         with:
-          name: release-assets-android
+          name: assets-android
           path: target/android/*
-      - name: upload the packs to the draft release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" target/android/tree-sitter-*.zip target/android/tree-sitter-*.zip.minisig
-      - name: upload the signed packages to the draft release
-        if: github.ref_type == 'tag' && env.ANDROID_SIGNED == '1'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" target/android/*.apk target/android/*.apk.minisig
-      - uses: actions/upload-artifact@v4
-        if: github.ref_type == 'tag'
-        with:
-          name: packs-manifest-android
-          path: target/android/packs-manifest-android.json
+          compression-level: 0
 
-  packs-manifest:
-    name: add the Linux and Android packs to the packs manifest
-    needs: [linux, android]
-    # Android may have failed (or been skipped); the Linux packs still go in
-    if: ${{ !cancelled() && needs.linux.result == 'success' && (github.ref_type == 'tag' || inputs.linux_release) }}
+  # The tree-sitter packs `plan` found missing from the `packs` release, one
+  # job per platform (macOS and Android build both architectures from one
+  # runner, Linux builds each natively).
+  packs:
+    name: tree-sitter packs (${{ matrix.name }})
+    needs: plan
+    if: ${{ needs.plan.outputs.packs != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.packs) }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.name == 'android' }}
+    timeout-minutes: 60
+    env:
+      NDK_VERSION: 27.3.13750724
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang
+        if: startsWith(matrix.name, 'linux')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang
+      # packs.sh builds for every macOS Rust target that is installed
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.name == 'macos'
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - name: install the NDK
+        if: matrix.name == 'android'
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "PACK_OS=android" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/grammar-sources
+      - name: build
+        run: |
+          packaging/packs.sh target/packs
+          mv target/packs/packs-manifest.json "target/packs/packs-manifest-${{ matrix.name }}.json"
+          ls -l target/packs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packs-${{ matrix.name }}
+          path: target/packs/*
+          compression-level: 0
+
+  # The archives first, then the manifest that points at them: an entry is
+  # keyed by pack, version and platform, so older versions stay listed for
+  # the apps that still need them.
+  publish-packs:
+    name: publish the packs
+    needs: [plan, packs]
+    if: ${{ !cancelled() && needs.packs.result != 'skipped' && (github.ref_type == 'tag' || inputs.linux_release || inputs.publish_packs) }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: packs-release
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: packs-manifest-*
+          pattern: packs-*
           merge-multiple: true
-          path: fragments
-      - name: merge, sign and replace
+          path: packs
+      - name: upload
         env:
           GH_TOKEN: ${{ github.token }}
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends minisign
-          version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          gh release download "$RELEASE_TAG" -p packs-manifest.json -D merged
-          python3 - merged/packs-manifest.json fragments/*.json <<'PY'
+          shopt -s nullglob
+          archives=(packs/*.zip)
+          if [[ ${#archives[@]} -eq 0 ]]; then
+            echo "::error::no pack was built"
+            exit 1
+          fi
+          if gh release view "$PACKS_TAG" --json tagName > /dev/null 2>&1; then
+            gh release download "$PACKS_TAG" -p packs-manifest.json -D merged || true
+          else
+            gh release create "$PACKS_TAG" --latest=false --target "$GITHUB_SHA" \
+              --title "Packs" \
+              --notes "Optional components Corvane downloads on demand (Settings › Advanced): the tree-sitter grammars. Not an application release; see the latest release for Corvane itself."
+          fi
+          mkdir -p merged
+          [[ -f merged/packs-manifest.json ]] || echo '{"schema": 1, "packs": []}' > merged/packs-manifest.json
+          python3 - merged/packs-manifest.json packs/packs-manifest-*.json <<'PY'
           import json, sys
           path, *fragments = sys.argv[1:]
           manifest = json.load(open(path))
-          key = lambda p: (p["name"], p.get("target"))
+          key = lambda p: (p["name"], p["version"], p.get("target"))
           packs = {key(p): p for p in manifest["packs"]}
           for fragment in fragments:
               for p in json.load(open(fragment))["packs"]:
@@ -473,48 +432,71 @@ jobs:
           manifest["packs"] = list(packs.values())
           json.dump(manifest, open(path, "w"), indent=2)
           PY
-          umask 077
-          key="$RUNNER_TEMP/corvane-release.key"
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
-          trap 'rm -f "$key"' EXIT
-          printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$key" \
-            -t "corvane v$version packs-manifest.json" -x merged/packs-manifest.json.minisig -m merged/packs-manifest.json
-          minisign -V -p packaging/corvane-release.pub -m merged/packs-manifest.json
-          gh release upload "$RELEASE_TAG" --clobber merged/packs-manifest.json merged/packs-manifest.json.minisig
+          gh release upload "$PACKS_TAG" --clobber "${archives[@]}"
+          gh release upload "$PACKS_TAG" --clobber merged/packs-manifest.json
+          {
+            echo "## Packs"
+            echo
+            echo '```'
+            ls -l packs | tail -n +2
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  cask:
-    name: add the Linux AppImages to the Homebrew cask
-    needs: [release, linux]
-    if: ${{ !cancelled() && needs.linux.result == 'success' }}
+  # The draft release (or, with `linux_release`, the existing one) gets the
+  # installers only, and the Homebrew cask its version and hashes.
+  publish:
+    name: draft release · Homebrew cask
+    needs: [plan, macos-assets, linux, android]
+    if: >-
+      ${{ !cancelled() && needs.linux.result == 'success'
+          && (inputs.linux_release || needs.macos-assets.result == 'success') }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        if: ${{ !inputs.linux_release }}
         with:
-          name: cask-macos
-          path: packaging/homebrew/Casks
-      # no macOS job in this run: its half comes from the release's zip
-      - name: stamp the macOS half from the release
-        if: inputs.linux_release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version="${RELEASE_TAG#v}"
-          gh release download "$RELEASE_TAG" -p "Corvane-$version-macos-universal.zip" -D "$RUNNER_TEMP"
-          packaging/homebrew/stamp.py --version "$version" \
-            --macos "$(sha256sum "$RUNNER_TEMP/Corvane-$version-macos-universal.zip" | cut -d' ' -f1)"
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: cask-sha256-*
+          pattern: assets-*
           merge-multiple: true
-          path: sha256
-      - name: stamp
+          path: assets
+      # no macOS job in a `linux_release` run: the cask's half comes from the release's zip
+      - name: the release's macOS zip
+        if: inputs.linux_release
+        run: gh release download "$RELEASE_TAG" -p "Corvane-$VERSION-macos-universal.zip" -D assets
+      - name: upload
+        if: env.RELEASE_TAG != ''
         run: |
-          packaging/homebrew/stamp.py \
-            --x86_64-linux "$(cat sha256/cask-sha256-x86_64)" \
-            --arm64-linux "$(cat sha256/cask-sha256-aarch64)"
+          shopt -s nullglob
+          # unsigned Android packages and the Play bundle stay workflow artifacts
+          files=()
+          for file in assets/*.zip assets/*.dmg assets/*.deb assets/*.AppImage assets/*.apk; do
+            [[ "$file" == *-unsigned.apk ]] || files+=("$file")
+          done
+          if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" --clobber "${files[@]}"
+          else
+            gh release create "$RELEASE_TAG" --draft --verify-tag \
+              --title "Corvane ${RELEASE_TAG#v}" \
+              --notes "- [New] …" \
+              "${files[@]}"
+          fi
+      - name: stamp the cask
+        run: |
+          sha() { sha256sum "$1" | cut -d' ' -f1; }
+          packaging/homebrew/stamp.py --version "$VERSION" \
+            --macos "$(sha "assets/Corvane-$VERSION-macos-universal.zip")" \
+            --x86_64-linux "$(sha "assets/Corvane-$VERSION-x86_64.AppImage")" \
+            --arm64-linux "$(sha "assets/Corvane-$VERSION-aarch64.AppImage")"
           {
+            echo "## Corvane $VERSION"
+            echo
+            echo '```'
+            ls -l assets | tail -n +2
+            echo '```'
+            echo
             echo "## Homebrew cask"
             echo
             echo "Copy the \`cask\` artifact's corvane.rb to wasi-master/homebrew-corvane after publishing the release."

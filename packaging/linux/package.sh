@@ -11,8 +11,7 @@
 #   usr/share/applications/com.wasimaster.corvane.desktop
 #   usr/share/icons/hicolor/{256x256,scalable}/apps/com.wasimaster.corvane.*
 #
-# Env: CORVANE_UPDATE_PUBLIC_KEY (else packaging/corvane-release.pub),
-# SKIP_BUILD=1 (reuse target/release/corvane), PACKAGE_BIN=<binary> (package
+# Env: SKIP_BUILD=1 (reuse target/release/corvane), PACKAGE_BIN=<binary> (package
 # that binary instead, e.g. CI's debug build), APPIMAGETOOL=<path>.
 set -euo pipefail
 
@@ -29,10 +28,6 @@ esac
 OUT="$ROOT/target/linux"
 ID=com.wasimaster.corvane
 
-if [ -z "${CORVANE_UPDATE_PUBLIC_KEY:-}" ] && [ -f packaging/corvane-release.pub ]; then
-  CORVANE_UPDATE_PUBLIC_KEY="$(tail -n 1 packaging/corvane-release.pub)"
-  export CORVANE_UPDATE_PUBLIC_KEY
-fi
 if [ -z "${SKIP_BUILD:-}" ] && [ -z "${PACKAGE_BIN:-}" ]; then
   cargo build --release -p corvane
 fi

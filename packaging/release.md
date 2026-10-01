@@ -2,39 +2,8 @@
 
 How a tagged commit becomes the artefacts the self-updater and the Homebrew
 cask consume (Linux: see [Linux](#linux)). Nothing here needs an Apple Developer ID: the
-bundle is signed with a self-signed certificate and integrity comes from
-minisign.
-
-## Signing keys (one-time, maintainer's machine)
-
-The self-updater verifies every download against an Ed25519 minisign public
-key compiled into the binary. Generate the pair once:
-
-```bash
-brew install minisign
-minisign -G -p corvane-release.pub -s ~/.minisign/corvane-release.key
-```
-
-(`rsign2` from crates.io is a drop-in alternative: `rsign generate -p … -s …`.)
-
-- `corvane-release.pub` is public. Copy it to `packaging/corvane-release.pub`
-  and commit it; `packaging/release.sh` exports its key line as
-  `CORVANE_UPDATE_PUBLIC_KEY` before building.
-- `~/.minisign/corvane-release.key` is the **secret key**. It never enters
-  the repository or the bundle. Keep it in the password manager, and store
-  its contents in the GitHub Actions secret `MINISIGN_SECRET_KEY` (with the
-  passphrase in `MINISIGN_PASSWORD`) for CI signing.
-- Losing the secret key means shipping a new public key in a release users
-  install by hand: existing installs cannot verify anything signed with a
-  new key.
-
-Every build without `CORVANE_UPDATE_PUBLIC_KEY` prints
-`warning: corvane-platform@…: CORVANE_UPDATE_PUBLIC_KEY is not set…` from
-`crates/corvane-platform/build.rs` and compiles a placeholder key that
-rejects every real update (`corvane_platform::updater::PUBLIC_KEY`).
-Development builds never check for updates anyway
-(`corvane_core::updater::updates_enabled`, `CORVANE_UPDATE_CHECK=1` forces
-it).
+bundle is signed with a self-signed certificate, and the self-updater checks
+a download against the sha256 GitHub lists for the asset.
 
 ## Code-signing certificate (one-time, maintainer's machine)
 
@@ -60,7 +29,7 @@ packaging/signing-cert.sh create   # → login keychain, ~/.corvane-signing/corv
   first run asks to use the key: Always Allow), else ad-hoc;
   `CORVANE_SIGN_IDENTITY=-` forces ad-hoc. `packaging/release.sh` refuses a
   bundle that is not signed with it (`ALLOW_ADHOC=1` for tests).
-- Losing it is not fatal, unlike the minisign key: a new certificate means
+- Losing it is not fatal: a new certificate means
   one more password prompt per Keychain item on every install. The first
   self-signed release does the same for installs of ad-hoc builds.
 - `codesign -d -r- /Applications/Corvane.app` shows the requirement.
@@ -72,59 +41,91 @@ packaging/signing-cert.sh create   # → login keychain, ~/.corvane-signing/corv
    `git tag v<version>`. Pushing the tag runs steps 2, 3 and 5 in CI
    ([Releasing from CI](#releasing-from-ci)); the steps below are the local
    path.
-2. `packaging/release.sh` (see `packaging/release.sh --help`): release build
-   with the public key, `packaging/bundle.sh release`, the universal binary
-   when both target directories exist, `Corvane-<version>-macos-universal.zip`
-   (+ `.dmg`), the `Corvane-Full-…` variant when `FULL=1`, minisign
-   signatures for every asset, the packs manifest, and the cask's sha256.
-   Output lands in `target/release-assets/`.
-3. Create the GitHub release for the tag and upload everything in
-   `target/release-assets/`. The self-updater reads
+2. `packaging/release.sh` (see `packaging/release.sh --help`): release build,
+   `packaging/bundle.sh release`, the universal binary when both target
+   directories exist, `Corvane-<version>-macos-universal.zip` (+ `.dmg`), the
+   `Corvane-Full-…` variant when `FULL=1`, and the cask's sha256. Output
+   lands in `target/release-assets/`.
+3. Create the GitHub release for the tag and upload the `.zip` and `.dmg`
+   files in `target/release-assets/`. The self-updater reads
    `GET /repos/wasi-master/corvane/releases/latest`, picks the `.zip` whose
    name contains `universal` (else the machine's architecture, else `macos`)
-   and needs `<zip>.minisig` next to it. The release body is Markdown; list
-   items tagged `[New]` / `[Improved]` / `[Fixed]` / `[Added]` / `[Removed]`
-   become the Release Notes dialog's entries (`corvane_core::release_notes`).
+   and checks the download against the asset's `digest` (the sha256 GitHub
+   computes at upload and shows next to the asset). The release body is
+   Markdown; list items tagged `[New]` / `[Improved]` / `[Fixed]` /
+   `[Added]` / `[Removed]` become the Release Notes dialog's entries
+   (`corvane_core::release_notes`).
 4. Update `packaging/homebrew/Casks/corvane.rb` with the version, the
    sha256 `release.sh` printed and the two AppImages' sha256
    (`packaging/homebrew/stamp.py`), and push it to the `homebrew-corvane`
    tap (`packaging/homebrew/README.md`).
-5. Upload `packs-manifest.json` (+ `.minisig`) and the pack archives to the
-   same release when a pack changed (`crates/corvane-packs`).
+5. When a pack changed: [Packs](#packs).
+
+## Packs
+
+The on-demand packs (`crates/corvane-packs`: the tree-sitter grammars, one
+archive per OS and architecture) are not assets of the app's releases. They
+live on one rolling release tagged `packs`, which is created with
+`--latest=false` so `releases/latest` (the updater's feed, the README's
+download link) never points at it, next to `packs-manifest.json`. The app
+reads `…/releases/download/packs/packs-manifest.json`; every entry carries
+the archive's URL and sha256, and the download is checked against it.
+
+A pack is installed by version, so a published `(pack, version, platform)`
+is never built or uploaded again: bump the pack's version
+(`corvane_grammars::PACK_VERSION`) to ship new grammars. The manifest keeps
+the older entries (with their `min_app`) for the apps that still need them.
+
+By hand: `packaging/packs.sh` on each platform (`PACK_OS=android` for the
+Android ones), add the `packs` entries of its `packs-manifest.json` to the
+release's, then upload the archives and the merged manifest:
+
+```bash
+gh release create packs --latest=false --title Packs --notes "…"   # once
+gh release upload packs --clobber target/release-assets/packs/*.zip packs-manifest.json
+```
 
 ## Releasing from CI
 
-`.github/workflows/release.yml` runs on a `v*` tag push (`macos-26`, Xcode
-26; its `actool` crashes on a macOS 15 host): fmt, clippy and tests; a `--no-default-features` release build for
-`aarch64-apple-darwin` and `x86_64-apple-darwin`; `packaging/release.sh`
-with `SKIP_BUILD=1 UPDATE_CASK=1` (lipo, bundle signed with the certificate
-from `packaging/signing-cert.sh ci`, zip, dmg, packs); the same for
-`Corvane-Full`; minisign signatures for every `.zip`, `.dmg` and
-`packs-manifest.json`, checked against `packaging/corvane-release.pub`; and a
-**draft** release with every asset. It fails when the tag is not
-`v<Cargo.toml version>`.
+`.github/workflows/release.yml` runs on a `v*` tag push. It runs no fmt,
+clippy or tests (`ci.yml` does on every push to `main`): tag a commit whose
+CI run is green. Every platform builds at once and hands its assets on as
+workflow artifacts:
 
-Repository secrets: `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`,
-`MINISIGN_SECRET_KEY`, `MINISIGN_PASSWORD`, and optionally
-`CORVANE_GITHUB_CLIENT_SECRET` (without it the `307-sign-in-flow` "auto"
-default uses the device flow).
+- `plan`: the version (fails when the tag is not `v<Cargo.toml version>`)
+  and which packs the `packs` release lacks.
+- `macos-build`: one `macos-26` runner (Xcode 26; its `actool` crashes on a
+  macOS 15 host) per architecture and variant, a `--no-default-features`
+  release build each (`--features full` for `Corvane-Full`).
+- `macos-assets`: `packaging/release.sh` with `SKIP_BUILD=1` on those four
+  binaries (lipo, bundle signed with the certificate from
+  `packaging/signing-cert.sh ci`, zip, dmg), once per variant.
+- `linux` (x86_64 and aarch64) and `android`.
+- `packs`: only the platforms `plan` listed; `publish-packs` uploads them to
+  the `packs` release and merges their entries into its manifest.
+- `publish`: once every build is through, a **draft** release
+  with the installers (`.zip`, `.dmg`, `.deb`, `.AppImage`, signed `.apk`),
+  and the `cask` artifact: `corvane.rb` with the version and every sha256
+  filled in (also in the run summary).
+
+Repository secrets: `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`, and
+optionally `CORVANE_GITHUB_CLIENT_SECRET` (without it the `307-sign-in-flow`
+"auto" default uses the device flow) and the Android keystore's.
 
 After the run: write the release notes in the draft, publish it (the
 self-updater ignores drafts), then copy the `cask` artifact's `corvane.rb`
-(version and every sha256 already filled in, also in the run summary) to the
-tap. That artifact comes from the `cask` job, which runs after both Linux
-builds; `cask-macos` is the macOS job's half-stamped copy.
+to the tap.
 "Run workflow" with `linux_release` set to a published release's tag
-(`gh workflow run release.yml --ref main -f linux_release=v0.1.0`) skips the
-macOS job, builds the Linux assets from that branch, uploads them to the
-release, merges their packs into its `packs-manifest.json` and stamps the
-whole cask (the macOS hash from the release's zip). `Cargo.toml` must still
-carry that version. The tag stays where it is, so the Linux binaries are
-newer than the tagged source.
+(`gh workflow run release.yml --ref main -f linux_release=v0.1.0`) skips
+macOS and Android, builds the Linux assets from that branch, replaces them
+on the release and stamps the whole cask (the macOS hash from the release's
+zip). `Cargo.toml` must still carry that version. The tag stays where it is,
+so the Linux binaries are newer than the tagged source.
 
-"Run workflow" by hand builds and signs the same assets as a workflow
-artifact without a release (`full` input: skip the Full variant for a faster
-run).
+"Run workflow" by hand builds the same assets as workflow artifacts without
+a release, and on `main` it is also what saves the dependency caches the tag
+runs read (a tag's run can read `main`'s caches but not another tag's) (`full` input: skip the Full variant; `publish_packs`: rebuild
+every pack and publish it to the `packs` release anyway).
 
 ## How the updater uses the assets
 
@@ -134,9 +135,9 @@ every four hours, release builds only):
 1. `GET …/releases/latest` (no token; `CORVANE_UPDATE_FEED` overrides the
    URL for testing). A tag newer than the running version by semver wins;
    drafts are skipped.
-2. `<zip>` and `<zip>.minisig` are downloaded to
-   `~/Library/Caches/Corvane/updates/`; the zip is verified with the
-   compiled-in key (BLAKE2b-prehashed minisign, no legacy mode).
+2. `<zip>` is downloaded to `~/Library/Caches/Corvane/updates/` and its
+   sha256 compared with the asset's `digest` from the feed. A release whose
+   asset lists no sha256 digest is refused.
 3. The "Corvane N is available" banner appears. "Install and Restart" (banner,
    Release Notes dialog, About) unpacks the zip with `ditto` (keeps the
    signature), renames the running bundle to `Corvane.app.old`, moves
@@ -151,9 +152,8 @@ update launches without Gatekeeper's "Open Anyway" dance.
 
 ## Linux
 
-`packaging/linux/package.sh` builds two assets from a release build (with
-`CORVANE_UPDATE_PUBLIC_KEY`, taken from `packaging/corvane-release.pub` like
-`release.sh` does) into `target/linux/`:
+`packaging/linux/package.sh` builds two assets from a release build into
+`target/linux/`:
 
 - `corvane_<version>_amd64.deb` / `corvane_<version>_arm64.deb`
 - `Corvane-<version>-x86_64.AppImage` / `Corvane-<version>-aarch64.AppImage`
@@ -161,36 +161,18 @@ update launches without Gatekeeper's "Open Anyway" dance.
 for the architecture of the machine it runs on (release.yml builds both,
 the arm64 ones on an `ubuntu-24.04-arm` runner).
 
-A `v<version>` tag does this in release.yml's `linux` job (after the macOS
-job creates the draft release): it builds, signs both with the
-`MINISIGN_SECRET_KEY` secret and uploads them with their signatures. By
-hand, sign both with the same minisign key and upload each with its
-signature to the release:
-
-```bash
-minisign -Sm target/linux/corvane_<version>_amd64.deb
-minisign -Sm target/linux/Corvane-<version>-x86_64.AppImage
-```
-
-(`-s ~/.minisign/corvane-release.key` when the key is not in minisign's
-default place; this writes `<file>.minisig` next to each file.)
-
-The same job builds the machine's tree-sitter packs
+A `v<version>` tag does this in release.yml's `linux` jobs; `publish` adds
+both to the draft release. The machine's tree-sitter packs
 (`tree-sitter-{all,rest}-<v>-linux-<arch>.zip`, `.so` units; `packs.sh`
-builds shared objects on Linux) and uploads them signed; the
-`packs-manifest` job then adds their entries to the macOS job's
-`packs-manifest.json`, re-signs it and replaces it on the draft release. By
-hand: run `PACKS="tree-sitter-all tree-sitter-rest" packaging/packs.sh` on
-each Linux architecture, append the `packs` entries of its manifest to the
-release's `packs-manifest.json`, then sign and upload as above.
+builds shared objects on Linux) come from the `packs` jobs
+([Packs](#packs)).
 
 Only the AppImage updates itself. The updater picks
-`Corvane-*-<arch>.AppImage` (the machine's `x86_64` / `aarch64`) and its
-`.minisig` from the latest release, downloads both to
-`$XDG_CACHE_HOME/corvane/updates/` (`~/.cache/corvane/updates/`) and
-verifies them. "Install and Restart" copies the image next to the running
-one (`$APPIMAGE`, which must be a file in a folder the user can write),
-verifies that copy again, makes it executable, fsyncs it, renames it over
+`Corvane-*-<arch>.AppImage` (the machine's `x86_64` / `aarch64`) from the
+latest release, downloads it to `$XDG_CACHE_HOME/corvane/updates/`
+(`~/.cache/corvane/updates/`) and checks its sha256. "Install and Restart"
+copies the image next to the running one (`$APPIMAGE`, which must be a file
+in a folder the user can write), checks that copy again, makes it executable, fsyncs it, renames it over
 `$APPIMAGE` and starts it once the old process has exited.
 
 The AppImage also installs its own desktop entry
@@ -210,29 +192,26 @@ shipping the icons at those paths in the AppDir.
 
 A `.deb` install (`/usr/lib/corvane`) is never updated in place: like a
 Homebrew cask on macOS, the banner and About only say that the release is
-available and to update with the package manager. The `.deb`'s `.minisig`
-is for people verifying a download by hand.
+available and to update with the package manager.
 
 The Homebrew cask installs the same AppImage as
 `~/Applications/Corvane.AppImage`. An image in `~/Applications` while a
 `corvane` cask exists (`Caskroom/corvane` under `$HOMEBREW_PREFIX`,
 `/home/linuxbrew/.linuxbrew` or `~/.linuxbrew`) is the cask's and is never
-swapped: the banner says `brew upgrade corvane`. The `linux` job writes each
-AppImage's sha256 to a `cask-sha256-<arch>` artifact and the `cask` job
-stamps both into the cask.
+swapped: the banner says `brew upgrade corvane`. The
+`publish` job stamps both AppImages' sha256 into the cask.
 
 ## Testing the flow locally
 
 ```bash
-# a throwaway key pair (never reuse for a real release)
-rsign generate -W -p /tmp/test.pub -s /tmp/test.key
-CORVANE_UPDATE_PUBLIC_KEY="$(tail -n1 /tmp/test.pub)" cargo build -p corvane && packaging/bundle.sh
-# a "new" version: copy the bundle, bump CFBundleShortVersionString, re-sign, zip, sign
+cargo build -p corvane && packaging/bundle.sh
+# a "new" version: copy the bundle, bump CFBundleShortVersionString, re-sign, zip
 cp -R target/bundle/Corvane.app /tmp/new/ && /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 9.9.9' /tmp/new/Corvane.app/Contents/Info.plist
 codesign --force --sign "${CORVANE_SIGN_IDENTITY:--}" /tmp/new/Corvane.app
 (cd /tmp/new && ditto -c -k --sequesterRsrc --keepParent Corvane.app Corvane-9.9.9-macos-universal.zip)
-rsign sign -W -s /tmp/test.key -x /tmp/new/Corvane-9.9.9-macos-universal.zip.minisig /tmp/new/Corvane-9.9.9-macos-universal.zip
-# a fake feed: latest.json with tag_name "v9.9.9" and assets pointing at http://127.0.0.1:8765/
+shasum -a 256 /tmp/new/Corvane-9.9.9-macos-universal.zip
+# a fake feed: latest.json with tag_name "v9.9.9" and one asset: its
+# browser_download_url at http://127.0.0.1:8765/ and "digest": "sha256:<that hash>"
 (cd /tmp/new && python3 -m http.server 8765)
 CORVANE_UPDATE_CHECK=1 CORVANE_UPDATE_FEED=http://127.0.0.1:8765/latest.json open -n target/bundle/Corvane.app
 ```

@@ -5,12 +5,11 @@
 #   FULL=1 packaging/release.sh          # the "full" variant (packs compiled in)
 #   SKIP_BUILD=1 packaging/release.sh    # reuse target/release/corvane
 #   UPDATE_CASK=1 packaging/release.sh   # also stamp packaging/homebrew/Casks/corvane.rb (macOS half)
-#   SECRET_KEY=~/.minisign/corvane-release.key packaging/release.sh   # sign here
+#   WITH_PACKS=1 packaging/release.sh    # also the pack archives (packs.sh) → target/release-assets/packs/
 #   ALLOW_ADHOC=1 packaging/release.sh   # without the code-signing certificate (testing)
 #
-# Output: Corvane[-Full]-<version>-macos-<universal|arch>.zip (+ .dmg), a
-# .minisig for every asset when a secret key is given, the packs manifest and
-# archives, and the cask's sha256 on stdout. Creates no git tags or remotes.
+# Output: Corvane[-Full]-<version>-macos-<universal|arch>.zip (+ .dmg) and the
+# cask's sha256 on stdout. Creates no git tags or remotes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,22 +20,6 @@ FEATURES=()
 if [[ "${FULL:-0}" == "1" ]]; then
   VARIANT="Corvane-Full"
   FEATURES=(--features full)
-fi
-
-# --- signing key -----------------------------------------------------------
-PUB_FILE="$ROOT/packaging/corvane-release.pub"
-if [[ -z "${CORVANE_UPDATE_PUBLIC_KEY:-}" ]]; then
-  if [[ -f "$PUB_FILE" ]]; then
-    export CORVANE_UPDATE_PUBLIC_KEY="$(tail -n1 "$PUB_FILE")"
-  else
-    echo "warning: $PUB_FILE is missing; the self-updater will ship a placeholder key (packaging/release.md)" >&2
-  fi
-fi
-SIGNER=""
-if command -v minisign >/dev/null 2>&1; then
-  SIGNER="minisign"
-elif command -v rsign >/dev/null 2>&1; then
-  SIGNER="rsign"
 fi
 
 # --- build ------------------------------------------------------------------
@@ -85,27 +68,9 @@ hdiutil create -quiet -volname Corvane -srcfolder "$APP" -ov -format UDZO "$DMG"
 echo "zip: $ZIP ($(stat -f%z "$ZIP") bytes)"
 echo "dmg: $DMG"
 
-if [[ "${FULL:-0}" != "1" ]]; then
+# the packs go to the `packs` release, not next to the app assets
+if [[ "${WITH_PACKS:-0}" == "1" ]]; then
   "$ROOT/packaging/packs.sh" "$OUT/packs"
-  cp "$OUT/packs/packs-manifest.json" "$OUT/packs-manifest.json"
-  cp "$OUT"/packs/*.zip "$OUT/"
-fi
-
-# --- signatures -------------------------------------------------------------
-sign() {
-  local asset="$1"
-  rm -f "$asset.minisig"
-  case "$SIGNER" in
-    minisign) minisign -S -s "$SECRET_KEY" -t "corvane v$VERSION $(basename "$asset")" -x "$asset.minisig" -m "$asset" ;;
-    rsign) rsign sign -s "$SECRET_KEY" -t "corvane v$VERSION $(basename "$asset")" -x "$asset.minisig" "$asset" ;;
-  esac
-}
-if [[ -n "${SECRET_KEY:-}" && -n "$SIGNER" ]]; then
-  for asset in "$OUT"/*.zip "$OUT"/*.dmg "$OUT"/packs-manifest.json; do
-    [[ -f "$asset" ]] && sign "$asset" && echo "signed $(basename "$asset")"
-  done
-else
-  echo "not signed: set SECRET_KEY=<minisign secret key> (and install minisign or rsign) or sign in CI" >&2
 fi
 
 # --- cask -------------------------------------------------------------------

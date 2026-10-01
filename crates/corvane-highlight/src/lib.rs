@@ -4,8 +4,8 @@
 //! tokens. Three tokenizers, chained per [`Engine`]:
 //!
 //! - [`cm`]: ports of the CodeMirror modes GHD's highlighter runs;
-//! - syntect with the compiled-in grammar set or the `syntax-extended` pack
-//!   ([`syntaxes`]), for languages no port covers;
+//! - syntect with the compiled-in grammar sets ([`syntaxes`]), for languages
+//!   no port covers;
 //! - [`treesitter`] (Corvane addition, opt-in): grammars from the full build
 //!   or a `tree-sitter-all` / `tree-sitter-rest` pack.
 //!

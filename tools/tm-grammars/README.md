@@ -50,6 +50,5 @@ remaining one passes.
 
 ## How the sets stack
 
-Default build: the core dump alone. With the `syntax-extended` pack or the
-full build, two-face's set comes first and the core dump second
+two-face's set (compiled in) comes first and the core dump second
 (`syntaxes::sets`), so the TextMate additions two-face lacks still apply.

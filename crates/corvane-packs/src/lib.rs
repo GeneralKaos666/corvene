@@ -1,6 +1,7 @@
-//! On-demand packs: a minisign-signed manifest on GitHub
-//! Releases lists archives (`syntax-extended`, `tree-sitter-all`,
-//! `tree-sitter-rest`, later `git-portable` and `git-lfs`) with their sha256; a pack is downloaded to
+//! On-demand packs: a manifest on the `packs` GitHub release (a rolling
+//! release that is never the latest one, so the app releases list only
+//! installers) lists archives (`tree-sitter-all`, `tree-sitter-rest`, later
+//! `git-portable` and `git-lfs`) with their sha256; a pack is downloaded to
 //! `~/Library/Caches/Corvane/packs/`, checked against the manifest's sha256,
 //! unpacked into `~/Library/Application Support/Corvane/packs/<name>/<version>/`
 //! and marked installed. The `default` build fetches packs on demand; the
@@ -26,10 +27,10 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
-/// Where releases publish the manifest (`packs-manifest.json` + `.minisig`
-/// next to the app assets, see `packaging/release.md`).
+/// Where the manifest is published: the `packs` release, next to the pack
+/// archives (`packaging/release.md`).
 pub const MANIFEST_URL: &str =
-    "https://github.com/wasi-master/corvane/releases/latest/download/packs-manifest.json";
+    "https://github.com/wasi-master/corvane/releases/download/packs/packs-manifest.json";
 
 /// The manifest schema this build reads.
 pub const MANIFEST_SCHEMA: u32 = 1;
@@ -44,8 +45,6 @@ pub enum PackError {
     Status(u16),
     #[error("the packs manifest could not be read: {0}")]
     Manifest(String),
-    #[error("the packs manifest's signature does not match the key compiled into Corvane ({0})")]
-    Signature(String),
     #[error("the packs manifest is for a newer Corvane (schema {0})")]
     Schema(u32),
     #[error("pack {0} is not in the manifest")]
@@ -68,8 +67,6 @@ pub enum PackError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PackKind {
-    /// two-face's full grammar set as a syntect dump (`syntaxes.packdump`).
-    SyntaxExtended,
     /// dugite-native git + git-lfs.
     GitPortable,
     /// git-lfs alone.
@@ -112,7 +109,6 @@ impl PackKind {
     /// The manifest name of the pack.
     pub fn name(self) -> &'static str {
         match self {
-            PackKind::SyntaxExtended => "syntax-extended",
             PackKind::GitPortable => "git-portable",
             PackKind::GitLfs => "git-lfs",
             PackKind::TreeSitterAll => "tree-sitter-all",
@@ -123,7 +119,6 @@ impl PackKind {
     /// What Settings › Advanced calls it.
     pub fn title(self) -> &'static str {
         match self {
-            PackKind::SyntaxExtended => "Extended syntax highlighting",
             PackKind::GitPortable => "Portable Git",
             PackKind::GitLfs => "Git LFS",
             PackKind::TreeSitterAll => "Tree-sitter grammars",
@@ -134,7 +129,6 @@ impl PackKind {
     /// The file the pack's consumer opens, relative to the install directory.
     pub fn entry_file(self) -> &'static str {
         match self {
-            PackKind::SyntaxExtended => "syntaxes.packdump",
             PackKind::GitPortable => "bin/git",
             PackKind::GitLfs => "bin/git-lfs",
             PackKind::TreeSitterAll | PackKind::TreeSitterRest => GRAMMAR_INDEX,
@@ -171,9 +165,9 @@ impl PackManifest {
     /// can use.
     pub fn entry_for(&self, kind: PackKind, app_version: &str) -> Option<&PackEntry> {
         // Android's `play` flavour runs no code it downloaded; data packs
-        // (the extended syntaxes) stay available
+        // stay available
         #[cfg(target_os = "android")]
-        if kind != PackKind::SyntaxExtended
+        if matches!(kind, PackKind::TreeSitterAll | PackKind::TreeSitterRest)
             && !corvane_platform::android::bridge()
                 .is_some_and(|bridge| bridge.allows_downloaded_code())
         {
@@ -311,19 +305,16 @@ fn fetch_bytes(url: &str, limit: u64) -> Result<Vec<u8>, PackError> {
         .map_err(|err| PackError::Network(err.to_string()))
 }
 
-/// Fetch and verify the manifest (`<url>` + `<url>.minisig`, signed with the
-/// release key compiled into `corvane_platform::updater::PUBLIC_KEY`).
+/// Fetch the manifest; every archive it lists is checked against its sha256
+/// there.
 pub fn fetch_manifest() -> Result<PackManifest, PackError> {
     let url = manifest_url();
     debug!(%url, "fetching the packs manifest");
     let body = fetch_bytes(&url, 4 * 1024 * 1024)?;
-    let signature = fetch_bytes(&format!("{url}.minisig"), 64 * 1024)?;
-    corvane_platform::updater::verify_bytes(&body, &signature)
-        .map_err(|err| PackError::Signature(err.to_string()))?;
     parse_manifest(&body)
 }
 
-/// Parse a manifest body (already verified). Entries this build cannot read
+/// Parse a manifest body. Entries this build cannot read
 /// (a pack kind added later) are skipped.
 pub fn parse_manifest(body: &[u8]) -> Result<PackManifest, PackError> {
     #[derive(Deserialize)]
@@ -640,28 +631,24 @@ mod tests {
         let manifest = PackManifest {
             schema: 1,
             packs: vec![
-                entry(PackKind::SyntaxExtended, "1.0.0", "0.1.0"),
-                entry(PackKind::SyntaxExtended, "1.2.0", "0.1.0"),
-                entry(PackKind::SyntaxExtended, "2.0.0", "0.5.0"),
-                entry(PackKind::GitLfs, "3.5.0", "0.1.0"),
+                entry(PackKind::GitLfs, "1.0.0", "0.1.0"),
+                entry(PackKind::GitLfs, "1.2.0", "0.1.0"),
+                entry(PackKind::GitLfs, "2.0.0", "0.5.0"),
+                entry(PackKind::TreeSitterRest, "3.5.0", "0.1.0"),
             ],
         };
-        let pick = manifest
-            .entry_for(PackKind::SyntaxExtended, "0.1.0")
-            .unwrap();
+        let pick = manifest.entry_for(PackKind::GitLfs, "0.1.0").unwrap();
         assert_eq!(pick.version, "1.2.0");
-        let pick = manifest
-            .entry_for(PackKind::SyntaxExtended, "0.5.0")
-            .unwrap();
+        let pick = manifest.entry_for(PackKind::GitLfs, "0.5.0").unwrap();
         assert_eq!(pick.version, "2.0.0");
         assert!(manifest.entry_for(PackKind::GitPortable, "0.1.0").is_none());
     }
 
     #[test]
     fn manifest_json_round_trips_and_newer_schemas_are_refused() {
-        let json = r#"{"schema":1,"packs":[{"name":"syntax-extended","version":"1.0.0","min_app":"0.1.0","url":"https://example.invalid/x.zip","sha256":"ab","size":12,"kind":"syntax-extended"}]}"#;
+        let json = r#"{"schema":1,"packs":[{"name":"git-lfs","version":"1.0.0","min_app":"0.1.0","url":"https://example.invalid/x.zip","sha256":"ab","size":12,"kind":"git-lfs"}]}"#;
         let manifest = parse_manifest(json.as_bytes()).unwrap();
-        assert_eq!(manifest.packs[0].kind, PackKind::SyntaxExtended);
+        assert_eq!(manifest.packs[0].kind, PackKind::GitLfs);
         assert!(matches!(
             parse_manifest(br#"{"schema":9,"packs":[]}"#),
             Err(PackError::Schema(9))
@@ -672,9 +659,9 @@ mod tests {
     fn installs_a_local_zip_and_checks_its_sha256() {
         let dir = std::env::temp_dir().join(format!("corvane-packs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(dir.join("src")).unwrap();
-        std::fs::write(dir.join("src/syntaxes.packdump"), b"not really a dump").unwrap();
-        let zip = dir.join("syntax-extended-1.0.0.zip");
+        std::fs::create_dir_all(dir.join("src/bin")).unwrap();
+        std::fs::write(dir.join("src/bin/git-lfs"), b"not really git-lfs").unwrap();
+        let zip = dir.join("git-lfs-1.0.0.zip");
         #[cfg(target_os = "macos")]
         let status = std::process::Command::new("/usr/bin/ditto")
             .args(["-c", "-k"])
@@ -693,13 +680,13 @@ mod tests {
         assert!(status.success());
         let sha = sha256_file(&zip).unwrap();
         let mut entry = PackEntry {
-            name: "syntax-extended".into(),
+            name: "git-lfs".into(),
             version: "1.0.0".into(),
             min_app: "0.1.0".into(),
             url: zip.to_string_lossy().into_owned(),
             sha256: sha,
             size: 0,
-            kind: PackKind::SyntaxExtended,
+            kind: PackKind::GitLfs,
             target: None,
         };
         // SAFETY: the only test touching CORVANE_PACKS_DIR
@@ -711,7 +698,7 @@ mod tests {
         assert!(installed.entry_path().is_file());
         assert_eq!(installed.version, "1.0.0");
         assert_eq!(
-            super::installed(PackKind::SyntaxExtended).map(|p| p.version),
+            super::installed(PackKind::GitLfs).map(|p| p.version),
             Some("1.0.0".to_string())
         );
         // a wrong checksum is refused before anything is unpacked
@@ -727,9 +714,9 @@ mod tests {
             install(&entry, "0.1.0", &mut progress),
             Err(PackError::NeedsNewerApp { .. })
         ));
-        uninstall(PackKind::SyntaxExtended).unwrap();
-        assert!(super::installed(PackKind::SyntaxExtended).is_none());
-        assert!(!real_packs.join("syntax-extended").exists());
+        uninstall(PackKind::GitLfs).unwrap();
+        assert!(super::installed(PackKind::GitLfs).is_none());
+        assert!(!real_packs.join("git-lfs").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

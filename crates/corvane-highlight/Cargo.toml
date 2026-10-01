@@ -6,15 +6,11 @@ license.workspace = true
 description = "Corvane diff syntax highlighting (CodeMirror ports, syntect, tree-sitter)"
 
 [features]
-# The "full" build: two-face's whole grammar collection compiled in instead
-# of the on-demand `syntax-extended` pack.
-bundled-syntax-extended = ["dep:two-face"]
 # The "full" build: every tree-sitter grammar linked in instead of the
 # `tree-sitter-all` / `tree-sitter-rest` packs.
 bundled-tree-sitter = ["dep:corvane-grammars", "corvane-grammars/all"]
-# `cargo run -p corvane-highlight --features pack-builder --example dump-extended <out>`
-# writes the pack's syntaxes.packdump (packaging/packs.sh).
-pack-builder = ["dep:two-face", "syntect/dump-create", "syntect/yaml-load"]
+# the tools that write assets/syntaxes.packdump (tools/tm-grammars)
+pack-builder = ["syntect/dump-create", "syntect/yaml-load"]
 
 [dependencies]
 corvane-grammars = { workspace = true, optional = true }
@@ -30,14 +26,10 @@ syntect.workspace = true
 tracing.workspace = true
 tree-sitter.workspace = true
 tree-sitter-language.workspace = true
-two-face = { workspace = true, optional = true }
+two-face.workspace = true
 
 [dev-dependencies]
 corvane-grammars = { workspace = true, features = ["all"] }
-
-[[example]]
-name = "dump-extended"
-required-features = ["pack-builder"]
 
 [[example]]
 name = "list-syntaxes"

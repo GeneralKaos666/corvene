@@ -1,0 +1,37 @@
+name: Grammar sources
+description: >
+  The tree-sitter grammar sources (target/grammar-src, cached) for the tests,
+  the full build and the packs, and the tree-sitter CLI that generates the
+  grammars without a committed parser.c.
+
+runs:
+  using: composite
+  steps:
+    # the release binary: `cargo install tree-sitter-cli` takes minutes
+    - name: tree-sitter CLI
+      shell: bash
+      run: |
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          macOS-ARM64) asset=macos-arm64 ;;
+          macOS-X64) asset=macos-x64 ;;
+          Linux-X64) asset=linux-x64 ;;
+          Linux-ARM64) asset=linux-arm64 ;;
+          *) echo "::error::no tree-sitter CLI for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+        esac
+        mkdir -p "$RUNNER_TEMP/ts-cli/bin"
+        curl -fsSL "https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.0/tree-sitter-$asset.gz" \
+          | gunzip > "$RUNNER_TEMP/ts-cli/bin/tree-sitter"
+        chmod +x "$RUNNER_TEMP/ts-cli/bin/tree-sitter"
+        "$RUNNER_TEMP/ts-cli/bin/tree-sitter" --version
+        echo "CORVANE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter" >> "$GITHUB_ENV"
+        echo "$RUNNER_TEMP/ts-cli/bin" >> "$GITHUB_PATH"
+    - name: cache grammar sources
+      id: grammar-src
+      uses: actions/cache@v4
+      with:
+        path: target/grammar-src
+        key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
+    - name: fetch grammar sources
+      if: steps.grammar-src.outputs.cache-hit != 'true'
+      shell: bash
+      run: python3 tools/ts-queries/fetch.py

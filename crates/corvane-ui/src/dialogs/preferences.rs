@@ -1696,7 +1696,7 @@ impl PreferencesDialog {
                     )
             })
             // Corvane addition: on-demand packs;
-            // `502-optional-components`, `105-tree-sitter-highlighting`
+            // `105-tree-sitter-highlighting`
             .when(!offered_packs.is_empty(), |d| {
                 d.child(div().mt(SPACING()).child(section_heading("Optional components", cx)))
                     .children(offered_packs.iter().map(|kind| self.pack_row(*kind, cx)))
@@ -1711,11 +1711,6 @@ impl PreferencesDialog {
         let t = cx.ghd();
         let packs = &self.state.read(cx).packs;
         let description = match kind {
-            PackKind::SyntaxExtended => {
-                "Syntax highlighting for the languages beyond the built-in set \
-                 (two-face's full grammar collection). Downloaded from Corvane's \
-                 GitHub releases and verified before use."
-            }
             PackKind::TreeSitterAll => {
                 "Tree-sitter grammars for every language, for Appearance › Syntax \
                  highlighting. Downloaded from Corvane's GitHub releases and verified \

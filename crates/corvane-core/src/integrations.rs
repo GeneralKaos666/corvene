@@ -726,8 +726,7 @@ impl Dispatcher {
         Self::show_popup(Popup::Preferences { tab }, cx);
         Self::detect_integrations(cx);
         // Settings › Advanced (and Appearance › Syntax highlighting) list the
-        // on-demand packs from the manifest (`502-optional-components`,
-        // `105-tree-sitter-highlighting`)
+        // on-demand packs from the manifest (`105-tree-sitter-highlighting`)
         let wants_manifest = {
             let s = Self::state(cx).read(cx);
             s.packs.manifest.is_none()

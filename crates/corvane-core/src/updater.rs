@@ -4,8 +4,8 @@
 //! `corvane_platform::updater`.
 //!
 //! GHD lets Squirrel download the update as soon as one is found and shows
-//! the banner once it is ready; Corvane does the same (download + minisign
-//! verification in the background), then "Install and Restart" swaps the
+//! the banner once it is ready; Corvane does the same (download + sha256
+//! check in the background), then "Install and Restart" swaps the
 //! bundle (Linux: the AppImage) on request. Deviations: one release (the
 //! latest) feeds the release notes, not every release since the running
 //! version; a Homebrew install is told to `brew upgrade corvane` instead of
@@ -23,7 +23,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub use corvane_platform::updater::PackageManager;
 use corvane_platform::updater::{self, ReleaseInfo, UpdateError};
 use gpui_kit::{App, AsyncApp};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::dispatcher::Dispatcher;
 use crate::release_notes::{ReleaseSummary, release_summary};
@@ -82,6 +82,9 @@ pub enum UpdateStatus {
     Ready {
         update: AvailableUpdate,
         zip: PathBuf,
+        /// What `zip` was checked against (Linux checks the installed copy
+        /// again).
+        sha256: String,
     },
     /// Corvane: the bundle belongs to the Homebrew cask, `brew upgrade`
     /// installs the update (Linux: also any install but an AppImage, which
@@ -165,9 +168,6 @@ impl Dispatcher {
         if !updates_enabled() {
             info!("update checks are off in this build");
             return;
-        }
-        if updater::public_key_is_placeholder() {
-            warn!("built without CORVANE_UPDATE_PUBLIC_KEY: updates will fail verification");
         }
         // a few seconds' jitter so a fleet of launches does not hit the API
         // at once; `CORVANE_UPDATE_CHECK=1` checks right away
@@ -315,8 +315,8 @@ impl Dispatcher {
                 };
                 let zip = updater::download(&release, &mut progress)?;
                 let _ = tx.try_send((release.zip_size.max(last_sent), None));
-                updater::verify(&zip)?;
-                Ok::<PathBuf, UpdateError>(zip)
+                updater::verify(&zip, &release.sha256)?;
+                Ok::<(PathBuf, String), UpdateError>((zip, release.sha256))
             },
             move |result, cx| {
                 let state = Self::state(cx);
@@ -324,10 +324,14 @@ impl Dispatcher {
                     return;
                 }
                 match result {
-                    Ok(zip) => {
+                    Ok((zip, sha256)) => {
                         info!(zip = %zip.display(), "update downloaded and verified");
                         state.update(cx, |s, cx| {
-                            s.update.status = UpdateStatus::Ready { update, zip };
+                            s.update.status = UpdateStatus::Ready {
+                                update,
+                                zip,
+                                sha256,
+                            };
                             s.update.banner_visible = true;
                             cx.notify();
                         });
@@ -417,8 +421,8 @@ impl Dispatcher {
     /// over `$APPIMAGE`), relaunch it after this process exits, quit.
     pub fn install_update(cx: &mut App) {
         let state = Self::state(cx);
-        let zip = match &state.read(cx).update.status {
-            UpdateStatus::Ready { zip, .. } => zip.clone(),
+        let (zip, sha256) = match &state.read(cx).update.status {
+            UpdateStatus::Ready { zip, sha256, .. } => (zip.clone(), sha256.clone()),
             _ => return,
         };
         // the running `.app` (Linux: `$APPIMAGE`)
@@ -445,7 +449,7 @@ impl Dispatcher {
             {
                 let bundle = bundle.clone();
                 move || {
-                    updater::install(&zip, &bundle)?;
+                    updater::install(&zip, &bundle, &sha256)?;
                     corvane_platform::app_location::relaunch_after_exit(&bundle, pid)
                         .map_err(UpdateError::Install)
                 }
@@ -506,7 +510,7 @@ impl Dispatcher {
             },
             zip_url: String::new(),
             zip_size: 0,
-            signature_url: String::new(),
+            sha256: String::new(),
         };
         let mut update = AvailableUpdate::from_release(&release, Self::heading_kinds(cx));
         update.summary.date_published = Some(SystemTime::now());
@@ -517,6 +521,7 @@ impl Dispatcher {
                 UpdateStatus::Ready {
                     update,
                     zip: updater::updates_dir().join(release.zip_name.clone()),
+                    sha256: String::new(),
                 }
             };
             s.update.last_successful_check = Some(SystemTime::now());

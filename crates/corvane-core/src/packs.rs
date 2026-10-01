@@ -1,7 +1,7 @@
 //! On-demand packs in the app (`corvane_packs`): which packs
 //! are installed, the manifest for Settings › Advanced, download / remove
-//! with progress, and handing the `syntax-extended` dump and the tree-sitter
-//! grammar libraries to `corvane_highlight`. No GHD equivalent (Electron
+//! with progress, and handing the tree-sitter grammar libraries to
+//! `corvane_highlight`. No GHD equivalent (Electron
 //! ships everything, and has no tree-sitter).
 //!
 //! Testing hooks: `CORVANE_PACKS_MANIFEST=<url|path>` (the manifest),
@@ -28,7 +28,7 @@ pub struct PackProgress {
 /// `AppState::packs`
 #[derive(Clone, Debug, Default)]
 pub struct PacksState {
-    /// The signed manifest, once fetched for Settings › Advanced.
+    /// The manifest, once fetched for Settings › Advanced.
     pub manifest: Option<PackManifest>,
     pub manifest_error: Option<String>,
     pub manifest_loading: bool,
@@ -48,7 +48,6 @@ impl PacksState {
     /// Whether this build compiled the pack in.
     pub fn bundled(&self, kind: PackKind) -> bool {
         match kind {
-            PackKind::SyntaxExtended => corvane_highlight::syntaxes::extended_bundled(),
             PackKind::TreeSitterAll | PackKind::TreeSitterRest => {
                 corvane_highlight::treesitter::bundled()
             }
@@ -74,14 +73,9 @@ impl PacksState {
 
 /// Every pack Settings › Advanced may list (the git packs are not published
 /// yet).
-pub const OFFERED_PACKS: &[PackKind] = &[
-    PackKind::SyntaxExtended,
-    PackKind::TreeSitterAll,
-    PackKind::TreeSitterRest,
-];
+pub const OFFERED_PACKS: &[PackKind] = &[PackKind::TreeSitterAll, PackKind::TreeSitterRest];
 
-/// The packs the flags offer: the extended syntect grammars with
-/// `502-optional-components`, the tree-sitter grammars with
+/// The packs the flags offer: the tree-sitter grammars with
 /// `105-tree-sitter-highlighting`.
 pub fn offered_packs(flags: &Flags) -> Vec<PackKind> {
     OFFERED_PACKS
@@ -93,7 +87,6 @@ pub fn offered_packs(flags: &Flags) -> Vec<PackKind> {
                 || !corvane_packs::store_delivered(PackKind::TreeSitterAll)
         })
         .filter(|kind| match kind {
-            PackKind::SyntaxExtended => flags.bool(ids::OPTIONAL_COMPONENTS),
             PackKind::TreeSitterAll | PackKind::TreeSitterRest => {
                 flags.bool(ids::TREE_SITTER_HIGHLIGHTING)
             }
@@ -117,13 +110,6 @@ fn grammar_cache(kind: PackKind) -> std::path::PathBuf {
 /// Point the consumer at an installed pack's data.
 fn activate(pack: &InstalledPack) -> Result<(), String> {
     match pack.kind {
-        PackKind::SyntaxExtended => {
-            match corvane_highlight::syntaxes::use_extended_dump(&pack.entry_path()) {
-                Ok(count) => info!(count, version = %pack.version, "extended grammars loaded"),
-                Err(err) => warn!(%err, "could not load the extended grammars"),
-            }
-            Ok(())
-        }
         PackKind::TreeSitterAll | PackKind::TreeSitterRest => {
             let count = corvane_highlight::treesitter::load_pack(
                 pack.kind.name(),
@@ -143,7 +129,6 @@ fn activate(pack: &InstalledPack) -> Result<(), String> {
 
 fn deactivate(kind: PackKind) {
     match kind {
-        PackKind::SyntaxExtended => corvane_highlight::syntaxes::clear_extended_dump(),
         PackKind::TreeSitterAll | PackKind::TreeSitterRest => {
             corvane_highlight::treesitter::unload_library(kind.name());
             let _ = std::fs::remove_dir_all(grammar_cache(kind));
@@ -220,7 +205,7 @@ impl Dispatcher {
         }
     }
 
-    /// Fetch the signed manifest (Settings › Advanced opening, Retry).
+    /// Fetch the manifest (Settings › Advanced opening, Retry).
     pub fn refresh_packs_manifest(cx: &mut App) {
         let state = Self::state(cx);
         if state.read(cx).packs.manifest_loading {

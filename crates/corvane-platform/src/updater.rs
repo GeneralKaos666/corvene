@@ -4,8 +4,9 @@
 //! (`GET /repos/wasi-master/corvane/releases/latest`).
 //!
 //! macOS: the release's `.zip` is downloaded to
-//! `~/Library/Caches/Corvane/updates/`, verified with its minisign signature
-//! against the public key compiled into this binary, unpacked with `ditto`
+//! `~/Library/Caches/Corvane/updates/`, checked against the sha256 the feed
+//! lists for it (the asset's `digest`, which GitHub computes at upload),
+//! unpacked with `ditto`
 //! (keeps the code signature intact), swapped in for the running bundle
 //! (`Corvane.app` → `Corvane.app.old`, new bundle moved in) and opened again
 //! once this process has exited. The `.old` bundle is removed at the next
@@ -16,9 +17,8 @@
 //!
 //! Linux (GHD ships no Linux build; Squirrel has no Linux backend): only an
 //! AppImage updates itself. `$APPIMAGE` names the running image
-//! ([`running_appimage`]); the release's `Corvane-<v>-<arch>.AppImage` and
-//! its `.minisig` are downloaded to
-//! `$XDG_CACHE_HOME/corvane/updates/` and verified like the zip, then
+//! ([`running_appimage`]); the release's `Corvane-<v>-<arch>.AppImage` is
+//! downloaded to `$XDG_CACHE_HOME/corvane/updates/` and checked like the zip, then
 //! [`install`] copies the image next to `$APPIMAGE` under a temporary name,
 //! verifies that copy again, makes it executable, fsyncs it and renames it
 //! over `$APPIMAGE` (atomic: a crash leaves the old or the new image, never
@@ -29,38 +29,20 @@
 //! the Homebrew cask installed ([`is_homebrew_appimage`]): `brew upgrade
 //! corvane` replaces it.
 //!
-//! Testing hooks: `CORVANE_UPDATE_FEED=<url>` replaces the feed URL,
-//! `CORVANE_UPDATE_PUBLIC_KEY` (build time) replaces the public key.
+//! Testing hook: `CORVANE_UPDATE_FEED=<url>` replaces the feed URL.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
 /// GHD `__UPDATES_URL__`: the release feed.
 pub const RELEASES_LATEST_URL: &str =
     "https://api.github.com/repos/wasi-master/corvane/releases/latest";
-
-/// A syntactically valid minisign key (all-zero key id and key) that signs
-/// nothing; `build.rs` warns when it is what gets compiled in.
-const PLACEHOLDER_PUBLIC_KEY: &str = "RWQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
-/// The minisign public key releases are verified against, from
-/// `CORVANE_UPDATE_PUBLIC_KEY` at build time (`packaging/release.md`).
-pub const PUBLIC_KEY: &str = match option_env!("CORVANE_UPDATE_PUBLIC_KEY") {
-    Some(key) => key,
-    None => PLACEHOLDER_PUBLIC_KEY,
-};
-
-/// True when this binary was built without a real signing key: every
-/// signature check will fail.
-pub fn public_key_is_placeholder() -> bool {
-    let key = PUBLIC_KEY.trim();
-    key.is_empty() || key == PLACEHOLDER_PUBLIC_KEY
-}
 
 const USER_AGENT: &str = concat!("Corvane/", env!("CARGO_PKG_VERSION"));
 
@@ -84,12 +66,12 @@ pub enum UpdateError {
     Feed(String),
     #[error("release {0} has no {ASSET_KIND} asset")]
     NoAsset(String),
-    #[error("release {0} has no minisign signature (.minisig) next to its {ASSET_EXTENSION}")]
-    NoSignature(String),
+    #[error("release {0} lists no sha256 digest for its {ASSET_EXTENSION}")]
+    NoDigest(String),
     #[error("{0}")]
     Io(#[from] std::io::Error),
-    #[error("the download could not be verified: {0}")]
-    Signature(String),
+    #[error("the download does not match the release's sha256 ({0})")]
+    Checksum(String),
     #[error("{0}")]
     Install(String),
 }
@@ -111,8 +93,8 @@ pub struct ReleaseInfo {
     pub zip_name: String,
     pub zip_url: String,
     pub zip_size: u64,
-    /// `<zip_name>.minisig`
-    pub signature_url: String,
+    /// Hex sha256 of the asset, from the feed's `digest`.
+    pub sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +119,9 @@ struct ApiAsset {
     browser_download_url: String,
     #[serde(default)]
     size: u64,
+    /// `sha256:<hex>`
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 /// The feed URL: `CORVANE_UPDATE_FEED` or the GitHub Releases API.
@@ -211,9 +196,8 @@ fn release_info_for(
     let Some(zip) = pick_asset(&release.assets, os, arch) else {
         return Err(UpdateError::NoAsset(release.tag_name));
     };
-    let signature_name = format!("{}.minisig", zip.name);
-    let Some(signature) = release.assets.iter().find(|a| a.name == signature_name) else {
-        return Err(UpdateError::NoSignature(release.tag_name));
+    let Some(sha256) = zip.digest.as_deref().and_then(sha256_digest) else {
+        return Err(UpdateError::NoDigest(release.tag_name));
     };
     Ok(Some(ReleaseInfo {
         version,
@@ -225,8 +209,15 @@ fn release_info_for(
         zip_name: zip.name.clone(),
         zip_url: zip.browser_download_url.clone(),
         zip_size: zip.size,
-        signature_url: signature.browser_download_url.clone(),
+        sha256,
     }))
+}
+
+/// The hex of a `sha256:<hex>` asset digest.
+fn sha256_digest(digest: &str) -> Option<String> {
+    let hex = digest.trim().strip_prefix("sha256:")?;
+    (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| hex.to_ascii_lowercase())
 }
 
 /// The asset an `os` / `arch` machine installs: the macOS `.zip`
@@ -241,7 +232,7 @@ fn pick_asset<'a>(assets: &'a [ApiAsset], os: &str, arch: &str) -> Option<&'a Ap
 }
 
 /// The `.zip` for this machine: a universal / macOS zip, else one naming
-/// this architecture; the packs manifest and `.minisig` files are skipped.
+/// this architecture; pack archives and the `Corvane-Full` zip are skipped.
 fn pick_zip_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset> {
     let zips: Vec<&ApiAsset> = assets
         .iter()
@@ -263,8 +254,8 @@ fn pick_zip_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset
 
 /// `Corvane-<version>-<arch>.AppImage` (`packaging/linux/package.sh`),
 /// `<arch>` being `x86_64` or `aarch64` as `std::env::consts::ARCH` spells
-/// them; a `Corvane-Full-…` image (should there ever be one) and `.minisig`
-/// files are skipped.
+/// them; a `Corvane-Full-…` image (should there ever be one) is
+/// skipped.
 fn pick_appimage_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset> {
     let suffix = format!("-{arch}.AppImage");
     assets.iter().find(|a| {
@@ -450,9 +441,9 @@ pub fn updates_dir() -> PathBuf {
     crate::paths::cache_dir().join("updates")
 }
 
-/// Download the release's asset (`.zip` / AppImage) and `.minisig` into a
-/// fresh updates directory; `progress(received, total)` is called as bytes
-/// arrive. Returns the asset's path.
+/// Download the release's asset (`.zip` / AppImage) into a fresh updates
+/// directory; `progress(received, total)` is called as bytes arrive. Returns
+/// the asset's path.
 pub fn download(
     release: &ReleaseInfo,
     progress: &mut dyn FnMut(u64, Option<u64>),
@@ -462,26 +453,8 @@ pub fn download(
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
     let zip = dir.join(&release.zip_name);
-    let signature = dir.join(format!("{}.minisig", release.zip_name));
 
     let agent = agent(None);
-    info!(url = %release.signature_url, "downloading update signature");
-    let mut sig_response = agent
-        .get(&release.signature_url)
-        .call()
-        .map_err(|err| UpdateError::Network(err.to_string()))?;
-    let status = sig_response.status().as_u16();
-    if status != 200 {
-        return Err(UpdateError::Status(status));
-    }
-    let sig_bytes = sig_response
-        .body_mut()
-        .with_config()
-        .limit(64 * 1024)
-        .read_to_vec()
-        .map_err(|err| UpdateError::Network(err.to_string()))?;
-    std::fs::write(&signature, sig_bytes)?;
-
     info!(url = %release.zip_url, "downloading update");
     let mut response = agent
         .get(&release.zip_url)
@@ -516,50 +489,24 @@ pub fn download(
     Ok(zip)
 }
 
-/// Verify `zip` against `<zip>.minisig` with [`PUBLIC_KEY`].
-pub fn verify(zip: &Path) -> Result<(), UpdateError> {
-    let signature_path = PathBuf::from(format!("{}.minisig", zip.display()));
-    verify_with_key(zip, &signature_path, PUBLIC_KEY)
-}
-
-fn verify_with_key(zip: &Path, signature_path: &Path, public_key: &str) -> Result<(), UpdateError> {
-    let key = minisign_verify::PublicKey::from_base64(public_key.trim())
-        .map_err(|err| UpdateError::Signature(format!("bad public key: {err}")))?;
-    let signature = minisign_verify::Signature::from_file(signature_path)
-        .map_err(|err| UpdateError::Signature(format!("bad signature file: {err}")))?;
-    let mut verifier = key
-        .verify_stream(&signature)
-        .map_err(|err| UpdateError::Signature(err.to_string()))?;
-    let mut file = std::fs::File::open(zip)?;
+/// Check that `file` hashes to `sha256` ([`ReleaseInfo::sha256`]).
+pub fn verify(file: &Path, sha256: &str) -> Result<(), UpdateError> {
+    let mut hasher = Sha256::new();
+    let mut file = std::fs::File::open(file)?;
     let mut buf = vec![0u8; 256 * 1024];
     loop {
         let n = file.read(&mut buf)?;
         if n == 0 {
             break;
         }
-        verifier.update(&buf[..n]);
+        hasher.update(&buf[..n]);
     }
-    verifier
-        .finalize()
-        .map_err(|err| UpdateError::Signature(err.to_string()))
-}
-
-/// Verify in-memory `data` against a minisign signature file's contents
-/// with [`PUBLIC_KEY`] (the packs manifest).
-pub fn verify_bytes(data: &[u8], signature: &[u8]) -> Result<(), UpdateError> {
-    let key = minisign_verify::PublicKey::from_base64(PUBLIC_KEY.trim())
-        .map_err(|err| UpdateError::Signature(format!("bad public key: {err}")))?;
-    let signature = std::str::from_utf8(signature)
-        .map_err(|_| UpdateError::Signature("signature is not text".into()))?;
-    let signature = minisign_verify::Signature::decode(signature)
-        .map_err(|err| UpdateError::Signature(format!("bad signature: {err}")))?;
-    let mut verifier = key
-        .verify_stream(&signature)
-        .map_err(|err| UpdateError::Signature(err.to_string()))?;
-    verifier.update(data);
-    verifier
-        .finalize()
-        .map_err(|err| UpdateError::Signature(err.to_string()))
+    let actual = format!("{:x}", hasher.finalize());
+    if actual.eq_ignore_ascii_case(sha256.trim()) {
+        Ok(())
+    } else {
+        Err(UpdateError::Checksum(actual))
+    }
 }
 
 /// `<bundle>.old` next to the bundle (`Corvane.app.old`).
@@ -572,34 +519,30 @@ pub fn old_bundle_path(bundle: &Path) -> PathBuf {
     bundle.with_file_name(name)
 }
 
-/// Install the verified download over [`install_target`]; the caller
+/// Install the verified download (`sha256`: what [`verify`] checked it
+/// against) over [`install_target`]; the caller
 /// relaunches (`app_location::relaunch_after_exit`) and quits. macOS: unpack
 /// the zip and swap bundles ([`install_bundle`]). Linux: rename the AppImage
 /// over the running one ([`install_appimage`]).
-pub fn install(file: &Path, target: &Path) -> Result<(), UpdateError> {
+pub fn install(file: &Path, target: &Path, sha256: &str) -> Result<(), UpdateError> {
     #[cfg(target_os = "macos")]
     {
+        let _ = sha256;
         install_bundle(file, target)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let signature = PathBuf::from(format!("{}.minisig", file.display()));
-        install_appimage(file, &signature, target, PUBLIC_KEY)
+        install_appimage(file, target, sha256)
     }
 }
 
-/// Copy `new_image` next to `running` under a temporary name, verify the
-/// copy against `signature` with `public_key` (what gets renamed is what
+/// Copy `new_image` next to `running` under a temporary name, check the
+/// copy against `sha256` (what gets renamed is what
 /// was verified, whatever happened to the cache since the download), make it
 /// `0755`, fsync it and rename it over `running`, then fsync the folder. On
 /// any failure the temporary file is removed and `running` is untouched.
 #[cfg(not(target_os = "macos"))]
-fn install_appimage(
-    new_image: &Path,
-    signature: &Path,
-    running: &Path,
-    public_key: &str,
-) -> Result<(), UpdateError> {
+fn install_appimage(new_image: &Path, running: &Path, sha256: &str) -> Result<(), UpdateError> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
     let dir = running
@@ -623,7 +566,7 @@ fn install_appimage(
         file.set_permissions(std::fs::Permissions::from_mode(0o755))?;
         file.sync_all()?;
         drop(file);
-        verify_with_key(&temp, signature, public_key)?;
+        verify(&temp, sha256)?;
         std::fs::rename(&temp, running).map_err(|err| {
             UpdateError::Install(format!("could not replace {}: {err}", running.display()))
         })?;
@@ -785,16 +728,20 @@ mod tests {
         assert!(!version_is_newer("0.1.0.1", "0.1.0"));
     }
 
+    /// sha256 of "corvane\n"
+    const SHA: &str = "54f3bf20ad08b45c1bd66240769d69f2ae962accab362424a4a9a8e43476d6af";
+
     fn asset(name: &str) -> ApiAsset {
         ApiAsset {
             name: name.to_string(),
             browser_download_url: format!("https://example.invalid/{name}"),
             size: 1,
+            digest: Some(format!("sha256:{SHA}")),
         }
     }
 
     #[test]
-    fn picks_the_universal_zip_and_its_signature() {
+    fn picks_the_universal_zip_and_its_digest() {
         let release = ApiRelease {
             tag_name: "v0.2.0".into(),
             name: None,
@@ -803,8 +750,8 @@ mod tests {
             html_url: "https://example.invalid/r".into(),
             draft: false,
             assets: vec![
-                asset("packs-manifest.zip"),
-                asset("Corvane-0.2.0-macos-universal.zip.minisig"),
+                asset("tree-sitter-packs.zip"),
+                asset("Corvane-Full-0.2.0-macos-universal.zip"),
                 asset("Corvane-0.2.0-macos-universal.zip"),
                 asset("Corvane-0.2.0-macos-universal.dmg"),
             ],
@@ -814,7 +761,7 @@ mod tests {
             .unwrap();
         assert_eq!(info.version, "0.2.0");
         assert_eq!(info.zip_name, "Corvane-0.2.0-macos-universal.zip");
-        assert!(info.signature_url.ends_with(".zip.minisig"));
+        assert_eq!(info.sha256, SHA);
     }
 
     #[test]
@@ -852,11 +799,14 @@ mod tests {
             published_at: None,
             html_url: String::new(),
             draft: false,
-            assets: vec![asset("Corvane-9.0.0-macos-universal.zip")],
+            assets: vec![ApiAsset {
+                digest: Some("md5:00".into()),
+                ..asset("Corvane-9.0.0-macos-universal.zip")
+            }],
         };
         assert!(matches!(
             release_info_for(release, "0.1.0", "macos", "x86_64"),
-            Err(UpdateError::NoSignature(_))
+            Err(UpdateError::NoDigest(_))
         ));
     }
 
@@ -897,36 +847,24 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_key_parses_but_is_flagged() {
-        assert!(minisign_verify::PublicKey::from_base64(PLACEHOLDER_PUBLIC_KEY).is_ok());
-        assert!(PUBLIC_KEY != PLACEHOLDER_PUBLIC_KEY || public_key_is_placeholder());
+    fn verifies_a_file_against_its_sha256_and_rejects_tampering() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("corvane.txt");
+        std::fs::write(&file, b"corvane\n").unwrap();
+        verify(&file, SHA).unwrap();
+        verify(&file, &SHA.to_ascii_uppercase()).unwrap();
+        std::fs::write(&file, b"corvane!\n").unwrap();
+        assert!(matches!(verify(&file, SHA), Err(UpdateError::Checksum(_))));
     }
 
     #[test]
-    fn verifies_a_signed_file_and_rejects_the_wrong_key_or_tampering() {
-        // key pair + signature made with rsign2 (minisign-compatible) for "corvane\n"
-        const PK: &str = "RWQWQQA4BcbC0arsHabh/pvzTzJMt/cgR143jQlKG/hdxJRgz0QvST8y";
-        const SIG: &str = "untrusted comment: signature from rsign secret key\n\
-RUQWQQA4BcbC0ZcEEcxolelI9m4z1OEr3spEy1ILi+R6nNin5bF/cq/b/1vQDABxCC7S2nMoeR/MznbRnNOaHoj+08ODrWq5bwg=\n\
-trusted comment: file:corvane.txt hashed\n\
-dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3RflvCQ==\n";
-        let dir = std::env::temp_dir().join(format!("corvane-updater-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("corvane.txt");
-        std::fs::write(&file, b"corvane\n").unwrap();
-        let sig = dir.join("corvane.txt.minisig");
-        std::fs::write(&sig, SIG).unwrap();
-        verify_with_key(&file, &sig, PK).unwrap();
-        assert!(matches!(
-            verify_with_key(&file, &sig, PLACEHOLDER_PUBLIC_KEY),
-            Err(UpdateError::Signature(_))
-        ));
-        std::fs::write(&file, b"corvane!\n").unwrap();
-        assert!(matches!(
-            verify_with_key(&file, &sig, PK),
-            Err(UpdateError::Signature(_))
-        ));
-        std::fs::remove_dir_all(&dir).ok();
+    fn digests_must_be_sha256() {
+        assert_eq!(
+            sha256_digest(&format!("sha256:{SHA}")).as_deref(),
+            Some(SHA)
+        );
+        assert_eq!(sha256_digest("sha256:abc"), None);
+        assert_eq!(sha256_digest(SHA), None);
     }
 
     fn release_with(assets: &[&str]) -> ApiRelease {
@@ -941,17 +879,12 @@ dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3
         }
     }
 
-    const LINUX_ASSETS: [&str; 10] = [
+    const LINUX_ASSETS: [&str; 5] = [
         "Corvane-0.2.0-macos-universal.zip",
-        "Corvane-0.2.0-macos-universal.zip.minisig",
         "corvane_0.2.0_amd64.deb",
-        "corvane_0.2.0_amd64.deb.minisig",
-        "Corvane-0.2.0-x86_64.AppImage.minisig",
+        "corvane_0.2.0_arm64.deb",
         "Corvane-0.2.0-x86_64.AppImage",
         "Corvane-0.2.0-aarch64.AppImage",
-        "Corvane-0.2.0-aarch64.AppImage.minisig",
-        "packs-manifest.json",
-        "packs-manifest.json.minisig",
     ];
 
     #[test]
@@ -960,10 +893,6 @@ dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3
             .unwrap()
             .unwrap();
         assert_eq!(info.zip_name, "Corvane-0.2.0-x86_64.AppImage");
-        assert!(
-            info.signature_url
-                .ends_with("/Corvane-0.2.0-x86_64.AppImage.minisig")
-        );
         let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "linux", "aarch64")
             .unwrap()
             .unwrap();
@@ -979,25 +908,22 @@ dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3
     fn linux_ignores_the_deb_and_other_architectures() {
         let only_deb = release_with(&[
             "corvane_0.2.0_amd64.deb",
-            "corvane_0.2.0_amd64.deb.minisig",
             "Corvane-0.2.0-macos-universal.zip",
         ]);
         assert!(matches!(
             release_info_for(only_deb, "0.1.0", "linux", "x86_64"),
             Err(UpdateError::NoAsset(_))
         ));
-        let other_arch = release_with(&[
-            "Corvane-0.2.0-aarch64.AppImage",
-            "Corvane-0.2.0-aarch64.AppImage.minisig",
-        ]);
+        let other_arch = release_with(&["Corvane-0.2.0-aarch64.AppImage"]);
         assert!(matches!(
             release_info_for(other_arch, "0.1.0", "linux", "x86_64"),
             Err(UpdateError::NoAsset(_))
         ));
-        let unsigned = release_with(&["Corvane-0.2.0-x86_64.AppImage"]);
+        let mut no_digest = release_with(&["Corvane-0.2.0-x86_64.AppImage"]);
+        no_digest.assets[0].digest = None;
         assert!(matches!(
-            release_info_for(unsigned, "0.1.0", "linux", "x86_64"),
-            Err(UpdateError::NoSignature(_))
+            release_info_for(no_digest, "0.1.0", "linux", "x86_64"),
+            Err(UpdateError::NoDigest(_))
         ));
         let full = [asset("Corvane-Full-0.2.0-x86_64.AppImage")];
         assert!(pick_appimage_asset(&full, "x86_64").is_none());
@@ -1010,17 +936,12 @@ mod linux_tests {
 
     use super::*;
 
-    /// The rsign key pair and signature of `verifies_a_signed_file_…`:
-    /// "corvane\n" signed.
-    const PK: &str = "RWQWQQA4BcbC0arsHabh/pvzTzJMt/cgR143jQlKG/hdxJRgz0QvST8y";
-    const SIG: &str = "untrusted comment: signature from rsign secret key\n\
-RUQWQQA4BcbC0ZcEEcxolelI9m4z1OEr3spEy1ILi+R6nNin5bF/cq/b/1vQDABxCC7S2nMoeR/MznbRnNOaHoj+08ODrWq5bwg=\n\
-trusted comment: file:corvane.txt hashed\n\
-dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3RflvCQ==\n";
+    /// sha256 of "corvane\n"
+    const SHA: &str = "54f3bf20ad08b45c1bd66240769d69f2ae962accab362424a4a9a8e43476d6af";
 
     /// `<tmp>/apps/Corvane.AppImage` (old, `0644`) and a downloaded
-    /// `<tmp>/updates/Corvane-9.9.9-x86_64.AppImage` with its signature.
-    fn setup(new_contents: &[u8]) -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+    /// `<tmp>/updates/Corvane-9.9.9-x86_64.AppImage`.
+    fn setup(new_contents: &[u8]) -> (tempfile::TempDir, PathBuf, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let apps = tmp.path().join("apps");
         let updates = tmp.path().join("updates");
@@ -1031,9 +952,7 @@ dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3
         std::fs::set_permissions(&running, std::fs::Permissions::from_mode(0o644)).unwrap();
         let new_image = updates.join("Corvane-9.9.9-x86_64.AppImage");
         std::fs::write(&new_image, new_contents).unwrap();
-        let signature = updates.join("Corvane-9.9.9-x86_64.AppImage.minisig");
-        std::fs::write(&signature, SIG).unwrap();
-        (tmp, running, new_image, signature)
+        (tmp, running, new_image)
     }
 
     fn leftovers(dir: &Path) -> Vec<String> {
@@ -1046,8 +965,8 @@ dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3
 
     #[test]
     fn installs_a_verified_appimage_by_rename() {
-        let (_tmp, running, new_image, signature) = setup(b"corvane\n");
-        install_appimage(&new_image, &signature, &running, PK).unwrap();
+        let (_tmp, running, new_image) = setup(b"corvane\n");
+        install_appimage(&new_image, &running, SHA).unwrap();
         assert_eq!(std::fs::read(&running).unwrap(), b"corvane\n");
         let mode = std::fs::metadata(&running).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o755);
@@ -1058,27 +977,20 @@ dtHnoc7Q3DoWMwpvaTIB3VqmmNHAKafDMTDw/fUPRD2ShSxmbDbCFrnR+eJ/MTpKtzTl7yeie0bqlbc3
 
     #[test]
     fn a_failed_verification_leaves_the_running_image_alone() {
-        let (_tmp, running, new_image, signature) = setup(b"corvane!\n");
+        let (_tmp, running, new_image) = setup(b"corvane!\n");
         assert!(matches!(
-            install_appimage(&new_image, &signature, &running, PK),
-            Err(UpdateError::Signature(_))
+            install_appimage(&new_image, &running, SHA),
+            Err(UpdateError::Checksum(_))
         ));
         assert_eq!(std::fs::read(&running).unwrap(), b"old image");
         let mode = std::fs::metadata(&running).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o644);
         assert!(leftovers(running.parent().unwrap()).is_empty());
-        // the right bytes under the wrong key fail the same way
-        std::fs::write(&new_image, b"corvane\n").unwrap();
-        assert!(matches!(
-            install_appimage(&new_image, &signature, &running, PLACEHOLDER_PUBLIC_KEY),
-            Err(UpdateError::Signature(_))
-        ));
-        assert_eq!(std::fs::read(&running).unwrap(), b"old image");
     }
 
     #[test]
     fn appimage_target_needs_a_replaceable_regular_file() {
-        let (tmp, running, _, _) = setup(b"x");
+        let (tmp, running, _) = setup(b"x");
         assert_eq!(
             appimage_target(Some(running.clone().into_os_string())),
             Some(std::fs::canonicalize(&running).unwrap())
