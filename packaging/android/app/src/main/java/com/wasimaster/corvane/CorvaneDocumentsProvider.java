@@ -58,6 +58,8 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
      * that shows hidden files can put a key there.
      */
     private static final String HOME_ID = "home";
+    /** Stands for the leading dot of a name in the settings root's ids. */
+    private static final String DOT = "%2E";
     private static final String SHARED_ID = "shared";
     private static final String TMP_ID = "tmp";
 
@@ -100,7 +102,14 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
                 return ids[i];
             }
             if (path.startsWith(root + File.separator)) {
-                return ids[i] + "/" + path.substring(root.length() + 1);
+                String relative = path.substring(root.length() + 1);
+                // File managers hide ids whose name starts with a dot too
+                // (DocumentsUI), and the settings root is there for
+                // .gitconfig and .ssh
+                if (ids[i].equals(HOME_ID) && relative.startsWith(".")) {
+                    relative = DOT + relative.substring(1);
+                }
+                return ids[i] + "/" + relative;
             }
         }
         return null;
@@ -114,8 +123,12 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
         }
         String prefix = documentId.contains("/")
                 ? documentId.substring(0, documentId.indexOf('/')) : documentId;
-        File file = documentId.equals(prefix)
-                ? base : new File(base, documentId.substring(prefix.length() + 1));
+        String relative = documentId.equals(prefix)
+                ? "" : documentId.substring(prefix.length() + 1);
+        if (prefix.equals(HOME_ID) && relative.startsWith(DOT)) {
+            relative = "." + relative.substring(DOT.length());
+        }
+        File file = relative.isEmpty() ? base : new File(base, relative);
         try {
             String canonical = file.getCanonicalPath();
             String root = base.getCanonicalPath();
@@ -212,14 +225,23 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
         }
         File parent = file.getParentFile();
         String id = idFor(file);
+        // File managers hide names that start with a dot, and what the
+        // settings root is for is .gitconfig and .ssh: there they are shown
+        // without it (and keep their names, so no renaming).
+        boolean dotted = parent != null && parent.equals(homeDirectory(getContext()))
+                && file.getName().startsWith(".") && file.getName().length() > 1;
         if (parent != null && parent.canWrite() && !isTop(id)) {
-            flags |= Document.FLAG_SUPPORTS_DELETE | Document.FLAG_SUPPORTS_RENAME;
+            flags |= Document.FLAG_SUPPORTS_DELETE;
+            if (!dotted) {
+                flags |= Document.FLAG_SUPPORTS_RENAME;
+            }
         }
         MatrixCursor.RowBuilder row = result.newRow();
         row.add(Document.COLUMN_DOCUMENT_ID, id);
         row.add(Document.COLUMN_DISPLAY_NAME, id.equals(BASE_ID)
                 ? getContext().getString(R.string.app_name)
                 : id.equals(HOME_ID) ? getContext().getString(R.string.home_title)
+                : dotted ? file.getName().substring(1)
                 : file.getName());
         row.add(Document.COLUMN_SIZE, file.length());
         row.add(Document.COLUMN_MIME_TYPE, mimeType(file));
@@ -232,6 +254,10 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
             return Document.MIME_TYPE_DIR;
         }
         String name = file.getName();
+        // .gitconfig is text, whatever its "extension" says
+        if (name.startsWith(".") && name.indexOf('.', 1) < 0) {
+            return "text/plain";
+        }
         int dot = name.lastIndexOf('.');
         if (dot >= 0) {
             String type = MimeTypeMap.getSingleton()
@@ -329,7 +355,10 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
     public String renameDocument(String documentId, String displayName)
             throws FileNotFoundException {
         File file = fileFor(documentId);
-        if (isTop(documentId) || displayName.contains("/")
+        boolean dotted = file.getParentFile() != null
+                && file.getParentFile().equals(homeDirectory(getContext()))
+                && file.getName().startsWith(".");
+        if (isTop(documentId) || dotted || displayName.contains("/")
                 || displayName.equals("..")) {
             throw new FileNotFoundException(displayName);
         }
