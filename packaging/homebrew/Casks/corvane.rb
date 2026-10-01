@@ -20,7 +20,7 @@ cask "corvane" do
     strategy :github_latest
   end
 
-  depends_on macos: :sequoia
+  depends_on macos: ">= :catalina"
 
   app "Corvane.app"
   # `corvane [open] [path]` / `corvane clone <url>` (Install Command Line Tool… does the same by hand)

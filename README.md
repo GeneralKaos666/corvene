@@ -10,8 +10,8 @@ Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus 
 
 ## Requirements
 
-- macOS 15 or newer ([Apple Silicon](https://support.apple.com/en-us/116943) or Intel)
-- `git` 2.40+ on your `PATH` ([Xcode Command Line](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) Tools or [Homebrew](https://brew.sh/))
+- macOS 10.15.7 Catalina or newer on Intel, macOS 11 or newer on [Apple Silicon](https://support.apple.com/en-us/116943)
+- `git` 2.40+ on your `PATH` ([Xcode Command Line](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) Tools or [Homebrew](https://brew.sh/)); the Command Line Tools for macOS 15 and older ship an older git, so use Homebrew's there
 
 ## Building
 
@@ -29,7 +29,7 @@ Development builds compile [Metal](https://developer.apple.com/metal/) shaders a
 brew install --cask wasi-master/corvane/corvane
 ```
 
-Direct download from [GitHub Releases](https://github.com/wasi-master/corvane/releases): after the first launch is blocked, open System Settings → Privacy & Security and click "Open Anyway", or run `xattr -d com.apple.quarantine /Applications/Corvane.app`.
+Direct download from [GitHub Releases](https://github.com/wasi-master/corvane/releases): after the first launch is blocked, open System Settings → Privacy & Security and click "Open Anyway" (on macOS 14 and older, right-click the app and choose Open), or run `xattr -d com.apple.quarantine /Applications/Corvane.app`.
 
 ## License
 

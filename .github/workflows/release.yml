@@ -29,7 +29,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   # C code (tree-sitter, grammars) targets Info.plist's LSMinimumSystemVersion
-  MACOSX_DEPLOYMENT_TARGET: '15.0'
+  MACOSX_DEPLOYMENT_TARGET: '10.15'
   TARGETS: aarch64-apple-darwin x86_64-apple-darwin
 
 jobs:

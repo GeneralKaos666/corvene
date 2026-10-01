@@ -24,8 +24,8 @@
 set -euo pipefail
 
 # C grammars compile for the oldest macOS Corvane supports (Info.plist
-# LSMinimumSystemVersion), not for the build machine's
-export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
+# LSMinimumSystemVersion; 11.0 on arm64), not for the build machine's
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-10.15}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/target/release-assets/packs}"

@@ -113,7 +113,11 @@ def main(argv: list[str]) -> int:
     )
     macos = target.endswith("-apple-darwin") if target else sys.platform == "darwin"
     if target and macos:
-        arch = ["-target", target.replace("-apple-darwin", "-apple-macos15.0")]
+        # Info.plist's LSMinimumSystemVersion; Apple Silicon starts at 11.0
+        floor = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "10.15")
+        if target.startswith("aarch64") and int(floor.split(".")[0]) < 11:
+            floor = "11.0"
+        arch = ["-target", target.replace("-apple-darwin", f"-apple-macos{floor}")]
     elif target:
         arch = ["-target", target]
     else:

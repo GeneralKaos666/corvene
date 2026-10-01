@@ -74,7 +74,7 @@ mod mac {
 
     use block::Block;
     use objc::declare::ClassDecl;
-    use objc::runtime::{Class, Object, Protocol, Sel};
+    use objc::runtime::{BOOL, Class, NO, Object, Protocol, Sel};
     use objc::{class, msg_send, sel, sel_impl};
 
     use super::NotificationClick;
@@ -176,7 +176,8 @@ mod mac {
 
     /// `userNotificationCenter:willPresentNotification:withCompletionHandler:`:
     /// show the banner even while Corvane is frontmost (GHD passes alert,
-    /// badge and sound; `alert` is `banner | list` since macOS 11).
+    /// badge and sound; `alert` is `banner | list` since macOS 11, and
+    /// Catalina only knows `alert`).
     extern "C" fn will_present(
         _this: &Object,
         _sel: Sel,
@@ -185,11 +186,38 @@ mod mac {
         completion: *mut Object,
     ) {
         let completion = completion as *mut Block<(u64,), ()>;
-        // UNNotificationPresentationOptionBadge | Sound | List | Banner
-        const OPTIONS: u64 = 1 | 2 | 8 | 16;
+        // UNNotificationPresentationOptionBadge | Sound, then List | Banner
+        // or the Alert they replaced
+        let options: u64 = if macos_at_least(11, 0) {
+            1 | 2 | 8 | 16
+        } else {
+            1 | 2 | 4
+        };
         if !completion.is_null() {
             // SAFETY: the framework's completion block, called once.
-            unsafe { (*completion).call((OPTIONS,)) };
+            unsafe { (*completion).call((options,)) };
+        }
+    }
+
+    /// `[NSProcessInfo.processInfo isOperatingSystemAtLeastVersion:]`
+    fn macos_at_least(major: isize, minor: isize) -> bool {
+        #[repr(C)]
+        struct NSOperatingSystemVersion {
+            major: isize,
+            minor: isize,
+            patch: isize,
+        }
+        let version = NSOperatingSystemVersion {
+            major,
+            minor,
+            patch: 0,
+        };
+        // SAFETY: the process info singleton always exists; the argument is
+        // the struct the selector takes by value.
+        unsafe {
+            let info: *mut Object = msg_send![class!(NSProcessInfo), processInfo];
+            let at_least: BOOL = msg_send![info, isOperatingSystemAtLeastVersion: version];
+            at_least != NO
         }
     }
 

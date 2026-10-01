@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regenerates the app icon artefacts from the SVG sources in assets/icon/:
-#   assets/Corvane.icns                  legacy icon (macOS 15, and 26 without Assets.car)
+#   assets/Corvane.icns                  legacy icon (macOS before 26, and 26 without Assets.car)
 #   assets/icon/Corvane-1024.png         marketing / README
 #   assets/icon/Corvane.icon/Assets/*.png  Icon Composer layers (macOS 26 Liquid Glass)
 # Requires rsvg-convert (brew install librsvg) and iconutil (Xcode CLT).
