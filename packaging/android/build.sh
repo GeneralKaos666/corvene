@@ -1,11 +1,12 @@
 #!/bin/bash
-# Build Corvane's Android package: the Rust library with cargo-ndk, then the
-# APK with Gradle.
+# Build Corvane's Android package: the bundled git (git/build.sh), the Rust
+# library with cargo-ndk, then the APK with Gradle.
 #
 #   packaging/android/build.sh [debug|release]
 #
 # Needs the Android SDK and NDK (ANDROID_HOME, ANDROID_NDK_HOME), a JDK 17+
-# (JAVA_HOME), `cargo install cargo-ndk` and the Rust targets of the ABIS.
+# (JAVA_HOME), `cargo install cargo-ndk`, the Rust targets of the ABIS, and
+# for the bundled git: make, perl and Go.
 #
 # Env: ABIS (default "arm64-v8a x86_64"), SKIP_GRADLE=1 (library only).
 set -euo pipefail
@@ -22,6 +23,13 @@ for abi in $ABIS; do
 done
 profile_flag=
 [ "$PROFILE" = release ] && profile_flag=--release
+
+# git, its HTTPS helper, ssh and git-lfs, once per ABI (git/build.sh)
+missing=
+for abi in $ABIS; do
+  [ -f "$JNI_LIBS/$abi/libgit.so" ] || missing="$missing $abi"
+done
+[ -z "$missing" ] || packaging/android/git/build.sh $missing
 
 # `--lib`: the activity loads libcorvane.so; Android has no use for the binary.
 # API 26 is the minimum the manifest declares.
