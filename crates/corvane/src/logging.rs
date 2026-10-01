@@ -5,8 +5,16 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 pub fn init() -> Option<WorkerGuard> {
-    let filter = EnvFilter::try_from_env("CORVANE_LOG")
-        .unwrap_or_else(|_| EnvFilter::new("info,corvane=debug"));
+    let filter = EnvFilter::try_from_env("CORVANE_LOG").unwrap_or_else(|_| {
+        // Android: every line is a write to logcat on the thread that
+        // logs; a release keeps to `info` (a refresh alone logs a dozen
+        // git commands at `debug`)
+        EnvFilter::new(if cfg!(target_os = "android") && !cfg!(debug_assertions) {
+            "info"
+        } else {
+            "info,corvane=debug"
+        })
+    });
 
     let logs_dir = corvane_platform::paths::logs_dir();
     let file_layer = std::fs::create_dir_all(&logs_dir).ok().map(|_| {

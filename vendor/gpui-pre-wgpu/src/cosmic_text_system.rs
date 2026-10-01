@@ -149,9 +149,21 @@ impl CosmicTextSystem {
     /// mapped when a face is first used.
     #[cfg(target_os = "android")]
     pub fn load_fonts_dir(&self, dir: &std::path::Path) {
+        self.load_fonts_dirs(&[dir], || {});
+    }
+
+    /// [`Self::load_fonts_dir`] for several directories under one lock;
+    /// `locked` runs once the lock is held. A caller that loads on another
+    /// thread waits for it: every use of the text system then waits for the
+    /// fonts instead of seeing the database without them.
+    #[cfg(target_os = "android")]
+    pub fn load_fonts_dirs(&self, dirs: &[&std::path::Path], locked: impl FnOnce()) {
         let mut state = self.0.write();
+        locked();
         let db = state.font_system.db_mut();
-        db.load_fonts_dir(dir);
+        for dir in dirs {
+            db.load_fonts_dir(dir);
+        }
         // Android 13's NotoColorEmoji.ttf is COLR v1, which swash cannot
         // draw (the glyphs come out blank). The system keeps the bitmap
         // font it replaced as NotoColorEmojiLegacy.ttf, under the same

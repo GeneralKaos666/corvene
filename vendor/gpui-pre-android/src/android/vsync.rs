@@ -10,7 +10,7 @@
 //! Not in gpui-mobile, which rendered from a polling loop.
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{mpsc, Arc};
 
 use android_activity::AndroidAppWaker;
@@ -22,6 +22,10 @@ struct Shared {
     posted: AtomicBool,
     /// A tick arrived that the event loop has not consumed.
     ticked: AtomicBool,
+    /// The last tick's time and the time between the last two that followed
+    /// each other, in nanoseconds: the display's refresh period.
+    last_tick: AtomicI64,
+    period: AtomicI64,
     waker: AndroidAppWaker,
 }
 
@@ -36,9 +40,17 @@ struct Looper(*mut ndk_sys::ALooper);
 // reference (`ALooper_acquire`) for as long as this value lives
 unsafe impl Send for Looper {}
 
-unsafe extern "C" fn tick(_frame_time_nanos: std::ffi::c_long, data: *mut c_void) {
+unsafe extern "C" fn tick(frame_time_nanos: std::ffi::c_long, data: *mut c_void) {
     // SAFETY: `data` is the `Shared` the thread below keeps alive forever
     let shared = unsafe { &*data.cast::<Shared>() };
+    // `long` is 64 bits on both ABIs this is built for
+    #[allow(clippy::unnecessary_cast)]
+    let now = frame_time_nanos as i64;
+    let gap = now - shared.last_tick.swap(now, Ordering::Relaxed);
+    // consecutive ticks only: 240 Hz to 30 Hz
+    if (4_000_000..34_000_000).contains(&gap) {
+        shared.period.store(gap, Ordering::Relaxed);
+    }
     shared.posted.store(false, Ordering::SeqCst);
     shared.ticked.store(true, Ordering::SeqCst);
     shared.waker.wake();
@@ -52,6 +64,8 @@ impl Vsync {
             requested: AtomicBool::new(false),
             posted: AtomicBool::new(false),
             ticked: AtomicBool::new(false),
+            last_tick: AtomicI64::new(0),
+            period: AtomicI64::new(0),
             waker,
         });
         let (sender, receiver) = mpsc::channel::<Option<Looper>>();
@@ -107,6 +121,13 @@ impl Vsync {
         self.shared.requested.store(true, Ordering::SeqCst);
         // SAFETY: see `Looper`
         unsafe { ndk_sys::ALooper_wake(self.looper.0) };
+    }
+
+    /// The display's refresh period as the ticks show it, once two followed
+    /// each other.
+    pub(crate) fn period(&self) -> Option<std::time::Duration> {
+        let nanos = self.shared.period.load(Ordering::Relaxed);
+        (nanos > 0).then(|| std::time::Duration::from_nanos(nanos as u64))
     }
 
     /// Whether a tick arrived since the last call.

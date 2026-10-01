@@ -117,6 +117,22 @@ impl AndroidPlatform {
         if vsync.is_none() {
             log::warn!("no choreographer: frames are paced by a timer");
         }
+        // The thread that draws: display priority (the nice value Android
+        // gives its own render threads), and a performance hint session so
+        // the CPU governor knows what a frame needs.
+        // SAFETY: plain libc calls on the calling thread
+        unsafe {
+            libc::setpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t, -4);
+        }
+        let mut perf_hint = super::perf_hint::PerfHint::for_current_thread(FRAME_INTERVAL);
+        log::info!(
+            "performance hints: {}",
+            if perf_hint.is_some() {
+                "on"
+            } else {
+                "unavailable"
+            }
+        );
         // when the frame that is wanted now was first wanted
         let mut wanted_since: Option<Instant> = None;
 
@@ -202,7 +218,12 @@ impl AndroidPlatform {
                     let gap = last_frame.map(|last| start - last);
                     last_frame = Some(start);
                     window.frame();
-                    FRAME_STATS.with(|stats| stats.borrow_mut().record(gap, start.elapsed()));
+                    let took = start.elapsed();
+                    if let Some(hint) = perf_hint.as_mut() {
+                        let period = vsync.as_ref().and_then(|vsync| vsync.period());
+                        hint.frame(took, period.unwrap_or(FRAME_INTERVAL));
+                    }
+                    FRAME_STATS.with(|stats| stats.borrow_mut().record(gap, took));
                 }
             }
         }

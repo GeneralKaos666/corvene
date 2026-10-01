@@ -96,9 +96,33 @@ impl AndroidPlatform {
 
         let (dispatcher, main_receiver) = AndroidDispatcher::new(&app);
         let text_system = Arc::new(CosmicTextSystem::new("Roboto"));
-        text_system.load_fonts_dir(Path::new("/system/fonts"));
-        // fonts an OEM or a module adds
-        text_system.load_fonts_dir(Path::new("/product/fonts"));
+        // The system's fonts (and those an OEM or a module adds) are read on
+        // a thread of their own: a few hundred files, while this thread goes
+        // on to the surface and the GPU. The thread holds the text system's
+        // lock before `new` returns, so nothing shapes text without them.
+        {
+            let loader = text_system.clone();
+            let (locked, wait) = std::sync::mpsc::channel::<()>();
+            let spawned = std::thread::Builder::new()
+                .name("fonts".into())
+                .spawn(move || {
+                    loader.load_fonts_dirs(
+                        &[Path::new("/system/fonts"), Path::new("/product/fonts")],
+                        || {
+                            let _ = locked.send(());
+                        },
+                    );
+                });
+            match spawned {
+                Ok(_) => {
+                    let _ = wait.recv();
+                }
+                Err(_) => {
+                    text_system.load_fonts_dir(Path::new("/system/fonts"));
+                    text_system.load_fonts_dir(Path::new("/product/fonts"));
+                }
+            }
+        }
 
         let pending_urls = jni::launch_url().into_iter().collect();
         Self {

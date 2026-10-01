@@ -25,6 +25,7 @@ mod android {
     pub(crate) mod event_loop;
     pub mod jni;
     pub mod keyboard;
+    pub(crate) mod perf_hint;
     pub(crate) mod platform;
     pub(crate) mod vsync;
     pub(crate) mod window;
