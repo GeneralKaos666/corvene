@@ -553,9 +553,15 @@ impl Dispatcher {
             then(id, cx);
             return;
         }
-        let probe = cx
-            .background_executor()
-            .spawn(async move { open_repository(&path).map(|info| (path, info)) });
+        #[cfg(target_os = "android")]
+        let git = state.read(cx).git.clone();
+        let probe = cx.background_executor().spawn(async move {
+            #[cfg(target_os = "android")]
+            if let Some(git) = git {
+                android_prepare_repository(git, &path);
+            }
+            open_repository(&path).map(|info| (path, info))
+        });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = probe.await;
             cx.update(|cx| match result {
@@ -3727,6 +3733,16 @@ impl Dispatcher {
         }
     }
 
+    /// Android: the system page where the user grants "All files access",
+    /// so repositories on shared storage can be used in place.
+    #[cfg(target_os = "android")]
+    pub fn request_all_files_access(cx: &mut App) {
+        let _ = cx;
+        if let Some(bridge) = corvane_platform::android::bridge() {
+            bridge.request_all_files_access();
+        }
+    }
+
     /// Native folder picker → `Some(path)` on the foreground.
     pub fn pick_directory(
         prompt: &str,
@@ -5165,5 +5181,29 @@ mod replace_diff_tests {
                 lines()
             ),
         ));
+    }
+}
+
+/// Android: what a repository outside the app-private filesystem needs
+/// before git will work in it. Shared storage belongs to another user id
+/// (git's "dubious ownership") and keeps neither file modes nor symbolic
+/// links; a folder imported through the Storage Access Framework arrived
+/// without its file modes. Failures are left for the commands that follow to
+/// report.
+#[cfg(target_os = "android")]
+fn android_prepare_repository(git: Arc<corvane_git::GitBinary>, path: &Path) {
+    if !path.join(".git").exists() {
+        return;
+    }
+    let imported = corvane_platform::android::take_imported(path);
+    if corvane_platform::android::is_shared_storage(path) {
+        let trusted = corvane_git::global_config_values(git.clone(), "safe.directory");
+        if !trusted.iter().any(|dir| Path::new(dir) == path) {
+            let _ = corvane_git::add_safe_directory(git.clone(), path);
+        }
+        let _ = corvane_git::set_local_config_value(git.clone(), path, "core.symlinks", "false");
+        let _ = corvane_git::set_local_config_value(git, path, "core.filemode", "false");
+    } else if imported {
+        let _ = corvane_git::set_local_config_value(git, path, "core.filemode", "false");
     }
 }

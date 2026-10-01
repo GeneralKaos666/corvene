@@ -7,6 +7,8 @@
 pub const BUNDLE_ID: &str = "com.wasimaster.corvane";
 
 pub mod accessibility;
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod app_location;
 pub mod apps;
 pub mod cli;
@@ -90,11 +92,19 @@ pub mod paths {
     }
 
     /// GitHub Desktop's default clone location: `~/Documents/GitHub`.
+    /// Android: `files/repositories` in the app-private storage.
     pub fn default_clone_dir() -> PathBuf {
-        dirs::document_dir()
-            .or_else(dirs::home_dir)
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("GitHub")
+        #[cfg(target_os = "android")]
+        {
+            crate::android::repositories_dir()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            dirs::document_dir()
+                .or_else(dirs::home_dir)
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("GitHub")
+        }
     }
 
     /// Candidate clone locations offered during onboarding, existing ones only

@@ -37,8 +37,8 @@ pub use commit::{
     head_sha, merge_trailers, set_assume_unchanged, stage_files, undo_last_commit, unstage_all,
 };
 pub use config::{
-    add_safe_directory, global_config_value, local_config_value, remove_local_config_value,
-    set_default_branch, set_global_config_value, set_local_config_value,
+    add_safe_directory, global_config_value, global_config_values, local_config_value,
+    remove_local_config_value, set_default_branch, set_global_config_value, set_local_config_value,
 };
 pub use detect::{GitBinary, GitVersion, find_git, find_git_prefetched, prefetch_git};
 pub use diff::{
