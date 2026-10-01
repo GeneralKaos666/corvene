@@ -2,7 +2,11 @@
 # Build Corvane's Android package: the bundled git (git/build.sh), the Rust
 # library with cargo-ndk, then the APK with Gradle.
 #
-#   packaging/android/build.sh [debug|release]
+#   packaging/android/build.sh [debug|release] [foss|play]
+#
+# Without a flavour both packages are built (app/build.gradle.kts). A release
+# is signed when CORVANE_ANDROID_KEYSTORE, CORVANE_ANDROID_KEYSTORE_PASSWORD,
+# CORVANE_ANDROID_KEY_ALIAS and CORVANE_ANDROID_KEY_PASSWORD are set.
 #
 # Needs the Android SDK and NDK (ANDROID_HOME, ANDROID_NDK_HOME), a JDK 17+
 # (JAVA_HOME), `cargo install cargo-ndk`, the Rust targets of the ABIS, and
@@ -59,9 +63,8 @@ done
 
 [ -n "${SKIP_GRADLE:-}" ] && exit 0
 cd packaging/android
-if [ "$PROFILE" = release ]; then
-  ./gradlew --no-daemon assembleRelease
-else
-  ./gradlew --no-daemon assembleDebug
-fi
+# assemble[Foss|Play]<Debug|Release>
+flavour="${2:-}"
+task="assemble$(echo "${flavour:0:1}" | tr a-z A-Z)${flavour:1}$(echo "${PROFILE:0:1}" | tr a-z A-Z)${PROFILE:1}"
+./gradlew --no-daemon "$task"
 find app/build/outputs/apk -name '*.apk'

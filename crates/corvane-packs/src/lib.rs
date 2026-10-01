@@ -88,7 +88,12 @@ const GRAMMAR_INDEX: &str = "index.json";
 /// `<os>-<arch>` (`macos-aarch64`, `linux-x86_64`). Native packs are per
 /// architecture rather than universal: the grammar tables are large.
 pub fn pack_target() -> &'static str {
-    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+    // Android has its own C library: a Linux pack does not load there
+    if cfg!(all(target_os = "android", target_arch = "aarch64")) {
+        "android-aarch64"
+    } else if cfg!(target_os = "android") {
+        "android-x86_64"
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "macos-aarch64"
     } else if cfg!(target_os = "macos") {
         "macos-x86_64"
@@ -165,6 +170,15 @@ impl PackManifest {
     /// The newest entry of `kind` for this platform that this app version
     /// can use.
     pub fn entry_for(&self, kind: PackKind, app_version: &str) -> Option<&PackEntry> {
+        // Android's `play` flavour runs no code it downloaded; data packs
+        // (the extended syntaxes) stay available
+        #[cfg(target_os = "android")]
+        if kind != PackKind::SyntaxExtended
+            && !corvane_platform::android::bridge()
+                .is_some_and(|bridge| bridge.allows_downloaded_code())
+        {
+            return None;
+        }
         self.packs
             .iter()
             .filter(|p| p.kind == kind)
