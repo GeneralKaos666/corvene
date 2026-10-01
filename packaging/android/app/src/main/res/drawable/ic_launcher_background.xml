@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's background layer: the purple of the desktop icon.
+     Drawn on the 108 dp adaptive icon canvas; the glyph stays inside the
+     66 dp safe zone, so every launcher mask (circle, squircle, rounded
+     square) shows it whole. Source: assets/icon/Corvane.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="54"
+                android:startY="0"
+                android:endX="54"
+                android:endY="108"
+                android:startColor="#FF8A5CFF"
+                android:endColor="#FF4318B8" />
+        </aapt:attr>
+    </path>
+</vector>

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launcher icon's foreground layer: Corvane's branch glyph.
+     Drawn on the 108 dp adaptive icon canvas; the glyph stays inside the
+     66 dp safe zone, so every launcher mask (circle, squircle, rounded
+     square) shows it whole. Source: assets/icon/Corvane.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.098"
+        android:scaleY="0.098"
+        android:translateX="6.029"
+        android:translateY="3.824">
+        <path
+            android:pathData="M 665,343 A 228,228 0 1 0 665,681"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="76"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M 528,502 C 528,612 578,652 665,681"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="76"
+            android:strokeLineCap="round" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M 597,343 a 68,68 0 1,0 136,0 a 68,68 0 1,0 -136,0 Z" />
+        <path
+            android:fillColor="#FF4C22C4"
+            android:pathData="M 634,343 a 31,31 0 1,0 62,0 a 31,31 0 1,0 -62,0 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M 597,681 a 68,68 0 1,0 136,0 a 68,68 0 1,0 -136,0 Z" />
+        <path
+            android:fillColor="#FF4C22C4"
+            android:pathData="M 634,681 a 31,31 0 1,0 62,0 a 31,31 0 1,0 -62,0 Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M 460,502 a 68,68 0 1,0 136,0 a 68,68 0 1,0 -136,0 Z" />
+        <path
+            android:fillColor="#FF4C22C4"
+            android:pathData="M 497,502 a 31,31 0 1,0 62,0 a 31,31 0 1,0 -62,0 Z" />
+    </group>
+</vector>
