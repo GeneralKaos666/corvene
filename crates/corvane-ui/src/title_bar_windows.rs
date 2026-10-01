@@ -135,8 +135,18 @@ pub fn title_bar(
         .flex_row()
         .when(!light, |bar| {
             bar.bg(rgb(BACKGROUND))
-                .border_b_1()
-                .border_color(rgb(0x000000))
+                .relative()
+                // `border-bottom: 1px solid #000`, under the menu bar so that
+                // an open menu's button reaches its pane
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .bottom_0()
+                        .w_full()
+                        .h(px(1.))
+                        .bg(rgb(0x000000)),
+                )
                 // `showAppIcon`: not in the welcome flow
                 .child(
                     drag()

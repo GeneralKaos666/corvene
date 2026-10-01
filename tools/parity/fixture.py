@@ -61,11 +61,28 @@ def _git(repo: Path, *args: str, date: str | None = None):
     subprocess.run(["git", *args], cwd=repo, env=env, check=True, capture_output=True)
 
 
+def remove_tree(path: Path) -> None:
+    """`shutil.rmtree` that also removes read-only files: git's objects are,
+    and Windows refuses to delete those."""
+    import os
+    import stat
+    import sys
+
+    def writable(function, target, _):
+        os.chmod(target, stat.S_IWRITE)
+        function(target)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=writable)
+    else:
+        shutil.rmtree(path, onerror=writable)
+
+
 def build(parent: Path) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path."""
     repo = parent / NAME
     if repo.exists():
-        shutil.rmtree(repo)
+        remove_tree(repo)
     repo.mkdir(parents=True)
     _git(repo, "init", "-q", "-b", "main")
     for key, value in (("user.name", AUTHOR[0]), ("user.email", AUTHOR[1]), ("commit.gpgsign", "false"), ("tag.gpgsign", "false")):

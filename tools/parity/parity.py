@@ -72,6 +72,9 @@ def load_scenarios(names: list[str]) -> list[dict]:
                 continue
             doc.setdefault("name", path.stem)
             doc["_file"] = path.name
+            # `platforms: [win32]`: what only one platform's GHD has
+            if "platforms" in doc and sys.platform not in doc["platforms"]:
+                continue
             if not names or any(fnmatch.fnmatch(doc["name"], n) or fnmatch.fnmatch(path.stem, n) for n in names):
                 out.append(doc)
     return out
@@ -116,7 +119,7 @@ class Run:
         work = self.out / "work" / slug
         shots = self.out / "shots" / slug
         if work.exists():
-            shutil.rmtree(work)
+            fixture.remove_tree(work)
         shots.mkdir(parents=True, exist_ok=True)
         (work / "logs").mkdir(parents=True)
         setup = sc.get("setup", "repo")

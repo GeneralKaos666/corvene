@@ -1,0 +1,24 @@
+# The app menu GitHub Desktop draws in its Windows title bar (macOS has the
+# system's menu bar, Linux Electron's): the panes, a hovered row, the dimmed
+# page.
+name: app-menu
+description: The Windows title bar's app menu, File and Repository, with a row hovered
+platforms: [win32]
+setup: repo
+steps:
+  - click: {text: "File", within: "#app-menu-bar"}
+    wait: 500
+  - snap: file-menu
+  - hover: [60, 150]
+    wait: 300
+  - snap: file-menu-row-hovered
+  - key: escape
+    wait: 300
+  - click: {text: "Repository", within: "#app-menu-bar"}
+    wait: 500
+  - hover: [200, 300]
+    wait: 300
+  - snap: repository-menu-row-hovered
+  - key: escape
+    wait: 300
+  - snap: closed

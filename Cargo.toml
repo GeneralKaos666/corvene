@@ -117,9 +117,11 @@ incremental = false
 # rendering a window's scene to an image (src/wgpu_renderer.rs);
 # tree-sitter-scss: its build script passes a GCC flag MSVC refuses
 # (bindings/rust/build.rs); tree-sitter-agda: its scanner reads before an
-# empty array (src/scanner.c). All marked "Corvane patch".
+# empty array (src/scanner.c); gpui-pre-windows: anchored popups (the context
+# menus; src/window.rs, src/events.rs). All marked "Corvane patch".
 [patch.crates-io]
 tree-sitter-agda = { path = "vendor/tree-sitter-agda" }
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 tree-sitter-scss = { path = "vendor/tree-sitter-scss" }
 gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 gpui-pre = { path = "vendor/gpui-pre" }

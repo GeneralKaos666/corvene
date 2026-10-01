@@ -26,7 +26,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::popup::{PopupAnchor, PopupGravity};
-#[cfg(not(any(target_os = "android", windows)))]
+#[cfg(not(target_os = "android"))]
 use gpui_kit::popup::{PopupConstraintAdjustment, PopupOptions};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -104,6 +104,8 @@ struct Style {
     accelerator_right: f32,
     arrow_column: f32,
     check_column: f32,
+    /// From the submenu arrow's 16 px box to the menu's right edge.
+    arrow_right: f32,
     submenu_delay_ms: u64,
     /// GitHub Desktop's app menu panes rather than a Chromium menu.
     app_menu: bool,
@@ -124,15 +126,23 @@ impl Style {
         accelerator_right: metrics::ACCELERATOR_RIGHT,
         arrow_column: metrics::ARROW_COLUMN,
         check_column: metrics::CHECK_COLUMN,
+        arrow_right: 8.,
         submenu_delay_ms: metrics::SUBMENU_DELAY_MS,
         app_menu: false,
     };
 
-    /// Chromium's menus on Windows (the context menus): the same layout in
-    /// the system's menu font, Segoe UI at 9 pt.
+    /// Chromium's menus on Windows (the context menus), measured from
+    /// GitHub Desktop 3.6.6 at 150 %: Segoe UI at 9 pt, 28 px items between
+    /// 17 px separators, 12 px above the first and below the last item, the
+    /// submenu arrow's ink ending 24 px from the edge.
     #[cfg(windows)]
     const CHROMIUM_WINDOWS: Style = Style {
         font_size: 12.,
+        item_height: 28.,
+        top_inset: 12.,
+        bottom_inset: 12.,
+        text_raise: 0.,
+        arrow_right: 23.,
         ..Self::CHROMIUM
     };
 
@@ -157,6 +167,7 @@ impl Style {
         accelerator_right: 10.,
         arrow_column: 12.,
         check_column: 0.,
+        arrow_right: 10.,
         submenu_delay_ms: 300,
         app_menu: true,
     };
@@ -279,16 +290,16 @@ impl Palette {
         if Style::current().app_menu || !is_open(cx) {
             return Self::for_view_app(cx);
         }
-        // a context menu is Chromium's, in the system's colours (its
-        // refreshed menus: a grey highlight, not the accent colour)
-        let dark = matches!(
-            window.appearance(),
-            WindowAppearance::Dark | WindowAppearance::VibrantDark
-        );
+        // a context menu is Chromium's, light or dark as the app's theme is
+        // (GitHub Desktop sets Electron's `nativeTheme.themeSource`), in the
+        // colours measured from GitHub Desktop 3.6.6: a grey highlight, not
+        // the accent colour
+        let _ = window;
+        let dark = Self::for_view_app(cx).background.l < 0.5;
         let (background, text, minor, disabled, separator, highlight) = if dark {
-            (0x2b2b2b, 0xe3e3e3, 0xa8a8a8, 0x7a7a7a, 0x454545, 0x3f3f3f)
+            (0x1f1f1f, 0xe3e3e3, 0x9aa0a6, 0x9aa0a6, 0x5e5e5e, 0x363636)
         } else {
-            (0xffffff, 0x1f1f1f, 0x5e5e5e, 0xa0a0a0, 0xe0e0e0, 0xebebeb)
+            (0xffffff, 0x1f1f1f, 0x5f6368, 0x5f6368, 0xd3e3fd, 0xf2f2f2)
         };
         Self {
             background: rgb(background).into(),
@@ -307,18 +318,26 @@ impl Palette {
     pub fn for_view_app(cx: &App) -> Self {
         use crate::theme::ActiveGhdTheme;
         let theme = cx.ghd();
+        // measured from GitHub Desktop 3.6.6: the pane and the open button
+        // are the page's colour in the light theme and `$gray-800` in the
+        // dark one, where the separators are `$gray-600`
+        let (pane, separator): (Hsla, Hsla) = if theme.background.l < 0.5 {
+            (rgb(0x2f363d).into(), rgb(0x586069).into())
+        } else {
+            (theme.toolbar_button_active_background, theme.box_border)
+        };
         Self {
-            background: theme.background,
+            background: pane,
             text: theme.text,
             accelerator: theme.text_secondary,
             // `.menu-item.disabled { opacity: 0.3 }`
             disabled: theme.text.opacity(0.3),
-            separator: theme.box_border,
+            separator,
             highlight: theme.box_selected_active_background,
             highlight_text: theme.box_selected_active_text,
             bar_background: rgb(0x24292e).into(),
             bar_text: rgb(0xffffff).into(),
-            bar_open: theme.background,
+            bar_open: pane,
             bar_hot: rgb(0x2f363d).into(),
             focus_ring: transparent_black(),
         }
@@ -456,6 +475,12 @@ struct Level {
     view: Entity<MenuLevelView>,
     #[cfg(any(target_os = "android", windows))]
     bounds: Bounds<Pixels>,
+    /// Windows: a context menu's level is a window of its own showing
+    /// `view` (Chromium's menus reach past the window they belong to), and
+    /// `bounds` is that window's; the app menu's levels have none, they are
+    /// part of GitHub Desktop's page.
+    #[cfg(windows)]
+    popup: Option<WindowHandle<MenuLevelView>>,
     /// Top of each row inside the menu.
     row_tops: Vec<f32>,
 }
@@ -588,7 +613,12 @@ pub fn open(
     let Some(level) = open_level(entries, anchor, owner, keyboard, window, cx) else {
         return;
     };
-    let auto_dismiss = crate::native_menu_common::auto_dismiss().map(|hold| {
+    // (Windows: the app menu is part of GitHub Desktop's page, which a
+    // parity scenario opens, captures and closes itself; only the context
+    // menus are closed for it)
+    let hold = crate::native_menu_common::auto_dismiss()
+        .filter(|_| !cfg!(windows) || matches!(source, Source::Context));
+    let auto_dismiss = hold.map(|hold| {
         cx.spawn(async move |cx| {
             cx.background_executor().timer(hold).await;
             cx.update(close_all);
@@ -642,6 +672,7 @@ fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
     let has_check = entries.iter().any(|e| e.checked.is_some());
     let mut label_max = 0f32;
     let mut minor_max = 0f32;
+    let mut row_max = 0f32;
     let mut row_tops = Vec::with_capacity(entries.len());
     let mut y = s.top_inset;
     for entry in entries {
@@ -671,6 +702,21 @@ fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
             0.
         };
         minor_max = minor_max.max(accelerator + arrow);
+        // GitHub Desktop's app menu rows are flex boxes: a pane is as wide
+        // as its widest row, not as its widest label plus widest accelerator
+        let minor = accelerator + arrow;
+        row_max = row_max.max(
+            width_of(&entry.text)
+                + if minor > 0. {
+                    minor + s.accelerator_padding
+                } else {
+                    0.
+                },
+        );
+    }
+    if s.app_menu {
+        let width = (s.label_start + row_max + s.trailing).ceil();
+        return (row_tops, size(px(width), px(y + s.bottom_inset)));
     }
     let label_start = s.label_start + if has_check { s.check_column } else { 0. };
     let minor = if minor_max > 0. {
@@ -695,12 +741,64 @@ fn open_level(
         .try_global::<Menus>()
         .and_then(|m| m.session.as_ref())
         .map_or(0, |s| s.levels.len());
-    let highlighted = keyboard
+    // (GitHub Desktop's app menu selects a pane's first item however the
+    // menu was opened; a submenu's only from the keyboard)
+    let first = keyboard || (cfg!(windows) && Style::current().app_menu && level_index == 0);
+    let highlighted = first
         .then(|| entries.iter().position(Entry::selectable))
         .flatten();
     #[cfg(any(target_os = "android", windows))]
     {
         let _ = owner;
+        #[cfg(windows)]
+        if !Style::current().app_menu {
+            let view = cx.new(|_| MenuLevelView {
+                level: level_index,
+                scroll: ScrollHandle::new(),
+            });
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    point(px(0.), px(0.)),
+                    menu_size,
+                ))),
+                titlebar: None,
+                focus: false,
+                show: true,
+                kind: WindowKind::AnchoredPopup(PopupOptions {
+                    parent: owner,
+                    anchor_rect: anchor.rect,
+                    anchor: anchor.anchor,
+                    gravity: anchor.gravity,
+                    constraint_adjustment: PopupConstraintAdjustment::FLIP_X
+                        | PopupConstraintAdjustment::FLIP_Y
+                        | PopupConstraintAdjustment::SLIDE_X
+                        | PopupConstraintAdjustment::SLIDE_Y,
+                    offset: point(px(0.), px(0.)),
+                    grab: false,
+                }),
+                is_movable: false,
+                is_resizable: false,
+                is_minimizable: false,
+                window_background: WindowBackgroundAppearance::Opaque,
+                app_id: Some(corvane_platform::BUNDLE_ID.into()),
+                ..Default::default()
+            };
+            let root = view.clone();
+            return match cx.open_window(options, move |_, _| root) {
+                Ok(popup) => Some(Level {
+                    entries,
+                    highlighted,
+                    view,
+                    bounds: Bounds::new(point(px(0.), px(0.)), menu_size),
+                    popup: Some(popup),
+                    row_tops,
+                }),
+                Err(err) => {
+                    tracing::warn!(%err, "could not open a menu window");
+                    None
+                }
+            };
+        }
         // a menu taller than the screen scrolls
         let area = crate::theme::safe_area();
         let room = window.viewport_size().height - area.top - area.bottom;
@@ -716,6 +814,8 @@ fn open_level(
             highlighted,
             view,
             bounds,
+            #[cfg(windows)]
+            popup: None,
             row_tops,
         })
     }
@@ -809,6 +909,7 @@ pub fn overlay(cx: &App) -> Vec<AnyElement> {
         .levels
         .iter()
         .enumerate()
+        .filter(|(_, level)| in_window(level))
         .map(|(index, level)| {
             deferred(
                 anchored()
@@ -823,17 +924,13 @@ pub fn overlay(cx: &App) -> Vec<AnyElement> {
                             .map(|pane| {
                                 // Windows: the app menu's panes are flat,
                                 // each after the first with a divider on its
-                                // left; Chromium's menus are rounded there
+                                // left
                                 #[cfg(windows)]
                                 {
-                                    if Style::current().app_menu {
-                                        pane.when(index > 0, |pane| {
-                                            pane.border_l_1()
-                                                .border_color(Palette::for_view_app(cx).separator)
-                                        })
-                                    } else {
-                                        pane.shadow_md().rounded(px(8.)).overflow_hidden()
-                                    }
+                                    pane.when(index > 0, |pane| {
+                                        pane.border_l_1()
+                                            .border_color(Palette::for_view_app(cx).separator)
+                                    })
                                 }
                                 #[cfg(not(windows))]
                                 {
@@ -849,6 +946,21 @@ pub fn overlay(cx: &App) -> Vec<AnyElement> {
         .collect()
 }
 
+/// Whether a level is drawn in its owner's window ([`overlay`]) rather than
+/// in a window of its own.
+#[cfg(any(target_os = "android", windows))]
+fn in_window(level: &Level) -> bool {
+    #[cfg(windows)]
+    {
+        level.popup.is_none()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = level;
+        true
+    }
+}
+
 /// Whether `position` (window coordinates) is on an open menu drawn in the
 /// window itself (Android); menus in their own windows never are.
 pub fn contains(position: Point<Pixels>, cx: &App) -> bool {
@@ -856,7 +968,11 @@ pub fn contains(position: Point<Pixels>, cx: &App) -> bool {
     {
         cx.try_global::<Menus>()
             .and_then(|m| m.session.as_ref())
-            .is_some_and(|s| s.levels.iter().any(|l| l.bounds.contains(&position)))
+            .is_some_and(|s| {
+                s.levels
+                    .iter()
+                    .any(|l| in_window(l) && l.bounds.contains(&position))
+            })
     }
     #[cfg(not(any(target_os = "android", windows)))]
     {
@@ -875,6 +991,10 @@ fn remove_windows(levels: Vec<Level>, cx: &mut App) {
     }
     #[cfg(any(target_os = "android", windows))]
     {
+        #[cfg(windows)]
+        for popup in levels.iter().filter_map(|level| level.popup) {
+            popup.update(cx, |_, window, _| window.remove_window()).ok();
+        }
         drop(levels);
         cx.refresh_windows();
     }
@@ -1016,7 +1136,12 @@ fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
             anchor: PopupAnchor::TopRight,
             gravity: PopupGravity::BottomRight,
         };
-        Some((children.clone(), anchor, session.owner))
+        // Windows: a submenu of a menu window is anchored to that window
+        #[cfg(windows)]
+        let owner = l.popup.map_or(session.owner, AnyWindowHandle::from);
+        #[cfg(not(windows))]
+        let owner = session.owner;
+        Some((children.clone(), anchor, owner))
     })() else {
         return;
     };
@@ -1409,7 +1534,7 @@ impl Render for MenuLevelView {
                     d.child(
                         div()
                             .absolute()
-                            .right(px(if s.app_menu { 10. } else { 8. }))
+                            .right(px(s.arrow_right))
                             .top(px(-s.text_raise))
                             .h(px(s.item_height))
                             .flex()

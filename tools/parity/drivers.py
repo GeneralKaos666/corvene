@@ -300,21 +300,43 @@ class Ghd:
                 return msg.get("result", {})
 
     def eval(self, expression: str):
-        r = self.call("Runtime.evaluate", expression=expression, returnByValue=True, awaitPromise=True)
+        # An evaluation that lands while the page is being replaced (a
+        # reload, which GHD on Windows also does on its own after a theme
+        # change) is dropped without an answer: ask again rather than wait
+        # out the socket.
+        patient = self.ws.gettimeout()
+        for attempt in range(4):
+            self.ws.settimeout(min(patient or 15, 15))
+            try:
+                r = self.call("Runtime.evaluate", expression=expression, returnByValue=True, awaitPromise=True)
+                break
+            except websocket.WebSocketTimeoutException:
+                if attempt == 3:
+                    raise
+            finally:
+                self.ws.settimeout(patient)
         if "exceptionDetails" in r:
             raise RuntimeError(f"eval failed: {r['exceptionDetails'].get('exception', {}).get('description', r['exceptionDetails'])}")
         return r.get("result", {}).get("value")
 
     def wait_for(self, expression: str, timeout: float = 15, interval: float = 0.15) -> bool:
         deadline = time.time() + timeout
-        while time.time() < deadline:
-            try:
-                if self.eval(f"!!({expression})"):
-                    return True
-            except RuntimeError:
-                pass
-            time.sleep(interval)
-        return False
+        # an evaluation sent while the page reloads is never answered (its
+        # execution context is gone): give up on it after a moment and ask
+        # again, instead of waiting out the socket's own timeout
+        patient = self.ws.gettimeout()
+        self.ws.settimeout(3)
+        try:
+            while time.time() < deadline:
+                try:
+                    if self.eval(f"!!({expression})"):
+                        return True
+                except (RuntimeError, websocket.WebSocketTimeoutException):
+                    pass
+                time.sleep(interval)
+            return False
+        finally:
+            self.ws.settimeout(patient)
 
     def emit(self, channel: str, payload) -> None:
         """Deliver an IPC message to the renderer as if the main process sent it."""
@@ -326,10 +348,20 @@ class Ghd:
         self.scale = scale
         if local_storage:
             items = ";".join(f"localStorage.setItem({json.dumps(k)}, {json.dumps(str(v))})" for k, v in local_storage.items())
-            self.eval(items)
+            if IS_WIN:
+                # GHD's page stops answering for good when it is reloaded
+                # while the app is still starting up
+                time.sleep(4)
+            # the mark tells the page being replaced from the reloaded one:
+            # the old one is still there, and complete, for a moment
+            self.eval(items + ";window.__parityStale = true")
             self.call("Page.reload", ignoreCache=False)
             time.sleep(0.5)
-            self.wait_for("document.readyState === 'complete' && !!document.querySelector('#desktop-app-container, #desktop-app')", 30)
+            self.wait_for(
+                "!window.__parityStale && document.readyState === 'complete'"
+                " && !!document.querySelector('#desktop-app-container, #desktop-app')",
+                30,
+            )
         self.resize(width, height)
         self.hook_context_menus()
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)

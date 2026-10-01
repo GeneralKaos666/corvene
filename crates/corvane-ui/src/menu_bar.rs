@@ -693,7 +693,8 @@ impl MenuBarShell {
                             .left_0()
                             .right_0()
                             .bottom_0()
-                            .bg(hsla(0., 0., 0., 0.4)),
+                            // `--overlay-background-color`
+                            .bg(cx.ghd().overlay),
                     )
                 })
         } else {
