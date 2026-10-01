@@ -74,13 +74,21 @@ impl AndroidPlatform {
                 break;
             }
 
-            let timeout = match self.window() {
+            let frame = match self.window() {
                 Some(window) if window.wants_frame() => {
                     Some(last_frame.map_or(Duration::ZERO, |last| {
                         FRAME_INTERVAL.saturating_sub(last.elapsed())
                     }))
                 }
                 _ => None,
+            };
+            let long_press = self
+                .window()
+                .and_then(|window| window.long_press_deadline())
+                .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+            let timeout = match (frame, long_press) {
+                (Some(frame), Some(long_press)) => Some(frame.min(long_press)),
+                (frame, long_press) => frame.or(long_press),
             };
             app.poll_events(timeout, |event| {
                 if let PollEvent::Main(event) = event {
@@ -115,6 +123,9 @@ impl AndroidPlatform {
                 self.handle_command(command);
             }
             self.process_input();
+            if let Some(window) = self.window() {
+                window.fire_long_press();
+            }
             self.process_activity_events();
             self.run_foreground_tasks();
 
@@ -442,13 +453,23 @@ fn handle_touch(
     };
     match action {
         MotionAction::Down | MotionAction::PointerDown => {
-            let pointer_id = motion.pointer_at_index(action_pointer).pointer_id();
+            let pointer = motion.pointer_at_index(action_pointer);
+            let pointer_id = pointer.pointer_id();
             let id = window.touch_started(pointer_id);
+            // one finger resting is a long press; a second one ends that
+            if action == MotionAction::Down {
+                window
+                    .long_press_started(pointer_id, window.logical_point(pointer.x(), pointer.y()));
+            } else {
+                window.long_press_ended(false);
+            }
             window.handle_input(touch(id, TouchPhase::Started, action_pointer));
         }
         MotionAction::Move => {
             for index in 0..motion.pointer_count() {
-                let pointer_id = motion.pointer_at_index(index).pointer_id();
+                let pointer = motion.pointer_at_index(index);
+                let pointer_id = pointer.pointer_id();
+                window.long_press_moved(pointer_id, window.logical_point(pointer.x(), pointer.y()));
                 if let Some(id) = window.touch(pointer_id) {
                     window.handle_input(touch(id, TouchPhase::Moved, index));
                 }
@@ -456,11 +477,16 @@ fn handle_touch(
         }
         MotionAction::Up | MotionAction::PointerUp => {
             let pointer_id = motion.pointer_at_index(action_pointer).pointer_id();
+            let tap = window.long_press_ended(action == MotionAction::Up);
             if let Some(id) = window.touch_ended(pointer_id) {
                 window.handle_input(touch(id, TouchPhase::Ended, action_pointer));
+                if let Some(position) = tap {
+                    window.tapped(position);
+                }
             }
         }
         MotionAction::Cancel => {
+            window.long_press_ended(false);
             for index in 0..motion.pointer_count() {
                 let pointer_id = motion.pointer_at_index(index).pointer_id();
                 if let Some(id) = window.touch_ended(pointer_id) {

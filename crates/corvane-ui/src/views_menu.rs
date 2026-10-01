@@ -25,7 +25,9 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::popup::{PopupAnchor, PopupConstraintAdjustment, PopupGravity, PopupOptions};
+use gpui_kit::popup::{PopupAnchor, PopupGravity};
+#[cfg(not(target_os = "android"))]
+use gpui_kit::popup::{PopupConstraintAdjustment, PopupOptions};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -239,7 +241,14 @@ pub enum Source {
 struct Level {
     entries: Vec<Entry>,
     highlighted: Option<usize>,
+    #[cfg(not(target_os = "android"))]
     window: WindowHandle<MenuLevelView>,
+    /// Android: an activity has one window, so a level is a view drawn over
+    /// the page ([`overlay`]) at `bounds` (window coordinates).
+    #[cfg(target_os = "android")]
+    view: Entity<MenuLevelView>,
+    #[cfg(target_os = "android")]
+    bounds: Bounds<Pixels>,
     /// Top of each row inside the menu.
     row_tops: Vec<f32>,
 }
@@ -480,55 +489,154 @@ fn open_level(
     let highlighted = keyboard
         .then(|| entries.iter().position(Entry::selectable))
         .flatten();
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-            point(px(0.), px(0.)),
-            menu_size,
-        ))),
-        titlebar: None,
-        focus: false,
-        show: true,
-        kind: WindowKind::AnchoredPopup(PopupOptions {
-            parent: owner,
-            anchor_rect: anchor.rect,
-            anchor: anchor.anchor,
-            gravity: anchor.gravity,
-            constraint_adjustment: PopupConstraintAdjustment::FLIP_X
-                | PopupConstraintAdjustment::FLIP_Y
-                | PopupConstraintAdjustment::SLIDE_X
-                | PopupConstraintAdjustment::SLIDE_Y,
-            offset: point(px(0.), px(0.)),
-            grab: false,
-        }),
-        is_movable: false,
-        is_resizable: false,
-        is_minimizable: false,
-        window_background: WindowBackgroundAppearance::Opaque,
-        app_id: Some(corvane_platform::BUNDLE_ID.into()),
-        ..Default::default()
-    };
-    match cx.open_window(options, |_, cx| {
-        cx.new(|_| MenuLevelView { level: level_index })
-    }) {
-        Ok(handle) => Some(Level {
+    #[cfg(target_os = "android")]
+    {
+        let _ = owner;
+        let bounds = Bounds::new(place(anchor, menu_size, window), menu_size);
+        let view = cx.new(|_| MenuLevelView { level: level_index });
+        window.refresh();
+        Some(Level {
             entries,
             highlighted,
-            window: handle,
+            view,
+            bounds,
             row_tops,
-        }),
-        Err(err) => {
-            tracing::warn!(%err, "could not open a menu window");
-            None
+        })
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                point(px(0.), px(0.)),
+                menu_size,
+            ))),
+            titlebar: None,
+            focus: false,
+            show: true,
+            kind: WindowKind::AnchoredPopup(PopupOptions {
+                parent: owner,
+                anchor_rect: anchor.rect,
+                anchor: anchor.anchor,
+                gravity: anchor.gravity,
+                constraint_adjustment: PopupConstraintAdjustment::FLIP_X
+                    | PopupConstraintAdjustment::FLIP_Y
+                    | PopupConstraintAdjustment::SLIDE_X
+                    | PopupConstraintAdjustment::SLIDE_Y,
+                offset: point(px(0.), px(0.)),
+                grab: false,
+            }),
+            is_movable: false,
+            is_resizable: false,
+            is_minimizable: false,
+            window_background: WindowBackgroundAppearance::Opaque,
+            app_id: Some(corvane_platform::BUNDLE_ID.into()),
+            ..Default::default()
+        };
+        match cx.open_window(options, |_, cx| {
+            cx.new(|_| MenuLevelView { level: level_index })
+        }) {
+            Ok(handle) => Some(Level {
+                entries,
+                highlighted,
+                window: handle,
+                row_tops,
+            }),
+            Err(err) => {
+                tracing::warn!(%err, "could not open a menu window");
+                None
+            }
         }
     }
 }
 
+/// Android: where a level goes in the window. What the window system does
+/// for a popup window on the desktop: under (or beside) its anchor, kept
+/// inside the part of the window the system bars leave free.
+#[cfg(target_os = "android")]
+fn place(anchor: Anchor, menu_size: Size<Pixels>, window: &Window) -> Point<Pixels> {
+    let area = crate::theme::safe_area();
+    let viewport = window.viewport_size();
+    let (right, bottom) = (viewport.width - area.right, viewport.height - area.bottom);
+    let rect = anchor.rect;
+    let beside = matches!(anchor.anchor, PopupAnchor::TopRight);
+    let mut origin = match anchor.anchor {
+        PopupAnchor::BottomLeft => point(rect.left(), rect.bottom()),
+        PopupAnchor::TopRight => point(rect.right(), rect.top()),
+        _ => rect.origin,
+    };
+    if origin.x + menu_size.width > right {
+        // a submenu flips to its parent's other side, a menu slides in
+        origin.x = if beside {
+            rect.left() - menu_size.width
+        } else {
+            right - menu_size.width
+        };
+    }
+    if origin.y + menu_size.height > bottom {
+        origin.y = bottom - menu_size.height;
+    }
+    point(origin.x.max(area.left), origin.y.max(area.top))
+}
+
+/// Android: the open levels as overlays for the window's root
+/// (`menu_bar::MenuBarShell`), topmost last.
+#[cfg(target_os = "android")]
+pub fn overlay(cx: &App) -> Vec<AnyElement> {
+    let Some(session) = cx.try_global::<Menus>().and_then(|m| m.session.as_ref()) else {
+        return Vec::new();
+    };
+    session
+        .levels
+        .iter()
+        .enumerate()
+        .map(|(index, level)| {
+            deferred(
+                anchored()
+                    .position(level.bounds.origin)
+                    .snap_to_window()
+                    .child(
+                        div()
+                            .w(level.bounds.size.width)
+                            .h(level.bounds.size.height)
+                            .occlude()
+                            .shadow_md()
+                            .child(level.view.clone()),
+                    ),
+            )
+            .with_priority(1000 + index)
+            .into_any_element()
+        })
+        .collect()
+}
+
+/// Whether `position` (window coordinates) is on an open menu drawn in the
+/// window itself (Android); menus in their own windows never are.
+pub fn contains(position: Point<Pixels>, cx: &App) -> bool {
+    #[cfg(target_os = "android")]
+    {
+        cx.try_global::<Menus>()
+            .and_then(|m| m.session.as_ref())
+            .is_some_and(|s| s.levels.iter().any(|l| l.bounds.contains(&position)))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (position, cx);
+        false
+    }
+}
+
 fn remove_windows(levels: Vec<Level>, cx: &mut App) {
+    #[cfg(not(target_os = "android"))]
     for level in levels {
         level
             .window
             .update(cx, |_, window, _| window.remove_window())
             .ok();
+    }
+    #[cfg(target_os = "android")]
+    {
+        drop(levels);
+        cx.refresh_windows();
     }
 }
 
@@ -572,6 +680,14 @@ fn close_after(keep: usize, cx: &mut App) {
 }
 
 fn refresh_levels(cx: &mut App) {
+    #[cfg(target_os = "android")]
+    cx.refresh_windows();
+    #[cfg(not(target_os = "android"))]
+    refresh_level_windows(cx);
+}
+
+#[cfg(not(target_os = "android"))]
+fn refresh_level_windows(cx: &mut App) {
     let windows: Vec<_> = cx
         .try_global::<Menus>()
         .and_then(|m| m.session.as_ref())
@@ -598,6 +714,7 @@ fn set_highlight(level: usize, row: Option<usize>, cx: &mut App) {
 }
 
 /// Open the submenu of `row` in `level` (closing deeper ones).
+#[cfg(not(target_os = "android"))]
 fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
     close_after(level, cx);
     let Some((entries, rect, parent_window, owner)) = (|| {
@@ -634,6 +751,44 @@ fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
     refresh_levels(cx);
 }
 
+/// Android: the submenu beside its row, in the owner window.
+#[cfg(target_os = "android")]
+fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
+    close_after(level, cx);
+    let Some((entries, anchor, owner)) = (|| {
+        let session = cx.try_global::<Menus>()?.session.as_ref()?;
+        let l = session.levels.get(level)?;
+        let EntryKind::Submenu(children) = &l.entries.get(row)?.kind else {
+            return None;
+        };
+        let top = *l.row_tops.get(row)?;
+        // Chromium lines the submenu's first item up with its parent item
+        let anchor = Anchor {
+            rect: Bounds::new(
+                point(
+                    l.bounds.origin.x,
+                    l.bounds.origin.y + px(top - metrics::VERTICAL_INSET),
+                ),
+                size(l.bounds.size.width, px(metrics::ITEM_HEIGHT)),
+            ),
+            anchor: PopupAnchor::TopRight,
+            gravity: PopupGravity::BottomRight,
+        };
+        Some((children.clone(), anchor, session.owner))
+    })() else {
+        return;
+    };
+    let opened = owner.update(cx, |_, window, cx| {
+        open_level(entries, anchor, owner, keyboard, window, cx)
+    });
+    if let Ok(Some(level)) = opened
+        && let Some(session) = cx.global_mut::<Menus>().session.as_mut()
+    {
+        session.levels.push(level);
+    }
+    refresh_levels(cx);
+}
+
 /// Run the entry at `row` of `level`: open its submenu or close every menu
 /// and run its action in the owner window.
 fn activate(level: usize, row: usize, keyboard: bool, cx: &mut App) {
@@ -648,7 +803,12 @@ fn activate(level: usize, row: usize, keyboard: bool, cx: &mut App) {
         return;
     }
     match entry.kind {
+        #[cfg(not(target_os = "android"))]
         EntryKind::Submenu(_) => open_submenu(level, row, keyboard, cx),
+        // Android: a tap opens it (there is no hover), from inside the
+        // owner window's update, which cannot nest
+        #[cfg(target_os = "android")]
+        EntryKind::Submenu(_) => cx.defer(move |cx| open_submenu(level, row, keyboard, cx)),
         EntryKind::Action(action) => {
             if keyboard {
                 LAST_KEY.with(|k| *k.borrow_mut() = LastKey::Activated);
@@ -828,6 +988,9 @@ impl MenuLevelView {
     fn row_at(&self, y: f32, cx: &App) -> Option<usize> {
         let session = cx.try_global::<Menus>()?.session.as_ref()?;
         let level = session.levels.get(self.level)?;
+        // Android: pointer positions are the window's, not the menu's
+        #[cfg(target_os = "android")]
+        let y = y - f32::from(level.bounds.origin.y);
         level
             .row_tops
             .iter()

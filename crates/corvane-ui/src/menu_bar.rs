@@ -518,7 +518,7 @@ impl MenuBarShell {
 }
 
 impl Render for MenuBarShell {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let menu_bar = self.menu_bar.clone();
         crate::theme::update_safe_area(window);
         let shell = div().id("menu-bar-shell").size_full().flex().flex_col();
@@ -537,6 +537,11 @@ impl Render for MenuBarShell {
         shell
             .capture_any_mouse_down(move |event, _, cx| {
                 let y = f32::from(event.position.y - bar_origin().y);
+                // a press on a menu drawn in this window (Android) is the
+                // menu's
+                if views_menu::contains(event.position, cx) {
+                    return;
+                }
                 // the bar handles presses on itself
                 if y >= HEIGHT && views_menu::dismiss_on_outside_click(cx) {
                     cx.stop_propagation();
@@ -553,5 +558,22 @@ impl Render for MenuBarShell {
                     .w_full()
                     .child(self.content.clone()),
             )
+            .children(Self::menus_in_window(cx))
+    }
+}
+
+impl MenuBarShell {
+    /// Android: the open menus, drawn over the page (an activity has no
+    /// popup windows). Nothing elsewhere.
+    fn menus_in_window(cx: &App) -> Vec<AnyElement> {
+        #[cfg(target_os = "android")]
+        {
+            views_menu::overlay(cx)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = cx;
+            Vec::new()
+        }
     }
 }

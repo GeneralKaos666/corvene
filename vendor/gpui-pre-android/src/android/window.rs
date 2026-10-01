@@ -33,10 +33,11 @@ use anyhow::{Context as _, Result};
 use futures::channel::oneshot;
 use gpui::{
     point, px, size, Bounds, Capslock, DevicePixels, DispatchEventResult, Edges, GpuSpecs,
-    Modifiers, MouseButton, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
-    PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
-    Scene, Size, TouchId, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    WindowControlArea, WindowControls, WindowInsets, WindowVisibility,
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformAtlas, PlatformDisplay,
+    PlatformInput, PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel,
+    RequestFrameOptions, Scene, Size, TouchEvent, TouchId, TouchPhase, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowControls, WindowInsets,
+    WindowVisibility,
 };
 use gpui_wgpu::{wgpu, GpuContext, WgpuRenderer, WgpuSurfaceConfig};
 use ndk::native_window::NativeWindow;
@@ -52,6 +53,15 @@ use super::display::AndroidDisplay;
 /// get the desktop's more forgiving 500 ms).
 const MULTI_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 const MULTI_CLICK_SLOP: f32 = 4.0;
+
+/// `ViewConfiguration.getLongPressTimeout()` and `getScaledTouchSlop()`'s
+/// defaults (500 ms, 8 dp).
+const LONG_PRESS: Duration = Duration::from_millis(500);
+const TOUCH_SLOP: f32 = 8.0;
+
+/// How far above or below the caret's line a tap still counts as a tap on
+/// the text input, in logical pixels.
+const KEYBOARD_TAP_MARGIN: f32 = 24.0;
 
 /// An owned window handle for wgpu, which needs `Clone + Send + Sync`.
 #[derive(Debug, Clone, Copy)]
@@ -136,6 +146,17 @@ struct WindowState {
     next_touch_id: u64,
     title: String,
     back_enabled: bool,
+    /// A finger resting where it went down: a long press in the making.
+    long_press: Option<LongPress>,
+    /// A tap that ended; after the next frame the keyboard opens if the tap
+    /// was on the focused text input.
+    tapped: Option<Point<Pixels>>,
+}
+
+struct LongPress {
+    pointer_id: i32,
+    position: Point<Pixels>,
+    deadline: Instant,
 }
 
 pub(crate) struct AndroidWindow {
@@ -231,6 +252,8 @@ impl AndroidWindow {
                 next_touch_id: 1,
                 title: String::new(),
                 back_enabled: false,
+                long_press: None,
+                tapped: None,
             }),
             callbacks: RefCell::new(Callbacks::default()),
             frame_requested: Cell::new(true),
@@ -451,6 +474,121 @@ impl AndroidWindow {
                 force_render: force,
             });
             self.callbacks.borrow_mut().request_frame = Some(callback);
+        }
+        self.show_keyboard_for_tap();
+    }
+
+    // ── touch conventions ────────────────────────────────────────────────────
+
+    /// A finger went down at `position`: a long press starts counting.
+    pub(crate) fn long_press_started(&self, pointer_id: i32, position: Point<Pixels>) {
+        self.state.borrow_mut().long_press = Some(LongPress {
+            pointer_id,
+            position,
+            deadline: Instant::now() + LONG_PRESS,
+        });
+    }
+
+    /// The finger moved: past the slop it is a pan, not a press.
+    pub(crate) fn long_press_moved(&self, pointer_id: i32, position: Point<Pixels>) {
+        let mut state = self.state.borrow_mut();
+        let moved_away = state.long_press.as_ref().is_some_and(|press| {
+            press.pointer_id == pointer_id
+                && (f32::from((press.position.x - position.x).abs()) > TOUCH_SLOP
+                    || f32::from((press.position.y - position.y).abs()) > TOUCH_SLOP)
+        });
+        if moved_away {
+            state.long_press = None;
+        }
+    }
+
+    /// The finger lifted, another came down or the gesture was cancelled.
+    /// Returns where the finger was when it lifted in place before the long
+    /// press was due: a tap.
+    pub(crate) fn long_press_ended(&self, tap: bool) -> Option<Point<Pixels>> {
+        let press = self.state.borrow_mut().long_press.take()?;
+        tap.then_some(press.position)
+    }
+
+    /// When the event loop must wake for a long press.
+    pub(crate) fn long_press_deadline(&self) -> Option<Instant> {
+        self.state
+            .borrow()
+            .long_press
+            .as_ref()
+            .map(|press| press.deadline)
+    }
+
+    /// Android's convention: a long press is the secondary click. The touch
+    /// is cancelled (lifting the finger must not tap) and a right-button
+    /// press and release go where the finger rests, which opens the context
+    /// menu of whatever is there.
+    pub(crate) fn fire_long_press(&self) {
+        let due = self
+            .state
+            .borrow()
+            .long_press
+            .as_ref()
+            .is_some_and(|press| press.deadline <= Instant::now());
+        if !due {
+            return;
+        }
+        let Some(press) = self.state.borrow_mut().long_press.take() else {
+            return;
+        };
+        if let Some(id) = self.touch_ended(press.pointer_id) {
+            self.handle_input(PlatformInput::Touch(TouchEvent {
+                id,
+                phase: TouchPhase::Cancelled,
+                position: press.position,
+                predicted_position: None,
+                force: None,
+            }));
+        }
+        self.set_mouse_position(press.position);
+        self.handle_input(PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Right,
+            position: press.position,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        }));
+        self.handle_input(PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Right,
+            position: press.position,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        }));
+    }
+
+    /// A tap ended at `position`; see [`Self::show_keyboard_for_tap`].
+    pub(crate) fn tapped(&self, position: Point<Pixels>) {
+        self.state.borrow_mut().tapped = Some(position);
+        self.request_frame();
+    }
+
+    /// The on-screen keyboard opens when a text input is tapped, not
+    /// whenever one takes focus: lists and dialogs focus their filter box on
+    /// their own, and a keyboard over half the screen each time would be in
+    /// the way. Checked after the frame that follows a tap, when the tapped
+    /// input has focus and its caret is where the tap was.
+    fn show_keyboard_for_tap(&self) {
+        let Some(tap) = self.state.borrow_mut().tapped.take() else {
+            return;
+        };
+        let Some(mut handler) = self.state.borrow_mut().input_handler.take() else {
+            return;
+        };
+        let caret = handler
+            .selected_text_range(true)
+            .and_then(|selection| handler.bounds_for_range(selection.range));
+        self.state.borrow_mut().input_handler = Some(handler);
+        let on_input = caret.is_some_and(|caret| {
+            f32::from(tap.y) >= f32::from(caret.top()) - KEYBOARD_TAP_MARGIN
+                && f32::from(tap.y) <= f32::from(caret.bottom()) + KEYBOARD_TAP_MARGIN
+        });
+        if on_input {
+            super::activity_events::show_soft_keyboard(true);
         }
     }
 
@@ -869,11 +1007,10 @@ impl PlatformWindow for AndroidPlatformWindow {
     }
 
     fn text_input_state_changed(&self, change: gpui::TextInputStateChange) {
-        // the keyboard follows the focused text input, as in a browser
+        // The keyboard closes with the text input; it opens when one is
+        // tapped (`show_keyboard_for_tap`), not for every focus change.
         match change {
-            gpui::TextInputStateChange::FocusGained => {
-                super::activity_events::show_soft_keyboard(true)
-            }
+            gpui::TextInputStateChange::FocusGained => {}
             gpui::TextInputStateChange::FocusLost => {
                 super::activity_events::show_soft_keyboard(false)
             }
