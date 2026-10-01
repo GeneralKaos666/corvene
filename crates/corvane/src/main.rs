@@ -1004,6 +1004,10 @@ pub(crate) fn main() {
             }
         });
         cx.on_action(|_: &ToggleFullScreen, cx| {
+            // Android: the window always fills the screen; the item shows
+            // or hides the system's bars
+            #[cfg(target_os = "android")]
+            corvane_platform::android::toggle_full_screen();
             if let Some(window) = cx.active_window() {
                 window
                     .update(cx, |_, window, _| window.toggle_fullscreen())

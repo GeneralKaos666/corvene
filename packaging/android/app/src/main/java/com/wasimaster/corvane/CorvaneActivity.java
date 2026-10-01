@@ -82,12 +82,10 @@ public class CorvaneActivity extends NativeActivity {
             if (Build.VERSION.SDK_INT >= 30) {
                 int types = android.view.WindowInsets.Type.systemBars()
                         | android.view.WindowInsets.Type.displayCutout();
-                // Not edge to edge, the window is resized above the keyboard
-                // (adjustResize) and counting it here would count it twice.
-                if (Build.VERSION.SDK_INT >= 36
-                        && getApplicationInfo().targetSdkVersion >= 36) {
-                    types |= android.view.WindowInsets.Type.ime();
-                }
+                // The keyboard too: full screen (and edge to edge) the
+                // window is not resized above it. Where it still is, the
+                // native side takes the larger of this and the resize.
+                types |= android.view.WindowInsets.Type.ime();
                 android.graphics.Insets covered = insets.getInsets(types);
                 nativeInsets(covered.left, covered.top, covered.right, covered.bottom);
             } else {
@@ -96,6 +94,16 @@ public class CorvaneActivity extends NativeActivity {
             }
             return view.onApplyWindowInsets(insets);
         });
+        // the window reaches under a cutout on every edge; the native side
+        // keeps its content clear of it (nativeInsets)
+        if (Build.VERSION.SDK_INT >= 28) {
+            WindowManager.LayoutParams attributes = getWindow().getAttributes();
+            attributes.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= 30
+                    ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attributes);
+        }
+        applyFullScreen();
         inputView = new InputView(this);
         addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
         inputView.requestFocus();
@@ -121,6 +129,84 @@ public class CorvaneActivity extends NativeActivity {
         if (hasFocus && inputView != null) {
             inputView.requestFocus();
         }
+        if (hasFocus) {
+            // the system shows its bars again for a dialog or the keyboard
+            applyFullScreen();
+        }
+    }
+
+    private static final String FULL_SCREEN = "full-screen";
+
+    private boolean isFullScreen() {
+        return getSharedPreferences(PREFERENCES, MODE_PRIVATE).getBoolean(FULL_SCREEN, true);
+    }
+
+    /**
+     * Full screen (the default, View > Toggle full screen turns it off): the
+     * status and navigation bars are hidden and a swipe from an edge shows
+     * them for a moment, as in a game. A phone's screen is small for a
+     * window made for the desktop.
+     */
+    @SuppressWarnings("deprecation")
+    private void applyFullScreen() {
+        boolean fullScreen = isFullScreen();
+        View decor = getWindow().getDecorView();
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController controller = decor.getWindowInsetsController();
+            if (controller == null) {
+                return;
+            }
+            int bars = android.view.WindowInsets.Type.systemBars();
+            if (fullScreen) {
+                controller.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.hide(bars);
+            } else {
+                controller.show(bars);
+            }
+        } else {
+            decor.setSystemUiVisibility(fullScreen
+                    ? View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    : View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
+    }
+
+    /**
+     * Starts the application again in a new process (a flag that needs a
+     * relaunch changed): the task is restarted, then this process ends.
+     */
+    static void relaunch() {
+        CorvaneActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            Intent launch = activity.getPackageManager()
+                    .getLaunchIntentForPackage(activity.getPackageName());
+            if (launch == null || launch.getComponent() == null) {
+                return;
+            }
+            // a moment for the settings just changed to reach the disk
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                activity.startActivity(Intent.makeRestartActivityTask(launch.getComponent()));
+                Runtime.getRuntime().exit(0);
+            }, 300);
+        });
+    }
+
+    /** View > Toggle full screen. */
+    static void toggleFullScreen() {
+        CorvaneActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            activity.getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
+                    .putBoolean(FULL_SCREEN, !activity.isFullScreen()).apply();
+            activity.applyFullScreen();
+        });
     }
 
     @Override

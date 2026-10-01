@@ -128,6 +128,19 @@ impl Dispatcher {
     /// process has exited (the updater's path: `open -n` the bundle on
     /// macOS, the AppImage or executable on Linux), then quit.
     pub fn relaunch(cx: &mut App) {
+        // Android: the activity starts itself again and ends the process
+        #[cfg(target_os = "android")]
+        {
+            let _ = cx;
+            info!("relaunching for flags");
+            corvane_platform::android::relaunch();
+        }
+        #[cfg(not(target_os = "android"))]
+        Self::relaunch_from_bundle(cx);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn relaunch_from_bundle(cx: &mut App) {
         let Some(bundle) = corvane_platform::app_location::relaunch_target() else {
             Self::show_error(
                 "Could not relaunch Corvane",
