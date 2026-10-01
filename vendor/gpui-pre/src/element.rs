@@ -547,6 +547,11 @@ impl<E: Element> Drawable<E> {
             _ => panic!("cannot measure after painting"),
         };
 
+        // Corvane patch: (Windows) a root is measured as it was laid out; its
+        // edges are snapped where it is placed
+        if cfg!(windows) {
+            return window.unsnapped_layout_size(layout_id);
+        }
         window.layout_bounds(layout_id).size
     }
 }
@@ -648,6 +653,8 @@ impl AnyElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<FocusHandle> {
+        // Corvane patch: see `Window::unsnapped_origin`
+        let origin = window.unsnapped_origin(origin);
         window.with_absolute_element_offset(origin, |window| self.prepaint(window, cx))
     }
 
@@ -661,6 +668,7 @@ impl AnyElement {
         cx: &mut App,
     ) -> Option<FocusHandle> {
         self.layout_as_root(available_space, window, cx);
+        let origin = window.unsnapped_origin(origin);
         window.with_absolute_element_offset(origin, |window| self.prepaint(window, cx))
     }
 }

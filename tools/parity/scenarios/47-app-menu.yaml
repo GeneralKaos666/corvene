@@ -21,4 +21,7 @@ steps:
   - snap: repository-menu-row-hovered
   - key: escape
     wait: 300
+  # (the pointer is over the changes list again)
+  - hover: [201, 300]
+    wait: 300
   - snap: closed

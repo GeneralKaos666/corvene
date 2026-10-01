@@ -649,16 +649,17 @@ pub fn toolbar_button(
         })
         .child({
             // `.description` / `.title` keep `line-height: normal`: 13 px
-            // and 14 px boxes for SF at 11 / 12 px
+            // and 14 px boxes for SF at 11 / 12 px (Segoe UI, measured in
+            // GitHub Desktop at 150 %: 22 and 24 device pixels)
             let description = div()
                 .text_size(FONT_SIZE_SM())
-                .line_height(zpx(13.))
+                .line_height(zpx(if cfg!(windows) { 44. / 3. } else { 13. }))
                 .text_color(secondary)
                 .truncate()
                 .child(model.description);
             let title = div()
                 .text_size(FONT_SIZE())
-                .line_height(zpx(14.))
+                .line_height(zpx(if cfg!(windows) { 16. } else { 14. }))
                 .font_weight(FontWeight::SEMIBOLD)
                 .truncate()
                 .when(model.title_italic, |d| d.italic())

@@ -2292,7 +2292,9 @@ impl Render for HistorySidebar {
                                 window,
                                 cx,
                             )
-                            .h(zpx(27.))
+                            // (25 px inside two borders, which Chromium
+                            // lays out in whole device pixels)
+                            .h(zpx(25.) + 2. * crate::widgets::hairline(window))
                             .pl(zpx(7.))
                             .gap(zpx(1.))
                             .when(!focused, |d| d.border_color(t.box_border)),

@@ -122,6 +122,9 @@ struct Button {
 pub struct MenuBar {
     /// The keyboard-focused button (Alt released alone, or ← / →).
     focused: Option<usize>,
+    /// The button Escape left focused after a menu opened with the pointer
+    /// (Windows): no access keys show for it.
+    quiet: Option<usize>,
     /// Alt is down with no other key yet: underlines show, and releasing
     /// it focuses the bar.
     alt_alone: bool,
@@ -155,6 +158,7 @@ impl MenuBar {
         .detach();
         Self {
             focused: None,
+            quiet: None,
             alt_alone: false,
             buttons: Vec::new(),
         }
@@ -256,9 +260,19 @@ impl MenuBar {
         );
         // the bar keeps the keyboard position while its menu is open
         self.focused = keyboard.then_some(index);
+        self.quiet = None;
+        views_menu::take_escaped();
         let bar = cx.entity().downgrade();
         let on_close: views_menu::OnClose = Rc::new(move |cx| {
-            bar.update(cx, |_, cx| cx.notify()).ok();
+            let escaped = views_menu::take_escaped();
+            bar.update(cx, |bar, cx| {
+                if cfg!(windows) && escaped {
+                    bar.focused = Some(index);
+                    bar.quiet = (!keyboard).then_some(index);
+                }
+                cx.notify()
+            })
+            .ok();
         });
         views_menu::open(
             entries,
@@ -409,8 +423,10 @@ impl Render for MenuBar {
             })
             .collect();
         let open = views_menu::open_menu_bar_index(cx);
-        let underline =
-            self.alt_alone || self.focused.is_some() || views_menu::opened_from_keyboard(cx);
+        let quiet = self.focused.is_some() && self.focused == self.quiet;
+        let underline = self.alt_alone
+            || (self.focused.is_some() && !quiet)
+            || views_menu::opened_from_keyboard(cx);
         let buttons = self.buttons.iter().enumerate().map(|(ix, b)| {
             let is_open = open == Some(ix);
             let hot = !is_open && self.focused == Some(ix);
@@ -442,7 +458,29 @@ impl Render for MenuBar {
                             .bg(palette.bar_open),
                     )
                 })
-                .when(hot, |d| {
+                // Windows: Chromium's `outline: auto` ring, 2 px inside the
+                // button (white in a black halo, the title bar being dark)
+                .when(cfg!(windows) && hot, |d| {
+                    d.bg(palette.bar_hot).child(
+                        div()
+                            .absolute()
+                            .top(px(2.))
+                            .left(px(2.))
+                            .right(px(2.))
+                            .bottom(px(3.))
+                            .border_1()
+                            .border_color(rgb(0x101010))
+                            .rounded(px(4.))
+                            .child(
+                                div()
+                                    .size_full()
+                                    .border_2()
+                                    .border_color(rgb(0xffffff))
+                                    .rounded(px(3.)),
+                            ),
+                    )
+                })
+                .when(!cfg!(windows) && hot, |d| {
                     d.bg(palette.bar_hot).child(
                         // Chromium's focus ring: only its right edge shows
                         // past the button

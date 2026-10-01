@@ -349,6 +349,15 @@ impl TaffyLayoutEngine {
         Point::new(Pixels(origin.x / scale_factor), Pixels(origin.y / scale_factor))
     }
 
+    /// Corvane patch: the node's border box before pixel snapping, in
+    /// device pixels.
+    pub fn unrounded_bounds(&mut self, id: LayoutId, scale_factor: f32) -> Bounds<f32> {
+        self.layout_bounds(id, scale_factor);
+        let origin = self.absolute_outer_origins[&id];
+        let size = self.taffy.layout(id.into()).expect(EXPECT_MESSAGE).size;
+        Bounds::new(origin, Size::from(size))
+    }
+
     pub fn layout_bounds(&mut self, id: LayoutId, scale_factor: f32) -> Bounds<Pixels> {
         if let Some(layout) = self.absolute_layout_bounds.get(&id).cloned() {
             return layout;
@@ -417,6 +426,16 @@ impl From<LayoutId> for NodeId {
 }
 
 fn snap_measured_size_to_device_pixels(size: Size<Pixels>, scale_factor: f32) -> Size<f32> {
+    // Corvane patch: on Windows a measured height stays fractional, as a
+    // line box's is in Chromium (three 16.5 px lines are 74.25 device pixels
+    // at 150 %, not 75); the width is still rounded up so that text given
+    // exactly its own width never wraps
+    if cfg!(windows) {
+        return Size {
+            width: ceil_to_device_pixel(size.width.0.max(0.0), scale_factor),
+            height: size.height.0.max(0.0) * scale_factor,
+        };
+    }
     size.map(|d| ceil_to_device_pixel(d.0.max(0.0), scale_factor))
 }
 
@@ -529,6 +548,13 @@ impl ToTaffy<taffy::style::Style> for Style {
 
 impl ToTaffy<f32> for AbsoluteLength {
     fn to_taffy(&self, rem_size: Pixels, scale_factor: f32) -> f32 {
+        // Corvane patch: on Windows, where 150 % scaling is the usual one,
+        // lengths stay fractional as Chromium's do (29 px rows are 43.5
+        // device pixels, drawn 43 and 44 tall by turns); `layout_bounds`
+        // snaps the edges
+        if cfg!(windows) {
+            return self.to_pixels(rem_size).0 * scale_factor;
+        }
         round_to_device_pixel(self.to_pixels(rem_size).0, scale_factor)
     }
 }

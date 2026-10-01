@@ -971,6 +971,13 @@ pub fn text_box_opts(
     text_box_impl(id, state, prefix, None, disabled, window, cx)
 }
 
+/// A 1 px CSS border as Chromium lays it out: whole device pixels, at least
+/// one (1 device pixel, two thirds of a CSS pixel, at 150 %).
+pub fn hairline(window: &Window) -> Pixels {
+    let scale = window.scale_factor();
+    px(scale.floor().max(1.) / scale)
+}
+
 /// GHD `TextBox` with `displayClearButton` (filter lists, the changes
 /// filter, compare, diff search): the text stops 25 px before the end and a
 /// 25 px ✕ button (`button.clear-button`, `--text-color`) clears the value

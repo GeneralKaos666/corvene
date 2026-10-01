@@ -1000,6 +1000,17 @@ fn remove_windows(levels: Vec<Level>, cx: &mut App) {
     }
 }
 
+thread_local! {
+    /// Set when Escape closed the last level.
+    static ESCAPED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether Escape closed the menus (once): GitHub Desktop's app menu then
+/// leaves the keyboard focus on the menu's button.
+pub fn take_escaped() -> bool {
+    ESCAPED.with(|escaped| escaped.take())
+}
+
 /// Close every open menu.
 pub fn close_all(cx: &mut App) {
     let Some(menus) = cx.try_global::<Menus>() else {
@@ -1285,6 +1296,7 @@ fn handle_key(keystroke: &Keystroke, cx: &mut App) -> bool {
             if depth > 0 {
                 close_after(depth - 1, cx);
             } else {
+                ESCAPED.with(|escaped| escaped.set(true));
                 close_all(cx);
             }
         }

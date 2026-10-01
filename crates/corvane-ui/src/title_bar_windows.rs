@@ -141,11 +141,9 @@ pub fn title_bar(
                 .child(
                     div()
                         .absolute()
-                        .left_0()
-                        .bottom_0()
-                        .w_full()
-                        .h(px(1.))
-                        .bg(rgb(0x000000)),
+                        .inset_0()
+                        .border_b_1()
+                        .border_color(rgb(0x000000)),
                 )
                 // `showAppIcon`: not in the welcome flow
                 .child(

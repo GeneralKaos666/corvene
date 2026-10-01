@@ -1216,6 +1216,9 @@ pub struct Window {
     pub(crate) rendered_frame: Frame,
     pub(crate) next_frame: Frame,
     next_hitbox_id: HitboxId,
+    /// Corvane patch: where this frame's elements start before snapping to
+    /// device pixels, by their snapped origin in device pixels (Windows).
+    unsnapped_origins: FxHashMap<(i32, i32), Bounds<Pixels>>,
     /// Corvane patch: the element paths hovered at the last pointer input.
     sticky_hover: Vec<Arc<[ElementId]>>,
     /// Corvane patch: a wheel scroll moved content under the pointer;
@@ -2078,6 +2081,7 @@ impl Window {
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame_callbacks,
             next_hitbox_id: HitboxId(0),
+            unsnapped_origins: FxHashMap::default(),
             sticky_hover: Vec::new(),
             sticky_hover_after_scroll: false,
             next_tooltip_id: TooltipId::default(),
@@ -3568,6 +3572,7 @@ impl Window {
             .as_mut()
             .unwrap()
             .stretch_auto_size_to_fill(root_layout_id, root_size, scale_factor);
+        self.unsnapped_origins.clear();
         root_element.prepaint_as_root(Point::default(), root_size.into(), self, cx);
 
         #[cfg(any(feature = "inspector", debug_assertions))]
@@ -5169,6 +5174,67 @@ impl Window {
         hover_persists_while_typing() && self.sticky_hover.iter().any(|o| o == owner)
     }
 
+    fn device_key(origin: Point<Pixels>, scale_factor: f32) -> (i32, i32) {
+        (
+            (origin.x.0 * scale_factor).round() as i32,
+            (origin.y.0 * scale_factor).round() as i32,
+        )
+    }
+
+    /// Corvane patch: where the element laid out at `origin` this frame
+    /// starts before snapping (Windows; `origin` itself elsewhere). A root
+    /// nested in it is placed there, so that halves of a device pixel carry
+    /// on into it as they do in Chromium.
+    pub fn unsnapped_origin(&self, origin: Point<Pixels>) -> Point<Pixels> {
+        if !cfg!(windows) {
+            return origin;
+        }
+        let scale_factor = self.scale_factor();
+        let device = point(origin.x.0 * scale_factor, origin.y.0 * scale_factor);
+        if device.x.fract() != 0. || device.y.fract() != 0. {
+            return origin;
+        }
+        self.unsnapped_origins
+            .get(&Self::device_key(origin, scale_factor))
+            .map_or(origin, |bounds| bounds.origin)
+    }
+
+    /// Corvane patch: [`Self::unsnapped_origin`] with the element's size
+    /// before snapping, when `bounds` are the ones it was laid out with.
+    pub fn unsnapped_bounds(&self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+        if !cfg!(windows) {
+            return bounds;
+        }
+        let scale_factor = self.scale_factor();
+        match self
+            .unsnapped_origins
+            .get(&Self::device_key(bounds.origin, scale_factor))
+        {
+            Some(unsnapped)
+                if (unsnapped.size.width - bounds.size.width).abs() < px(1.)
+                    && (unsnapped.size.height - bounds.size.height).abs() < px(1.) =>
+            {
+                *unsnapped
+            }
+            _ => bounds,
+        }
+    }
+
+    /// Corvane patch: the element's size before layout snapped it to device
+    /// pixels.
+    pub fn unsnapped_layout_size(&mut self, layout_id: LayoutId) -> Size<Pixels> {
+        let scale_factor = self.scale_factor();
+        let raw = self
+            .layout_engine
+            .as_mut()
+            .unwrap()
+            .unrounded_bounds(layout_id, scale_factor);
+        size(
+            px(raw.size.width / scale_factor),
+            px(raw.size.height / scale_factor),
+        )
+    }
+
     /// Corvane patch: the element's origin before layout snapped it to
     /// device pixels (the element offset is applied as in `layout_bounds`).
     pub fn unsnapped_layout_origin(&mut self, layout_id: LayoutId) -> Point<Pixels> {
@@ -5185,6 +5251,37 @@ impl Window {
         self.invalidator.debug_assert_prepaint();
 
         let scale_factor = self.scale_factor();
+        // Corvane patch: on Windows the edges are snapped where they fall in
+        // the window, element offset included, as Chromium snaps them (rows
+        // of 43.5 device pixels in a list are 43 and 44 tall by turns and
+        // leave no gaps)
+        if cfg!(windows) {
+            let raw = self
+                .layout_engine
+                .as_mut()
+                .unwrap()
+                .unrounded_bounds(layout_id, scale_factor);
+            let offset = self.element_offset();
+            // (`LayoutUnit::Round`: halves go up)
+            let snap = |v: f32| px((v + 0.5).floor() / scale_factor);
+            let left = raw.origin.x + offset.x.0 * scale_factor;
+            let top = raw.origin.y + offset.y.0 * scale_factor;
+            let bounds = Bounds::from_corners(
+                point(snap(left), snap(top)),
+                point(snap(left + raw.size.width), snap(top + raw.size.height)),
+            );
+            self.unsnapped_origins.insert(
+                Self::device_key(bounds.origin, scale_factor),
+                Bounds::new(
+                    point(px(left / scale_factor), px(top / scale_factor)),
+                    size(
+                        px(raw.size.width / scale_factor),
+                        px(raw.size.height / scale_factor),
+                    ),
+                ),
+            );
+            return bounds;
+        }
         let mut bounds = self
             .layout_engine
             .as_mut()

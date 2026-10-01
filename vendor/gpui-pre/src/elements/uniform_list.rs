@@ -506,7 +506,13 @@ impl Element for UniformList {
                                 AvailableSpace::Definite(item_height),
                             );
                             item.layout_as_root(available_space, window, cx);
-                            item.prepaint_at(item_origin, window, cx);
+                            // Corvane patch: not `prepaint_at`, which would
+                            // take the first row's origin for the list's own
+                            // (rows are placed from the list's snapped origin,
+                            // as in Chromium's scrolling layers)
+                            window.with_absolute_element_offset(item_origin, |window| {
+                                item.prepaint(window, cx)
+                            });
                             frame_state.items.push(item);
                         }
 
