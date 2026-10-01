@@ -80,6 +80,18 @@ public class CorvaneActivity extends NativeActivity {
         return instance != null;
     }
 
+    /**
+     * Back from a picker, a chooser or another application: the input view
+     * takes the focus again, or hardware keys go nowhere until a tap.
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && inputView != null) {
+            inputView.requestFocus();
+        }
+    }
+
     @Override
     protected void onDestroy() {
         if (instance == this) {
@@ -463,7 +475,47 @@ public class CorvaneActivity extends NativeActivity {
 
     /** viewPath, always with the system's list of applications. */
     public static String choosePath(String path) {
-        return view(path, true);
+        return view(path, true, "");
+    }
+
+    /** viewPath in one application: `component` is "package/class". */
+    public static String viewPathWith(String path, String component) {
+        return view(path, false, component);
+    }
+
+    /**
+     * The applications that open a text file, one "label\tpackage/class" per
+     * line, sorted by label: the editors Options › Integrations offers.
+     */
+    public static String viewApps() {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "";
+        }
+        PackageManager manager = activity.getPackageManager();
+        Intent intent = new Intent(Intent.ACTION_VIEW).setDataAndType(
+                DocumentsContract.buildDocumentUri(
+                        activity.getPackageName() + ".documents", "repositories/a.txt"),
+                "text/plain");
+        java.util.TreeMap<String, String> apps = new java.util.TreeMap<>();
+        for (android.content.pm.ResolveInfo info
+                : manager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
+            if (info.activityInfo == null
+                    || activity.getPackageName().equals(info.activityInfo.packageName)) {
+                continue;
+            }
+            String label = String.valueOf(info.loadLabel(manager)).replace('\t', ' ')
+                    .replace('\n', ' ');
+            String component = info.activityInfo.packageName + "/" + info.activityInfo.name;
+            // two activities with one label: tell them apart by package
+            apps.put(apps.containsKey(label)
+                    ? label + " (" + info.activityInfo.packageName + ")" : label, component);
+        }
+        StringBuilder lines = new StringBuilder();
+        for (java.util.Map.Entry<String, String> app : apps.entrySet()) {
+            lines.append(app.getKey()).append('\t').append(app.getValue()).append('\n');
+        }
+        return lines.toString();
     }
 
     /**
@@ -473,10 +525,10 @@ public class CorvaneActivity extends NativeActivity {
      * to read and write it. Returns an error message, empty when it worked.
      */
     public static String viewPath(String path) {
-        return view(path, false);
+        return view(path, false, "");
     }
 
-    private static String view(String path, boolean chooser) {
+    private static String view(String path, boolean chooser, String component) {
         final CorvaneActivity activity = instance;
         if (activity == null) {
             return "Corvane is not open.";
@@ -499,6 +551,9 @@ public class CorvaneActivity extends NativeActivity {
             Uri uri = DocumentsContract.buildDocumentUri(
                     activity.getPackageName() + ".documents", id);
             intent.setDataAndType(uri, mimeType(file));
+            if (!component.isEmpty()) {
+                intent.setComponent(android.content.ComponentName.unflattenFromString(component));
+            }
         }
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                 | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);

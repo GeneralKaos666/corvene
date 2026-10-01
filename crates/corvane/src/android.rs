@@ -368,6 +368,57 @@ impl corvane_platform::android::Bridge for ActivityBridge {
         activity_result!("viewPath", &path.to_string_lossy())
     }
 
+    fn view_apps(&self) -> Vec<(String, String)> {
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let apps = env
+                .call_static_method(
+                    &class,
+                    jni::jni_str!("viewApps"),
+                    jni::jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )
+                .and_then(|value| value.l())
+                .map_err(|err| err.to_string())?;
+            Ok(gpui_android::jni::get_string(env, &apps))
+        })
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(label, component)| (label.to_string(), component.to_string()))
+        .collect()
+    }
+
+    fn view_path_with(&self, path: &Path, component: &str) -> Result<(), String> {
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let path = env
+                .new_string(path.to_string_lossy())
+                .map_err(|err| err.to_string())?;
+            let component = env.new_string(component).map_err(|err| err.to_string())?;
+            let message = env
+                .call_static_method(
+                    &class,
+                    jni::jni_str!("viewPathWith"),
+                    jni::jni_sig!("(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"),
+                    &[
+                        jni::objects::JValue::Object(&path),
+                        jni::objects::JValue::Object(&component),
+                    ],
+                )
+                .and_then(|value| value.l())
+                .map_err(|err| err.to_string())?;
+            Ok(gpui_android::jni::get_string(env, &message))
+        })
+        .and_then(|message| {
+            if message.is_empty() {
+                Ok(())
+            } else {
+                Err(message)
+            }
+        })
+    }
+
     fn view_path_with_chooser(&self, path: &Path) -> Result<(), String> {
         activity_result!("choosePath", &path.to_string_lossy())
     }

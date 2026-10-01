@@ -38,6 +38,10 @@ pub trait Bridge: Send + Sync {
     /// in the file manager (`ACTION_VIEW` on a document of
     /// `CorvaneDocumentsProvider`).
     fn view_path(&self, path: &Path) -> Result<(), String>;
+    /// The applications that open a text file: (label, "package/class").
+    fn view_apps(&self) -> Vec<(String, String)>;
+    /// Opens a file in the application `component` names.
+    fn view_path_with(&self, path: &Path, component: &str) -> Result<(), String>;
     /// Like [`Bridge::view_path`], always offering the choice of application.
     fn view_path_with_chooser(&self, path: &Path) -> Result<(), String>;
     /// Opens a Termux session in `dir` (Termux's `RUN_COMMAND` intent).

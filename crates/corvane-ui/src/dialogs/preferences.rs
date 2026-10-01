@@ -572,8 +572,14 @@ impl PreferencesDialog {
         let use_custom_editor = self.draft.use_custom_editor;
         let use_custom_shell = self.draft.use_custom_shell;
         // `CustomIntegrationValue`: the last option configures a custom integration.
+        // Android: applications are intents, not executables with arguments,
+        // so there is no custom integration to configure
+        let android = cfg!(target_os = "android");
         let mut editor_options = editors.clone();
-        editor_options.push(mac_or("Configure Custom Editor…", "Configure custom editor…").into());
+        if !android {
+            editor_options
+                .push(mac_or("Configure Custom Editor…", "Configure custom editor…").into());
+        }
         let editor_value = if use_custom_editor {
             mac_or("Configure Custom Editor…", "Configure custom editor…").to_string()
         } else {
@@ -589,7 +595,9 @@ impl PreferencesDialog {
             editors.iter().position(|e| e.as_ref() == editor_value)
         };
         let mut shell_options = shells.clone();
-        shell_options.push(mac_or("Configure Custom Shell…", "Configure custom shell…").into());
+        if !android {
+            shell_options.push(mac_or("Configure Custom Shell…", "Configure custom shell…").into());
+        }
         let shell_value = if use_custom_shell {
             mac_or("Configure Custom Shell…", "Configure custom shell…").to_string()
         } else {
@@ -706,6 +714,9 @@ impl PreferencesDialog {
                     window,
                     cx,
                 ))
+            })
+            .when(android, |d| {
+                d.child(android_shell_note(shells.is_empty(), cx))
             })
             .into_any_element()
     }
@@ -2081,4 +2092,29 @@ fn accounts_call_to_action(
                         .on_click(move |_, window, cx| on_action(window, cx)),
                 ),
         )
+}
+
+/// Android, under the Shell select: Termux is the one terminal that opens in
+/// a folder, and only after the user allowed it.
+fn android_shell_note(missing: bool, cx: &App) -> AnyElement {
+    const TERMUX_URL: &str = "https://f-droid.org/packages/com.termux/";
+    let t = cx.ghd();
+    let text: Vec<Inline> = if missing {
+        vec![
+            "Termux is not installed. ".into(),
+            link_button("prefs-install-termux", "Install Termux?", cx)
+                .on_click(|_, _, cx| Dispatcher::open_url(TERMUX_URL, cx))
+                .into_any_element()
+                .into(),
+        ]
+    } else {
+        vec![
+            "Termux opens repositories on shared storage. Set allow-external-apps = true in \
+             ~/.termux/termux.properties first."
+                .into(),
+        ]
+    };
+    paragraph(text)
+        .text_color(t.text_secondary)
+        .into_any_element()
 }
