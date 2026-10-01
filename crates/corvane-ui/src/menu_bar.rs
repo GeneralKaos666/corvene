@@ -26,10 +26,16 @@ use gpui_kit::*;
 
 use crate::views_menu::{self, Anchor, Entry, EntryKind, Palette, Source};
 
-pub const HEIGHT: f32 = 28.;
+/// Android: as low and tight as the labels allow; a phone's screen has
+/// little room for a desktop's menu bar.
+pub const HEIGHT: f32 = if cfg!(target_os = "android") {
+    22.
+} else {
+    28.
+};
 /// The open button's background covers the bar minus its last row.
-const OPEN_HEIGHT: f32 = 27.;
-const BUTTON_PADDING: f32 = 6.;
+const OPEN_HEIGHT: f32 = HEIGHT - 1.;
+const BUTTON_PADDING: f32 = if cfg!(target_os = "android") { 5. } else { 6. };
 
 /// GHD's menu id for one of Corvane's menu actions (`menu-update.ts` works
 /// on ids).
@@ -521,6 +527,9 @@ impl Render for MenuBarShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let menu_bar = self.menu_bar.clone();
         crate::theme::update_safe_area(window);
+        // the handles a finger can drag are collected again by this frame
+        #[cfg(target_os = "android")]
+        corvane_platform::android::clear_drag_handles();
         let shell = div().id("menu-bar-shell").size_full().flex().flex_col();
         // Android: stay clear of the system bars and the keyboard; the bar's
         // colour runs on under the status bar

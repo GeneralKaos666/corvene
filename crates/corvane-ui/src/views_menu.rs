@@ -46,6 +46,23 @@ pub mod metrics {
     /// Where the separator's 1 px rule sits inside its 17 px.
     pub const SEPARATOR_RULE: f32 = 8.;
     /// Space above the first and below the last item.
+    /// [`ITEM_HEIGHT`], lower in a short window (a phone on its side, where
+    /// a menu of GHD's is taller than the screen).
+    pub fn item_height() -> f32 {
+        if crate::theme::short() {
+            26.
+        } else {
+            ITEM_HEIGHT
+        }
+    }
+    /// [`SEPARATOR_HEIGHT`], see [`item_height`].
+    pub fn separator_height() -> f32 {
+        if crate::theme::short() {
+            9.
+        } else {
+            SEPARATOR_HEIGHT
+        }
+    }
     pub const VERTICAL_INSET: f32 = 4.;
     pub const LABEL_START: f32 = 20.;
     /// Right of the widest label (fitted with the `&` quirk in `measure`).
@@ -438,10 +455,10 @@ fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
     for entry in entries {
         row_tops.push(y);
         if entry.is_separator() {
-            y += SEPARATOR_HEIGHT;
+            y += separator_height();
             continue;
         }
-        y += ITEM_HEIGHT;
+        y += item_height();
         // Chromium measures `title_` with its `&` prefix still in it
         // (`MenuItemView::CalculateDimensions`; it is only stripped when
         // drawn), so a label with a mnemonic reserves an ampersand more
@@ -492,8 +509,15 @@ fn open_level(
     #[cfg(target_os = "android")]
     {
         let _ = owner;
+        // a menu taller than the screen scrolls
+        let area = crate::theme::safe_area();
+        let room = window.viewport_size().height - area.top - area.bottom;
+        let menu_size = size(menu_size.width, menu_size.height.min(room));
         let bounds = Bounds::new(place(anchor, menu_size, window), menu_size);
-        let view = cx.new(|_| MenuLevelView { level: level_index });
+        let view = cx.new(|_| MenuLevelView {
+            level: level_index,
+            scroll: ScrollHandle::new(),
+        });
         window.refresh();
         Some(Level {
             entries,
@@ -533,7 +557,11 @@ fn open_level(
             ..Default::default()
         };
         match cx.open_window(options, |_, cx| {
-            cx.new(|_| MenuLevelView { level: level_index })
+            cx.new(|_| MenuLevelView {
+                level: level_index,
+                #[cfg(target_os = "android")]
+                scroll: ScrollHandle::new(),
+            })
         }) {
             Ok(handle) => Some(Level {
                 entries,
@@ -736,7 +764,7 @@ fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
         let anchor = Anchor {
             rect: Bounds::new(
                 point(px(0.), px(rect - metrics::VERTICAL_INSET)),
-                size(width, px(metrics::ITEM_HEIGHT)),
+                size(width, px(metrics::item_height())),
             ),
             anchor: PopupAnchor::TopRight,
             gravity: PopupGravity::BottomRight,
@@ -767,9 +795,11 @@ fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
             rect: Bounds::new(
                 point(
                     l.bounds.origin.x,
-                    l.bounds.origin.y + px(top - metrics::VERTICAL_INSET),
+                    l.bounds.origin.y
+                        + l.view.read(cx).scroll.offset().y
+                        + px(top - metrics::VERTICAL_INSET),
                 ),
-                size(l.bounds.size.width, px(metrics::ITEM_HEIGHT)),
+                size(l.bounds.size.width, px(metrics::item_height())),
             ),
             anchor: PopupAnchor::TopRight,
             gravity: PopupGravity::BottomRight,
@@ -982,6 +1012,9 @@ pub fn dismiss_on_outside_click(cx: &mut App) -> bool {
 /// One level's window.
 pub struct MenuLevelView {
     level: usize,
+    /// Android: a menu taller than the window scrolls.
+    #[cfg(target_os = "android")]
+    scroll: ScrollHandle,
 }
 
 impl MenuLevelView {
@@ -990,7 +1023,7 @@ impl MenuLevelView {
         let level = session.levels.get(self.level)?;
         // Android: pointer positions are the window's, not the menu's
         #[cfg(target_os = "android")]
-        let y = y - f32::from(level.bounds.origin.y);
+        let y = y - f32::from(level.bounds.origin.y + self.scroll.offset().y);
         level
             .row_tops
             .iter()
@@ -998,9 +1031,9 @@ impl MenuLevelView {
             .rev()
             .find_map(|(i, top)| {
                 let height = if level.entries[i].is_separator() {
-                    metrics::SEPARATOR_HEIGHT
+                    metrics::separator_height()
                 } else {
-                    metrics::ITEM_HEIGHT
+                    metrics::item_height()
                 };
                 (y >= *top && y < top + height).then_some(i)
             })
@@ -1073,14 +1106,14 @@ impl Render for MenuLevelView {
         let rows = entries.into_iter().enumerate().map(move |(ix, entry)| {
             if entry.is_separator() {
                 return div()
-                    .h(px(SEPARATOR_HEIGHT))
+                    .h(px(separator_height()))
                     .w_full()
                     .flex_none()
                     .relative()
                     .child(
                         div()
                             .absolute()
-                            .top(px(SEPARATOR_RULE))
+                            .top(px((separator_height() / 2.).floor()))
                             .left_0()
                             .w_full()
                             .h(px(1.))
@@ -1100,7 +1133,7 @@ impl Render for MenuLevelView {
             // opened from the keyboard (measured in GitHub Desktop)
             let label_element = div().child(entry.text.clone());
             div()
-                .h(px(ITEM_HEIGHT))
+                .h(px(item_height()))
                 .w_full()
                 .flex_none()
                 .relative()
@@ -1114,7 +1147,7 @@ impl Render for MenuLevelView {
                             .absolute()
                             .left(px(LABEL_START))
                             .top(px(-TEXT_RAISE))
-                            .h(px(ITEM_HEIGHT))
+                            .h(px(item_height()))
                             .flex()
                             .items_center()
                             .child(
@@ -1131,7 +1164,7 @@ impl Render for MenuLevelView {
                         .absolute()
                         .left(px(label_start))
                         .top(px(-TEXT_RAISE))
-                        .h(px(ITEM_HEIGHT))
+                        .h(px(item_height()))
                         .flex()
                         .items_center()
                         .child(label_element),
@@ -1143,7 +1176,7 @@ impl Render for MenuLevelView {
                             .absolute()
                             .right(px(ACCELERATOR_RIGHT + if arrow { ARROW_COLUMN } else { 0. }))
                             .top(px(-TEXT_RAISE))
-                            .h(px(ITEM_HEIGHT))
+                            .h(px(item_height()))
                             .flex()
                             .items_center()
                             .text_color(minor)
@@ -1156,7 +1189,7 @@ impl Render for MenuLevelView {
                             .absolute()
                             .right(px(8.))
                             .top(px(-TEXT_RAISE))
-                            .h(px(ITEM_HEIGHT))
+                            .h(px(item_height()))
                             .flex()
                             .items_center()
                             .child(
@@ -1213,6 +1246,11 @@ impl Render for MenuLevelView {
                 }),
             )
             .children(rows)
+            .map(|menu| {
+                #[cfg(target_os = "android")]
+                let menu = menu.overflow_y_scroll().track_scroll(&self.scroll);
+                menu
+            })
     }
 }
 

@@ -108,11 +108,12 @@ pub mod sizes {
     }
     #[allow(non_snake_case)]
     pub fn TOOLBAR_HEIGHT() -> Pixels {
-        zpx(50.)
+        // a short window (a phone on its side) has no 50 px to give
+        zpx(if super::short() { 38. } else { 50. })
     }
     #[allow(non_snake_case)]
     pub fn TOOLBAR_BUTTON_HEIGHT() -> Pixels {
-        zpx(49.)
+        TOOLBAR_HEIGHT() - zpx(1.)
     }
     #[allow(non_snake_case)]
     pub fn TOOLBAR_BUTTON_WIDTH() -> Pixels {
@@ -242,6 +243,30 @@ pub fn safe_area() -> gpui_kit::Edges<gpui_kit::Pixels> {
     }
 }
 
+/// Below this window height (logical pixels) the touch layout saves rows:
+/// a lower toolbar, a one-line description box, lower menu items.
+pub const SHORT_HEIGHT: f32 = 480.;
+
+thread_local! {
+    static SHORT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the phone layouts may be used at all: on Android, and with
+/// `CORVANE_COMPACT=1` elsewhere (to work on them without a device).
+fn phone_layouts() -> bool {
+    static ALLOWED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALLOWED.get_or_init(|| {
+        cfg!(target_os = "android") || std::env::var_os("CORVANE_COMPACT").is_some()
+    })
+}
+
+/// Whether the window is short (a phone held sideways), as of the last
+/// [`update_safe_area`]. GHD's window is at least 660 px tall. Android only,
+/// like [`compact`].
+pub fn short() -> bool {
+    SHORT.with(|short| short.get())
+}
+
 #[cfg(target_os = "android")]
 thread_local! {
     static SAFE_AREA: std::cell::Cell<gpui_kit::Edges<gpui_kit::Pixels>> =
@@ -250,6 +275,9 @@ thread_local! {
 
 /// Reads [`safe_area`] from the window (Android; a no-op elsewhere).
 pub fn update_safe_area(window: &gpui_kit::Window) {
+    SHORT.with(|short| {
+        short.set(phone_layouts() && window.viewport_size().height < gpui_kit::px(SHORT_HEIGHT))
+    });
     #[cfg(target_os = "android")]
     {
         let viewport = window.viewport_size();
@@ -310,10 +338,7 @@ pub const COMPACT_WIDTH: f32 = 600.;
 /// window cannot be narrower than 960 px. Android only; `CORVANE_COMPACT=1`
 /// turns it on elsewhere, to work on it without a device.
 pub fn compact(window: &gpui_kit::Window) -> bool {
-    static ALLOWED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ALLOWED.get_or_init(|| {
-        cfg!(target_os = "android") || std::env::var_os("CORVANE_COMPACT").is_some()
-    }) && window.viewport_size().width < gpui_kit::px(COMPACT_WIDTH)
+    phone_layouts() && window.viewport_size().width < gpui_kit::px(COMPACT_WIDTH)
 }
 
 thread_local! {
