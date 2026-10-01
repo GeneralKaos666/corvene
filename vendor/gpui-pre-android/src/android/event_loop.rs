@@ -524,6 +524,7 @@ fn handle_touch(
         MotionAction::Down | MotionAction::PointerDown => {
             let pointer = motion.pointer_at_index(action_pointer);
             let pointer_id = pointer.pointer_id();
+            window.end_touch_hover();
             let id = window.touch_started(pointer_id);
             // one finger resting is a long press; a second one ends that
             if action == MotionAction::Down {

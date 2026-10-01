@@ -33,11 +33,11 @@ use anyhow::{Context as _, Result};
 use futures::channel::oneshot;
 use gpui::{
     point, px, size, Bounds, Capslock, DevicePixels, DispatchEventResult, Edges, GpuSpecs,
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformAtlas, PlatformDisplay,
-    PlatformInput, PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel,
-    RequestFrameOptions, Scene, Size, TouchEvent, TouchId, TouchPhase, WindowAppearance,
-    WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowControls, WindowInsets,
-    WindowVisibility,
+    Modifiers, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
+    PromptButton, PromptLevel, RequestFrameOptions, Scene, Size, TouchEvent, TouchId, TouchPhase,
+    WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowControls,
+    WindowInsets, WindowVisibility,
 };
 use gpui_wgpu::{wgpu, GpuContext, WgpuRenderer, WgpuSurfaceConfig};
 use ndk::native_window::NativeWindow;
@@ -148,6 +148,9 @@ struct WindowState {
     back_enabled: bool,
     /// A finger resting where it went down: a long press in the making.
     long_press: Option<LongPress>,
+    /// A long press nothing answered left the pointer hovering where the
+    /// finger was (tooltips); the next touch ends that.
+    touch_hover: Option<Point<Pixels>>,
     /// A tap that ended; after the next frame the keyboard opens if the tap
     /// was on the focused text input.
     tapped: Option<Point<Pixels>>,
@@ -253,6 +256,7 @@ impl AndroidWindow {
                 title: String::new(),
                 back_enabled: false,
                 long_press: None,
+                touch_hover: None,
                 tapped: None,
             }),
             callbacks: RefCell::new(Callbacks::default()),
@@ -546,18 +550,41 @@ impl AndroidWindow {
             }));
         }
         self.set_mouse_position(press.position);
-        self.handle_input(PlatformInput::MouseDown(MouseDownEvent {
+        let pressed = self.handle_input(PlatformInput::MouseDown(MouseDownEvent {
             button: MouseButton::Right,
             position: press.position,
             modifiers: Modifiers::default(),
             click_count: 1,
             first_mouse: false,
         }));
-        self.handle_input(PlatformInput::MouseUp(MouseUpEvent {
+        let released = self.handle_input(PlatformInput::MouseUp(MouseUpEvent {
             button: MouseButton::Right,
             position: press.position,
             modifiers: Modifiers::default(),
             click_count: 1,
+        }));
+        // Nothing took the secondary click: the press stands in for the
+        // mouse resting there, which shows what only hovering shows (a
+        // tooltip, a truncated title in full, hover controls).
+        if !pressed && !released {
+            self.state.borrow_mut().touch_hover = Some(press.position);
+            self.handle_input(PlatformInput::MouseMove(MouseMoveEvent {
+                position: press.position,
+                pressed_button: None,
+                modifiers: Modifiers::default(),
+            }));
+        }
+    }
+
+    /// A new touch: the pointer a long press left hovering goes away.
+    pub(crate) fn end_touch_hover(&self) {
+        let Some(position) = self.state.borrow_mut().touch_hover.take() else {
+            return;
+        };
+        self.handle_input(PlatformInput::MouseExited(MouseExitEvent {
+            position,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
         }));
     }
 
