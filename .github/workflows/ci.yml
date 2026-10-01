@@ -2,7 +2,8 @@ name: CI
 
 # macOS runners are scarce, so a push only runs what it has to: docs-only
 # changes skip CI, a newer push to the same branch cancels the older run,
-# rustfmt fails fast on Linux before a macOS or Linux runner is taken, and the release
+# rustfmt fails fast on Linux before any other runner is taken, builds carry
+# no debug info, Android builds one ABI, and the release
 # build + bundle run only on demand (Actions → CI → Run workflow). Tags build
 # and bundle in release.yml.
 
@@ -35,6 +36,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # no debug info: less to compile, link and cache, and a failing test still
+  # names its file and line
+  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
   fmt:
@@ -60,21 +64,13 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          # PR runs read main's cache but do not write their own
+          # PR runs read main's cache but do not write their own; a red run
+          # on main still saves what it compiled
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       # grammars built from source (crates/corvane-grammars/build.rs); the
       # tree-sitter tests need all of them
-      - name: cache grammar sources
-        id: grammar-src
-        uses: actions/cache@v4
-        with:
-          path: target/grammar-src
-          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
-      - name: fetch grammar sources (tree-sitter CLI generates the ones without parser.c)
-        if: steps.grammar-src.outputs.cache-hit != 'true'
-        run: |
-          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
-          CORVANE_TREE_SITTER="$RUNNER_TEMP/ts-cli/bin/tree-sitter" python3 tools/ts-queries/fetch.py
+      - uses: ./.github/actions/grammar-sources
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
@@ -128,17 +124,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: cache grammar sources
-        id: grammar-src
-        uses: actions/cache@v4
-        with:
-          path: target/grammar-src
-          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
-      - name: fetch grammar sources (tree-sitter CLI generates the ones without parser.c)
-        if: steps.grammar-src.outputs.cache-hit != 'true'
-        run: |
-          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
-          CORVANE_TREE_SITTER="$RUNNER_TEMP/ts-cli/bin/tree-sitter" python3 tools/ts-queries/fetch.py
+          cache-on-failure: true
+      - uses: ./.github/actions/grammar-sources
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       # the keyring and notification tests talk to a session bus
@@ -176,19 +163,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: cache grammar sources
-        id: grammar-src
-        uses: actions/cache@v4
-        with:
-          path: target/grammar-src
-          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
-          enableCrossOsArchive: true
-      - name: fetch grammar sources (tree-sitter CLI generates the ones without parser.c)
-        if: steps.grammar-src.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
-          PYTHONUTF8=1 CORVANE_TREE_SITTER="$RUNNER_TEMP/ts-cli/bin/tree-sitter.exe" python tools/ts-queries/fetch.py
+          cache-on-failure: true
+      - uses: ./.github/actions/grammar-sources
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
@@ -208,9 +184,10 @@ jobs:
           $help = cmd /c packaging\windows\corvane.bat --help
           if (-not ($help -match "Corvane CLI usage")) { throw "the command line tool printed no usage" }
 
-  # Both Android packages (foss and play) from one native library per ABI,
-  # on a Linux runner: cargo-ndk cross-compiles, Gradle packages. The bundled
-  # git (packaging/android/git) is cross-built once and cached.
+  # Both Android packages (foss and play) from one native library, on a
+  # Linux runner: cargo-ndk cross-compiles, Gradle packages. One ABI is
+  # enough to check a push (release.yml builds all four). The bundled git
+  # (packaging/android/git) is cross-built once and cached.
   android:
     name: clippy · package (Android)
     needs: fmt
@@ -218,16 +195,18 @@ jobs:
     timeout-minutes: 90
     env:
       NDK_VERSION: 27.3.13750724
+      ABIS: arm64-v8a
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-          targets: aarch64-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
           key: android
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -239,13 +218,14 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-      - name: install cargo-ndk
-        run: cargo install cargo-ndk --locked
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
       - name: cache the bundled git
         uses: actions/cache@v4
         with:
           path: packaging/android/app/src/main/jniLibs
-          key: android-git-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
+          key: android-git-${{ env.ABIS }}-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
       # rustc reports this lint for thread locals only on Android targets
       - name: clippy
         run: >

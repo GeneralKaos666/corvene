@@ -51,14 +51,16 @@ pub fn watch(
     // unbounded: every burst's time reaches the dispatcher (a refresh that
     // started before it must not swallow it)
     let (tx, rx) = async_channel::unbounded::<Instant>();
-    // FSEvents reports resolved paths (`/private/var/…` for `/var/…`)
-    // (dunce: Windows reports paths under the folder as it was given, which
-    // `canonicalize`'s `\\?\` form is not a prefix of)
+    // FSEvents reports resolved paths (`/private/var/…` for `/var/…`).
+    // Windows reports paths under the folder as it was given: `canonicalize`'s
+    // `\\?\` form is not a prefix of those (hence dunce), and neither is the
+    // resolved path when the folder was given by a short name
+    // (`C:\Users\RUNNER~1\…`), so the folder as given counts as the root too
     let root = dunce::canonicalize(&workdir).unwrap_or_else(|_| workdir.clone());
     std::thread::Builder::new()
         .name("repo-watcher".into())
         .spawn(move || {
-            let mut rules = Relevance::new(root.clone());
+            let mut rules = Relevance::new(root.clone()).with_alias(workdir);
             // Each iteration: wait for one relevant event, then absorb the burst.
             while let Ok(paths) = raw_rx.recv() {
                 let mut relevant = rules.any_relevant(&paths, false);
@@ -110,6 +112,8 @@ fn is_open(kind: &notify::EventKind) -> bool {
 /// worktree paths unless git ignores them.
 pub struct Relevance {
     root: PathBuf,
+    /// Another spelling of `root` that event paths may start with.
+    alias: Option<PathBuf>,
     /// `None` until first needed, after a rules file changed, or when the
     /// repository could not be opened (then every worktree path counts).
     matcher: Option<IgnoreMatcher>,
@@ -120,9 +124,25 @@ impl Relevance {
     pub fn new(root: PathBuf) -> Self {
         Self {
             root,
+            alias: None,
             matcher: None,
             stale: true,
         }
+    }
+
+    /// Paths under `alias` are paths under the root as well.
+    pub fn with_alias(mut self, alias: PathBuf) -> Self {
+        self.alias = Some(alias).filter(|alias| *alias != self.root);
+        self
+    }
+
+    /// `path` relative to the root, by either of its spellings.
+    fn relative<'a>(&self, path: &'a Path) -> Option<&'a Path> {
+        path.strip_prefix(&self.root).ok().or_else(|| {
+            self.alias
+                .as_deref()
+                .and_then(|alias| path.strip_prefix(alias).ok())
+        })
     }
 
     /// Whether a refresh is due after `paths` changed, given `already` from
@@ -142,11 +162,11 @@ impl Relevance {
     }
 
     pub fn is_relevant(&mut self, path: &Path) -> bool {
-        let Ok(rel) = path.strip_prefix(&self.root) else {
+        let Some(rel) = self.relative(path) else {
             return true;
         };
         if rel.starts_with(".git") {
-            return is_relevant(&self.root, path);
+            return is_relevant(Path::new(""), rel);
         }
         !self.is_ignored(rel)
     }
@@ -167,7 +187,7 @@ impl Relevance {
     /// `.gitignore` in an ignored directory (`node_modules/pkg/.gitignore`)
     /// is not one: git never reads it.
     fn changes_rules(&mut self, path: &Path) -> bool {
-        let Ok(rel) = path.strip_prefix(&self.root) else {
+        let Some(rel) = self.relative(path) else {
             return false;
         };
         if rel.file_name().is_some_and(|name| name == ".gitignore") {
@@ -296,6 +316,27 @@ mod tests {
         std::fs::write(root.join(".git/info/exclude"), "*.tmp\n").unwrap();
         assert!(!rules.any_relevant(&[root.join(".git/info/exclude")], false));
         assert!(!rules.is_relevant(&root.join("scratch.tmp")));
+    }
+
+    #[test]
+    fn an_alias_of_the_root_is_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        init_repo(&root);
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+        // the spelling the events use: a short name on Windows, a link here
+        let alias = Path::new("/as/given");
+        let mut rules = Relevance::new(root.clone()).with_alias(alias.to_path_buf());
+        assert!(!rules.is_relevant(&alias.join("target/debug/x.o")));
+        assert!(!rules.is_relevant(&alias.join(".git/objects/ab/cdef")));
+        assert!(rules.is_relevant(&alias.join(".git/HEAD")));
+        assert!(rules.is_relevant(&alias.join("src/main.rs")));
+        assert!(!rules.is_relevant(&root.join("target/debug/x.o")));
+        // a rules file under the alias rebuilds the rules
+        std::fs::write(root.join(".gitignore"), "dist/\n").unwrap();
+        assert!(rules.any_relevant(&[alias.join(".gitignore")], false));
+        assert!(rules.is_relevant(&alias.join("target/debug/x.o")));
+        assert!(!rules.is_relevant(&alias.join("dist/app.js")));
     }
 
     #[test]

@@ -16,6 +16,8 @@
 
 use std::path::{Path, PathBuf};
 
+// Android opens an editor with an intent, not a process
+#[cfg(not(target_os = "android"))]
 use crate::apps;
 
 #[cfg(windows)]
@@ -698,6 +700,7 @@ fn line_tool_key(editor: &FoundEditor) -> &str {
 
 /// The program and arguments that open `target` at `line` (1-based) in
 /// `editor`, when its bundle has a command line tool that can.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn line_command(editor: &FoundEditor, target: &Path, line: u32) -> Option<(PathBuf, Vec<String>)> {
     let (candidates, syntax) = line_tool(line_tool_key(editor))?;
     let program = candidates
