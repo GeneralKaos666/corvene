@@ -113,6 +113,11 @@ impl raw_window_handle::HasDisplayHandle for WebDisplaySource {
     }
 }
 
+/// Corvane patch: makes [`WgpuContext::instance`] offer OpenGL ES only.
+#[cfg(target_os = "android")]
+pub static ANDROID_GL_ONLY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Clone, Copy)]
 pub struct CompositorGpuHint {
     pub vendor_id: u32,
@@ -441,8 +446,18 @@ impl WgpuContext {
 
     #[cfg(not(target_family = "wasm"))]
     pub fn instance(display: Option<Box<dyn wgpu::wgt::WgpuHasDisplayHandle>>) -> wgpu::Instance {
+        // Corvane patch: the Android platform retries with OpenGL ES alone
+        // when a Vulkan driver loses its device at start-up (the emulator's)
+        #[cfg(target_os = "android")]
+        let backends = if ANDROID_GL_ONLY.load(std::sync::atomic::Ordering::Relaxed) {
+            wgpu::Backends::GL
+        } else {
+            wgpu::Backends::VULKAN | wgpu::Backends::GL
+        };
+        #[cfg(not(target_os = "android"))]
+        let backends = wgpu::Backends::VULKAN | wgpu::Backends::GL;
         wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            backends,
             flags: wgpu::InstanceFlags::default(),
             backend_options: wgpu::BackendOptions::default(),
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),

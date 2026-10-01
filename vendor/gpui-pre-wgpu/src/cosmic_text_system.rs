@@ -144,6 +144,16 @@ impl CosmicTextSystem {
         }))
     }
 
+    /// Corvane patch: fontdb does not look for system fonts on Android, so
+    /// the platform points it at `/system/fonts`. The files are memory
+    /// mapped when a face is first used.
+    #[cfg(target_os = "android")]
+    pub fn load_fonts_dir(&self, dir: &std::path::Path) {
+        let mut state = self.0.write();
+        state.font_system.db_mut().load_fonts_dir(dir);
+        state.font_ids_by_family_cache.clear();
+    }
+
     pub fn new_without_system_fonts(system_font_fallback: &str) -> Self {
         let font_system = FontSystem::new_with_locale_and_db(
             "en-US".to_string(),

@@ -1,0 +1,45 @@
+# The Android platform layer for the pinned GPUI: the `src/android` module of
+# gpui-mobile (https://github.com/itsbalamurali/gpui-mobile, used under its
+# Apache-2.0 option, see LICENSE-APACHE), ported from Zed's
+# GPUI of April 2026 to gpui-pre 0.3.7. Not on crates.io; the workspace
+# depends on it by path.
+
+[package]
+edition = "2021"
+name = "gpui-pre-android"
+version = "0.3.7"
+publish = false
+description = "Android platform for gpui-pre (port of gpui-mobile's src/android)"
+license = "Apache-2.0"
+repository = "https://github.com/itsbalamurali/gpui-mobile"
+
+[lib]
+name = "gpui_android"
+path = "src/gpui_android.rs"
+doctest = false
+
+[target.'cfg(target_os = "android")'.dependencies]
+anyhow = "1"
+futures = "0.3"
+log = "0.4"
+parking_lot = "0.12"
+raw-window-handle = "0.6"
+rustc-hash = "2"
+uuid = { version = "1", features = ["v5"] }
+libc = "0.2"
+
+gpui = { package = "gpui-pre", version = "=0.3.7", default-features = false }
+gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.7" }
+
+jni = "0.22"
+# `nativewindow` only: `api-level-31` would link API 31 symbols and the
+# library would fail to load on Android 8
+ndk = { version = "0.9", features = ["nativewindow"] }
+ndk-context = "0.1"
+ndk-sys = "0.6"
+android-activity = { version = "0.6", features = ["native-activity"] }
+android_logger = "0.15"
+
+[lints.rust.unexpected_cfgs]
+level = "allow"
+priority = 0
