@@ -47,7 +47,8 @@ pub fn launch(_found: &FoundShell, path: &Path) -> std::io::Result<()> {
     if !crate::android::is_shared_storage(path) {
         return Err(std::io::Error::other(
             "Termux cannot reach a repository in Corvane's private storage. \
-             Keep the repository on shared storage to open it in Termux.",
+             Clone or add it on shared storage (a folder under /storage/emulated/0, \
+             with \"All files access\") to work on it in both.",
         ));
     }
     let bridge = crate::android::bridge().ok_or_else(|| std::io::Error::other("no activity"))?;

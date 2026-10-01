@@ -548,6 +548,39 @@ impl Dispatcher {
     /// worktree it is switched to when it belongs to an added repository,
     /// else Add Local Repository opens prefilled.
     pub fn open_local_repository(path: PathBuf, cx: &mut App) {
+        // Android (`corvane <dir>` in Termux): say why a folder cannot be
+        // opened instead of calling a readable-looking path "not found"
+        #[cfg(target_os = "android")]
+        {
+            let android = corvane_platform::android::bridge();
+            let reason = if path.starts_with("/data/data/com.termux")
+                || path.starts_with("/data/user/0/com.termux")
+            {
+                Some(
+                    "This folder is in Termux's own storage, which no other application can \
+                     read. Keep the repository on shared storage (~/storage/shared in Termux) \
+                     to use it in both.",
+                )
+            } else if corvane_platform::android::is_shared_storage(&path)
+                && !android.is_some_and(|bridge| bridge.has_all_files_access())
+            {
+                Some(
+                    if android.is_some_and(|bridge| bridge.can_request_all_files_access()) {
+                        "Corvane needs \"All files access\" to open a repository on shared storage \
+                     in place. Allow it from File › Add local repository, then try again."
+                    } else {
+                        "This build of Corvane cannot open a repository on shared storage in \
+                     place. Use File › Add local repository to import a copy."
+                    },
+                )
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                Self::show_error("Unable to Open Repository", reason.to_string(), cx);
+                return;
+            }
+        }
         let git = Self::state(cx).read(cx).git.clone();
         spawn_bg(
             cx,

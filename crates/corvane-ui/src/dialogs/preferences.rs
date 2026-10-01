@@ -2125,13 +2125,31 @@ fn android_shell_note(missing: bool, cx: &App) -> AnyElement {
         ]
     } else {
         vec![
-            "Termux opens repositories on shared storage. Set allow-external-apps = true in \
-             ~/.termux/termux.properties first."
+            "Termux and Corvane share repositories on shared storage (a folder under \
+             /storage/emulated/0), not the ones in Corvane's own storage. Run the setup commands \
+             in Termux once: they allow \"Open in Termux\", trust shared storage in Termux's git \
+             and add a corvane command that opens a folder here."
                 .into(),
         ]
     };
-    paragraph(text)
-        .text_color(t.text_secondary)
+    let note = paragraph(text).text_color(t.text_secondary);
+    if missing {
+        return note.into_any_element();
+    }
+    #[cfg(target_os = "android")]
+    let setup = corvane_platform::android::TERMUX_SETUP;
+    #[cfg(not(target_os = "android"))]
+    let setup = "";
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACING_HALF())
+        .child(note)
+        .child(div().flex().child(
+            button("prefs-termux-setup", "Copy Termux setup commands", cx).on_click(
+                move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(setup.into())),
+            ),
+        ))
         .into_any_element()
 }
 

@@ -91,6 +91,28 @@ pub fn network_busy() -> bool {
 /// Termux, the terminal most Android git users already have.
 pub const TERMUX_PACKAGE: &str = "com.termux";
 
+/// What a Termux user pastes once so the two work on the same repositories
+/// (Options › Integrations copies it):
+///
+/// * `allow-external-apps`: lets "Open in Termux" start a session
+///   (Termux's `RUN_COMMAND` intent is refused without it);
+/// * `termux-setup-storage`: `~/storage/shared`, the shared storage both
+///   applications reach (neither can read the other's private storage);
+/// * `safe.directory`: files on shared storage belong to neither
+///   application's user, which git refuses by default;
+/// * `corvane [dir]`: opens a repository in Corvane from the shell, through
+///   the `x-corvane://openLocalRepo` link.
+pub const TERMUX_SETUP: &str = r#"mkdir -p ~/.termux
+grep -qs '^allow-external-apps *= *true' ~/.termux/termux.properties || echo 'allow-external-apps = true' >> ~/.termux/termux.properties
+termux-reload-settings
+[ -d ~/storage/shared ] || termux-setup-storage
+git config --global --get-all safe.directory | grep -qxF '/storage/emulated/0/*' || git config --global --add safe.directory '/storage/emulated/0/*'
+grep -qs '^corvane()' ~/.bashrc || cat >> ~/.bashrc <<'CORVANE'
+corvane() { am start -a android.intent.action.VIEW -d "x-corvane://openLocalRepo$(realpath "${1:-.}" | sed 's/%/%25/g; s/ /%20/g')" > /dev/null; }
+CORVANE
+. ~/.bashrc
+"#;
+
 /// Opens `path` for [`crate::apps::show_item_in_folder`] and the editor
 /// integration.
 pub fn view_path(path: &Path) -> std::io::Result<()> {

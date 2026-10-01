@@ -1769,9 +1769,15 @@ pub fn android_storage_note(note: StorageNote, cx: &App) -> Option<AnyElement> {
         let can_ask =
             !in_place && bridge.is_some_and(|bridge| bridge.can_request_all_files_access());
         let text = match (note, in_place) {
-            (StorageNote::NewRepository, _) => {
+            (StorageNote::NewRepository, false) => {
                 "Corvane keeps repositories in its own storage. Uninstalling Corvane deletes \
                  them, so push what you want to keep."
+            }
+            (StorageNote::NewRepository, true) => {
+                "Corvane keeps repositories in its own storage, which uninstalling Corvane \
+                 deletes. A path under /storage/emulated/0 puts the repository on shared \
+                 storage instead, where Termux and other apps reach it (without symbolic \
+                 links and file modes)."
             }
             (StorageNote::AddLocal, false) => {
                 "Choose… imports a repository: the folder is copied into Corvane's own storage, \
@@ -1783,12 +1789,20 @@ pub fn android_storage_note(note: StorageNote, cx: &App) -> Option<AnyElement> {
             }
         };
         let mut parts: Vec<Inline> = vec![text.into()];
-        if can_ask && note == StorageNote::AddLocal {
+        if can_ask {
             parts.push(" ".into());
             parts.push(
                 link_button(
                     "android-all-files-access",
-                    "Allow \"All files access\" to use folders in place.",
+                    match note {
+                        StorageNote::AddLocal => {
+                            "Allow \"All files access\" to use folders in place."
+                        }
+                        StorageNote::NewRepository => {
+                            "Allow \"All files access\" to use shared storage, which Termux \
+                             reaches too."
+                        }
+                    },
                     cx,
                 )
                 .on_click(|_, _, cx| corvane_core::Dispatcher::request_all_files_access(cx))
