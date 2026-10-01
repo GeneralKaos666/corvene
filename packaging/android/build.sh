@@ -2,7 +2,12 @@
 # Build Corvane's Android package: the bundled git (git/build.sh), the Rust
 # library with cargo-ndk, then the APK with Gradle.
 #
-#   packaging/android/build.sh [debug|release] [foss|play]
+#   packaging/android/build.sh [debug|profiling|release] [foss|play]
+#
+# debug is for compiling quickly; its unoptimised library draws several times
+# slower than a release, so judge speed on a device with profiling (the
+# workspace's optimised profile with symbols, in Gradle's debug package:
+# debuggable, so simpleperf and run-as work) or release.
 #
 # Without a flavour both packages are built (app/build.gradle.kts). A release
 # is signed when CORVANE_ANDROID_KEYSTORE, CORVANE_ANDROID_KEYSTORE_PASSWORD,
@@ -25,8 +30,13 @@ targets=()
 for abi in $ABIS; do
   targets+=(-t "$abi")
 done
-profile_flag=
-[ "$PROFILE" = release ] && profile_flag=--release
+# cargo's profile and Gradle's build type
+case "$PROFILE" in
+  debug) profile_flag= VARIANT=debug ;;
+  profiling) profile_flag="--profile profiling" VARIANT=debug ;;
+  release) profile_flag=--release VARIANT=release ;;
+  *) echo "unknown profile $PROFILE" >&2; exit 2 ;;
+esac
 
 # git, its HTTPS helper, ssh and git-lfs, once per ABI (git/build.sh)
 missing=
@@ -65,6 +75,6 @@ done
 cd packaging/android
 # assemble[Foss|Play]<Debug|Release>
 flavour="${2:-}"
-task="assemble$(echo "${flavour:0:1}" | tr a-z A-Z)${flavour:1}$(echo "${PROFILE:0:1}" | tr a-z A-Z)${PROFILE:1}"
+task="assemble$(echo "${flavour:0:1}" | tr a-z A-Z)${flavour:1}$(echo "${VARIANT:0:1}" | tr a-z A-Z)${VARIANT:1}"
 ./gradlew --no-daemon "$task"
 find app/build/outputs/apk -name '*.apk'
