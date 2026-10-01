@@ -2128,7 +2128,9 @@ fn android_shell_note(missing: bool, cx: &App) -> AnyElement {
             "Termux and Corvane share repositories on shared storage (a folder under \
              /storage/emulated/0), not the ones in Corvane's own storage. Run the setup commands \
              in Termux once: they allow \"Open in Termux\", trust shared storage in Termux's git \
-             and add a corvane command that opens a folder here."
+             and add two commands, corvane (opens a folder here) and corvane-git-config \
+             (brings Termux's Git settings over; Corvane has a Git of its own and cannot \
+             read Termux's)."
                 .into(),
         ]
     };

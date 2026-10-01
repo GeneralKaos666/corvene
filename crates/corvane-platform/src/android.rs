@@ -101,7 +101,9 @@ pub const TERMUX_PACKAGE: &str = "com.termux";
 /// * `safe.directory`: files on shared storage belong to neither
 ///   application's user, which git refuses by default;
 /// * `corvane [dir]`: opens a repository in Corvane from the shell, through
-///   the `x-corvane://openLocalRepo` link.
+///   the `x-corvane://openLocalRepo` link;
+/// * `corvane-git-config`: offers Termux's global git settings to Corvane
+///   (`x-corvane://importGitConfig`), whose own git cannot read them.
 pub const TERMUX_SETUP: &str = r#"mkdir -p ~/.termux
 grep -qs '^allow-external-apps *= *true' ~/.termux/termux.properties || echo 'allow-external-apps = true' >> ~/.termux/termux.properties
 termux-reload-settings
@@ -109,6 +111,9 @@ termux-reload-settings
 git config --global --get-all safe.directory | grep -qxF '/storage/emulated/0/*' || git config --global --add safe.directory '/storage/emulated/0/*'
 grep -qs '^corvane()' ~/.bashrc || cat >> ~/.bashrc <<'CORVANE'
 corvane() { am start -a android.intent.action.VIEW -d "x-corvane://openLocalRepo$(realpath "${1:-.}" | sed 's/%/%25/g; s/ /%20/g')" > /dev/null; }
+CORVANE
+grep -qs '^corvane-git-config()' ~/.bashrc || cat >> ~/.bashrc <<'CORVANE'
+corvane-git-config() { am start -a android.intent.action.VIEW -d "x-corvane://importGitConfig/$(git config --global --list | base64 -w0 | tr '+/' '-_' | tr -d '=')" > /dev/null; }
 CORVANE
 . ~/.bashrc
 "#;

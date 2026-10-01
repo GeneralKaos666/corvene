@@ -17,6 +17,7 @@ mod discard_selection;
 mod flags;
 mod fork_dialogs;
 mod history_dialogs;
+mod import_git_config;
 mod import_github_desktop;
 mod mco_dialogs;
 mod move_to_applications_folder;
@@ -542,6 +543,9 @@ impl DialogHost {
                 .into(),
             Popup::ConfirmExitTutorial => cx
                 .new(|_| tutorial_dialogs::ConfirmExitTutorialDialog)
+                .into(),
+            Popup::ImportGitConfig { settings, skipped } => cx
+                .new(|_| import_git_config::ImportGitConfigDialog::new(settings.clone(), *skipped))
                 .into(),
             Popup::TestNotifications { repo } => cx
                 .new(|cx| test_notifications::TestNotificationsDialog::new(*repo, cx))

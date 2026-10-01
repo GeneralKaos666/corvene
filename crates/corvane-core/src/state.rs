@@ -150,6 +150,13 @@ pub enum Popup {
     },
     /// `ConfirmExitTutorial`
     ConfirmExitTutorial,
+    /// Corvane on Android: git settings offered through the
+    /// `importGitConfig` link (`git_config_import`), and how many more were
+    /// left out.
+    ImportGitConfig {
+        settings: Vec<(String, String)>,
+        skipped: usize,
+    },
     /// `TestNotifications`: post sample pull request notifications for
     /// `repo` (debug builds).
     TestNotifications {

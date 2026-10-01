@@ -51,6 +51,10 @@ pub enum UrlAction {
     },
     /// Corvane: open a local path (the CLI's `open`).
     OpenLocalRepository { path: PathBuf },
+    /// Corvane on Android: git settings another git on the device offers
+    /// (`x-corvane://importGitConfig/<base64url of git config --list>`,
+    /// see `git_config_import`).
+    ImportGitConfig { list: String },
     /// Corvane: the Flags dialog (`x-corvane://flags?q=<search>`).
     Flags { query: Option<String> },
     /// `IUnknownAction`
@@ -182,6 +186,10 @@ pub fn parse_app_url(url: &str) -> UrlAction {
             }
         }
         // the path's own leading `/` is the one after the action
+        "importgitconfig" => match crate::git_config_import::decode_payload(parsed_path) {
+            Some(list) => UrlAction::ImportGitConfig { list },
+            None => unknown(),
+        },
         "openlocalrepo" => {
             let decoded = percent_decode(parsed_path, false);
             UrlAction::OpenLocalRepository {
@@ -294,6 +302,7 @@ impl Dispatcher {
                 filepath,
             } => Self::open_repository_from_url(url, branch, pr, filepath, cx),
             UrlAction::OpenLocalRepository { path } => Self::open_local_repository(path, cx),
+            UrlAction::ImportGitConfig { list } => Self::offer_git_config(list, cx),
             UrlAction::Flags { query } => Self::open_flags(query, cx),
             UrlAction::Unknown { url } => warn!(%url, "unknown URL action"),
         }
@@ -547,6 +556,46 @@ impl Dispatcher {
     /// the repository root containing `path` is selected when added, the
     /// worktree it is switched to when it belongs to an added repository,
     /// else Add Local Repository opens prefilled.
+    /// `x-corvane://importGitConfig/…`: ask before taking the settings (any
+    /// application can send the link). Android only: elsewhere Corvane uses
+    /// the system's git and its configuration.
+    fn offer_git_config(list: String, cx: &mut App) {
+        if !cfg!(target_os = "android") {
+            warn!("git settings are only imported on Android");
+            return;
+        }
+        let (settings, skipped) = crate::git_config_import::parse(&list);
+        Self::show_popup(Popup::ImportGitConfig { settings, skipped }, cx);
+    }
+
+    /// The Import button of that dialog: write `~/.gitconfig-imported` and
+    /// include it from `~/.gitconfig`.
+    pub fn import_git_config(settings: Vec<(String, String)>, cx: &mut App) {
+        use crate::git_config_import::{IMPORTED_FILE, render, with_include};
+        let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || -> std::io::Result<()> {
+                std::fs::write(home.join(IMPORTED_FILE), render(&settings))?;
+                let gitconfig = home.join(".gitconfig");
+                let current = std::fs::read_to_string(&gitconfig).unwrap_or_default();
+                let included = with_include(&current);
+                if included != current {
+                    std::fs::write(&gitconfig, included)?;
+                }
+                Ok(())
+            },
+            |result, cx| match result {
+                Ok(()) => info!("git settings imported"),
+                Err(err) => {
+                    Self::show_error("Could not import the Git settings", err.to_string(), cx)
+                }
+            },
+        );
+    }
+
     pub fn open_local_repository(path: PathBuf, cx: &mut App) {
         // Android (`corvane <dir>` in Termux): say why a folder cannot be
         // opened instead of calling a readable-looking path "not found"
