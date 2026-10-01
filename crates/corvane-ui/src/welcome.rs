@@ -27,29 +27,67 @@ use crate::widgets::{
 use gpui_kit::component::Sizable;
 use gpui_kit::component::input::Input;
 
-const SCALE: f32 = 1.2;
+thread_local! {
+    /// `--welcome-scale` for the frame being drawn ([`welcome_scale`]).
+    static WELCOME_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.2) };
+}
+
+/// `#welcome`'s `--welcome-scale`: fonts and inputs grow with the window
+/// (`@media screen and (min-width: …) and (min-height: …)`).
+fn welcome_scale(page: Size<Pixels>) -> f32 {
+    let (width, height) = (f32::from(page.width), f32::from(page.height));
+    [
+        (1800., 775., 1.5),
+        (1600., 750., 1.4),
+        (1400., 725., 1.3),
+        (1366., 700., 1.2),
+    ]
+    .into_iter()
+    .find(|(min_width, min_height, _)| width >= *min_width && height >= *min_height)
+    .map_or(1., |(_, _, scale)| scale)
+}
+
+#[allow(non_snake_case)]
+fn SCALE() -> f32 {
+    WELCOME_SCALE.get()
+}
 
 /// `#welcome`'s `--text-field-height` / `--button-height`:
-/// `--welcome-item-height` (29 px on macOS) × scale. GHD defines
-/// `--welcome-item-height` for darwin and win32 only, so on Linux both
-/// variables are invalid at computed-value time, `height` falls back to
+/// `--welcome-item-height` (29 px on macOS, 31.5 px on Windows) × scale. GHD
+/// defines `--welcome-item-height` for darwin and win32 only, so on Linux
+/// both variables are invalid at computed-value time, `height` falls back to
 /// `auto`, and inputs and buttons size to their content: Noto Sans's
-/// `line-height: normal` at 16.8 px (23 px) + 5 px padding + 1 px border
-/// each side = 35 px (measured in GHD's Electron).
-const ITEM_HEIGHT: f32 = if cfg!(target_os = "macos") {
-    29. * SCALE
-} else {
-    35.
-};
+/// `line-height: normal` (23 px at 16.8 px) + 5 px padding + 1 px border
+/// each side = 35 px at scale 1.2 (measured in GHD's Electron).
+#[allow(non_snake_case)]
+fn ITEM_HEIGHT() -> f32 {
+    if cfg!(target_os = "macos") {
+        29. * SCALE()
+    } else if cfg!(windows) {
+        31.5 * SCALE()
+    } else {
+        linux_text_height() + 12.
+    }
+}
 
 /// `#welcome select` at `--text-field-height`; on Linux (see
-/// [`ITEM_HEIGHT`]) its auto height is 23 px of text + Chromium's 1 px
-/// menulist padding + 1 px border each side = 27 px.
-const SELECT_HEIGHT: f32 = if cfg!(target_os = "macos") {
-    29. * SCALE
-} else {
-    27.
-};
+/// [`ITEM_HEIGHT`]) its auto height is the text + Chromium's 1 px menulist
+/// padding + 1 px border each side = 27 px at scale 1.2.
+#[allow(non_snake_case)]
+fn SELECT_HEIGHT() -> f32 {
+    if cfg!(target_os = "macos") {
+        29. * SCALE()
+    } else if cfg!(windows) {
+        31.5 * SCALE()
+    } else {
+        linux_text_height() + 4.
+    }
+}
+
+/// Noto Sans's `line-height: normal` at `--welcome-font-size-md`.
+fn linux_text_height() -> f32 {
+    (14. * SCALE() * 1.369).round()
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Step {
@@ -294,10 +332,10 @@ impl WelcomeView {
                 on_select,
                 cx,
             )
-            .h(px(SELECT_HEIGHT))
+            .h(px(SELECT_HEIGHT()))
             .rounded(BORDER_RADIUS())
             .bg(t.box_background)
-            .text_size(px(WELCOME_FONT_MD)),
+            .text_size(px(WELCOME_FONT_MD())),
             cx,
         )
         .mt(px(10.))
@@ -394,8 +432,8 @@ impl WelcomeView {
                             .mt(px(40.))
                             .flex()
                             .flex_col()
-                            .text_size(px(WELCOME_FONT_MD))
-                            .line_height(px(WELCOME_FONT_MD * 1.5))
+                            .text_size(px(WELCOME_FONT_MD()))
+                            .line_height(px(WELCOME_FONT_MD() * 1.5))
                             .child(
                                 paragraph(vec![
                                     "New to GitHub? ".into(),
@@ -404,7 +442,7 @@ impl WelcomeView {
                                         "Create your free account.",
                                         cx,
                                     )
-                                    .text_size(px(WELCOME_FONT_MD))
+                                    .text_size(px(WELCOME_FONT_MD()))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .on_click(|_, _, cx| {
                                         corvane_core::Dispatcher::open_url(
@@ -415,13 +453,13 @@ impl WelcomeView {
                                     .into_any_element()
                                     .into(),
                                 ])
-                                .line_height(px(WELCOME_FONT_MD * 1.5))
+                                .line_height(px(WELCOME_FONT_MD() * 1.5))
                                 .my(px(10.)),
                             )
                             .child(
                                 div().flex().child(
                                     link_button("welcome-skip", "Skip this step", cx)
-                                        .text_size(px(WELCOME_FONT_MD))
+                                        .text_size(px(WELCOME_FONT_MD()))
                                         .text_color(t.text_secondary)
                                         .on_click(move |_, window, cx| {
                                             this.update(cx, |w, cx| w.advance(window, cx))
@@ -435,10 +473,10 @@ impl WelcomeView {
                 div()
                     .flex()
                     .flex_col()
-                    .py(px(WELCOME_FONT_SM))
-                    .gap(px(WELCOME_FONT_SM))
-                    .text_size(px(WELCOME_FONT_SM))
-                    .line_height(px(WELCOME_FONT_SM * 1.5))
+                    .py(px(WELCOME_FONT_SM()))
+                    .gap(px(WELCOME_FONT_SM()))
+                    .text_size(px(WELCOME_FONT_SM()))
+                    .line_height(px(WELCOME_FONT_SM() * 1.5))
                     .text_color(t.text_secondary)
                     .child(
                         paragraph(vec![
@@ -458,7 +496,7 @@ impl WelcomeView {
                                 cx,
                             ),
                         ])
-                        .line_height(px(WELCOME_FONT_SM * 1.5)),
+                        .line_height(px(WELCOME_FONT_SM() * 1.5)),
                     )
                     .child(div().child(format!(
                         "{name} does not send usage metrics. Nothing about how you use the \
@@ -588,8 +626,8 @@ impl WelcomeView {
                                     .px(px(10.))
                                     .py(px(5.))
                                     .bg(rgb(0xf2f8fe))
-                                    .text_size(px(WELCOME_FONT_SM))
-                                    .line_height(px(WELCOME_FONT_SM * 1.5))
+                                    .text_size(px(WELCOME_FONT_SM()))
+                                    .line_height(px(WELCOME_FONT_SM() * 1.5))
                                     .child("Example commit"),
                             )
                             .child(
@@ -599,8 +637,8 @@ impl WelcomeView {
                                     .max_w(px(280.))
                                     .px(px(10.))
                                     .py(px(5.))
-                                    .text_size(px(12. * SCALE))
-                                    .line_height(px(12. * SCALE * 1.5))
+                                    .text_size(px(12. * SCALE()))
+                                    .line_height(px(12. * SCALE() * 1.5))
                                     .child(
                                         div()
                                             .mt(px(-4.))
@@ -620,10 +658,10 @@ impl WelcomeView {
                                                     .items_center()
                                                     .child(
                                                         // `.AvatarStack--small`: avatar + 5 px
-                                                        div().w(px(16. * SCALE + 5.)).child(
+                                                        div().w(px(16. * SCALE() + 5.)).child(
                                                             avatar_image(
                                                                 avatar_lookup(&email, cx),
-                                                                px(16. * SCALE),
+                                                                px(16. * SCALE()),
                                                                 cx,
                                                             ),
                                                         ),
@@ -632,8 +670,8 @@ impl WelcomeView {
                                                         div()
                                                             .min_w_0()
                                                             .truncate()
-                                                            .text_size(px(WELCOME_FONT_SM))
-                                                            .line_height(px(WELCOME_FONT_SM * 1.5))
+                                                            .text_size(px(WELCOME_FONT_SM()))
+                                                            .line_height(px(WELCOME_FONT_SM() * 1.5))
                                                             .text_color(t.text_secondary)
                                                             .child(format!(
                                                                 "{} • {}",
@@ -651,8 +689,14 @@ impl WelcomeView {
     }
 }
 
-const WELCOME_FONT_SM: f32 = 11. * SCALE;
-const WELCOME_FONT_MD: f32 = 14. * SCALE;
+#[allow(non_snake_case)]
+fn WELCOME_FONT_SM() -> f32 {
+    11. * SCALE()
+}
+#[allow(non_snake_case)]
+fn WELCOME_FONT_MD() -> f32 {
+    14. * SCALE()
+}
 
 /// `.welcome-title`: 42 px × scale, light, line-height 1.25, 10 px below.
 fn welcome_title(text: impl Into<SharedString>) -> Div {
@@ -663,8 +707,8 @@ fn welcome_title(text: impl Into<SharedString>) -> Div {
 /// `.welcome-title` without its text.
 fn welcome_title_box() -> Div {
     div()
-        .text_size(px(42. * SCALE))
-        .line_height(px(42. * SCALE * 1.25))
+        .text_size(px(42. * SCALE()))
+        .line_height(px(42. * SCALE() * 1.25))
         .font_weight(FontWeight::LIGHT)
         .mb(px(10.))
 }
@@ -690,14 +734,14 @@ fn welcome_text(text: impl Into<SharedString>) -> Div {
     let text: SharedString = text.into();
     div()
         .mb(px(10.))
-        .text_size(px(WELCOME_FONT_MD))
-        .line_height(px(WELCOME_FONT_MD * 1.5))
+        .text_size(px(WELCOME_FONT_MD()))
+        .line_height(px(WELCOME_FONT_MD() * 1.5))
         .child(text)
 }
 
 fn footer_link(id: &'static str, label: &'static str, url: &'static str, cx: &App) -> Inline {
     link_button(id, label, cx)
-        .text_size(px(WELCOME_FONT_SM))
+        .text_size(px(WELCOME_FONT_SM()))
         .on_click(move |_, _, cx| corvane_core::Dispatcher::open_url(url, cx))
         .into_any_element()
         .into()
@@ -712,8 +756,8 @@ fn welcome_field(label: &'static str, field: impl IntoElement, cx: &App) -> Div 
         .child(
             div()
                 .mb(px(3.33))
-                .text_size(px(WELCOME_FONT_MD))
-                .line_height(px(WELCOME_FONT_MD * 1.5))
+                .text_size(px(WELCOME_FONT_MD()))
+                .line_height(px(WELCOME_FONT_MD() * 1.5))
                 .child(label),
         )
         .child(field)
@@ -731,7 +775,7 @@ fn welcome_text_box(
     let focused = state.read(cx).focus_handle(cx).is_focused(window);
     div()
         .id(id)
-        .h(px(ITEM_HEIGHT))
+        .h(px(ITEM_HEIGHT()))
         .w_full()
         .flex()
         .items_center()
@@ -759,7 +803,7 @@ fn welcome_text_box(
                 Input::new(state)
                     .appearance(false)
                     .xsmall()
-                    .text_size(px(WELCOME_FONT_MD)),
+                    .text_size(px(WELCOME_FONT_MD())),
             ),
         )
 }
@@ -769,7 +813,7 @@ fn welcome_read_only_box(id: &'static str, state: &Entity<InputState>, cx: &App)
     let t = cx.ghd();
     div()
         .id(id)
-        .h(px(ITEM_HEIGHT))
+        .h(px(ITEM_HEIGHT()))
         .w_full()
         .flex()
         .items_center()
@@ -786,7 +830,7 @@ fn welcome_read_only_box(id: &'static str, state: &Entity<InputState>, cx: &App)
                     .xsmall()
                     .readonly(true)
                     .text_color(t.text_secondary)
-                    .text_size(px(WELCOME_FONT_MD)),
+                    .text_size(px(WELCOME_FONT_MD())),
             ),
         )
 }
@@ -801,7 +845,7 @@ fn welcome_radio_row(id: &'static str, selected: bool, cx: &App) -> Stateful<Div
         .flex()
         .flex_row()
         .items_center()
-        .h(px(WELCOME_FONT_MD * 1.5))
+        .h(px(WELCOME_FONT_MD() * 1.5))
         .cursor_pointer()
         .child(
             div()
@@ -866,7 +910,7 @@ fn email_not_found_warning(account: &corvane_core::Account, email: &str, cx: &Ap
         );
         parts.push(
             link_button("welcome-email-learn-more", "Learn more.", cx)
-                .text_size(px(WELCOME_FONT_MD))
+                .text_size(px(WELCOME_FONT_MD()))
                 .on_click(|_, _, cx| {
                     corvane_core::Dispatcher::open_url(
                         "https://docs.github.com/en/github/committing-changes-to-your-project/\
@@ -881,7 +925,7 @@ fn email_not_found_warning(account: &corvane_core::Account, email: &str, cx: &Ap
     Some(
         paragraph(parts)
             .mt(px(10.))
-            .line_height(px(WELCOME_FONT_MD * 1.5)),
+            .line_height(px(WELCOME_FONT_MD() * 1.5)),
     )
 }
 
@@ -912,7 +956,7 @@ fn welcome_button(id: &'static str, primary: bool, focused: bool, cx: &App) -> S
     div()
         .id(id)
         .flex_none()
-        .h(px(ITEM_HEIGHT))
+        .h(px(ITEM_HEIGHT()))
         .flex()
         .flex_row()
         .items_center()
@@ -922,7 +966,7 @@ fn welcome_button(id: &'static str, primary: bool, focused: bool, cx: &App) -> S
         .bg(bg)
         .border_color(border)
         .text_color(text)
-        .text_size(px(WELCOME_FONT_MD))
+        .text_size(px(WELCOME_FONT_MD()))
         .whitespace_nowrap()
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
@@ -930,6 +974,7 @@ fn welcome_button(id: &'static str, primary: bool, focused: bool, cx: &App) -> S
 
 impl Render for WelcomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        WELCOME_SCALE.set(welcome_scale(crate::theme::page_size(window)));
         if self.autofocus && self.step == Step::Start {
             self.autofocus = false;
             window.focus(&self.sign_in_focus, cx);
@@ -968,8 +1013,8 @@ impl Render for WelcomeView {
             .flex_row()
             .bg(t.background)
             .text_color(t.text)
-            .text_size(px(WELCOME_FONT_MD))
-            .line_height(px(WELCOME_FONT_MD * 1.5))
+            .text_size(px(WELCOME_FONT_MD()))
+            .line_height(px(WELCOME_FONT_MD() * 1.5))
             .child(
                 // `.welcome-left`: graphics behind the content (`z-index: -1`)
                 div()
@@ -1000,7 +1045,7 @@ impl Render for WelcomeView {
                     .child(
                         div()
                             .w_full()
-                            .max_w(px(500. * SCALE))
+                            .max_w(px(500. * SCALE()))
                             .flex()
                             .flex_col()
                             .child(content),

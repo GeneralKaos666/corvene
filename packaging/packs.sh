@@ -56,6 +56,8 @@ OS="$(uname -s)"
 case "$OS" in
   MINGW* | MSYS* | CYGWIN*)
     WINDOWS=1
+    # the tools read UTF-8 files and `cargo metadata`
+    export PYTHONUTF8=1
     # python.org's installer has no `python3`; Git for Windows has no `zip`
     python3() { "${PYTHON:-python}" "$@"; }
     if ! command -v zip > /dev/null; then

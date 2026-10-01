@@ -124,6 +124,7 @@ impl Render for DiscardChangesDialog {
                                 Some(i) => (&p[..=i], &p[i + 1..]),
                                 None => ("", p.as_str()),
                             };
+                            let dir = crate::format::display_path(dir);
                             div()
                                 .flex()
                                 .flex_row()

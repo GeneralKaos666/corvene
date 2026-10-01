@@ -751,7 +751,7 @@ fn open_level(
         match cx.open_window(options, |_, cx| {
             cx.new(|_| MenuLevelView {
                 level: level_index,
-                #[cfg(target_os = "android")]
+                #[cfg(any(target_os = "android", windows))]
                 scroll: ScrollHandle::new(),
             })
         }) {
@@ -1225,7 +1225,7 @@ pub fn dismiss_on_outside_click(cx: &mut App) -> bool {
 pub struct MenuLevelView {
     level: usize,
     /// Android: a menu taller than the window scrolls.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", windows))]
     scroll: ScrollHandle,
 }
 
@@ -1474,7 +1474,7 @@ impl Render for MenuLevelView {
             )
             .children(rows)
             .map(|menu| {
-                #[cfg(target_os = "android")]
+                #[cfg(any(target_os = "android", windows))]
                 let menu = menu.overflow_y_scroll().track_scroll(&self.scroll);
                 menu
             })
@@ -1654,6 +1654,19 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn formats_accelerators_like_github_desktop() {
+        let k = |s: &str| accelerator_text(&Keystroke::parse(s).unwrap());
+        assert_eq!(k("ctrl-,"), "Ctrl+,");
+        assert_eq!(k("ctrl-shift-backspace"), "Ctrl+Shift+Backspace");
+        assert_eq!(k("ctrl-shift-alt-a"), "Ctrl+Shift+Alt+A");
+        assert_eq!(k("ctrl-`"), "Ctrl+`");
+        assert_eq!(k("alt-f4"), "Alt+F4");
+        assert_eq!(k("f11"), "F11");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
     fn formats_accelerators_like_chromium() {
         let k = |s: &str| accelerator_text(&Keystroke::parse(s).unwrap());
         assert_eq!(k("ctrl-,"), "Ctrl+Comma");

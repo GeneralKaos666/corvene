@@ -230,7 +230,7 @@ fn stash_file_row(
                                     (true, false) => t.box_selected_text,
                                     _ => t.text_secondary,
                                 })
-                                .child(file.directory().to_string()),
+                                .child(crate::format::display_path(file.directory())),
                         )
                         .child(div().child(file.file_name().to_string())),
                 ),

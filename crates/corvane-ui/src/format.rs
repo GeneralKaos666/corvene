@@ -130,6 +130,16 @@ pub struct LocalTime {
     pub second: u32,
 }
 
+/// A path inside a repository as GitHub Desktop shows it: with the
+/// platform's separator (it normalises paths, so `docs\old.md` on Windows).
+pub fn display_path(path: &str) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path.to_string()
+    }
+}
+
 /// Local wall-clock time via `localtime_r`.
 pub fn local_time(at: SystemTime) -> LocalTime {
     let secs = at

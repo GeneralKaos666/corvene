@@ -105,6 +105,10 @@ class Run:
     # -- one scenario in one theme ---------------------------------------
     def scenario(self, sc: dict, theme: str) -> dict:
         cfg = {**DEFAULTS, **{k: v for k, v in sc.items() if k in DEFAULTS}}
+        if self.args.size:
+            # a screen too small for the scenarios' window (Windows does not
+            # let a window outgrow it): both apps at a size that fits
+            cfg["width"], cfg["height"] = (int(n) for n in self.args.size.lower().split("x"))
         for k in ("threshold", "tolerance", "edge_tolerance", "radius", "settle"):
             if getattr(self.args, k) is not None:
                 cfg[k] = getattr(self.args, k)
@@ -385,8 +389,12 @@ def main():
     ap.add_argument("scenarios", nargs="*", help="scenario names or file stems (globs ok)")
     ap.add_argument("--themes", default="dark,light")
     ap.add_argument("--out", default=str(ROOT / "target" / "parity" / datetime.now().strftime("%Y%m%d-%H%M%S")))
-    ap.add_argument("--corvane", default=str(ROOT / "target" / "debug" / "corvane"))
+    ap.add_argument(
+        "--corvane",
+        default=str(ROOT / "target" / "debug" / ("corvane.exe" if sys.platform == "win32" else "corvane")),
+    )
     ap.add_argument("--build", action="store_true", help="cargo build -p corvane --features snapshots first")
+    ap.add_argument("--size", metavar="WxH", help="window size for both apps instead of the scenarios' 1367x814")
     ap.add_argument("--threshold", type=float)
     ap.add_argument("--tolerance", type=int)
     ap.add_argument("--edge-tolerance", type=int)
@@ -419,18 +427,27 @@ def main():
     run = Run(args)
     run.out.mkdir(parents=True, exist_ok=True)
     # one run at a time: two runs fight over focus, ports and GHD's shared helpers
-    import fcntl
-
     lock = open(run.out.parent / ".lock", "w")
     try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
         print("another parity run is in progress", file=sys.stderr)
         return 2
     latest = run.out.parent / "latest"
     if latest.is_symlink() or latest.exists():
         latest.unlink()
-    latest.symlink_to(run.out.name)
+    try:
+        latest.symlink_to(run.out.name)
+    except OSError:
+        # Windows without Developer Mode: no symlinks; a text file names the run
+        latest.write_text(run.out.name)
     results = []
     for theme in [t.strip() for t in args.themes.split(",") if t.strip()]:
         for sc in scenarios:

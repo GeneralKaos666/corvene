@@ -115,6 +115,7 @@ pub fn diff_header(
         Some(i) => (&path[..=i], &path[i + 1..]),
         None => ("", path),
     };
+    let directory = crate::format::display_path(directory);
     // `.diff-container .header`: 5 px / 10 px padding around the 19 px
     // options button, `--diff-border-color` underneath (30 px in all)
     div()

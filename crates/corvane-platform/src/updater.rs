@@ -368,7 +368,7 @@ pub fn is_homebrew_appimage(image: &Path, home: &Path, caskrooms: &[PathBuf]) ->
 
 /// Where Homebrew on Linux keeps its casks: under `$HOMEBREW_PREFIX` (unset
 /// when the desktop starts Corvane), the default prefix and the per-user one.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn linuxbrew_caskrooms(home: &Path) -> Vec<PathBuf> {
     std::env::var_os("HOMEBREW_PREFIX")
         .filter(|prefix| !prefix.is_empty())
@@ -407,7 +407,9 @@ pub fn package_manager() -> Option<PackageManager> {
     }
     #[cfg(windows)]
     {
-        installed_executable().is_none()
+        installed_executable()
+            .is_none()
+            .then_some(PackageManager::System)
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {

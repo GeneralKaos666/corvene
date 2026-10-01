@@ -4219,7 +4219,7 @@ fn file_row(
             .flags
             .bool(corvane_core::flags::ids::CHANGES_FILE_NAMES_ONLY)
     });
-    let directory = file.directory().to_string();
+    let directory = crate::format::display_path(file.directory());
     let file_name = file.file_name().to_string();
     let mode = corvane_core::AppState::try_global(cx).map_or("fuzzy".to_string(), |s| {
         s.read(cx)

@@ -14,6 +14,8 @@ pub mod apps;
 pub mod cli;
 pub mod crash_reports;
 pub mod custom_integration;
+// freedesktop `.desktop` entries
+#[cfg(not(windows))]
 pub mod desktop_entry;
 pub mod editors;
 pub mod ghd_import;

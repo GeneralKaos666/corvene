@@ -497,7 +497,7 @@ impl OpenPullRequestDialog {
                                                 (true, false) => t.box_selected_text,
                                                 _ => t.text_secondary,
                                             })
-                                            .child(file.directory().to_string()),
+                                            .child(crate::format::display_path(file.directory())),
                                     )
                                     .child(
                                         div()

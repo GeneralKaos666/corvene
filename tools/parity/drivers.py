@@ -31,12 +31,33 @@ from pathlib import Path
 import websocket
 
 IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
+
+
+def _windows_ghd() -> str:
+    """The newest `app-<version>\\GitHubDesktop.exe` of the per-user install
+    (the `GitHubDesktop.exe` next to those folders is Squirrel's stub, which
+    starts the app as a process of its own and returns)."""
+    root = Path(os.environ.get("LOCALAPPDATA", "")) / "GitHubDesktop"
+
+    def version(app: Path) -> tuple:
+        return tuple(int(part) if part.isdigit() else 0 for part in app.name[len("app-"):].split("."))
+
+    apps = sorted(root.glob("app-*"), key=version)
+    return str((apps[-1] if apps else root) / "GitHubDesktop.exe")
+
 
 # PARITY_GHD_APP overrides; on Linux, a GitHub Desktop 3.6.6 build (`yarn
 # build:prod` → dist/desktop-linux-x64/desktop) or a packaged github-desktop
 GHD_APP = Path(
     os.environ.get("PARITY_GHD_APP")
-    or ("/Applications/GitHub Desktop.app/Contents/MacOS/GitHub Desktop" if IS_MAC else "/usr/bin/github-desktop")
+    or (
+        "/Applications/GitHub Desktop.app/Contents/MacOS/GitHub Desktop"
+        if IS_MAC
+        else _windows_ghd()
+        if IS_WIN
+        else "/usr/bin/github-desktop"
+    )
 )
 # PARITY_OFFLINE=1: both apps without network (an unreachable proxy), so
 # avatars, emoji and API calls fail the same way in both
@@ -52,7 +73,36 @@ DEFAULT_SCALE = 2.0 if IS_MAC else 1.0
 # page has none (Electron's menu bar sits outside it). The page off macOS is
 # the macOS page's content below the title bar (scenario height minus 32),
 # so elements anchored to the top and to the bottom alike sit 32 higher.
-TITLE_BAR = 32.0 if not IS_MAC else 0.0
+# Windows: GHD's page has a title bar of its own there, 28 px
+# (`--win32-title-bar-height`), so its content sits 4 higher than on macOS.
+TITLE_BAR = 0.0 if IS_MAC else 4.0 if IS_WIN else 32.0
+
+
+def _spawn(command: list, log, env: dict) -> subprocess.Popen:
+    """Start an app detached from the harness's terminal."""
+    if IS_WIN:
+        return subprocess.Popen(
+            command, stdout=log, stderr=log, env=env, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+    return subprocess.Popen(command, stdout=log, stderr=log, env=env, start_new_session=True)
+
+
+def _terminate(proc: subprocess.Popen, wait: float) -> None:
+    """End an app and the processes it started: politely, then for good."""
+    if IS_WIN:
+        # no signals on Windows: taskkill asks the windows to close, /F ends
+        # the tree
+        subprocess.run(["taskkill", "/T", "/PID", str(proc.pid)], capture_output=True)
+        try:
+            proc.wait(wait)
+        except subprocess.TimeoutExpired:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+        return
+    os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(wait)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
 
 
 def page_height(height: int) -> int:
@@ -191,7 +241,7 @@ class Ghd:
     def start(self, timeout: float = 30):
         self.profile.mkdir(parents=True, exist_ok=True)
         with open(self.log, "ab") as log:
-            self.proc = subprocess.Popen(
+            self.proc = _spawn(
                 [
                     str(GHD_APP),
                     f"--remote-debugging-port={self.port}",
@@ -200,7 +250,7 @@ class Ghd:
                     # Chromium converts to the display profile (#1d2125 → #16191c)
                     "--force-color-profile=srgb",
                     # Chromium refuses to run as root with its sandbox
-                    *(["--no-sandbox"] if not IS_MAC and os.geteuid() == 0 else []),
+                    *(["--no-sandbox"] if not IS_MAC and not IS_WIN and os.geteuid() == 0 else []),
                     # extra switches, e.g. `--proxy-server=127.0.0.1:9` to keep
                     # GHD offline where its network would fail differently
                     # from Corvane's (an intercepting proxy Chromium does not
@@ -208,10 +258,8 @@ class Ghd:
                     *shlex.split(os.environ.get("PARITY_GHD_ARGS", "")),
                     *([f"--proxy-server={DEAD_PROXY}"] if OFFLINE else []),
                 ],
-                stdout=log,
-                stderr=log,
-                start_new_session=True,
-                env={**os.environ, **{k: str(v) for k, v in self.env.items()}},
+                log,
+                {**os.environ, **{k: str(v) for k, v in self.env.items()}},
             )
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -237,11 +285,7 @@ class Ghd:
             self.ws = None
         if self.proc and self.proc.poll() is None:
             # Chromium shuts down cleanly on SIGTERM (IndexedDB / localStorage flushed)
-            os.killpg(self.proc.pid, signal.SIGTERM)
-            try:
-                self.proc.wait(8)
-            except subprocess.TimeoutExpired:
-                os.killpg(self.proc.pid, signal.SIGKILL)
+            _terminate(self.proc, 8)
         self.proc = None
 
     # -- protocol ----------------------------------------------------------
@@ -576,7 +620,7 @@ class Corvane:
             # (.docs/flags.md); PARITY_CORVANE_FLAGS overrides
             CORVANE_FLAGS=env.get("PARITY_CORVANE_FLAGS", "preset=github-desktop"),
         )
-        if not IS_MAC:
+        if not IS_MAC and not IS_WIN:
             # the avatar and emoji caches live under XDG_CACHE_HOME, not the
             # data dir: a private one keeps earlier runs' downloads out
             env["XDG_CACHE_HOME"] = str(self.data_dir / "cache")
@@ -586,7 +630,7 @@ class Corvane:
             env["NO_PROXY"] = env["no_proxy"] = "localhost,127.0.0.1"
         env.update(extra_env or {})
         with open(self.log, "ab") as log:
-            self.proc = subprocess.Popen([str(self.binary)], env=env, stdout=log, stderr=log, start_new_session=True)
+            self.proc = _spawn([str(self.binary)], log, env)
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:

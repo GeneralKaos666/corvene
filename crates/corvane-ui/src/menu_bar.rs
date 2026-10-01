@@ -395,7 +395,9 @@ impl Render for MenuBar {
                         .shape_line(SharedString::from(text.clone()), font_size, &[run], None)
                         .width,
                 );
-                let width = (text_width + 2. * BUTTON_PADDING).floor();
+                // (Windows: the buttons are HTML there, as wide as their text)
+                let width = text_width + 2. * BUTTON_PADDING;
+                let width = if cfg!(windows) { width } else { width.floor() };
                 let button = Button {
                     text: text.into(),
                     mnemonic,

@@ -1,3 +1,10 @@
+# MSVC reads C sources in the system code page unless told they are UTF-8;
+# grammar parsers name nodes like "⇒" in string literals (cc reads these
+# variables for every C file it builds for the target)
+[env]
+CFLAGS_x86_64_pc_windows_msvc = "/utf-8"
+CFLAGS_aarch64_pc_windows_msvc = "/utf-8"
+
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
