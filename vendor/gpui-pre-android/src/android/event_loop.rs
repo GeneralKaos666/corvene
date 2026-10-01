@@ -658,6 +658,16 @@ fn handle_touch(
             if action == MotionAction::Down && window.select_drag_started(pointer_id, position) {
                 return;
             }
+            // a touch on something only a mouse can drag (a split handle)
+            if action == MotionAction::Down {
+                let onto =
+                    super::activity_events::touch_as_mouse(position.x.into(), position.y.into());
+                if let Some((x, y)) = onto {
+                    let target = point(px(x), px(y));
+                    window.mouse_drag_started(pointer_id, position, target - position, 1);
+                    return;
+                }
+            }
             let id = window.touch_started(pointer_id);
             // one finger resting is a long press; a second one ends that
             if action == MotionAction::Down {

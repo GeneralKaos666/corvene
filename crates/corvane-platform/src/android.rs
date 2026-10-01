@@ -61,6 +61,10 @@ pub trait Bridge: Send + Sync {
     /// A network operation runs (or the last one ended): the activity keeps
     /// a foreground service while one does.
     fn transfer_active(&self, active: bool);
+    /// Shows or hides the system's status and navigation bars.
+    fn toggle_full_screen(&self);
+    /// Starts the application again in a new process and ends this one.
+    fn relaunch(&self);
 }
 
 static NETWORK_COMMANDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -80,6 +84,20 @@ pub fn network_command(started: bool) {
         && let Some(bridge) = bridge()
     {
         bridge.transfer_active(started);
+    }
+}
+
+/// View > Toggle full screen: shows or hides the system's bars.
+pub fn toggle_full_screen() {
+    if let Some(bridge) = bridge() {
+        bridge.toggle_full_screen();
+    }
+}
+
+/// Starts Corvane again (a flag that needs a relaunch changed).
+pub fn relaunch() {
+    if let Some(bridge) = bridge() {
+        bridge.relaunch();
     }
 }
 
@@ -285,4 +303,50 @@ pub fn create_ssh_key() -> Result<String, String> {
         *cached = None;
     }
     ssh_public_key().ok_or_else(|| "ssh-keygen wrote no public key".to_string())
+}
+
+// ── handles a finger can drag ───────────────────────────────────────────────
+//
+// GPUI's resizable panels are dragged with the mouse. The UI records where
+// their handles are each frame; a touch that starts on (or just beside) one
+// is delivered as a mouse drag by the platform layer.
+
+/// left, top, right, bottom in logical pixels
+static DRAG_HANDLES: Mutex<Vec<[f32; 4]>> = Mutex::new(Vec::new());
+
+/// How far beside a handle a finger may land.
+const HANDLE_SLOP: f32 = 14.0;
+
+/// Forgets the handles of the last frame.
+pub fn clear_drag_handles() {
+    if let Ok(mut handles) = DRAG_HANDLES.lock() {
+        handles.clear();
+    }
+}
+
+/// A handle painted at this rectangle this frame.
+pub fn add_drag_handle(left: f32, top: f32, right: f32, bottom: f32) {
+    if let Ok(mut handles) = DRAG_HANDLES.lock() {
+        handles.push([left, top, right, bottom]);
+    }
+}
+
+/// The point on a handle that a touch at (`x`, `y`) grabs, when it is on or
+/// just beside one: the touch moved onto the handle's long axis.
+pub fn drag_handle_at(x: f32, y: f32) -> Option<(f32, f32)> {
+    let handles = DRAG_HANDLES.lock().ok()?;
+    handles.iter().find_map(|&[left, top, right, bottom]| {
+        let inside = x >= left - HANDLE_SLOP
+            && x <= right + HANDLE_SLOP
+            && y >= top - HANDLE_SLOP
+            && y <= bottom + HANDLE_SLOP;
+        inside.then(|| {
+            if right - left >= bottom - top {
+                // a horizontal bar: keep x, centre y
+                (x.clamp(left, right), (top + bottom) / 2.0)
+            } else {
+                ((left + right) / 2.0, y.clamp(top, bottom))
+            }
+        })
+    })
 }

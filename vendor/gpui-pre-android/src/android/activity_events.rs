@@ -228,3 +228,25 @@ pub(crate) fn render_scale_changed(render_scale: f32) {
         listener(render_scale);
     }
 }
+
+type TouchAsMouse = Box<dyn Fn(f32, f32) -> Option<(f32, f32)> + Send + Sync>;
+
+static TOUCH_AS_MOUSE: Mutex<Option<TouchAsMouse>> = Mutex::new(None);
+
+/// Lets the application say which touches drag with the mouse: `filter`
+/// gets where a finger went down (logical pixels) and answers with the
+/// point the left button is pressed at instead (the middle of a thin
+/// handle the finger landed beside), or `None` for an ordinary touch.
+pub fn set_touch_as_mouse(filter: impl Fn(f32, f32) -> Option<(f32, f32)> + Send + Sync + 'static) {
+    *TOUCH_AS_MOUSE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(filter));
+}
+
+pub(crate) fn touch_as_mouse(x: f32, y: f32) -> Option<(f32, f32)> {
+    TOUCH_AS_MOUSE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .and_then(|filter| filter(x, y))
+}

@@ -165,6 +165,10 @@ struct WindowState {
     last_tap: Option<(Instant, Point<Pixels>)>,
     /// The finger of a double tap that is still down, dragging a selection.
     select_drag: Option<i32>,
+    /// The click count that drag reports, and what is added to the finger's
+    /// position (a drag that starts beside a thin handle is moved onto it).
+    drag_clicks: usize,
+    drag_offset: Point<Pixels>,
     /// A tap that ended; after the next frame the keyboard opens if the tap
     /// was on the focused text input.
     tapped: Option<Point<Pixels>>,
@@ -283,6 +287,8 @@ impl AndroidWindow {
                 touch_hover: None,
                 last_tap: None,
                 select_drag: None,
+                drag_clicks: 1,
+                drag_offset: Point::default(),
                 tapped: None,
             }),
             callbacks: RefCell::new(Callbacks::default()),
@@ -679,16 +685,45 @@ impl AndroidWindow {
         if !double_tap {
             return false;
         }
-        self.state.borrow_mut().select_drag = Some(pointer_id);
+        self.mouse_drag_started(pointer_id, position, Point::default(), 2);
+        true
+    }
+
+    /// The dragging finger moved; false when `pointer_id` drags nothing.
+    /// A touch that acts as the left mouse button from here on: pressed at
+    /// `position` plus `offset` now, dragged and released as the finger
+    /// moves and lifts. For what GPUI only does with a mouse: selecting text
+    /// (a double tap, `clicks` 2) and dragging the handle between two panes
+    /// (`gpui_android::set_touch_as_mouse`).
+    pub(crate) fn mouse_drag_started(
+        &self,
+        pointer_id: i32,
+        position: Point<Pixels>,
+        offset: Point<Pixels>,
+        clicks: usize,
+    ) {
+        {
+            let mut state = self.state.borrow_mut();
+            state.select_drag = Some(pointer_id);
+            state.drag_clicks = clicks;
+            state.drag_offset = offset;
+        }
+        let position = position + offset;
         self.set_mouse_position(position);
+        // the pointer arrives first: GPUI presses what the mouse is over,
+        // and a finger was not over anything until now
+        self.handle_input(PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
+        }));
         self.handle_input(PlatformInput::MouseDown(MouseDownEvent {
             button: MouseButton::Left,
             position,
             modifiers: Modifiers::default(),
-            click_count: 2,
+            click_count: clicks,
             first_mouse: false,
         }));
-        true
     }
 
     /// The dragging finger moved; false when `pointer_id` drags nothing.
@@ -696,6 +731,7 @@ impl AndroidWindow {
         if self.state.borrow().select_drag != Some(pointer_id) {
             return false;
         }
+        let position = position + self.state.borrow().drag_offset;
         self.set_mouse_position(position);
         self.handle_input(PlatformInput::MouseMove(MouseMoveEvent {
             position,
@@ -710,12 +746,22 @@ impl AndroidWindow {
         if self.state.borrow().select_drag != Some(pointer_id) {
             return false;
         }
-        self.state.borrow_mut().select_drag = None;
+        let (offset, clicks) = {
+            let mut state = self.state.borrow_mut();
+            state.select_drag = None;
+            (state.drag_offset, state.drag_clicks)
+        };
         self.handle_input(PlatformInput::MouseUp(MouseUpEvent {
             button: MouseButton::Left,
-            position,
+            position: position + offset,
             modifiers: Modifiers::default(),
-            click_count: 2,
+            click_count: clicks,
+        }));
+        // and leaves again, or what it rested on stays hovered
+        self.handle_input(PlatformInput::MouseExited(MouseExitEvent {
+            position: position + offset,
+            pressed_button: None,
+            modifiers: Modifiers::default(),
         }));
         true
     }

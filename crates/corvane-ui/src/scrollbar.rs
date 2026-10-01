@@ -148,11 +148,24 @@ impl Metrics {
         min_track: 0.,
     };
 
+    /// Android: GHD's Linux scrollbar, wide and long enough for a finger
+    /// (the thumb is also a touch drag handle, see `paint_bar`).
+    const ANDROID: Self = Self {
+        legacy: true,
+        custom: true,
+        strip: 16.,
+        inset: 3.,
+        min_thumb: 56.,
+        min_track: 0.,
+    };
+
     /// `:hover` / `:active` thumb inset (`border-width: 1px`).
     const CUSTOM_HOVER_INSET: f32 = 1.;
 
     fn current() -> Self {
-        if !cfg!(target_os = "macos") {
+        if cfg!(target_os = "android") {
+            Self::ANDROID
+        } else if !cfg!(target_os = "macos") {
             Self::LINUX
         } else if legacy_scrollers() {
             Self::LEGACY
@@ -995,6 +1008,15 @@ fn paint_bar(
                     size(px(length - 2. * inset), px(across)),
                 ),
             };
+            // Android: a finger on the thumb drags it (a touch elsewhere
+            // scrolls the content)
+            #[cfg(target_os = "android")]
+            corvane_platform::android::add_drag_handle(
+                thumb.left().into(),
+                thumb.top().into(),
+                thumb.right().into(),
+                thumb.bottom().into(),
+            );
             if length - 2. * inset > 0. {
                 window.paint_quad(
                     fill(thumb, with_alpha(palette.thumb, alpha))
