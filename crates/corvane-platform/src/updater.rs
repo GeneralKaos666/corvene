@@ -253,10 +253,15 @@ fn pick_zip_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset
 }
 
 /// `Corvane-<version>-<arch>.AppImage` (`packaging/linux/package.sh`),
-/// `<arch>` being `x86_64` or `aarch64` as `std::env::consts::ARCH` spells
-/// them; a `Corvane-Full-…` image (should there ever be one) is
+/// `<arch>` being what AppImages call `std::env::consts::ARCH` (`x86_64`
+/// and `aarch64` as they are, `i686` for `x86`, `armhf` for `arm`); a `Corvane-Full-…` image (should there ever be one) is
 /// skipped.
 fn pick_appimage_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset> {
+    let arch = match arch {
+        "x86" => "i686",
+        "arm" => "armhf",
+        other => other,
+    };
     let suffix = format!("-{arch}.AppImage");
     assets.iter().find(|a| {
         a.name.starts_with("Corvane-") && !a.name.contains("Full") && a.name.ends_with(&suffix)
@@ -879,12 +884,14 @@ mod tests {
         }
     }
 
-    const LINUX_ASSETS: [&str; 5] = [
+    const LINUX_ASSETS: [&str; 7] = [
         "Corvane-0.2.0-macos-universal.zip",
         "corvane_0.2.0_amd64.deb",
         "corvane_0.2.0_arm64.deb",
         "Corvane-0.2.0-x86_64.AppImage",
         "Corvane-0.2.0-aarch64.AppImage",
+        "Corvane-0.2.0-i686.AppImage",
+        "Corvane-0.2.0-armhf.AppImage",
     ];
 
     #[test]
@@ -897,6 +904,16 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(info.zip_name, "Corvane-0.2.0-aarch64.AppImage");
+        // the 32-bit builds, by their AppImage names
+        for (arch, name) in [
+            ("x86", "Corvane-0.2.0-i686.AppImage"),
+            ("arm", "Corvane-0.2.0-armhf.AppImage"),
+        ] {
+            let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "linux", arch)
+                .unwrap()
+                .unwrap();
+            assert_eq!(info.zip_name, name);
+        }
         // macOS still takes the zip from the same release
         let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "macos", "aarch64")
             .unwrap()

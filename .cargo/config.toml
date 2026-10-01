@@ -1,3 +1,10 @@
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# the 32-bit Linux builds are cross-compiled (packaging/linux/package.sh)
+[target.i686-unknown-linux-gnu]
+linker = "i686-linux-gnu-gcc"
+
+[target.armv7-unknown-linux-gnueabihf]
+linker = "arm-linux-gnueabihf-gcc"

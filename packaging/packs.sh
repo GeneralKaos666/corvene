@@ -83,7 +83,7 @@ wants() { [[ " $PACKS " == *" $1 "* ]]; }
 TARGETS=()
 if [[ "$PACK_OS" == android ]]; then
   # API 26, the application's minimum
-  TARGETS=(aarch64-linux-android26 x86_64-linux-android26)
+  TARGETS=(aarch64-linux-android26 armv7a-linux-androideabi26 x86_64-linux-android26 i686-linux-android26)
 elif [[ "$PACK_OS" == macos ]]; then
   for t in aarch64-apple-darwin x86_64-apple-darwin; do
     if rustup target list --installed 2>/dev/null | grep -qx "$t"; then

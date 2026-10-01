@@ -10,6 +10,11 @@ val cargoVersion: String = Regex("""(?m)^version = "([^"]+)"""")
     .find(rootProject.file("../../Cargo.toml").readText())!!
     .groupValues[1]
 
+// -Pabis=arm64-v8a packages one ABI's libraries (build.sh PER_ABI=1); a
+// package has every ABI Corvane builds otherwise
+val packagedAbis: List<String> =
+    (findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+
 android {
     namespace = "com.wasimaster.corvane"
     compileSdk = 35
@@ -23,7 +28,7 @@ android {
         versionName = cargoVersion
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += packagedAbis
         }
     }
 

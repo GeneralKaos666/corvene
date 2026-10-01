@@ -4,6 +4,7 @@
 #   packaging/release.sh                 # release build → target/release-assets/
 #   FULL=1 packaging/release.sh          # the "full" variant (packs compiled in)
 #   SKIP_BUILD=1 packaging/release.sh    # reuse target/release/corvane
+#   ARCH=arm64 packaging/release.sh      # one architecture of a `--target` build (arm64 | x86_64 | universal)
 #   UPDATE_CASK=1 packaging/release.sh   # also stamp packaging/homebrew/Casks/corvane.rb (macOS half)
 #   WITH_PACKS=1 packaging/release.sh    # also the pack archives (packs.sh) → target/release-assets/packs/
 #   ALLOW_ADHOC=1 packaging/release.sh   # without the code-signing certificate (testing)
@@ -35,17 +36,33 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
 fi
 
 # a universal binary when both per-target builds exist (CI: two `cargo build
-# --target` runs with SKIP_BUILD=1), else the native one
+# --target` runs with SKIP_BUILD=1), else the native one; ARCH picks one of
+# the per-target builds (or insists on the universal one) instead
 ARCH_TAG="$(uname -m)"
 [[ "$ARCH_TAG" == "arm64" ]] && ARCH_TAG="arm64" || ARCH_TAG="x86_64"
 BIN="$ROOT/target/release/corvane"
-if [[ -x "$ROOT/target/aarch64-apple-darwin/release/corvane" && -x "$ROOT/target/x86_64-apple-darwin/release/corvane" ]]; then
-  mkdir -p "$ROOT/target/release"
-  lipo -create -output "$BIN" \
-    "$ROOT/target/aarch64-apple-darwin/release/corvane" \
-    "$ROOT/target/x86_64-apple-darwin/release/corvane"
-  ARCH_TAG="universal"
-fi
+ARM_BIN="$ROOT/target/aarch64-apple-darwin/release/corvane"
+INTEL_BIN="$ROOT/target/x86_64-apple-darwin/release/corvane"
+case "${ARCH:-}" in
+  arm64 | x86_64)
+    mkdir -p "$ROOT/target/release"
+    [[ "$ARCH" == arm64 ]] && SLICE="$ARM_BIN" || SLICE="$INTEL_BIN"
+    [[ -x "$SLICE" ]] || { echo "no release binary at $SLICE" >&2; exit 1; }
+    cp "$SLICE" "$BIN"
+    ARCH_TAG="$ARCH"
+    ;;
+  universal | "")
+    if [[ -x "$ARM_BIN" && -x "$INTEL_BIN" ]]; then
+      mkdir -p "$ROOT/target/release"
+      lipo -create -output "$BIN" "$ARM_BIN" "$INTEL_BIN"
+      ARCH_TAG="universal"
+    elif [[ -n "${ARCH:-}" ]]; then
+      echo "ARCH=universal needs both $ARM_BIN and $INTEL_BIN" >&2
+      exit 1
+    fi
+    ;;
+  *) echo "unknown ARCH $ARCH (arm64 | x86_64 | universal)" >&2; exit 2 ;;
+esac
 [[ -x "$BIN" ]] || { echo "no release binary at $BIN" >&2; exit 1; }
 
 "$ROOT/packaging/bundle.sh" release

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Build Corvane's Linux packages from a release build, for this machine's
-# architecture (amd64 / x86_64 or arm64 / aarch64):
-#   target/linux/corvane_<version>_<amd64|arm64>.deb
-#   target/linux/Corvane-<version>-<x86_64|aarch64>.AppImage   (when appimagetool is found)
+# architecture (amd64 / x86_64 or arm64 / aarch64) or, cross-compiled, for
+# TARGET (i686-unknown-linux-gnu, armv7-unknown-linux-gnueabihf):
+#   target/linux/corvane_<version>_<amd64|arm64|i386|armhf>.deb
+#   target/linux/Corvane-<version>-<x86_64|aarch64|i686|armhf>.AppImage   (when appimagetool is found)
 #
 # Layout (both):
 #   usr/lib/corvane/corvane          the app
@@ -12,26 +13,32 @@
 #   usr/share/icons/hicolor/{256x256,scalable}/apps/com.wasimaster.corvane.*
 #
 # Env: SKIP_BUILD=1 (reuse target/release/corvane), PACKAGE_BIN=<binary> (package
-# that binary instead, e.g. CI's debug build), APPIMAGETOOL=<path>.
+# that binary instead, e.g. CI's debug build), APPIMAGETOOL=<path>,
+# TARGET=<Rust target> (cross-compile: needs the target's C compiler and
+# its development libraries, the way release.yml installs them; the build
+# machine's appimagetool fetches the target's AppImage runtime).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 VERSION="$(cargo metadata --no-deps --format-version 1 |
   python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "corvane"))')"
-# the build machine's architecture (release.yml builds each natively)
-case "$(uname -m)" in
-  x86_64) ARCH_DEB=amd64 ARCH_APPIMAGE=x86_64 ;;
-  aarch64 | arm64) ARCH_DEB=arm64 ARCH_APPIMAGE=aarch64 ;;
-  *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+# TARGET's architecture, else the build machine's (release.yml builds the
+# 64-bit ones natively)
+case "${TARGET:-$(uname -m)}" in
+  x86_64*) ARCH_DEB=amd64 ARCH_APPIMAGE=x86_64 ;;
+  aarch64* | arm64) ARCH_DEB=arm64 ARCH_APPIMAGE=aarch64 ;;
+  i686*) ARCH_DEB=i386 ARCH_APPIMAGE=i686 ;;
+  armv7*) ARCH_DEB=armhf ARCH_APPIMAGE=armhf ;;
+  *) echo "unsupported architecture ${TARGET:-$(uname -m)}" >&2; exit 1 ;;
 esac
 OUT="$ROOT/target/linux"
 ID=com.wasimaster.corvane
 
 if [ -z "${SKIP_BUILD:-}" ] && [ -z "${PACKAGE_BIN:-}" ]; then
-  cargo build --release -p corvane
+  cargo build --release -p corvane ${TARGET:+--target "$TARGET"}
 fi
-BIN="${PACKAGE_BIN:-$ROOT/target/release/corvane}"
+BIN="${PACKAGE_BIN:-$ROOT/target/${TARGET:+$TARGET/}release/corvane}"
 [ -x "$BIN" ] || { echo "no $BIN" >&2; exit 1; }
 
 rm -rf "$OUT"

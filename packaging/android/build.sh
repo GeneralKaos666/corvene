@@ -17,14 +17,16 @@
 # (JAVA_HOME), `cargo install cargo-ndk`, the Rust targets of the ABIS, and
 # for the bundled git: make, perl and Go.
 #
-# Env: ABIS (default "arm64-v8a x86_64"), SKIP_GRADLE=1 (library only),
-# BUNDLE=1 (also the .aab for Google Play, with the grammar module).
+# Env: ABIS (default "arm64-v8a armeabi-v7a x86_64 x86"), SKIP_GRADLE=1 (library only),
+# BUNDLE=1 (also the .aab for Google Play, with the grammar module),
+# PER_ABI=1 (also a package per ABI, in app/build/outputs/per-abi/ as
+# <flavour>-<abi>.apk: a fraction of the download of the one with every ABI).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 PROFILE="${1:-debug}"
-ABIS="${ABIS:-arm64-v8a x86_64}"
+ABIS="${ABIS:-arm64-v8a armeabi-v7a x86_64 x86}"
 JNI_LIBS="$ROOT/packaging/android/app/src/main/jniLibs"
 
 targets=()
@@ -56,7 +58,9 @@ cargo ndk "${targets[@]}" -P 26 build -p corvane-askpass $profile_flag
 for abi in $ABIS; do
   case "$abi" in
     arm64-v8a) triple=aarch64-linux-android ;;
+    armeabi-v7a) triple=armv7-linux-androideabi ;;
     x86_64) triple=x86_64-linux-android ;;
+    x86) triple=i686-linux-android ;;
   esac
   cp "target/$triple/$PROFILE/corvane-askpass" "$JNI_LIBS/$abi/libcorvane-askpass.so"
 done
@@ -78,8 +82,20 @@ cd packaging/android
 # feature module is not part of an APK
 flavour="${2:-}"
 task=":app:assemble$(echo "${flavour:0:1}" | tr a-z A-Z)${flavour:1}$(echo "${VARIANT:0:1}" | tr a-z A-Z)${VARIANT:1}"
-./gradlew --no-daemon "$task"
-find app/build/outputs/apk -name '*.apk'
+# the per-ABI packages first: the last run leaves the package with every ABI
+# in app/build/outputs/apk
+if [ -n "${PER_ABI:-}" ]; then
+  rm -rf app/build/outputs/per-abi
+  mkdir -p app/build/outputs/per-abi
+  for abi in $ABIS; do
+    ./gradlew --no-daemon "$task" "-Pabis=$abi"
+    for apk in app/build/outputs/apk/*/"$VARIANT"/*.apk; do
+      cp "$apk" "app/build/outputs/per-abi/$(basename "$(dirname "$(dirname "$apk")")")-$abi.apk"
+    done
+  done
+fi
+./gradlew --no-daemon "$task" "-Pabis=$(echo $ABIS | tr ' ' ,)"
+find app/build/outputs/apk app/build/outputs/per-abi -name '*.apk' 2>/dev/null
 
 # BUNDLE=1: also the bundle Google Play takes (the play flavour with the
 # on-demand grammar module, which grammars.sh builds first)

@@ -268,6 +268,16 @@ mod tests {
         assert_eq!(summary.other[0].message, "Docs");
     }
 
+    /// packaging/release-table.py's section at the end of a release's notes
+    #[test]
+    fn the_downloads_table_is_not_a_note() {
+        let table = "## Downloads\n\n<!-- downloads -->\n\n| | x86_64 | Universal |\n|---|:---:|:---:|\n| **macOS** | — | [.dmg](https://example.invalid/a.dmg) |\n\n<!-- /downloads -->";
+        let notes = parse_release_body(&format!("- [New] Things\n\n{table}"));
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].message, "Things");
+        assert!(parse_release_body(table).is_empty());
+    }
+
     #[test]
     fn tag_needs_letters_and_a_space() {
         assert_eq!(parse_tagged("[x]y"), None);

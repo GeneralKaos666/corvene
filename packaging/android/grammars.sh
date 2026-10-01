@@ -7,11 +7,11 @@
 #
 # Needs ANDROID_NDK_HOME and the grammar sources (tools/ts-queries/fetch.py,
 # with the tree-sitter CLI for the grammars without a committed parser.c).
-# Env: ABIS (default "arm64-v8a x86_64"), UNITS (default: all).
+# Env: ABIS (default "arm64-v8a armeabi-v7a x86_64 x86"), UNITS (default: all).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-ABIS="${ABIS:-arm64-v8a x86_64}"
+ABIS="${ABIS:-arm64-v8a armeabi-v7a x86_64 x86}"
 OUT="$ROOT/packaging/android/grammars/src/main/jniLibs"
 NDK_BIN="$(dirname "$(find "${ANDROID_NDK_HOME:?needs ANDROID_NDK_HOME}/toolchains/llvm/prebuilt" -name llvm-nm | head -1)")"
 export CORVANE_CC="$NDK_BIN/clang" CORVANE_CXX="$NDK_BIN/clang++"
@@ -21,7 +21,9 @@ rm -rf "$OUT"
 for abi in $ABIS; do
   case "$abi" in
     arm64-v8a) target=aarch64-linux-android26 ;;
+    armeabi-v7a) target=armv7a-linux-androideabi26 ;;
     x86_64) target=x86_64-linux-android26 ;;
+    x86) target=i686-linux-android26 ;;
     *) echo "unknown ABI $abi" >&2; exit 2 ;;
   esac
   mkdir -p "$OUT/$abi"

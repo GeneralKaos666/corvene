@@ -99,12 +99,19 @@ workflow artifacts:
   release build each (`--features full` for `Corvane-Full`).
 - `macos-assets`: `packaging/release.sh` with `SKIP_BUILD=1` on those four
   binaries (lipo, bundle signed with the certificate from
-  `packaging/signing-cert.sh ci`, zip, dmg), once per variant.
-- `linux` (x86_64 and aarch64) and `android`.
+  `packaging/signing-cert.sh ci`, zip, dmg), per variant once for the
+  universal bundle and once per architecture (`ARCH=arm64` / `x86_64`:
+  `Corvane-<version>-macos-arm64.zip`, a smaller download). The updater and
+  the cask take the universal zip.
+- `linux` (x86_64 and aarch64, and cross-compiled i686 and armhf) and
+  `android`.
 - `packs`: only the platforms `plan` listed; `publish-packs` uploads them to
   the `packs` release and merges their entries into its manifest.
 - `publish`: once every build is through, a **draft** release
   with the installers (`.zip`, `.dmg`, `.deb`, `.AppImage`, signed `.apk`),
+  its notes ending in a Downloads table of them
+  (`packaging/release-table.py`: platforms as rows, architectures as
+  columns, one short link per asset),
   and the `cask` artifact: `corvane.rb` with the version and every sha256
   filled in (also in the run summary).
 
@@ -112,7 +119,9 @@ Repository secrets: `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`, and
 optionally `CORVANE_GITHUB_CLIENT_SECRET` (without it the `307-sign-in-flow`
 "auto" default uses the device flow) and the Android keystore's.
 
-After the run: write the release notes in the draft, publish it (the
+After the run: write the release notes in the draft above its `## Downloads`
+section (the Release Notes dialog skips that section; a later run rewrites
+it and keeps the rest), publish it (the
 self-updater ignores drafts), then copy the `cask` artifact's `corvane.rb`
 to the tap.
 "Run workflow" with `linux_release` set to a published release's tag
@@ -161,6 +170,15 @@ update launches without Gatekeeper's "Open Anyway" dance.
 for the architecture of the machine it runs on (release.yml builds both,
 the arm64 ones on an `ubuntu-24.04-arm` runner).
 
+`TARGET=i686-unknown-linux-gnu` or `TARGET=armv7-unknown-linux-gnueabihf`
+cross-compiles the 32-bit ones (`_i386.deb` / `-i686.AppImage`,
+`_armhf.deb` / `-armhf.AppImage`): release.yml does on the runner of the
+same family, with the target's gcc and the `:i386` / `:armhf` development
+libraries from Debian multiarch (the linkers are in `.cargo/config.toml`).
+Those two jobs may fail without holding up a release: nothing upstream is
+tested on 32-bit Linux. They have no tree-sitter packs and no Homebrew
+cask.
+
 A `v<version>` tag does this in release.yml's `linux` jobs; `publish` adds
 both to the draft release. The machine's tree-sitter packs
 (`tree-sitter-{all,rest}-<v>-linux-<arch>.zip`, `.so` units; `packs.sh`
@@ -168,7 +186,8 @@ builds shared objects on Linux) come from the `packs` jobs
 ([Packs](#packs)).
 
 Only the AppImage updates itself. The updater picks
-`Corvane-*-<arch>.AppImage` (the machine's `x86_64` / `aarch64`) from the
+`Corvane-*-<arch>.AppImage` (the machine's `x86_64` / `aarch64` / `i686` /
+`armhf`) from the
 latest release, downloads it to `$XDG_CACHE_HOME/corvane/updates/`
 (`~/.cache/corvane/updates/`) and checks its sha256. "Install and Restart"
 copies the image next to the running one (`$APPIMAGE`, which must be a file
@@ -200,6 +219,25 @@ The Homebrew cask installs the same AppImage as
 `/home/linuxbrew/.linuxbrew` or `~/.linuxbrew`) is the cask's and is never
 swapped: the banner says `brew upgrade corvane`. The
 `publish` job stamps both AppImages' sha256 into the cask.
+
+## Android
+
+`packaging/android/build.sh release` builds the `foss` and `play` packages
+with every ABI (arm64-v8a, armeabi-v7a, x86_64, x86) in each; `PER_ABI=1`
+also one per ABI. release.yml uploads all ten as
+`Corvane-<version>-android-<foss|play>-<arm64|armv7|x86_64|x86|universal>.apk`; the
+`play` bundle (`.aab`) stays a workflow artifact for Google Play.
+
+They are signed with the key from `packaging/android/keystore.sh create`
+(`~/.corvane-signing/corvane-android.jks` and `.password`; needs a JDK's
+`keytool`, so set `JAVA_HOME`). `keystore.sh secrets` stores it as the
+`CORVANE_ANDROID_KEYSTORE_BASE64`, `CORVANE_ANDROID_KEYSTORE_PASSWORD`,
+`CORVANE_ANDROID_KEY_ALIAS` and `CORVANE_ANDROID_KEY_PASSWORD` repository
+secrets; `eval "$(packaging/android/keystore.sh env)"` signs a local
+release build. Without them the packages are unsigned and stay workflow
+artifacts. Android updates a package only with one signed by the same key:
+keep the keystore and its password in the password manager, a lost key
+means every user uninstalls first.
 
 ## Testing the flow locally
 

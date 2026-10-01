@@ -4,7 +4,7 @@
 # OpenSSH client and git-lfs. Termux's build recipes are the reference for
 # the flags.
 #
-#   packaging/android/git/build.sh [abi…]      default: arm64-v8a x86_64
+#   packaging/android/git/build.sh [abi…]      default: arm64-v8a armeabi-v7a x86_64 x86
 #
 # An Android app can only execute files from its native library directory,
 # where the installer extracts what the APK holds as lib/<abi>/lib*.so. So
@@ -32,7 +32,7 @@ API="${API:-26}"
 OUT="${OUT:-$ROOT/packaging/android/app/src/main/jniLibs}"
 WORK="${WORK:-$ROOT/target/android-git}"
 DOWNLOADS="$WORK/downloads"
-ABIS="${*:-arm64-v8a x86_64}"
+ABIS="${*:-arm64-v8a armeabi-v7a x86_64 x86}"
 JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
 : "${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME}"
@@ -70,13 +70,17 @@ unpack() {
 }
 
 build_abi() {
-  local abi="$1" triple openssl_target goarch
+  # triple: what configure scripts call the ABI; clang: the NDK's compiler
+  # for it (32-bit ARM's is named after the armv7a it targets)
+  local abi="$1" triple clang openssl_target goarch
   case "$abi" in
     arm64-v8a) triple=aarch64-linux-android openssl_target=android-arm64 goarch=arm64 ;;
+    armeabi-v7a) triple=arm-linux-androideabi clang=armv7a-linux-androideabi openssl_target=android-arm goarch=arm ;;
     x86_64) triple=x86_64-linux-android openssl_target=android-x86_64 goarch=amd64 ;;
+    x86) triple=i686-linux-android openssl_target=android-x86 goarch=386 ;;
     *) echo "unsupported ABI $abi" >&2; exit 1 ;;
   esac
-  local cc="$TOOLCHAIN/bin/$triple$API-clang"
+  local cc="$TOOLCHAIN/bin/${clang:-$triple}$API-clang"
   local build="$WORK/$abi"
   local prefix="$build/prefix"
   local out="$OUT/$abi"
@@ -269,7 +273,7 @@ STUB
       (
         cd "$build/git-lfs"
         # GOOS=android links with the NDK (bionic's resolver, TLS)
-        GOOS=android GOARCH="$goarch" CGO_ENABLED=1 CC="$cc" \
+        GOOS=android GOARCH="$goarch" GOARM=7 CGO_ENABLED=1 CC="$cc" \
           GOFLAGS=-mod=mod CGO_LDFLAGS="$ldflags" \
           go build -trimpath -ldflags "-s -w" -o git-lfs .
       ) >"$build/git-lfs.log" 2>&1 || { tail -40 "$build/git-lfs.log" >&2; exit 1; }

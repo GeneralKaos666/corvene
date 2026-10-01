@@ -88,6 +88,10 @@ pub fn pack_target() -> &'static str {
     // Android has its own C library: a Linux pack does not load there
     if cfg!(all(target_os = "android", target_arch = "aarch64")) {
         "android-aarch64"
+    } else if cfg!(all(target_os = "android", target_arch = "arm")) {
+        "android-armv7a"
+    } else if cfg!(all(target_os = "android", target_arch = "x86")) {
+        "android-i686"
     } else if cfg!(target_os = "android") {
         "android-x86_64"
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
@@ -100,8 +104,13 @@ pub fn pack_target() -> &'static str {
         "windows-x86_64"
     } else if cfg!(target_arch = "aarch64") {
         "linux-aarch64"
-    } else {
+    } else if cfg!(target_arch = "x86_64") {
         "linux-x86_64"
+    } else if cfg!(target_arch = "arm") {
+        // no packs are published for the 32-bit builds
+        "linux-armv7"
+    } else {
+        "linux-x86"
     }
 }
 

@@ -102,7 +102,7 @@ jobs:
               {"name": "macos", "runner": "macos-26", "targets": ["macos-aarch64", "macos-x86_64"]},
               {"name": "linux-x86_64", "runner": "ubuntu-24.04", "targets": ["linux-x86_64"]},
               {"name": "linux-aarch64", "runner": "ubuntu-24.04-arm", "targets": ["linux-aarch64"]},
-              {"name": "android", "runner": "ubuntu-24.04", "targets": ["android-aarch64", "android-x86_64"]},
+              {"name": "android", "runner": "ubuntu-24.04", "targets": ["android-aarch64", "android-armv7a", "android-x86_64", "android-i686"]},
           ]
           have = {(p["name"], p["version"], p.get("target")) for p in json.load(open("have.json"))["packs"]}
           force = os.environ["FORCE"] == "true"
@@ -167,7 +167,7 @@ jobs:
           retention-days: 1
 
   macos-assets:
-    name: bundle · sign (macOS universal)
+    name: bundle · sign (macOS)
     needs: [plan, macos-build]
     runs-on: macos-26
     timeout-minutes: 30
@@ -196,7 +196,10 @@ jobs:
               cp "bins/bin-$variant-$t/corvane" "target/$t/release/corvane"
               chmod +x "target/$t/release/corvane"
             done
-            FULL="$([[ "$variant" == full ]] && echo 1 || echo 0)" SKIP_BUILD=1 packaging/release.sh
+            # the universal bundle, and one per architecture for a smaller download
+            for arch in universal arm64 x86_64; do
+              ARCH="$arch" FULL="$([[ "$variant" == full ]] && echo 1 || echo 0)" SKIP_BUILD=1 packaging/release.sh
+            done
           done
           ls -l target/release-assets
       - uses: actions/upload-artifact@v4
@@ -207,6 +210,10 @@ jobs:
             target/release-assets/*.dmg
           compression-level: 0
 
+  # x86_64 and aarch64 build natively. The 32-bit ones are cross-compiled on
+  # the runner of the same family (Debian multiarch has their libraries) and
+  # may fail without holding up the release: nothing upstream of Corvane
+  # (GPUI least of all) is tested on 32-bit Linux.
   linux:
     name: build · package (Linux ${{ matrix.arch }})
     needs: plan
@@ -215,21 +222,57 @@ jobs:
       matrix:
         include:
           - arch: x86_64
+            host: x86_64
             runner: ubuntu-24.04
           - arch: aarch64
+            host: aarch64
             runner: ubuntu-24.04-arm
+          - arch: i686
+            host: x86_64
+            runner: ubuntu-24.04
+            target: i686-unknown-linux-gnu
+            foreign: i386
+            triplet: i386-linux-gnu
+            gcc: gcc-i686-linux-gnu g++-i686-linux-gnu
+          - arch: armhf
+            host: aarch64
+            runner: ubuntu-24.04-arm
+            target: armv7-unknown-linux-gnueabihf
+            foreign: armhf
+            triplet: arm-linux-gnueabihf
+            gcc: gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
     runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.target != '' }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: system packages
+        if: ${{ !matrix.target }}
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang mold pkg-config \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libfontconfig-dev libfreetype-dev libvulkan-dev
+      - name: system packages (cross)
+        if: matrix.target
+        run: |
+          sudo dpkg --add-architecture ${{ matrix.foreign }}
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang pkg-config ${{ matrix.gcc }} \
+            libxcb1-dev:${{ matrix.foreign }} libxkbcommon-dev:${{ matrix.foreign }} \
+            libxkbcommon-x11-dev:${{ matrix.foreign }} libwayland-dev:${{ matrix.foreign }} \
+            libfontconfig-dev:${{ matrix.foreign }} libfreetype-dev:${{ matrix.foreign }} \
+            libvulkan-dev:${{ matrix.foreign }}
+          {
+            echo "TARGET=${{ matrix.target }}"
+            echo "PKG_CONFIG_ALLOW_CROSS=1"
+            echo "PKG_CONFIG_LIBDIR=/usr/lib/${{ matrix.triplet }}/pkgconfig:/usr/share/pkgconfig"
+          } >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-linux-${{ matrix.arch }}
@@ -237,7 +280,7 @@ jobs:
       - name: appimagetool
         run: |
           curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
-            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.arch }}.AppImage"
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.host }}.AppImage"
           chmod +x "$RUNNER_TEMP/appimagetool"
           echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
           # no FUSE on the runner
@@ -257,7 +300,7 @@ jobs:
             target/linux/*.AppImage
           compression-level: 0
 
-  # The Android packages (foss and play, both ABIs in each) on a Linux
+  # The Android packages (foss and play: one per ABI and one with all four) on a Linux
   # runner; also the play flavour's bundle (.aab, with the grammars as an
   # on-demand module), which stays a workflow artifact: it is uploaded to
   # Google Play by hand. The APKs are signed with the keystore in the
@@ -277,7 +320,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-android
@@ -302,7 +345,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: packaging/android/app/src/main/jniLibs
-          key: android-git-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
+          key: android-git-4abi-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
       - name: build and package
         env:
           CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
@@ -320,14 +363,19 @@ jobs:
             export CORVANE_ANDROID_KEYSTORE="$RUNNER_TEMP/corvane.jks"
             suffix=
           fi
-          # BUNDLE=1: also the .aab for Google Play with the grammar module
-          BUNDLE=1 packaging/android/build.sh release
+          # BUNDLE=1: also the .aab for Google Play with the grammar module;
+          # PER_ABI=1: a package per ABI next to the one with all four
+          BUNDLE=1 PER_ABI=1 packaging/android/build.sh release
           rm -f "$RUNNER_TEMP/corvane.jks"
           mkdir -p target/android
-          cp packaging/android/app/build/outputs/bundle/playRelease/*.aab "target/android/Corvane-$VERSION-android-play$suffix.aab"
+          outputs=packaging/android/app/build/outputs
+          cp $outputs/bundle/playRelease/*.aab "target/android/Corvane-$VERSION-android-play$suffix.aab"
           for flavour in foss play; do
-            apk="$(ls packaging/android/app/build/outputs/apk/$flavour/release/*.apk | head -1)"
-            cp "$apk" "target/android/Corvane-$VERSION-android-$flavour$suffix.apk"
+            apk="$(ls $outputs/apk/$flavour/release/*.apk | head -1)"
+            cp "$apk" "target/android/Corvane-$VERSION-android-$flavour-universal$suffix.apk"
+            for abi in arm64-v8a:arm64 armeabi-v7a:armv7 x86_64:x86_64 x86:x86; do
+              cp "$outputs/per-abi/$flavour-${abi%%:*}.apk" "target/android/Corvane-$VERSION-android-$flavour-${abi##*:}$suffix.apk"
+            done
           done
           ls -l target/android
       - uses: actions/upload-artifact@v4
@@ -443,7 +491,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # The draft release (or, with `linux_release`, the existing one) gets the
-  # installers only, and the Homebrew cask its version and hashes.
+  # installers only and a Downloads table of them in its notes, and the
+  # Homebrew cask its version and hashes.
   publish:
     name: draft release · Homebrew cask
     needs: [plan, macos-assets, linux, android]
@@ -483,6 +532,16 @@ jobs:
               --notes "- [New] …" \
               "${files[@]}"
           fi
+      # platforms as rows, architectures as columns, from what the release
+      # holds by now (a `linux_release` run: the other platforms' assets too)
+      - name: downloads table in the release notes
+        if: env.RELEASE_TAG != ''
+        run: |
+          gh release view "$RELEASE_TAG" --json assets,body \
+            | packaging/release-table.py --base "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG" \
+            > notes.md
+          gh release edit "$RELEASE_TAG" --notes-file notes.md
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
       - name: stamp the cask
         run: |
           sha() { sha256sum "$1" | cut -d' ' -f1; }

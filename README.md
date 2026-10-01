@@ -58,7 +58,7 @@ File → Install Command Line Tool links `corvane` into `~/.local/bin`, the same
 
 ### Android
 
-Download `Corvane-<version>-android-foss.apk` from [GitHub Releases](https://github.com/wasi-master/corvane/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The play package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
+Download `Corvane-<version>-android-foss-arm64.apk` (phones and tablets; `-x86_64` for most Chromebooks and emulators, `-universal` has both) from [GitHub Releases](https://github.com/wasi-master/corvane/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The play package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
 
 ## Building
 
