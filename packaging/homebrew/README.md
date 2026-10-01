@@ -73,4 +73,11 @@ Then copy the file to the tap and push. Homebrew 7 only loads casks from a
 tap, so check it with `brew style Casks/corvane.rb` in the tap checkout, then
 `brew audit --cask --strict --online wasi-master/corvane/corvane` once pushed.
 (`brew style` rejects the checked-in placeholder hashes for being identical;
-a stamped cask passes.)
+a stamped cask passes.) The audit compares the bundle's
+`LSMinimumSystemVersion` with the cask: 0.1.0 was built for macOS 15, so its
+cask in the tap carries `depends_on macos: :sequoia` inside `on_macos`;
+later bundles start at 10.15, below Homebrew's own floor, and need none.
+
+Actions → Homebrew cask → Run workflow (`.github/workflows/cask.yml`)
+installs the pushed cask with Homebrew on both Linux architectures, checks
+the AppImage it put in `~/Applications` and uninstalls it.
