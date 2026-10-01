@@ -227,23 +227,78 @@ pub mod sizes {
     }
 }
 
+/// What the system covers at the window's edges: nothing on the desktop.
+/// Android draws the status and navigation bars over the window and opens
+/// the on-screen keyboard above it; `menu_bar::MenuBarShell` keeps clear of
+/// them and records the edges here on every frame.
+pub fn safe_area() -> gpui_kit::Edges<gpui_kit::Pixels> {
+    #[cfg(target_os = "android")]
+    {
+        SAFE_AREA.with(|area| area.get())
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        gpui_kit::Edges::default()
+    }
+}
+
+#[cfg(target_os = "android")]
+thread_local! {
+    static SAFE_AREA: std::cell::Cell<gpui_kit::Edges<gpui_kit::Pixels>> =
+        std::cell::Cell::new(gpui_kit::Edges::default());
+}
+
+/// Reads [`safe_area`] from the window (Android; a no-op elsewhere).
+pub fn update_safe_area(window: &gpui_kit::Window) {
+    #[cfg(target_os = "android")]
+    {
+        let viewport = window.viewport_size();
+        let visible = window.fully_visible_bounds();
+        SAFE_AREA.with(|area| {
+            area.set(gpui_kit::Edges {
+                top: visible.top(),
+                left: visible.left(),
+                right: viewport.width - visible.right(),
+                bottom: viewport.height - visible.bottom(),
+            })
+        });
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = window;
+    }
+}
+
 /// Where GHD's page starts in the window: below Electron's menu bar on
-/// Linux (`crate::menu_bar`), at the top on macOS.
+/// Linux (`crate::menu_bar`), at the top on macOS. Android: the menu bar
+/// sits under the status bar.
 pub fn page_top() -> gpui_kit::Pixels {
     #[cfg(target_os = "macos")]
     {
         gpui_kit::px(0.)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         gpui_kit::px(crate::menu_bar::HEIGHT)
+    }
+    #[cfg(target_os = "android")]
+    {
+        safe_area().top + gpui_kit::px(crate::menu_bar::HEIGHT)
     }
 }
 
 /// GHD's viewport (`100vh`, `innerHeight`): the window's content minus
-/// the menu bar on Linux.
+/// the menu bar on Linux (Android: and what the system covers).
 pub fn page_size(window: &gpui_kit::Window) -> gpui_kit::Size<gpui_kit::Pixels> {
     let viewport = window.viewport_size();
+    #[cfg(target_os = "android")]
+    let viewport = {
+        let area = safe_area();
+        gpui_kit::size(
+            viewport.width - area.left - area.right,
+            viewport.height - area.bottom,
+        )
+    };
     gpui_kit::size(viewport.width, viewport.height - page_top())
 }
 
@@ -262,15 +317,19 @@ pub fn normal_line_height(size: gpui_kit::Pixels, cx: &gpui_kit::App) -> gpui_ki
 /// The page's top-left corner in window coordinates: where a full-page
 /// overlay (`anchored()` positions are window coordinates) starts.
 pub fn page_origin() -> gpui_kit::Point<gpui_kit::Pixels> {
-    gpui_kit::point(gpui_kit::px(0.), page_top())
+    #[cfg(not(target_os = "android"))]
+    {
+        gpui_kit::point(gpui_kit::px(0.), page_top())
+    }
+    #[cfg(target_os = "android")]
+    {
+        gpui_kit::point(safe_area().left, page_top())
+    }
 }
 
 /// [`page_size`] where it sits in window coordinates.
 pub fn page_bounds(window: &gpui_kit::Window) -> gpui_kit::Bounds<gpui_kit::Pixels> {
-    gpui_kit::Bounds::new(
-        gpui_kit::point(gpui_kit::px(0.), page_top()),
-        page_size(window),
-    )
+    gpui_kit::Bounds::new(page_origin(), page_size(window))
 }
 
 pub const UI_FONT: &str = ".SystemUIFont";

@@ -227,8 +227,9 @@ impl MenuBar {
             return;
         };
         let entries = entries(&menu.items, window, cx);
+        let origin = bar_origin();
         let rect = Bounds::new(
-            point(px(button.x), px(0.)),
+            point(origin.x + px(button.x), origin.y),
             size(px(button.width), px(OPEN_HEIGHT)),
         );
         // the bar keeps the keyboard position while its menu is open
@@ -249,11 +250,20 @@ impl MenuBar {
         cx.notify();
     }
 
+    /// The button under the window coordinate `x`.
     fn button_at(&self, x: f32) -> Option<usize> {
+        let x = x - f32::from(bar_origin().x);
         self.buttons
             .iter()
             .position(|b| x >= b.x && x < b.x + b.width)
     }
+}
+
+/// The bar's top-left corner in the window: the window's own, except on
+/// Android, where the shell keeps clear of the system bars.
+fn bar_origin() -> Point<Pixels> {
+    let area = crate::theme::safe_area();
+    point(area.left, area.top)
 }
 
 /// The views menu rows for a GPUI menu's items.
@@ -508,20 +518,30 @@ impl MenuBarShell {
 }
 
 impl Render for MenuBarShell {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let menu_bar = self.menu_bar.clone();
-        div()
-            .id("menu-bar-shell")
-            .size_full()
-            .flex()
-            .flex_col()
+        crate::theme::update_safe_area(window);
+        let shell = div().id("menu-bar-shell").size_full().flex().flex_col();
+        // Android: stay clear of the system bars and the keyboard; the bar's
+        // colour runs on under the status bar
+        #[cfg(target_os = "android")]
+        let shell = {
+            let area = crate::theme::safe_area();
+            shell
+                .pt(area.top)
+                .pl(area.left)
+                .pr(area.right)
+                .pb(area.bottom)
+                .bg(Palette::for_window(window).bar_background)
+        };
+        shell
             .capture_any_mouse_down(move |event, _, cx| {
+                let y = f32::from(event.position.y - bar_origin().y);
                 // the bar handles presses on itself
-                if f32::from(event.position.y) >= HEIGHT && views_menu::dismiss_on_outside_click(cx)
-                {
+                if y >= HEIGHT && views_menu::dismiss_on_outside_click(cx) {
                     cx.stop_propagation();
                 }
-                if f32::from(event.position.y) >= HEIGHT {
+                if y >= HEIGHT {
                     menu_bar.update(cx, |bar, cx| bar.unfocus(cx));
                 }
             })
