@@ -52,11 +52,23 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
         return baseDirectory(getContext());
     }
 
+    /**
+     * A second root, "Corvane settings": files/home, where git's global
+     * configuration (.gitconfig) and the SSH keys (.ssh) live. A file manager
+     * that shows hidden files can put a key there.
+     */
+    private static final String HOME_ID = "home";
     private static final String SHARED_ID = "shared";
     private static final String TMP_ID = "tmp";
 
     private static File sharedDirectory() {
         return android.os.Environment.getExternalStorageDirectory();
+    }
+
+    private static File homeDirectory(android.content.Context context) {
+        File home = new File(context.getFilesDir(), "home");
+        home.mkdirs();
+        return home;
     }
 
     private static File tmpDirectory(android.content.Context context) {
@@ -69,6 +81,7 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
                 ? documentId.substring(0, documentId.indexOf('/')) : documentId;
         switch (prefix) {
             case BASE_ID: return base();
+            case HOME_ID: return homeDirectory(getContext());
             case SHARED_ID: return sharedDirectory();
             case TMP_ID: return tmpDirectory(getContext());
             default: return null;
@@ -78,8 +91,9 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
     /** The document id of `file`, null when it is in none of the folders. */
     static String idOf(android.content.Context context, File file) {
         String path = file.getAbsolutePath();
-        String[] ids = {BASE_ID, TMP_ID, SHARED_ID};
-        File[] bases = {baseDirectory(context), tmpDirectory(context), sharedDirectory()};
+        String[] ids = {BASE_ID, HOME_ID, TMP_ID, SHARED_ID};
+        File[] bases = {baseDirectory(context), homeDirectory(context), tmpDirectory(context),
+                sharedDirectory()};
         for (int i = 0; i < ids.length; i++) {
             String root = bases[i].getAbsolutePath();
             if (path.equals(root)) {
@@ -141,18 +155,29 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
     @Override
     public Cursor queryRoots(String[] projection) {
         MatrixCursor result = new MatrixCursor(projection != null ? projection : ROOT_COLUMNS);
-        File base = base();
+        addRoot(result, ROOT_ID, BASE_ID, base(), R.string.app_name, R.string.documents_summary);
+        addRoot(result, HOME_ID, HOME_ID, homeDirectory(getContext()), R.string.home_title,
+                R.string.home_summary);
+        return result;
+    }
+
+    private void addRoot(MatrixCursor result, String rootId, String documentId, File base,
+            int title, int summary) {
         MatrixCursor.RowBuilder row = result.newRow();
-        row.add(Root.COLUMN_ROOT_ID, ROOT_ID);
-        row.add(Root.COLUMN_DOCUMENT_ID, BASE_ID);
-        row.add(Root.COLUMN_TITLE, getContext().getString(R.string.app_name));
-        row.add(Root.COLUMN_SUMMARY, getContext().getString(R.string.documents_summary));
+        row.add(Root.COLUMN_ROOT_ID, rootId);
+        row.add(Root.COLUMN_DOCUMENT_ID, documentId);
+        row.add(Root.COLUMN_TITLE, getContext().getString(title));
+        row.add(Root.COLUMN_SUMMARY, getContext().getString(summary));
         row.add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_CREATE | Root.FLAG_SUPPORTS_IS_CHILD
                 | Root.FLAG_LOCAL_ONLY);
         row.add(Root.COLUMN_MIME_TYPES, "*/*");
         row.add(Root.COLUMN_AVAILABLE_BYTES, base.getFreeSpace());
         row.add(Root.COLUMN_ICON, R.mipmap.ic_launcher);
-        return result;
+    }
+
+    /** A document that is a folder of its own, not something in one. */
+    private static boolean isTop(String documentId) {
+        return !documentId.contains("/");
     }
 
     @Override
@@ -186,13 +211,16 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
             flags |= Document.FLAG_SUPPORTS_WRITE;
         }
         File parent = file.getParentFile();
-        if (parent != null && parent.canWrite() && !file.equals(base())) {
+        String id = idFor(file);
+        if (parent != null && parent.canWrite() && !isTop(id)) {
             flags |= Document.FLAG_SUPPORTS_DELETE | Document.FLAG_SUPPORTS_RENAME;
         }
         MatrixCursor.RowBuilder row = result.newRow();
-        row.add(Document.COLUMN_DOCUMENT_ID, idFor(file));
-        row.add(Document.COLUMN_DISPLAY_NAME,
-                file.equals(base()) ? getContext().getString(R.string.app_name) : file.getName());
+        row.add(Document.COLUMN_DOCUMENT_ID, id);
+        row.add(Document.COLUMN_DISPLAY_NAME, id.equals(BASE_ID)
+                ? getContext().getString(R.string.app_name)
+                : id.equals(HOME_ID) ? getContext().getString(R.string.home_title)
+                : file.getName());
         row.add(Document.COLUMN_SIZE, file.length());
         row.add(Document.COLUMN_MIME_TYPE, mimeType(file));
         row.add(Document.COLUMN_LAST_MODIFIED, file.lastModified());
@@ -234,7 +262,9 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
     public android.provider.DocumentsContract.Path findDocumentPath(String parentDocumentId,
             String childDocumentId) throws FileNotFoundException {
         fileFor(childDocumentId);
-        String top = parentDocumentId != null ? parentDocumentId : BASE_ID;
+        String top = parentDocumentId != null ? parentDocumentId
+                : childDocumentId.equals(HOME_ID) || childDocumentId.startsWith(HOME_ID + "/")
+                ? HOME_ID : BASE_ID;
         if (!isChildDocument(top, childDocumentId)) {
             throw new FileNotFoundException(childDocumentId);
         }
@@ -248,7 +278,7 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
             id = id.substring(0, id.lastIndexOf('/'));
         }
         return new android.provider.DocumentsContract.Path(
-                parentDocumentId == null ? ROOT_ID : null, path);
+                parentDocumentId == null ? top : null, path);
     }
 
     @Override
@@ -280,7 +310,7 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
 
     @Override
     public void deleteDocument(String documentId) throws FileNotFoundException {
-        if (BASE_ID.equals(documentId) || !deleteRecursively(fileFor(documentId))) {
+        if (isTop(documentId) || !deleteRecursively(fileFor(documentId))) {
             throw new FileNotFoundException("could not delete " + documentId);
         }
     }
@@ -299,7 +329,7 @@ public class CorvaneDocumentsProvider extends DocumentsProvider {
     public String renameDocument(String documentId, String displayName)
             throws FileNotFoundException {
         File file = fileFor(documentId);
-        if (BASE_ID.equals(documentId) || displayName.contains("/")
+        if (isTop(documentId) || displayName.contains("/")
                 || displayName.equals("..")) {
             throw new FileNotFoundException(displayName);
         }
