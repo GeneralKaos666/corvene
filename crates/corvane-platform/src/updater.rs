@@ -25,7 +25,9 @@
 //! half of one). The relaunch runs the new image once this process has
 //! exited (`app_location::relaunch_after_exit`). Any other install (the
 //! `.deb` in `/usr/lib/corvane`, a bare binary) belongs to the package
-//! manager, like a Homebrew cask ([`is_package_managed`]).
+//! manager, like a Homebrew cask ([`package_manager`]). So does an AppImage
+//! the Homebrew cask installed ([`is_homebrew_appimage`]): `brew upgrade
+//! corvane` replaces it.
 //!
 //! Testing hooks: `CORVANE_UPDATE_FEED=<url>` replaces the feed URL,
 //! `CORVANE_UPDATE_PUBLIC_KEY` (build time) replaces the public key.
@@ -336,18 +338,66 @@ pub fn install_target() -> Option<PathBuf> {
     }
 }
 
-/// A package manager owns this install, so the updater only announces a
-/// release: a Homebrew cask bundle on macOS ([`is_homebrew_install`]); on
-/// Linux anything that is not an AppImage (the `.deb` under
-/// `/usr/lib/corvane`, a binary built from source).
-pub fn is_package_managed() -> bool {
+/// The Homebrew cask owns the AppImage it installed on Linux: an image in
+/// `~/Applications` (the cask's `app_image` target, Homebrew's
+/// `appimagedir`) while one of `caskrooms` holds a `corvane` cask.
+pub fn is_homebrew_appimage(image: &Path, home: &Path, caskrooms: &[PathBuf]) -> bool {
+    image.starts_with(home.join("Applications"))
+        && caskrooms.iter().any(|room| room.join("corvane").is_dir())
+}
+
+/// Where Homebrew on Linux keeps its casks: under `$HOMEBREW_PREFIX` (unset
+/// when the desktop starts Corvane), the default prefix and the per-user one.
+#[cfg(not(target_os = "macos"))]
+fn linuxbrew_caskrooms(home: &Path) -> Vec<PathBuf> {
+    std::env::var_os("HOMEBREW_PREFIX")
+        .filter(|prefix| !prefix.is_empty())
+        .map(PathBuf::from)
+        .into_iter()
+        .chain([
+            PathBuf::from("/home/linuxbrew/.linuxbrew"),
+            home.join(".linuxbrew"),
+        ])
+        .map(|prefix| prefix.join("Caskroom"))
+        .collect()
+}
+
+/// Who updates a package-managed install ([`package_manager`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackageManager {
+    /// The Homebrew cask: `brew upgrade corvane`.
+    Homebrew,
+    /// The distribution's package manager (the `.deb`), or whoever built
+    /// the binary.
+    System,
+}
+
+/// The package manager that owns this install, so the updater only
+/// announces a release: Homebrew for a cask bundle on macOS
+/// ([`is_homebrew_install`]) and a cask AppImage on Linux
+/// ([`is_homebrew_appimage`]); on Linux the system's for anything that is
+/// not an AppImage (the `.deb` under `/usr/lib/corvane`, a binary built from
+/// source). `None`: Corvane updates itself.
+pub fn package_manager() -> Option<PackageManager> {
     #[cfg(target_os = "macos")]
     {
-        crate::app_location::running_bundle().is_some_and(|b| is_homebrew_install(&b))
+        crate::app_location::running_bundle()
+            .is_some_and(|b| is_homebrew_install(&b))
+            .then_some(PackageManager::Homebrew)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        running_appimage().is_none()
+        let image = std::env::var_os("APPIMAGE")
+            .map(PathBuf::from)
+            .and_then(|path| std::fs::canonicalize(path).ok());
+        if let (Some(image), Some(home)) = (&image, dirs::home_dir())
+            && is_homebrew_appimage(image, &home, &linuxbrew_caskrooms(&home))
+        {
+            return Some(PackageManager::Homebrew);
+        }
+        running_appimage()
+            .is_none()
+            .then_some(PackageManager::System)
     }
 }
 
@@ -826,6 +876,24 @@ mod tests {
         assert!(!is_homebrew_install(Path::new(
             "/Users/someone/Downloads/Corvane.app"
         )));
+    }
+
+    #[test]
+    fn homebrew_appimage_detection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let image = home.join("Applications/Corvane.AppImage");
+        let caskrooms = [tmp.path().join("none"), tmp.path().join("brew/Caskroom")];
+        // no `corvane` cask: a hand-downloaded image updates itself
+        assert!(!is_homebrew_appimage(&image, &home, &caskrooms));
+        std::fs::create_dir_all(caskrooms[1].join("corvane")).unwrap();
+        assert!(is_homebrew_appimage(&image, &home, &caskrooms));
+        // the cask does not own an image kept somewhere else
+        assert!(!is_homebrew_appimage(
+            &home.join("Downloads/Corvane-0.1.0-x86_64.AppImage"),
+            &home,
+            &caskrooms
+        ));
     }
 
     #[test]

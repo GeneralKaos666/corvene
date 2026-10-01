@@ -85,9 +85,10 @@ packaging/signing-cert.sh create   # → login keychain, ~/.corvane-signing/corv
    and needs `<zip>.minisig` next to it. The release body is Markdown; list
    items tagged `[New]` / `[Improved]` / `[Fixed]` / `[Added]` / `[Removed]`
    become the Release Notes dialog's entries (`corvane_core::release_notes`).
-4. Update `packaging/homebrew/Casks/corvane.rb` with the version and the
-   sha256 `release.sh` printed, and push it to the `homebrew-corvane` tap
-   (`packaging/homebrew/README.md`).
+4. Update `packaging/homebrew/Casks/corvane.rb` with the version, the
+   sha256 `release.sh` printed and the two AppImages' sha256
+   (`packaging/homebrew/stamp.py`), and push it to the `homebrew-corvane`
+   tap (`packaging/homebrew/README.md`).
 5. Upload `packs-manifest.json` (+ `.minisig`) and the pack archives to the
    same release when a pack changed (`crates/corvane-packs`).
 
@@ -110,7 +111,17 @@ default uses the device flow).
 
 After the run: write the release notes in the draft, publish it (the
 self-updater ignores drafts), then copy the `cask` artifact's `corvane.rb`
-(version and sha256 already filled in, also in the run summary) to the tap.
+(version and every sha256 already filled in, also in the run summary) to the
+tap. That artifact comes from the `cask` job, which runs after both Linux
+builds; `cask-macos` is the macOS job's half-stamped copy.
+"Run workflow" with `linux_release` set to a published release's tag
+(`gh workflow run release.yml --ref main -f linux_release=v0.1.0`) skips the
+macOS job, builds the Linux assets from that branch, uploads them to the
+release, merges their packs into its `packs-manifest.json` and stamps the
+whole cask (the macOS hash from the release's zip). `Cargo.toml` must still
+carry that version. The tag stays where it is, so the Linux binaries are
+newer than the tagged source.
+
 "Run workflow" by hand builds and signs the same assets as a workflow
 artifact without a release (`full` input: skip the Full variant for a faster
 run).
@@ -182,10 +193,33 @@ one (`$APPIMAGE`, which must be a file in a folder the user can write),
 verifies that copy again, makes it executable, fsyncs it, renames it over
 `$APPIMAGE` and starts it once the old process has exited.
 
+The AppImage also installs its own desktop entry
+(`corvane_platform::desktop_entry`, run from `url_schemes::register` at
+every launch with `$APPIMAGE` set): the packaged
+`com.wasimaster.corvane.desktop` with `Exec=<$APPIMAGE> %U` and
+`TryExec=<$APPIMAGE>` goes to `$XDG_DATA_HOME/applications/`, the two icons
+from the mounted image (`$APPDIR/usr/share/icons/hicolor`) to
+`$XDG_DATA_HOME/icons/hicolor/{256x256,scalable}/apps/`, and `xdg-mime` then
+makes it the `x-corvane` / `x-corvane-auth` handler. The entry carries
+`X-Corvane-Installer=appimage`: only an entry with that line is rewritten
+(when the image moves or the template changes), a user entry without it and
+the `.deb`'s entry under `$XDG_DATA_DIRS` are left alone, and with the
+`.deb`'s entry present nothing is written. A launch that is not from an
+AppImage removes the entry once its image is gone. `package.sh` must keep
+shipping the icons at those paths in the AppDir.
+
 A `.deb` install (`/usr/lib/corvane`) is never updated in place: like a
 Homebrew cask on macOS, the banner and About only say that the release is
 available and to update with the package manager. The `.deb`'s `.minisig`
 is for people verifying a download by hand.
+
+The Homebrew cask installs the same AppImage as
+`~/Applications/Corvane.AppImage`. An image in `~/Applications` while a
+`corvane` cask exists (`Caskroom/corvane` under `$HOMEBREW_PREFIX`,
+`/home/linuxbrew/.linuxbrew` or `~/.linuxbrew`) is the cask's and is never
+swapped: the banner says `brew upgrade corvane`. The `linux` job writes each
+AppImage's sha256 to a `cask-sha256-<arch>` artifact and the `cask` job
+stamps both into the cask.
 
 ## Testing the flow locally
 

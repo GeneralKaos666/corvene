@@ -383,9 +383,9 @@ fn main() {
         //   sign-in (the GitHub.com sign-in dialog)
         //   alive:review|comment|checks-failed[:api] (an Alive event for the sample
         //   pull requests through the notification handler; sample data unless :api)
-        //   update-available[:brew][:about|:notes] (a sample update in the ready /
-        //   Homebrew state: the banner, plus About or the Release Notes with
-        //   "Install and Restart")
+        //   update-available[:brew|:pkg][:about|:notes] (a sample update in the
+        //   ready / Homebrew / package manager state: the banner, plus About or
+        //   the Release Notes with "Install and Restart")
         //   flags[:<search>] (Corvane › Flags…, with the search box prefilled)
         if let Ok(popup) = std::env::var("CORVANE_POPUP") {
             // Deferred so a `CORVANE_ADD_REPO` repository has been added and refreshed.
@@ -1233,7 +1233,14 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         (other, _) if other.starts_with("update-available") => {
             let flags: Vec<&str> = other.split(':').skip(1).collect();
-            Dispatcher::install_sample_update(flags.contains(&"brew"), cx);
+            let manager = if flags.contains(&"brew") {
+                Some(corvane_core::PackageManager::Homebrew)
+            } else if flags.contains(&"pkg") {
+                Some(corvane_core::PackageManager::System)
+            } else {
+                None
+            };
+            Dispatcher::install_sample_update(manager, cx);
             if flags.contains(&"about") {
                 Dispatcher::show_popup(
                     Popup::About {

@@ -1,6 +1,7 @@
 # Homebrew tap layout
 
-The primary install path is a Homebrew cask in a tap
+The primary install path on macOS, and one of three on Linux (next to the
+`.deb` and the bare AppImage), is a Homebrew cask in a tap
 repository named `homebrew-corvane` under the `wasi-master` account. This
 folder holds the tap's contents so a release can copy them over:
 
@@ -25,19 +26,51 @@ cp packaging/homebrew/Casks/corvane.rb ../homebrew-corvane/Casks/corvane.rb
 brew install --cask wasi-master/corvane/corvane
 ```
 
-Corvane is signed with a self-signed certificate (a hobby project without an
+macOS: Corvane is signed with a self-signed certificate (a hobby project without an
 Apple Developer ID), and macOS 15 blocks a quarantined, unnotarized app on
 first launch. Homebrew 7 removed `--no-quarantine` and always quarantines cask
 downloads, so the cask's `postflight_steps` runs
 `xattr -dr com.apple.quarantine /Applications/Corvane.app` itself.
 
+Linux (x86_64 and arm64): the cask's `app_image` stanza moves the release's
+AppImage to `~/Applications/Corvane.AppImage` (Homebrew's `appimagedir`) and
+makes it executable. Homebrew adds no desktop entry and no `corvane` command.
+Start the image from `~/Applications` once: an AppImage without an installed
+desktop entry writes its own on every launch
+(`~/.local/share/applications/com.wasimaster.corvane.desktop` with `Exec`
+naming the image, icons under `~/.local/share/icons/hicolor`;
+`corvane_platform::desktop_entry`), which gives the launcher entry and the
+`x-corvane://` / `x-corvane-auth://` handlers the browser sign-in needs.
+`brew uninstall` leaves those files (an `uninstall` stanza would also remove
+them on every `brew upgrade`): the entry's `TryExec` hides the launcher once
+the image is gone, `brew uninstall --zap` trashes them, and the next launch
+of a `.deb` install removes the entry. With AppImageLauncher or appimaged
+integrating the image, their entry is the launcher and Corvane writes none. File → Install Command Line Tool
+links `corvane` into `~/.local/bin` (the fixed target name keeps that link
+and the desktop entry valid across upgrades). The Vulkan driver, the Secret Service keyring and git
+stay the system's (a Homebrew `git` under `/home/linuxbrew/.linuxbrew/bin`
+is found too).
+
 Upgrade with `brew upgrade corvane`; the in-app updater recognises a
-Homebrew install and only points at that command.
+Homebrew install (macOS: the bundle; Linux: an AppImage in `~/Applications`
+while a Caskroom holds `corvane`) and only points at that command.
 
 ## Updating the cask for a release
 
+The cask carries four hashes: `arm` and `intel` (the same universal macOS
+zip) and `arm64_linux` / `x86_64_linux` (the AppImages).
+`packaging/homebrew/stamp.py` rewrites them and `version`:
 `packaging/release.sh` prints the zip's sha256 and, with `UPDATE_CASK=1`,
-rewrites `version` and `sha256` in `packaging/homebrew/Casks/corvane.rb`.
+stamps the version and the macOS half; release.yml's `cask` job adds the
+AppImage hashes and uploads the finished file as the `cask` artifact. By hand:
+
+```bash
+packaging/homebrew/stamp.py --version <version> --macos <sha256> \
+  --x86_64-linux <sha256> --arm64-linux <sha256>
+```
+
 Then copy the file to the tap and push. Homebrew 7 only loads casks from a
 tap, so check it with `brew style Casks/corvane.rb` in the tap checkout, then
 `brew audit --cask --strict --online wasi-master/corvane/corvane` once pushed.
+(`brew style` rejects the checked-in placeholder hashes for being identical;
+a stamped cask passes.)

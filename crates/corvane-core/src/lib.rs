@@ -80,4 +80,4 @@ pub use state::{
     RepositorySettingsTab, RepositoryState, RetryAction, SignInState, SignInStep,
     UnreachableCommitsTab,
 };
-pub use updater::{AvailableUpdate, UpdateState, UpdateStatus};
+pub use updater::{AvailableUpdate, PackageManager, UpdateState, UpdateStatus};

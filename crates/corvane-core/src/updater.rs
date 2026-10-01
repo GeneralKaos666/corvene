@@ -9,9 +9,9 @@
 //! bundle (Linux: the AppImage) on request. Deviations: one release (the
 //! latest) feeds the release notes, not every release since the running
 //! version; a Homebrew install is told to `brew upgrade corvane` instead of
-//! being swapped, and on Linux every install but an AppImage (the `.deb`, a
-//! source build) is left to the package manager the same way
-//! (`updater::is_package_managed`); checks run
+//! being swapped (on Linux too, for the cask's AppImage), and on Linux every
+//! install but an AppImage (the `.deb`, a source build) is left to the
+//! package manager the same way (`updater::package_manager`); checks run
 //! only in release builds unless `CORVANE_UPDATE_CHECK=1` (debug builds also
 //! honour `CORVANE_UPDATE_INSTALL=1`: install as soon as the update is ready).
 //! The launch and four-hourly checks can be switched off
@@ -20,6 +20,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub use corvane_platform::updater::PackageManager;
 use corvane_platform::updater::{self, ReleaseInfo, UpdateError};
 use gpui_kit::{App, AsyncApp};
 use tracing::{error, info, warn};
@@ -83,9 +84,12 @@ pub enum UpdateStatus {
         zip: PathBuf,
     },
     /// Corvane: the bundle belongs to the Homebrew cask, `brew upgrade`
-    /// installs the update (Linux: any install but an AppImage, which the
-    /// package manager updates).
-    AvailableViaHomebrew { update: AvailableUpdate },
+    /// installs the update (Linux: also any install but an AppImage, which
+    /// the system's package manager updates; `manager` says which).
+    AvailableViaHomebrew {
+        update: AvailableUpdate,
+        manager: PackageManager,
+    },
     /// `InstallingUpdate`: the bundle swap is running; quits when done.
     Installing,
 }
@@ -94,9 +98,8 @@ impl UpdateStatus {
     /// The release an "update available" banner is about.
     pub fn available(&self) -> Option<&AvailableUpdate> {
         match self {
-            UpdateStatus::Ready { update, .. } | UpdateStatus::AvailableViaHomebrew { update } => {
-                Some(update)
-            }
+            UpdateStatus::Ready { update, .. }
+            | UpdateStatus::AvailableViaHomebrew { update, .. } => Some(update),
             _ => None,
         }
     }
@@ -241,9 +244,9 @@ impl Dispatcher {
                 info!(version = %release.version, "update available");
                 Self::touch_last_update_check(cx);
                 let update = AvailableUpdate::from_release(&release, Self::heading_kinds(cx));
-                if updater::is_package_managed() {
+                if let Some(manager) = updater::package_manager() {
                     state.update(cx, |s, cx| {
-                        s.update.status = UpdateStatus::AvailableViaHomebrew { update };
+                        s.update.status = UpdateStatus::AvailableViaHomebrew { update, manager };
                         s.update.banner_visible = true;
                         cx.notify();
                     });
@@ -472,10 +475,10 @@ impl Dispatcher {
         );
     }
 
-    /// `CORVANE_POPUP=update-available[:brew]`: a sample update in the ready
-    /// (or Homebrew) state so the banner, About and Release Notes can be seen
-    /// without a release feed.
-    pub fn install_sample_update(homebrew: bool, cx: &mut App) {
+    /// `CORVANE_POPUP=update-available[:brew|:pkg]`: a sample update in the
+    /// ready (or Homebrew / package manager) state so the banner, About and
+    /// Release Notes can be seen without a release feed.
+    pub fn install_sample_update(manager: Option<PackageManager>, cx: &mut App) {
         let running = env!("CARGO_PKG_VERSION");
         let version = bump_patch(running);
         let body = format!(
@@ -503,8 +506,8 @@ impl Dispatcher {
         let mut update = AvailableUpdate::from_release(&release, Self::heading_kinds(cx));
         update.summary.date_published = Some(SystemTime::now());
         Self::state(cx).update(cx, |s, cx| {
-            s.update.status = if homebrew {
-                UpdateStatus::AvailableViaHomebrew { update }
+            s.update.status = if let Some(manager) = manager {
+                UpdateStatus::AvailableViaHomebrew { update, manager }
             } else {
                 UpdateStatus::Ready {
                     update,

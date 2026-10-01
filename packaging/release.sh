@@ -4,7 +4,7 @@
 #   packaging/release.sh                 # release build → target/release-assets/
 #   FULL=1 packaging/release.sh          # the "full" variant (packs compiled in)
 #   SKIP_BUILD=1 packaging/release.sh    # reuse target/release/corvane
-#   UPDATE_CASK=1 packaging/release.sh   # also rewrite packaging/homebrew/Casks/corvane.rb
+#   UPDATE_CASK=1 packaging/release.sh   # also stamp packaging/homebrew/Casks/corvane.rb (macOS half)
 #   SECRET_KEY=~/.minisign/corvane-release.key packaging/release.sh   # sign here
 #   ALLOW_ADHOC=1 packaging/release.sh   # without the code-signing certificate (testing)
 #
@@ -112,8 +112,7 @@ fi
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
 echo "cask sha256: $SHA"
 if [[ "${UPDATE_CASK:-0}" == "1" && "${FULL:-0}" != "1" ]]; then
-  CASK="$ROOT/packaging/homebrew/Casks/corvane.rb"
-  sed -i '' -E "s/^  version \"[^\"]+\"/  version \"$VERSION\"/; s/^  sha256 \"[^\"]+\"/  sha256 \"$SHA\"/" "$CASK"
-  echo "updated $CASK"
+  # the Linux hashes come from the AppImages (release.yml's `cask` job)
+  "$ROOT/packaging/homebrew/stamp.py" --version "$VERSION" --macos "$SHA"
 fi
 echo "assets in $OUT"

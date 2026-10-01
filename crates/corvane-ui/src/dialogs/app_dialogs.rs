@@ -3,7 +3,7 @@
 //! external editor error (`ui/editor/editor-error.tsx`) and the shell error
 //! (`ui/shell/shell-error.tsx`).
 
-use corvane_core::{AppState, Dispatcher, Popup, PreferencesTab, UpdateStatus};
+use corvane_core::{AppState, Dispatcher, PackageManager, Popup, PreferencesTab, UpdateStatus};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -102,18 +102,17 @@ impl AboutDialog {
                 )
                 .into_any_element(),
             ),
-            UpdateStatus::AvailableViaHomebrew { update } => Some(
+            UpdateStatus::AvailableViaHomebrew { update, manager } => Some(
                 info(
-                    if cfg!(target_os = "macos") {
-                        format!(
+                    match manager {
+                        PackageManager::Homebrew => format!(
                             "Corvane {} is available. Run brew upgrade corvane to install it.",
                             update.version
-                        )
-                    } else {
-                        format!(
+                        ),
+                        PackageManager::System => format!(
                             "Corvane {} is available. Update it with your package manager.",
                             update.version
-                        )
+                        ),
                     },
                     false,
                 )

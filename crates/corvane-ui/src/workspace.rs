@@ -896,13 +896,13 @@ impl Render for Workspace {
             let state = self.state.read(cx);
             if state.update.banner_visible {
                 state.update.status.available().cloned().map(|u| {
-                    (
-                        u,
-                        matches!(
-                            state.update.status,
-                            corvane_core::UpdateStatus::AvailableViaHomebrew { .. }
-                        ),
-                    )
+                    let manager = match state.update.status {
+                        corvane_core::UpdateStatus::AvailableViaHomebrew { manager, .. } => {
+                            Some(manager)
+                        }
+                        _ => None,
+                    };
+                    (u, manager)
                 })
             } else {
                 None
@@ -985,8 +985,8 @@ impl Render for Workspace {
             })
             // GHD shows the update banner only while no other banner is up
             .when(self.welcome.is_none() && banner.is_none(), |d| {
-                d.when_some(update_available.as_ref(), |d, (update, homebrew)| {
-                    d.child(update_banner(update, *homebrew, cx))
+                d.when_some(update_available.as_ref(), |d, (update, manager)| {
+                    d.child(update_banner(update, *manager, cx))
                 })
             })
             .when(self.welcome.is_none(), |d| {

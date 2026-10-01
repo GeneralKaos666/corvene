@@ -9,7 +9,7 @@
 //! branch" banners, with an Undo that recreates the deleted branch, are
 //! Corvane's (GHD deletes branches without a way back).
 
-use corvane_core::{AvailableUpdate, Banner, Dispatcher};
+use corvane_core::{AvailableUpdate, Banner, Dispatcher, PackageManager};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -273,22 +273,24 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
 /// `banners/_update-available.scss`): a desktop-download icon in the warning
 /// icon colour, "Corvane N is available", "what's new" opens the release
 /// notes and "install and restart" installs (`updateNow`). A Homebrew
-/// install is told to `brew upgrade corvane` instead (Linux: a package
-/// manager install is told to update with it). Always dismissable
+/// install is told to `brew upgrade corvane` instead (Linux: any other
+/// package manager install is told to update with it). Always dismissable
 /// (Corvane has no prioritised updates).
-pub fn update_banner(update: &AvailableUpdate, homebrew: bool, cx: &App) -> impl IntoElement {
+pub fn update_banner(
+    update: &AvailableUpdate,
+    manager: Option<PackageManager>,
+    cx: &App,
+) -> impl IntoElement {
     let t = cx.ghd();
     let version = update.version.clone();
-    let plain = if homebrew && !cfg!(target_os = "macos") {
-        format!(
+    let plain = match manager {
+        Some(PackageManager::System) => format!(
             "Corvane {version} is available. Update it with your package manager, or see what's new."
-        )
-    } else if homebrew {
-        format!(
+        ),
+        Some(PackageManager::Homebrew) => format!(
             "Corvane {version} is available. Run brew upgrade corvane to install it, or see what's new."
-        )
-    } else {
-        format!("Corvane {version} is available. See what's new or install and restart.")
+        ),
+        None => format!("Corvane {version} is available. See what's new or install and restart."),
     };
     let whats_new = link_button("update-banner-whats-new", "what's new", cx)
         .on_click(|_, _, cx| Dispatcher::show_update_release_notes(cx));
@@ -298,31 +300,30 @@ pub fn update_banner(update: &AvailableUpdate, homebrew: bool, cx: &App) -> impl
         .items_center()
         .whitespace_nowrap()
         .child(format!("Corvane {version} is available.\u{a0}"))
-        .map(|d| {
-            if homebrew && !cfg!(target_os = "macos") {
-                d.child("Update it with your package manager, or see\u{a0}")
-                    .child(whats_new)
-                    .child(".")
-            } else if homebrew {
-                d.child("Run\u{a0}")
-                    .child(
-                        div()
-                            .font_family(crate::theme::mono_font())
-                            .child("brew upgrade corvane"),
-                    )
-                    .child("\u{a0}to install it, or see\u{a0}")
-                    .child(whats_new)
-                    .child(".")
-            } else {
-                d.child("See\u{a0}")
-                    .child(whats_new)
-                    .child("\u{a0}or\u{a0}")
-                    .child(
-                        link_button("update-banner-install", "install and restart", cx)
-                            .on_click(|_, _, cx| Dispatcher::install_update(cx)),
-                    )
-                    .child(".")
-            }
+        .map(|d| match manager {
+            Some(PackageManager::System) => d
+                .child("Update it with your package manager, or see\u{a0}")
+                .child(whats_new)
+                .child("."),
+            Some(PackageManager::Homebrew) => d
+                .child("Run\u{a0}")
+                .child(
+                    div()
+                        .font_family(crate::theme::mono_font())
+                        .child("brew upgrade corvane"),
+                )
+                .child("\u{a0}to install it, or see\u{a0}")
+                .child(whats_new)
+                .child("."),
+            None => d
+                .child("See\u{a0}")
+                .child(whats_new)
+                .child("\u{a0}or\u{a0}")
+                .child(
+                    link_button("update-banner-install", "install and restart", cx)
+                        .on_click(|_, _, cx| Dispatcher::install_update(cx)),
+                )
+                .child("."),
         });
     let close_color = t.text_secondary;
     let close_hover = t.text;

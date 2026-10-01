@@ -99,7 +99,13 @@ pub fn find_git() -> Result<GitBinary> {
             candidates.push(candidate);
         }
     }
-    for p in ["/opt/homebrew/bin/git", "/usr/local/bin/git"] {
+    // Homebrew's prefixes (the last one is Linux's): a desktop session does
+    // not have them on `PATH`
+    for p in [
+        "/opt/homebrew/bin/git",
+        "/usr/local/bin/git",
+        "/home/linuxbrew/.linuxbrew/bin/git",
+    ] {
         candidates.push(PathBuf::from(p));
     }
     if command_line_tools_present() {
