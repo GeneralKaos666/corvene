@@ -31,8 +31,9 @@ use crate::tab_bar::{TabModel, VerticalTab, tab_bar};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
-    Inline, ListRowA11y, SelectHandler, button, checkbox_row, code_ref, labeled, link_button,
-    paragraph, radio, radio_row, section_heading, select_button, settings_description, text_box,
+    Inline, ListRowA11y, SelectHandler, SelectItem, button, checkbox_row, code_ref, labeled,
+    link_button, paragraph, radio, radio_row, section_heading, select_button, select_button_items,
+    settings_description, text_box,
 };
 
 /// Settings › Advanced › "Save crash reports locally" (where
@@ -573,6 +574,9 @@ impl PreferencesDialog {
             .iter()
             .map(|s| SharedString::from(s.shell.label()))
             .collect();
+        // Android: the applications behind the options, for their icons
+        let editor_apps: Vec<String> = s.editors.iter().map(|e| e.bundle_id.clone()).collect();
+        let shell_apps: Vec<String> = s.shells.iter().map(|s| s.bundle_id.clone()).collect();
         let use_custom_editor = self.draft.use_custom_editor;
         let use_custom_shell = self.draft.use_custom_shell;
         // `CustomIntegrationValue`: the last option configures a custom integration.
@@ -653,10 +657,10 @@ impl PreferencesDialog {
             .gap(SPACING())
             .child(labeled(
                 mac_or("External Editor", "External editor"),
-                select_button(
+                select_button_items(
                     "prefs-editor",
                     editor_value,
-                    editor_options,
+                    with_app_icons(editor_options, &editor_apps),
                     editor_ix,
                     false,
                     on_editor,
@@ -698,10 +702,10 @@ impl PreferencesDialog {
             })
             .child(labeled(
                 "Shell",
-                select_button(
+                select_button_items(
                     "prefs-shell",
                     shell_value,
-                    shell_options,
+                    with_app_icons(shell_options, &shell_apps),
                     shell_ix,
                     false,
                     on_shell,
@@ -2129,7 +2133,9 @@ fn android_shell_note(missing: bool, cx: &App) -> AnyElement {
              in Termux once: they allow \"Open in Termux\", trust shared storage in Termux's git \
              and add two commands, corvane (opens a folder here) and corvane-git-config \
              (brings Termux's Git settings over; Corvane has a Git of its own and cannot \
-             read Termux's)."
+             read Termux's). The editors Termux has (Neovim, Vim, Helix, Micro, nano, Emacs) \
+             then show under External editor. If Termux stays in the background when \
+             Corvane opens it, allow it \"Display over other apps\" in the system's settings."
                 .into(),
         ]
     };
@@ -2253,4 +2259,18 @@ fn android_ssh_key(cx: &App) -> AnyElement {
         let _ = cx;
         div().into_any_element()
     }
+}
+
+/// Select options with the launcher icon of the application each one stands
+/// for (`apps`, in the options' order): Android's editors and shells. No
+/// icons elsewhere.
+fn with_app_icons(options: Vec<SharedString>, apps: &[String]) -> Vec<SelectItem> {
+    options
+        .into_iter()
+        .enumerate()
+        .map(|(ix, label)| {
+            let icon = apps.get(ix).and_then(|app| crate::widgets::app_icon(app));
+            SelectItem::IconOption(label, icon)
+        })
+        .collect()
 }

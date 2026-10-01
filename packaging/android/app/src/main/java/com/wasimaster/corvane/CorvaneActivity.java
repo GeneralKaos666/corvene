@@ -768,17 +768,36 @@ public class CorvaneActivity extends NativeActivity {
 
     /** viewPath, always with the system's list of applications. */
     public static String choosePath(String path) {
-        return view(path, true, "");
+        return view(path, true, "", 0);
     }
 
     /** viewPath in one application: `component` is "package/class". */
     public static String viewPathWith(String path, String component) {
-        return view(path, false, component);
+        return view(path, false, component, 0);
+    }
+
+    /** viewPathWith, at a line (1-based) when the application can jump to one. */
+    public static String viewPathAt(String path, String component, int line) {
+        return view(path, false, component, line);
     }
 
     /**
-     * The applications that open a text file, one "label\tpackage/class" per
-     * line, sorted by label: the editors Options › Integrations offers.
+     * What the list of editors is asked with: a plain text file and the
+     * source files that the editors of one language register for only
+     * (Pydroid, Cxxdroid and Jvdroid match their own types and extensions).
+     */
+    private static final String[][] EDITOR_PROBES = {
+        {"a.txt", "text/plain"}, {"a.md", "text/markdown"}, {"a.py", "text/x-python"},
+        {"a.c", "text/x-csrc"}, {"a.cpp", "text/x-c++src"}, {"a.h", "text/x-chdr"},
+        {"a.java", "text/x-java"}, {"a.js", "application/javascript"},
+        {"a.json", "application/json"}, {"a.sh", "application/x-sh"},
+    };
+
+    /**
+     * The applications that edit or open a text or source file, one
+     * "label\tpackage/class" per line, sorted by label: the editors
+     * Options › Integrations offers. Termux is left out: it copies the file
+     * it is given into its own storage and edits the copy.
      */
     public static String viewApps() {
         final CorvaneActivity activity = instance;
@@ -786,23 +805,33 @@ public class CorvaneActivity extends NativeActivity {
             return "";
         }
         PackageManager manager = activity.getPackageManager();
-        Intent intent = new Intent(Intent.ACTION_VIEW).setDataAndType(
-                DocumentsContract.buildDocumentUri(
-                        activity.getPackageName() + ".documents", "repositories/a.txt"),
-                "text/plain");
         java.util.TreeMap<String, String> apps = new java.util.TreeMap<>();
-        for (android.content.pm.ResolveInfo info
-                : manager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)) {
-            if (info.activityInfo == null
-                    || activity.getPackageName().equals(info.activityInfo.packageName)) {
-                continue;
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        for (String[] probe : EDITOR_PROBES) {
+            Uri uri = DocumentsContract.buildDocumentUri(
+                    activity.getPackageName() + ".documents", "repositories/" + probe[0]);
+            for (String action : new String[] {Intent.ACTION_EDIT, Intent.ACTION_VIEW}) {
+                Intent intent = new Intent(action).setDataAndType(uri, probe[1]);
+                for (android.content.pm.ResolveInfo info : manager.queryIntentActivities(
+                        intent, PackageManager.MATCH_DEFAULT_ONLY)) {
+                    if (info.activityInfo == null
+                            || activity.getPackageName().equals(info.activityInfo.packageName)
+                            || TERMUX.equals(info.activityInfo.packageName)) {
+                        continue;
+                    }
+                    String component =
+                            info.activityInfo.packageName + "/" + info.activityInfo.name;
+                    if (!seen.add(component)) {
+                        continue;
+                    }
+                    String label = String.valueOf(info.loadLabel(manager)).replace('\t', ' ')
+                            .replace('\n', ' ');
+                    // two activities with one label: tell them apart by package
+                    apps.put(apps.containsKey(label)
+                            ? label + " (" + info.activityInfo.packageName + ")" : label,
+                            component);
+                }
             }
-            String label = String.valueOf(info.loadLabel(manager)).replace('\t', ' ')
-                    .replace('\n', ' ');
-            String component = info.activityInfo.packageName + "/" + info.activityInfo.name;
-            // two activities with one label: tell them apart by package
-            apps.put(apps.containsKey(label)
-                    ? label + " (" + info.activityInfo.packageName + ")" : label, component);
         }
         StringBuilder lines = new StringBuilder();
         for (java.util.Map.Entry<String, String> app : apps.entrySet()) {
@@ -812,16 +841,56 @@ public class CorvaneActivity extends NativeActivity {
     }
 
     /**
+     * The launcher icon of an application ("package") or of one activity
+     * ("package/class") as a PNG file in the cache, for the menus that list
+     * applications. Returns its path, empty when there is no such
+     * application.
+     */
+    public static String appIcon(String key) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "";
+        }
+        PackageManager manager = activity.getPackageManager();
+        try {
+            android.graphics.drawable.Drawable icon = key.indexOf('/') < 0
+                    ? manager.getApplicationIcon(key)
+                    : manager.getActivityIcon(
+                            android.content.ComponentName.unflattenFromString(key));
+            // 16 px in the menu at up to four device pixels each
+            final int size = 64;
+            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
+                    size, size, android.graphics.Bitmap.Config.ARGB_8888);
+            icon.setBounds(0, 0, size, size);
+            icon.draw(new android.graphics.Canvas(bitmap));
+            File directory = new File(activity.getCacheDir(), "app-icons");
+            directory.mkdirs();
+            File file = new File(directory, key.replace('/', '_') + ".png");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+            }
+            bitmap.recycle();
+            return file.getPath();
+        } catch (PackageManager.NameNotFoundException | java.io.IOException
+                | RuntimeException e) {
+            return "";
+        }
+    }
+
+    /**
      * Opens a file in the application the user picks for it and a folder in
      * the file manager. Other applications cannot read Corvane's storage, so
      * the intent carries a document of CorvaneDocumentsProvider with a grant
      * to read and write it. Returns an error message, empty when it worked.
      */
     public static String viewPath(String path) {
-        return view(path, false, "");
+        return view(path, false, "", 0);
     }
 
-    private static String view(String path, boolean chooser, String component) {
+    /** Markor's `Document.EXTRA_FILE_LINE_NUMBER`: the line to show, from 0. */
+    private static final String EXTRA_LINE = "EXTRA_FILE_LINE_NUMBER";
+
+    private static String view(String path, boolean chooser, String component, int line) {
         final CorvaneActivity activity = instance;
         if (activity == null) {
             return "Corvane is not open.";
@@ -844,8 +913,32 @@ public class CorvaneActivity extends NativeActivity {
             Uri uri = DocumentsContract.buildDocumentUri(
                     activity.getPackageName() + ".documents", id);
             intent.setDataAndType(uri, mimeType(file));
-            if (!component.isEmpty()) {
-                intent.setComponent(android.content.ComponentName.unflattenFromString(component));
+            android.content.ComponentName name = component.isEmpty()
+                    ? null : android.content.ComponentName.unflattenFromString(component);
+            if (name != null) {
+                // The application's own filters decide: it edits the file
+                // when it says it can, else views it. One that takes neither
+                // for this type of file (an editor of one language given
+                // another's) would be refused the intent, so the system's
+                // list of applications is shown instead.
+                PackageManager manager = activity.getPackageManager();
+                String action = null;
+                for (String candidate : new String[] {Intent.ACTION_EDIT, Intent.ACTION_VIEW}) {
+                    Intent probe = new Intent(candidate)
+                            .setDataAndType(uri, intent.getType()).setPackage(name.getPackageName());
+                    if (!manager.queryIntentActivities(probe, 0).isEmpty()) {
+                        action = candidate;
+                        break;
+                    }
+                }
+                if (action == null) {
+                    chooser = true;
+                } else {
+                    intent.setAction(action).setComponent(name);
+                    if (line > 0) {
+                        intent.putExtra(EXTRA_LINE, line - 1);
+                    }
+                }
             }
         }
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -948,6 +1041,107 @@ public class CorvaneActivity extends NativeActivity {
         } catch (RuntimeException e) {
             return "Could not reach Termux: " + e.getMessage();
         }
+    }
+
+    /**
+     * Runs `program` (a name in Termux's bin directory) with `arguments`
+     * (one per line) in a new Termux session in `directory`, like openTermux.
+     */
+    public static String runTermux(String program, String arguments, String directory) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "Corvane is not open.";
+        }
+        if (activity.checkSelfPermission(TERMUX_PERMISSION)
+                != PackageManager.PERMISSION_GRANTED) {
+            activity.runOnUiThread(() -> activity.requestPermissions(
+                    new String[] {TERMUX_PERMISSION}, REQUEST_TERMUX));
+            return "Allow Corvane to run commands in Termux, then try again.";
+        }
+        Intent intent = new Intent("com.termux.RUN_COMMAND")
+                .setClassName(TERMUX, "com.termux.app.RunCommandService")
+                .putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_BIN + program)
+                .putExtra("com.termux.RUN_COMMAND_ARGUMENTS",
+                        arguments.isEmpty() ? new String[0] : arguments.split("\n"))
+                .putExtra("com.termux.RUN_COMMAND_WORKDIR", directory)
+                .putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
+                .putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0");
+        try {
+            activity.startService(intent);
+            return "";
+        } catch (RuntimeException e) {
+            return "Could not reach Termux: " + e.getMessage();
+        }
+    }
+
+    private static final String TERMUX_BIN = "/data/data/com.termux/files/usr/bin/";
+    private static final String TERMUX_EDITORS = "termux_editors";
+    private static final String TERMUX_EDITORS_RESULT =
+            "com.wasimaster.corvane.TERMUX_EDITORS_RESULT";
+
+    /**
+     * Which of `candidates` (program names, separated by spaces) Termux has
+     * installed, one per line. Termux answers a background command through a
+     * PendingIntent, so this waits (never call it on the main thread) and
+     * remembers the answer for the times Termux does not give one: "?" when
+     * it never has (the permission or `allow-external-apps` is missing).
+     */
+    public static String termuxEditors(String candidates) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "?";
+        }
+        android.content.SharedPreferences preferences =
+                activity.getSharedPreferences(PREFERENCES, MODE_PRIVATE);
+        String known = preferences.getString(TERMUX_EDITORS, "?");
+        if (!candidates.matches("[a-z ]+") || Looper.myLooper() == Looper.getMainLooper()
+                || activity.checkSelfPermission(TERMUX_PERMISSION)
+                        != PackageManager.PERMISSION_GRANTED) {
+            return known;
+        }
+        final java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        final String[] found = {null};
+        android.content.BroadcastReceiver receiver = new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(android.content.Context context, Intent intent) {
+                android.os.Bundle result = intent.getBundleExtra("result");
+                if (result != null && result.getInt("exitCode", -1) == 0) {
+                    found[0] = String.valueOf(result.getString("stdout", "")).trim();
+                }
+                done.countDown();
+            }
+        };
+        android.content.IntentFilter filter = new android.content.IntentFilter(TERMUX_EDITORS_RESULT);
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            activity.registerReceiver(receiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            activity.registerReceiver(receiver, filter);
+        }
+        try {
+            // Termux fills the result in: the PendingIntent has to be mutable
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                    | (android.os.Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+            PendingIntent reply = PendingIntent.getBroadcast(activity, 0,
+                    new Intent(TERMUX_EDITORS_RESULT).setPackage(activity.getPackageName()), flags);
+            activity.startService(new Intent("com.termux.RUN_COMMAND")
+                    .setClassName(TERMUX, "com.termux.app.RunCommandService")
+                    .putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_BIN + "sh")
+                    .putExtra("com.termux.RUN_COMMAND_ARGUMENTS", new String[] {"-c",
+                            "for e in " + candidates
+                                    + "; do command -v $e >/dev/null && echo $e; done; true"})
+                    .putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
+                    .putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", reply));
+            done.await(2500, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (RuntimeException | InterruptedException e) {
+            Log.w("corvane", "termux editors: " + e);
+        } finally {
+            activity.unregisterReceiver(receiver);
+        }
+        if (found[0] == null) {
+            return known;
+        }
+        preferences.edit().putString(TERMUX_EDITORS, found[0]).apply();
+        return found[0];
     }
 
     // ── network operations ──────────────────────────────────────────────

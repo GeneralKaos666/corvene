@@ -335,6 +335,7 @@ fn entries(items: &[OwnedMenuItem], window: &mut Window, cx: &mut App) -> Vec<En
                     accelerator: None,
                     enabled: !menu.disabled,
                     checked: None,
+                    icon: None,
                     kind: EntryKind::Submenu(entries(&menu.items, window, cx)),
                 });
             }
@@ -366,6 +367,7 @@ fn entries(items: &[OwnedMenuItem], window: &mut Window, cx: &mut App) -> Vec<En
                     accelerator: accelerator.map(Into::into),
                     enabled: !disabled && available && ghd_enabled,
                     checked: checked.then_some(true),
+                    icon: None,
                     kind: EntryKind::Action(Rc::new(move |window, cx| {
                         window.dispatch_action(action.boxed_clone(), cx);
                     })),
@@ -672,7 +674,7 @@ impl Render for MenuBarShell {
                 }
             })
             .map(|shell| self.layout(shell, window, cx))
-            .children(Self::menus_in_window(cx))
+            .children(Self::menus_in_window(window, cx))
     }
 }
 
@@ -751,14 +753,14 @@ impl MenuBarShell {
 impl MenuBarShell {
     /// Android: the open menus, drawn over the page (an activity has no
     /// popup windows). Nothing elsewhere.
-    fn menus_in_window(cx: &App) -> Vec<AnyElement> {
+    fn menus_in_window(window: &Window, cx: &App) -> Vec<AnyElement> {
         #[cfg(any(target_os = "android", windows))]
         {
-            views_menu::overlay(cx)
+            views_menu::overlay(bar_origin().y + px(HEIGHT), window, cx)
         }
         #[cfg(not(any(target_os = "android", windows)))]
         {
-            let _ = cx;
+            let _ = (window, cx);
             Vec::new()
         }
     }

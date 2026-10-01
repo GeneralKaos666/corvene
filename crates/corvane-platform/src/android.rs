@@ -49,8 +49,13 @@ pub trait Bridge: Send + Sync {
     fn view_path(&self, path: &Path) -> Result<(), String>;
     /// The applications that open a text file: (label, "package/class").
     fn view_apps(&self) -> Vec<(String, String)>;
+    /// The launcher icon of the application `key` names ("package" or
+    /// "package/class") as PNG bytes.
+    fn app_icon(&self, key: &str) -> Option<Vec<u8>>;
     /// Opens a file in the application `component` names.
-    fn view_path_with(&self, path: &Path, component: &str) -> Result<(), String>;
+    /// `line` (1-based) reaches the applications that can jump to one.
+    fn view_path_with(&self, path: &Path, component: &str, line: Option<u32>)
+    -> Result<(), String>;
     /// Like [`Bridge::view_path`], always offering the choice of application.
     fn view_path_with_chooser(&self, path: &Path) -> Result<(), String>;
     /// Sends a file to another application through the share sheet
@@ -58,6 +63,13 @@ pub trait Bridge: Send + Sync {
     fn share_path(&self, path: &Path) -> Result<(), String>;
     /// Opens a Termux session in `dir` (Termux's `RUN_COMMAND` intent).
     fn open_termux(&self, dir: &Path) -> Result<(), String>;
+    /// Runs `program` (a name in Termux's `bin`) with `arguments` in a new
+    /// Termux session in `dir`.
+    fn run_termux(&self, program: &str, arguments: &[String], dir: &Path) -> Result<(), String>;
+    /// Which of `candidates` Termux has installed (it is asked with a
+    /// background command; blocks for a moment). `None` while Termux has
+    /// never answered: the user has not allowed its commands yet.
+    fn termux_programs(&self, candidates: &[&str]) -> Option<Vec<String>>;
     /// A network operation runs (or the last one ended): the activity keeps
     /// a foreground service while one does.
     fn transfer_active(&self, active: bool);

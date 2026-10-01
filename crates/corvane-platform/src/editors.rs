@@ -340,6 +340,98 @@ pub const SUGGESTED_EDITOR_URL: &str = "https://code.visualstudio.com";
 #[cfg(target_os = "android")]
 pub const ANDROID_EDITOR_NAME: &str = "Another App";
 
+/// Android: the terminal editors looked for in Termux (program, name). The
+/// installed ones are editors like the applications are, named
+/// "<name> (Termux)" with [`TERMUX_PREFIX`] and the program as `bundle_id`;
+/// they run in a new Termux session through its `RUN_COMMAND` intent, so
+/// only for files on shared storage (see `shells::android`).
+pub const TERMUX_EDITORS: &[(&str, &str)] = &[
+    ("nvim", "Neovim"),
+    ("vim", "Vim"),
+    ("hx", "Helix"),
+    ("micro", "Micro"),
+    ("nano", "nano"),
+    ("emacs", "Emacs"),
+];
+
+/// `bundle_id` of an editor that runs in Termux: this and its program.
+pub const TERMUX_PREFIX: &str = "termux:";
+
+/// The "program" of the entry that runs whatever `$EDITOR` names in the
+/// user's Termux shell (`vi` when it names nothing). Always offered: it
+/// needs no answer from Termux about what is installed.
+pub const TERMUX_DEFAULT_EDITOR: &str = "$EDITOR";
+
+/// `text` as one word of a POSIX (or fish) shell command.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+/// The program in Termux's `bin`, its arguments and the working directory
+/// that open `target` (a folder when `is_dir`) in the Termux editor
+/// `program`, at `line` when given.
+pub fn termux_command(
+    program: &str,
+    target: &Path,
+    is_dir: bool,
+    line: Option<u32>,
+) -> (String, Vec<String>, PathBuf) {
+    let dir = if is_dir {
+        target.to_path_buf()
+    } else {
+        target
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("/"))
+    };
+    let file = if is_dir {
+        ".".to_string()
+    } else {
+        target.to_string_lossy().into_owned()
+    };
+    let mut args = Vec::new();
+    match (program, line) {
+        // micro and nano take files only: in a folder they start empty
+        ("micro" | "nano", _) if is_dir => {}
+        ("hx", Some(line)) => args.push(format!("{file}:{line}")),
+        (_, Some(line)) => args.extend([format!("+{line}"), file]),
+        (_, None) => args.push(file),
+    }
+    if program != TERMUX_DEFAULT_EDITOR {
+        return (program.to_string(), args, dir);
+    }
+    // `login` starts the user's shell, which knows `$EDITOR` once it has
+    // read its startup files (`-i`: `.bashrc` and `.zshrc` are for
+    // interactive shells). The inner `sh` keeps the command the same for
+    // bash, zsh and fish.
+    let words: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
+    let command = format!(
+        "exec sh -c 'exec ${{EDITOR:-vi}} \"$@\"' sh {}",
+        words.join(" ")
+    );
+    (
+        "login".to_string(),
+        vec!["-i".to_string(), "-c".to_string(), command],
+        dir,
+    )
+}
+
+/// Android: the launcher icon (PNG) of the application an editor's
+/// `bundle_id` or a package name stands for. `None` elsewhere.
+pub fn app_icon(key: &str) -> Option<Vec<u8>> {
+    #[cfg(target_os = "android")]
+    if !key.is_empty() {
+        let key = if key.starts_with(TERMUX_PREFIX) {
+            crate::android::TERMUX_PACKAGE
+        } else {
+            key
+        };
+        return crate::android::bridge()?.app_icon(key);
+    }
+    let _ = key;
+    None
+}
+
 /// GHD `FoundEditor`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FoundEditor {
@@ -374,6 +466,23 @@ pub fn available_editors(extras: bool) -> Vec<FoundEditor> {
                 .into_iter()
                 .map(|(label, component)| app(label, component)),
         );
+        if bridge.package_installed(crate::android::TERMUX_PACKAGE) {
+            let programs: Vec<&str> = TERMUX_EDITORS.iter().map(|(program, _)| *program).collect();
+            let installed = bridge.termux_programs(&programs).unwrap_or_default();
+            let termux = |name: &str, program: &str| {
+                app(
+                    format!("{name} (Termux)"),
+                    format!("{TERMUX_PREFIX}{program}"),
+                )
+            };
+            editors.extend(
+                TERMUX_EDITORS
+                    .iter()
+                    .filter(|(program, _)| installed.iter().any(|i| i == program))
+                    .map(|(program, name)| termux(name, program)),
+            );
+            editors.push(termux(TERMUX_DEFAULT_EDITOR, TERMUX_DEFAULT_EDITOR));
+        }
         return editors;
     }
     // Windows: GHD's registry lookups, whose table already has the editors
@@ -461,15 +570,10 @@ pub fn launch(editor: &FoundEditor, target: &Path) -> Result<(), EditorError> {
     let launched = apps::open_with_app(&editor.path, target);
     #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let launched = apps::spawn_detached(&editor.path, &[&target.to_string_lossy()]);
-    // a folder goes to the file manager: editors take files
     #[cfg(target_os = "android")]
-    let launched = match crate::android::bridge() {
-        Some(bridge) if !editor.bundle_id.is_empty() && target.is_file() => bridge
-            .view_path_with(target, &editor.bundle_id)
-            .map_err(std::io::Error::other),
-        _ => crate::android::view_path(target),
-    };
-    launched.map_err(|err| EditorError {
+    return launch_android(editor, target, None);
+    #[cfg(not(target_os = "android"))]
+    return launched.map_err(|err| EditorError {
         message: if err.kind() == std::io::ErrorKind::PermissionDenied {
             format!(
                 "Corvane doesn't have the proper permissions to start '{}'. Please open {SETTINGS_LABEL} and try another editor.",
@@ -483,8 +587,51 @@ pub fn launch(editor: &FoundEditor, target: &Path) -> Result<(), EditorError> {
         },
         suggest_default_editor: false,
         open_preferences: true,
-    })
+    });
 }
+
+/// Android: a Termux editor runs in a new Termux session; an application
+/// gets the file (and the line, for those that read it) in an intent, and a
+/// folder goes to the file manager, because applications take files only.
+/// The message says what went wrong: there is no executable to blame.
+#[cfg(target_os = "android")]
+fn launch_android(
+    editor: &FoundEditor,
+    target: &Path,
+    line: Option<u32>,
+) -> Result<(), EditorError> {
+    let error = |message: String| EditorError {
+        message,
+        suggest_default_editor: false,
+        open_preferences: true,
+    };
+    let Some(bridge) = crate::android::bridge() else {
+        return Err(error("Corvane is not open.".to_string()));
+    };
+    if let Some(program) = editor.bundle_id.strip_prefix(TERMUX_PREFIX) {
+        if !crate::android::is_shared_storage(target) {
+            return Err(error(
+                "Termux cannot reach a repository in Corvane's private storage. \
+                 Clone or add it on shared storage (a folder under /storage/emulated/0, \
+                 with \"All files access\") to work on it in both."
+                    .to_string(),
+            ));
+        }
+        let (program, arguments, dir) = termux_command(program, target, target.is_dir(), line);
+        return bridge.run_termux(&program, &arguments, &dir).map_err(error);
+    }
+    if !editor.bundle_id.is_empty() && target.is_file() {
+        return bridge
+            .view_path_with(target, &editor.bundle_id, line)
+            .map_err(error);
+    }
+    bridge.view_path(target).map_err(error)
+}
+
+/// Android: the applications known to show the line an intent names
+/// (Markor's `EXTRA_FILE_LINE_NUMBER`), by package.
+#[cfg(target_os = "android")]
+const LINE_APPS: &[&str] = &["net.gsantner.markor"];
 
 /// How an editor's bundled command line tool opens a file at a line (not in
 /// GHD, which only opens files; desktop/desktop#14476).
@@ -573,19 +720,30 @@ fn line_command(editor: &FoundEditor, target: &Path, line: u32) -> Option<(PathB
 
 /// Whether `editor` can open a file at a line (see [`launch_at_line`]).
 pub fn supports_line(editor: &FoundEditor) -> bool {
+    #[cfg(target_os = "android")]
+    if editor.bundle_id.starts_with(TERMUX_PREFIX)
+        || LINE_APPS
+            .iter()
+            .any(|app| editor.bundle_id.split('/').next() == Some(app))
+    {
+        return true;
+    }
     line_tool(line_tool_key(editor)).is_some()
 }
 
 /// Open `target` at `line` through the editor's command line tool; editors
 /// without one (or a missing tool) open the file as [`launch`] does.
 pub fn launch_at_line(editor: &FoundEditor, target: &Path, line: u32) -> Result<(), EditorError> {
-    match line_command(editor, target, line) {
+    #[cfg(target_os = "android")]
+    return launch_android(editor, target, Some(line));
+    #[cfg(not(target_os = "android"))]
+    return match line_command(editor, target, line) {
         Some((program, args)) => {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             apps::spawn_detached(&program, &args).or_else(|_| launch(editor, target))
         }
         None => launch(editor, target),
-    }
+    };
 }
 
 /// GHD `openInExternalEditor` when nothing is installed.
@@ -616,6 +774,41 @@ mod tests {
                 path: "/Applications/Cursor.app".into(),
             },
         ]
+    }
+
+    #[test]
+    fn termux_commands() {
+        let file = Path::new("/storage/emulated/0/repo/src/it's.rs");
+        let dir = PathBuf::from("/storage/emulated/0/repo/src");
+        assert_eq!(
+            termux_command("nvim", file, false, Some(12)),
+            (
+                "nvim".into(),
+                vec!["+12".into(), file.to_string_lossy().into_owned()],
+                dir.clone()
+            )
+        );
+        assert_eq!(
+            termux_command("hx", file, false, Some(12)).1,
+            vec![format!("{}:12", file.display())]
+        );
+        assert_eq!(
+            termux_command("vim", &dir, true, None),
+            ("vim".into(), vec![".".into()], dir.clone())
+        );
+        assert!(termux_command("nano", &dir, true, None).1.is_empty());
+        let (program, args, _) = termux_command(TERMUX_DEFAULT_EDITOR, file, false, Some(3));
+        assert_eq!(program, "login");
+        assert_eq!(
+            args,
+            vec![
+                "-i".to_string(),
+                "-c".to_string(),
+                "exec sh -c 'exec ${EDITOR:-vi} \"$@\"' sh '+3' \
+                 '/storage/emulated/0/repo/src/it'\\''s.rs'"
+                    .to_string(),
+            ]
+        );
     }
 
     #[test]

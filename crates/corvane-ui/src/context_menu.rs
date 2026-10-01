@@ -74,6 +74,9 @@ pub struct MenuItem {
     pub kind: MenuItemKind,
     /// `type: 'checkbox'` items show a check mark column.
     pub checked: Option<bool>,
+    /// A 16 px picture in front of the label (Android's lists of
+    /// applications); only the menus drawn by `views_menu` show it.
+    pub icon: Option<std::sync::Arc<Image>>,
 }
 
 impl MenuItem {
@@ -86,6 +89,7 @@ impl MenuItem {
             enabled: true,
             kind: MenuItemKind::Action(Rc::new(action)),
             checked: None,
+            icon: None,
         }
     }
 
@@ -106,6 +110,7 @@ impl MenuItem {
             enabled: true,
             kind: MenuItemKind::Submenu(items),
             checked: None,
+            icon: None,
         }
     }
 
@@ -115,7 +120,13 @@ impl MenuItem {
             enabled: false,
             kind: MenuItemKind::Separator,
             checked: None,
+            icon: None,
         }
+    }
+
+    pub fn icon(mut self, icon: Option<std::sync::Arc<Image>>) -> Self {
+        self.icon = icon;
+        self
     }
 
     pub fn enabled(mut self, enabled: bool) -> Self {

@@ -2,6 +2,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui_kit::component::Sizable;
 use gpui_kit::component::input::{Input, InputState};
@@ -569,9 +570,36 @@ pub fn radio_row(
         .child(div().flex_1().min_w_0().text_size(FONT_SIZE()).child(label))
 }
 
+thread_local! {
+    /// [`app_icon`]'s answers: an image is decoded once.
+    static APP_ICONS: std::cell::RefCell<std::collections::HashMap<String, Option<Arc<Image>>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Android: the launcher icon of the application `key` names (a package, or
+/// "package/class" for one activity), for a list of applications. `None`
+/// elsewhere.
+pub fn app_icon(key: &str) -> Option<Arc<Image>> {
+    if !cfg!(target_os = "android") || key.is_empty() {
+        return None;
+    }
+    APP_ICONS.with(|icons| {
+        icons
+            .borrow_mut()
+            .entry(key.to_string())
+            .or_insert_with(|| {
+                corvane_platform::editors::app_icon(key)
+                    .map(|png| Arc::new(Image::from_bytes(ImageFormat::Png, png)))
+            })
+            .clone()
+    })
+}
+
 /// An entry of a `select_button_items` popup.
 pub enum SelectItem {
     Option(SharedString),
+    /// An option with a picture in front of its label ([`app_icon`]).
+    IconOption(SharedString, Option<Arc<Image>>),
     /// `<option disabled>────</option>`: a native menu separator.
     Separator,
 }
@@ -643,15 +671,20 @@ pub fn select_button_items(
                         .iter()
                         .map(|item| match item {
                             SelectItem::Separator => crate::context_menu::MenuItem::separator(),
-                            SelectItem::Option(label) => {
+                            SelectItem::Option(label) | SelectItem::IconOption(label, _) => {
                                 let on_select = on_select.clone();
                                 let ix = option_ix;
                                 option_ix += 1;
+                                let icon = match item {
+                                    SelectItem::IconOption(_, icon) => icon.clone(),
+                                    _ => None,
+                                };
                                 crate::context_menu::MenuItem::checkbox(
                                     label.clone(),
                                     selected == Some(ix),
                                     move |window, cx| on_select(ix, window, cx),
                                 )
+                                .icon(icon)
                             }
                         })
                         .collect();

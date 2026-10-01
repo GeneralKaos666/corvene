@@ -82,6 +82,10 @@ pub mod metrics {
     pub const ARROW_COLUMN: f32 = 24.;
     /// A check mark column in front of the labels of a menu with checkboxes.
     pub const CHECK_COLUMN: f32 = 24.;
+    /// A picture in front of the labels (`Entry::icon`) and the column it
+    /// takes in a menu that has any.
+    pub const ICON_SIZE: f32 = 16.;
+    pub const ICON_COLUMN: f32 = 24.;
     /// `MenuConfig::show_delay`: hovering a submenu item opens it after this.
     pub const SUBMENU_DELAY_MS: u64 = 400;
 }
@@ -412,6 +416,8 @@ pub struct Entry {
     pub accelerator: Option<SharedString>,
     pub enabled: bool,
     pub checked: Option<bool>,
+    /// A picture in front of the label (`MenuItem::icon`).
+    pub icon: Option<std::sync::Arc<Image>>,
     pub kind: EntryKind,
 }
 
@@ -423,6 +429,7 @@ impl Entry {
             accelerator: None,
             enabled: false,
             checked: None,
+            icon: None,
             kind: EntryKind::Separator,
         }
     }
@@ -445,6 +452,7 @@ impl Entry {
             accelerator: None,
             enabled: item.enabled,
             checked: item.checked,
+            icon: item.icon.clone(),
             kind: match &item.kind {
                 MenuItemKind::Separator => EntryKind::Separator,
                 MenuItemKind::Action(action) => EntryKind::Action(action.clone()),
@@ -718,7 +726,10 @@ fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
         let width = (s.label_start + row_max + s.trailing).ceil();
         return (row_tops, size(px(width), px(y + s.bottom_inset)));
     }
-    let label_start = s.label_start + if has_check { s.check_column } else { 0. };
+    let has_icon = entries.iter().any(|e| e.icon.is_some());
+    let label_start = s.label_start
+        + if has_check { s.check_column } else { 0. }
+        + if has_icon { metrics::ICON_COLUMN } else { 0. };
     let minor = if minor_max > 0. {
         minor_max + s.accelerator_padding
     } else {
@@ -901,11 +912,47 @@ fn place(anchor: Anchor, menu_size: Size<Pixels>, window: &Window) -> Point<Pixe
 /// Android: the open levels as overlays for the window's root
 /// (`menu_bar::MenuBarShell`), topmost last.
 #[cfg(any(target_os = "android", windows))]
-pub fn overlay(cx: &App) -> Vec<AnyElement> {
+pub fn overlay(bar_bottom: Pixels, window: &Window, cx: &App) -> Vec<AnyElement> {
     let Some(session) = cx.try_global::<Menus>().and_then(|m| m.session.as_ref()) else {
         return Vec::new();
     };
-    session
+    // Android: a press outside the menus closes them. The shell's own
+    // listener does not hear one on a dialog or a foldout (they occlude
+    // it), so a sheet under the menus takes it: the whole window, less the
+    // menu bar when the menu is one of its own (a press there opens the
+    // next menu).
+    #[cfg(target_os = "android")]
+    let backdrop = {
+        let top = match session.source {
+            Source::Context => px(0.),
+            Source::MenuBar(_) => bar_bottom,
+        };
+        let viewport = window.viewport_size();
+        Some(
+            deferred(
+                anchored().position(point(px(0.), top)).child(
+                    div()
+                        .id("views-menu-backdrop")
+                        .w(viewport.width)
+                        .h(viewport.height - top)
+                        .occlude()
+                        .child(crate::widgets::touch_drag_occluder())
+                        .on_any_mouse_down(|_, _, cx| {
+                            cx.stop_propagation();
+                            close_all(cx);
+                        }),
+                ),
+            )
+            .with_priority(999)
+            .into_any_element(),
+        )
+    };
+    #[cfg(not(target_os = "android"))]
+    let backdrop = {
+        let _ = (bar_bottom, window);
+        None
+    };
+    let levels = session
         .levels
         .iter()
         .enumerate()
@@ -942,8 +989,8 @@ pub fn overlay(cx: &App) -> Vec<AnyElement> {
             )
             .with_priority(1000 + index)
             .into_any_element()
-        })
-        .collect()
+        });
+    backdrop.into_iter().chain(levels).collect()
 }
 
 /// Whether a level is drawn in its owner's window ([`overlay`]) rather than
@@ -1451,7 +1498,9 @@ impl Render for MenuLevelView {
             return div().id("views-menu");
         };
         let has_check = entries.iter().any(|e| e.checked.is_some());
-        let label_start = s.label_start + if has_check { s.check_column } else { 0. };
+        let icon_start = s.label_start + if has_check { s.check_column } else { 0. };
+        let has_icon = entries.iter().any(|e| e.icon.is_some());
+        let label_start = icon_start + if has_icon { metrics::ICON_COLUMN } else { 0. };
         let keyboard = opened_from_keyboard(cx);
         let rows = entries.into_iter().enumerate().map(move |(ix, entry)| {
             if entry.is_separator() {
@@ -1514,6 +1563,16 @@ impl Render for MenuLevelView {
                                     .h(px(16.))
                                     .text_color(text),
                             ),
+                    )
+                })
+                .when_some(entry.icon.clone(), |d, icon| {
+                    d.child(
+                        img(icon)
+                            .absolute()
+                            .left(px(icon_start))
+                            .top(px((s.item_height - metrics::ICON_SIZE) / 2.))
+                            .size(px(metrics::ICON_SIZE))
+                            .when(!entry.enabled, |i| i.opacity(0.5)),
                     )
                 })
                 .child(
@@ -1826,6 +1885,7 @@ mod tests {
             accelerator: None,
             enabled,
             checked: None,
+            icon: None,
             kind: EntryKind::Action(Rc::new(|_, _| {})),
         }
     }

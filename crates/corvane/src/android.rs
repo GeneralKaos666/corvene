@@ -443,7 +443,32 @@ impl corvane_platform::android::Bridge for ActivityBridge {
         .collect()
     }
 
-    fn view_path_with(&self, path: &Path, component: &str) -> Result<(), String> {
+    fn app_icon(&self, key: &str) -> Option<Vec<u8>> {
+        let path = gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let key = env.new_string(key).map_err(|err| err.to_string())?;
+            let path = env
+                .call_static_method(
+                    &class,
+                    jni::jni_str!("appIcon"),
+                    jni::jni_sig!("(Ljava/lang/String;)Ljava/lang/String;"),
+                    &[jni::objects::JValue::Object(&key)],
+                )
+                .and_then(|value| value.l())
+                .map_err(|err| err.to_string())?;
+            Ok(gpui_android::jni::get_string(env, &path))
+        })
+        .ok()
+        .filter(|path| !path.is_empty())?;
+        std::fs::read(path).ok()
+    }
+
+    fn view_path_with(
+        &self,
+        path: &Path,
+        component: &str,
+        line: Option<u32>,
+    ) -> Result<(), String> {
         gpui_android::jni::with_env(|env| {
             let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
             let path = env
@@ -453,11 +478,12 @@ impl corvane_platform::android::Bridge for ActivityBridge {
             let message = env
                 .call_static_method(
                     &class,
-                    jni::jni_str!("viewPathWith"),
-                    jni::jni_sig!("(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"),
+                    jni::jni_str!("viewPathAt"),
+                    jni::jni_sig!("(Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/String;"),
                     &[
                         jni::objects::JValue::Object(&path),
                         jni::objects::JValue::Object(&component),
+                        jni::objects::JValue::Int(line.unwrap_or(0) as i32),
                     ],
                 )
                 .and_then(|value| value.l())
@@ -483,6 +509,58 @@ impl corvane_platform::android::Bridge for ActivityBridge {
 
     fn open_termux(&self, dir: &Path) -> Result<(), String> {
         activity_result!("openTermux", &dir.to_string_lossy())
+    }
+
+    fn run_termux(&self, program: &str, arguments: &[String], dir: &Path) -> Result<(), String> {
+        let arguments = arguments.join("\n");
+        let dir = dir.to_string_lossy();
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let strings = [
+                env.new_string(program).map_err(|err| err.to_string())?,
+                env.new_string(&arguments).map_err(|err| err.to_string())?,
+                env.new_string(&*dir).map_err(|err| err.to_string())?,
+            ];
+            let args: Vec<jni::objects::JValue> = strings
+                .iter()
+                .map(|s| jni::objects::JValue::Object(s))
+                .collect();
+            let message = env
+                .call_static_method(
+                    &class,
+                    jni::jni_str!("runTermux"),
+                    jni::jni_sig!(
+                        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"
+                    ),
+                    &args,
+                )
+                .and_then(|value| value.l())
+                .map_err(|err| err.to_string())?;
+            Ok(gpui_android::jni::get_string(env, &message))
+        })
+        .and_then(|message| {
+            if message.is_empty() {
+                Ok(())
+            } else {
+                Err(message)
+            }
+        })
+    }
+
+    fn termux_programs(&self, candidates: &[&str]) -> Option<Vec<String>> {
+        let found: Result<(), String> = activity_result!("termuxEditors", &candidates.join(" "));
+        // the method's "error message" is its answer
+        let found = match found {
+            Ok(()) => String::new(),
+            Err(found) => found,
+        };
+        (found != "?").then(|| {
+            found
+                .lines()
+                .filter(|line| candidates.contains(line))
+                .map(str::to_string)
+                .collect()
+        })
     }
 
     fn transfer_active(&self, active: bool) {
