@@ -38,6 +38,47 @@ use super::{
 /// Frames are paced to this interval; presentation itself waits for vsync.
 const FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
 
+/// Frame timings, logged at debug level once a hundred frames are counted:
+/// how long `window.frame()` took and how far apart frames started while
+/// they followed each other.
+#[derive(Default)]
+struct FrameStats {
+    frames: u32,
+    draw_total: Duration,
+    draw_max: Duration,
+    gaps: u32,
+    gap_total: Duration,
+    gap_max: Duration,
+}
+
+impl FrameStats {
+    fn record(&mut self, gap: Option<Duration>, draw: Duration) {
+        self.frames += 1;
+        self.draw_total += draw;
+        self.draw_max = self.draw_max.max(draw);
+        // a longer gap is a pause between animations, not a slow frame
+        if let Some(gap) = gap.filter(|gap| *gap < Duration::from_millis(100)) {
+            self.gaps += 1;
+            self.gap_total += gap;
+            self.gap_max = self.gap_max.max(gap);
+        }
+        if self.frames == 100 {
+            log::debug!(
+                "100 frames: draw avg {:.1} ms max {:.1} ms, interval avg {:.1} ms max {:.1} ms",
+                self.draw_total.as_secs_f32() * 10.0,
+                self.draw_max.as_secs_f32() * 1000.0,
+                self.gap_total.as_secs_f32() * 1000.0 / self.gaps.max(1) as f32,
+                self.gap_max.as_secs_f32() * 1000.0,
+            );
+            *self = Self::default();
+        }
+    }
+}
+
+thread_local! {
+    static FRAME_STATS: std::cell::RefCell<FrameStats> = std::cell::RefCell::new(FrameStats::default());
+}
+
 /// What one mouse wheel notch scrolls, in logical pixels
 /// (`ViewConfiguration.getScaledVerticalScrollFactor()` is 64 dp).
 const WHEEL_NOTCH: f32 = 64.0;
@@ -132,8 +173,11 @@ impl AndroidPlatform {
             if let Some(window) = self.window() {
                 let due = last_frame.is_none_or(|last| last.elapsed() >= FRAME_INTERVAL);
                 if window.wants_frame() && due {
-                    last_frame = Some(Instant::now());
+                    let start = Instant::now();
+                    let gap = last_frame.map(|last| start - last);
+                    last_frame = Some(start);
                     window.frame();
+                    FRAME_STATS.with(|stats| stats.borrow_mut().record(gap, start.elapsed()));
                 }
             }
         }
