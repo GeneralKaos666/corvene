@@ -130,7 +130,7 @@ impl AndroidPlatform {
 
     /// The scale factor the configuration's density asks for.
     pub(crate) fn scale_factor(&self) -> f32 {
-        scale_factor_for_density(self.app.config().density())
+        scale_factor_for_density(super::jni::density_dpi().or(self.app.config().density()))
     }
 
     pub(crate) fn appearance(&self) -> WindowAppearance {

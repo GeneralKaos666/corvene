@@ -142,6 +142,40 @@ fn system_service<'local>(
     Ok(service)
 }
 
+/// The activity's current density (`getResources().getDisplayMetrics()
+/// .densityDpi`). `AndroidApp::config` reads the application's resources,
+/// which keep the density the process started with when the display size
+/// setting changes while it runs.
+pub(crate) fn density_dpi() -> Option<u32> {
+    with_env(|env| {
+        let activity = activity(env)?;
+        let resources = env
+            .call_method(
+                &activity,
+                jni::jni_str!("getResources"),
+                jni::jni_sig!("()Landroid/content/res/Resources;"),
+                &[],
+            )
+            .and_then(|value| value.l())
+            .e()?;
+        let metrics = env
+            .call_method(
+                &resources,
+                jni::jni_str!("getDisplayMetrics"),
+                jni::jni_sig!("()Landroid/util/DisplayMetrics;"),
+                &[],
+            )
+            .and_then(|value| value.l())
+            .e()?;
+        env.get_field(&metrics, jni::jni_str!("densityDpi"), jni::jni_sig!("I"))
+            .and_then(|value| value.i())
+            .e()
+    })
+    .ok()
+    .and_then(|dpi| u32::try_from(dpi).ok())
+    .filter(|dpi| *dpi > 0)
+}
+
 /// The text on the clipboard (`ClipboardManager.getPrimaryClip`), which
 /// Android only shows to the focused application.
 pub(crate) fn clipboard_text() -> Option<String> {
