@@ -275,13 +275,9 @@ impl Platform for AndroidPlatform {
 
     fn prompt_for_paths(
         &self,
-        _options: PathPromptOptions,
+        options: PathPromptOptions,
     ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
-        // Android's pickers return content URIs, not paths; applications
-        // call the Storage Access Framework themselves
-        let (tx, rx) = oneshot::channel();
-        tx.send(Ok(None)).ok();
-        rx
+        super::activity_events::prompt_for_paths(options)
     }
 
     fn prompt_for_new_path(

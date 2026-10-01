@@ -40,7 +40,9 @@ mod android {
 
 use std::rc::Rc;
 
-pub use android::activity_events::{post, set_soft_keyboard_handler, ActivityEvent};
+pub use android::activity_events::{
+    post, set_path_prompt_handler, set_soft_keyboard_handler, ActivityEvent, PathPromptReply,
+};
 pub use android::display::AndroidDisplay;
 pub use android::init_logger;
 pub use android::jni;

@@ -85,3 +85,44 @@ pub(crate) fn show_soft_keyboard(show: bool) {
         }
     }
 }
+
+/// Answers a folder or file prompt: the picked path, or `None` when the user
+/// cancelled or nothing usable was picked.
+pub type PathPromptReply = Box<dyn FnOnce(Option<std::path::PathBuf>) + Send>;
+
+type PathPromptHandler = Box<dyn Fn(gpui::PathPromptOptions, PathPromptReply) + Send + Sync>;
+
+static PATH_PROMPT: Mutex<Option<PathPromptHandler>> = Mutex::new(None);
+
+/// Lets the application answer `Platform::prompt_for_paths`. Android's
+/// pickers return content URIs, not paths, and what a picked document may be
+/// used for is the application's business. Without a handler every prompt
+/// answers `None`.
+pub fn set_path_prompt_handler(
+    handler: impl Fn(gpui::PathPromptOptions, PathPromptReply) + Send + Sync + 'static,
+) {
+    *PATH_PROMPT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(handler));
+}
+
+pub(crate) fn prompt_for_paths(
+    options: gpui::PathPromptOptions,
+) -> futures::channel::oneshot::Receiver<anyhow::Result<Option<Vec<std::path::PathBuf>>>> {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    let handler = PATH_PROMPT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match handler.as_ref() {
+        Some(handler) => handler(
+            options,
+            Box::new(move |path| {
+                tx.send(Ok(path.map(|path| vec![path]))).ok();
+            }),
+        ),
+        None => {
+            tx.send(Ok(None)).ok();
+        }
+    }
+    rx
+}
