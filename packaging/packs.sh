@@ -38,6 +38,8 @@ RELEASE_BASE="${RELEASE_BASE:-https://github.com/wasi-master/corvane/releases/do
 PACKS="${PACKS:-syntax-extended tree-sitter-all tree-sitter-rest}"
 
 mkdir -p "$OUT"
+# absolute: the archives are written from inside the work directories
+OUT="$(cd "$OUT" && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 ENTRIES="$WORK/entries.jsonl"
