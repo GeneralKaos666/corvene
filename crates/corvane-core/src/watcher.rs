@@ -40,7 +40,9 @@ pub fn watch(
 ) -> anyhow::Result<(RepoWatcher, async_channel::Receiver<Instant>)> {
     let (raw_tx, raw_rx) = mpsc::channel::<Vec<PathBuf>>();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(event) = res {
+        if let Ok(event) = res
+            && !is_open(&event.kind)
+        {
             let _ = raw_tx.send(event.paths);
         }
     })?;
@@ -90,6 +92,16 @@ pub fn watch(
         })?;
 
     Ok((RepoWatcher { _watcher: watcher }, rx))
+}
+
+/// inotify also reports files being opened (FSEvents never does): git reading
+/// `.git/HEAD` during a refresh would ask for the next refresh, without end.
+/// A finished write still arrives as `Access(Close(Write))`.
+fn is_open(kind: &notify::EventKind) -> bool {
+    matches!(
+        kind,
+        notify::EventKind::Access(notify::event::AccessKind::Open(_))
+    )
 }
 
 /// Relevance with the repository's ignore rules: [`is_relevant`] for `.git/`,
@@ -315,6 +327,46 @@ mod tests {
             .await
         });
         assert!(!got, "writes under an ignored directory must not refresh");
+    }
+
+    #[test]
+    fn open_events_are_dropped() {
+        use notify::EventKind;
+        use notify::event::{AccessKind, AccessMode, DataChange, ModifyKind};
+        assert!(is_open(&EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(!is_open(&EventKind::Access(AccessKind::Close(
+            AccessMode::Write
+        ))));
+        assert!(!is_open(&EventKind::Modify(ModifyKind::Data(
+            DataChange::Any
+        ))));
+    }
+
+    #[test]
+    fn quiet_on_read() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let (_watcher, rx) =
+            watch(dir.path().to_path_buf(), Duration::from_millis(100), false).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        // what a refresh does: git reads HEAD, the refs and worktree files
+        std::fs::read(dir.path().join(".git/HEAD")).unwrap();
+        std::fs::read_dir(dir.path().join(".git/refs"))
+            .unwrap()
+            .count();
+        std::fs::read(dir.path().join("a.txt")).unwrap();
+        let got = smol::block_on(async {
+            smol::future::or(async { rx.recv().await.is_ok() }, async {
+                smol::Timer::after(Duration::from_millis(1500)).await;
+                false
+            })
+            .await
+        });
+        assert!(!got, "reading files must not refresh");
     }
 
     #[test]
