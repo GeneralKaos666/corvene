@@ -352,6 +352,10 @@ impl Render for AddExistingRepositoryDialog {
                                 ),
                         ),
                 )
+                .children(crate::widgets::android_storage_note(
+                    crate::widgets::StorageNote::AddLocal,
+                    cx,
+                ))
                 .children(error)
                 .when(alias_field, |d| {
                     d.child(labeled(

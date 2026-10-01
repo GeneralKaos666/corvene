@@ -332,6 +332,10 @@ impl Render for CreateRepositoryDialog {
                             ),
                         ),
                 )
+                .children(crate::widgets::android_storage_note(
+                    crate::widgets::StorageNote::NewRepository,
+                    cx,
+                ))
                 .when(in_folder_option, |d| {
                     let weak = cx.weak_entity();
                     d.child(crate::widgets::checkbox_row(

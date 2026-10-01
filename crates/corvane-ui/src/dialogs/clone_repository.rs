@@ -606,6 +606,13 @@ impl CloneRepositoryDialog {
             .flex()
             .flex_col()
             .child(self.path_field(window, cx))
+            .children(
+                crate::widgets::android_storage_note(
+                    crate::widgets::StorageNote::NewRepository,
+                    cx,
+                )
+                .map(|note| div().mt(SPACING()).child(note)),
+            )
             .children(add_existing)
             .when(
                 self.state
