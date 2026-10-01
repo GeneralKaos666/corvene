@@ -174,6 +174,17 @@ impl Dispatcher {
     /// keeps the device flow, as its secret lives in the keychain.
     pub fn browser_sign_in_first(endpoint: &corvane_github::Endpoint, cx: &App) -> bool {
         match Self::state(cx).read(cx).flags.text(ids::SIGN_IN_FLOW) {
+            // Android: a build without the client secret cannot finish the
+            // browser flow on GitHub.com, and a phone has no terminal to
+            // find out why; the one-time code works. The browser flow stays
+            // one link away in the dialog.
+            "browser"
+                if cfg!(target_os = "android")
+                    && endpoint.is_dotcom()
+                    && corvane_github::CLIENT_SECRET.is_none() =>
+            {
+                false
+            }
             "browser" => true,
             "auto" => endpoint.is_dotcom() && corvane_github::CLIENT_SECRET.is_some(),
             _ => false,
