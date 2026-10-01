@@ -26,6 +26,7 @@ mod android {
     pub mod jni;
     pub mod keyboard;
     pub(crate) mod platform;
+    pub(crate) mod vsync;
     pub(crate) mod window;
 
     /// Routes `log` to logcat; later calls do nothing.

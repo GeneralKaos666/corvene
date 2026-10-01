@@ -35,8 +35,14 @@ use super::{
     window::AndroidWindow,
 };
 
-/// Frames are paced to this interval; presentation itself waits for vsync.
+/// Without a choreographer, frames are paced to this interval; presentation
+/// itself waits for vsync.
 const FRAME_INTERVAL: Duration = Duration::from_micros(16_667);
+
+/// With a choreographer, a frame that is wanted is drawn at the next refresh
+/// tick; should no tick arrive (the display is off, the choreographer
+/// stalls) it is drawn after this long anyway.
+const TICK_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// Frame timings, logged at debug level once a hundred frames are counted:
 /// how long `window.frame()` took and how far apart frames started while
@@ -107,6 +113,12 @@ impl AndroidPlatform {
         let app = self.app.clone();
         let mut commands = Vec::new();
         let mut last_frame: Option<Instant> = None;
+        let vsync = super::vsync::Vsync::start(self.waker.clone());
+        if vsync.is_none() {
+            log::warn!("no choreographer: frames are paced by a timer");
+        }
+        // when the frame that is wanted now was first wanted
+        let mut wanted_since: Option<Instant> = None;
 
         while !self.should_quit.get() {
             // run what is already queued before deciding how long to sleep
@@ -116,11 +128,17 @@ impl AndroidPlatform {
             }
 
             let frame = match self.window() {
-                Some(window) if window.wants_frame() => {
-                    Some(last_frame.map_or(Duration::ZERO, |last| {
+                Some(window) if window.wants_frame() => match &vsync {
+                    // the tick wakes the loop; the timeout is the fallback
+                    Some(vsync) => {
+                        vsync.request();
+                        let since = *wanted_since.get_or_insert_with(Instant::now);
+                        Some(TICK_TIMEOUT.saturating_sub(since.elapsed()))
+                    }
+                    None => Some(last_frame.map_or(Duration::ZERO, |last| {
                         FRAME_INTERVAL.saturating_sub(last.elapsed())
-                    }))
-                }
+                    })),
+                },
                 _ => None,
             };
             let long_press = self
@@ -171,8 +189,15 @@ impl AndroidPlatform {
             self.run_foreground_tasks();
 
             if let Some(window) = self.window() {
-                let due = last_frame.is_none_or(|last| last.elapsed() >= FRAME_INTERVAL);
+                let due = match &vsync {
+                    Some(vsync) => {
+                        vsync.take_tick()
+                            || wanted_since.is_some_and(|since| since.elapsed() >= TICK_TIMEOUT)
+                    }
+                    None => last_frame.is_none_or(|last| last.elapsed() >= FRAME_INTERVAL),
+                };
                 if window.wants_frame() && due {
+                    wanted_since = None;
                     let start = Instant::now();
                     let gap = last_frame.map(|last| start - last);
                     last_frame = Some(start);
