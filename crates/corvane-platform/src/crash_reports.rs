@@ -45,7 +45,14 @@ pub fn diagnostic_reports_dir() -> PathBuf {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("Library/Logs/DiagnosticReports")
     }
-    #[cfg(not(target_os = "macos"))]
+    // Windows Error Reporting's per-user dumps
+    #[cfg(windows)]
+    {
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("CrashDumps")
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         PathBuf::from("/var/crash")
     }
@@ -170,7 +177,24 @@ pub fn os_version() -> String {
 }
 
 /// `Ubuntu 24.04.1 LTS (x86_64)` from `/etc/os-release` (`PRETTY_NAME`).
-#[cfg(not(target_os = "macos"))]
+/// `Windows 10.0.26200 (x86_64)` from the registry (Windows 11 still calls
+/// itself 10.0; the build number tells them apart).
+#[cfg(windows)]
+pub fn os_version() -> String {
+    let key = windows_registry::LOCAL_MACHINE.open(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let version = key.ok().and_then(|key| {
+        let major = key.get_u32("CurrentMajorVersionNumber").ok()?;
+        let minor = key.get_u32("CurrentMinorVersionNumber").ok()?;
+        let build = key.get_string("CurrentBuild").ok()?;
+        Some(format!("{major}.{minor}.{build}"))
+    });
+    match version {
+        Some(version) => format!("Windows {version} ({})", std::env::consts::ARCH),
+        None => format!("Windows ({})", std::env::consts::ARCH),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn os_version() -> String {
     let name = std::fs::read_to_string("/etc/os-release")
         .ok()

@@ -26,7 +26,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::popup::{PopupAnchor, PopupGravity};
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", windows)))]
 use gpui_kit::popup::{PopupConstraintAdjustment, PopupOptions};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -40,7 +40,11 @@ pub mod metrics {
     pub const FONT_SIZE: f32 = 13.333 + 1.;
     /// The menu bar's buttons use the UI font as is (10 pt at 96 dpi,
     /// rounded to whole pixels).
+    #[cfg(not(windows))]
     pub const BAR_FONT_SIZE: f32 = 13.;
+    /// Windows: GitHub Desktop's own menu bar, in its `--font-size`.
+    #[cfg(windows)]
+    pub const BAR_FONT_SIZE: f32 = 12.;
     pub const ITEM_HEIGHT: f32 = 32.;
     pub const SEPARATOR_HEIGHT: f32 = 17.;
     /// Where the separator's 1 px rule sits inside its 17 px.
@@ -80,6 +84,130 @@ pub mod metrics {
     pub const CHECK_COLUMN: f32 = 24.;
     /// `MenuConfig::show_delay`: hovering a submenu item opens it after this.
     pub const SUBMENU_DELAY_MS: u64 = 400;
+}
+
+/// The measurements a menu is laid out with: Chromium's ([`metrics`]) or,
+/// for the app menu on Windows, GitHub Desktop's own (`_app-menu.scss`):
+/// the app menu is part of its page there, not a Chromium menu.
+#[derive(Clone, Copy, Debug)]
+struct Style {
+    font_size: f32,
+    item_height: f32,
+    separator_height: f32,
+    separator_rule: f32,
+    top_inset: f32,
+    bottom_inset: f32,
+    label_start: f32,
+    trailing: f32,
+    accelerator_padding: f32,
+    text_raise: f32,
+    accelerator_right: f32,
+    arrow_column: f32,
+    check_column: f32,
+    submenu_delay_ms: u64,
+    /// GitHub Desktop's app menu panes rather than a Chromium menu.
+    app_menu: bool,
+}
+
+impl Style {
+    const CHROMIUM: Style = Style {
+        font_size: metrics::FONT_SIZE,
+        item_height: metrics::ITEM_HEIGHT,
+        separator_height: metrics::SEPARATOR_HEIGHT,
+        separator_rule: metrics::SEPARATOR_RULE,
+        top_inset: metrics::VERTICAL_INSET,
+        bottom_inset: metrics::VERTICAL_INSET,
+        label_start: metrics::LABEL_START,
+        trailing: metrics::TRAILING,
+        accelerator_padding: metrics::ACCELERATOR_PADDING,
+        text_raise: metrics::TEXT_RAISE,
+        accelerator_right: metrics::ACCELERATOR_RIGHT,
+        arrow_column: metrics::ARROW_COLUMN,
+        check_column: metrics::CHECK_COLUMN,
+        submenu_delay_ms: metrics::SUBMENU_DELAY_MS,
+        app_menu: false,
+    };
+
+    /// Chromium's menus on Windows (the context menus): the same layout in
+    /// the system's menu font, Segoe UI at 9 pt.
+    #[cfg(windows)]
+    const CHROMIUM_WINDOWS: Style = Style {
+        font_size: 12.,
+        ..Self::CHROMIUM
+    };
+
+    /// `.menu-pane` / `.menu-item` (`_app-menu.scss`): 30 px items in the
+    /// app's 12 px font, the label `--spacing-double` in and `--spacing`
+    /// before the accelerator, which ends `--spacing` from the edge; an
+    /// `hr` is 1 px between the browser's 0.5 em margins; the pane has
+    /// `--spacing-half` below its last item. `expandCollapseTimeout` is
+    /// 300 ms (`app-menu.tsx`).
+    #[cfg(windows)]
+    const APP_MENU: Style = Style {
+        font_size: 12.,
+        item_height: 30.,
+        separator_height: 13.,
+        separator_rule: 6.,
+        top_inset: 0.,
+        bottom_inset: 5.,
+        label_start: 20.,
+        trailing: 10.,
+        accelerator_padding: 10.,
+        text_raise: 0.,
+        accelerator_right: 10.,
+        arrow_column: 12.,
+        check_column: 0.,
+        submenu_delay_ms: 300,
+        app_menu: true,
+    };
+
+    /// The style of the open session (one at a time).
+    fn current() -> Style {
+        #[cfg(windows)]
+        {
+            if APP_MENU_SESSION.get() {
+                Self::APP_MENU
+            } else {
+                Self::CHROMIUM_WINDOWS
+            }
+        }
+        // (lower rows in a short window: `metrics::item_height`)
+        #[cfg(not(windows))]
+        {
+            let separator_height = metrics::separator_height();
+            Style {
+                item_height: metrics::item_height(),
+                separator_height,
+                separator_rule: (separator_height / 2.).floor(),
+                ..Self::CHROMIUM
+            }
+        }
+    }
+
+    /// How far below its parent's top a submenu starts: Chromium lines its
+    /// first item up with the parent row (at `row_top`); GitHub Desktop's
+    /// panes stand side by side.
+    #[cfg(any(target_os = "android", windows))]
+    fn submenu_offset(self, row_top: f32) -> f32 {
+        if self.app_menu {
+            0.
+        } else {
+            row_top - self.top_inset
+        }
+    }
+}
+
+#[cfg(windows)]
+thread_local! {
+    /// Whether the open session is the app menu ([`Style::current`]).
+    static APP_MENU_SESSION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the open menu is GitHub Desktop's app menu on Windows, under
+/// which the page is dimmed (`#foldout-container .overlay`).
+#[cfg(windows)]
+pub fn app_menu_open(cx: &App) -> bool {
+    is_open(cx) && APP_MENU_SESSION.get()
 }
 
 /// The GTK theme's menu colours Chromium draws with (Adwaita).
@@ -138,6 +266,68 @@ impl Palette {
             bar_hot: rgb(0x3d3d3d).into(),
             focus_ring: rgb(0x7ab4ff).into(),
         }
+    }
+
+    /// GitHub Desktop's app menu on Windows (`_app-menu.scss`,
+    /// `_app-menu-bar.scss`): the bar's buttons are toolbar buttons on the
+    /// title bar, the panes take the app's background and text colours and
+    /// `--box-selected-active-*` for the selected item.
+    /// The colours of Corvane's theme (not the desktop's, which Chromium's
+    /// own menus follow on Linux).
+    #[cfg(windows)]
+    pub fn for_view(window: &Window, cx: &App) -> Self {
+        if Style::current().app_menu || !is_open(cx) {
+            return Self::for_view_app(cx);
+        }
+        // a context menu is Chromium's, in the system's colours (its
+        // refreshed menus: a grey highlight, not the accent colour)
+        let dark = matches!(
+            window.appearance(),
+            WindowAppearance::Dark | WindowAppearance::VibrantDark
+        );
+        let (background, text, minor, disabled, separator, highlight) = if dark {
+            (0x2b2b2b, 0xe3e3e3, 0xa8a8a8, 0x7a7a7a, 0x454545, 0x3f3f3f)
+        } else {
+            (0xffffff, 0x1f1f1f, 0x5e5e5e, 0xa0a0a0, 0xe0e0e0, 0xebebeb)
+        };
+        Self {
+            background: rgb(background).into(),
+            text: rgb(text).into(),
+            accelerator: rgb(minor).into(),
+            disabled: rgb(disabled).into(),
+            separator: rgb(separator).into(),
+            highlight: rgb(highlight).into(),
+            highlight_text: rgb(text).into(),
+            ..Self::for_view_app(cx)
+        }
+    }
+
+    /// The app menu's palette: Corvane's theme.
+    #[cfg(windows)]
+    pub fn for_view_app(cx: &App) -> Self {
+        use crate::theme::ActiveGhdTheme;
+        let theme = cx.ghd();
+        Self {
+            background: theme.background,
+            text: theme.text,
+            accelerator: theme.text_secondary,
+            // `.menu-item.disabled { opacity: 0.3 }`
+            disabled: theme.text.opacity(0.3),
+            separator: theme.box_border,
+            highlight: theme.box_selected_active_background,
+            highlight_text: theme.box_selected_active_text,
+            bar_background: rgb(0x24292e).into(),
+            bar_text: rgb(0xffffff).into(),
+            bar_open: theme.background,
+            bar_hot: rgb(0x2f363d).into(),
+            focus_ring: transparent_black(),
+        }
+    }
+
+    /// The palette a menu or the menu bar draws with.
+    #[cfg(not(windows))]
+    pub fn for_view(window: &Window, _cx: &App) -> Self {
+        Self::for_window(window)
     }
 
     pub fn for_window(window: &Window) -> Self {
@@ -258,13 +448,13 @@ pub enum Source {
 struct Level {
     entries: Vec<Entry>,
     highlighted: Option<usize>,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", windows)))]
     window: WindowHandle<MenuLevelView>,
     /// Android: an activity has one window, so a level is a view drawn over
     /// the page ([`overlay`]) at `bounds` (window coordinates).
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", windows))]
     view: Entity<MenuLevelView>,
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", windows))]
     bounds: Bounds<Pixels>,
     /// Top of each row inside the menu.
     row_tops: Vec<f32>,
@@ -392,6 +582,8 @@ pub fn open(
     cx: &mut App,
 ) {
     close_all(cx);
+    #[cfg(windows)]
+    APP_MENU_SESSION.set(matches!(source, Source::MenuBar(_)));
     let owner = window.window_handle();
     let Some(level) = open_level(entries, anchor, owner, keyboard, window, cx) else {
         return;
@@ -418,7 +610,7 @@ pub fn open(
 
 /// Row tops and the menu's size for `entries`, measured in `window`.
 fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
-    use metrics::*;
+    let s = Style::current();
     let font = Font {
         family: font_family(),
         ..Font::default()
@@ -440,7 +632,7 @@ fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
                 .text_system()
                 .shape_line(
                     SharedString::from(text.to_string()),
-                    px(FONT_SIZE),
+                    px(s.font_size),
                     &[run],
                     None,
                 )
@@ -451,18 +643,18 @@ fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
     let mut label_max = 0f32;
     let mut minor_max = 0f32;
     let mut row_tops = Vec::with_capacity(entries.len());
-    let mut y = VERTICAL_INSET;
+    let mut y = s.top_inset;
     for entry in entries {
         row_tops.push(y);
         if entry.is_separator() {
-            y += separator_height();
+            y += s.separator_height;
             continue;
         }
-        y += item_height();
+        y += s.item_height;
         // Chromium measures `title_` with its `&` prefix still in it
         // (`MenuItemView::CalculateDimensions`; it is only stripped when
         // drawn), so a label with a mnemonic reserves an ampersand more
-        let ampersand = if entry.mnemonic.is_some() {
+        let ampersand = if entry.mnemonic.is_some() && !s.app_menu {
             width_of("&")
         } else {
             0.
@@ -474,20 +666,20 @@ fn measure(entries: &[Entry], window: &Window) -> (Vec<f32>, Size<Pixels>) {
             .map(|a| width_of(a))
             .unwrap_or(0.);
         let arrow = if matches!(entry.kind, EntryKind::Submenu(_)) {
-            ARROW_COLUMN
+            s.arrow_column
         } else {
             0.
         };
         minor_max = minor_max.max(accelerator + arrow);
     }
-    let label_start = LABEL_START + if has_check { CHECK_COLUMN } else { 0. };
+    let label_start = s.label_start + if has_check { s.check_column } else { 0. };
     let minor = if minor_max > 0. {
-        minor_max + ACCELERATOR_PADDING
+        minor_max + s.accelerator_padding
     } else {
         0.
     };
-    let width = (label_start + label_max.ceil() + TRAILING + minor.ceil()).ceil();
-    (row_tops, size(px(width), px(y + VERTICAL_INSET)))
+    let width = (label_start + label_max.ceil() + s.trailing + minor.ceil()).ceil();
+    (row_tops, size(px(width), px(y + s.bottom_inset)))
 }
 
 fn open_level(
@@ -506,7 +698,7 @@ fn open_level(
     let highlighted = keyboard
         .then(|| entries.iter().position(Entry::selectable))
         .flatten();
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", windows))]
     {
         let _ = owner;
         // a menu taller than the screen scrolls
@@ -527,7 +719,7 @@ fn open_level(
             row_tops,
         })
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", windows)))]
     {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -580,7 +772,7 @@ fn open_level(
 /// Android: where a level goes in the window. What the window system does
 /// for a popup window on the desktop: under (or beside) its anchor, kept
 /// inside the part of the window the system bars leave free.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", windows))]
 fn place(anchor: Anchor, menu_size: Size<Pixels>, window: &Window) -> Point<Pixels> {
     let area = crate::theme::safe_area();
     let viewport = window.viewport_size();
@@ -608,7 +800,7 @@ fn place(anchor: Anchor, menu_size: Size<Pixels>, window: &Window) -> Point<Pixe
 
 /// Android: the open levels as overlays for the window's root
 /// (`menu_bar::MenuBarShell`), topmost last.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", windows))]
 pub fn overlay(cx: &App) -> Vec<AnyElement> {
     let Some(session) = cx.try_global::<Menus>().and_then(|m| m.session.as_ref()) else {
         return Vec::new();
@@ -628,7 +820,26 @@ pub fn overlay(cx: &App) -> Vec<AnyElement> {
                             .h(level.bounds.size.height)
                             .occlude()
                             .child(crate::widgets::touch_drag_occluder())
-                            .shadow_md()
+                            .map(|pane| {
+                                // Windows: the app menu's panes are flat,
+                                // each after the first with a divider on its
+                                // left; Chromium's menus are rounded there
+                                #[cfg(windows)]
+                                {
+                                    if Style::current().app_menu {
+                                        pane.when(index > 0, |pane| {
+                                            pane.border_l_1()
+                                                .border_color(Palette::for_view_app(cx).separator)
+                                        })
+                                    } else {
+                                        pane.shadow_md().rounded(px(8.)).overflow_hidden()
+                                    }
+                                }
+                                #[cfg(not(windows))]
+                                {
+                                    pane.shadow_md()
+                                }
+                            })
                             .child(level.view.clone()),
                     ),
             )
@@ -641,13 +852,13 @@ pub fn overlay(cx: &App) -> Vec<AnyElement> {
 /// Whether `position` (window coordinates) is on an open menu drawn in the
 /// window itself (Android); menus in their own windows never are.
 pub fn contains(position: Point<Pixels>, cx: &App) -> bool {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", windows))]
     {
         cx.try_global::<Menus>()
             .and_then(|m| m.session.as_ref())
             .is_some_and(|s| s.levels.iter().any(|l| l.bounds.contains(&position)))
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", windows)))]
     {
         let _ = (position, cx);
         false
@@ -655,14 +866,14 @@ pub fn contains(position: Point<Pixels>, cx: &App) -> bool {
 }
 
 fn remove_windows(levels: Vec<Level>, cx: &mut App) {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", windows)))]
     for level in levels {
         level
             .window
             .update(cx, |_, window, _| window.remove_window())
             .ok();
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", windows))]
     {
         drop(levels);
         cx.refresh_windows();
@@ -709,13 +920,13 @@ fn close_after(keep: usize, cx: &mut App) {
 }
 
 fn refresh_levels(cx: &mut App) {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", windows))]
     cx.refresh_windows();
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", windows)))]
     refresh_level_windows(cx);
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", windows)))]
 fn refresh_level_windows(cx: &mut App) {
     let windows: Vec<_> = cx
         .try_global::<Menus>()
@@ -743,7 +954,7 @@ fn set_highlight(level: usize, row: Option<usize>, cx: &mut App) {
 }
 
 /// Open the submenu of `row` in `level` (closing deeper ones).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", windows)))]
 fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
     close_after(level, cx);
     let Some((entries, rect, parent_window, owner)) = (|| {
@@ -781,7 +992,7 @@ fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
 }
 
 /// Android: the submenu beside its row, in the owner window.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", windows))]
 fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
     close_after(level, cx);
     let Some((entries, anchor, owner)) = (|| {
@@ -798,9 +1009,9 @@ fn open_submenu(level: usize, row: usize, keyboard: bool, cx: &mut App) {
                     l.bounds.origin.x,
                     l.bounds.origin.y
                         + l.view.read(cx).scroll.offset().y
-                        + px(top - metrics::VERTICAL_INSET),
+                        + px(Style::current().submenu_offset(top)),
                 ),
-                size(l.bounds.size.width, px(metrics::item_height())),
+                size(l.bounds.size.width, px(Style::current().item_height)),
             ),
             anchor: PopupAnchor::TopRight,
             gravity: PopupGravity::BottomRight,
@@ -834,11 +1045,11 @@ fn activate(level: usize, row: usize, keyboard: bool, cx: &mut App) {
         return;
     }
     match entry.kind {
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", windows)))]
         EntryKind::Submenu(_) => open_submenu(level, row, keyboard, cx),
         // Android: a tap opens it (there is no hover), from inside the
         // owner window's update, which cannot nest
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", windows))]
         EntryKind::Submenu(_) => cx.defer(move |cx| open_submenu(level, row, keyboard, cx)),
         EntryKind::Action(action) => {
             if keyboard {
@@ -1023,7 +1234,7 @@ impl MenuLevelView {
         let session = cx.try_global::<Menus>()?.session.as_ref()?;
         let level = session.levels.get(self.level)?;
         // Android: pointer positions are the window's, not the menu's
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", windows))]
         let y = y - f32::from(level.bounds.origin.y + self.scroll.offset().y);
         level
             .row_tops
@@ -1032,9 +1243,9 @@ impl MenuLevelView {
             .rev()
             .find_map(|(i, top)| {
                 let height = if level.entries[i].is_separator() {
-                    metrics::separator_height()
+                    Style::current().separator_height
                 } else {
-                    metrics::item_height()
+                    Style::current().item_height
                 };
                 (y >= *top && y < top + height).then_some(i)
             })
@@ -1066,7 +1277,7 @@ impl MenuLevelView {
         set_highlight(level, target, cx);
         // a submenu opens after `show_delay`; hovering elsewhere closes the
         // open one after the same delay
-        let delay = Duration::from_millis(metrics::SUBMENU_DELAY_MS);
+        let delay = Duration::from_millis(Style::current().submenu_delay_ms);
         let is_submenu = entry
             .as_ref()
             .is_some_and(|e| selectable && matches!(e.kind, EntryKind::Submenu(_)));
@@ -1090,8 +1301,8 @@ impl MenuLevelView {
 
 impl Render for MenuLevelView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        use metrics::*;
-        let palette = Palette::for_window(window);
+        let s = Style::current();
+        let palette = Palette::for_view(window, cx);
         let Some((entries, highlighted)) = cx
             .try_global::<Menus>()
             .and_then(|m| m.session.as_ref())
@@ -1103,18 +1314,19 @@ impl Render for MenuLevelView {
             return div().id("views-menu");
         };
         let has_check = entries.iter().any(|e| e.checked.is_some());
-        let label_start = LABEL_START + if has_check { CHECK_COLUMN } else { 0. };
+        let label_start = s.label_start + if has_check { s.check_column } else { 0. };
+        let keyboard = opened_from_keyboard(cx);
         let rows = entries.into_iter().enumerate().map(move |(ix, entry)| {
             if entry.is_separator() {
                 return div()
-                    .h(px(separator_height()))
+                    .h(px(s.separator_height))
                     .w_full()
                     .flex_none()
                     .relative()
                     .child(
                         div()
                             .absolute()
-                            .top(px((separator_height() / 2.).floor()))
+                            .top(px(s.separator_rule))
                             .left_0()
                             .w_full()
                             .h(px(1.))
@@ -1132,9 +1344,14 @@ impl Render for MenuLevelView {
             };
             // Chromium's Linux menus show no mnemonic underlines, even when
             // opened from the keyboard (measured in GitHub Desktop)
-            let label_element = div().child(entry.text.clone());
+            // (GitHub Desktop's own app menu on Windows underlines its
+            // access keys when it is driven from the keyboard)
+            let label_element = match entry.mnemonic.filter(|_| s.app_menu && keyboard) {
+                Some(at) => mnemonic_text(&entry.text, at, text).into_any_element(),
+                None => div().child(entry.text.clone()).into_any_element(),
+            };
             div()
-                .h(px(item_height()))
+                .h(px(s.item_height))
                 .w_full()
                 .flex_none()
                 .relative()
@@ -1146,9 +1363,11 @@ impl Render for MenuLevelView {
                     d.child(
                         div()
                             .absolute()
-                            .left(px(LABEL_START))
-                            .top(px(-TEXT_RAISE))
-                            .h(px(item_height()))
+                            // `.menu-item.checked .icon`: centred in the
+                            // space before the label
+                            .left(px(if s.app_menu { 2. } else { s.label_start }))
+                            .top(px(-s.text_raise))
+                            .h(px(s.item_height))
                             .flex()
                             .items_center()
                             .child(
@@ -1164,8 +1383,8 @@ impl Render for MenuLevelView {
                     div()
                         .absolute()
                         .left(px(label_start))
-                        .top(px(-TEXT_RAISE))
-                        .h(px(item_height()))
+                        .top(px(-s.text_raise))
+                        .h(px(s.item_height))
                         .flex()
                         .items_center()
                         .child(label_element),
@@ -1175,9 +1394,9 @@ impl Render for MenuLevelView {
                     d.child(
                         div()
                             .absolute()
-                            .right(px(ACCELERATOR_RIGHT + if arrow { ARROW_COLUMN } else { 0. }))
-                            .top(px(-TEXT_RAISE))
-                            .h(px(item_height()))
+                            .right(px(s.accelerator_right + if arrow { s.arrow_column } else { 0. }))
+                            .top(px(-s.text_raise))
+                            .h(px(s.item_height))
                             .flex()
                             .items_center()
                             .text_color(minor)
@@ -1188,18 +1407,25 @@ impl Render for MenuLevelView {
                     d.child(
                         div()
                             .absolute()
-                            .right(px(8.))
-                            .top(px(-TEXT_RAISE))
-                            .h(px(item_height()))
+                            .right(px(if s.app_menu { 10. } else { 8. }))
+                            .top(px(-s.text_raise))
+                            .h(px(s.item_height))
                             .flex()
                             .items_center()
-                            .child(
+                            .child(if s.app_menu {
+                                // `.submenu-arrow`: 12 px high, 70 % opaque
+                                svg()
+                                    .path("octicons/triangle-right-16.svg")
+                                    .w(px(12.))
+                                    .h(px(12.))
+                                    .text_color(text.opacity(0.7))
+                            } else {
                                 svg()
                                     .path("octicons/chevron-right-16.svg")
                                     .w(px(16.))
                                     .h(px(16.))
-                                    .text_color(text),
-                            ),
+                                    .text_color(text)
+                            }),
                     )
                 })
                 .into_any_element()
@@ -1207,12 +1433,12 @@ impl Render for MenuLevelView {
         div()
             .id("views-menu")
             .size_full()
-            .pt(px(VERTICAL_INSET))
+            .pt(px(s.top_inset))
             .flex()
             .flex_col()
             .bg(palette.background)
             .font_family(font_family())
-            .text_size(px(FONT_SIZE))
+            .text_size(px(s.font_size))
             .line_height(px(20.))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                 this.hover(f32::from(event.position.y), cx);
@@ -1280,6 +1506,35 @@ pub fn mnemonic_text(text: &str, at: usize, color: Hsla) -> impl IntoElement {
 /// (`Accelerator::GetShortcutText`): `Alt+Ctrl+Shift+Key`, keys by their
 /// Chromium names (`Comma`, `Backspace`, `F11`).
 pub fn accelerator_text(keystroke: &Keystroke) -> String {
+    // Windows: the app menu shows GitHub Desktop's own accelerator strings
+    // (`friendlyAcceleratorText` of `CmdOrCtrl+Shift+Alt+<key>`), where a
+    // key is the character it types (`Ctrl+,`, `Ctrl+=`)
+    #[cfg(windows)]
+    if cfg!(windows) {
+        let m = &keystroke.modifiers;
+        let mut out = String::new();
+        for (held, name) in [(m.control, "Ctrl+"), (m.shift, "Shift+"), (m.alt, "Alt+")] {
+            if held {
+                out.push_str(name);
+            }
+        }
+        let key = keystroke.key.as_str();
+        out.push_str(&match key {
+            "backspace" => "Backspace".to_string(),
+            "delete" => "Delete".to_string(),
+            "enter" => "Enter".to_string(),
+            "escape" => "Esc".to_string(),
+            "space" => "Space".to_string(),
+            "tab" => "Tab".to_string(),
+            "up" | "down" | "left" | "right" | "home" | "end" => {
+                let mut name = key.to_string();
+                name[..1].make_ascii_uppercase();
+                name
+            }
+            key => key.to_uppercase(),
+        });
+        return out;
+    }
     let m = &keystroke.modifiers;
     let mut out = String::new();
     if m.alt {

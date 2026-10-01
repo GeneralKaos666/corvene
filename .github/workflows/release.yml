@@ -103,6 +103,8 @@ jobs:
               {"name": "linux-x86_64", "runner": "ubuntu-24.04", "targets": ["linux-x86_64"]},
               {"name": "linux-aarch64", "runner": "ubuntu-24.04-arm", "targets": ["linux-aarch64"]},
               {"name": "android", "runner": "ubuntu-24.04", "targets": ["android-aarch64", "android-armv7a", "android-x86_64", "android-i686"]},
+              {"name": "windows-x86_64", "runner": "windows-latest", "targets": ["windows-x86_64"]},
+              {"name": "windows-aarch64", "runner": "windows-11-arm", "targets": ["windows-aarch64"]},
           ]
           have = {(p["name"], p["version"], p.get("target")) for p in json.load(open("have.json"))["packs"]}
           force = os.environ["FORCE"] == "true"
@@ -300,6 +302,81 @@ jobs:
             target/linux/*.AppImage
           compression-level: 0
 
+  # The Windows installers (Inno Setup, per user), one job per architecture
+  # and variant. x86_64 and aarch64 build natively; the 32-bit one is
+  # cross-compiled on the x86_64 runner and, like Linux's, is not something
+  # GPUI is tested on. No job here holds up the release. The installers are
+  # Authenticode-signed when the WINDOWS_SIGNING_PFX_BASE64 secret holds a
+  # certificate (packaging/release.md); without one SmartScreen warns about
+  # the download.
+  windows:
+    name: build · package (Windows ${{ matrix.arch }}, ${{ matrix.variant }})
+    needs: plan
+    if: ${{ !inputs.linux_release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64, i686]
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
+        include:
+          - arch: x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - arch: aarch64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - arch: i686
+            runner: windows-latest
+            target: i686-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-windows-${{ matrix.arch }}
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.variant == 'default' }}
+      # the full build links every grammar in
+      - uses: ./.github/actions/grammar-sources
+        if: matrix.variant == 'full'
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc.exe -ErrorAction SilentlyContinue) -and
+              -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+      - name: build and package
+        shell: pwsh
+        env:
+          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+          WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          TARGET: ${{ matrix.target }}
+          FULL: ${{ matrix.variant == 'full' && '1' || '0' }}
+        run: |
+          if (-not $env:CORVANE_GITHUB_CLIENT_SECRET) { Remove-Item Env:CORVANE_GITHUB_CLIENT_SECRET -ErrorAction SilentlyContinue }
+          if ($env:WINDOWS_SIGNING_PFX_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP "corvane-signing.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
+            $env:SIGN_PFX = $pfx
+          }
+          try {
+            packaging\windows\package.ps1
+          } finally {
+            if ($env:SIGN_PFX) { Remove-Item $env:SIGN_PFX -Force -ErrorAction SilentlyContinue }
+          }
+          Get-ChildItem target\windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-windows-${{ matrix.arch }}-${{ matrix.variant }}
+          path: target/windows/*-setup.exe
+          compression-level: 0
+
   # The Android packages (foss and play: one per ABI and one with all four) on a Linux
   # runner; also the play flavour's bundle (.aab, with the grammars as an
   # on-demand module), which stays a workflow artifact: it is uploaded to
@@ -396,7 +473,11 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.packs) }}
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.name == 'android' }}
+    continue-on-error: ${{ matrix.name == 'android' || startsWith(matrix.name, 'windows') }}
+    # Windows: packs.sh runs in Git Bash, with the runner's LLVM clang
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 60
     env:
       NDK_VERSION: 27.3.13750724
@@ -495,7 +576,7 @@ jobs:
   # Homebrew cask its version and hashes.
   publish:
     name: draft release · Homebrew cask
-    needs: [plan, macos-assets, linux, android]
+    needs: [plan, macos-assets, linux, android, windows]
     if: >-
       ${{ !cancelled() && needs.linux.result == 'success'
           && (inputs.linux_release || needs.macos-assets.result == 'success') }}
@@ -521,7 +602,7 @@ jobs:
           shopt -s nullglob
           # unsigned Android packages and the Play bundle stay workflow artifacts
           files=()
-          for file in assets/*.zip assets/*.dmg assets/*.deb assets/*.AppImage assets/*.apk; do
+          for file in assets/*.zip assets/*.dmg assets/*.deb assets/*.AppImage assets/*.apk assets/*-setup.exe; do
             [[ "$file" == *-unsigned.apk ]] || files+=("$file")
           done
           if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2>&1; then

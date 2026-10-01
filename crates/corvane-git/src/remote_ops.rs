@@ -1057,8 +1057,12 @@ mod tests {
             "#!/bin/sh\necho hook-stdout\necho hook-stderr >&2\nexit 1\n",
         )
         .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Git for Windows runs a hook that starts with `#!`, whatever its mode
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         run(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
         let err = push(
             git,

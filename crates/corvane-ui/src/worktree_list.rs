@@ -546,7 +546,9 @@ pub fn default_worktree_dir(state: &AppState, repo: u64) -> PathBuf {
                 .unwrap_or_default(),
         })
         .unwrap_or_default();
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
     corvane_core::worktrees::worktree_location(
         state
             .flags

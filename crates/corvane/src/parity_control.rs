@@ -56,10 +56,11 @@ use tracing::{error, info};
 type Reply = mpsc::Sender<Value>;
 
 /// Where GHD's page starts in the window: below Electron's menu bar on
-/// Linux (`corvane_ui::menu_bar`), at the top on macOS.
-#[cfg(not(target_os = "macos"))]
+/// Linux (`corvane_ui::menu_bar`), at the top on macOS and on Windows,
+/// where the title bar with the app menu is part of GHD's page.
+#[cfg(not(any(target_os = "macos", windows)))]
 const PAGE_TOP: f32 = corvane_ui::menu_bar::HEIGHT;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 const PAGE_TOP: f32 = 0.;
 /// `open_dev_popup` from `main.rs` (the `CORVANE_POPUP` names).
 pub type PopupHook = fn(&str, &mut App);
@@ -455,6 +456,13 @@ fn thread_minstr() -> f64 {
 
 /// CPU time this thread has used, in ms: frame costs measured this way do
 /// not grow when other processes preempt the app (a loaded machine).
+#[cfg(windows)]
+fn thread_cpu_ms() -> f64 {
+    f64::NAN
+}
+
+/// CPU time this thread has used, in ms (`CLOCK_THREAD_CPUTIME_ID`).
+#[cfg(not(windows))]
 fn thread_cpu_ms() -> f64 {
     let mut ts = libc::timespec {
         tv_sec: 0,

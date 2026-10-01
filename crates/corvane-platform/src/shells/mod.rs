@@ -1,5 +1,5 @@
 //! Shell detection and launching: GHD `lib/shells/darwin.ts` on macOS,
-//! `lib/shells/linux.ts` on Linux.
+//! `lib/shells/linux.ts` on Linux, `lib/shells/win32.ts` on Windows.
 
 use std::path::PathBuf;
 
@@ -7,10 +7,14 @@ use std::path::PathBuf;
 mod darwin;
 #[cfg(target_os = "macos")]
 pub use darwin::*;
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 mod linux;
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 pub use linux::*;
+#[cfg(windows)]
+mod win32;
+#[cfg(windows)]
+pub use win32::*;
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]

@@ -65,7 +65,7 @@ fn git_running_in(dir: &Path) -> Option<bool> {
 /// Linux: the same question answered from `/proc` (`comm` starting with
 /// `git`, like `lsof -c git`; `cwd` link under `dir`; `cmdline` for the
 /// fsmonitor daemon), so nothing needs `lsof` installed.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn git_running_in(dir: &Path) -> Option<bool> {
     let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
     let entries = std::fs::read_dir("/proc").ok()?;
@@ -97,6 +97,27 @@ fn git_running_in(dir: &Path) -> Option<bool> {
         }
     }
     Some(false)
+}
+
+/// Windows: another process's working directory cannot be read without
+/// debugging rights, so any running `git.exe` counts, wherever it runs.
+#[cfg(windows)]
+fn git_running_in(_dir: &Path) -> Option<bool> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq git.exe", "/FO", "CSV", "/NH"])
+        .creation_flags(crate::CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    // without a match tasklist prints an "INFO:" line instead of CSV rows
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .any(|line| line.to_ascii_lowercase().starts_with("\"git.exe\"")),
+    )
 }
 
 /// Remove `lock` unless a git process is running in `workdir` (or in the
@@ -150,6 +171,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "any running git counts on Windows, and other tests run git"
+    )]
     fn removes_a_stale_lock() {
         let dir = tempfile::tempdir().unwrap();
         let gitdir = dir.path().join(".git");

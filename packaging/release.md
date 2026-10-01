@@ -239,6 +239,58 @@ artifacts. Android updates a package only with one signed by the same key:
 keep the keystore and its password in the password manager, a lost key
 means every user uninstalls first.
 
+## Windows
+
+`packaging/windows/package.ps1` builds the installer from a release build
+into `target\windows\`:
+
+- `Corvane-<version>-<x86_64|aarch64|i686>-setup.exe`
+- `Corvane-Full-<version>-<arch>-setup.exe` with `FULL=1` (every tree-sitter
+  grammar compiled in)
+
+for the architecture of the machine it runs on, or for `TARGET=<Rust
+target>`. It needs Inno Setup 6
+(`iscc.exe`; `ISCC` names it when it is not in its default folder). The
+installer (`packaging/windows/corvane.iss`) is per user and asks for no
+administrator rights: `%LOCALAPPDATA%\Programs\Corvane\corvane.exe`, the
+command line tool `bin\corvane.bat` with its folder on the user's `PATH`,
+a Start menu shortcut (whose AppUserModelID notifications are shown
+under), the `x-corvane` and `x-corvane-auth` URL schemes and an
+uninstaller.
+
+A `v<version>` tag does this in release.yml's `windows` jobs, one per
+architecture and variant (x86_64 and aarch64 natively, i686 cross-compiled
+on the x86_64 runner), and `publish` adds the installers to the draft
+release with the other platforms' assets. A failure there does not hold up
+the other platforms.
+
+The installers are Authenticode-signed only when there is a certificate:
+`SIGN_PFX=<file>` and `SIGN_PFX_PASSWORD` make `package.ps1` sign
+`corvane.exe` and the installer with `signtool`; in release.yml they come
+from the `WINDOWS_SIGNING_PFX_BASE64` (the `.pfx`, base64) and
+`WINDOWS_SIGNING_PFX_PASSWORD` repository secrets. Corvane has no
+certificate yet (one is bought from a certificate authority), so SmartScreen
+warns about the download and a PC with Smart App Control on refuses it.
+
+The `packs` job builds the Windows tree-sitter packs
+(`tree-sitter-{all,rest}-<v>-windows-<x86_64|aarch64>.zip`, DLL units) on
+Windows runners: `packaging/packs.sh` in Git Bash, with LLVM's clang. By hand that
+needs Python as `python` (or `PYTHON=<exe>`), clang on the `PATH` and the
+tree-sitter CLI (`CORVANE_TREE_SITTER`).
+
+An installed Corvane updates itself. The updater picks
+`Corvane-*-<arch>-setup.exe` from the latest release, downloads it to
+`%LOCALAPPDATA%\Corvane\Cache\updates\` and checks it against the sha256
+GitHub lists for the asset. "Install and Restart" copies the installer,
+checks the copy, quits,
+and a hidden PowerShell runs the copy with `/VERYSILENT` once Corvane has
+exited and then starts the new Corvane. A Corvane that was not installed by
+the installer (`cargo run`, an unpacked copy: no `unins000.exe` next to it)
+only says that the release is available.
+
+`packaging/windows/corvane.ico` is generated from the app icon by
+`packaging/windows/make-ico.ps1`; run it again when the icon changes.
+
 ## Testing the flow locally
 
 ```bash

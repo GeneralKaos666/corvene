@@ -87,7 +87,11 @@ pub fn excludes_file(git: Arc<GitBinary>, workdir: &Path) -> Option<PathBuf> {
     let config_home = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(|home| PathBuf::from(home).join(".config"))
+        })?;
     Some(config_home.join("git").join("ignore"))
 }
 

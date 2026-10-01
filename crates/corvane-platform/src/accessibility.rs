@@ -26,15 +26,21 @@ pub fn increase_contrast() -> bool {
     }
 }
 
+/// Windows: a contrast theme is on.
+#[cfg(windows)]
+pub fn increase_contrast() -> bool {
+    crate::windows::high_contrast()
+}
+
 /// Portal `Settings.ReadOne("org.freedesktop.appearance", "contrast")`:
 /// `1` is higher contrast. `false` without a portal (or before it answers
 /// within 250 ms, as this runs when the window is activated).
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn increase_contrast() -> bool {
     portal_contrast() == Some(1)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn portal_contrast() -> Option<u32> {
     use std::sync::OnceLock;
     use std::time::Duration;
@@ -68,7 +74,7 @@ fn portal_contrast() -> Option<u32> {
 }
 
 /// The `u` inside the reply, unwrapping `Read`'s extra variant.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn contrast_value(value: &zbus::zvariant::Value<'_>) -> Option<u32> {
     use zbus::zvariant::Value;
     match value {
@@ -78,7 +84,7 @@ fn contrast_value(value: &zbus::zvariant::Value<'_>) -> Option<u32> {
     }
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, not(any(target_os = "macos", windows))))]
 mod tests {
     use zbus::zvariant::Value;
 

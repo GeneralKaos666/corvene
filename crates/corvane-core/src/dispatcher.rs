@@ -5131,9 +5131,15 @@ mod resolve_path_tests {
 
     #[test]
     fn folds_dot_segments() {
+        #[cfg(not(windows))]
         assert_eq!(
             resolve_path(Path::new("/a/b/../c/./d")),
             Path::new("/a/c/d").to_path_buf()
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            resolve_path(Path::new(r"C:\a\b\..\c\.\d")),
+            Path::new(r"C:\a\c\d").to_path_buf()
         );
         assert!(resolve_path(Path::new("x/../y")).is_absolute());
     }

@@ -1356,6 +1356,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         run(dir.path(), &["init", "-q", "-b", "main"]);
         run(dir.path(), &["config", "commit.gpgsign", "false"]);
+        // Git for Windows checks text out with CRLF unless told not to
+        run(dir.path(), &["config", "core.autocrlf", "false"]);
         std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
         run(dir.path(), &["add", "."]);
         run(dir.path(), &["commit", "-q", "-m", "first"]);

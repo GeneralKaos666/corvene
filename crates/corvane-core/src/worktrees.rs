@@ -40,8 +40,12 @@ pub fn worktree_location(
         .replace("{clone-dir}", &clone_dir.to_string_lossy())
         .replace("{repo}", repo);
     match (expanded.strip_prefix('~'), home) {
-        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
-            home.join(rest.trim_start_matches('/'))
+        (Some(rest), Some(home))
+            if rest.is_empty()
+                || rest.starts_with('/')
+                || (cfg!(windows) && rest.starts_with('\\')) =>
+        {
+            home.join(rest.trim_start_matches(['/', '\\']))
         }
         _ => PathBuf::from(expanded),
     }

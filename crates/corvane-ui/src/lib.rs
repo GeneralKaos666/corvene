@@ -47,6 +47,8 @@ pub mod stash_view;
 pub mod tab_bar;
 pub mod theme;
 pub mod title_bar;
+#[cfg(windows)]
+pub mod title_bar_windows;
 pub mod toolbar;
 pub mod tutorial_panel;
 #[cfg(not(target_os = "macos"))]

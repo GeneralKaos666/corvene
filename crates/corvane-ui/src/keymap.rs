@@ -326,6 +326,9 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
     // ⌘W is the Window menu's Close Window below)
     #[cfg(not(target_os = "macos"))]
     bindings.push(KeyBinding::new("secondary-w", CloseFoldout, Some("Popup")));
+    // Electron's `quit` role on Windows: the accelerator File › Exit shows
+    #[cfg(windows)]
+    bindings.push(KeyBinding::new("alt-f4", Quit, None));
     #[cfg(target_os = "macos")]
     bindings.extend([
         // the app menu and the Window menu (macOS only in GHD)

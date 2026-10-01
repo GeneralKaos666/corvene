@@ -28,7 +28,11 @@ fn config_files(repo: &gix::Repository) -> Vec<PathBuf> {
         repo.common_dir().join("config"),
         repo.git_dir().join("config.worktree"),
     ];
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    // Windows: git looks in %USERPROFILE% when %HOME% is not set
+    if let Some(home) = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+    {
         files.push(home.join(".gitconfig"));
         let xdg = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)

@@ -193,7 +193,11 @@ pub fn parse_app_url(url: &str) -> UrlAction {
         "openlocalrepo" => {
             let decoded = percent_decode(parsed_path, false);
             UrlAction::OpenLocalRepository {
-                path: if decoded.starts_with('/') {
+                // Windows: `C:\…` and `\\server\share\…` are absolute as
+                // they are
+                path: if decoded.starts_with('/')
+                    || (cfg!(windows) && Path::new(&decoded).is_absolute())
+                {
                     PathBuf::from(decoded)
                 } else {
                     Path::new("/").join(decoded)
@@ -216,8 +220,8 @@ pub fn open_local_repo_url(path: &Path) -> String {
 /// GHD `resolveWithin`: `relative` inside `root`, symlinks resolved; `None`
 /// when it escapes the root or does not exist.
 fn resolve_within(root: &Path, relative: &str) -> Option<PathBuf> {
-    let root = root.canonicalize().ok()?;
-    let resolved = root.join(relative).canonicalize().ok()?;
+    let root = dunce::canonicalize(root).ok()?;
+    let resolved = dunce::canonicalize(root.join(relative)).ok()?;
     resolved.starts_with(&root).then_some(resolved)
 }
 

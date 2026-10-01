@@ -228,6 +228,8 @@ mod tests {
             )
         };
         run(&["init", "-q", "-b", "main"]);
+        // Git for Windows checks text out with CRLF unless told not to
+        run(&["config", "core.autocrlf", "false"]);
         run(&["config", "commit.gpgsign", "false"]);
         // the code under test commits too; a CI runner has no identity
         run(&["config", "user.name", "T"]);

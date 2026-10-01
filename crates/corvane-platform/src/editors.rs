@@ -18,6 +18,10 @@ use std::path::{Path, PathBuf};
 
 use crate::apps;
 
+#[cfg(windows)]
+#[path = "editors_windows.rs"]
+mod windows_editors;
+
 /// Friendly name + bundle identifiers, in GHD's order (the first installed
 /// editor is the default when none is selected in Settings).
 #[cfg(target_os = "macos")]
@@ -371,6 +375,13 @@ pub fn available_editors(extras: bool) -> Vec<FoundEditor> {
                 .map(|(label, component)| app(label, component)),
         );
         return editors;
+    }
+    // Windows: GHD's registry lookups, whose table already has the editors
+    // `extras` adds elsewhere
+    #[cfg(windows)]
+    if cfg!(windows) {
+        let _ = extras;
+        return windows_editors::available();
     }
     let extra: &[(&str, &[&str])] = if extras { EXTRA_EDITORS } else { &[] };
     #[cfg(target_os = "macos")]

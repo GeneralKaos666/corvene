@@ -20,7 +20,26 @@ ureq.workspace = true
 [target.'cfg(not(any(target_os = "macos", target_os = "android")))'.dependencies]
 trash = "5"
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+# Windows: toasts through notify-rust's WinRT backend, everything else
+# through the Win32 API
+[target.'cfg(windows)'.dependencies]
+notify-rust = "4"
+windows-registry = "0.6"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 libc = "0.2"
 # org.freedesktop.Notifications (the crate GPUI's Linux backend uses)
 notify-rust = "4"

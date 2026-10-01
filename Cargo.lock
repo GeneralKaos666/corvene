@@ -1425,18 +1425,22 @@ dependencies = [
  "corvane-platform",
  "corvane-store",
  "corvane-ui",
+ "dunce",
+ "embed-resource",
  "gpui-kit",
  "gpui-pre",
  "gpui-pre-android",
  "gpui-pre-apple",
  "gpui-pre-linux",
  "gpui-pre-macos",
+ "gpui-pre-windows",
  "image",
  "jni 0.22.4",
  "libc",
  "ndk-context",
  "rust-embed",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -1459,6 +1463,7 @@ dependencies = [
  "corvane-packs",
  "corvane-platform",
  "corvane-store",
+ "dunce",
  "gpui-kit",
  "notify",
  "pulldown-cmark",
@@ -1477,6 +1482,7 @@ name = "corvane-git"
 version = "0.1.0"
 dependencies = [
  "corvane-models",
+ "dunce",
  "gix",
  "libc",
  "tempfile",
@@ -1665,6 +1671,8 @@ dependencies = [
  "tracing",
  "trash",
  "ureq",
+ "windows 0.62.2",
+ "windows-registry 0.6.1",
  "zbus",
 ]
 
@@ -9905,8 +9913,6 @@ dependencies = [
 [[package]]
 name = "tree-sitter-scss"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33909a9ca86390ebbf3461e9949c4bbe2767d2d024b486306d27616641d4ba24"
 dependencies = [
  "cc",
  "tree-sitter",

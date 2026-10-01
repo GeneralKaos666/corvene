@@ -24,9 +24,8 @@ pub fn top_level_working_directory(path: &Path) -> Option<PathBuf> {
 pub fn main_worktree_path(path: &Path) -> Option<PathBuf> {
     let repo = crate::handle::open(path).ok()?;
     let common = repo.common_dir();
-    let common = common
-        .canonicalize()
-        .unwrap_or_else(|_| common.to_path_buf());
+    // dunce: without the `\\?\` prefix `canonicalize` adds on Windows
+    let common = dunce::canonicalize(common).unwrap_or_else(|_| common.to_path_buf());
     if common.file_name().is_some_and(|n| n == ".git") {
         common.parent().map(Path::to_path_buf)
     } else {
@@ -409,11 +408,12 @@ mod unsafe_repository_tests {
                 "feature",
             ],
         );
-        let main = main.canonicalize().unwrap();
+        let main = dunce::canonicalize(&main).unwrap();
         assert_eq!(main_worktree_path(&main), Some(main.clone()));
         assert_eq!(main_worktree_path(&linked), Some(main.clone()));
         assert_eq!(
-            top_level_working_directory(&main.join("src/deep")).map(|p| p.canonicalize().unwrap()),
+            top_level_working_directory(&main.join("src/deep"))
+                .map(|p| dunce::canonicalize(p).unwrap()),
             Some(main)
         );
     }

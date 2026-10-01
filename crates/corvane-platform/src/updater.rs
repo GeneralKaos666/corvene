@@ -49,11 +49,15 @@ const USER_AGENT: &str = concat!("Corvane/", env!("CARGO_PKG_VERSION"));
 /// What the updater installs on this OS, for error messages.
 #[cfg(target_os = "macos")]
 const ASSET_KIND: &str = "macOS .zip";
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+const ASSET_KIND: &str = "Windows installer";
+#[cfg(not(any(target_os = "macos", windows)))]
 const ASSET_KIND: &str = "AppImage";
 #[cfg(target_os = "macos")]
 const ASSET_EXTENSION: &str = ".zip";
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+const ASSET_EXTENSION: &str = "-setup.exe";
+#[cfg(not(any(target_os = "macos", windows)))]
 const ASSET_EXTENSION: &str = ".AppImage";
 
 #[derive(Debug, Error)]
@@ -226,6 +230,8 @@ fn sha256_digest(digest: &str) -> Option<String> {
 fn pick_asset<'a>(assets: &'a [ApiAsset], os: &str, arch: &str) -> Option<&'a ApiAsset> {
     if os == "macos" {
         pick_zip_asset(assets, arch)
+    } else if os == "windows" {
+        pick_setup_asset(assets, arch)
     } else {
         pick_appimage_asset(assets, arch)
     }
@@ -263,6 +269,20 @@ fn pick_appimage_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a Api
         other => other,
     };
     let suffix = format!("-{arch}.AppImage");
+    assets.iter().find(|a| {
+        a.name.starts_with("Corvane-") && !a.name.contains("Full") && a.name.ends_with(&suffix)
+    })
+}
+
+/// `Corvane-<version>-<arch>-setup.exe` (`packaging/windows/package.ps1`),
+/// `<arch>` being `x86_64` and `aarch64` as `std::env::consts::ARCH` spells
+/// them and `i686` for `x86`; the `Corvane-Full-…` installer is skipped.
+fn pick_setup_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset> {
+    let arch = match arch {
+        "x86" => "i686",
+        other => other,
+    };
+    let suffix = format!("-{arch}-setup.exe");
     assets.iter().find(|a| {
         a.name.starts_with("Corvane-") && !a.name.contains("Full") && a.name.ends_with(&suffix)
     })
@@ -328,7 +348,11 @@ pub fn install_target() -> Option<PathBuf> {
     {
         crate::app_location::running_bundle()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        installed_executable()
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         running_appimage()
     }
@@ -381,7 +405,11 @@ pub fn package_manager() -> Option<PackageManager> {
             .is_some_and(|b| is_homebrew_install(&b))
             .then_some(PackageManager::Homebrew)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        installed_executable().is_none()
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         let image = std::env::var_os("APPIMAGE")
             .map(PathBuf::from)
@@ -397,9 +425,29 @@ pub fn package_manager() -> Option<PackageManager> {
     }
 }
 
+/// Windows: this executable when the installer put it there (its
+/// uninstaller sits next to it). A build run from elsewhere (`cargo run`, an
+/// unpacked copy) is not the updater's to replace.
+#[cfg(windows)]
+pub fn installed_executable() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    exe.parent()?.join("unins000.exe").is_file().then_some(exe)
+}
+
+/// The verified installer [`install`] left for the relaunch to run.
+#[cfg(windows)]
+static PENDING_SETUP: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Windows: the installer to run once this process has exited (see
+/// [`install`]), handed out once.
+#[cfg(windows)]
+pub fn take_pending_setup() -> Option<PathBuf> {
+    PENDING_SETUP.lock().ok()?.take()
+}
+
 /// The AppImage this process runs from: `$APPIMAGE` (set by the AppImage
 /// runtime) when it names a regular file this user may replace.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn running_appimage() -> Option<PathBuf> {
     appimage_target(std::env::var_os("APPIMAGE"))
 }
@@ -409,7 +457,7 @@ pub fn running_appimage() -> Option<PathBuf> {
 /// writable and so is its folder (the rename needs the latter); a running
 /// image can answer `ETXTBSY` for the former, which counts as writable
 /// since the image is replaced, never written to.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn appimage_target(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let path = PathBuf::from(value.filter(|v| !v.is_empty())?);
     if !path.is_absolute() {
@@ -428,7 +476,7 @@ fn appimage_target(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
 }
 
 /// `access(path, W_OK)`
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn writable(path: &Path) -> std::io::Result<()> {
     use std::os::unix::ffi::OsStrExt;
     let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
@@ -535,7 +583,25 @@ pub fn install(file: &Path, target: &Path, sha256: &str) -> Result<(), UpdateErr
         let _ = sha256;
         install_bundle(file, target)
     }
-    #[cfg(not(target_os = "macos"))]
+    // Windows cannot replace a running program: the installer runs once
+    // Corvane has exited, started by `app_location::relaunch_after_exit`.
+    // It is copied out of the cache and the copy is what gets verified, so
+    // what runs is what was verified.
+    #[cfg(windows)]
+    {
+        let _ = target;
+        let setup = updates_dir().join("pending-setup.exe");
+        std::fs::copy(file, &setup)?;
+        if let Err(err) = verify(&setup, sha256) {
+            let _ = std::fs::remove_file(&setup);
+            return Err(err);
+        }
+        if let Ok(mut pending) = PENDING_SETUP.lock() {
+            *pending = Some(setup);
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
         install_appimage(file, target, sha256)
     }
@@ -546,7 +612,7 @@ pub fn install(file: &Path, target: &Path, sha256: &str) -> Result<(), UpdateErr
 /// was verified, whatever happened to the cache since the download), make it
 /// `0755`, fsync it and rename it over `running`, then fsync the folder. On
 /// any failure the temporary file is removed and `running` is untouched.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn install_appimage(new_image: &Path, running: &Path, sha256: &str) -> Result<(), UpdateError> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
@@ -922,6 +988,27 @@ mod tests {
     }
 
     #[test]
+    fn windows_picks_the_installer_for_its_architecture() {
+        let assets = [
+            "Corvane-Full-0.2.0-x86_64-setup.exe",
+            "Corvane-0.2.0-aarch64-setup.exe",
+            "Corvane-0.2.0-x86_64-setup.exe",
+            "Corvane-0.2.0-i686-setup.exe",
+            "Corvane-0.2.0-x86_64.AppImage",
+        ];
+        for (arch, name) in [
+            ("x86_64", "Corvane-0.2.0-x86_64-setup.exe"),
+            ("aarch64", "Corvane-0.2.0-aarch64-setup.exe"),
+            ("x86", "Corvane-0.2.0-i686-setup.exe"),
+        ] {
+            let info = release_info_for(release_with(&assets), "0.1.0", "windows", arch)
+                .unwrap()
+                .unwrap();
+            assert_eq!(info.zip_name, name);
+        }
+    }
+
+    #[test]
     fn linux_ignores_the_deb_and_other_architectures() {
         let only_deb = release_with(&[
             "corvane_0.2.0_amd64.deb",
@@ -947,7 +1034,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, not(any(target_os = "macos", windows))))]
 mod linux_tests {
     use std::os::unix::fs::PermissionsExt;
 

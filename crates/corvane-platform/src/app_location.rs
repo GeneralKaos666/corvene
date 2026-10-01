@@ -148,7 +148,7 @@ pub fn relaunch_after_exit(bundle: &Path, pid: u32) -> Result<(), String> {
 /// and so are the runtime's `APPIMAGE` / `APPDIR` / `ARGV0` / `OWD` (the new
 /// image's runtime sets its own). The shell starts in `/` so it keeps no
 /// folder busy.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn relaunch_after_exit(executable: &Path, pid: u32) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
 
@@ -180,6 +180,42 @@ pub fn relaunch_after_exit(executable: &Path, pid: u32) -> Result<(), String> {
         });
     }
     command.spawn().map(|_| ()).map_err(|err| err.to_string())
+}
+
+/// Windows: run `executable` once process `pid` has exited, after the
+/// installer of a pending update (`updater::install`), which can only
+/// replace the program when it no longer runs. A hidden PowerShell does the
+/// waiting; it outlives this process. As elsewhere, `CORVANE_*` variables
+/// are dropped.
+#[cfg(windows)]
+pub fn relaunch_after_exit(executable: &Path, pid: u32) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    // a single-quoted PowerShell string: quotes are doubled
+    let quoted = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "''"));
+    let mut script = format!("Wait-Process -Id {pid} -ErrorAction SilentlyContinue; ");
+    if let Some(setup) = crate::updater::take_pending_setup() {
+        script.push_str(&format!(
+            "Start-Process -Wait -FilePath {} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'; ",
+            quoted(&setup)
+        ));
+    }
+    script.push_str(&format!("Start-Process -FilePath {}", quoted(executable)));
+    let mut command = std::process::Command::new("powershell.exe");
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("CORVANE_") {
+            command.env_remove(&key);
+        }
+    }
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .creation_flags(crate::windows::CREATE_NO_WINDOW)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| err.to_string())
 }
 
 /// The pre-translocation path of a translocated bundle, `None` when it is

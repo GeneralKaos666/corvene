@@ -100,8 +100,11 @@ pub fn pack_target() -> &'static str {
         "macos-x86_64"
     } else if cfg!(all(target_os = "windows", target_arch = "aarch64")) {
         "windows-aarch64"
-    } else if cfg!(target_os = "windows") {
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         "windows-x86_64"
+    } else if cfg!(target_os = "windows") {
+        // no packs are published for the 32-bit build
+        "windows-x86"
     } else if cfg!(target_arch = "aarch64") {
         "linux-aarch64"
     } else if cfg!(target_arch = "x86_64") {
@@ -447,7 +450,8 @@ fn download_archive(
     std::fs::create_dir_all(&dir)?;
     let file_name = entry
         .url
-        .rsplit('/')
+        // a local archive on Windows has backslashes
+        .rsplit(|c| c == '/' || (cfg!(windows) && c == '\\'))
         .next()
         .filter(|n| !n.is_empty())
         .unwrap_or("pack.zip");
@@ -502,8 +506,42 @@ fn download_archive(
     Ok(archive)
 }
 
+/// Windows: the `tar.exe` Windows ships (bsdtar), which unpacks both kinds.
+#[cfg(windows)]
+fn windows_tar() -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let system_root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let mut command = std::process::Command::new(Path::new(&system_root).join(r"System32\tar.exe"));
+    // CREATE_NO_WINDOW: no console window for a console program
+    command.creation_flags(0x0800_0000);
+    command
+}
+
+#[cfg(windows)]
+fn unpack(archive: &Path, into: &Path) -> Result<(), PackError> {
+    let name = archive.to_string_lossy();
+    if !(name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz")) {
+        return Err(PackError::Install(format!(
+            "unknown archive type: {}",
+            archive.display()
+        )));
+    }
+    match windows_tar()
+        .arg("-xf")
+        .arg(archive)
+        .arg("-C")
+        .arg(into)
+        .status()
+    {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(PackError::Install(format!("unpacking failed ({status})"))),
+        Err(err) => Err(PackError::Install(format!("could not run tar.exe: {err}"))),
+    }
+}
+
 /// `.zip` through `ditto` on macOS (keeps executable bits and signatures),
 /// `unzip` elsewhere; `.tar.gz` / `.tgz` through `tar`.
+#[cfg(not(windows))]
 fn unpack(archive: &Path, into: &Path) -> Result<(), PackError> {
     let name = archive.to_string_lossy();
     let status = if name.ends_with(".zip") {
@@ -678,7 +716,16 @@ mod tests {
             .arg(&zip)
             .status()
             .unwrap();
-        #[cfg(not(target_os = "macos"))]
+        // bsdtar picks the zip format from the name (`-a`)
+        #[cfg(windows)]
+        let status = windows_tar()
+            .args(["-a", "-c", "-f"])
+            .arg(&zip)
+            .args(["-C", "src", "."])
+            .current_dir(&dir)
+            .status()
+            .unwrap();
+        #[cfg(not(any(target_os = "macos", windows)))]
         let status = std::process::Command::new("zip")
             .args(["-q", "-r"])
             .arg(&zip)

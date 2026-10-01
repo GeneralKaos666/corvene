@@ -160,6 +160,54 @@ jobs:
           CORVANE_CLI_DRY_RUN=1 packaging/linux/corvane.sh open . | grep -q '^x-corvane://openLocalRepo/'
 
 
+  # MSVC; GPUI's DirectX backend needs nothing installed. Git for Windows on
+  # the runner checks text out with CRLF unless .gitattributes says otherwise
+  # (it does).
+  windows:
+    name: clippy · test (Windows)
+    needs: fmt
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cache grammar sources
+        id: grammar-src
+        uses: actions/cache@v4
+        with:
+          path: target/grammar-src
+          key: grammar-src-${{ hashFiles('tools/ts-queries/languages.toml', 'tools/ts-queries/sources.lock.json') }}
+          enableCrossOsArchive: true
+      - name: fetch grammar sources (tree-sitter CLI generates the ones without parser.c)
+        if: steps.grammar-src.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          cargo install tree-sitter-cli --version 0.27.0 --locked --root "$RUNNER_TEMP/ts-cli"
+          PYTHONUTF8=1 CORVANE_TREE_SITTER="$RUNNER_TEMP/ts-cli/bin/tree-sitter.exe" python tools/ts-queries/fetch.py
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+      # the installer from a debug binary (release.yml packages the release
+      # build), and the command line tool's batch file
+      - name: package smoke test (installer)
+        shell: pwsh
+        run: |
+          cargo build -p corvane
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+          $env:PACKAGE_BIN = "target\debug\corvane.exe"
+          packaging\windows\package.ps1
+          if (-not (Get-ChildItem target\windows\Corvane-*-x86_64-setup.exe)) { throw "no installer" }
+          $help = cmd /c packaging\windows\corvane.bat --help
+          if (-not ($help -match "Corvane CLI usage")) { throw "the command line tool printed no usage" }
+
   # Both Android packages (foss and play) from one native library per ABI,
   # on a Linux runner: cargo-ndk cross-compiles, Gradle packages. The bundled
   # git (packaging/android/git) is cross-built once and cached.

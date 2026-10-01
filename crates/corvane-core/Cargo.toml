@@ -21,6 +21,7 @@ tracing.workspace = true
 anyhow.workspace = true
 rust-embed.workspace = true
 notify = "7"
+dunce = "1"
 regex.workspace = true
 pulldown-cmark.workspace = true
 async-channel = "2"

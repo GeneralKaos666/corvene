@@ -62,7 +62,14 @@ pub fn first_installed(bundle_ids: &[&str]) -> Option<(String, PathBuf)> {
 /// Spawn a detached process (stdio ignored) so closing Corvane never takes
 /// the launched editor or shell with it.
 pub fn spawn_detached(program: impl AsRef<Path>, args: &[&str]) -> std::io::Result<()> {
-    Command::new(program.as_ref())
+    let mut command = Command::new(program.as_ref());
+    // a `.cmd` launcher (VS Code's `code.cmd`) would flash a console
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(crate::windows::CREATE_NO_WINDOW);
+    }
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -110,11 +117,15 @@ pub fn show_item_in_folder(path: &Path) -> std::io::Result<()> {
         };
         crate::android::view_path(dir)
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(windows)]
+    {
+        crate::windows::show_item_in_folder(path)
+    }
+    #[cfg(not(any(target_os = "android", windows)))]
     show_item_with_file_manager(path)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 fn show_item_with_file_manager(path: &Path) -> std::io::Result<()> {
     let shown = zbus::blocking::Connection::session().and_then(|bus| {
         bus.call_method(
@@ -142,7 +153,7 @@ fn show_item_with_file_manager(path: &Path) -> std::io::Result<()> {
 
 /// `file://` URI with every byte outside RFC 3986's unreserved set and `/`
 /// percent-encoded (what GLib's `g_filename_to_uri` produces).
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn file_uri(path: &Path) -> String {
     use std::os::unix::ffi::OsStrExt;
     let mut uri = String::from("file://");
@@ -156,7 +167,7 @@ pub fn file_uri(path: &Path) -> String {
     uri
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, not(any(target_os = "macos", windows))))]
 mod linux_tests {
     #[test]
     fn file_uris_are_escaped() {

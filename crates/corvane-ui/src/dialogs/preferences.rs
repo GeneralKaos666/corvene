@@ -41,7 +41,11 @@ use crate::widgets::{
 const CRASH_REPORTS_DESCRIPTION: &str = "When Corvane crashes, a report is saved in \
      ~/Library/Logs/Corvane/crashes and pointed out at the next launch, together with macOS's \
      own crash reports. Reports never leave this Mac.";
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+const CRASH_REPORTS_DESCRIPTION: &str = "When Corvane crashes, a report is saved in \
+     %LOCALAPPDATA%\\Corvane\\crashes and pointed out at the next launch, together with \
+     Windows's own crash reports. Reports never leave this computer.";
+#[cfg(not(any(target_os = "macos", windows)))]
 const CRASH_REPORTS_DESCRIPTION: &str = "When Corvane crashes, a report is saved in \
      ~/.local/state/corvane/crashes and pointed out at the next launch, together with the \
      system's own crash reports. Reports never leave this computer.";

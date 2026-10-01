@@ -6,9 +6,13 @@
 #   PACK_OS=android PACKS="tree-sitter-all tree-sitter-rest" packaging/packs.sh
 #                                       # the Android packs, from any host
 #
+# On Windows this runs in Git Bash, with Python as `python` (or PYTHON=<exe>)
+# and LLVM's clang on the PATH.
+#
 # Produces in <out>:
 # - tree-sitter-{all,rest}-<v>-<os>-<arch>.zip: corvane-grammars as ad-hoc
 #   signed dylibs on macOS, shared objects on Linux (every grammar / the ones
+#   (DLLs on Windows; in each case every grammar, or the ones
 #   for languages GitHub Desktop does not highlight) plus the grammars' and
 #   queries' licenses, one per architecture (the parse tables are ~170 MB per
 #   architecture, so a universal file would double every download);
@@ -49,6 +53,34 @@ ENTRIES="$WORK/entries.jsonl"
 : > "$ENTRIES"
 
 OS="$(uname -s)"
+case "$OS" in
+  MINGW* | MSYS* | CYGWIN*)
+    WINDOWS=1
+    # python.org's installer has no `python3`; Git for Windows has no `zip`
+    python3() { "${PYTHON:-python}" "$@"; }
+    if ! command -v zip > /dev/null; then
+      # the forms used below: zip -q [-r] -0|-9 <archive> <paths…>, adding
+      # to an archive that exists
+      zip() {
+        python3 - "$@" << 'PY'
+import os, sys, zipfile
+flags = [a for a in sys.argv[1:] if a.startswith("-")]
+archive, *paths = [a for a in sys.argv[1:] if not a.startswith("-")]
+kind = zipfile.ZIP_STORED if "-0" in flags else zipfile.ZIP_DEFLATED
+with zipfile.ZipFile(archive, "a", kind, compresslevel=None if "-0" in flags else 9) as out:
+    for path in paths:
+        if os.path.isdir(path):
+            for folder, _, files in sorted(os.walk(path)):
+                for name in sorted(files):
+                    full = os.path.join(folder, name)
+                    out.write(full, os.path.relpath(full).replace(os.sep, "/"))
+        else:
+            out.write(path, path.replace(os.sep, "/"))
+PY
+      }
+    fi
+    ;;
+esac
 if [[ "${PACK_OS:-}" == android ]]; then
   # PACK_OS=android cross-builds the grammar packs with the NDK's clang
   # (ANDROID_NDK_HOME) on any host, for both of Corvane's Android ABIs
@@ -57,6 +89,8 @@ if [[ "${PACK_OS:-}" == android ]]; then
   export CORVANE_CC="$NDK_BIN/clang" CORVANE_CXX="$NDK_BIN/clang++"
 elif [[ "$OS" == Darwin ]]; then
   PACK_OS=macos LIB_EXT=dylib
+elif [[ -n "${WINDOWS:-}" ]]; then
+  PACK_OS=windows LIB_EXT=dll
 else
   PACK_OS=linux LIB_EXT=so
 fi
@@ -92,6 +126,12 @@ elif [[ "$PACK_OS" == macos ]]; then
       echo "warning: $t is not installed; no tree-sitter packs for it" >&2
     fi
   done
+elif [[ "$PACK_OS" == windows ]]; then
+  case "$(uname -m)" in
+    x86_64) TARGETS=(x86_64-pc-windows-msvc) ;;
+    aarch64 | arm64) TARGETS=(aarch64-pc-windows-msvc) ;;
+    *) echo "warning: no tree-sitter packs for $(uname -m)" >&2 ;;
+  esac
 else
   case "$(uname -m)" in
     x86_64) TARGETS=(x86_64-unknown-linux-gnu) ;;
@@ -121,6 +161,8 @@ build_units() {
       # arm64 code must carry a signature; the linker's is kept, re-sign to be sure
       codesign --force --sign - --timestamp=none "$lib" 2>/dev/null
       nm -gU "$lib" | grep -q '_corvane_grammars_v1$' || { echo "$lib does not export corvane_grammars_v1" >&2; exit 1; }
+    elif [[ "$PACK_OS" == windows ]]; then
+      llvm-readobj --coff-exports "$lib" | grep -q 'Name: corvane_grammars_v1$' || { echo "$lib does not export corvane_grammars_v1" >&2; exit 1; }
     else
       "${NDK_BIN:+$NDK_BIN/llvm-}nm" -D --defined-only "$lib" | grep -q ' corvane_grammars_v1$' || { echo "$lib does not export corvane_grammars_v1" >&2; exit 1; }
     fi

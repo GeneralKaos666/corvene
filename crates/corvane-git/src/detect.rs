@@ -90,26 +90,31 @@ pub fn find_git() -> Result<GitBinary> {
     if let Ok(p) = std::env::var("CORVANE_GIT") {
         candidates.push(PathBuf::from(p));
     }
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join("git");
-            if candidate == Path::new("/usr/bin/git") && !command_line_tools_present() {
-                continue;
+    #[cfg(windows)]
+    candidates.extend(windows_candidates());
+    #[cfg(not(windows))]
+    {
+        if let Some(path) = std::env::var_os("PATH") {
+            for dir in std::env::split_paths(&path) {
+                let candidate = dir.join("git");
+                if candidate == Path::new("/usr/bin/git") && !command_line_tools_present() {
+                    continue;
+                }
+                candidates.push(candidate);
             }
-            candidates.push(candidate);
         }
-    }
-    // Homebrew's prefixes (the last one is Linux's): a desktop session does
-    // not have them on `PATH`
-    for p in [
-        "/opt/homebrew/bin/git",
-        "/usr/local/bin/git",
-        "/home/linuxbrew/.linuxbrew/bin/git",
-    ] {
-        candidates.push(PathBuf::from(p));
-    }
-    if command_line_tools_present() {
-        candidates.push(PathBuf::from("/usr/bin/git"));
+        // Homebrew's prefixes (the last one is Linux's): a desktop session
+        // does not have them on `PATH`
+        for p in [
+            "/opt/homebrew/bin/git",
+            "/usr/local/bin/git",
+            "/home/linuxbrew/.linuxbrew/bin/git",
+        ] {
+            candidates.push(PathBuf::from(p));
+        }
+        if command_line_tools_present() {
+            candidates.push(PathBuf::from("/usr/bin/git"));
+        }
     }
 
     let mut too_old: Option<GitVersion> = None;
@@ -150,13 +155,42 @@ fn command_line_tools_present() -> bool {
         || Path::new("/Applications/Xcode.app/Contents/Developer/usr/bin/git").exists()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn command_line_tools_present() -> bool {
     true
 }
 
+/// Windows: `git.exe` on `%PATH%`, then where Git for Windows installs (for
+/// all users, for one user), whose installer only puts `cmd` on the path
+/// when asked to.
+#[cfg(windows)]
+fn windows_candidates() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        out.extend(std::env::split_paths(&path).map(|dir| dir.join("git.exe")));
+    }
+    let roots = [
+        std::env::var_os("ProgramFiles").map(PathBuf::from),
+        std::env::var_os("ProgramW6432").map(PathBuf::from),
+        std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("Programs")),
+    ];
+    out.extend(
+        roots
+            .into_iter()
+            .flatten()
+            .map(|root| root.join("Git").join("cmd").join("git.exe")),
+    );
+    out
+}
+
 fn probe(path: &Path) -> Option<GitVersion> {
-    let output = Command::new(path)
+    let mut command = Command::new(path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(crate::CREATE_NO_WINDOW);
+    }
+    let output = command
         .arg("--version")
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()

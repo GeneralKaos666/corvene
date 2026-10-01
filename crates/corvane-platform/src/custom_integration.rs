@@ -99,9 +99,16 @@ pub fn path_looks_valid(path: &str) -> bool {
         use std::os::unix::fs::PermissionsExt;
         meta.is_file() && meta.permissions().mode() & 0o111 != 0
     }
+    // Windows has no executable bit: what can be started is told by the
+    // extension (GHD accepts `.exe`, `.cmd` and `.bat` there)
     #[cfg(not(unix))]
     {
         meta.is_file()
+            && p.extension().is_some_and(|ext| {
+                ["exe", "cmd", "bat"]
+                    .iter()
+                    .any(|known| ext.eq_ignore_ascii_case(known))
+            })
     }
 }
 
@@ -163,7 +170,23 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    fn validates_executables() {
+        let system32 =
+            std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+        assert!(path_looks_valid(
+            &system32.join("cmd.exe").to_string_lossy()
+        ));
+        // a file that is not a program, and a folder
+        assert!(!path_looks_valid(
+            &system32.join("drivers/etc/hosts").to_string_lossy()
+        ));
+        assert!(!path_looks_valid(&system32.to_string_lossy()));
+        assert!(!path_looks_valid(""));
+    }
+
+    #[test]
+    #[cfg(not(any(target_os = "macos", windows)))]
     fn validates_executables() {
         assert!(path_looks_valid("/bin/ls"));
         assert!(!path_looks_valid("/etc/hosts"));

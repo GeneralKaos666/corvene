@@ -1,7 +1,12 @@
 //! Corvane entry point: logging, persisted settings, GPUI application, window.
+// Windows: a release build is a GUI program (no console window of its own;
+// a debug build keeps one for its log)
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 pub(crate) mod askpass;
 mod assets;
+#[cfg(windows)]
+mod cli_windows;
 mod dev_samples;
 mod logging;
 mod menus;
@@ -30,6 +35,13 @@ pub(crate) fn main() {
     // single activity itself (`launchMode="singleTask"`).
     #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let launch_urls = corvane_platform::single_instance::url_arguments(std::env::args().skip(1));
+    // Windows: what the command line tool asks for (`corvane.bat`) is one more URL
+    #[cfg(windows)]
+    let launch_urls = {
+        let mut urls = launch_urls;
+        urls.extend(cli_windows::url(std::env::args().skip(1)));
+        urls
+    };
     #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let instance = match corvane_platform::single_instance::claim(&launch_urls) {
         corvane_platform::single_instance::Claim::Forwarded => return,
@@ -574,7 +586,9 @@ pub(crate) fn main() {
                 title: Some("Corvane".into()),
                 // macOS: hiddenInset; Linux keeps the window manager's frame
                 // (Electron's default there)
-                appears_transparent: cfg!(target_os = "macos"),
+                // Windows: no frame either, GHD draws its own title bar
+                // there (`corvane_ui::title_bar_windows`)
+                appears_transparent: cfg!(any(target_os = "macos", windows)),
                 traffic_light_position: Some(point(px(9.), px(9.))),
             }),
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(

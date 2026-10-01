@@ -1,0 +1,5 @@
+# Text is checked out with LF everywhere: Git for Windows would otherwise
+# convert it to CRLF (core.autocrlf), which ends up in what the build embeds
+# (license and .gitignore templates, shaders, test fixtures).
+* text=auto eol=lf
+packaging/windows/*.bat text eol=crlf

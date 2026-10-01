@@ -20,6 +20,11 @@ pub mod paths;
 pub mod process;
 pub mod rebase_ops;
 pub mod remote_ops;
+
+/// Windows: Corvane is a GUI program, so a console program it starts would
+/// open a console window of its own. Every child gets this creation flag.
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub mod repo;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;

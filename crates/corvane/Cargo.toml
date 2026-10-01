@@ -40,6 +40,8 @@ snapshots = [
     "gpui-pre-macos/test-support",
     "dep:gpui-pre-linux",
     "gpui-pre-linux/test-support",
+    "dep:gpui-pre-windows",
+    "gpui-pre-windows/test-support",
 ]
 
 [dependencies]
@@ -64,9 +66,21 @@ rust-embed.workspace = true
 gpui-pre-apple = { workspace = true, optional = true }
 gpui-pre-macos = { version = "=0.3.7", optional = true }
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 # `snapshots`: offscreen frames (`render_to_image`) on Linux
 gpui-pre-linux = { version = "=0.3.7", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# `snapshots`: offscreen frames (`render_to_image`) on Windows
+gpui-pre-windows = { version = "=0.3.7", optional = true }
+dunce = "1"
+
+# the executable's icon and version information (build.rs)
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+tempfile = "3"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # the Android platform layer for the pinned GPUI (gpui-mobile's src/android)

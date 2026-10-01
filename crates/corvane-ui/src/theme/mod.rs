@@ -305,7 +305,13 @@ pub fn page_top() -> gpui_kit::Pixels {
     {
         gpui_kit::px(0.)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    // Windows: below the title bar, unless it lies over the page (the
+    // welcome flow) or is hidden (full screen)
+    #[cfg(windows)]
+    {
+        gpui_kit::px(crate::title_bar_windows::page_top())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     {
         gpui_kit::px(crate::menu_bar::HEIGHT)
     }

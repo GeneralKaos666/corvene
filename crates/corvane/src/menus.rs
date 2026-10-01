@@ -47,7 +47,10 @@ impl MenuOptions {
             show_main_window: s.flags.bool(ids::WINDOW_MENU_MAIN_WINDOW),
             show_add_license: s.flags.bool(ids::ADD_LICENSE),
             fetch_all: s.flags.bool(ids::FETCH_ALL_REPOSITORIES),
-            install_cli: !cfg!(target_os = "android") && s.flags.bool(ids::LINUX_INSTALL_CLI),
+            // Windows: the installer puts the command line tool on the PATH
+            // (GHD has no menu item for it there either)
+            install_cli: !cfg!(any(target_os = "android", windows))
+                && s.flags.bool(ids::LINUX_INSTALL_CLI),
             keymap: corvane_ui::keymap::KeymapFlags::from_flags(&s.flags),
         }
     }
@@ -110,7 +113,11 @@ pub fn install(cx: &mut App, options: &MenuOptions) {
             OpenInShell,
         ),
         MenuItem::action(
-            l("Show in Finder", "Show in your File Manager"),
+            if cfg!(windows) {
+                "Show in E&xplorer"
+            } else {
+                l("Show in Finder", "Show in your File Manager")
+            },
             ShowInFinder,
         ),
         MenuItem::action(
@@ -384,7 +391,11 @@ fn help_items(show_release_notes: bool) -> Vec<MenuItem> {
             ShowKeyboardShortcuts,
         ),
         MenuItem::action(
-            l("Show Logs in Finder", "S&how logs in your File Manager"),
+            if cfg!(windows) {
+                "S&how logs in Explorer"
+            } else {
+                l("Show Logs in Finder", "S&how logs in your File Manager")
+            },
             ShowLogs,
         ),
     ];

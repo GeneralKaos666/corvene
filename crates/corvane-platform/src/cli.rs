@@ -141,11 +141,12 @@ fn symlink_as_admin(packaged: &Path, installed: &Path) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
     #[test]
+    #[cfg(unix)]
     fn installs_replaces_and_keeps_the_symlink() {
         let dir = std::env::temp_dir().join(format!("corvane-cli-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

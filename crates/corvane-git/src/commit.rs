@@ -370,6 +370,8 @@ mod tests {
             )
         };
         run(&["init", "-q", "-b", "main"]);
+        // Git for Windows checks text out with CRLF unless told not to
+        run(&["config", "core.autocrlf", "false"]);
         run(&["config", "commit.gpgsign", "false"]);
         run(&["config", "user.name", "T"]);
         run(&["config", "user.email", "t@example.com"]);
@@ -522,8 +524,11 @@ mod tests {
         discard_changes(git.clone(), path, &status.files, false, false).unwrap();
         assert!(sub.join("junk.txt").exists());
         discard_changes(git.clone(), path, &status.files, false, true).unwrap();
+        // the submodule's clone has the machine's `core.autocrlf`
         assert_eq!(
-            std::fs::read_to_string(sub.join("lib.txt")).unwrap(),
+            std::fs::read_to_string(sub.join("lib.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "lib\n"
         );
         assert!(!sub.join("junk.txt").exists());

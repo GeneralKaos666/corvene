@@ -22,12 +22,17 @@ pub mod locale;
 pub mod notifications;
 pub mod services;
 pub mod shells;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
+pub mod single_instance;
+#[cfg(windows)]
+#[path = "single_instance_windows.rs"]
 pub mod single_instance;
 pub mod spell;
 pub mod trash;
 pub mod updater;
 pub mod url_schemes;
+#[cfg(windows)]
+pub mod windows;
 
 pub mod paths {
     use std::path::PathBuf;
@@ -39,7 +44,9 @@ pub mod paths {
     /// directories on Linux (freedesktop convention).
     #[cfg(target_os = "macos")]
     const DIR_NAME: &str = APP_NAME;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    const DIR_NAME: &str = APP_NAME;
+    #[cfg(not(any(target_os = "macos", windows)))]
     const DIR_NAME: &str = "corvane";
 
     fn home() -> PathBuf {
@@ -77,19 +84,34 @@ pub mod paths {
 
     /// `$XDG_STATE_HOME/corvane` (`~/.local/state/corvane`): logs and crash
     /// reports, which the XDG spec files under state rather than data.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     pub fn state_dir() -> PathBuf {
         dirs::state_dir()
             .unwrap_or_else(|| home().join(".local/state"))
             .join(DIR_NAME)
     }
 
+    /// Windows: `%LOCALAPPDATA%\Corvane` for logs and crash reports. The
+    /// settings and the store are in `%APPDATA%\Corvane`
+    /// ([`app_support_dir`]), where Electron keeps GitHub Desktop's.
+    #[cfg(windows)]
+    pub fn state_dir() -> PathBuf {
+        dirs::data_local_dir().unwrap_or_else(home).join(DIR_NAME)
+    }
+
     /// `~/Library/Caches/Corvane` (Linux: `$XDG_CACHE_HOME/corvane`,
-    /// `~/.cache/corvane`)
+    /// `~/.cache/corvane`; Windows: `%LOCALAPPDATA%\Corvane\Cache`)
     pub fn cache_dir() -> PathBuf {
-        dirs::cache_dir()
-            .unwrap_or_else(|| home().join(".cache"))
-            .join(DIR_NAME)
+        #[cfg(windows)]
+        {
+            state_dir().join("Cache")
+        }
+        #[cfg(not(windows))]
+        {
+            dirs::cache_dir()
+                .unwrap_or_else(|| home().join(".cache"))
+                .join(DIR_NAME)
+        }
     }
 
     /// GitHub Desktop's default clone location: `~/Documents/GitHub`.
@@ -150,7 +172,7 @@ pub mod fonts {
     /// named family that is installed as itself (fontconfig substitutes only
     /// for the generic `monospace`), else what `monospace` matches
     /// (DejaVu Sans Mono on a stock Ubuntu).
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     pub fn ghd_monospace_family() -> String {
         [
             "SFMono-Regular",
@@ -172,7 +194,7 @@ pub mod fonts {
     /// is the desktop's UI font (GTK's `gtk-font-name`, fontconfig's
     /// `sans-serif` without a desktop), and the named families after it only
     /// count when installed as themselves.
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     pub fn ghd_ui_family() -> String {
         fc_match("sans-serif")
             .or_else(|| {
@@ -189,7 +211,7 @@ pub mod fonts {
     /// desktop's XSETTINGS (GNOME: `font-antialiasing` 'rgba') or the
     /// `Xft.rgba` X resource, and "none" (grayscale) otherwise. fontconfig's
     /// own `rgba` is not consulted.
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     pub fn subpixel_antialiasing() -> bool {
         let gnome = std::process::Command::new("gsettings")
             .args(["get", "org.gnome.desktop.interface", "font-antialiasing"])
@@ -218,6 +240,25 @@ pub mod fonts {
             })
     }
 
+    /// Chromium on Windows takes the first installed family of the stack:
+    /// Consolas ships with every Windows.
+    #[cfg(windows)]
+    pub fn ghd_monospace_family() -> String {
+        "Consolas".to_string()
+    }
+
+    /// `system-ui` on Windows is Segoe UI.
+    #[cfg(windows)]
+    pub fn ghd_ui_family() -> String {
+        "Segoe UI".to_string()
+    }
+
+    /// Chromium draws subpixel text when ClearType is on.
+    #[cfg(windows)]
+    pub fn subpixel_antialiasing() -> bool {
+        crate::windows::cleartype()
+    }
+
     /// Android's `monospace` family (`/system/etc/fonts.xml`): what Chrome
     /// for Android resolves the stack to, none of its named families being
     /// installed.
@@ -240,7 +281,7 @@ pub mod fonts {
     }
 
     /// `fc-match -f '%{family[0]}' <pattern>`: the family fontconfig picks.
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     fn fc_match(pattern: &str) -> Option<String> {
         let out = std::process::Command::new("fc-match")
             .args(["-f", "%{family[0]}", pattern])

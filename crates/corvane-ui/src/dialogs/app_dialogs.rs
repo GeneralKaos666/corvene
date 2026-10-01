@@ -332,7 +332,12 @@ impl Render for ConfirmRemoveRepositoryDialog {
                 d.child(crate::widgets::checkbox_row_focus(
                     "remove-repo-trash",
                     trash,
-                    "Also move this repository to Trash",
+                    // GHD `TrashNameLabel`
+                    if cfg!(windows) {
+                        "Also move this repository to Recycle Bin"
+                    } else {
+                        "Also move this repository to Trash"
+                    },
                     self.focus_visible,
                     move |value, _, cx| {
                         weak.update(cx, |this, cx| {

@@ -24,7 +24,7 @@
 //! Deviation (`226-clone-prefers-ssh`): the SSH URL can be preferred for
 //! every lookup, not only for a typed SSH URL (GHD has no protocol setting).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use corvane_github::{Client, Endpoint, RepositoryCloneInfo};
 use corvane_models::split_remote;
@@ -47,14 +47,31 @@ pub fn local_source(input: &str) -> Option<PathBuf> {
     let input = input.trim();
     if let Some(rest) = input.strip_prefix("file://") {
         let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-        return rest
-            .starts_with('/')
-            .then(|| PathBuf::from(rest.replace("%20", " ")));
+        let path = rest.replace("%20", " ");
+        // Windows: the drive follows the slash (`file:///C:/…`)
+        if cfg!(windows) {
+            return path
+                .strip_prefix('/')
+                .filter(|path| Path::new(path).is_absolute())
+                .map(PathBuf::from);
+        }
+        return rest.starts_with('/').then(|| PathBuf::from(path));
     }
-    if let Some(rest) = input.strip_prefix("~/") {
-        return std::env::var_os("HOME").map(|home| PathBuf::from(home).join(rest));
+    let home_relative = input
+        .strip_prefix("~/")
+        .or_else(|| input.strip_prefix("~\\").filter(|_| cfg!(windows)));
+    if let Some(rest) = home_relative {
+        return std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(|home| PathBuf::from(home).join(rest));
     }
-    input.starts_with('/').then(|| PathBuf::from(input))
+    // Windows: `C:\…` or `\\server\share\…`; `/a/b` has no drive there
+    let absolute = if cfg!(windows) {
+        Path::new(input).is_absolute()
+    } else {
+        input.starts_with('/')
+    };
+    absolute.then(|| PathBuf::from(input))
 }
 
 /// `232-clone-local-sources`: `None` when `input` is not a local source,
@@ -408,18 +425,38 @@ mod tests {
     fn local_sources_are_checked_and_cloned_as_typed() {
         assert_eq!(local_source("hubot/cool"), None);
         assert_eq!(local_source("https://github.com/a/b"), None);
-        assert_eq!(local_source(" /a/b/c "), Some(PathBuf::from("/a/b/c")));
-        assert_eq!(
-            local_source("file://localhost/a/my%20repo"),
-            Some(PathBuf::from("/a/my repo"))
-        );
+        #[cfg(not(windows))]
+        {
+            assert_eq!(local_source(" /a/b/c "), Some(PathBuf::from("/a/b/c")));
+            assert_eq!(
+                local_source("file://localhost/a/my%20repo"),
+                Some(PathBuf::from("/a/my repo"))
+            );
+        }
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                local_source(r" C:\a\b\c "),
+                Some(PathBuf::from(r"C:\a\b\c"))
+            );
+            assert_eq!(local_source("/a/b/c"), None);
+            assert_eq!(
+                local_source("file:///C:/a/my%20repo"),
+                Some(PathBuf::from("C:/a/my repo"))
+            );
+        }
         assert!(resolve_local("owner/name").is_none());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().display().to_string();
         assert_eq!(resolve_local(&path), Some(Err(LOCAL_SOURCE_NOT_FOUND)));
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         assert_eq!(resolve_local(&path).unwrap().unwrap().url, path);
-        let url = format!("file://{path}");
+        // Windows: the drive follows a third slash
+        let url = if cfg!(windows) {
+            format!("file:///{path}")
+        } else {
+            format!("file://{path}")
+        };
         assert_eq!(resolve_local(&url).unwrap().unwrap().url, url);
     }
 

@@ -3,6 +3,7 @@
 
     python3 tools/ts-queries/build_unit.py <unit> <out.dylib> [--target aarch64-apple-darwin]
     python3 tools/ts-queries/build_unit.py <unit> <out.so> [--target x86_64-unknown-linux-gnu]
+    python tools/ts-queries/build_unit.py <unit> <out.dll> [--target x86_64-pc-windows-msvc]
     CORVANE_CC=<ndk clang> CORVANE_CXX=<ndk clang++> \
         python3 tools/ts-queries/build_unit.py <unit> <out.so> --target aarch64-linux-android26
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -111,9 +113,14 @@ def main(argv: list[str]) -> int:
         + "\n".join(externs)
         + f"\nstatic const Grammar GRAMMARS[] = {{\n{','.join(entries)}\n}};\n"
         + f'static const Table TABLE = {{1, "{PACK_VERSION}", {len(entries)}, GRAMMARS}};\n'
-        + '__attribute__((visibility("default"))) const Table *corvane_grammars_v1(void) { return &TABLE; }\n'
+        + "#ifdef _WIN32\n__declspec(dllexport)\n#else\n"
+        + '__attribute__((visibility("default")))\n#endif\n'
+        + "const Table *corvane_grammars_v1(void) { return &TABLE; }\n"
     )
     macos = target.endswith("-apple-darwin") if target else sys.platform == "darwin"
+    # Windows: clang with the MSVC libraries (the static C runtime, clang's
+    # default there, so a unit needs nothing beyond the system's DLLs)
+    windows = "-windows-" in target if target else sys.platform == "win32"
     if target and macos:
         # Info.plist's LSMinimumSystemVersion; Apple Silicon starts at 11.0
         floor = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "10.15")
@@ -132,7 +139,10 @@ def main(argv: list[str]) -> int:
         tmpd = Path(tmp)
         (tmpd / "table.c").write_text(table)
         objs, cpp = [tmpd / "table.o"], False
-        cflags = ["-O2", "-fPIC", "-fvisibility=hidden", "-w", *arch]
+        if windows:
+            cflags = ["-O2", "-w", *arch]
+        else:
+            cflags = ["-O2", "-fPIC", "-fvisibility=hidden", "-w", *arch]
         if not macos:
             cflags += ["-ffunction-sections", "-fdata-sections"]
         subprocess.run([cc, "-c", "-std=c11", *cflags, str(tmpd / "table.c"), "-o", str(objs[0])], check=True)
@@ -149,6 +159,14 @@ def main(argv: list[str]) -> int:
                     subprocess.run([cc, "-c", "-std=c11", *cflags, "-I", str(src), str(path), "-o", str(obj)], check=True)
                 objs.append(obj)
         out.parent.mkdir(parents=True, exist_ok=True)
+        if windows:
+            # linked in the temporary folder: the import library and the
+            # export file the linker writes next to a DLL are not wanted
+            dll = tmpd / out.name
+            subprocess.run([cxx if cpp else cc, "-shared", *arch, "-Wl,/OPT:REF", "-Wl,/OPT:ICF",
+                            *map(str, objs), "-o", str(dll)], check=True)
+            shutil.copyfile(dll, out)
+            return 0
         if macos:
             link = [cxx if cpp else cc, "-dynamiclib", *arch, "-Wl,-dead_strip", "-Wl,-x",
                     "-install_name", f"@rpath/{out.name}", *map(str, objs), "-o", str(out)]

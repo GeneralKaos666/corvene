@@ -1004,7 +1004,11 @@ impl Dispatcher {
                 if let Err((path, err)) = result {
                     error!(%err, path = %path.display(), "could not move repository to Trash");
                     Self::show_error(
-                        "Unable to Move Repository to Trash",
+                        if cfg!(windows) {
+                            "Unable to Move Repository to Recycle Bin"
+                        } else {
+                            "Unable to Move Repository to Trash"
+                        },
                         format!("{}: {err}", path.display()),
                         cx,
                     );
@@ -1028,7 +1032,9 @@ impl Dispatcher {
 }
 
 fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 /// Where a file as of commit `short_sha` is written (flag `811`):

@@ -112,6 +112,21 @@ fn default_cancel_token() -> Option<CancelToken> {
     DEFAULT_CANCEL.lock().ok().and_then(|slot| slot.clone())
 }
 
+/// Windows has no SIGTERM. `taskkill /T` ends the whole tree: `cmd\git.exe`
+/// is a wrapper around the real git, which in turn runs the remote helper.
+#[cfg(windows)]
+fn terminate(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .creation_flags(crate::CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(windows))]
 fn terminate(pid: u32) {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return;
@@ -248,6 +263,11 @@ impl GitCommand {
 
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.bin.path);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(crate::CREATE_NO_WINDOW);
+        }
         // Settings › Advanced › Use Git Credential Manager: `-c credential.helper=manager`
         // for the network commands (GHD `useExternalCredentialHelper`).
         let network = is_network_command(self.args.first());

@@ -13,6 +13,7 @@
 //! dictionary nothing is flagged.
 #![allow(unexpected_cfgs)] // `objc` macros probe a `cargo-clippy` feature
 
+#[cfg(not(windows))]
 use std::ops::Range;
 
 /// Every misspelled word in `text`, in document order.
@@ -155,7 +156,13 @@ fn utf16_to_byte(text: &str, utf16: &[u16], n: usize) -> Option<usize> {
     None
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+#[path = "spell_windows.rs"]
+mod windows_checker;
+#[cfg(windows)]
+pub use windows_checker::{guesses, learn_word, misspelled_ranges};
+
+#[cfg(not(any(target_os = "macos", windows)))]
 mod hunspell {
     use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
@@ -218,7 +225,7 @@ mod hunspell {
 
 /// Words as Chromium's spellchecker splits them: letters with inner
 /// apostrophes; tokens with digits are skipped. UTF-8 byte ranges.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn words(text: &str) -> Vec<Range<usize>> {
     let mut out = Vec::new();
     let mut start: Option<usize> = None;
@@ -246,7 +253,7 @@ fn words(text: &str) -> Vec<Range<usize>> {
     out
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn misspelled_ranges(text: &str) -> Vec<Range<usize>> {
     let Ok(guard) = hunspell::dictionary().lock() else {
         return Vec::new();
@@ -261,7 +268,7 @@ pub fn misspelled_ranges(text: &str) -> Vec<Range<usize>> {
 }
 
 /// Spelling suggestions for `word` (Chromium shows up to five).
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn guesses(word: &str) -> Vec<String> {
     let Ok(guard) = hunspell::dictionary().lock() else {
         return Vec::new();
@@ -275,7 +282,7 @@ pub fn guesses(word: &str) -> Vec<String> {
 }
 
 /// "Add to Dictionary": remember `word` now and in `custom-dictionary.txt`.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn learn_word(word: &str) {
     use std::io::Write;
 
@@ -298,7 +305,7 @@ pub fn learn_word(word: &str) {
     }
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, not(any(target_os = "macos", windows))))]
 mod linux_tests {
     #[test]
     fn splits_words_like_chromium() {

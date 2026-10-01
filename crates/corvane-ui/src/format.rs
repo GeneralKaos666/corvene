@@ -140,7 +140,11 @@ pub fn local_time(at: SystemTime) -> LocalTime {
     unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
         let t: libc::time_t = secs as libc::time_t;
+        #[cfg(not(windows))]
         libc::localtime_r(&t, &mut tm);
+        // the CRT's equivalent, arguments swapped
+        #[cfg(windows)]
+        libc::localtime_s(&mut tm, &t);
         LocalTime {
             year: tm.tm_year + 1900,
             month: (tm.tm_mon + 1) as u32,

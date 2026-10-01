@@ -4,9 +4,12 @@
 //! terminal would. Corvane applies it to every git subprocess.
 
 use std::collections::HashMap;
+#[cfg(not(windows))]
 use std::io::Read;
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::sync::RwLock;
+#[cfg(not(windows))]
 use std::time::{Duration, Instant};
 
 /// Variables never copied from the shell (`ExcludedEnvironmentVars` + shell
@@ -67,8 +70,18 @@ pub fn reload_if_uncached() {
     }
 }
 
+/// Windows has no login shell whose profile changes the environment: every
+/// process already has the user's variables.
+#[cfg(windows)]
+pub fn load_shell_env() -> std::io::Result<HashMap<String, String>> {
+    Ok(std::env::vars()
+        .filter(|(key, _)| !EXCLUDED.contains(&key.as_str()))
+        .collect())
+}
+
 /// Run `$SHELL -ilc` and collect its environment, NUL-delimited so values
 /// with newlines survive (the same awk one-liner GHD uses). 5 s timeout.
+#[cfg(not(windows))]
 pub fn load_shell_env() -> std::io::Result<HashMap<String, String>> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
     let cmd = r#"command awk 'BEGIN{for(k in ENVIRON) printf("%c%s=%s%c", 0, k, ENVIRON[k], 0)}'"#;

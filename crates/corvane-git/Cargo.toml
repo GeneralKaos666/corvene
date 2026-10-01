@@ -9,6 +9,7 @@ description = "Corvane git engine: gitoxide reads, git CLI writes"
 corvane-models.workspace = true
 gix.workspace = true
 libc = "0.2"
+dunce = "1"
 thiserror.workspace = true
 tracing.workspace = true
 

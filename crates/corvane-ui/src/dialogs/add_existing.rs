@@ -134,7 +134,10 @@ impl AddExistingRepositoryDialog {
         if raw.is_empty() {
             return None;
         }
-        let expanded = if let Some(rest) = raw.strip_prefix("~/") {
+        let home_relative = raw
+            .strip_prefix("~/")
+            .or_else(|| raw.strip_prefix("~\\").filter(|_| cfg!(windows)));
+        let expanded = if let Some(rest) = home_relative {
             dirs_home().join(rest)
         } else {
             PathBuf::from(raw)
@@ -226,6 +229,7 @@ fn add_several(paths: Vec<PathBuf>, cx: &mut App) {
 
 fn dirs_home() -> PathBuf {
     std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
 }

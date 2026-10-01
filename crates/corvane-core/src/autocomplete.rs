@@ -578,16 +578,24 @@ impl Dispatcher {
 /// ones only when the rest starts with `.`), sorted, at most `max`. `~/`
 /// is listed from `$HOME` but kept in the completion.
 pub fn folder_completions(text: &str, max: usize) -> Vec<(String, String)> {
-    let Some(slash) = text.rfind('/') else {
+    // Windows: either separator, and the completion continues with the one
+    // that was typed
+    let Some(slash) = text.rfind(|c| c == '/' || (cfg!(windows) && c == '\\')) else {
         return Vec::new();
     };
     let (dir, prefix) = (&text[..=slash], &text[slash + 1..]);
-    let listed = match dir.strip_prefix("~/") {
-        Some(rest) => match std::env::var_os("HOME") {
+    let separator = &text[slash..=slash];
+    let home_relative = dir
+        .strip_prefix("~/")
+        .or_else(|| dir.strip_prefix("~\\").filter(|_| cfg!(windows)));
+    let listed = match home_relative {
+        Some(rest) => match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
             Some(home) => std::path::PathBuf::from(home).join(rest),
             None => return Vec::new(),
         },
-        None if dir.starts_with('/') => std::path::PathBuf::from(dir),
+        None if dir.starts_with('/') || std::path::Path::new(dir).is_absolute() => {
+            std::path::PathBuf::from(dir)
+        }
         None => return Vec::new(),
     };
     let Ok(entries) = std::fs::read_dir(&listed) else {
@@ -606,7 +614,7 @@ pub fn folder_completions(text: &str, max: usize) -> Vec<(String, String)> {
     names.truncate(max);
     names
         .into_iter()
-        .map(|n| (format!("{dir}{n}/"), n))
+        .map(|n| (format!("{dir}{n}{separator}"), n))
         .collect()
 }
 

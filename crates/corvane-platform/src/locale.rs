@@ -41,7 +41,7 @@ pub fn country_code() -> Option<String> {
 /// Linux: the territory of the locale Chromium's UI locale comes from, the
 /// first set of `LC_ALL`, `LC_MESSAGES`, `LANG` (`en_GB.UTF-8` → `GB`);
 /// `C` / `POSIX` have none.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn country_code() -> Option<String> {
     let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
     let locale = var("LC_ALL")
@@ -50,8 +50,14 @@ pub fn country_code() -> Option<String> {
     territory(&locale)
 }
 
+/// Windows: the region chosen in Settings.
+#[cfg(windows)]
+pub fn country_code() -> Option<String> {
+    crate::windows::country_code()
+}
+
 /// `ll_CC[.codeset][@modifier]` → `CC`.
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", windows)))]
 fn territory(locale: &str) -> Option<String> {
     let base = locale.split(['.', '@']).next()?;
     let (_, country) = base.split_once('_')?;
@@ -59,7 +65,7 @@ fn territory(locale: &str) -> Option<String> {
         .then(|| country.to_ascii_uppercase())
 }
 
-#[cfg(all(test, not(target_os = "macos")))]
+#[cfg(all(test, not(any(target_os = "macos", windows))))]
 mod tests {
     #[test]
     fn territories() {

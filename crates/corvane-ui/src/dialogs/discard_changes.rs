@@ -146,6 +146,8 @@ impl Render for DiscardChangesDialog {
             .when(!only_submodules, |d| {
                 d.child(div().when(!all, |d| d.mb(SPACING())).child(if skips_trash {
                     "Discarded files are deleted permanently and cannot be restored."
+                } else if cfg!(windows) {
+                    "Changes can be restored by retrieving them from the Recycle Bin."
                 } else {
                     "Changes can be restored by retrieving them from the Trash."
                 }))

@@ -449,7 +449,7 @@ pub fn install_click_handler(handler: impl Fn(NotificationClick) + Send + Sync +
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 mod linux {
     use std::sync::OnceLock;
 
@@ -463,12 +463,12 @@ mod linux {
 }
 
 /// No permission model on Linux (see the module docs).
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 pub fn permission() -> NotificationPermission {
     NotificationPermission::Unsupported
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 pub fn request_permission() {}
 
 /// Post to `org.freedesktop.Notifications` like Chromium's HTML5
@@ -476,7 +476,7 @@ pub fn request_permission() {}
 /// desktop entry hint lets the shell show Corvane's icon and name. A thread
 /// waits for the notification to be clicked or closed; a click goes to the
 /// installed click handler with `identifier` and `payload`.
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 pub fn show(
     identifier: &str,
     title: &str,
@@ -519,10 +519,63 @@ pub fn show(
 
 /// GHD `onNotificationEvent`: every click on a Corvane notification goes to
 /// `handler` (on the notification's waiting thread).
-#[cfg(not(any(target_os = "macos", target_os = "android")))]
+#[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
 pub fn install_click_handler(handler: impl Fn(NotificationClick) + Send + Sync + 'static) {
     let _ = linux::CLICK_HANDLER.set(Box::new(handler));
 }
+
+/// Windows shows toasts without asking; Settings › System › Notifications
+/// can turn them off, which a program is not told.
+#[cfg(windows)]
+pub fn permission() -> NotificationPermission {
+    NotificationPermission::Granted
+}
+
+#[cfg(windows)]
+pub fn request_permission() {}
+
+/// A toast under Corvane's AppUserModelID, which an installed Corvane has
+/// through its Start menu shortcut. A build that is not installed has no
+/// identity of its own, and Windows only shows toasts of a known one, so
+/// its toasts go out under the stand-in the toast library provides. A
+/// click starts the identity's program: for the installed Corvane that is
+/// a second launch, which hands over to the running window.
+#[cfg(windows)]
+pub fn show(
+    identifier: &str,
+    title: &str,
+    body: &str,
+    payload: Option<&str>,
+    done: impl FnOnce(Result<(), NotificationError>) + Send + 'static,
+) {
+    let _ = (identifier, payload);
+    let mut notification = notify_rust::Notification::new();
+    notification.summary(title).body(body);
+    let installed = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("unins000.exe").is_file()))
+        .unwrap_or(false);
+    if installed {
+        notification.app_id(crate::windows::APP_USER_MODEL_ID);
+    }
+    let spawned = std::thread::Builder::new()
+        .name("notification".into())
+        .spawn(move || {
+            done(
+                notification
+                    .show()
+                    .map(drop)
+                    .map_err(|err| NotificationError::Post(err.to_string())),
+            )
+        });
+    if let Err(err) = spawned {
+        tracing::warn!(%err, "could not start the notification thread");
+    }
+}
+
+/// Clicks arrive as a second launch (see [`show`]), not here.
+#[cfg(windows)]
+pub fn install_click_handler(_handler: impl Fn(NotificationClick) + Send + Sync + 'static) {}
 
 /// GHD `getNotificationSettingsUrl`: System Settings › Notifications for this app.
 pub fn settings_url(bundle_id: &str) -> String {
@@ -531,7 +584,12 @@ pub fn settings_url(bundle_id: &str) -> String {
         let _ = bundle_id;
         crate::android::NOTIFICATION_SETTINGS_URL.to_string()
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(windows)]
+    {
+        let _ = bundle_id;
+        "ms-settings:notifications".to_string()
+    }
+    #[cfg(not(any(target_os = "android", windows)))]
     format!("x-apple.systempreferences:com.apple.preference.notifications?id={bundle_id}")
 }
 
@@ -599,7 +657,7 @@ pub fn clicked(click: NotificationClick) {
 /// (CI runs the tests under `dbus-run-session`): it records the posted
 /// notification and "clicks" it. Skipped without a session bus or when a
 /// real notification server owns the name.
-#[cfg(all(test, not(any(target_os = "macos", target_os = "android"))))]
+#[cfg(all(test, not(any(target_os = "macos", target_os = "android", windows))))]
 mod linux_tests {
     use std::collections::HashMap;
     use std::sync::mpsc;

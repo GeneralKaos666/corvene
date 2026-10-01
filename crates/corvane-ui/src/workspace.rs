@@ -603,18 +603,23 @@ impl Workspace {
                         move |_, cx| Dispatcher::show_in_finder(&path, cx)
                     }),
                     // `getPlatformFileManagerName` and the menu item's label
-                    title: crate::context_menu::mac_or(
-                        "View the files of your repository in Finder",
-                        "View the files of your repository in your File Manager",
-                    )
+                    title: if cfg!(windows) {
+                        "View the files of your repository in Explorer"
+                    } else {
+                        crate::context_menu::mac_or(
+                            "View the files of your repository in Finder",
+                            "View the files of your repository in your File Manager",
+                        )
+                    }
                     .into(),
                     description: None,
                     hint: "Repository menu or".into(),
                     keys: &["⌘", "⇧", "F"],
-                    button_label: crate::context_menu::mac_or(
-                        "Show in Finder",
-                        "Show in your File Manager",
-                    )
+                    button_label: if cfg!(windows) {
+                        "Show in Explorer"
+                    } else {
+                        crate::context_menu::mac_or("Show in Finder", "Show in your File Manager")
+                    }
                     .into(),
                     primary: false,
                 }]);

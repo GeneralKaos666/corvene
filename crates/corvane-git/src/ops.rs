@@ -75,6 +75,13 @@ pub fn normalize_clone_url(input: &str) -> Option<String> {
 /// Last path segment of a clone URL without `.git` (GHD `getDefaultDir`).
 pub fn repository_name_from_url(url: &str) -> Option<String> {
     let trimmed = url.trim().trim_end_matches('/');
+    // Windows: a local source is a path with backslashes
+    #[cfg(windows)]
+    let last = trimmed
+        .trim_end_matches('\\')
+        .rsplit(['/', ':', '\\'])
+        .next()?;
+    #[cfg(not(windows))]
     let last = trimmed.rsplit(['/', ':']).next()?;
     let name = last.strip_suffix(".git").unwrap_or(last);
     if name.is_empty() {
@@ -241,7 +248,8 @@ pub fn parse_clone_progress(line: &str) -> CloneProgress {
 
 /// `git clone --progress --recurse-submodules <url> <path>` streaming progress;
 /// `depth` adds `--depth <n>` (a shallow clone, `233-shallow-clone`). A
-/// cancelled `cancel` token stops git, which removes what it created.
+/// cancelled `cancel` token stops git, which removes what it created
+/// (Windows: a terminated git removes nothing, so Corvane does).
 pub fn clone(
     git: Arc<GitBinary>,
     url: &str,
@@ -268,9 +276,23 @@ pub fn clone(
     if let Some(depth) = depth {
         cmd = cmd.args(["--depth".to_string(), depth.to_string()]);
     }
-    cmd.args(["--", url])
+    #[cfg(windows)]
+    let existed = path.exists();
+    let cloned = cmd
+        .args(["--", url])
         .arg(path)
-        .run_streaming(|line| on_progress(parse_clone_progress(line)))?;
+        .run_streaming(|line| on_progress(parse_clone_progress(line)));
+    #[cfg(windows)]
+    if matches!(cloned, Err(crate::error::GitError::Cancelled(_))) && !existed {
+        // the killed processes let go of their files a moment later
+        for _ in 0..20 {
+            if std::fs::remove_dir_all(path).is_ok() || !path.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+    cloned?;
     Ok(())
 }
 

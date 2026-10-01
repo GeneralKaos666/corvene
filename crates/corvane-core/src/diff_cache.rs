@@ -175,6 +175,16 @@ pub struct WorkingStamp {
 
 type WorkingKey = (PathBuf, String, WorkingStamp);
 
+/// Windows: the last write time in 100 ns ticks; a file index needs an open
+/// handle, so the third field stays 0.
+#[cfg(windows)]
+fn file_stamp(path: &Path) -> Option<(u64, i128, u64)> {
+    use std::os::windows::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    Some((meta.len(), i128::from(meta.last_write_time()), 0))
+}
+
+#[cfg(not(windows))]
 fn file_stamp(path: &Path) -> Option<(u64, i128, u64)> {
     use std::os::unix::fs::MetadataExt;
     let meta = std::fs::symlink_metadata(path).ok()?;

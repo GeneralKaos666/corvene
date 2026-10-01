@@ -9,10 +9,11 @@
 //! newline. Reply: the answer (empty when Corvane knows nothing, which makes
 //! git fail with an authentication error the app turns into its dialog).
 
-use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
-
+#[cfg(unix)]
 fn ask(prompt: &str) -> Option<String> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
     let socket = std::env::var_os("CORVANE_ASKPASS_SOCKET")?;
     let logins = std::env::var("CORVANE_ASKPASS_LOGINS").unwrap_or_default();
     let mut stream = UnixStream::connect(socket).ok()?;
@@ -27,6 +28,13 @@ fn ask(prompt: &str) -> Option<String> {
     let mut answer = String::new();
     stream.read_to_string(&mut answer).ok()?;
     Some(answer)
+}
+
+/// Only built there so that the workspace builds: Windows git runs the
+/// Corvane binary itself.
+#[cfg(not(unix))]
+fn ask(_prompt: &str) -> Option<String> {
+    None
 }
 
 fn main() {

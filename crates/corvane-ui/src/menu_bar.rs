@@ -34,8 +34,17 @@ pub const HEIGHT: f32 = if cfg!(target_os = "android") {
     28.
 };
 /// The open button's background covers the bar minus its last row.
+#[cfg(not(windows))]
 const OPEN_HEIGHT: f32 = HEIGHT - 1.;
+#[cfg(not(windows))]
 const BUTTON_PADDING: f32 = if cfg!(target_os = "android") { 5. } else { 6. };
+/// Windows: the bar is GitHub Desktop's own app menu bar inside its title
+/// bar (`crate::title_bar_windows`, `_app-menu-bar.scss`): the open button
+/// is as tall as the bar, the labels have `var(--spacing)` either side.
+#[cfg(windows)]
+const OPEN_HEIGHT: f32 = HEIGHT;
+#[cfg(windows)]
+const BUTTON_PADDING: f32 = 10.;
 
 /// GHD's menu id for one of Corvane's menu actions (`menu-update.ts` works
 /// on ids).
@@ -93,6 +102,8 @@ fn menu_id(action: &dyn Action) -> Option<MenuId> {
 fn role_accelerator(os_action: OsAction) -> &'static str {
     match os_action {
         OsAction::Undo => "Ctrl+Z",
+        // Electron's `redo` role on Windows
+        OsAction::Redo if cfg!(windows) => "Ctrl+Y",
         OsAction::Redo => "Ctrl+Shift+Z",
         OsAction::Cut => "Ctrl+X",
         OsAction::Copy => "Ctrl+C",
@@ -156,6 +167,11 @@ impl MenuBar {
     /// Alt+letter, and the keys of a focused bar.
     fn intercept(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
         self.alt_alone = false;
+        // Windows: no app menu during the welcome flow
+        #[cfg(windows)]
+        if title_bar_mode(false, window, cx) == crate::title_bar_windows::Mode::Light {
+            return;
+        }
         match views_menu::last_key() {
             views_menu::LastKey::Activated => {
                 // Chromium leaves the menu bar once an item runs
@@ -269,6 +285,13 @@ impl MenuBar {
 /// Android, where the shell keeps clear of the system bars.
 fn bar_origin() -> Point<Pixels> {
     let area = crate::theme::safe_area();
+    // Windows: the title bar's app icon comes first
+    #[cfg(windows)]
+    let area = {
+        let mut area = area;
+        area.left += px(crate::title_bar_windows::MENU_BAR_LEFT);
+        area
+    };
     point(area.left, area.top)
 }
 
@@ -347,7 +370,7 @@ fn entries(items: &[OwnedMenuItem], window: &mut Window, cx: &mut App) -> Vec<En
 
 impl Render for MenuBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = Palette::for_window(window);
+        let palette = Palette::for_view(window, cx);
         let font = Font {
             family: views_menu::font_family(),
             ..Font::default()
@@ -401,6 +424,10 @@ impl Render for MenuBar {
                 .top_0()
                 .w(px(b.width))
                 .h(px(HEIGHT))
+                // Windows: `.toolbar-button > button:hover`
+                .when(cfg!(windows) && !is_open && !hot, |d| {
+                    d.hover(|style| style.bg(palette.bar_hot))
+                })
                 .when(is_open, |d| {
                     d.child(
                         div()
@@ -434,16 +461,18 @@ impl Render for MenuBar {
                         .h(px(HEIGHT))
                         .flex()
                         .items_center()
+                        // Windows: the open button takes the pane's colours
+                        .when(cfg!(windows) && is_open, |d| d.text_color(palette.text))
                         .child(label),
                 )
         });
-        div()
+        let bar = div()
             .id("menu-bar")
             .relative()
             .w_full()
             .h(px(HEIGHT))
             .flex_none()
-            .bg(palette.bar_background)
+            .when(!cfg!(windows), |d| d.bg(palette.bar_background))
             .text_color(palette.bar_text)
             .font_family(views_menu::font_family())
             .text_size(font_size)
@@ -504,8 +533,45 @@ impl Render for MenuBar {
                     this.open(index, false, window, cx);
                 }
             }))
-            .children(buttons)
+            .children(buttons);
+        framed(bar, x, self.focused.is_some() || self.alt_alone, window, cx)
     }
+}
+
+/// Windows: how the title bar is shown (`app.tsx#renderTitlebar`): light
+/// during the welcome flow; in full screen only while the app menu is in
+/// use (`active`: the bar has the keyboard, or a menu is open).
+#[cfg(windows)]
+fn title_bar_mode(active: bool, window: &Window, cx: &App) -> crate::title_bar_windows::Mode {
+    use crate::title_bar_windows::Mode;
+    let welcome = corvane_core::AppState::try_global(cx)
+        .is_some_and(|state| !state.read(cx).settings.welcome_completed);
+    if welcome {
+        Mode::Light
+    } else if window.is_fullscreen() && !active && !views_menu::is_open(cx) {
+        Mode::Hidden
+    } else {
+        Mode::Dark
+    }
+}
+
+/// The bar as the window shows it: on Windows inside GitHub Desktop's title
+/// bar (`crate::title_bar_windows`), `width` being the buttons' width.
+#[cfg(windows)]
+fn framed(bar: Stateful<Div>, width: f32, active: bool, window: &Window, cx: &App) -> AnyElement {
+    let mode = title_bar_mode(active, window, cx);
+    crate::title_bar_windows::title_bar(bar, width, mode, window)
+}
+
+#[cfg(not(windows))]
+fn framed(
+    bar: Stateful<Div>,
+    _width: f32,
+    _active: bool,
+    _window: &Window,
+    _cx: &App,
+) -> AnyElement {
+    bar.into_any_element()
 }
 
 /// The main window's root on Linux: the menu bar over the app, as Electron
@@ -559,15 +625,63 @@ impl Render for MenuBarShell {
                     menu_bar.update(cx, |bar, cx| bar.unfocus(cx));
                 }
             })
-            .child(self.menu_bar.clone())
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(self.content.clone()),
-            )
+            .map(|shell| self.layout(shell, window, cx))
             .children(Self::menus_in_window(cx))
+    }
+}
+
+impl MenuBarShell {
+    /// The bar above the page.
+    #[cfg(not(windows))]
+    fn layout(&self, shell: Stateful<Div>, _window: &Window, _cx: &App) -> Stateful<Div> {
+        shell.child(self.menu_bar.clone()).child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(self.content.clone()),
+        )
+    }
+
+    /// Windows: the title bar above the page, or over it (the welcome
+    /// flow's light bar; none in full screen), and the page dimmed under an
+    /// open app menu (`#foldout-container .overlay`).
+    #[cfg(windows)]
+    fn layout(&self, shell: Stateful<Div>, window: &Window, cx: &App) -> Stateful<Div> {
+        use crate::title_bar_windows::{self, Mode};
+        let bar = self.menu_bar.read(cx);
+        let mode = title_bar_mode(bar.focused.is_some() || bar.alt_alone, window, cx);
+        title_bar_windows::set_mode(mode);
+        let page = div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .child(self.content.clone());
+        if mode == Mode::Dark {
+            shell
+                .child(self.menu_bar.clone())
+                .child(page)
+                .when(views_menu::app_menu_open(cx), |shell| {
+                    shell.child(
+                        div()
+                            .absolute()
+                            .top(px(title_bar_windows::HEIGHT))
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .bg(hsla(0., 0., 0., 0.4)),
+                    )
+                })
+        } else {
+            shell.relative().child(page).child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w_full()
+                    .child(self.menu_bar.clone()),
+            )
+        }
     }
 }
 
@@ -575,11 +689,11 @@ impl MenuBarShell {
     /// Android: the open menus, drawn over the page (an activity has no
     /// popup windows). Nothing elsewhere.
     fn menus_in_window(cx: &App) -> Vec<AnyElement> {
-        #[cfg(target_os = "android")]
+        #[cfg(any(target_os = "android", windows))]
         {
             views_menu::overlay(cx)
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", windows)))]
         {
             let _ = cx;
             Vec::new()

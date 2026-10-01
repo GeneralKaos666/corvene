@@ -52,7 +52,9 @@ pub fn watch(
     // started before it must not swallow it)
     let (tx, rx) = async_channel::unbounded::<Instant>();
     // FSEvents reports resolved paths (`/private/var/…` for `/var/…`)
-    let root = workdir.canonicalize().unwrap_or_else(|_| workdir.clone());
+    // (dunce: Windows reports paths under the folder as it was given, which
+    // `canonicalize`'s `\\?\` form is not a prefix of)
+    let root = dunce::canonicalize(&workdir).unwrap_or_else(|_| workdir.clone());
     std::thread::Builder::new()
         .name("repo-watcher".into())
         .spawn(move || {

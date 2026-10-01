@@ -651,6 +651,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), allow(unreachable_code))]
     fn symlink_lines_are_the_target() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("real.txt"), "one\ntwo\n").unwrap();

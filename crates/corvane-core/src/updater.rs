@@ -431,6 +431,8 @@ impl Dispatcher {
                 "Could not install the update",
                 if cfg!(target_os = "macos") {
                     "Corvane is not running from an app bundle."
+                } else if cfg!(windows) {
+                    "Corvane was not installed with its installer."
                 } else {
                     "Corvane is not running from an AppImage."
                 },
@@ -473,6 +475,8 @@ impl Dispatcher {
                             crate::release_notes::RELEASE_NOTES_URL,
                             if cfg!(target_os = "macos") {
                                 "Corvane.app"
+                            } else if cfg!(windows) {
+                                "Corvane"
                             } else {
                                 "the AppImage"
                             }
@@ -505,6 +509,12 @@ impl Dispatcher {
             html_url: format!("https://github.com/wasi-master/corvane/releases/tag/v{version}"),
             zip_name: if cfg!(target_os = "macos") {
                 format!("Corvane-{version}-macos-universal.zip")
+            } else if cfg!(windows) {
+                let arch = match std::env::consts::ARCH {
+                    "x86" => "i686",
+                    arch => arch,
+                };
+                format!("Corvane-{version}-{arch}-setup.exe")
             } else {
                 format!("Corvane-{version}-{}.AppImage", std::env::consts::ARCH)
             },

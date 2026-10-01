@@ -1013,8 +1013,14 @@ mod tests {
         );
         assert_eq!(derived_path(base, "nope", true, false), Path::new("/c"));
         // `232-clone-local-sources`: a local folder names the clone after itself
+        #[cfg(not(windows))]
         assert_eq!(
             derived_path(base, "/src/a/tool.git", true, true),
+            Path::new("/c/tool")
+        );
+        #[cfg(windows)]
+        assert_eq!(
+            derived_path(base, r"C:\src\a\tool.git", true, true),
             Path::new("/c/tool")
         );
         assert_eq!(
