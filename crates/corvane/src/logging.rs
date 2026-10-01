@@ -8,9 +8,10 @@ pub fn init() -> Option<WorkerGuard> {
     let filter = EnvFilter::try_from_env("CORVANE_LOG").unwrap_or_else(|_| {
         // Android: every line is a write to logcat on the thread that
         // logs; a release keeps to `info` (a refresh alone logs a dozen
-        // git commands at `debug`)
+        // git commands at `debug`); the platform layer's frame timings,
+        // one line per hundred frames, stay
         EnvFilter::new(if cfg!(target_os = "android") && !cfg!(debug_assertions) {
-            "info"
+            "info,gpui_android=debug"
         } else {
             "info,corvane=debug"
         })
