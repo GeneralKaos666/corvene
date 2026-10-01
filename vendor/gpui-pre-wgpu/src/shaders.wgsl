@@ -536,6 +536,13 @@ struct QuadVarying {
     @location(3) @interpolate(flat) background_solid: vec4<f32>,
     @location(4) @interpolate(flat) background_color0: vec4<f32>,
     @location(5) @interpolate(flat) background_color1: vec4<f32>,
+    // Corvane patch: the part of a solid quad that is its background and
+    // nothing else (inside the borders and the rounded corners; all of a
+    // quad that has neither), as min.xy and max.zw in device pixels. Decided
+    // once per quad, so the fragment shader does not read the instance from
+    // the storage buffer for each of those pixels: on a phone's GPU that read
+    // cost more than everything else in a frame. Empty for other backgrounds.
+    @location(6) @interpolate(flat) interior: vec4<f32>,
 }
 
 @vertex
@@ -556,6 +563,20 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     out.background_color0 = gradient.color0;
     out.background_color1 = gradient.color1;
     out.border_color = hsla_to_rgba(quad.border_color);
+    let widest_border = max(max(quad.border_widths.top, quad.border_widths.bottom),
+        max(quad.border_widths.left, quad.border_widths.right));
+    let widest_radius = max(max(quad.corner_radii.top_left, quad.corner_radii.top_right),
+        max(quad.corner_radii.bottom_left, quad.corner_radii.bottom_right));
+    // one pixel more than the border or the corner needs: past the
+    // antialiasing of the inner edge (see `is_within_inner_straight_border`)
+    let edge = max(widest_border, widest_radius);
+    let inset = select(edge + 1.0, 0.0, edge == 0.0);
+    if (quad.background.tag == 0u) {
+        out.interior = vec4<f32>(quad.bounds.origin + inset,
+            quad.bounds.origin + quad.bounds.size - inset);
+    } else {
+        out.interior = vec4<f32>(1.0, 1.0, 0.0, 0.0);
+    }
     out.quad_id = instance_id;
     out.clip_distances = distance_from_clip_rect(unit_vertex, quad.bounds, quad.content_mask);
     return out;
@@ -566,6 +587,13 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     // Alpha clip first, since we don't have `clip_distance`.
     if (any(input.clip_distances < vec4<f32>(0.0))) {
         return vec4<f32>(0.0);
+    }
+
+    // Corvane patch: see `QuadVarying.interior` (what the fast paths below
+    // return for these pixels, without the instance)
+    if (all(input.position.xy >= input.interior.xy) &&
+            all(input.position.xy <= input.interior.zw)) {
+        return blend_color(input.background_solid, 1.0);
     }
 
     let quad = load_quad(input.quad_id);
