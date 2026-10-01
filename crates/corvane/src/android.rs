@@ -28,6 +28,8 @@ fn android_main(android_app: AndroidApp) {
     prepare_environment(&android_app);
     let _ = ANDROID_APP.set(android_app);
     gpui_android::set_soft_keyboard_handler(show_keyboard);
+    gpui_android::set_path_prompt_handler(pick_folder);
+    corvane_platform::android::set_bridge(Box::new(ActivityBridge));
     std::panic::set_hook(Box::new(|info| {
         // stderr goes nowhere; `logging` sends tracing to logcat
         tracing::error!("panic: {info}");
@@ -203,22 +205,114 @@ use std::ffi::c_void;
 
 use gpui_android::ActivityEvent;
 
+const ACTIVITY: &str = "com.wasimaster.corvane.CorvaneActivity";
+
+/// Calls a static method of `CorvaneActivity` that returns `boolean` or
+/// `void`: `Some(Some(result))`, `Some(None)` for `void`, and `None` (with a
+/// log line) when the call fails.
+macro_rules! activity_call {
+    ($name:literal, $sig:literal, $args:expr) => {{
+        let result = gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            env.call_static_method(&class, jni::jni_str!($name), jni::jni_sig!($sig), $args)
+                // a `boolean` result; `None` for `void`
+                .map(|value| value.z().ok())
+                .map_err(|err| err.to_string())
+        });
+        match result {
+            Ok(value) => Some(value),
+            Err(err) => {
+                tracing::warn!("CorvaneActivity.{} failed: {err}", $name);
+                None
+            }
+        }
+    }};
+}
+
 /// `CorvaneActivity.showKeyboard(boolean)`.
 fn show_keyboard(show: bool) {
-    let result = gpui_android::jni::with_env(|env| {
-        let class =
-            gpui_android::jni::find_app_class(env, "com.wasimaster.corvane.CorvaneActivity")?;
-        env.call_static_method(
-            &class,
-            jni::jni_str!("showKeyboard"),
-            jni::jni_sig!("(Z)V"),
-            &[jni::objects::JValue::Bool(show)],
-        )
-        .map_err(|err| err.to_string())?;
-        Ok(())
-    });
-    if let Err(err) = result {
-        tracing::warn!("showKeyboard failed: {err}");
+    activity_call!("showKeyboard", "(Z)V", &[jni::objects::JValue::Bool(show)]);
+}
+
+struct ActivityBridge;
+
+impl corvane_platform::android::Bridge for ActivityBridge {
+    fn has_all_files_access(&self) -> bool {
+        activity_call!("hasAllFilesAccess", "()Z", &[])
+            .flatten()
+            .unwrap_or(false)
+    }
+
+    fn can_request_all_files_access(&self) -> bool {
+        activity_call!("canRequestAllFilesAccess", "()Z", &[])
+            .flatten()
+            .unwrap_or(false)
+    }
+
+    fn request_all_files_access(&self) {
+        activity_call!("requestAllFilesAccess", "()V", &[]);
+    }
+}
+
+/// The folder prompt in flight: Android shows one picker at a time.
+static PICKING: std::sync::Mutex<Option<gpui_android::PathPromptReply>> =
+    std::sync::Mutex::new(None);
+
+/// `Platform::prompt_for_paths`: the system's folder picker
+/// (`CorvaneActivity.pickFolder`), which answers with a path Corvane can use:
+/// a folder of its own storage, one on shared storage with "All files
+/// access", or the imported copy of a repository picked anywhere else.
+fn pick_folder(options: gpui_kit::PathPromptOptions, reply: gpui_android::PathPromptReply) {
+    if !options.directories {
+        // nothing in Corvane picks single files on Android yet
+        reply(None);
+        return;
+    }
+    let previous = PICKING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .replace(reply);
+    if let Some(previous) = previous {
+        previous(None);
+    }
+    if activity_call!("pickFolder", "()V", &[]).is_none() {
+        let reply = PICKING
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(reply) = reply {
+            reply(None);
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativePathPicked(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    path: *mut c_void,
+    error: *mut c_void,
+) {
+    let path = gpui_android::jni::string_from_raw(path);
+    let error = gpui_android::jni::string_from_raw(error);
+    if !error.is_empty() {
+        tracing::warn!("folder picker: {error}");
+    }
+    let path = (!path.is_empty()).then(|| PathBuf::from(path));
+    if let Some(path) = &path {
+        // a copy made through the Storage Access Framework has no file modes
+        if path.starts_with(corvane_platform::android::repositories_dir())
+            && path.join(".git").exists()
+        {
+            corvane_platform::android::note_imported(path);
+        }
+    }
+    let reply = PICKING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    if let Some(reply) = reply {
+        reply(path);
     }
 }
 
