@@ -17,17 +17,20 @@ use corvane_ui::workspace::Workspace;
 use gpui_kit::*;
 use tracing::{debug, error, info, warn};
 
-fn main() {
+// `pub(crate)`: on Android this file is a module of the activity's native
+// library (`android.rs`), whose `android_main` calls it
+pub(crate) fn main() {
     // `GIT_ASKPASS` runs this same binary; answer git and exit before touching GPUI.
     if std::env::var_os("CORVANE_ASKPASS").is_some() {
         askpass::run();
     }
     // GHD `requestSingleInstanceLock`: a second launch (the `.desktop` file's
     // URL handler, the command line tool) hands its URLs to the running
-    // Corvane and exits before touching the store it holds
-    #[cfg(not(target_os = "macos"))]
+    // Corvane and exits before touching the store it holds. Android keeps a
+    // single activity itself (`launchMode="singleTask"`).
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let launch_urls = corvane_platform::single_instance::url_arguments(std::env::args().skip(1));
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     let instance = match corvane_platform::single_instance::claim(&launch_urls) {
         corvane_platform::single_instance::Claim::Forwarded => return,
         corvane_platform::single_instance::Claim::First(listener) => listener,
@@ -66,7 +69,12 @@ fn main() {
     let launch_flags = corvane_core::Flags::resolve(&flag_overrides, &flags_env);
     phase(started, "store opened");
 
+    #[cfg(not(target_os = "android"))]
     let app = gpui_kit::application().with_assets(assets::Assets);
+    // gpui-kit leaves the platform to mobile applications
+    #[cfg(target_os = "android")]
+    let app = Application::with_platform(gpui_android::current_platform(crate::android_app()))
+        .with_assets(assets::Assets);
     phase(started, "application created");
     // `app.on('activate')`: the Dock icon shows the hidden window again.
     #[cfg(target_os = "macos")]
@@ -84,7 +92,7 @@ fn main() {
     // in Corvane", links) may arrive before launch has finished: queue them
     let url_inbox = corvane_core::app_url::AppUrlInbox::default();
     let url_sender = url_inbox.sender();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     {
         for url in launch_urls {
             url_sender.send(url);
