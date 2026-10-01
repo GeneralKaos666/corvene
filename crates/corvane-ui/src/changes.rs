@@ -1918,6 +1918,9 @@ impl ChangesSidebar {
                 })
                 .enabled(!deleted),
             ];
+            // Android: the share sheet
+            #[cfg(target_os = "android")]
+            let share = default.clone();
             // `713-open-file-with`
             if open_file_with {
                 items.push(
@@ -1927,6 +1930,13 @@ impl ChangesSidebar {
                     .enabled(!deleted),
                 );
             }
+            #[cfg(target_os = "android")]
+            items.push(
+                MenuItem::new("Share…", move |_, cx| {
+                    Dispatcher::share_file(share.clone(), cx)
+                })
+                .enabled(!deleted),
+            );
             items
         };
 

@@ -403,6 +403,17 @@ impl Dispatcher {
         }
     }
 
+    /// Android: a changed file's "Share…", the system's share sheet (GHD has
+    /// no Android build).
+    #[cfg(target_os = "android")]
+    pub fn share_file(path: PathBuf, cx: &mut App) {
+        if let Some(bridge) = corvane_platform::android::bridge()
+            && let Err(err) = bridge.share_path(&path)
+        {
+            Self::show_error("Unable to Share", err, cx);
+        }
+    }
+
     /// Repository › Open With… (`_openWithSystemDialog`): pick an application,
     /// then `open -a <app> <repository>`. Also a changed file's "Open With…"
     /// (Corvane `713-open-file-with`), whose error names the file.

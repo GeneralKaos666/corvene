@@ -44,6 +44,9 @@ pub trait Bridge: Send + Sync {
     fn view_path_with(&self, path: &Path, component: &str) -> Result<(), String>;
     /// Like [`Bridge::view_path`], always offering the choice of application.
     fn view_path_with_chooser(&self, path: &Path) -> Result<(), String>;
+    /// Sends a file to another application through the share sheet
+    /// (`ACTION_SEND`).
+    fn share_path(&self, path: &Path) -> Result<(), String>;
     /// Opens a Termux session in `dir` (Termux's `RUN_COMMAND` intent).
     fn open_termux(&self, dir: &Path) -> Result<(), String>;
     /// A network operation runs (or the last one ended): the activity keeps

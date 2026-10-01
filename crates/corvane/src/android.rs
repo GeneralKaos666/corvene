@@ -423,6 +423,10 @@ impl corvane_platform::android::Bridge for ActivityBridge {
         activity_result!("choosePath", &path.to_string_lossy())
     }
 
+    fn share_path(&self, path: &Path) -> Result<(), String> {
+        activity_result!("sharePath", &path.to_string_lossy())
+    }
+
     fn open_termux(&self, dir: &Path) -> Result<(), String> {
         activity_result!("openTermux", &dir.to_string_lossy())
     }

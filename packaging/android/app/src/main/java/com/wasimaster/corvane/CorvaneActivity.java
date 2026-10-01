@@ -571,6 +571,37 @@ public class CorvaneActivity extends NativeActivity {
         }
     }
 
+    /**
+     * Sends a file to another application (ACTION_SEND through the system's
+     * share sheet), as a document of CorvaneDocumentsProvider it may read.
+     * Returns an error message, empty when the sheet opened.
+     */
+    public static String sharePath(String path) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return "Corvane is not open.";
+        }
+        File file = new File(path);
+        String id = CorvaneDocumentsProvider.idOf(activity, file);
+        if (id == null || !file.isFile()) {
+            return "Other applications cannot open " + path + ".";
+        }
+        Uri uri = DocumentsContract.buildDocumentUri(
+                activity.getPackageName() + ".documents", id);
+        Intent intent = new Intent(Intent.ACTION_SEND)
+                .setType(mimeType(file))
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        // the grant follows the clip data, not the extra
+        intent.setClipData(android.content.ClipData.newRawUri(file.getName(), uri));
+        try {
+            activity.startActivity(Intent.createChooser(intent, null));
+            return "";
+        } catch (RuntimeException e) {
+            return String.valueOf(e.getMessage());
+        }
+    }
+
     /** By extension; a file without a known one is text unless it has a NUL. */
     private static String mimeType(File file) {
         String name = file.getName();
