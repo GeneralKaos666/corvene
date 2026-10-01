@@ -25,7 +25,13 @@ use gpui::{
 };
 
 use super::{
-    dispatcher, keyboard::android_key_to_keystroke, platform::AndroidPlatform,
+    activity_events::{self, ActivityEvent},
+    dispatcher,
+    keyboard::{
+        android_key_to_keystroke, android_meta_to_modifiers, AKEYCODE_DEL, AKEYCODE_ENTER,
+        AKEYCODE_FORWARD_DEL,
+    },
+    platform::AndroidPlatform,
     window::AndroidWindow,
 };
 
@@ -109,6 +115,7 @@ impl AndroidPlatform {
                 self.handle_command(command);
             }
             self.process_input();
+            self.process_activity_events();
             self.run_foreground_tasks();
 
             if let Some(window) = self.window() {
@@ -153,11 +160,13 @@ impl AndroidPlatform {
                 }
             }
             Command::GainedFocus => {
+                self.focused.set(true);
                 if let Some(window) = self.window() {
                     window.set_active(true);
                 }
             }
             Command::LostFocus => {
+                self.focused.set(false);
                 if let Some(window) = self.window() {
                     window.set_active(false);
                 }
@@ -196,7 +205,10 @@ impl AndroidPlatform {
             scale_factor,
             self.appearance(),
         ) {
-            Ok(window) => *self.window.borrow_mut() = Some(window),
+            Ok(window) => {
+                window.set_active(self.focused.get());
+                *self.window.borrow_mut() = Some(window);
+            }
             Err(err) => {
                 log::error!("failed to create the window: {err:#}");
                 self.should_quit.set(true);
@@ -292,19 +304,97 @@ impl AndroidPlatform {
             _ => 0,
         };
         let code: u32 = key_code.into();
-        let Some(keystroke) = android_key_to_keystroke(code as i32, modifiers, unicode) else {
-            return false;
-        };
-        if down {
-            window.handle_input(PlatformInput::KeyDown(KeyDownEvent {
-                keystroke,
-                is_held: event.repeat_count() > 0,
-                prefer_character_input: false,
-            }))
-        } else {
-            window.handle_input(PlatformInput::KeyUp(KeyUpEvent { keystroke }))
+        send_key(
+            window,
+            code as i32,
+            down,
+            modifiers,
+            unicode,
+            event.repeat_count() > 0,
+        )
+    }
+
+    /// What the activity's input view and intents reported.
+    fn process_activity_events(&self) {
+        let events = activity_events::drain();
+        if events.is_empty() {
+            return;
+        }
+        let window = self.window();
+        for event in events {
+            match (event, &window) {
+                (ActivityEvent::OpenUrl(url), _) => self.open_urls(vec![url]),
+                (_, None) => {}
+                (ActivityEvent::CommitText(text), Some(window)) => {
+                    // Enter is a key (submit, new line), not text
+                    if text == "\n" {
+                        tap_key(window, AKEYCODE_ENTER);
+                    } else {
+                        window.insert_text(&text);
+                    }
+                }
+                (ActivityEvent::SetComposingText(text), Some(window)) => {
+                    window.set_composing_text(&text)
+                }
+                (ActivityEvent::FinishComposing, Some(window)) => window.finish_composing(),
+                (ActivityEvent::DeleteSurrounding { before, after }, Some(window)) => {
+                    for _ in 0..before {
+                        tap_key(window, AKEYCODE_DEL);
+                    }
+                    for _ in 0..after {
+                        tap_key(window, AKEYCODE_FORWARD_DEL);
+                    }
+                }
+                (
+                    ActivityEvent::Key {
+                        key_code,
+                        down,
+                        meta_state,
+                        unicode,
+                    },
+                    Some(window),
+                ) => {
+                    send_key(
+                        window,
+                        key_code,
+                        down,
+                        android_meta_to_modifiers(meta_state),
+                        unicode,
+                        false,
+                    );
+                }
+            }
         }
     }
+}
+
+/// One key transition as GPUI input; true when it was used.
+fn send_key(
+    window: &AndroidWindow,
+    key_code: i32,
+    down: bool,
+    modifiers: Modifiers,
+    unicode: u32,
+    is_held: bool,
+) -> bool {
+    let Some(keystroke) = android_key_to_keystroke(key_code, modifiers, unicode) else {
+        return false;
+    };
+    if down {
+        window.handle_input(PlatformInput::KeyDown(KeyDownEvent {
+            keystroke,
+            is_held,
+            prefer_character_input: false,
+        }))
+    } else {
+        window.handle_input(PlatformInput::KeyUp(KeyUpEvent { keystroke }))
+    }
+}
+
+/// A press and release of `key_code` without modifiers.
+fn tap_key(window: &AndroidWindow, key_code: i32) {
+    send_key(window, key_code, true, Modifiers::default(), 0, false);
+    send_key(window, key_code, false, Modifiers::default(), 0, false);
 }
 
 fn modifiers(meta: MetaState) -> Modifiers {

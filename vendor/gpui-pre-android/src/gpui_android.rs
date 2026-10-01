@@ -19,6 +19,7 @@
 #![allow(clippy::type_complexity)]
 
 mod android {
+    pub mod activity_events;
     pub(crate) mod dispatcher;
     pub(crate) mod display;
     pub(crate) mod event_loop;
@@ -39,6 +40,7 @@ mod android {
 
 use std::rc::Rc;
 
+pub use android::activity_events::{post, set_soft_keyboard_handler, ActivityEvent};
 pub use android::display::AndroidDisplay;
 pub use android::init_logger;
 pub use android::jni;

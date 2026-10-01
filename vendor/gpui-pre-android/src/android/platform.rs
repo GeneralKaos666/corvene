@@ -80,6 +80,9 @@ pub struct AndroidPlatform {
     pub(crate) callbacks: RefCell<PlatformCallbacks>,
     pub(crate) finish_launching: RefCell<Option<Box<dyn FnOnce()>>>,
     pub(crate) should_quit: Cell<bool>,
+    /// Whether the activity's window has input focus; it may gain it before
+    /// its first surface exists.
+    pub(crate) focused: Cell<bool>,
     menus: RefCell<Vec<OwnedMenu>>,
     /// URLs that arrived before `on_open_urls` was registered.
     pending_urls: RefCell<Vec<String>>,
@@ -111,6 +114,7 @@ impl AndroidPlatform {
             callbacks: RefCell::new(PlatformCallbacks::default()),
             finish_launching: RefCell::new(None),
             should_quit: Cell::new(false),
+            focused: Cell::new(false),
             menus: RefCell::new(Vec::new()),
             pending_urls: RefCell::new(pending_urls),
         }

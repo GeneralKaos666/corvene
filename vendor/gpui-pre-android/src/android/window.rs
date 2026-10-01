@@ -494,6 +494,23 @@ impl AndroidWindow {
         }
     }
 
+    /// Shows `text` as the composition in progress (marked text).
+    pub(crate) fn set_composing_text(&self, text: &str) {
+        let handler = self.state.borrow_mut().input_handler.take();
+        if let Some(mut handler) = handler {
+            handler.replace_and_mark_text_in_range(None, text, None);
+            self.state.borrow_mut().input_handler = Some(handler);
+        }
+    }
+
+    pub(crate) fn finish_composing(&self) {
+        let handler = self.state.borrow_mut().input_handler.take();
+        if let Some(mut handler) = handler {
+            handler.unmark_text();
+            self.state.borrow_mut().input_handler = Some(handler);
+        }
+    }
+
     pub(crate) fn logical_point(&self, x: f32, y: f32) -> Point<Pixels> {
         let scale = self.state.borrow().scale_factor;
         point(px(x / scale), px(y / scale))
@@ -844,10 +861,24 @@ impl PlatformWindow for AndroidPlatformWindow {
     }
 
     fn show_soft_keyboard(&self) {
-        self.0.app.show_soft_input(true);
+        super::activity_events::show_soft_keyboard(true);
     }
 
     fn hide_soft_keyboard(&self) {
-        self.0.app.hide_soft_input(false);
+        super::activity_events::show_soft_keyboard(false);
+    }
+
+    fn text_input_state_changed(&self, change: gpui::TextInputStateChange) {
+        // the keyboard follows the focused text input, as in a browser
+        match change {
+            gpui::TextInputStateChange::FocusGained => {
+                super::activity_events::show_soft_keyboard(true)
+            }
+            gpui::TextInputStateChange::FocusLost => {
+                super::activity_events::show_soft_keyboard(false)
+            }
+            gpui::TextInputStateChange::SelectionChanged
+            | gpui::TextInputStateChange::ContentChanged => {}
+        }
     }
 }

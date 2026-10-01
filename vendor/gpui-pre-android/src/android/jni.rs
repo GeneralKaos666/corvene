@@ -317,3 +317,17 @@ pub(crate) fn launch_url() -> Option<String> {
     .ok()
     .flatten()
 }
+
+/// The `java.lang.String` behind a raw `jstring` a JNI function received.
+pub fn string_from_raw(string: *mut std::ffi::c_void) -> String {
+    if string.is_null() {
+        return String::new();
+    }
+    with_env(|env| {
+        // SAFETY: the caller passes the `jstring` argument of a JNI call
+        // that is still running
+        let object = unsafe { JObject::from_raw(env, string.cast()) };
+        Ok(get_string(env, &object))
+    })
+    .unwrap_or_default()
+}
