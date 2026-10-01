@@ -92,6 +92,15 @@ impl FrameStats {
 struct RenderScaleGovernor {
     frames: u32,
     total: Duration,
+    pinned: Option<f32>,
+}
+
+/// An Android system property, when it is set.
+fn system_property(name: &std::ffi::CStr) -> Option<String> {
+    let mut value = [0u8; 92];
+    // SAFETY: the buffer has PROP_VALUE_MAX bytes
+    let length = unsafe { libc::__system_property_get(name.as_ptr(), value.as_mut_ptr().cast()) };
+    (length > 0).then(|| String::from_utf8_lossy(&value[..length as usize]).into_owned())
 }
 
 impl RenderScaleGovernor {
@@ -106,6 +115,10 @@ impl RenderScaleGovernor {
         took: Duration,
         period: Duration,
     ) {
+        if let Some(pinned) = self.pinned {
+            window.set_render_scale(pinned);
+            return;
+        }
         // only frames that follow each other (an animation, a scroll) and
         // drew something say what a frame costs
         if !gap.is_some_and(|gap| gap < Duration::from_millis(100))
@@ -119,7 +132,7 @@ impl RenderScaleGovernor {
             return;
         }
         let average = self.total / self.frames;
-        *self = Self::default();
+        (self.frames, self.total) = (0, Duration::ZERO);
 
         let current = window.render_scale();
         let step = Self::STEPS
@@ -198,14 +211,21 @@ impl AndroidPlatform {
         let mut perf_hint = super::perf_hint::PerfHint::for_current_thread(FRAME_INTERVAL);
         log::info!(
             "performance hints: {}",
-            if perf_hint.is_some() {
-                "on"
-            } else {
-                "unavailable"
+            match &perf_hint {
+                Some(hint) if hint.reports_gpu() => "on, with the GPU's share",
+                Some(_) => "on",
+                None => "unavailable",
             }
         );
         let mut overran = false;
-        let mut render_scale = RenderScaleGovernor::default();
+        // `adb shell setprop debug.corvane.render_scale 1` pins the scale
+        // (measurements, or a user who prefers sharp over smooth)
+        let mut render_scale = RenderScaleGovernor {
+            pinned: system_property(c"debug.corvane.render_scale")
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|scale| scale.clamp(0.5, 1.0)),
+            ..Default::default()
+        };
         // when the frame that is wanted now was first wanted
         let mut wanted_since: Option<Instant> = None;
 
@@ -302,7 +322,11 @@ impl AndroidPlatform {
                         .unwrap_or(FRAME_INTERVAL);
                     overran = took >= period.mul_f32(0.95);
                     if let Some(hint) = perf_hint.as_mut() {
-                        hint.frame(took, period);
+                        let gpu = Duration::from_nanos(
+                            gpui_wgpu::ANDROID_LAST_PRESENT_NANOS
+                                .swap(0, std::sync::atomic::Ordering::Relaxed),
+                        );
+                        hint.frame(took, gpu, period);
                     }
                     render_scale.frame(&window, gap, took, period);
                     FRAME_STATS.with(|stats| stats.borrow_mut().record(gap, took));

@@ -1242,7 +1242,15 @@ impl WgpuRenderer {
             return false;
         }
 
+        // Corvane patch: see `ANDROID_LAST_PRESENT_NANOS`
+        #[cfg(target_os = "android")]
+        let presenting = std::time::Instant::now();
         frame.present();
+        #[cfg(target_os = "android")]
+        crate::wgpu_context::ANDROID_LAST_PRESENT_NANOS.store(
+            presenting.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         true
     }
 }

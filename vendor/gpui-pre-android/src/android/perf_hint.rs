@@ -19,10 +19,53 @@ type CreateSession = unsafe extern "C" fn(*mut c_void, *const i32, usize, i64) -
 type UpdateTarget = unsafe extern "C" fn(*mut c_void, i64) -> c_int;
 type ReportActual = unsafe extern "C" fn(*mut c_void, i64) -> c_int;
 
+/// Android 15: the work duration split into its CPU and GPU parts, which
+/// lets the system raise the GPU's frequency too.
+struct WorkDuration {
+    duration: *mut c_void,
+    set_start: unsafe extern "C" fn(*mut c_void, i64),
+    set_total: unsafe extern "C" fn(*mut c_void, i64),
+    set_cpu: unsafe extern "C" fn(*mut c_void, i64),
+    set_gpu: unsafe extern "C" fn(*mut c_void, i64),
+    report: unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int,
+}
+
+impl WorkDuration {
+    // the fields give each transmute its target type
+    #[allow(clippy::missing_transmute_annotations)]
+    fn new() -> Option<Self> {
+        // SAFETY: the NDK functions of those names (API 35)
+        unsafe {
+            let create: unsafe extern "C" fn() -> *mut c_void =
+                std::mem::transmute(lookup(c"AWorkDuration_create")?);
+            let work = Self {
+                set_start: std::mem::transmute::<*mut c_void, _>(lookup(
+                    c"AWorkDuration_setWorkPeriodStartTimestampNanos",
+                )?),
+                set_total: std::mem::transmute::<*mut c_void, _>(lookup(
+                    c"AWorkDuration_setActualTotalDurationNanos",
+                )?),
+                set_cpu: std::mem::transmute::<*mut c_void, _>(lookup(
+                    c"AWorkDuration_setActualCpuDurationNanos",
+                )?),
+                set_gpu: std::mem::transmute::<*mut c_void, _>(lookup(
+                    c"AWorkDuration_setActualGpuDurationNanos",
+                )?),
+                report: std::mem::transmute::<*mut c_void, _>(lookup(
+                    c"APerformanceHint_reportActualWorkDuration2",
+                )?),
+                duration: create(),
+            };
+            (!work.duration.is_null()).then_some(work)
+        }
+    }
+}
+
 pub(crate) struct PerfHint {
     session: *mut c_void,
     update_target: UpdateTarget,
     report_actual: ReportActual,
+    work: Option<WorkDuration>,
     target: Duration,
 }
 
@@ -61,22 +104,44 @@ impl PerfHint {
                 session,
                 update_target,
                 report_actual,
+                work: WorkDuration::new(),
                 target,
             })
         }
     }
 
-    /// One frame took `actual`; `target` is what a frame may take now (the
-    /// display's refresh period).
-    pub(crate) fn frame(&mut self, actual: Duration, target: Duration) {
+    /// Whether the system takes the GPU's share of a frame (Android 15).
+    pub(crate) fn reports_gpu(&self) -> bool {
+        self.work.is_some()
+    }
+
+    /// One frame took `actual`, `gpu` of it waiting for the GPU; `target`
+    /// is what a frame may take now (the display's refresh period).
+    pub(crate) fn frame(&mut self, actual: Duration, gpu: Duration, target: Duration) {
         // SAFETY: the session of `for_current_thread`, on its thread
         unsafe {
             if target != self.target && !target.is_zero() {
                 self.target = target;
                 (self.update_target)(self.session, target.as_nanos() as i64);
             }
-            // the system rejects a duration of zero
-            (self.report_actual)(self.session, actual.as_nanos().max(1) as i64);
+            // the system rejects durations of zero
+            let total = actual.as_nanos().max(1) as i64;
+            match &self.work {
+                Some(work) => {
+                    let gpu = (gpu.as_nanos() as i64).clamp(0, total - 1);
+                    let mut now = std::mem::zeroed::<libc::timespec>();
+                    libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now);
+                    let now = now.tv_sec as i64 * 1_000_000_000 + now.tv_nsec as i64;
+                    (work.set_start)(work.duration, now - total);
+                    (work.set_total)(work.duration, total);
+                    (work.set_cpu)(work.duration, total - gpu);
+                    (work.set_gpu)(work.duration, gpu);
+                    (work.report)(self.session, work.duration);
+                }
+                None => {
+                    (self.report_actual)(self.session, total);
+                }
+            }
         }
     }
 }
