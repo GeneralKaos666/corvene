@@ -526,6 +526,10 @@ fn handle_touch(
             let pointer = motion.pointer_at_index(action_pointer);
             let pointer_id = pointer.pointer_id();
             window.end_touch_hover();
+            let position = window.logical_point(pointer.x(), pointer.y());
+            if action == MotionAction::Down && window.select_drag_started(pointer_id, position) {
+                return;
+            }
             let id = window.touch_started(pointer_id);
             // one finger resting is a long press; a second one ends that
             if action == MotionAction::Down {
@@ -540,14 +544,23 @@ fn handle_touch(
             for index in 0..motion.pointer_count() {
                 let pointer = motion.pointer_at_index(index);
                 let pointer_id = pointer.pointer_id();
-                window.long_press_moved(pointer_id, window.logical_point(pointer.x(), pointer.y()));
+                let position = window.logical_point(pointer.x(), pointer.y());
+                if window.select_drag_moved(pointer_id, position) {
+                    continue;
+                }
+                window.long_press_moved(pointer_id, position);
                 if let Some(id) = window.touch(pointer_id) {
                     window.handle_input(touch(id, TouchPhase::Moved, index));
                 }
             }
         }
         MotionAction::Up | MotionAction::PointerUp => {
-            let pointer_id = motion.pointer_at_index(action_pointer).pointer_id();
+            let pointer = motion.pointer_at_index(action_pointer);
+            let pointer_id = pointer.pointer_id();
+            let position = window.logical_point(pointer.x(), pointer.y());
+            if window.select_drag_ended(pointer_id, position) {
+                return;
+            }
             let tap = window.long_press_ended(action == MotionAction::Up);
             if let Some(id) = window.touch_ended(pointer_id) {
                 window.handle_input(touch(id, TouchPhase::Ended, action_pointer));
@@ -559,7 +572,13 @@ fn handle_touch(
         MotionAction::Cancel => {
             window.long_press_ended(false);
             for index in 0..motion.pointer_count() {
-                let pointer_id = motion.pointer_at_index(index).pointer_id();
+                let pointer = motion.pointer_at_index(index);
+                let pointer_id = pointer.pointer_id();
+                if window
+                    .select_drag_ended(pointer_id, window.logical_point(pointer.x(), pointer.y()))
+                {
+                    continue;
+                }
                 if let Some(id) = window.touch_ended(pointer_id) {
                     window.handle_input(touch(id, TouchPhase::Cancelled, index));
                 }

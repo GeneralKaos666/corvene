@@ -403,6 +403,21 @@ impl Dispatcher {
         }
     }
 
+    /// Android, Options › Integrations: create the SSH key the bundled ssh
+    /// client uses (`corvane_platform::android::create_ssh_key`).
+    #[cfg(target_os = "android")]
+    pub fn create_ssh_key(cx: &mut App) {
+        spawn_bg(
+            cx,
+            corvane_platform::android::create_ssh_key,
+            |result, cx| match result {
+                // the dialog reads the key again when the state notifies
+                Ok(_) => Self::state(cx).update(cx, |_, cx| cx.notify()),
+                Err(err) => Self::show_error("Could not create an SSH key", err, cx),
+            },
+        );
+    }
+
     /// Android: a changed file's "Share…", the system's share sheet (GHD has
     /// no Android build).
     #[cfg(target_os = "android")]

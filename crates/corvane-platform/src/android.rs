@@ -192,3 +192,70 @@ pub fn grammar_module_event(event: GrammarModuleEvent) {
         handler(event);
     }
 }
+
+// ── SSH key ─────────────────────────────────────────────────────────────────
+//
+// The bundled OpenSSH client reads `~/.ssh` in the app-private storage,
+// where no other application can put a key. Options › Integrations creates
+// one with the bundled `ssh-keygen` and shows its public half to copy into
+// the account settings of the git host.
+
+fn ssh_key_file() -> Option<PathBuf> {
+    Some(dirs::home_dir()?.join(".ssh").join("id_ed25519"))
+}
+
+static SSH_PUBLIC_KEY: Mutex<Option<Option<String>>> = Mutex::new(None);
+
+/// The public key of `~/.ssh/id_ed25519` (read once, then remembered).
+pub fn ssh_public_key() -> Option<String> {
+    let mut cached = SSH_PUBLIC_KEY.lock().ok()?;
+    cached
+        .get_or_insert_with(|| {
+            let public = ssh_key_file()?.with_extension("pub");
+            let key = std::fs::read_to_string(public).ok()?;
+            Some(key.trim().to_string()).filter(|key| !key.is_empty())
+        })
+        .clone()
+}
+
+/// Creates `~/.ssh/id_ed25519` without a passphrase (the key never leaves
+/// the app-private storage, and nothing could ask for one during a fetch in
+/// the background) and returns its public key. An existing key is kept.
+pub fn create_ssh_key() -> Result<String, String> {
+    if let Some(key) = ssh_public_key() {
+        return Ok(key);
+    }
+    let file = ssh_key_file().ok_or("no home directory")?;
+    let dir = file.parent().ok_or("no home directory")?;
+    std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+    let keygen = std::env::var_os("GIT_EXEC_PATH")
+        .map(|bin| PathBuf::from(bin).join("ssh-keygen"))
+        .filter(|keygen| keygen.exists())
+        .ok_or("this build has no ssh-keygen")?;
+    let output = std::process::Command::new(keygen)
+        .args([
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            "corvane-android",
+            "-f",
+        ])
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    if let Ok(mut cached) = SSH_PUBLIC_KEY.lock() {
+        *cached = None;
+    }
+    ssh_public_key().ok_or_else(|| "ssh-keygen wrote no public key".to_string())
+}

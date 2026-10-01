@@ -86,6 +86,18 @@ fn prepare_environment(files: &Path) {
             std::env::set_var("CORVANE_ASKPASS_SOCKET", cache.join("askpass.sock"));
             std::env::set_var("GIT_EXEC_PATH", &git.bin);
             std::env::set_var("GIT_TEMPLATE_DIR", &git.templates);
+            // No terminal to ask whether an unknown host's key is right:
+            // the first key seen is kept in ~/.ssh/known_hosts and a
+            // changed one is still refused.
+            if std::env::var_os("GIT_SSH_COMMAND").is_none() {
+                std::env::set_var(
+                    "GIT_SSH_COMMAND",
+                    format!(
+                        "{} -o StrictHostKeyChecking=accept-new",
+                        git.bin.join("ssh").display()
+                    ),
+                );
+            }
             // there is no /etc/gitconfig
             std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
             // The system's trusted certificates. Android names the files by
@@ -120,6 +132,7 @@ fn bundled_git(files: &Path) -> Option<BundledGit> {
         ("git-remote-https", "libgit-remote-https.so"),
         ("git-remote-http", "libgit-remote-https.so"),
         ("ssh", "libssh.so"),
+        ("ssh-keygen", "libssh-keygen.so"),
         ("git-lfs", "libgit-lfs.so"),
         ("corvane-askpass", "libcorvane-askpass.so"),
         ("git-sh-setup", "libgit-sh-setup.so"),

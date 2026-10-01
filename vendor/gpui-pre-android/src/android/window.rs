@@ -52,6 +52,12 @@ use super::display::AndroidDisplay;
 /// and distance (`ViewConfiguration.getDoubleTapTimeout()` is 300 ms; mice
 /// get the desktop's more forgiving 500 ms).
 const MULTI_CLICK_INTERVAL: Duration = Duration::from_millis(500);
+
+/// A touch that starts this soon and this close (logical pixels) after a
+/// tap is a double tap (`ViewConfiguration`'s 300 ms; its slop is 100 dp,
+/// far more than rows a finger tells apart here).
+const DOUBLE_TAP_INTERVAL: Duration = Duration::from_millis(300);
+const DOUBLE_TAP_SLOP: f32 = 24.0;
 const MULTI_CLICK_SLOP: f32 = 4.0;
 
 /// `ViewConfiguration.getLongPressTimeout()` and `getScaledTouchSlop()`'s
@@ -151,6 +157,11 @@ struct WindowState {
     /// A long press nothing answered left the pointer hovering where the
     /// finger was (tooltips); the next touch ends that.
     touch_hover: Option<Point<Pixels>>,
+    /// When and where the last tap ended: a touch that starts there right
+    /// after is a double tap.
+    last_tap: Option<(Instant, Point<Pixels>)>,
+    /// The finger of a double tap that is still down, dragging a selection.
+    select_drag: Option<i32>,
     /// A tap that ended; after the next frame the keyboard opens if the tap
     /// was on the focused text input.
     tapped: Option<Point<Pixels>>,
@@ -257,6 +268,8 @@ impl AndroidWindow {
                 back_enabled: false,
                 long_press: None,
                 touch_hover: None,
+                last_tap: None,
+                select_drag: None,
                 tapped: None,
             }),
             callbacks: RefCell::new(Callbacks::default()),
@@ -593,6 +606,69 @@ impl AndroidWindow {
         }
     }
 
+    // Double tap and drag: Android's way to select text by word. The second
+    // touch of a double tap is handed to GPUI as the left mouse button's
+    // double click, and its movement as a drag, which selects in every text
+    // GPUI selects in with a mouse (inputs, the diff). Elsewhere it is the
+    // double click that opens things.
+
+    /// Whether a touch going down at `position` completes a double tap; the
+    /// touch then drags a selection until [`Self::select_drag_ended`].
+    pub(crate) fn select_drag_started(&self, pointer_id: i32, position: Point<Pixels>) -> bool {
+        let double_tap = self
+            .state
+            .borrow_mut()
+            .last_tap
+            .take()
+            .is_some_and(|(at, tap)| {
+                let (dx, dy) = (f32::from(position.x - tap.x), f32::from(position.y - tap.y));
+                at.elapsed() <= DOUBLE_TAP_INTERVAL
+                    && dx * dx + dy * dy <= DOUBLE_TAP_SLOP * DOUBLE_TAP_SLOP
+            });
+        if !double_tap {
+            return false;
+        }
+        self.state.borrow_mut().select_drag = Some(pointer_id);
+        self.set_mouse_position(position);
+        self.handle_input(PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Left,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 2,
+            first_mouse: false,
+        }));
+        true
+    }
+
+    /// The dragging finger moved; false when `pointer_id` drags nothing.
+    pub(crate) fn select_drag_moved(&self, pointer_id: i32, position: Point<Pixels>) -> bool {
+        if self.state.borrow().select_drag != Some(pointer_id) {
+            return false;
+        }
+        self.set_mouse_position(position);
+        self.handle_input(PlatformInput::MouseMove(MouseMoveEvent {
+            position,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        }));
+        true
+    }
+
+    /// The dragging finger lifted (or the gesture was cancelled).
+    pub(crate) fn select_drag_ended(&self, pointer_id: i32, position: Point<Pixels>) -> bool {
+        if self.state.borrow().select_drag != Some(pointer_id) {
+            return false;
+        }
+        self.state.borrow_mut().select_drag = None;
+        self.handle_input(PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Left,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 2,
+        }));
+        true
+    }
+
     /// A new touch: the pointer a long press left hovering goes away.
     pub(crate) fn end_touch_hover(&self) {
         let Some(position) = self.state.borrow_mut().touch_hover.take() else {
@@ -608,6 +684,7 @@ impl AndroidWindow {
     /// A tap ended at `position`; see [`Self::show_keyboard_for_tap`].
     pub(crate) fn tapped(&self, position: Point<Pixels>) {
         self.state.borrow_mut().tapped = Some(position);
+        self.state.borrow_mut().last_tap = Some((Instant::now(), position));
         self.request_frame();
     }
 

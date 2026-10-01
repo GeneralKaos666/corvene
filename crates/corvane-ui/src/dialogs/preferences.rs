@@ -717,6 +717,7 @@ impl PreferencesDialog {
             })
             .when(android, |d| {
                 d.child(android_shell_note(shells.is_empty(), cx))
+                    .child(android_ssh_key(cx))
             })
             .into_any_element()
     }
@@ -2130,4 +2131,71 @@ fn android_shell_note(missing: bool, cx: &App) -> AnyElement {
     paragraph(text)
         .text_color(t.text_secondary)
         .into_any_element()
+}
+
+/// Android, Options › Integrations: the SSH key of the bundled ssh client.
+/// Other platforms use the system's ssh and whatever keys it has.
+fn android_ssh_key(cx: &App) -> AnyElement {
+    #[cfg(target_os = "android")]
+    {
+        const ADD_KEY_URL: &str = "https://github.com/settings/ssh/new";
+        let t = cx.ghd();
+        let section = div()
+            .flex()
+            .flex_col()
+            .gap(SPACING_HALF())
+            .mt(SPACING())
+            .child(div().font_weight(FontWeight::SEMIBOLD).child("SSH key"));
+        match corvane_platform::android::ssh_public_key() {
+            Some(key) => {
+                let copy = key.clone();
+                section
+                    .child(
+                        div()
+                            .p(SPACING_HALF())
+                            .rounded(zpx(4.))
+                            .border_1()
+                            .border_color(t.box_border)
+                            .font_family(crate::theme::mono_font())
+                            .text_size(FONT_SIZE_SM())
+                            .child(key),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(SPACING())
+                            .child(button("prefs-ssh-copy", "Copy public key", cx).on_click(
+                                move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                                },
+                            ))
+                            .child(
+                                link_button("prefs-ssh-add", "Add it to your GitHub account", cx)
+                                    .on_click(|_, _, cx| Dispatcher::open_url(ADD_KEY_URL, cx)),
+                            ),
+                    )
+                    .into_any_element()
+            }
+            None => section
+                .child(
+                    div()
+                        .text_color(t.text_secondary)
+                        .child("Remotes with an SSH address (git@…) need a key on this device."),
+                )
+                .child(
+                    div().flex().child(
+                        button("prefs-ssh-create", "Create SSH key", cx)
+                            .on_click(|_, _, cx| Dispatcher::create_ssh_key(cx)),
+                    ),
+                )
+                .into_any_element(),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = cx;
+        div().into_any_element()
+    }
 }
