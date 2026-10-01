@@ -17,14 +17,14 @@ Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus 
 
 ### Linux
 
-- A distribution with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 or later), on x86_64 or arm64
+- A distribution with [glibc](https://sourceware.org/glibc/) 2.35 or newer ([Ubuntu 22.04](https://releases.ubuntu.com/jammy/), [Debian 12](https://www.debian.org/distrib/), [Fedora 36](https://fedoraproject.org/) or later), on x86_64 or arm64
 - An X11 or Wayland session, and a [Vulkan](https://www.vulkan.org/) driver (Mesa's drivers work)
-- A [Secret Service](https://specifications.freedesktop.org/secret-service-spec/latest/) keyring for signed-in accounts: GNOME Keyring, KWallet or KeePassXC
+- A [Secret Service](https://specifications.freedesktop.org/secret-service-spec/latest/) keyring for signed-in accounts: [GNOME Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), [KWallet](https://apps.kde.org/kwalletmanager5/) or [KeePassXC](https://keepassxc.org/)
 - `git` 2.40+ on your `PATH`; Ubuntu 22.04 ships an older git, so use the [git-core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa) there
 
 ### Android
 
-- Android 8.0 or newer on arm64 or x86_64, with a [Vulkan](https://www.vulkan.org/) driver (OpenGL ES is the fallback)
+- Android 8.0 or newer on arm64 or x86_64, with a [Vulkan](https://www.vulkan.org/) driver ([OpenGL ES](https://www.khronos.org/opengles/) is the fallback)
 - Nothing else: git, [OpenSSH](https://www.openssh.com/) and [Git LFS](https://git-lfs.com/) are included inside the app prebuilt
 
 ## Install
@@ -58,11 +58,7 @@ File → Install Command Line Tool links `corvane` into `~/.local/bin`, the same
 
 ### Android
 
-Download `Corvane-<version>-android-foss.apk` from [GitHub Releases](https://github.com/wasi-master/corvane/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The `play` package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
-
-The window is the desktop one on a tablet, a Chromebook or a phone held sideways, and a one-column layout on a phone held upright. A long press is a right click, a double tap and drag selects text, and View → Toggle full screen shows the system bars again.
-
-Repositories live in Corvane's own storage, which uninstalling deletes; the system's file picker shows them to editors and file managers as "Corvane", and git's settings and SSH keys as "Corvane settings". The `foss` flavour can also use repositories on shared storage, where [Termux](https://termux.dev/) reaches them, once "All files access" is allowed. Options → Integrations creates or imports an SSH key and copies a setup script for Termux.
+Download `Corvane-<version>-android-foss.apk` from [GitHub Releases](https://github.com/wasi-master/corvane/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The play package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
 
 ## Building
 
@@ -81,7 +77,7 @@ On macOS, development builds compile [Metal](https://developer.apple.com/metal/)
 
 ### Android
 
-With the [Android SDK](https://developer.android.com/studio) and NDK 27.3.13750724 (`ANDROID_HOME`, `ANDROID_NDK_HOME`), a JDK 17 or newer (`JAVA_HOME`), make, perl, [Go](https://go.dev/) and [cargo-ndk](https://github.com/bbqsrc/cargo-ndk):
+With the [Android SDK](https://developer.android.com/studio) and [NDK 27.3.13750724](https://github.com/android/ndk/wiki/Unsupported-Downloads#r27d) (`ANDROID_HOME`, `ANDROID_NDK_HOME`), a [JDK 17](https://www.oracle.com/apac/java/technologies/downloads/) or newer (`JAVA_HOME`), [make](https://developers.make.com/make-cli), [perl](https://www.perl.org/), [Go](https://go.dev/) and [cargo-ndk](https://github.com/bbqsrc/cargo-ndk):
 
 ```bash
 rustup target add aarch64-linux-android x86_64-linux-android
