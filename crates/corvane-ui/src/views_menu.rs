@@ -1394,7 +1394,9 @@ impl Render for MenuLevelView {
                     d.child(
                         div()
                             .absolute()
-                            .right(px(s.accelerator_right + if arrow { s.arrow_column } else { 0. }))
+                            .right(px(
+                                s.accelerator_right + if arrow { s.arrow_column } else { 0. }
+                            ))
                             .top(px(-s.text_raise))
                             .h(px(s.item_height))
                             .flex()

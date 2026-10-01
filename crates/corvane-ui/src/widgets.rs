@@ -407,6 +407,34 @@ pub fn section_heading(text: impl Into<SharedString>, cx: &App) -> Div {
 /// `.button-component` (`outline-offset` draws it 2 px outside the border):
 /// absolutely placed in a `relative()` wrapper around the button.
 pub fn focus_ring(cx: &App) -> Div {
+    // Windows: Chromium draws `outline: auto` in the system's focus colours
+    // there, whatever `outline-color` says: a 2 px ring that contrasts with
+    // the page (white on a dark one) inside a 1 px halo of the opposite
+    #[cfg(windows)]
+    if cfg!(windows) {
+        let dark = cx.ghd().background.l < 0.5;
+        let (ring, halo) = if dark {
+            (rgb(0xffffff), rgb(0x101010))
+        } else {
+            (rgb(0x101010), rgb(0xffffff))
+        };
+        return div()
+            .absolute()
+            .top(zpx(-5.))
+            .left(zpx(-5.))
+            .right(zpx(-5.))
+            .bottom(zpx(-5.))
+            .border_1()
+            .border_color(halo)
+            .rounded(BORDER_RADIUS() + zpx(5.))
+            .child(
+                div()
+                    .size_full()
+                    .border_2()
+                    .border_color(ring)
+                    .rounded(BORDER_RADIUS() + zpx(4.)),
+            );
+    }
     div()
         .absolute()
         .top(zpx(-4.))

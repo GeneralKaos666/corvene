@@ -501,6 +501,10 @@ fn dialog_impl(
                 .flex()
                 .items_center()
                 .justify_center()
+                // Windows: GHD's page includes its title bar, so a dialog is
+                // centred in the whole window: half the bar's height higher
+                // than in the page below it
+                .when(cfg!(windows), |d| d.pb(crate::theme::page_top()))
                 .bg(t.dialog_backdrop)
                 .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                     if backdrop_dismissable {

@@ -671,7 +671,9 @@ impl WelcomeView {
                                                             .min_w_0()
                                                             .truncate()
                                                             .text_size(px(WELCOME_FONT_SM()))
-                                                            .line_height(px(WELCOME_FONT_SM() * 1.5))
+                                                            .line_height(
+                                                                px(WELCOME_FONT_SM() * 1.5),
+                                                            )
                                                             .text_color(t.text_secondary)
                                                             .child(format!(
                                                                 "{} • {}",

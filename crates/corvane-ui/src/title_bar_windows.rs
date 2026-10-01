@@ -110,7 +110,11 @@ pub fn title_bar(
         .h_full()
         .flex_none()
         .overflow_hidden()
-        .w(px(if mode == Mode::Dark { menu_bar_width } else { 0. }))
+        .w(px(if mode == Mode::Dark {
+            menu_bar_width
+        } else {
+            0.
+        }))
         .child(menu_bar);
     if mode == Mode::Hidden {
         return div()
@@ -141,7 +145,15 @@ pub fn title_bar(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(img("icon/Corvane-256.png").size(px(16.))),
+                        // `.app-icon`: a 16 px mark in
+                        // `--toolbar-button-secondary-color`
+                        .child(
+                            svg()
+                                .path("icon/Corvane-mark.svg")
+                                .size(px(16.))
+                                .flex_none()
+                                .text_color(rgb(0xd1d5da)),
+                        ),
                 )
         })
         .child(menu_bar)

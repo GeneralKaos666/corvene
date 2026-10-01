@@ -587,6 +587,12 @@ pub struct MenuBarShell {
 impl MenuBarShell {
     pub fn new(content: AnyView, cx: &mut Context<Self>) -> Self {
         let menu_bar = cx.new(MenuBar::new);
+        // Windows: the title bar's mode and its dimming follow the app's
+        // state (the welcome flow ending, a dialog opening)
+        #[cfg(windows)]
+        if let Some(state) = corvane_core::AppState::try_global(cx) {
+            cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        }
         Self { menu_bar, content }
     }
 }
@@ -659,9 +665,25 @@ impl MenuBarShell {
             .min_h_0()
             .w_full()
             .child(self.content.clone());
+        // a dialog's backdrop lies over GHD's whole page, title bar included
+        // (drawn here, not by the dialog, so the window controls stay usable)
+        let dialog_open = corvane_core::AppState::try_global(cx)
+            .is_some_and(|state| state.read(cx).popup.is_some());
         if mode == Mode::Dark {
+            use crate::theme::ActiveGhdTheme;
             shell
                 .child(self.menu_bar.clone())
+                .when(dialog_open, |shell| {
+                    shell.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .w_full()
+                            .h(px(title_bar_windows::HEIGHT))
+                            .bg(cx.ghd().dialog_backdrop),
+                    )
+                })
                 .child(page)
                 .when(views_menu::app_menu_open(cx), |shell| {
                     shell.child(
