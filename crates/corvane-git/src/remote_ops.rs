@@ -221,10 +221,15 @@ pub struct AskpassEnv {
 }
 
 impl AskpassEnv {
+    /// Android: the process is the activity, not a program git could run;
+    /// `CORVANE_ASKPASS_PROGRAM` names the packaged helper
+    /// (`crates/corvane-askpass`), which asks the running app.
     pub fn current_exe(logins: String) -> Option<Self> {
-        std::env::current_exe()
-            .ok()
-            .map(|program| Self { program, logins })
+        #[cfg(target_os = "android")]
+        let program = std::env::var_os("CORVANE_ASKPASS_PROGRAM").map(std::path::PathBuf::from);
+        #[cfg(not(target_os = "android"))]
+        let program = std::env::current_exe().ok();
+        program.map(|program| Self { program, logins })
     }
 
     fn apply(&self, cmd: GitCommand) -> GitCommand {

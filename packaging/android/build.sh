@@ -35,11 +35,26 @@ done
 # API 26 is the minimum the manifest declares.
 cargo ndk "${targets[@]}" -P 26 -o "$JNI_LIBS" build -p corvane --lib $profile_flag
 
+# git's askpass helper (crates/corvane-askpass), an executable packaged like
+# the bundled git's
+cargo ndk "${targets[@]}" -P 26 build -p corvane-askpass $profile_flag
+for abi in $ABIS; do
+  case "$abi" in
+    arm64-v8a) triple=aarch64-linux-android ;;
+    x86_64) triple=x86_64-linux-android ;;
+  esac
+  cp "target/$triple/$PROFILE/corvane-askpass" "$JNI_LIBS/$abi/libcorvane-askpass.so"
+done
+
 # A debug library carries a gigabyte of debug info; the package keeps the
 # symbol table (backtraces) only.
 STRIP="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-strip | head -1)"
 for abi in $ABIS; do
   "$STRIP" --strip-debug "$JNI_LIBS/$abi/libcorvane.so"
+  "$STRIP" "$JNI_LIBS/$abi/libcorvane-askpass.so"
+  # cargo-ndk also copies the cdylib of a dependency that libcorvane.so
+  # already links statically
+  rm -f "$JNI_LIBS/$abi"/libandroid_native_keyring_store-*.so
 done
 
 [ -n "${SKIP_GRADLE:-}" ] && exit 0

@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- pull request notifications; asked for at run time on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- wgpu draws with Vulkan and falls back to OpenGL ES 3 -->
     <uses-feature
         android:name="android.hardware.vulkan.level"
@@ -46,6 +49,16 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- x-corvane://openRepo/… links and the browser sign-in's
+                 x-corvane-auth://oauth callback -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="x-corvane" />
+                <data android:scheme="x-corvane-auth" />
             </intent-filter>
         </activity>
 

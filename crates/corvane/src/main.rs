@@ -1,6 +1,6 @@
 //! Corvane entry point: logging, persisted settings, GPUI application, window.
 
-mod askpass;
+pub(crate) mod askpass;
 mod assets;
 mod dev_samples;
 mod logging;

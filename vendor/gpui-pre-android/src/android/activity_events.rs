@@ -126,3 +126,27 @@ pub(crate) fn prompt_for_paths(
     }
     rx
 }
+
+type UrlHandler = Box<dyn Fn(&str) -> bool + Send + Sync>;
+
+static URL_HANDLER: Mutex<Option<UrlHandler>> = Mutex::new(None);
+
+/// Lets the application open some URLs itself (`Platform::open_url`): the
+/// handler returns true for a URL it took. Everything else goes to an
+/// `ACTION_VIEW` intent.
+pub fn set_url_handler(handler: impl Fn(&str) -> bool + Send + Sync + 'static) {
+    *URL_HANDLER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(handler));
+}
+
+pub(crate) fn open_url(url: &str) {
+    let handled = URL_HANDLER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .is_some_and(|handler| handler(url));
+    if !handled {
+        super::jni::open_url(url);
+    }
+}

@@ -257,7 +257,7 @@ impl Platform for AndroidPlatform {
     }
 
     fn open_url(&self, url: &str) {
-        jni::open_url(url);
+        super::activity_events::open_url(url);
     }
 
     fn on_open_urls(&self, mut callback: Box<dyn FnMut(Vec<String>)>) {

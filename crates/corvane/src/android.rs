@@ -29,11 +29,13 @@ fn android_main(android_app: AndroidApp) {
     let _ = ANDROID_APP.set(android_app);
     gpui_android::set_soft_keyboard_handler(show_keyboard);
     gpui_android::set_path_prompt_handler(pick_folder);
+    gpui_android::set_url_handler(open_url);
     corvane_platform::android::set_bridge(Box::new(ActivityBridge));
     std::panic::set_hook(Box::new(|info| {
         // stderr goes nowhere; `logging` sends tracing to logcat
         tracing::error!("panic: {info}");
     }));
+    serve_askpass();
     app::main();
     // The activity is gone. A later launch would call `android_main` again
     // in this process, with the store still locked and GPUI's globals set.
@@ -78,6 +80,9 @@ fn prepare_environment(android_app: &AndroidApp) {
                 std::env::set_var("PATH", path);
             }
             std::env::set_var("CORVANE_GIT", git.bin.join("git"));
+            // credentials: git runs the helper, which asks `serve_askpass`
+            std::env::set_var("CORVANE_ASKPASS_PROGRAM", git.bin.join("corvane-askpass"));
+            std::env::set_var("CORVANE_ASKPASS_SOCKET", cache.join("askpass.sock"));
             std::env::set_var("GIT_EXEC_PATH", &git.bin);
             std::env::set_var("GIT_TEMPLATE_DIR", &git.templates);
             // there is no /etc/gitconfig
@@ -115,6 +120,7 @@ fn bundled_git(files: &Path) -> Option<BundledGit> {
         ("git-remote-http", "libgit-remote-https.so"),
         ("ssh", "libssh.so"),
         ("git-lfs", "libgit-lfs.so"),
+        ("corvane-askpass", "libcorvane-askpass.so"),
         ("git-sh-setup", "libgit-sh-setup.so"),
         ("git-sh-i18n", "libgit-sh-i18n.so"),
         ("git-submodule", "libgit-submodule.so"),
@@ -229,6 +235,39 @@ macro_rules! activity_call {
     }};
 }
 
+/// A static `int` method of `CorvaneActivity` without arguments.
+macro_rules! activity_int {
+    ($name:literal) => {{
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            env.call_static_method(&class, jni::jni_str!($name), jni::jni_sig!("()I"), &[])
+                .and_then(|value| value.i())
+                .map_err(|err| err.to_string())
+        })
+        .ok()
+    }};
+}
+
+/// A static `void` method of `CorvaneActivity` taking strings; true when the
+/// call went through.
+macro_rules! activity_strings {
+    ($name:literal, $sig:literal, [$($arg:expr),+]) => {{
+        let result = gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let strings = [$(env.new_string($arg).map_err(|err| err.to_string())?),+];
+            let args: Vec<jni::objects::JValue> =
+                strings.iter().map(|s| jni::objects::JValue::Object(s)).collect();
+            env.call_static_method(&class, jni::jni_str!($name), jni::jni_sig!($sig), &args)
+                .map(|_| ())
+                .map_err(|err| err.to_string())
+        });
+        if let Err(err) = &result {
+            tracing::warn!("CorvaneActivity.{} failed: {err}", $name);
+        }
+        result.is_ok()
+    }};
+}
+
 /// `CorvaneActivity.showKeyboard(boolean)`.
 fn show_keyboard(show: bool) {
     activity_call!("showKeyboard", "(Z)V", &[jni::objects::JValue::Bool(show)]);
@@ -252,6 +291,58 @@ impl corvane_platform::android::Bridge for ActivityBridge {
     fn request_all_files_access(&self) {
         activity_call!("requestAllFilesAccess", "()V", &[]);
     }
+
+    fn notifications_allowed(&self) -> Option<bool> {
+        // 0: not asked yet, 1: allowed, 2: denied
+        match activity_int!("notificationPermission") {
+            Some(1) => Some(true),
+            Some(2) => Some(false),
+            _ => None,
+        }
+    }
+
+    fn request_notification_permission(&self) {
+        activity_call!("requestNotificationPermission", "()V", &[]);
+    }
+
+    fn show_notification(&self, identifier: &str, title: &str, body: &str, payload: &str) {
+        let _ = activity_strings!(
+            "showNotification",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+            [identifier, title, body, payload]
+        );
+    }
+}
+
+/// `Platform::open_url`: sign-in pages open in a Custom Tab over Corvane (the
+/// browser flow comes back through the `x-corvane-auth` deep link, the
+/// device flow's page is closed by hand), the notification settings URL
+/// opens the system's page, everything else goes to the default handler.
+fn open_url(url: &str) -> bool {
+    if url == corvane_platform::android::NOTIFICATION_SETTINGS_URL {
+        activity_call!("openNotificationSettings", "()V", &[]);
+        return true;
+    }
+    let sign_in = url.starts_with("https://")
+        && (url.contains("/login/oauth/authorize") || url.contains("/login/device"));
+    if sign_in {
+        return activity_strings!("openCustomTab", "(Ljava/lang/String;)V", [url]);
+    }
+    false
+}
+
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeNotificationClicked(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    identifier: *mut c_void,
+    payload: *mut c_void,
+) {
+    let payload = gpui_android::jni::string_from_raw(payload);
+    corvane_platform::notifications::clicked(corvane_platform::notifications::NotificationClick {
+        identifier: gpui_android::jni::string_from_raw(identifier),
+        payload: (!payload.is_empty()).then_some(payload),
+    });
 }
 
 /// The folder prompt in flight: Android shows one picker at a time.
@@ -385,4 +476,42 @@ extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeOpenUrl(
     gpui_android::post(ActivityEvent::OpenUrl(gpui_android::jni::string_from_raw(
         url,
     )));
+}
+
+/// Answers the askpass helper (`crates/corvane-askpass`): git runs it for a
+/// username or password, it connects to `CORVANE_ASKPASS_SOCKET` in the
+/// app-private cache directory, and the answer comes from the Android
+/// Keystore as on the desktop it comes from the keychain.
+fn serve_askpass() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    let Some(socket) = std::env::var_os("CORVANE_ASKPASS_SOCKET") else {
+        return;
+    };
+    let _ = std::fs::remove_file(&socket);
+    let listener = match UnixListener::bind(&socket) {
+        Ok(listener) => listener,
+        Err(err) => {
+            tracing::warn!("askpass socket: {err}");
+            return;
+        }
+    };
+    let spawned = std::thread::Builder::new()
+        .name("askpass".into())
+        .spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut lines = BufReader::new(&stream).lines();
+                let (Some(Ok(logins)), Some(Ok(prompt))) = (lines.next(), lines.next()) else {
+                    continue;
+                };
+                let answer =
+                    app::askpass::answer_with(&prompt, app::askpass::parse_logins(&logins))
+                        .unwrap_or_default();
+                let _ = (&stream).write_all(answer.as_bytes());
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!("askpass thread: {err}");
+    }
 }

@@ -4469,6 +4469,14 @@ impl Dispatcher {
                             let _ = tx.send(Msg::Token { token, scopes });
                             return;
                         }
+                        // Android: the browser is in front while the code is
+                        // typed, and requests of an app in the background
+                        // can fail (no network for it on some devices);
+                        // keep asking until the code expires
+                        #[cfg(target_os = "android")]
+                        Err(corvane_github::GitHubError::Http(err)) => {
+                            warn!(%err, "sign-in poll failed; retrying");
+                        }
                         Err(err) => {
                             let _ = tx.send(Msg::Failed(err.to_string()));
                             return;

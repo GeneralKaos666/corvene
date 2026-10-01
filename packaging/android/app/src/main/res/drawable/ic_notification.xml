@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Octicons' git-pull-request (MIT), as the status bar's notification icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="16"
+    android:viewportHeight="16">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M1.5,3.25a2.25,2.25 0,1 1,3 2.122v5.256a2.251,2.251 0,1 1,-1.5 0V5.372A2.25,2.25 0,0 1,1.5 3.25ZM7.72,0.22a0.75,0.75 0,0 1,1.06 0l2.5,2.5a0.75,0.75 0,0 1,0 1.06l-2.5,2.5A0.749,0.749 0,0 1,7.5 5.75V4.5h-0.25a1,1 0,0 0,-1 1v0.5a0.75,0.75 0,0 1,-1.5 0V5.5A2.5,2.5 0,0 1,7.25 3H7.5V1.75a0.75,0.75 0,0 1,0.22 -0.53ZM12.75,10.628a2.251,2.251 0,1 1,-1.5 0V7.75a0.75,0.75 0,0 1,1.5 0v2.878ZM3.75,2.5a0.75,0.75 0,1 0,0 1.5,0.75 0.75,0 0,0 0,-1.5ZM3.75,12a0.75,0.75 0,1 0,0 1.5,0.75 0.75,0 0,0 0,-1.5ZM12,12a0.75,0.75 0,1 0,0 1.5,0.75 0.75,0 0,0 0,-1.5Z" />
+</vector>

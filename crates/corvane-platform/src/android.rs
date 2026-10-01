@@ -21,7 +21,19 @@ pub trait Bridge: Send + Sync {
     fn can_request_all_files_access(&self) -> bool;
     /// Opens the system page where the user grants it.
     fn request_all_files_access(&self);
+    /// Whether notifications may be posted: `None` before the user was
+    /// asked (Android 13+).
+    fn notifications_allowed(&self) -> Option<bool>;
+    /// Asks for `POST_NOTIFICATIONS` (Android 13+).
+    fn request_notification_permission(&self);
+    /// Posts a notification; a tap on it comes back through
+    /// [`crate::notifications::clicked`].
+    fn show_notification(&self, identifier: &str, title: &str, body: &str, payload: &str);
 }
+
+/// The URL [`crate::notifications::settings_url`] gives on Android; the
+/// application's URL handler opens the system's notification settings for it.
+pub const NOTIFICATION_SETTINGS_URL: &str = "x-corvane-android://notification-settings";
 
 static BRIDGE: OnceLock<Box<dyn Bridge>> = OnceLock::new();
 

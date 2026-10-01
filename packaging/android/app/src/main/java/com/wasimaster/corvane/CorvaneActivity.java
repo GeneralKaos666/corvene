@@ -1,6 +1,10 @@
 package com.wasimaster.corvane;
 
 import android.app.NativeActivity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -58,6 +62,10 @@ public class CorvaneActivity extends NativeActivity {
         inputView = new InputView(this);
         addContentView(inputView, new ViewGroup.LayoutParams(1, 1));
         inputView.requestFocus();
+        // a link is read by the platform (`getIntent().getDataString()`)
+        if (ACTION_NOTIFICATION.equals(getIntent().getAction())) {
+            handleIntent(getIntent());
+        }
     }
 
     @Override
@@ -72,10 +80,7 @@ public class CorvaneActivity extends NativeActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        String url = intent.getDataString();
-        if (url != null) {
-            nativeOpenUrl(url);
-        }
+        handleIntent(intent);
     }
 
     /** Called from the native thread: show or hide the on-screen keyboard. */
@@ -294,6 +299,133 @@ public class CorvaneActivity extends NativeActivity {
             }
         });
     }
+
+    // ── links and notifications ─────────────────────────────────────────────
+
+    private static final String ACTION_NOTIFICATION = "com.wasimaster.corvane.NOTIFICATION";
+    private static final String EXTRA_IDENTIFIER = "identifier";
+    private static final String EXTRA_PAYLOAD = "payload";
+    private static final String CHANNEL = "pull-requests";
+    private static final String PREFERENCES = "corvane";
+    private static final String ASKED_NOTIFICATIONS = "asked-notifications";
+    private static final int REQUEST_NOTIFICATIONS = 2;
+
+    /**
+     * A page in a Custom Tab: the browser's tab drawn over Corvane, so
+     * signing in does not leave the application. Custom Tabs are an intent
+     * convention; a browser without them opens the page normally.
+     */
+    public static void openCustomTab(final String url) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            Bundle extras = new Bundle();
+            extras.putBinder("android.support.customtabs.extra.SESSION", null);
+            intent.putExtras(extras);
+            intent.putExtra("android.support.customtabs.extra.TOOLBAR_COLOR", 0xff24292e);
+            try {
+                activity.startActivity(intent);
+            } catch (RuntimeException e) {
+                Toast.makeText(activity, "No browser is installed.", Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /** What the activity was opened with: a link or a tapped notification. */
+    private void handleIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        if (ACTION_NOTIFICATION.equals(intent.getAction())) {
+            nativeNotificationClicked(intent.getStringExtra(EXTRA_IDENTIFIER),
+                    intent.getStringExtra(EXTRA_PAYLOAD));
+            return;
+        }
+        String url = intent.getDataString();
+        if (url != null) {
+            nativeOpenUrl(url);
+        }
+    }
+
+    /** 0: not asked yet, 1: allowed, 2: denied. */
+    public static int notificationPermission() {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return 2;
+        }
+        NotificationManager manager = activity.getSystemService(NotificationManager.class);
+        if (manager.areNotificationsEnabled()) {
+            return 1;
+        }
+        boolean asked = activity.getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+                .getBoolean(ASKED_NOTIFICATIONS, false);
+        return Build.VERSION.SDK_INT >= 33 && !asked ? 0 : 2;
+    }
+
+    /** POST_NOTIFICATIONS, which Android 13 made a runtime permission. */
+    public static void requestNotificationPermission() {
+        final CorvaneActivity activity = instance;
+        if (activity == null || Build.VERSION.SDK_INT < 33) {
+            return;
+        }
+        activity.runOnUiThread(() -> activity.requestPermissions(
+                new String[] {"android.permission.POST_NOTIFICATIONS"}, REQUEST_NOTIFICATIONS));
+    }
+
+    /** The permission counts as asked for once the system's dialog is answered. */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_NOTIFICATIONS) {
+            getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
+                    .putBoolean(ASKED_NOTIFICATIONS, true).apply();
+        }
+    }
+
+    public static void openNotificationSettings() {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> activity.startActivity(
+                new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, activity.getPackageName())));
+    }
+
+    /** Posts a notification; tapping it opens Corvane with its payload. */
+    public static void showNotification(String identifier, String title, String body,
+            String payload) {
+        final CorvaneActivity activity = instance;
+        if (activity == null) {
+            return;
+        }
+        NotificationManager manager = activity.getSystemService(NotificationManager.class);
+        manager.createNotificationChannel(new NotificationChannel(CHANNEL,
+                activity.getString(R.string.channel_pull_requests),
+                NotificationManager.IMPORTANCE_DEFAULT));
+        Intent intent = new Intent(activity, CorvaneActivity.class)
+                .setAction(ACTION_NOTIFICATION)
+                .putExtra(EXTRA_IDENTIFIER, identifier)
+                .putExtra(EXTRA_PAYLOAD, payload)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent open = PendingIntent.getActivity(activity, identifier.hashCode(), intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification notification = new Notification.Builder(activity, CHANNEL)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(new Notification.BigTextStyle().bigText(body))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build();
+        manager.notify(identifier, 0, notification);
+    }
+
+    static native void nativeNotificationClicked(String identifier, String payload);
 
     static native void nativePathPicked(String path, String error);
 
