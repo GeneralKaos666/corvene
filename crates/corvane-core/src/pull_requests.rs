@@ -36,6 +36,13 @@ const PULL_REQUEST_INTERVAL: Duration = Duration::from_secs(30 * 60);
 static APP_FOCUSED: AtomicBool = AtomicBool::new(false);
 /// Bumped to stop the running updater (`stopPullRequestUpdater`).
 static UPDATER_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Android: periodic work is skipped while the application is not on screen
+/// (it costs battery, and the system freezes the process anyway). Always
+/// false elsewhere.
+pub(crate) fn android_in_background() -> bool {
+    cfg!(target_os = "android") && !APP_FOCUSED.load(Ordering::Relaxed)
+}
 /// `MaxPullRequestRefreshFrequency`: never more often than every 2 minutes.
 const MAX_REFRESH_FREQUENCY: Duration = Duration::from_secs(2 * 60);
 /// `fetchUpdatedPullRequests(maxResults)`: past this many updated PRs the

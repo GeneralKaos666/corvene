@@ -1537,7 +1537,10 @@ impl Dispatcher {
                 .timer(Duration::from_secs(20))
                 .await;
             loop {
-                cx.update(Self::background_fetch_tick);
+                // in the background WorkManager drives the fetch (above)
+                if !crate::pull_requests::android_in_background() {
+                    cx.update(Self::background_fetch_tick);
+                }
                 cx.background_executor()
                     .timer(BACKGROUND_FETCH_MINIMUM)
                     .await;
@@ -1546,10 +1549,13 @@ impl Dispatcher {
         .detach();
         // `217-prompt-indicator-refresh`: the first indicator refresh runs
         // right after launch (GHD's updater starts on its delayed cadence)
-        let first_indicators = if Self::state(cx)
-            .read(cx)
-            .flags
-            .bool(crate::flags::ids::PROMPT_INDICATOR_REFRESH)
+        // Android: starting git twice per listed repository right at launch
+        // competes with drawing the first frames, so the delayed cadence
+        let first_indicators = if !cfg!(target_os = "android")
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::PROMPT_INDICATOR_REFRESH)
         {
             Duration::from_secs(1)
         } else {
@@ -1558,7 +1564,9 @@ impl Dispatcher {
         cx.spawn(async move |cx: &mut AsyncApp| {
             cx.background_executor().timer(first_indicators).await;
             loop {
-                cx.update(Self::refresh_indicators);
+                if !crate::pull_requests::android_in_background() {
+                    cx.update(Self::refresh_indicators);
+                }
                 cx.background_executor()
                     .timer(INDICATOR_REFRESH_INTERVAL)
                     .await;
