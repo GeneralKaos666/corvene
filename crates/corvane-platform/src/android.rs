@@ -22,6 +22,15 @@ pub trait Bridge: Send + Sync {
     /// This build may load native code it downloaded (the `foss` flavour;
     /// Google Play forbids it).
     fn allows_downloaded_code(&self) -> bool;
+    /// Where the Play feature module with the tree-sitter grammars put its
+    /// libraries, when it is installed (`play` flavour).
+    fn grammar_module_dir(&self) -> Option<PathBuf>;
+    /// Asks Google Play for that module; progress and the end come through
+    /// [`grammar_module_event`].
+    fn install_grammar_module(&self);
+    /// Lets Google Play remove the module (it does so later, in the
+    /// background).
+    fn uninstall_grammar_module(&self);
     /// Opens the system page where the user grants it.
     fn request_all_files_access(&self);
     /// Whether notifications may be posted: `None` before the user was
@@ -159,4 +168,27 @@ pub fn take_imported(path: &Path) -> bool {
         .ok()
         .and_then(|mut imported| imported.as_mut().map(|set| set.remove(path)))
         .unwrap_or(false)
+}
+
+/// What Google Play reports while it installs the grammar module.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GrammarModuleEvent {
+    Progress { received: u64, total: u64 },
+    Installed,
+    Failed(String),
+}
+
+type GrammarModuleHandler = Box<dyn Fn(GrammarModuleEvent) + Send + Sync>;
+
+static GRAMMAR_MODULE: OnceLock<GrammarModuleHandler> = OnceLock::new();
+
+pub fn set_grammar_module_handler(handler: impl Fn(GrammarModuleEvent) + Send + Sync + 'static) {
+    let _ = GRAMMAR_MODULE.set(Box::new(handler));
+}
+
+/// From the activity: the module's installation moved on.
+pub fn grammar_module_event(event: GrammarModuleEvent) {
+    if let Some(handler) = GRAMMAR_MODULE.get() {
+        handler(event);
+    }
 }

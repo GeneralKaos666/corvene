@@ -19,3 +19,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Corvane"
 include(":app")
+// the tree-sitter grammars as an on-demand feature module (Google Play)
+include(":grammars")

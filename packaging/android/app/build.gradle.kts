@@ -37,6 +37,10 @@ android {
     //   open repositories on shared storage in place (src/foss declares the
     //   permission) and may download packs with native code.
     // play: Google Play, whose policies allow neither.
+    // Google Play installs it on demand (play flavour, bundlePlayRelease);
+    // packages built as APKs do not contain it
+    dynamicFeatures += ":grammars"
+
     flavorDimensions += "distribution"
     productFlavors {
         create("foss") {
@@ -98,4 +102,7 @@ android {
 dependencies {
     // the periodic background fetch (CorvaneFetchWorker)
     implementation("androidx.work:work-runtime:2.10.0")
+    // Play Feature Delivery: the on-demand grammar module (GrammarModule).
+    // Only the play flavour links it; foss stays free of Google libraries.
+    "playImplementation"("com.google.android.play:feature-delivery:2.1.0")
 }

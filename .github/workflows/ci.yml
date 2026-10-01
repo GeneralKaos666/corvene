@@ -205,6 +205,13 @@ jobs:
           -D warnings -A clippy::missing_const_for_thread_local
       - name: package (foss and play)
         run: packaging/android/build.sh debug
+      # the bundle Google Play takes, with one grammar in the on-demand
+      # module (release.yml builds them all)
+      - name: bundle (play, with the grammar module)
+        run: |
+          UNITS=json packaging/android/grammars.sh
+          cd packaging/android && ./gradlew --no-daemon :app:bundlePlayDebug
+          unzip -l app/build/outputs/bundle/playDebug/app-play-debug.aab | grep -q 'grammars/lib/arm64-v8a/libcorvane_ts_index.so'
       - name: the play package asks for no all files access
         run: |
           aapt="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)"

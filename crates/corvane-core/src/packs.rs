@@ -87,6 +87,11 @@ pub fn offered_packs(flags: &Flags) -> Vec<PackKind> {
     OFFERED_PACKS
         .iter()
         .copied()
+        // Google Play delivers one module with every grammar
+        .filter(|kind| {
+            *kind != PackKind::TreeSitterRest
+                || !corvane_packs::store_delivered(PackKind::TreeSitterAll)
+        })
         .filter(|kind| match kind {
             PackKind::SyntaxExtended => flags.bool(ids::OPTIONAL_COMPONENTS),
             PackKind::TreeSitterAll | PackKind::TreeSitterRest => {
@@ -244,6 +249,12 @@ impl Dispatcher {
     /// Download, verify and install `kind` from the manifest (fetching the
     /// manifest first when needed), then activate it.
     pub fn install_pack(kind: PackKind, cx: &mut App) {
+        #[cfg(target_os = "android")]
+        if matches!(kind, PackKind::TreeSitterAll | PackKind::TreeSitterRest)
+            && corvane_packs::store_delivered(PackKind::TreeSitterAll)
+        {
+            return Self::install_play_grammars(cx);
+        }
         let state = Self::state(cx);
         let entry = {
             let s = state.read(cx);
@@ -367,12 +378,89 @@ impl Dispatcher {
         );
     }
 
+    /// Android's `play` flavour: the grammars are a feature module Google
+    /// Play installs on demand (`CorvaneActivity` › `GrammarModule`); its
+    /// progress shows like a download's, and once installed it is loaded
+    /// like a pack.
+    #[cfg(target_os = "android")]
+    fn install_play_grammars(cx: &mut App) {
+        use corvane_platform::android::GrammarModuleEvent;
+        const KIND: PackKind = PackKind::TreeSitterAll;
+        let state = Self::state(cx);
+        if state.read(cx).packs.progress.contains_key(&KIND) {
+            return;
+        }
+        let Some(bridge) = corvane_platform::android::bridge() else {
+            return;
+        };
+        state.update(cx, |s, cx| {
+            s.packs.errors.remove(&KIND);
+            s.packs.progress.insert(
+                KIND,
+                PackProgress {
+                    received: 0,
+                    total: None,
+                },
+            );
+            cx.notify();
+        });
+        // one listener for the life of the process; later installs reuse it
+        thread_local! {
+            static LISTENING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        if !LISTENING.replace(true) {
+            let (tx, rx) = async_channel::unbounded::<GrammarModuleEvent>();
+            corvane_platform::android::set_grammar_module_handler(move |event| {
+                let _ = tx.try_send(event);
+            });
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                while let Ok(event) = rx.recv().await {
+                    cx.update(|cx| match event {
+                        GrammarModuleEvent::Progress { received, total } => {
+                            Self::state(cx).update(cx, |s, cx| {
+                                if let Some(progress) = s.packs.progress.get_mut(&KIND) {
+                                    progress.received = received;
+                                    progress.total = Some(total).filter(|total| *total > 0);
+                                    cx.notify();
+                                }
+                            });
+                        }
+                        GrammarModuleEvent::Installed => {
+                            Self::state(cx).update(cx, |s, cx| {
+                                s.packs.progress.remove(&KIND);
+                                cx.notify();
+                            });
+                            Self::load_packs(vec![KIND], cx);
+                        }
+                        GrammarModuleEvent::Failed(err) => {
+                            error!(%err, "Google Play could not install the grammars");
+                            Self::state(cx).update(cx, |s, cx| {
+                                s.packs.progress.remove(&KIND);
+                                s.packs.errors.insert(KIND, err);
+                                cx.notify();
+                            });
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
+        bridge.install_grammar_module();
+    }
+
     /// Remove `kind` from disk and fall back to the compiled-in data.
     pub fn uninstall_pack(kind: PackKind, cx: &mut App) {
         spawn_bg(
             cx,
             move || {
                 deactivate(kind);
+                #[cfg(target_os = "android")]
+                if corvane_packs::store_delivered(kind) {
+                    if let Some(bridge) = corvane_platform::android::bridge() {
+                        bridge.uninstall_grammar_module();
+                    }
+                    return Ok(());
+                }
                 corvane_packs::uninstall(kind)
             },
             move |result, cx| {

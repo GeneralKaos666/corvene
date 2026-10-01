@@ -57,6 +57,12 @@ public class CorvaneActivity extends NativeActivity {
     private InputView inputView;
 
     @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        GrammarModule.attach(this);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         // a background fetch WorkManager started in this process without an
         // activity (CorvaneFetchWorker) has to let go before the native
@@ -291,6 +297,31 @@ public class CorvaneActivity extends NativeActivity {
     public static boolean allowsDownloadedCode() {
         return BuildConfig.DOWNLOADED_CODE;
     }
+
+    // The tree-sitter grammars as Google Play's on-demand module (play
+    // flavour; GrammarModule is a stub in foss).
+
+    public static String grammarModuleDir() {
+        final CorvaneActivity activity = instance;
+        return activity == null ? "" : GrammarModule.directory(activity);
+    }
+
+    public static void installGrammarModule() {
+        final CorvaneActivity activity = instance;
+        if (activity != null) {
+            activity.runOnUiThread(() -> GrammarModule.install(activity));
+        }
+    }
+
+    public static void uninstallGrammarModule() {
+        final CorvaneActivity activity = instance;
+        if (activity != null) {
+            GrammarModule.uninstall(activity);
+        }
+    }
+
+    /** 0: progress, 1: installed, 2: failed (with a message). */
+    static native void nativeGrammarModule(int status, long received, long total, String error);
 
     /** This build declares MANAGE_EXTERNAL_STORAGE (the foss flavour). */
     public static boolean canRequestAllFilesAccess() {

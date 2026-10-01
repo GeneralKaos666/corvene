@@ -17,7 +17,8 @@
 # (JAVA_HOME), `cargo install cargo-ndk`, the Rust targets of the ABIS, and
 # for the bundled git: make, perl and Go.
 #
-# Env: ABIS (default "arm64-v8a x86_64"), SKIP_GRADLE=1 (library only).
+# Env: ABIS (default "arm64-v8a x86_64"), SKIP_GRADLE=1 (library only),
+# BUNDLE=1 (also the .aab for Google Play, with the grammar module).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -73,8 +74,17 @@ done
 
 [ -n "${SKIP_GRADLE:-}" ] && exit 0
 cd packaging/android
-# assemble[Foss|Play]<Debug|Release>
+# assemble[Foss|Play]<Debug|Release>, of the application only: the grammar
+# feature module is not part of an APK
 flavour="${2:-}"
-task="assemble$(echo "${flavour:0:1}" | tr a-z A-Z)${flavour:1}$(echo "${VARIANT:0:1}" | tr a-z A-Z)${VARIANT:1}"
+task=":app:assemble$(echo "${flavour:0:1}" | tr a-z A-Z)${flavour:1}$(echo "${VARIANT:0:1}" | tr a-z A-Z)${VARIANT:1}"
 ./gradlew --no-daemon "$task"
 find app/build/outputs/apk -name '*.apk'
+
+# BUNDLE=1: also the bundle Google Play takes (the play flavour with the
+# on-demand grammar module, which grammars.sh builds first)
+if [ -n "${BUNDLE:-}" ]; then
+  ABIS="$ABIS" "$ROOT/packaging/android/grammars.sh"
+  ./gradlew --no-daemon ":app:bundlePlay$(echo "${VARIANT:0:1}" | tr a-z A-Z)${VARIANT:1}"
+  find app/build/outputs/bundle -name '*.aab'
+fi

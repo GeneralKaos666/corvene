@@ -281,7 +281,9 @@ jobs:
           path: target/linux/packs-manifest-linux-${{ matrix.arch }}.json
 
   # The Android packages (foss and play, both ABIs in each) and the Android
-  # tree-sitter packs, on a Linux runner. The APKs are signed with the
+  # tree-sitter packs, on a Linux runner; also the play flavour's bundle
+  # (.aab, with the grammars as an on-demand module), which stays a workflow
+  # artifact: it is uploaded to Google Play by hand. The APKs are signed with the
   # keystore in the CORVANE_ANDROID_KEYSTORE_BASE64 secret and only then
   # added to the draft release; without it they stay workflow artifacts,
   # unsigned. A failure here does not hold up the other platforms.
@@ -354,9 +356,11 @@ jobs:
             suffix=
             echo "ANDROID_SIGNED=1" >> "$GITHUB_ENV"
           fi
-          packaging/android/build.sh release
+          # BUNDLE=1: also the .aab for Google Play with the grammar module
+          BUNDLE=1 packaging/android/build.sh release
           rm -f "$RUNNER_TEMP/corvane.jks"
           mkdir -p target/android
+          cp packaging/android/app/build/outputs/bundle/playRelease/*.aab "target/android/Corvane-$version-android-play$suffix.aab"
           for flavour in foss play; do
             apk="$(ls packaging/android/app/build/outputs/apk/$flavour/release/*.apk | head -1)"
             cp "$apk" "target/android/Corvane-$version-android-$flavour$suffix.apk"

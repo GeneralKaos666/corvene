@@ -1727,6 +1727,13 @@ impl PreferencesDialog {
             PackKind::GitPortable => "A private copy of Git for machines without one.",
             PackKind::GitLfs => "Git Large File Storage for repositories that use it.",
         };
+        // Android's `play` flavour gets the grammars from Google Play
+        let description = if corvane_packs::store_delivered(kind) {
+            "Tree-sitter grammars for every language, for Appearance › Syntax \
+             highlighting. Installed by Google Play."
+        } else {
+            description
+        };
         let id = format!("prefs-pack-{}", kind.name());
         let (status, action) = self.pack_state(kind, &id, cx);
         let error = packs.errors.get(&kind).map(|e| capitalize(e));
@@ -1842,7 +1849,13 @@ impl PreferencesDialog {
             }
             (None, None, _) => "Not installed.".to_string(),
         };
-        let enabled = entry.is_some();
+        let store = corvane_packs::store_delivered(kind);
+        let enabled = entry.is_some() || store;
+        let text = if store {
+            "Not installed.".to_string()
+        } else {
+            text
+        };
         (
             text,
             Some(

@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Corvane</string>
     <string name="documents_summary">Repositories</string>
+    <string name="grammars_title">Tree-sitter grammars</string>
     <string name="home_title">Corvane settings</string>
     <string name="home_summary">Git configuration and SSH keys</string>
     <string name="channel_pull_requests">Pull requests</string>

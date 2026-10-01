@@ -323,6 +323,33 @@ impl corvane_platform::android::Bridge for ActivityBridge {
             .unwrap_or(false)
     }
 
+    fn grammar_module_dir(&self) -> Option<PathBuf> {
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let dir = env
+                .call_static_method(
+                    &class,
+                    jni::jni_str!("grammarModuleDir"),
+                    jni::jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )
+                .and_then(|value| value.l())
+                .map_err(|err| err.to_string())?;
+            Ok(gpui_android::jni::get_string(env, &dir))
+        })
+        .ok()
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+    }
+
+    fn install_grammar_module(&self) {
+        activity_call!("installGrammarModule", "()V", &[]);
+    }
+
+    fn uninstall_grammar_module(&self) {
+        activity_call!("uninstallGrammarModule", "()V", &[]);
+    }
+
     fn request_all_files_access(&self) {
         activity_call!("requestAllFilesAccess", "()V", &[]);
     }
@@ -495,6 +522,28 @@ extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeNotificatio
     corvane_platform::notifications::clicked(corvane_platform::notifications::NotificationClick {
         identifier: gpui_android::jni::string_from_raw(identifier),
         payload: (!payload.is_empty()).then_some(payload),
+    });
+}
+
+/// `GrammarModule` (Google Play's on-demand module with the tree-sitter
+/// grammars): 0 progress, 1 installed, 2 failed.
+#[unsafe(no_mangle)]
+extern "system" fn Java_com_wasimaster_corvane_CorvaneActivity_nativeGrammarModule(
+    _env: *mut c_void,
+    _class: *mut c_void,
+    status: i32,
+    received: i64,
+    total: i64,
+    error: *mut c_void,
+) {
+    use corvane_platform::android::GrammarModuleEvent;
+    corvane_platform::android::grammar_module_event(match status {
+        0 => GrammarModuleEvent::Progress {
+            received: received.max(0) as u64,
+            total: total.max(0) as u64,
+        },
+        1 => GrammarModuleEvent::Installed,
+        _ => GrammarModuleEvent::Failed(gpui_android::jni::string_from_raw(error)),
     });
 }
 
