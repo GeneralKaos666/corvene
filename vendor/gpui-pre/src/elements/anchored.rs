@@ -75,6 +75,14 @@ impl Anchored {
         self.fit_mode = AnchoredFitMode::SnapToWindowWithMargin(edges.into());
         self
     }
+
+    /// Corvane patch: keep the element `padding` inside the window's left
+    /// and right edges only, letting it overflow vertically (floating-ui's
+    /// `shift({ padding })` for a top or bottom placement).
+    pub fn shift_horizontally(mut self, padding: Pixels) -> Self {
+        self.fit_mode = AnchoredFitMode::ShiftHorizontally(padding);
+        self
+    }
 }
 
 impl ParentElement for Anchored {
@@ -179,6 +187,23 @@ impl Element for Anchored {
             }
         }
 
+        if let AnchoredFitMode::ShiftHorizontally(padding) = self.fit_mode {
+            if desired.right() > limits.right() - padding {
+                desired.origin.x = limits.right() - padding - desired.size.width;
+            }
+            if desired.left() < limits.left() + padding {
+                desired.origin.x = limits.left() + padding;
+            }
+            let offset = desired.origin - bounds.origin;
+            let offset = point(offset.x.round(), offset.y.round());
+            window.with_element_offset(offset, |window| {
+                for child in &mut self.children {
+                    child.prepaint(window, cx);
+                }
+            });
+            return;
+        }
+
         let client_inset = window.client_inset.unwrap_or(px(0.));
         let edges = match self.fit_mode {
             AnchoredFitMode::SnapToWindowWithMargin(edges) => edges,
@@ -247,6 +272,8 @@ pub enum AnchoredFitMode {
     SnapToWindowWithMargin(Edges<Pixels>),
     /// Switch which corner anchor this anchored element is attached to.
     SwitchAnchor,
+    /// Corvane patch: see [`Anchored::shift_horizontally`].
+    ShiftHorizontally(Pixels),
 }
 
 /// Which algorithm to use when positioning the anchored element.

@@ -411,6 +411,7 @@ impl NoRepositoriesView {
                     scale: z,
                     gap: 8.,
                     fixed_height: true,
+                    balloon: true,
                 },
                 accounts.clone(),
                 Some(account),

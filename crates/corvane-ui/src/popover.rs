@@ -58,19 +58,37 @@ pub fn balloon_popover(
     component: impl IntoElement,
     cx: &App,
 ) -> Deferred {
+    balloon_popover_zoomed(anchor, position, 1., component, cx)
+}
+
+/// [`balloon_popover`] inside a page CSS-`zoom`ed by `zoom`
+/// (`#no-repositories`): floating-ui places the popover from the anchor's
+/// page rect, but its `top` / `left` and the tip apply inside the zoom, so
+/// the place (the tip's offset included) and the tip scale by `zoom` while
+/// the anchor's rect does not.
+pub fn balloon_popover_zoomed(
+    anchor: Bounds<Pixels>,
+    position: PopoverAnchorPosition,
+    zoom: f32,
+    component: impl IntoElement,
+    cx: &App,
+) -> Deferred {
     let t = cx.ghd();
+    let page_top = crate::theme::page_top();
     let (corner, x) = match position {
         PopoverAnchorPosition::BottomLeft => (Anchor::TopLeft, anchor.left()),
         PopoverAnchorPosition::BottomRight => (Anchor::TopRight, anchor.right()),
     };
+    let y = (anchor.bottom() - page_top + zpx(TIP_SIZE)) * zoom + page_top;
     let anchor_center = anchor.center().x;
     deferred(
         anchored()
             .anchor(corner)
-            .position(point(x, anchor.bottom() + zpx(TIP_SIZE)))
-            .snap_to_window_with_margin(zpx(SCREEN_BORDER_PADDING))
+            .position(point(x * zoom, y))
+            .shift_horizontally(zpx(SCREEN_BORDER_PADDING))
             .child(div().relative().child(component).child(tip(
                 anchor_center,
+                zoom,
                 t.box_border,
                 t.background,
             ))),
@@ -79,25 +97,32 @@ pub fn balloon_popover(
 
 /// `.popover-tip` above the popover: floating-ui's `arrow` puts its 16 px
 /// box on the anchor's centre, at least `TipCornerPadding` from either end,
-/// and GHD applies that offset inside the 1 px border. Within it, rotated
-/// to point up, the `--box-border-color` triangle sits a pixel above the
-/// background one, which covers the popover's top border.
-fn tip(anchor_center: Pixels, border: Hsla, background: Hsla) -> AnyElement {
+/// and GHD applies that offset inside the 1 px border (all in page px,
+/// scaled by `zoom` on screen). Within it, rotated to point up, the
+/// `--box-border-color` triangle sits a pixel above the background one,
+/// which covers the popover's top border.
+fn tip(anchor_center: Pixels, zoom: f32, border: Hsla, background: Hsla) -> AnyElement {
     canvas(
         |_, _, _| {},
         move |bounds, _, window, _| {
-            let width = f32::from(bounds.size.width);
+            let unit = zpx(1.);
+            let page = |v: Pixels| f32::from(v) / f32::from(unit);
+            let width = page(bounds.size.width) / zoom;
             let tip_box = TIP_SIZE * 2.;
-            let arrow_x = (f32::from(anchor_center - bounds.left()) - TIP_SIZE)
+            let arrow_x = (page(anchor_center) - page(bounds.left()) / zoom - TIP_SIZE)
                 .min(width - tip_box - TIP_CORNER_PADDING)
                 .max(TIP_CORNER_PADDING);
-            let left = bounds.left() + zpx(1. + arrow_x);
-            let top = bounds.top();
+            let at = |x: f32, y: f32| {
+                point(
+                    bounds.left() + zpx((1. + arrow_x + x) * zoom),
+                    bounds.top() + zpx(y * zoom),
+                )
+            };
             let tri = |apex: f32, base: f32| {
-                let mut path = Path::new(point(left + zpx(TIP_SIZE), top + zpx(apex)));
-                path.line_to(point(left + zpx(tip_box), top + zpx(base)));
-                path.line_to(point(left, top + zpx(base)));
-                path.line_to(point(left + zpx(TIP_SIZE), top + zpx(apex)));
+                let mut path = Path::new(at(TIP_SIZE, apex));
+                path.line_to(at(tip_box, base));
+                path.line_to(at(0., base));
+                path.line_to(at(TIP_SIZE, apex));
                 path
             };
             window.paint_path(tri(-7., 0.), border);

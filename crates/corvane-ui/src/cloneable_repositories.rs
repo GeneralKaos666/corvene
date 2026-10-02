@@ -540,6 +540,9 @@ pub struct PopoverPlacement {
     pub gap: f32,
     /// 500 px tall however few accounts there are (else 200–500 px).
     pub fixed_height: bool,
+    /// Placed and drawn as GHD's balloon (`crate::popover`), with `scale`
+    /// as the page zoom; else at `gap` under the button without a tip.
+    pub balloon: bool,
 }
 
 /// `.popover-dropdown-popover` with the account `SectionFilterList`, under
@@ -581,160 +584,187 @@ pub fn account_popover(
     let hover_bg = t.list_item_hover_background;
     let id = |suffix: &str| SharedString::from(format!("{id_prefix}-{suffix}"));
     let close_overlay = on_close.clone();
-    deferred(
-        anchored().position(point(zpx(0.), zpx(0.))).child(
+    let body = div()
+        .id(id("popover"))
+        .w(width)
+        .map(|d| {
+            if placement.fixed_height {
+                d.h(zpx(500.))
+            } else {
+                d.min_h(zpx(200.)).max_h(zpx(500.))
+            }
+        })
+        .flex()
+        .flex_col()
+        // `.popover-component { background: var(--background-color) }`
+        .bg(t.background)
+        .text_color(t.text)
+        .text_size(FONT_SIZE())
+        .border_1()
+        .border_color(t.box_border)
+        .rounded(BORDER_RADIUS())
+        .map(|d| {
+            if placement.balloon {
+                // `--base-box-shadow`
+                d.shadow(vec![BoxShadow {
+                    color: t.shadow,
+                    offset: point(zpx(0.), zpx(2.)),
+                    blur_radius: css_blur(7.),
+                    spread_radius: zpx(0.),
+                    inset: false,
+                }])
+            } else {
+                d.shadow_lg()
+            }
+        })
+        .overflow_hidden()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        // `.popover-dropdown-header`
+        .child(
             div()
-                .id(id("layer"))
-                .relative()
-                .w(viewport.width)
-                .h(viewport.height)
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(SPACING())
+                .p(SPACING())
+                .border_b_1()
+                .border_color(t.box_border)
                 .child(
                     div()
-                        .id(id("overlay"))
-                        .absolute()
-                        .inset_0()
-                        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                            close_overlay(window, cx)
-                        }),
+                        .flex_1()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Choose an account"),
                 )
                 .child(
                     div()
-                        .id(id("popover"))
-                        .absolute()
-                        .left(x)
-                        .top(y)
-                        .w(width)
-                        .map(|d| {
-                            if placement.fixed_height {
-                                d.h(zpx(500.))
-                            } else {
-                                d.min_h(zpx(200.)).max_h(zpx(500.))
-                            }
-                        })
+                        .id(id("close"))
+                        .cursor_pointer()
+                        .icon_button_label("Close")
+                        .on_click(move |_, window, cx| on_close(window, cx))
+                        .child(octicon(Octicon::X, t.text_secondary)),
+                ),
+        )
+        .child(
+            div()
+                .flex_none()
+                .mt(SPACING())
+                .mx(SPACING())
+                .mb(SPACING_HALF())
+                .child(crate::widgets::filter_text_box(
+                    id("filter"),
+                    &picker.filter,
+                    Some(octicon(Octicon::Search, t.text_secondary)),
+                    window,
+                    cx,
+                )),
+        )
+        .child(
+            div()
+                .id(id("list"))
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .children(accounts.into_iter().map(|account| {
+                    let is_selected = current.is_some_and(|c| {
+                        c.endpoint == account.endpoint && c.login == account.login
+                    });
+                    let avatar = account
+                        .avatar_url
+                        .as_deref()
+                        .and_then(|url| avatar_lookup_url(url, cx));
+                    let (fg, secondary) = if is_selected {
+                        (selected_text, selected_text)
+                    } else {
+                        (t.text, t.text_secondary)
+                    };
+                    let on_pick = on_pick.clone();
+                    let picked = account.clone();
+                    div()
+                        .id(SharedString::from(format!(
+                            "{id_prefix}-{}@{}",
+                            account.login, account.endpoint
+                        )))
+                        .h(ACCOUNT_ROW_HEIGHT())
+                        .flex_none()
                         .flex()
-                        .flex_col()
-                        // `.popover-component { background: var(--background-color) }`
-                        .bg(t.background)
-                        .text_color(t.text)
-                        .text_size(FONT_SIZE())
-                        .border_1()
-                        .border_color(t.box_border)
-                        .rounded(BORDER_RADIUS())
-                        .shadow_lg()
-                        .overflow_hidden()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        // `.popover-dropdown-header`
+                        .flex_row()
+                        .items_center()
+                        .px(SPACING())
+                        .cursor_pointer()
+                        .text_color(fg)
+                        .when(is_selected, |d| d.bg(selected_bg))
+                        .when(!is_selected, move |d| d.hover(move |s| s.bg(hover_bg)))
+                        .on_click(move |_, window, cx| on_pick(&picked, window, cx))
+                        .child(avatar_image(avatar, zpx(32.), cx))
                         .child(
                             div()
-                                .flex_none()
+                                .flex_1()
+                                .min_w_0()
+                                .mx(SPACING())
                                 .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(SPACING())
-                                .p(SPACING())
-                                .border_b_1()
-                                .border_color(t.box_border)
+                                .flex_col()
                                 .child(
                                     div()
-                                        .flex_1()
+                                        .truncate()
                                         .font_weight(FontWeight::SEMIBOLD)
-                                        .child("Choose an account"),
+                                        .child(format!("@{}", account.login)),
                                 )
                                 .child(
                                     div()
-                                        .id(id("close"))
-                                        .cursor_pointer()
-                                        .icon_button_label("Close")
-                                        .on_click(move |_, window, cx| on_close(window, cx))
-                                        .child(octicon(Octicon::X, t.text_secondary)),
+                                        .truncate()
+                                        .font_weight(FontWeight::LIGHT)
+                                        .text_size(FONT_SIZE_SM())
+                                        .text_color(secondary)
+                                        .child(account.friendly_endpoint()),
                                 ),
                         )
-                        .child(
-                            div()
-                                .flex_none()
-                                .mt(SPACING())
-                                .mx(SPACING())
-                                .mb(SPACING_HALF())
-                                .child(crate::widgets::filter_text_box(
-                                    id("filter"),
-                                    &picker.filter,
-                                    Some(octicon(Octicon::Search, t.text_secondary)),
-                                    window,
-                                    cx,
-                                )),
-                        )
-                        .child(
-                            div()
-                                .id(id("list"))
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_y_scroll()
-                                .flex()
-                                .flex_col()
-                                .children(accounts.into_iter().map(|account| {
-                                    let is_selected = current.is_some_and(|c| {
-                                        c.endpoint == account.endpoint && c.login == account.login
-                                    });
-                                    let avatar = account
-                                        .avatar_url
-                                        .as_deref()
-                                        .and_then(|url| avatar_lookup_url(url, cx));
-                                    let (fg, secondary) = if is_selected {
-                                        (selected_text, selected_text)
-                                    } else {
-                                        (t.text, t.text_secondary)
-                                    };
-                                    let on_pick = on_pick.clone();
-                                    let picked = account.clone();
-                                    div()
-                                        .id(SharedString::from(format!(
-                                            "{id_prefix}-{}@{}",
-                                            account.login, account.endpoint
-                                        )))
-                                        .h(ACCOUNT_ROW_HEIGHT())
-                                        .flex_none()
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .px(SPACING())
-                                        .cursor_pointer()
-                                        .text_color(fg)
-                                        .when(is_selected, |d| d.bg(selected_bg))
-                                        .when(!is_selected, move |d| {
-                                            d.hover(move |s| s.bg(hover_bg))
-                                        })
-                                        .on_click(move |_, window, cx| on_pick(&picked, window, cx))
-                                        .child(avatar_image(avatar, zpx(32.), cx))
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w_0()
-                                                .mx(SPACING())
-                                                .flex()
-                                                .flex_col()
-                                                .child(
-                                                    div()
-                                                        .truncate()
-                                                        .font_weight(FontWeight::SEMIBOLD)
-                                                        .child(format!("@{}", account.login)),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .truncate()
-                                                        .font_weight(FontWeight::LIGHT)
-                                                        .text_size(FONT_SIZE_SM())
-                                                        .text_color(secondary)
-                                                        .child(account.friendly_endpoint()),
-                                                ),
-                                        )
-                                }))
-                                .with_scrollbar(),
-                        ),
-                ),
-        ),
-    )
-    .with_priority(25)
-    .into_any_element()
+                }))
+                .with_scrollbar(),
+        );
+    // a window-sized layer under the popover closes it on any click outside
+    let layer = div()
+        .id(id("layer"))
+        .relative()
+        .w(viewport.width)
+        .h(viewport.height)
+        .child(
+            div()
+                .id(id("overlay"))
+                .absolute()
+                .inset_0()
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    close_overlay(window, cx)
+                }),
+        );
+    if placement.balloon {
+        div()
+            .child(
+                deferred(anchored().position(point(zpx(0.), zpx(0.))).child(layer))
+                    .with_priority(25),
+            )
+            .child(
+                crate::popover::balloon_popover_zoomed(
+                    anchor,
+                    crate::popover::PopoverAnchorPosition::BottomLeft,
+                    placement.scale,
+                    body,
+                    cx,
+                )
+                .with_priority(26),
+            )
+            .into_any_element()
+    } else {
+        deferred(
+            anchored()
+                .position(point(zpx(0.), zpx(0.)))
+                .child(layer.child(div().absolute().left(x).top(y).child(body))),
+        )
+        .with_priority(25)
+        .into_any_element()
+    }
 }
 
 #[cfg(test)]

@@ -759,6 +759,7 @@ impl CloneRepositoryDialog {
                     scale: 1.,
                     gap: 4.,
                     fixed_height: false,
+                    balloon: false,
                 },
                 self.accounts_for_tab(cx),
                 Some(&account),
