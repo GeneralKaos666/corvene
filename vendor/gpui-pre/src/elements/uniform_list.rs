@@ -562,11 +562,22 @@ impl Element for UniformList {
             window,
             cx,
             |_, window, cx| {
-                for item in &mut request_layout.items {
-                    item.paint(window, cx);
-                }
-                for decoration in &mut request_layout.decorations {
-                    decoration.paint(window, cx);
+                // Corvane patch: off macOS rows paint text like Chromium in
+                // a virtualized grid's composited layer: grayscale
+                let mut paint = |window: &mut Window, cx: &mut App| {
+                    for item in &mut request_layout.items {
+                        item.paint(window, cx);
+                    }
+                    for decoration in &mut request_layout.decorations {
+                        decoration.paint(window, cx);
+                    }
+                };
+                if cfg!(target_os = "macos") {
+                    paint(window, cx)
+                } else {
+                    window.with_text_rendering_mode(crate::TextRenderingMode::Grayscale, |window| {
+                        paint(window, cx)
+                    })
                 }
             },
         )

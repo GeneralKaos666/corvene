@@ -1191,6 +1191,9 @@ pub struct Window {
     sprite_atlas: Arc<dyn PlatformAtlas>,
     text_system: Arc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
+    /// Corvane patch: the mode [`Window::with_text_rendering_mode`] sets
+    /// for the text painted inside it.
+    text_rendering_override: Option<TextRenderingMode>,
     rem_size: Pixels,
     /// The stack of override values for the window's rem size.
     ///
@@ -2063,6 +2066,7 @@ impl Window {
             sprite_atlas,
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),
+            text_rendering_override: None,
             rem_size: px(16.),
             rem_size_override_stack: SmallVec::new(),
             viewport_size: content_size,
@@ -3820,7 +3824,18 @@ impl Window {
                 self.with_rendered_view(deferred_draw.current_view, |window| {
                     window.with_content_mask(content_mask, |window| {
                         window.with_rem_size(Some(deferred_draw.rem_size), |window| {
-                            element.paint(window, cx);
+                            // Corvane patch: off macOS overlays (dialogs,
+                            // foldouts, popovers, tooltips) paint text in
+                            // grayscale like Chromium in their composited
+                            // layers
+                            if cfg!(target_os = "macos") {
+                                element.paint(window, cx);
+                            } else {
+                                window.with_text_rendering_mode(
+                                    TextRenderingMode::Grayscale,
+                                    |window| element.paint(window, cx),
+                                );
+                            }
                         });
                     })
                 })
@@ -4762,6 +4777,20 @@ impl Window {
         Ok(())
     }
 
+    /// Corvane patch: paints the text inside `f` in `mode` instead of the
+    /// app's (Chromium draws text in a composited layer without an opaque
+    /// background, such as a virtualized list's, in grayscale).
+    pub fn with_text_rendering_mode<R>(
+        &mut self,
+        mode: TextRenderingMode,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = self.text_rendering_override.replace(mode);
+        let result = f(self);
+        self.text_rendering_override = previous;
+        result
+    }
+
     fn should_use_subpixel_rendering(&self, font_id: FontId, font_size: Pixels) -> bool {
         if self.platform_window.background_appearance() != WindowBackgroundAppearance::Opaque {
             return false;
@@ -4771,7 +4800,10 @@ impl Window {
             return false;
         }
 
-        let mode = match self.text_rendering_mode.get() {
+        let mode = match self
+            .text_rendering_override
+            .unwrap_or_else(|| self.text_rendering_mode.get())
+        {
             TextRenderingMode::PlatformDefault => self
                 .text_system()
                 .recommended_rendering_mode(font_id, font_size),

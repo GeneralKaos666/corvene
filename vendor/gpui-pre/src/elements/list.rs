@@ -1614,8 +1614,21 @@ impl Element for List {
         });
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            for item in &mut prepaint.layout.item_layouts {
-                item.element.paint(window, cx);
+            // Corvane patch: off macOS rows paint text like Chromium in a
+            // virtualized grid's composited layer: grayscale
+            let mode = if cfg!(target_os = "macos") {
+                None
+            } else {
+                Some(crate::TextRenderingMode::Grayscale)
+            };
+            let mut paint = |window: &mut Window| {
+                for item in &mut prepaint.layout.item_layouts {
+                    item.element.paint(window, cx);
+                }
+            };
+            match mode {
+                Some(mode) => window.with_text_rendering_mode(mode, paint),
+                None => paint(window),
             }
         });
     }
