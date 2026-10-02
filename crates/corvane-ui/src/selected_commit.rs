@@ -701,13 +701,23 @@ impl SelectedCommitView {
                                         })
                                         .child({
                                             let sha = commit.sha.clone();
-                                            // `.copy-button`: 16 × 14 with a 12 px icon
+                                            // `.copy-button`: 16 px wide with a 12 px
+                                            // icon, a `<button>` at `line-height:
+                                            // normal` (14 px with SF; with a wider
+                                            // UI font, 17 px, which sets the row's)
                                             div()
                                                 .id("copy-sha")
                                                 .icon_button_label("Copy the full SHA")
                                                 .ml(SPACING_HALF())
                                                 .w(zpx(16.))
-                                                .h(zpx(14.))
+                                                .h(if cfg!(target_os = "macos") {
+                                                    zpx(14.)
+                                                } else {
+                                                    crate::theme::normal_line_height(
+                                                        FONT_SIZE(),
+                                                        cx,
+                                                    )
+                                                })
                                                 .flex()
                                                 .items_center()
                                                 .justify_center()
