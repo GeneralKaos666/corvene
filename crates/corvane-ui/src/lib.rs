@@ -38,6 +38,7 @@ mod native_menu_common;
 pub mod native_window;
 pub mod no_changes;
 pub mod no_repositories;
+pub mod popover;
 pub mod pull_request_list;
 pub mod relative_time;
 pub mod repository_list;

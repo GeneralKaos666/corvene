@@ -1680,111 +1680,95 @@ impl ChangesSidebar {
                         .child(format!("{label} ({count})")),
                 )
         };
+        // a window-sized layer under the balloon closes it on any click
+        // outside (`onMousedownOutside`)
+        let overlay = deferred(
+            anchored().position(point(zpx(0.), zpx(0.))).child(
+                div()
+                    .id("filter-popover-overlay")
+                    .relative()
+                    .size_full()
+                    .on_mouse_down(MouseButton::Left, cx.listener(close))
+                    .on_mouse_down(MouseButton::Right, cx.listener(close)),
+            ),
+        )
+        .with_priority(25);
         Some(
-            deferred(
-                anchored().position(point(zpx(0.), zpx(0.))).child(
-                    div()
-                        .id("filter-popover-overlay")
-                        .relative()
-                        .size_full()
-                        .on_mouse_down(MouseButton::Left, cx.listener(close))
-                        .on_mouse_down(MouseButton::Right, cx.listener(close))
+            div().child(overlay).child(
+                crate::popover::balloon_popover(
+                    bounds,
+                    crate::popover::PopoverAnchorPosition::BottomRight,
+                    crate::popover::popover_component(cx)
+                        .id("filter-popover")
+                        .occlude()
+                        // `.filter-popover { min-width: 200px }`,
+                        // `.popover-content { padding: var(--spacing)
+                        // var(--spacing) 0 var(--spacing) }`
+                        .min_w(zpx(200.))
+                        .px(SPACING())
+                        .pt(SPACING())
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(
                             div()
-                                .id("filter-popover")
-                                .absolute()
-                                .left(bounds.origin.x)
-                                .top(bounds.origin.y + bounds.size.height + zpx(8.))
-                                .min_w(zpx(200.))
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .text_size(FONT_SIZE_MD())
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child("Filter Options"),
+                                )
+                                .child(
+                                    div()
+                                        .id("filter-popover-close")
+                                        .icon_button_label("Close")
+                                        .size(zpx(16.))
+                                        .cursor_pointer()
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.filter_popover_open = false;
+                                            cx.notify();
+                                        }))
+                                        .child(octicon(Octicon::X, t.text_secondary)),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .my(SPACING())
                                 .flex()
                                 .flex_col()
-                                .px(SPACING())
-                                .pt(SPACING())
-                                .rounded(BORDER_RADIUS())
-                                .bg(t.background)
-                                .text_color(t.text)
-                                .border_1()
-                                .border_color(t.box_border)
-                                .shadow(vec![BoxShadow {
-                                    color: t.shadow,
-                                    offset: point(zpx(0.), zpx(2.)),
-                                    blur_radius: css_blur(7.),
-                                    spread_radius: zpx(0.),
-                                    inset: false,
-                                }])
-                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .justify_between()
-                                        .child(
-                                            div()
-                                                .text_size(FONT_SIZE_MD())
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .child("Filter Options"),
-                                        )
-                                        .child(
-                                            div()
-                                                .id("filter-popover-close")
-                                                .icon_button_label("Close")
-                                                .size(zpx(16.))
-                                                .cursor_pointer()
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.filter_popover_open = false;
-                                                    cx.notify();
-                                                }))
-                                                .child(octicon(Octicon::X, t.text_secondary)),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .my(SPACING())
-                                        .flex()
-                                        .flex_col()
-                                        .child(option_row(
-                                            FilterOption::IncludedInCommit,
-                                            "Included in commit",
-                                        ))
-                                        .child(option_row(
-                                            FilterOption::ExcludedFromCommit,
-                                            "Excluded from commit",
-                                        ))
-                                        .child(option_row(FilterOption::NewFiles, "New files"))
-                                        .child(option_row(
-                                            FilterOption::ModifiedFiles,
-                                            "Modified files",
-                                        ))
-                                        .child(option_row(
-                                            FilterOption::DeletedFiles,
-                                            "Deleted files",
-                                        ))
-                                        .when(renamed_option, |d| {
-                                            d.child(option_row(
-                                                FilterOption::RenamedFiles,
-                                                "Renamed files",
-                                            ))
-                                        }),
-                                )
-                                .when(active, |d| {
-                                    d.child(div().pt(SPACING_HALF()).pb(SPACING()).child(
-                                        button("filter-clear", "Clear filters", cx).on_click(
-                                            cx.listener(move |this, _, window, cx| {
-                                                this.filter.update(cx, |s, cx| {
-                                                    s.set_value("", window, cx)
-                                                });
-                                                this.filter_popover_open = false;
-                                                Dispatcher::clear_filter_options(id, cx);
-                                            }),
-                                        ),
-                                    ))
-                                })
-                                .when(!active, |d| d.pb(SPACING_HALF())),
-                        ),
-                ),
-            )
-            .with_priority(25),
+                                .child(option_row(
+                                    FilterOption::IncludedInCommit,
+                                    "Included in commit",
+                                ))
+                                .child(option_row(
+                                    FilterOption::ExcludedFromCommit,
+                                    "Excluded from commit",
+                                ))
+                                .child(option_row(FilterOption::NewFiles, "New files"))
+                                .child(option_row(FilterOption::ModifiedFiles, "Modified files"))
+                                .child(option_row(FilterOption::DeletedFiles, "Deleted files"))
+                                .when(renamed_option, |d| {
+                                    d.child(option_row(FilterOption::RenamedFiles, "Renamed files"))
+                                }),
+                        )
+                        .when(active, |d| {
+                            d.child(div().pt(SPACING_HALF()).pb(SPACING()).child(
+                                button("filter-clear", "Clear filters", cx).on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.filter.update(cx, |s, cx| s.set_value("", window, cx));
+                                        this.filter_popover_open = false;
+                                        Dispatcher::clear_filter_options(id, cx);
+                                    },
+                                )),
+                            ))
+                        })
+                        .when(!active, |d| d.pb(SPACING_HALF())),
+                    cx,
+                )
+                .with_priority(26),
+            ),
         )
     }
 

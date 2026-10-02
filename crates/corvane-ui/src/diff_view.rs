@@ -1406,9 +1406,6 @@ impl DiffView {
     fn options_popover(&self, snap: &Snapshot, window: &Window, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
         let anchor = self.gear_bounds.get();
-        let width = zpx(250.);
-        let x = (anchor.right() - width).max(zpx(0.));
-        let y = anchor.bottom() + zpx(4.);
         let source = self.source;
         let interactive = self.source == DiffSource::WorkingDirectory;
         let hide = snap.hide_whitespace;
@@ -1420,10 +1417,28 @@ impl DiffView {
                 .mb(zpx(6.))
                 .child(text.to_string())
         };
-        deferred(
-            anchored()
-                .position(point(x, y))
-                .snap_to_window_with_margin(zpx(8.))
+        crate::popover::balloon_popover(
+            anchor,
+            crate::popover::PopoverAnchorPosition::BottomRight,
+            crate::popover::popover_component(cx)
+                .id("diff-options-popover")
+                .occlude()
+                // `.diff-options-component .popover-component`,
+                // `.popover-content { padding: var(--spacing-double) }`
+                .w(zpx(250.))
+                .p(SPACING_DOUBLE())
+                .text_size(FONT_SIZE())
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.options_open = false;
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_size(FONT_SIZE_MD())
+                        .mb(zpx(8.))
+                        .child(mac_or("Diff Settings", "Diff Options")),
+                )
                 .child(
                     div()
                         .id("diff-options-popover")
@@ -1433,72 +1448,44 @@ impl DiffView {
                         .p(SPACING())
                         .flex()
                         .flex_col()
-                        .text_size(FONT_SIZE())
-                        .text_color(t.text)
-                        .bg(t.background)
-                        .border_1()
-                        .border_color(t.box_border)
-                        .rounded(BORDER_RADIUS())
-                        .shadow(vec![BoxShadow {
-                            color: hsla(0., 0., 0., 0.3),
-                            offset: point(zpx(0.), zpx(0.)),
-                            blur_radius: css_blur(8.),
-                            spread_radius: zpx(0.),
-                            inset: false,
-                        }])
-                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                            this.options_open = false;
-                            cx.notify();
-                        }))
-                        .child(
-                            div()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_size(FONT_SIZE_MD())
-                                .mb(zpx(8.))
-                                .child(mac_or("Diff Settings", "Diff Options")),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .mb(zpx(8.))
-                                .child(legend("Whitespace"))
-                                .child(checkbox_row(
-                                    "diff-hide-whitespace",
-                                    hide,
-                                    mac_or("Hide Whitespace Changes", "Hide whitespace changes"),
-                                    move |checked, _, cx| set_hide_whitespace(source, checked, cx),
-                                    cx,
-                                ))
-                                .when(interactive, |d| {
-                                    d.child(div().mt(zpx(6.)).text_color(t.text_secondary).child(
-                                        "Interacting with individual lines or hunks \
+                        .mb(zpx(8.))
+                        .child(legend("Whitespace"))
+                        .child(checkbox_row(
+                            "diff-hide-whitespace",
+                            hide,
+                            mac_or("Hide Whitespace Changes", "Hide whitespace changes"),
+                            move |checked, _, cx| set_hide_whitespace(source, checked, cx),
+                            cx,
+                        ))
+                        .when(interactive, |d| {
+                            d.child(div().mt(zpx(6.)).text_color(t.text_secondary).child(
+                                "Interacting with individual lines or hunks \
                                                  will be disabled while hiding whitespace.",
-                                    ))
-                                }),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(zpx(4.))
-                                .child(legend("Diff display"))
-                                .child(radio_row(
-                                    "diff-display-unified",
-                                    !split,
-                                    "Unified",
-                                    |_, cx| Dispatcher::set_show_side_by_side_diff(false, cx),
-                                    cx,
-                                ))
-                                .child(radio_row(
-                                    "diff-display-split",
-                                    split,
-                                    "Split",
-                                    |_, cx| Dispatcher::set_show_side_by_side_diff(true, cx),
-                                    cx,
-                                )),
-                        ),
+                            ))
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(zpx(4.))
+                        .child(legend("Diff display"))
+                        .child(radio_row(
+                            "diff-display-unified",
+                            !split,
+                            "Unified",
+                            |_, cx| Dispatcher::set_show_side_by_side_diff(false, cx),
+                            cx,
+                        ))
+                        .child(radio_row(
+                            "diff-display-split",
+                            split,
+                            "Split",
+                            |_, cx| Dispatcher::set_show_side_by_side_diff(true, cx),
+                            cx,
+                        )),
                 ),
+            cx,
         )
         .with_priority(3)
         .into_any_element()
