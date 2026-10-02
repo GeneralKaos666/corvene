@@ -903,9 +903,12 @@ fn email_not_found_warning(account: &corvane_core::Account, email: &str, cx: &Ap
         );
         parts.push(format!("This email address matches your {kind} account.").into());
     } else {
+        parts.push(Inline::Element(
+            crate::widgets::emoji("⚠️").into_any_element(),
+        ));
         parts.push(
             format!(
-                "⚠️This email address does not match your {kind} account. Your commits \
+                "This email address does not match your {kind} account. Your commits \
                  will be wrongly attributed. "
             )
             .into(),

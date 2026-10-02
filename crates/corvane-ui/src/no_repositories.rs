@@ -146,17 +146,33 @@ fn slot(button: Stateful<Div>, ring: bool, z: f32, cx: &App) -> Div {
         .relative()
         .mb(s(10.))
         .when(ring, |d| {
-            d.child(
-                div()
-                    .absolute()
-                    .top(-s(4.))
-                    .left(-s(4.))
-                    .right(-s(4.))
-                    .bottom(-s(4.))
-                    .border(s(2.))
-                    .border_color(cx.ghd().focus)
-                    .rounded(s(10.)),
-            )
+            let (inner, outer) = crate::widgets::focus_ring_colors(cx);
+            let ring = div()
+                .absolute()
+                .top(-s(4.))
+                .left(-s(4.))
+                .right(-s(4.))
+                .bottom(-s(4.))
+                .border(s(2.))
+                .border_color(inner)
+                .rounded(s(10.));
+            if cfg!(target_os = "macos") {
+                d.child(ring.border_color(cx.ghd().focus))
+            } else {
+                // Chromium's two-tone `outline: auto` (`focus_ring_colors`)
+                d.child(
+                    div()
+                        .absolute()
+                        .top(-s(5.))
+                        .left(-s(5.))
+                        .right(-s(5.))
+                        .bottom(-s(5.))
+                        .border(s(1.))
+                        .border_color(outer)
+                        .rounded(s(11.))
+                        .child(ring.top(-s(0.)).left(-s(0.)).right(-s(0.)).bottom(-s(0.))),
+                )
+            }
         })
         .child(button)
 }

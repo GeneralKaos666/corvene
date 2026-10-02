@@ -396,9 +396,21 @@ pub fn section_heading(text: impl Into<SharedString>, cx: &App) -> Div {
         .child(text.into())
 }
 
+/// An emoji presentation sequence (`⚠️`): Chromium draws it with the
+/// emoji font even where the UI font has a text glyph; GPUI's fallback
+/// would take the text glyph, so off macOS the font is named.
+pub fn emoji(text: &'static str) -> Div {
+    let el = div().child(text);
+    #[cfg(not(target_os = "macos"))]
+    let el = el.font_family(SharedString::from(corvane_platform::fonts::emoji_family()));
+    el
+}
+
 /// Chromium's `outline: auto` focus ring in `--focus-color` for a
 /// `.button-component` (`outline-offset` draws it 2 px outside the border):
-/// absolutely placed in a `relative()` wrapper around the button.
+/// absolutely placed in a `relative()` wrapper around the button. Off macOS
+/// the ring is two-tone, a 1 px line around it (see
+/// [`focus_ring_colors`]).
 pub fn focus_ring(cx: &App) -> Div {
     // Windows: Chromium draws `outline: auto` in the system's focus colours
     // there, whatever `outline-color` says: a 2 px ring that contrasts with

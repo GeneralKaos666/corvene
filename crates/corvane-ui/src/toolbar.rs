@@ -1025,20 +1025,22 @@ pub fn toolbar(
 }
 
 /// Chromium's `outline: auto` with `outline-offset: -4px` on Linux: a 1 px
-/// white line 2 px inside the button around 2 px of `--focus-color`.
+/// line 2 px inside the button around the 2 px ring
+/// ([`crate::widgets::focus_ring_colors`]).
 fn focus_visible_ring(cx: &App) -> Div {
+    let (inner, outer) = crate::widgets::focus_ring_colors(cx);
     div()
         .absolute()
         .inset(zpx(2.))
         .border_1()
-        .border_color(gpui_kit::white())
+        .border_color(outer)
         .rounded(zpx(4.))
         .child(
             div()
                 .absolute()
                 .inset_0()
                 .border_2()
-                .border_color(cx.ghd().focus)
+                .border_color(inner)
                 .rounded(zpx(3.)),
         )
 }

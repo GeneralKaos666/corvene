@@ -109,9 +109,8 @@ impl TestNotificationsDialog {
             ],
             NotificationPermission::Denied => vec![
                 Inline::Element(
-                    div()
+                    crate::widgets::emoji("⚠️")
                         .text_color(t.dialog_warning)
-                        .child("⚠️")
                         .into_any_element(),
                 ),
                 " Corvane has no permission to display notifications. Please, enable them in the "
