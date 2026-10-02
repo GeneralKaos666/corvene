@@ -42,6 +42,7 @@ pub fn watch(
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res
             && !is_open(&event.kind)
+            && !(cfg!(windows) && is_directory_touch(&event.kind, &event.paths))
         {
             let _ = raw_tx.send(event.paths);
         }
@@ -106,6 +107,19 @@ fn is_open(kind: &notify::EventKind) -> bool {
         kind,
         notify::EventKind::Access(notify::event::AccessKind::Open(_))
     )
+}
+
+/// Windows also reports a folder as modified when something in it changes
+/// or, for its access time, when it is listed: git listing `.git/refs` during
+/// a refresh would ask for the next refresh, without end. What changed in
+/// the folder has an event of its own, and a folder that is created, removed
+/// or renamed is not reported this way.
+fn is_directory_touch(kind: &notify::EventKind, paths: &[PathBuf]) -> bool {
+    matches!(
+        kind,
+        notify::EventKind::Modify(notify::event::ModifyKind::Any)
+    ) && !paths.is_empty()
+        && paths.iter().all(|path| path.is_dir())
 }
 
 /// Relevance with the repository's ignore rules: [`is_relevant`] for `.git/`,
@@ -417,6 +431,32 @@ mod tests {
         assert!(!is_open(&EventKind::Modify(ModifyKind::Data(
             DataChange::Any
         ))));
+    }
+
+    #[test]
+    fn directory_touches_are_told_apart() {
+        use notify::EventKind;
+        use notify::event::{CreateKind, ModifyKind, RenameMode};
+        let dir = tempfile::tempdir().unwrap();
+        let refs = dir.path().join("refs");
+        std::fs::create_dir(&refs).unwrap();
+        let file = refs.join("main");
+        std::fs::write(&file, "x").unwrap();
+        let touched = EventKind::Modify(ModifyKind::Any);
+        assert!(is_directory_touch(&touched, std::slice::from_ref(&refs)));
+        // a file's change, a new folder and a renamed one all count
+        assert!(!is_directory_touch(&touched, std::slice::from_ref(&file)));
+        assert!(!is_directory_touch(
+            &EventKind::Create(CreateKind::Any),
+            std::slice::from_ref(&refs)
+        ));
+        assert!(!is_directory_touch(
+            &EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            std::slice::from_ref(&refs)
+        ));
+        // so does a path that is gone by now
+        assert!(!is_directory_touch(&touched, &[dir.path().join("gone")]));
+        assert!(!is_directory_touch(&touched, &[]));
     }
 
     #[test]
