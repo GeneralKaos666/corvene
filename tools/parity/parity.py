@@ -41,7 +41,7 @@ import accounts  # noqa: E402
 import fixture  # noqa: E402
 import imgdiff  # noqa: E402
 import report  # noqa: E402
-from drivers import Corvane, Ghd, page_height, page_rect  # noqa: E402
+from drivers import Corvane, Ghd, page_height, page_rect, park_pointer  # noqa: E402
 
 
 class Absent:
@@ -427,6 +427,7 @@ def main():
         print(f"{args.corvane} missing: cargo build -p corvane --features snapshots (or --build)", file=sys.stderr)
         return 2
 
+    park_pointer()
     run = Run(args)
     run.out.mkdir(parents=True, exist_ok=True)
     # one run at a time: two runs fight over focus, ports and GHD's shared helpers

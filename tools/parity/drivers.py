@@ -105,6 +105,22 @@ def _terminate(proc: subprocess.Popen, wait: float) -> None:
         os.killpg(proc.pid, signal.SIGKILL)
 
 
+def park_pointer():
+    """Off macOS, move the real X pointer to the screen's bottom-right corner.
+
+    Both apps are driven by synthetic input, but the window manager centres
+    their windows under the real pointer (Xvfb starts it mid-screen), and
+    Chromium hovers whatever is under it while Corvane does not."""
+    if IS_MAC or not os.environ.get("DISPLAY"):
+        return
+    try:
+        out = subprocess.run(["xdotool", "getdisplaygeometry"], capture_output=True, text=True, check=True)
+        w, h = (int(v) for v in out.stdout.split())
+        subprocess.run(["xdotool", "mousemove", str(w - 1), str(h - 1)], check=True)
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        print("note: xdotool missing; the X pointer may hover GHD content", file=sys.stderr)
+
+
 def page_height(height: int) -> int:
     """The page height that holds a scenario's macOS content area."""
     return int(height - TITLE_BAR)
