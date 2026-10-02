@@ -98,6 +98,25 @@ impl ToolbarResize {
     }
 }
 
+/// The toolbar button showing `:focus-visible`: Escape closing a foldout
+/// gives focus back to the button that opened it (GHD's `ToolbarDropdown`
+/// keeps focus on its `<button>`, and a key moved it there), until a mouse
+/// press anywhere moves focus on.
+#[derive(Default)]
+pub struct ToolbarFocusVisible(pub Option<Foldout>);
+
+impl Global for ToolbarFocusVisible {}
+
+/// Mark `foldout`'s button (or none) as keyboard-focused.
+pub fn set_focus_visible(foldout: Option<Foldout>, cx: &mut App) {
+    cx.set_global(ToolbarFocusVisible(foldout));
+    cx.refresh_windows();
+}
+
+fn focus_visible(cx: &App) -> Option<Foldout> {
+    cx.try_global::<ToolbarFocusVisible>().and_then(|f| f.0)
+}
+
 /// The worktree and branch button widths for this window
 /// (`updateResizableConstraints`), with a drag in progress applied.
 pub fn toolbar_widths(
@@ -569,6 +588,11 @@ pub fn toolbar_button(
     } else {
         (t.toolbar_background, t.toolbar_text)
     };
+    // `.toolbar-button > button:focus-visible`: the focus background
+    // (`--toolbar-button-focus-background-color`, gray-800 like the hover
+    // one) and Chromium's `outline: auto` ring 4 px inside
+    let ring = !model.open && foldout.is_some() && focus_visible(cx) == foldout;
+    let bg = if ring { hover_bg } else { bg };
     let bg = if push_pull { t.toolbar_background } else { bg };
     let text = if push_pull { t.toolbar_text } else { text };
     let secondary = if push_pull {
@@ -636,6 +660,7 @@ pub fn toolbar_button(
                 }
             })
         })
+        .when(ring, |d| d.child(focus_visible_ring(cx)))
         .when_some(model.width, |d, w| d.w(w))
         .when(model.width.is_none(), |d| d.flex_1().min_w_0())
         .child(if model.spin {
@@ -929,6 +954,19 @@ pub fn toolbar(
         .text_color(t.toolbar_text)
         .children(buttons.into_iter().map(|b| toolbar_button(b, resize, cx)))
         .children(open_in_buttons(cx))
+        .when(focus_visible(cx).is_some(), |d| {
+            // a mouse press anywhere moves focus off the button
+            d.child(canvas(
+                |_, _, _| {},
+                |_, _, window, _| {
+                    window.on_mouse_event(|_: &MouseDownEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            set_focus_visible(None, cx);
+                        }
+                    });
+                },
+            ))
+        })
         .when(dragging, |d| {
             // `handleDragMove` / `handleDragStop` on the document
             d.child(
@@ -984,4 +1022,23 @@ pub fn toolbar(
                 .size_0(),
             )
         })
+}
+
+/// Chromium's `outline: auto` with `outline-offset: -4px` on Linux: a 1 px
+/// white line 2 px inside the button around 2 px of `--focus-color`.
+fn focus_visible_ring(cx: &App) -> Div {
+    div()
+        .absolute()
+        .inset(zpx(2.))
+        .border_1()
+        .border_color(gpui_kit::white())
+        .rounded(zpx(4.))
+        .child(
+            div()
+                .absolute()
+                .inset_0()
+                .border_2()
+                .border_color(cx.ghd().focus)
+                .rounded(zpx(3.)),
+        )
 }

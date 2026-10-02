@@ -1002,8 +1002,13 @@ pub(crate) fn main() {
             }
         });
         cx.on_action(|_: &CloseFoldout, cx| {
+            // the foldout's toolbar button keeps keyboard focus
+            let open = corvane_core::AppState::global(cx).read(cx).foldout;
             Dispatcher::close_foldout(cx);
             Dispatcher::close_popup(cx);
+            if open.is_some() {
+                corvane_ui::toolbar::set_focus_visible(open, cx);
+            }
         });
         cx.on_action(|_: &Minimize, cx| {
             if let Some(window) = cx.active_window() {
