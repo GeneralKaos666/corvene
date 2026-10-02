@@ -2353,62 +2353,78 @@ impl ChangesSidebar {
                                 "Filter Options".to_string()
                             };
                             let bounds_cell = self.filter_button_bounds.clone();
-                            div()
-                                .id("filter-options")
-                                .icon_button_label(filter_label)
-                                .relative()
-                                .h(TEXT_FIELD_HEIGHT())
-                                .w(zpx(48.))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .gap(zpx(2.))
-                                .border_1()
-                                .border_color(t.secondary_button_border)
-                                .rounded_l(BORDER_RADIUS())
-                                .bg(t.secondary_button_background)
-                                .cursor_pointer()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.filter_popover_open = !this.filter_popover_open;
-                                    cx.notify();
-                                }))
-                                .child(
-                                    canvas(move |b, _, _| bounds_cell.set(b), |_, _, _, _| {})
-                                        .absolute()
-                                        .size_full(),
-                                )
-                                // `.active span:first-child { color: box-selected-active-background }`
-                                .child(octicon(
+                            let secondary = t.text_secondary;
+                            // a `Button` tooltip: north of the button by default
+                            crate::widgets::with_directed_tooltip(
+                                div().id("filter-options").a11y_button(filter_label.clone()),
+                                filter_label,
+                                crate::widgets::TooltipDirection::North,
+                            )
+                            .group("filter-options")
+                            .relative()
+                            .h(TEXT_FIELD_HEIGHT())
+                            .w(zpx(48.))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .gap(zpx(2.))
+                            .border_1()
+                            .border_color(t.secondary_button_border)
+                            .rounded_l(BORDER_RADIUS())
+                            .bg(t.secondary_button_background)
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.filter_popover_open = !this.filter_popover_open;
+                                cx.notify();
+                            }))
+                            .child(
+                                canvas(move |b, _, _| bounds_cell.set(b), |_, _, _, _| {})
+                                    .absolute()
+                                    .size_full(),
+                            )
+                            // `.active span:first-child { color: box-selected-active-background }`
+                            // `.filter-button:hover { color: var(--text-secondary-color) }`
+                            .child(
+                                octicon(
                                     Octicon::Filter,
                                     if active {
                                         t.box_selected_active_background
                                     } else {
                                         t.secondary_button_text
                                     },
-                                ))
-                                .child(
-                                    octicon(Octicon::TriangleDown, t.secondary_button_text)
-                                        .size(zpx(12.)),
                                 )
-                                // `.active-badge`: 5 px dot with a 1 px ring, right 18 / top 4
-                                .when(active, |d| {
-                                    d.child(
-                                        div()
-                                            .absolute()
-                                            .top(zpx(4.))
-                                            .right(zpx(18.))
-                                            .p(zpx(1.))
-                                            .rounded_full()
-                                            .bg(t.secondary_button_background)
-                                            .child(
-                                                div()
-                                                    .size(zpx(5.))
-                                                    .rounded_full()
-                                                    .bg(t.box_selected_active_background),
-                                            ),
-                                    )
-                                })
+                                .when(!active, |i| {
+                                    i.group_hover("filter-options", move |s| {
+                                        s.text_color(secondary)
+                                    })
+                                }),
+                            )
+                            .child(
+                                octicon(Octicon::TriangleDown, t.secondary_button_text)
+                                    .size(zpx(12.))
+                                    .group_hover("filter-options", move |s| {
+                                        s.text_color(secondary)
+                                    }),
+                            )
+                            // `.active-badge`: 5 px dot with a 1 px ring, right 18 / top 4
+                            .when(active, |d| {
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .top(zpx(4.))
+                                        .right(zpx(18.))
+                                        .p(zpx(1.))
+                                        .rounded_full()
+                                        .bg(t.secondary_button_background)
+                                        .child(
+                                            div()
+                                                .size(zpx(5.))
+                                                .rounded_full()
+                                                .bg(t.box_selected_active_background),
+                                        ),
+                                )
+                            })
                         })
                         .child(
                             crate::widgets::filter_text_box(
