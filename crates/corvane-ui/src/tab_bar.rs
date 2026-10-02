@@ -78,8 +78,13 @@ pub fn vertical_tab_bar_sized(
                 .bg(bg)
                 .text_color(text)
                 .text_size(FONT_SIZE())
-                // the label span is 16 px tall: 36 px items
-                .line_height(zpx(16.))
+                // a `<button>` at `line-height: normal`: the label span is
+                // 16 px tall with SF (36 px items), 17 px with Noto Sans
+                .line_height(if cfg!(target_os = "macos") {
+                    zpx(16.)
+                } else {
+                    crate::theme::normal_line_height(FONT_SIZE(), cx)
+                })
                 .cursor_pointer()
                 .when(!is_selected, move |d| d.hover(move |s| s.bg(hover_bg)))
                 .on_click(move |_, window, cx| on_select(ix, window, cx))
