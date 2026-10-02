@@ -234,8 +234,12 @@ fn window_command(
         "drag" => {
             let to = point(px(num(request, "x2")), px(num(request, "y2") + PAGE_TOP));
             let steps = request["steps"].as_u64().unwrap_or(10).max(1);
+            // a frame after the press and every move, as with real input:
+            // GPUI registers drag-move listeners when it paints an active
+            // drag, so moves within one frame never reach them
             window.dispatch_event(moved(position, None), cx);
             window.dispatch_event(down(position), cx);
+            window.draw(cx).clear(cx);
             for step in 1..=steps {
                 let t = step as f32 / steps as f32;
                 let at = point(
@@ -243,6 +247,7 @@ fn window_command(
                     position.y + (to.y - position.y) * t,
                 );
                 window.dispatch_event(moved(at, Some(button)), cx);
+                window.draw(cx).clear(cx);
             }
             window.dispatch_event(up(to), cx);
         }
