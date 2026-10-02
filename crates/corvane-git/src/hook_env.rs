@@ -142,6 +142,7 @@ mod tests {
     #[test]
     fn loads_the_login_shell_environment() {
         let env = load_shell_env().expect("shell env");
-        assert!(env.contains_key("PATH"));
+        // Windows spells it `Path`
+        assert!(env.keys().any(|key| key.eq_ignore_ascii_case("PATH")));
     }
 }
