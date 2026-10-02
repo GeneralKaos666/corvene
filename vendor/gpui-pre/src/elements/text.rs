@@ -784,7 +784,14 @@ impl TextLayout {
                 for line in &lines {
                     let line_size = line.size(line_height);
                     size.height += line_size.height;
-                    size.width = size.width.max(line_size.width).ceil();
+                    // Corvane patch: off macOS keep Chromium's LayoutUnit
+                    // precision (1/64 px, rounded up) rather than a whole
+                    // pixel, so inline runs add up as they do in Electron
+                    size.width = if cfg!(target_os = "macos") {
+                        size.width.max(line_size.width).ceil()
+                    } else {
+                        crate::px((f32::from(size.width.max(line_size.width)) * 64.).ceil() / 64.)
+                    };
                 }
 
                 element_state.0.borrow_mut().replace(TextLayoutInner {

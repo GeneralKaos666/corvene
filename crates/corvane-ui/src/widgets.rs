@@ -293,20 +293,12 @@ impl Element for InlineShift {
                 let line = window
                     .text_system()
                     .shape_line(text.clone(), font_size, &[run], None);
-                // Chromium breaks lines on exact widths; layout rounds every
-                // measured leaf up to a device pixel, which over a line of
-                // words wraps early (at scale 1 up to a pixel a word). The
-                // box is the width rounded to the nearest device pixel
-                // instead, so the rounding evens out; paint corrects the
-                // drift either way.
-                // (macOS keeps the round-up its parity runs were tuned with)
-                let scale = window.scale_factor();
-                let box_width = if cfg!(target_os = "macos") {
-                    line.width
-                } else {
-                    px((f32::from(line.width) * scale).round() / scale)
-                };
-                let box_size = size(box_width, line_height);
+                // Chromium breaks lines on exact widths. Off macOS layout
+                // keeps measured widths to 1/64 px, so the word's own width
+                // adds up along a line like Electron's; paint corrects the
+                // snapping drift. (On macOS layout rounds every leaf up to a
+                // device pixel, which its parity runs were tuned with.)
+                let box_size = size(line.width, line_height);
                 let layout_id =
                     window.request_measured_layout(Style::default(), move |_, _, _, _| box_size);
                 (layout_id, Some((line, line_height, layout_id)))

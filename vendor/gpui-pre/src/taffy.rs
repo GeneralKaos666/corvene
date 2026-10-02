@@ -384,9 +384,19 @@ impl TaffyLayoutEngine {
             .insert(id, absolute_outer_origin);
 
         let absolute_far = absolute_outer_origin + Point::from(Size::from(layout_size));
+        // Corvane patch: off macOS edges snap like Chromium's pixel snapping
+        // (`LayoutUnit::Round`, halves up), so a box at y = 172.5 lands on
+        // 173 as in Electron
+        let snap = |v: f32| {
+            if cfg!(target_os = "macos") {
+                round_half_toward_zero(v)
+            } else {
+                (v + 0.5).floor()
+            }
+        };
         let snapped_bounds = Bounds::from_corners(
-            absolute_outer_origin.map(round_half_toward_zero),
-            absolute_far.map(round_half_toward_zero),
+            absolute_outer_origin.map(snap),
+            absolute_far.map(snap),
         );
 
         let bounds = (snapped_bounds / scale_factor).map(Pixels);
