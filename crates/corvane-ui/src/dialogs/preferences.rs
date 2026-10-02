@@ -131,7 +131,20 @@ impl PreferencesDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let draft = state.read(cx).settings.clone();
+        let mut draft = state.read(cx).settings.clone();
+        // `Integrations.componentDidMount`: with no editor (shell) found the
+        // select shows the custom entry, and its form, from the start
+        {
+            let s = state.read(cx);
+            if s.editors.is_empty() && !draft.use_custom_editor {
+                draft.use_custom_editor = true;
+                draft.custom_editor.get_or_insert_with(Default::default);
+            }
+            if s.shells.is_empty() && !draft.use_custom_shell {
+                draft.use_custom_shell = true;
+                draft.custom_shell.get_or_insert_with(Default::default);
+            }
+        }
         let name = cx.new(|cx| InputState::new(window, cx));
         let email = cx.new(|cx| InputState::new(window, cx));
         let default_branch = cx.new(|cx| InputState::new(window, cx));
@@ -1442,9 +1455,8 @@ impl PreferencesDialog {
                 warning = Some(
                     div().mt(SPACING()).child(paragraph(vec![
                         Inline::Element(
-                            div()
+                            crate::widgets::emoji("⚠️")
                                 .text_color(t.dialog_warning)
-                                .child("⚠️")
                                 .into_any_element(),
                         ),
                         " Corvane has no permission to display notifications. Please, enable them in the ".into(),
