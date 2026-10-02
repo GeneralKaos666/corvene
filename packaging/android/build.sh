@@ -95,7 +95,8 @@ if [ -n "${PER_ABI:-}" ]; then
   done
 fi
 ./gradlew --no-daemon "$task" "-Pabis=$(echo $ABIS | tr ' ' ,)"
-find app/build/outputs/apk app/build/outputs/per-abi -name '*.apk' 2>/dev/null
+find app/build/outputs/apk -name '*.apk'
+[ -z "${PER_ABI:-}" ] || find app/build/outputs/per-abi -name '*.apk'
 
 # BUNDLE=1: also the bundle Google Play takes (the play flavour with the
 # on-demand grammar module, which grammars.sh builds first)

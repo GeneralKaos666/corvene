@@ -349,27 +349,59 @@ mod tests {
         assert!(!rules.is_relevant(&root.join(".git/objects/ab/cdef")));
     }
 
+    /// Watch `dir`, run `act` and say whether a refresh was signalled, with
+    /// the raw events of that time for the failure message. What was
+    /// written before the watch began is left to settle first: Windows
+    /// reports a write when its cache flushes it, up to seconds later, and
+    /// FSEvents replays the last moments before a stream starts.
+    fn refreshed_by(dir: &Path, act: impl FnOnce()) -> (bool, Vec<String>) {
+        let (_watcher, rx) = watch(dir.to_path_buf(), Duration::from_millis(100), false).unwrap();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut raw = notify::recommended_watcher({
+            let seen = seen.clone();
+            move |res: notify::Result<notify::Event>| {
+                if let Ok(event) = res {
+                    seen.lock()
+                        .unwrap()
+                        .push(format!("{:?} {:?}", event.kind, event.paths));
+                }
+            }
+        })
+        .unwrap();
+        raw.watch(dir, RecursiveMode::Recursive).unwrap();
+        let signalled = |wait: Duration| {
+            smol::block_on(smol::future::or(async { rx.recv().await.is_ok() }, async {
+                smol::Timer::after(wait).await;
+                false
+            }))
+        };
+        for _ in 0..10 {
+            if !signalled(Duration::from_millis(1500)) {
+                break;
+            }
+        }
+        seen.lock().unwrap().clear();
+        act();
+        let got = signalled(Duration::from_millis(1500));
+        let events = seen.lock().unwrap().clone();
+        (got, events)
+    }
+
     #[test]
     fn quiet_on_ignored_change() {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
         std::fs::write(dir.path().join(".gitignore"), "target/\n").unwrap();
         std::fs::create_dir(dir.path().join("target")).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
-        let (_watcher, rx) =
-            watch(dir.path().to_path_buf(), Duration::from_millis(100), false).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
-        for i in 0..20 {
-            std::fs::write(dir.path().join(format!("target/{i}.o")), "x").unwrap();
-        }
-        let got = smol::block_on(async {
-            smol::future::or(async { rx.recv().await.is_ok() }, async {
-                smol::Timer::after(Duration::from_millis(1500)).await;
-                false
-            })
-            .await
+        let (got, events) = refreshed_by(dir.path(), || {
+            for i in 0..20 {
+                std::fs::write(dir.path().join(format!("target/{i}.o")), "x").unwrap();
+            }
         });
-        assert!(!got, "writes under an ignored directory must not refresh");
+        assert!(
+            !got,
+            "writes under an ignored directory must not refresh: {events:#?}"
+        );
     }
 
     #[test]
@@ -392,24 +424,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
         std::fs::write(dir.path().join("a.txt"), "x").unwrap();
-        std::thread::sleep(Duration::from_millis(200));
-        let (_watcher, rx) =
-            watch(dir.path().to_path_buf(), Duration::from_millis(100), false).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
-        // what a refresh does: git reads HEAD, the refs and worktree files
-        std::fs::read(dir.path().join(".git/HEAD")).unwrap();
-        std::fs::read_dir(dir.path().join(".git/refs"))
-            .unwrap()
-            .count();
-        std::fs::read(dir.path().join("a.txt")).unwrap();
-        let got = smol::block_on(async {
-            smol::future::or(async { rx.recv().await.is_ok() }, async {
-                smol::Timer::after(Duration::from_millis(1500)).await;
-                false
-            })
-            .await
+        let (got, events) = refreshed_by(dir.path(), || {
+            // what a refresh does: git reads HEAD, the refs and worktree files
+            std::fs::read(dir.path().join(".git/HEAD")).unwrap();
+            std::fs::read_dir(dir.path().join(".git/refs"))
+                .unwrap()
+                .count();
+            std::fs::read(dir.path().join("a.txt")).unwrap();
         });
-        assert!(!got, "reading files must not refresh");
+        assert!(!got, "reading files must not refresh: {events:#?}");
     }
 
     #[test]
