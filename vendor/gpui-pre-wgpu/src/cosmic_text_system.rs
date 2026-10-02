@@ -465,8 +465,11 @@ impl CosmicTextSystemState {
                 "Segoe Fluent Icons",
             ];
 
+            // Corvane patch: an emoji font has no 'm' either, and removing
+            // its face would also take it out of emoji fallback
             if font.as_swash().charmap().map('m') == 0
                 && !allowed_bad_font_names.contains(&postscript_name.as_str())
+                && !check_is_known_emoji_font(&postscript_name)
             {
                 self.font_system.db_mut().remove_face(font.id());
                 continue;
