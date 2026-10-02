@@ -1432,11 +1432,16 @@ impl DiffView {
                     this.options_open = false;
                     cx.notify();
                 }))
+                .line_height(zpx(18.))
+                // `h3` (UA style: 1.17em, bold) with
+                // `.diff-options-component` margins: 6 px (0.5em) between
+                // it, the fieldsets, their legends and paragraphs
                 .child(
                     div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_size(FONT_SIZE_MD())
-                        .mb(zpx(8.))
+                        .font_weight(FontWeight::BOLD)
+                        .text_size(FONT_SIZE() * 1.17)
+                        .line_height(FONT_SIZE() * 1.17 * 1.5)
+                        .mb(zpx(6.))
                         .child(mac_or("Diff Settings", "Diff Options")),
                 )
                 .child(
@@ -1448,7 +1453,6 @@ impl DiffView {
                         .p(SPACING())
                         .flex()
                         .flex_col()
-                        .mb(zpx(8.))
                         .child(legend("Whitespace"))
                         .child(checkbox_row(
                             "diff-hide-whitespace",
@@ -1457,10 +1461,11 @@ impl DiffView {
                             move |checked, _, cx| set_hide_whitespace(source, checked, cx),
                             cx,
                         ))
+                        // `.secondary-text { margin: 0.5em 0 }`
                         .when(interactive, |d| {
-                            d.child(div().mt(zpx(6.)).text_color(t.text_secondary).child(
+                            d.child(div().my(zpx(6.)).text_color(t.text_secondary).child(
                                 "Interacting with individual lines or hunks \
-                                                 will be disabled while hiding whitespace.",
+                                 will be disabled while hiding whitespace.",
                             ))
                         }),
                 )
@@ -1468,7 +1473,7 @@ impl DiffView {
                     div()
                         .flex()
                         .flex_col()
-                        .gap(zpx(4.))
+                        .mt(zpx(6.))
                         .child(legend("Diff display"))
                         .child(radio_row(
                             "diff-display-unified",
@@ -1477,13 +1482,14 @@ impl DiffView {
                             |_, cx| Dispatcher::set_show_side_by_side_diff(false, cx),
                             cx,
                         ))
-                        .child(radio_row(
+                        // `.radio-button-component + .radio-button-component`
+                        .child(div().mt(zpx(5.)).child(radio_row(
                             "diff-display-split",
                             split,
                             "Split",
                             |_, cx| Dispatcher::set_show_side_by_side_diff(true, cx),
                             cx,
-                        )),
+                        ))),
                 ),
             cx,
         )

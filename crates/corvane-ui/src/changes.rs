@@ -1661,7 +1661,8 @@ impl ChangesSidebar {
                 .flex_row()
                 .items_center()
                 .gap(SPACING_HALF())
-                .py(zpx(3.))
+                // `.checkbox-component`: one 18 px line
+                .h(zpx(18.))
                 .cursor_pointer()
                 // GHD closes the popover after every option change
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -1715,9 +1716,11 @@ impl ChangesSidebar {
                                 .items_center()
                                 .justify_between()
                                 .child(
+                                    // `h3` (UA style: 1.17em, bold)
                                     div()
-                                        .text_size(FONT_SIZE_MD())
-                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_size(FONT_SIZE() * 1.17)
+                                        .line_height(FONT_SIZE() * 1.17 * 1.5)
+                                        .font_weight(FontWeight::BOLD)
                                         .child("Filter Options"),
                                 )
                                 .child(
@@ -1763,8 +1766,7 @@ impl ChangesSidebar {
                                     },
                                 )),
                             ))
-                        })
-                        .when(!active, |d| d.pb(SPACING_HALF())),
+                        }),
                     cx,
                 )
                 .with_priority(26),
