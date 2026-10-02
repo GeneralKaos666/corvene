@@ -67,7 +67,7 @@ Version: $VERSION
 Architecture: $ARCH_DEB
 Maintainer: Corvane <corvane@wasimaster.com>
 Installed-Size: $SIZE_KB
-Depends: git (>= 2.35), libc6 (>= 2.35), libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libvulkan1, xdg-utils, perl
+Depends: git (>= 1:2.38), libc6 (>= 2.35), libxcb1, libxkbcommon0, libxkbcommon-x11-0, libfontconfig1, libfreetype6, libvulkan1, xdg-utils, perl
 Recommends: mesa-vulkan-drivers, gnome-keyring | kwalletmanager | keepassxc, hunspell-en-us, fonts-noto-core
 Section: devel
 Priority: optional

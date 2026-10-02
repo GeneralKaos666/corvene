@@ -13,7 +13,7 @@ Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus 
 ### macOS
 
 - macOS 10.15.7 Catalina or newer on Intel, macOS 11 or newer on [Apple Silicon](https://support.apple.com/en-us/116943)
-- `git` 2.40+ on your `PATH` ([Xcode Command Line](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) Tools or [Homebrew](https://brew.sh/)); the Command Line Tools for macOS 15 and older ship an older git, so use Homebrew's there
+- `git` 2.38+ on your `PATH`: the [Xcode Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) from Xcode 14.3 on ship 2.39, or use [Homebrew](https://brew.sh/)'s
 
 ### Linux
 
