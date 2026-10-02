@@ -215,6 +215,9 @@ pub mod fonts {
     /// own `rgba` is not consulted.
     #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     pub fn subpixel_antialiasing() -> bool {
+        if let Some(subpixel) = fontconfig_subpixel(&ghd_ui_family()) {
+            return subpixel;
+        }
         let gnome = std::process::Command::new("gsettings")
             .args(["get", "org.gnome.desktop.interface", "font-antialiasing"])
             .output()
