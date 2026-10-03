@@ -3675,6 +3675,21 @@ registry! {
         code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Unticked files stay unticked after a restart.
+    PERSIST_FILE_SELECTION = 777 "persist-file-selection" {
+        title: "Remember unticked files",
+        summary: "Files unticked in a repository's changes list are still unticked after \
+                  quitting and reopening Corvene (whole files only; a partly selected file comes \
+                  back fully ticked).",
+        ghd_behaviour: "After a restart every changed file is ticked again.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5870), Upstream::issue(17788)],
+        code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

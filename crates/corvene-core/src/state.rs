@@ -1082,6 +1082,10 @@ pub struct AppState {
     /// message, and a counter that debounces writing them.
     pub commit_drafts: HashMap<u64, crate::drafts::CommitDraft>,
     pub commit_drafts_nonce: u64,
+    /// `777-persist-file-selection`: each repository's unticked files as
+    /// saved, and the repositories whose first status already got them.
+    pub excluded_files: HashMap<u64, Vec<String>>,
+    pub excluded_files_restored: std::collections::HashSet<u64>,
 }
 
 impl AppState {

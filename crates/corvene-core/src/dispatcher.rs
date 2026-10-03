@@ -94,6 +94,14 @@ impl Dispatcher {
         } else {
             std::collections::HashMap::new()
         };
+        // Corvene (`777-persist-file-selection`): last session's unticked files
+        let excluded_files = if flags.bool(crate::flags::ids::PERSIST_FILE_SELECTION) {
+            let mut saved = store.excluded_files().unwrap_or_default();
+            saved.retain(|id, _| repositories.iter().any(|r| r.id == *id));
+            saved
+        } else {
+            std::collections::HashMap::new()
+        };
         // `876-git-spawn-error-details`
         corvene_git::set_explain_missing_workdir(
             flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
@@ -149,6 +157,8 @@ impl Dispatcher {
             alive: crate::alive::AliveState::default(),
             commit_drafts,
             commit_drafts_nonce: 0,
+            excluded_files,
+            excluded_files_restored: std::collections::HashSet::new(),
         });
         AppState::install(state.clone(), cx);
         cx.background_executor()
@@ -1027,6 +1037,12 @@ impl Dispatcher {
                     let exclude_untracked = s
                         .flags
                         .bool(crate::flags::ids::NEW_UNTRACKED_FILES_EXCLUDED);
+                    // `777-persist-file-selection`: last session's unticked
+                    // files, for this repository's first status
+                    let restore_excluded = (!s.excluded_files_restored.contains(&id))
+                        .then(|| s.excluded_files.get(&id).cloned())
+                        .flatten();
+                    let mut status_applied = false;
                     let repo_state: &mut RepositoryState = s.repo_state_mut(id);
                     repo_state.loading = false;
                     repo_state.last_refresh = Some(Instant::now());
@@ -1094,6 +1110,10 @@ impl Dispatcher {
                                 if exclude_untracked {
                                     exclude_new_untracked(&mut status, repo_state.status.as_ref());
                                 }
+                                if let Some(excluded) = &restore_excluded {
+                                    crate::drafts::apply_excluded(&mut status, excluded);
+                                }
+                                status_applied = true;
                                 // keep the selection if the file is still changed, else first file
                                 let keep = repo_state
                                     .selected_file
@@ -1155,6 +1175,10 @@ impl Dispatcher {
                             warn!(id, %err, "refresh failed");
                             repo_state.error = Some(err.to_string());
                         }
+                    }
+                    if status_applied {
+                        s.excluded_files_restored.insert(id);
+                        crate::drafts::note_excluded(s, id, cx);
                     }
                     if let Some(main) = main_worktree
                         && let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
@@ -3595,6 +3619,7 @@ impl Dispatcher {
                         f.selection.select_all()
                     };
                 }
+                crate::drafts::note_excluded(s, id, cx);
                 cx.notify();
             }
         });
@@ -3631,6 +3656,7 @@ impl Dispatcher {
                 .and_then(|st| st.files.iter_mut().find(|f| f.path == path))
             {
                 f.selection = edit(&f.selection);
+                crate::drafts::note_excluded(s, id, cx);
                 cx.notify();
             }
         });
@@ -3648,6 +3674,7 @@ impl Dispatcher {
                         f.selection.select_none()
                     };
                 }
+                crate::drafts::note_excluded(s, id, cx);
                 cx.notify();
             }
         });
@@ -3683,6 +3710,7 @@ impl Dispatcher {
                         f.selection.select_none()
                     };
                 }
+                crate::drafts::note_excluded(s, id, cx);
                 cx.notify();
             }
         });

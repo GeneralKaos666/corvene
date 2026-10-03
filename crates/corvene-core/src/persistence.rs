@@ -363,6 +363,13 @@ pub trait StoreExt {
         &self,
         drafts: &std::collections::HashMap<u64, crate::drafts::CommitDraft>,
     ) -> Result<()>;
+    /// Unticked changed files by repository id (flag
+    /// `777-persist-file-selection`).
+    fn excluded_files(&self) -> Result<std::collections::HashMap<u64, Vec<String>>>;
+    fn save_excluded_files(
+        &self,
+        excluded: &std::collections::HashMap<u64, Vec<String>>,
+    ) -> Result<()>;
 
     fn accounts(&self) -> Result<Vec<Account>>;
     fn save_accounts(&self, accounts: &[Account]) -> Result<()>;
@@ -446,6 +453,17 @@ impl StoreExt for Store {
         drafts: &std::collections::HashMap<u64, crate::drafts::CommitDraft>,
     ) -> Result<()> {
         self.set("changes.commit_drafts", drafts)
+    }
+
+    fn excluded_files(&self) -> Result<std::collections::HashMap<u64, Vec<String>>> {
+        Ok(self.get("changes.excluded_files")?.unwrap_or_default())
+    }
+
+    fn save_excluded_files(
+        &self,
+        excluded: &std::collections::HashMap<u64, Vec<String>>,
+    ) -> Result<()> {
+        self.set("changes.excluded_files", excluded)
     }
 
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()> {

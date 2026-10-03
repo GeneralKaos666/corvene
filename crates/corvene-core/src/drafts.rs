@@ -2,15 +2,20 @@
 //! keeps it in memory only, `RepositoryStateCache`):
 //! - `776-persist-commit-drafts`: each repository's commit summary and
 //!   description, saved a moment after the last edit and cleared by a commit.
+//! - `777-persist-file-selection`: each repository's unticked files (whole
+//!   files only), unticked again by the repository's first status of the
+//!   next session.
 
 use std::time::Duration;
 
+use corvene_models::{DiffSelectionType, WorkingDirectoryStatus};
 use gpui_kit::{App, AsyncApp};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::dispatcher::Dispatcher;
 use crate::persistence::StoreExt;
+use crate::state::AppState;
 
 /// How long after the last edit a draft is written.
 const DRAFT_SAVE_DELAY: Duration = Duration::from_secs(1);
@@ -40,6 +45,61 @@ impl CommitDraft {
             description: description.to_string(),
         })
     }
+}
+
+/// The paths of `status` whose files are wholly left out of the commit.
+pub fn excluded_paths(status: &WorkingDirectoryStatus) -> Vec<String> {
+    let mut paths: Vec<String> = status
+        .files
+        .iter()
+        .filter(|f| f.selection.kind() == DiffSelectionType::None)
+        .map(|f| f.path.clone())
+        .collect();
+    paths.sort();
+    paths
+}
+
+/// Untick the files of `status` named in `excluded` (a fresh status ticks
+/// every file).
+pub fn apply_excluded(status: &mut WorkingDirectoryStatus, excluded: &[String]) {
+    for file in &mut status.files {
+        if excluded.contains(&file.path) {
+            file.selection = file.selection.select_none();
+        }
+    }
+}
+
+/// `777-persist-file-selection`: record `id`'s unticked files and save them
+/// when they changed. Call after anything that ticks or unticks files.
+pub(crate) fn note_excluded(s: &mut AppState, id: u64, cx: &mut App) {
+    if !s.flags.bool(crate::flags::ids::PERSIST_FILE_SELECTION) {
+        return;
+    }
+    let Some(status) = s.repo_states.get(&id).and_then(|rs| rs.status.as_ref()) else {
+        return;
+    };
+    let paths = excluded_paths(status);
+    let unchanged = match s.excluded_files.get(&id) {
+        Some(saved) => *saved == paths,
+        None => paths.is_empty(),
+    };
+    if unchanged {
+        return;
+    }
+    if paths.is_empty() {
+        s.excluded_files.remove(&id);
+    } else {
+        s.excluded_files.insert(id, paths);
+    }
+    let store = s.store.clone();
+    let excluded = s.excluded_files.clone();
+    cx.background_executor()
+        .spawn(async move {
+            if let Err(err) = store.save_excluded_files(&excluded) {
+                warn!(?err, "could not save the unticked files");
+            }
+        })
+        .detach();
 }
 
 impl Dispatcher {
@@ -83,7 +143,36 @@ impl Dispatcher {
 
 #[cfg(test)]
 mod tests {
+    use corvene_models::{
+        DiffSelection, FileStatus, FileStatusKind, GitStatusEntry, WorkingDirectoryFileChange,
+    };
+
     use super::*;
+
+    fn file(path: &str, selection: DiffSelection) -> WorkingDirectoryFileChange {
+        WorkingDirectoryFileChange {
+            path: path.to_string(),
+            old_path: None,
+            status: FileStatus {
+                kind: FileStatusKind::Modified,
+                index: GitStatusEntry::Unchanged,
+                working_tree: GitStatusEntry::Modified,
+                score: None,
+                code: ".M".into(),
+                submodule: false,
+                submodule_status: None,
+                conflict_markers: None,
+            },
+            selection,
+        }
+    }
+
+    fn status(files: Vec<WorkingDirectoryFileChange>) -> WorkingDirectoryStatus {
+        WorkingDirectoryStatus {
+            files,
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn drafts_skip_untouched_forms() {
@@ -101,5 +190,25 @@ mod tests {
             })
         );
         assert!(CommitDraft::normalized("", "details", None).is_some());
+    }
+
+    #[test]
+    fn excluded_paths_are_whole_unticked_files() {
+        let st = status(vec![
+            file("b.txt", DiffSelection::none()),
+            file("a.txt", DiffSelection::none()),
+            file("c.txt", DiffSelection::all()),
+        ]);
+        assert_eq!(excluded_paths(&st), vec!["a.txt", "b.txt"]);
+    }
+
+    #[test]
+    fn apply_excluded_unticks_named_files_only() {
+        let mut st = status(vec![
+            file("a.txt", DiffSelection::all()),
+            file("b.txt", DiffSelection::all()),
+        ]);
+        apply_excluded(&mut st, &["b.txt".to_string(), "gone.txt".to_string()]);
+        assert_eq!(excluded_paths(&st), vec!["b.txt"]);
     }
 }
