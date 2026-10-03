@@ -3241,6 +3241,21 @@ registry! {
         code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/workspace.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Stop computing a diff nobody will see.
+    CANCEL_STALE_DIFFS = 763 "cancel-stale-diffs" {
+        title: "Stop stale diffs",
+        summary: "Selecting another changed file (or a refresh) stops the git diff still running \
+                  for the previous selection, so moving quickly through large files does not \
+                  queue up diffs that are thrown away.",
+        ghd_behaviour: "Every started diff runs to completion and the stale ones are discarded.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1915)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-git/src/process.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

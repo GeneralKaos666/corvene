@@ -317,7 +317,10 @@ impl GitCommand {
     }
 
     /// Run to completion, capturing stdout/stderr. Blocking: call from a
-    /// background thread (GPUI `background_spawn`).
+    /// background thread (GPUI `background_spawn`). A [`cancel_token`]
+    /// (`Self::cancel_token`) stops the process and makes this return
+    /// [`GitError::Cancelled`] (not on Android, where `run` has no child to
+    /// signal before it exits).
     pub fn run(&self) -> Result<GitOutput> {
         let started = Instant::now();
         let _network = NetworkGuard::for_command(self);
@@ -334,23 +337,34 @@ impl GitCommand {
             child.wait_with_output().map_err(GitError::Spawn)?
         };
         #[cfg(not(target_os = "android"))]
-        let output = match &self.stdin {
-            None => self.command().output().map_err(GitError::Spawn)?,
-            Some(bytes) => {
+        let output = match (&self.stdin, &self.cancel) {
+            (None, None) => self.command().output().map_err(GitError::Spawn)?,
+            (stdin_bytes, cancel) => {
                 let mut child = self
                     .command()
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
                     .map_err(GitError::Spawn)?;
-                if let Some(mut stdin) = child.stdin.take() {
+                if let Some(token) = cancel {
+                    token.attach(child.id());
+                }
+                if let (Some(bytes), Some(mut stdin)) = (stdin_bytes, child.stdin.take()) {
                     use std::io::Write;
                     // git may exit early; a broken pipe is then reported via the exit code
                     let _ = stdin.write_all(bytes);
                 }
-                child.wait_with_output().map_err(GitError::Spawn)?
+                let output = child.wait_with_output();
+                if let Some(token) = cancel {
+                    token.detach();
+                }
+                output.map_err(GitError::Spawn)?
             }
         };
+        if self.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+            debug!(git = %args, "git cancelled");
+            return Err(GitError::Cancelled(args));
+        }
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         let code = output.status.code();
         debug!(
@@ -547,6 +561,19 @@ mod tests {
             })
             .filter(|(k, _)| k.starts_with("GIT_HTTP_LOW_SPEED"))
             .collect()
+    }
+
+    #[test]
+    fn run_honours_the_cancel_token() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let token = CancelToken::new();
+        let version = GitCommand::new(git).arg("version");
+        assert!(version.clone().cancel_token(token.clone()).run().is_ok());
+        token.cancel();
+        assert!(matches!(
+            version.cancel_token(token).run(),
+            Err(GitError::Cancelled(_))
+        ));
     }
 
     #[test]

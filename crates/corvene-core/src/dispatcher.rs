@@ -1330,23 +1330,46 @@ impl Dispatcher {
             .as_ref()
             .and_then(|stamp| crate::diff_cache::working_diff(&workdir, &path, stamp))
         {
+            // `763-cancel-stale-diffs`
+            if let Some(previous) = state.update(cx, |s, _| s.repo_state_mut(id).diff_cancel.take())
+            {
+                previous.cancel();
+            }
             Self::apply_working_diff(id, &path, loaded, cx);
             Self::prefetch_working_diffs(id, cx);
             return;
         }
+        // `763-cancel-stale-diffs`: the diff still running for the previous
+        // selection (or refresh) is stopped instead of finishing unseen
+        let cancel_stale = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CANCEL_STALE_DIFFS);
+        let cancel = cancel_stale.then(corvene_git::CancelToken::new);
         state.update(cx, |s, cx| {
-            s.repo_state_mut(id).diff_loading = true;
+            let rs = s.repo_state_mut(id);
+            rs.diff_loading = true;
+            if let Some(previous) = std::mem::replace(&mut rs.diff_cancel, cancel.clone()) {
+                previous.cancel();
+            }
             cx.notify();
         });
         let work = cx.background_executor().spawn(async move {
-            let loaded = compute_working_diff(git, &workdir, &file, options);
+            let loaded = compute_working_diff(git, &workdir, &file, options, cancel.as_ref());
+            // a stopped diff is incomplete: neither cached nor shown
+            if cancel
+                .as_ref()
+                .is_some_and(corvene_git::CancelToken::is_cancelled)
+            {
+                return None;
+            }
             if let Some(stamp) = stamp {
                 crate::diff_cache::store_working_diff(&workdir, &file.path, stamp, loaded.clone());
             }
-            loaded
+            Some(loaded)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let loaded = work.await;
+            let Some(loaded) = work.await else { return };
             cx.update(|cx| {
                 Self::apply_working_diff(id, &path, loaded, cx);
                 Self::prefetch_working_diffs(id, cx);
@@ -1551,7 +1574,7 @@ impl Dispatcher {
                     if crate::diff_cache::working_diff(&workdir, &file.path, &stamp).is_some() {
                         continue;
                     }
-                    let loaded = compute_working_diff(git.clone(), &workdir, &file, options);
+                    let loaded = compute_working_diff(git.clone(), &workdir, &file, options, None);
                     crate::diff_cache::store_working_diff(&workdir, &file.path, stamp, loaded);
                 }
             })
@@ -4988,6 +5011,7 @@ fn compute_working_diff(
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
     options: WorkingDiffOptions,
+    cancel: Option<&corvene_git::CancelToken>,
 ) -> LoadedDiff {
     // the old side is read in-process meanwhile
     std::thread::scope(|scope| {
@@ -5010,9 +5034,12 @@ fn compute_working_diff(
             options.hide_whitespace,
             options.renamed_against_head,
             options.as_text,
+            cancel,
         )
         .unwrap_or_else(|err| {
-            warn!(%err, "diff failed");
+            if !matches!(err, corvene_git::GitError::Cancelled(_)) {
+                warn!(%err, "diff failed");
+            }
             corvene_models::Diff::Empty
         });
         // GHD `fileContents.newContents`: the working copy, for hunk expansion.

@@ -18,7 +18,7 @@ use corvene_models::{
 
 use crate::detect::GitBinary;
 use crate::error::Result;
-use crate::process::GitCommand;
+use crate::process::{CancelToken, GitCommand};
 
 /// GHD `MaxReasonableDiffSize`: beyond this the diff is `LargeText` and only
 /// rendered on request.
@@ -40,6 +40,9 @@ pub const MAX_DIFF_LINES: usize = 50_000;
 ///
 /// `as_text` adds `--text` (Corvene `749-binary-diff-as-text`): a file git
 /// takes for binary is diffed line by line anyway.
+///
+/// `cancel` (Corvene `763-cancel-stale-diffs`) stops the git processes when
+/// another file was selected meanwhile ([`crate::GitError::Cancelled`]).
 pub fn working_directory_diff(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -47,6 +50,7 @@ pub fn working_directory_diff(
     hide_whitespace: bool,
     renamed_against_head: bool,
     as_text: bool,
+    cancel: Option<&CancelToken>,
 ) -> Result<Diff> {
     let mut args = vec!["diff"];
     if hide_whitespace {
@@ -57,9 +61,13 @@ pub fn working_directory_diff(
     }
     args.extend(["--no-ext-diff", "--patch-with-raw", "-z", "--no-color"]);
     let base = || {
-        GitCommand::new(git.clone())
+        let cmd = GitCommand::new(git.clone())
             .args(&args)
-            .current_dir(workdir)
+            .current_dir(workdir);
+        match cancel {
+            Some(token) => cmd.cancel_token(token.clone()),
+            None => cmd,
+        }
     };
     let mut cmd = base();
     let is_submodule = file.status.submodule;
@@ -702,7 +710,7 @@ mod tests {
         let status = crate::status::get_status(git.clone(), path, None).unwrap();
         for file in &status.files {
             let diff =
-                working_directory_diff(git.clone(), path, file, false, false, false).unwrap();
+                working_directory_diff(git.clone(), path, file, false, false, false, None).unwrap();
             let Diff::Text { hunks, .. } = diff else {
                 panic!("text diff for {}", file.path)
             };
@@ -821,9 +829,10 @@ mod tests {
         let git = Arc::new(crate::find_git().unwrap());
         let status = crate::get_status(git.clone(), path, None).unwrap();
         let file = &status.files[0];
-        let binary = working_directory_diff(git.clone(), path, file, false, false, false).unwrap();
+        let binary =
+            working_directory_diff(git.clone(), path, file, false, false, false, None).unwrap();
         assert_eq!(binary, Diff::Binary);
-        let text = working_directory_diff(git, path, file, false, false, true).unwrap();
+        let text = working_directory_diff(git, path, file, false, false, true, None).unwrap();
         assert!(matches!(text, Diff::Text { .. }));
     }
 

@@ -733,6 +733,9 @@ pub struct RepositoryState {
     /// `762-diff-header-mtime`: the selected working-directory file's path
     /// and modification time.
     pub diff_file_modified: Option<(String, std::time::SystemTime)>,
+    /// `763-cancel-stale-diffs`: stops the working-directory diff still
+    /// being computed when another one is asked for.
+    pub diff_cancel: Option<corvene_git::CancelToken>,
     /// Most recent commit made from Corvene in this session (`UndoCommit` bar).
     pub last_commit: Option<LastCommit>,
     /// Summaries of the upstream's commits the current branch lacks
