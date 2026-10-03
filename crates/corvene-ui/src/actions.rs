@@ -71,6 +71,8 @@ gpui_kit::actions!(
         AddLocalRepository,
         CloneRepository,
         ImportFromGitHubDesktop,
+        // File › Remove Repositories… (`269-bulk-remove-repositories`)
+        RemoveRepositories,
         // Edit
         Undo,
         Redo,

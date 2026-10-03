@@ -29,6 +29,7 @@ mod push_protection;
 mod reauth_dialogs;
 mod release_notes;
 mod remote_dialogs;
+mod remove_repositories;
 mod repository_settings;
 mod sign_in;
 mod simple;
@@ -530,6 +531,11 @@ impl DialogHost {
             Popup::Acknowledgements => cx.new(acknowledgements::AcknowledgementsDialog::new).into(),
             Popup::ImportFromGitHubDesktop => cx
                 .new(import_github_desktop::ImportGitHubDesktopDialog::new)
+                .into(),
+            Popup::RemoveRepositories { ticked } => cx
+                .new(|cx| {
+                    remove_repositories::RemoveRepositoriesDialog::new(state, *ticked, window, cx)
+                })
                 .into(),
             Popup::AddLicense { repo } => {
                 cx.new(|_| add_license::AddLicenseDialog::new(*repo)).into()

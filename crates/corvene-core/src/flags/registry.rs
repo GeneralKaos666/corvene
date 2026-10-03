@@ -1456,6 +1456,27 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// Remove several repositories at once.
+    BULK_REMOVE_REPOSITORIES = 269 "bulk-remove-repositories" {
+        title: "Remove several repositories at once",
+        summary: "File › Remove Repositories… and the repository list's context menu open a dialog \
+                  listing every repository with a checkbox and a filter box; Remove takes the \
+                  ticked ones out of Corvene (optionally moving their folders to the Trash, as \
+                  the single Remove does).",
+        ghd_behaviour: "Repositories are removed one at a time, each with its own confirmation.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20684), Upstream::issue(22135), Upstream::issue(22434)],
+        code: &[
+            "crates/corvene-ui/src/dialogs/remove_repositories.rs",
+            "crates/corvene-ui/src/repository_list.rs",
+            "crates/corvene/src/menus.rs",
+            "crates/corvene/src/main.rs",
+        ],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

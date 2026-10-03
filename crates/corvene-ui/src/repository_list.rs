@@ -816,6 +816,20 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
             },
         ),
     ]);
+    // Corvene (`269-bulk-remove-repositories`)
+    if state.repositories.len() > 1
+        && state
+            .flags
+            .bool(corvene_core::flags::ids::BULK_REMOVE_REPOSITORIES)
+    {
+        items.push(MenuItem::new(
+            mac_or("Remove Repositories…", "Remove repositories…"),
+            move |_, cx| {
+                Dispatcher::close_foldout(cx);
+                Dispatcher::show_popup(Popup::RemoveRepositories { ticked: Some(id) }, cx)
+            },
+        ));
+    }
     // Corvene (`216-remove-all-missing-repositories`): on a missing row,
     // remove every repository Corvene cannot find (without confirmation,
     // as GHD removes one missing repository)

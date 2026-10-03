@@ -94,6 +94,11 @@ pub enum Popup {
     /// Corvene addition (flag 206): pick repositories from GitHub Desktop's
     /// list to add.
     ImportFromGitHubDesktop,
+    /// Corvene addition (flag 269): tick repositories to remove at once;
+    /// `ticked` starts ticked (the row the context menu was opened on).
+    RemoveRepositories {
+        ticked: Option<u64>,
+    },
     /// Corvene addition (flag 455): Repository › Add License….
     AddLicense {
         repo: u64,
