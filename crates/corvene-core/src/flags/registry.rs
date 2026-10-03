@@ -4111,6 +4111,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Push and remote branch deletion name full refs.
+    QUALIFIED_PUSH_REFSPECS = 867 "qualified-push-refspecs" {
+        title: "Push branches by their full ref name",
+        summary: "Push, Publish branch and deleting a branch on the remote name the branch as \
+                  refs/heads/<name>, so a tag with the same name as the branch does not make \
+                  them fail.",
+        ghd_behaviour: "Pushes <name>:<name>; a tag called like the branch makes git stop with \
+                        \"src refspec <name> matches more than one\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7726)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

@@ -1137,13 +1137,23 @@ impl Dispatcher {
             }),
             cx,
         );
-        let local = up_to.clone().unwrap_or_else(|| branch.name.clone());
+        // Corvene (`867-qualified-push-refspecs`): full ref names, so a tag
+        // named like the branch does not make the refspec ambiguous (GHD
+        // pushes `name:name`)
+        let qualified = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::QUALIFIED_PUSH_REFSPECS);
+        let local = up_to.clone().unwrap_or_else(|| match qualified {
+            true => format!("refs/heads/{}", branch.name),
+            false => branch.name.clone(),
+        });
         let remote_branch = branch
             .upstream_short()
             .and_then(|u| u.split_once('/').map(|(_, b)| b.to_string()))
-            .map(|b| match up_to {
-                Some(_) => format!("refs/heads/{b}"),
-                None => b,
+            .map(|b| match up_to.is_some() || qualified {
+                true => format!("refs/heads/{b}"),
+                false => b,
             });
         let remote_url = remote.url.clone();
         // GHD `pushRepo(…, gitStore.tagsToPush)`: unpushed tags ride along

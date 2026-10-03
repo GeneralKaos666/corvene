@@ -2770,12 +2770,19 @@ impl Dispatcher {
             branch: branch.name.clone(),
             sha,
         });
-        let (fetch_after, explain_worktrees) = {
+        let (fetch_after, explain_worktrees, qualified) = {
             let flags = &Self::state(cx).read(cx).flags;
             (
                 flags.bool(crate::flags::ids::FETCH_AFTER_DELETING_CURRENT_BRANCH),
                 flags.bool(crate::flags::ids::EXPLAIN_BRANCH_IN_OTHER_WORKTREE),
+                flags.bool(crate::flags::ids::QUALIFIED_PUSH_REFSPECS),
             )
+        };
+        // Corvene (`867-qualified-push-refspecs`): `:refs/heads/<name>`, so a
+        // remote tag of the same name does not make the deletion ambiguous
+        let remote_ref = move |name: &str| match qualified {
+            true => format!("refs/heads/{name}"),
+            false => name.to_string(),
         };
         // Corvene (`862-fetch-after-deleting-current-branch`): the default
         // branch this worktree switched to is brought up to date, so a merged
@@ -2832,7 +2839,7 @@ impl Dispatcher {
                                 git,
                                 &workdir,
                                 remote,
-                                remote_branch,
+                                &remote_ref(remote_branch),
                             )?;
                         }
                         Ok(())
@@ -2842,7 +2849,12 @@ impl Dispatcher {
                             .name
                             .split_once('/')
                             .unwrap_or(("origin", &branch.name));
-                        corvene_git::delete_remote_branch(git, &workdir, remote, remote_branch)
+                        corvene_git::delete_remote_branch(
+                            git,
+                            &workdir,
+                            remote,
+                            &remote_ref(remote_branch),
+                        )
                     }
                 }
             },

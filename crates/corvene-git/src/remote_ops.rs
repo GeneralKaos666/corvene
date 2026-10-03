@@ -1036,6 +1036,52 @@ mod tests {
     }
 
     #[test]
+    fn qualified_refspecs_push_a_branch_shadowed_by_a_tag() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("remote.git");
+        let work = dir.path().join("work");
+        run(
+            dir.path(),
+            &["init", "-q", "--bare", bare.to_str().unwrap()],
+        );
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", work.to_str().unwrap()],
+        );
+        run(&work, &["config", "commit.gpgsign", "false"]);
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        run(&work, &["tag", "main"]);
+        run(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        let push_as = |local: &str, remote: Option<&str>| {
+            push(
+                git.clone(),
+                &work,
+                "origin",
+                local,
+                remote,
+                &[],
+                false,
+                None,
+                &mut |_, _| {},
+            )
+        };
+        // `main` alone matches both refs/heads/main and refs/tags/main
+        assert!(push_as("main", None).is_err());
+        push_as("refs/heads/main", None).unwrap();
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "second"]);
+        assert!(push_as("main", Some("main")).is_err());
+        push_as("refs/heads/main", Some("refs/heads/main")).unwrap();
+        assert_eq!(
+            config_value(git.clone(), &work, "branch.main.merge").as_deref(),
+            Some("refs/heads/main")
+        );
+        run(&work, &["push", "-q", "origin", "refs/tags/main"]);
+        assert!(crate::delete_remote_branch(git.clone(), &work, "origin", "main").is_err());
+        crate::delete_remote_branch(git, &work, "origin", "refs/heads/main").unwrap();
+    }
+
+    #[test]
     fn push_error_includes_hook_stdout() {
         let git = Arc::new(crate::find_git().unwrap());
         let dir = tempfile::tempdir().unwrap();
