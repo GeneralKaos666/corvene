@@ -16,6 +16,7 @@ mod parity_control;
 use std::sync::Arc;
 use std::time::Instant;
 
+use corvene_core::menu_state::MenuId;
 use corvene_core::{Dispatcher, Popup, Section, StoreExt, ThemeSetting};
 use corvene_ui::actions::*;
 use corvene_ui::workspace::Workspace;
@@ -500,31 +501,43 @@ pub(crate) fn main() {
                 );
             }
         });
-        on_menu_action(cx, move |_: &OpenInEditor, cx| {
-            if let Some((_, path)) = selected_path(cx) {
-                Dispatcher::open_in_editor(path, cx);
-            }
-        });
-        on_menu_action(cx, move |_: &OpenInShell, cx| {
+        on_kept_menu_action(
+            cx,
+            MenuId::OpenExternalEditor,
+            move |_: &OpenInEditor, cx| {
+                if let Some((_, path)) = selected_path(cx) {
+                    Dispatcher::open_in_editor(path, cx);
+                }
+            },
+        );
+        on_kept_menu_action(cx, MenuId::OpenInShell, move |_: &OpenInShell, cx| {
             if let Some((_, path)) = selected_path(cx) {
                 Dispatcher::open_in_shell(&path, cx);
             }
         });
-        on_menu_action(cx, move |_: &ShowInFinder, cx| {
-            if let Some((_, path)) = selected_path(cx) {
-                Dispatcher::show_in_finder(&path, cx);
-            }
-        });
+        on_kept_menu_action(
+            cx,
+            MenuId::OpenWorkingDirectory,
+            move |_: &ShowInFinder, cx| {
+                if let Some((_, path)) = selected_path(cx) {
+                    Dispatcher::show_in_finder(&path, cx);
+                }
+            },
+        );
         on_menu_action(cx, move |_: &OpenWith, cx| {
             if let Some((_, path)) = selected_path(cx) {
                 Dispatcher::open_with(path, cx);
             }
         });
-        on_menu_action(cx, move |_: &ViewOnGitHub, cx| {
-            if let Some((id, _)) = selected_path(cx) {
-                Dispatcher::view_on_github(id, cx);
-            }
-        });
+        on_kept_menu_action(
+            cx,
+            MenuId::ViewRepositoryOnGithub,
+            move |_: &ViewOnGitHub, cx| {
+                if let Some((id, _)) = selected_path(cx) {
+                    Dispatcher::view_on_github(id, cx);
+                }
+            },
+        );
         on_menu_action(cx, move |_: &ViewUpstreamOnGitHub, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::view_upstream_on_github(id, cx);
@@ -1133,8 +1146,6 @@ fn resolve_theme_with(
     .with_variants(variants)
 }
 
-/// GHD `focusWindow`: bring Corvene forward and show its window, even when
-/// it was hidden with ⌘W.
 /// Registers the handler of a menu item GitHub Desktop disables while a
 /// popup is open (`menu-update.ts` `getMenuState` → `allMenuIds`): with a
 /// dialog up, its shortcut or menu item does nothing instead of acting on the
@@ -1148,6 +1159,20 @@ fn on_menu_action<A: Action>(cx: &mut App, f: impl Fn(&A, &mut App) + 'static) {
     });
 }
 
+/// [`on_menu_action`] for an item `menu_state` can keep enabled under a
+/// popup (`456-conflicts-dialog-keeps-open-items`: the open items under the
+/// merge-conflicts dialog).
+fn on_kept_menu_action<A: Action>(cx: &mut App, id: MenuId, f: impl Fn(&A, &mut App) + 'static) {
+    cx.on_action(move |action: &A, cx| {
+        let state = corvene_core::AppState::global(cx).read(cx);
+        if state.popup.is_none() || corvene_core::menu_state::is_enabled(state, id) {
+            f(action, cx)
+        }
+    });
+}
+
+/// GHD `focusWindow`: bring Corvene forward and show its window, even when
+/// it was hidden with ⌘W.
 fn focus_main_window(cx: &mut App) {
     cx.activate(true);
     #[cfg(target_os = "macos")]

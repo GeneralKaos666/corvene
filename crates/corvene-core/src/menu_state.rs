@@ -22,6 +22,11 @@
 //!   as unknown (GHD: `!== false`, i.e. enabled); only `archived` disables.
 //! - `enableWorktreeSupport()` is `true` in GHD 3.6.6 and worktrees are
 //!   always on in Corvene, so the worktree ids are never forced off.
+//!
+//! Deviation (`456-conflicts-dialog-keeps-open-items`): while the
+//! merge-conflicts dialog is open, Show in Finder, Open in Editor, Open in
+//! Shell and View on GitHub keep their usual state (GHD disables every item
+//! while any popup is open).
 
 use std::collections::HashMap;
 
@@ -404,6 +409,9 @@ impl RepositoryFacts {
 pub struct MenuInputs {
     /// `currentPopup !== null`
     pub popup_open: bool,
+    /// The open popup is the merge-conflicts dialog and
+    /// `456-conflicts-dialog-keeps-open-items` is on.
+    pub conflicts_dialog_open: bool,
     /// `windowState !== 'hidden'`
     pub window_open: bool,
     /// `showWelcomeFlow`
@@ -443,8 +451,21 @@ impl MenuInputs {
                 facts,
             }
         });
+        // `456-conflicts-dialog-keeps-open-items`
+        let conflicts_dialog_open = state
+            .flags
+            .bool(crate::flags::ids::CONFLICTS_DIALOG_KEEPS_OPEN_ITEMS)
+            && match &state.popup {
+                Some(crate::state::Popup::MultiCommitOperation { repo, .. }) => state
+                    .repo_states
+                    .get(repo)
+                    .and_then(|rs| rs.mco.as_ref())
+                    .is_some_and(|m| m.step == crate::mco::McoStep::ShowConflicts),
+                _ => false,
+            };
         Self {
             popup_open: state.popup.is_some(),
+            conflicts_dialog_open,
             // `AppState` has no hidden-window state (⌘W hides the window in
             // the UI layer only): treat the window as open.
             window_open: true,
@@ -764,10 +785,31 @@ fn app_menu_builder(inputs: &MenuInputs) -> MenuStateBuilder {
     b
 }
 
+/// Corvene (`456-conflicts-dialog-keeps-open-items`): the items that stay as
+/// usual while the merge-conflicts dialog is open, to look at the conflicted
+/// files.
+const CONFLICTS_DIALOG_KEPT_IDS: [MenuId; 4] = [
+    MenuId::OpenWorkingDirectory,
+    MenuId::OpenExternalEditor,
+    MenuId::OpenInShell,
+    MenuId::ViewRepositoryOnGithub,
+];
+
 /// GHD `getMenuState` over already-read inputs.
 pub fn menu_state_for(inputs: &MenuInputs) -> HashMap<MenuId, bool> {
     if inputs.popup_open {
-        return all_menus_disabled_builder().state;
+        let mut disabled = all_menus_disabled_builder();
+        if inputs.conflicts_dialog_open {
+            let usual = menu_state_for(&MenuInputs {
+                popup_open: false,
+                conflicts_dialog_open: false,
+                ..*inputs
+            });
+            for id in CONFLICTS_DIALOG_KEPT_IDS {
+                disabled.set_enabled(id, usual.get(&id).copied().unwrap_or(true));
+            }
+        }
+        return disabled.state;
     }
     all_menus_enabled_builder()
         .merge(repository_menu_builder(inputs))
@@ -853,6 +895,7 @@ mod tests {
     fn inputs(selected: Option<SelectedRepository>) -> MenuInputs {
         MenuInputs {
             popup_open: false,
+            conflicts_dialog_open: false,
             window_open: true,
             show_welcome_flow: false,
             repository_count: 1,
@@ -915,6 +958,20 @@ mod tests {
             assert_eq!(state.get(&id), Some(&false), "{}", id.as_str());
         }
         assert_eq!(state.len(), ALL_MENU_IDS.len());
+    }
+
+    #[test]
+    fn conflicts_dialog_keeps_the_open_items() {
+        let facts = RepositoryFacts::derive(&snapshot(&valid("feature", Some("x"))));
+        let state = menu_state_for(&MenuInputs {
+            popup_open: true,
+            conflicts_dialog_open: true,
+            ..inputs(Some(on_github(facts)))
+        });
+        for id in ALL_MENU_IDS {
+            let kept = CONFLICTS_DIALOG_KEPT_IDS.contains(&id);
+            assert_eq!(state.get(&id), Some(&kept), "{}", id.as_str());
+        }
     }
 
     #[test]

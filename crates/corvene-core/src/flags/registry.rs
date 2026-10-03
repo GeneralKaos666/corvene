@@ -2179,6 +2179,21 @@ registry! {
         ],
     },
 
+    /// Open items stay enabled under the merge-conflicts dialog.
+    CONFLICTS_DIALOG_KEEPS_OPEN_ITEMS = 456 "conflicts-dialog-keeps-open-items" {
+        title: "Open items while resolving conflicts",
+        summary: "While the merge-conflicts dialog is open, Show in Finder, Open in External \
+                  Editor, Open in Terminal and View on GitHub stay enabled in the menus, to look \
+                  at the conflicted files without closing the dialog.",
+        ghd_behaviour: "Every menu item is disabled while the dialog is open.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14236)],
+        code: &["crates/corvene-core/src/menu_state.rs", "crates/corvene/src/main.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
