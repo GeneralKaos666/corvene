@@ -1643,6 +1643,7 @@ dependencies = [
  "async-channel",
  "corvene-core",
  "corvene-git",
+ "corvene-highlight",
  "corvene-models",
  "corvene-platform",
  "corvene-store",

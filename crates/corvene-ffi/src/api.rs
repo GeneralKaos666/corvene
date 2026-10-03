@@ -9,7 +9,9 @@ use corvene_core::host::{Host, LoopHandle, spawn_loop};
 use corvene_core::persistence::StoreExt;
 
 use crate::runtime::Services;
-use crate::vm::{RepoListVm, repo_list};
+use crate::vm::{
+    ChangesVm, DiffHeaderVm, DiffRowVm, RepoListVm, changes, diff_header, diff_rows, repo_list,
+};
 
 /// What the engine asks of the Android side. Called on the engine's
 /// threads: post to the main looper before touching views.
@@ -170,5 +172,78 @@ impl Corvene {
 
     pub async fn repo_list(&self) -> RepoListVm {
         self.loop_.query(|host| repo_list(host.state_ref())).await
+    }
+
+    // ---- the Changes tab ----
+
+    pub fn select_section(&self, repo: u64, history: bool) {
+        self.loop_.post(move |host| {
+            let section = if history {
+                corvene_models::Section::History
+            } else {
+                corvene_models::Section::Changes
+            };
+            Dispatcher::show_section(repo, section, host)
+        });
+    }
+
+    pub fn select_file(&self, repo: u64, path: String) {
+        self.loop_
+            .post(move |host| Dispatcher::select_file(repo, path, host));
+    }
+
+    pub fn toggle_file_included(&self, repo: u64, path: String) {
+        self.loop_
+            .post(move |host| Dispatcher::toggle_file_included(repo, path, host));
+    }
+
+    /// Toggles one add/delete line of `path` in or out of the next commit.
+    pub fn toggle_diff_line(&self, repo: u64, path: String, line: u32) {
+        self.loop_
+            .post(move |host| Dispatcher::toggle_diff_line(repo, path, line, host));
+    }
+
+    pub fn commit(&self, repo: u64, summary: String, description: String) {
+        self.loop_
+            .post(move |host| Dispatcher::commit(repo, summary, description, host));
+    }
+
+    pub fn undo_commit(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::undo_commit(repo, host));
+    }
+
+    pub fn discard_changes(&self, repo: u64, paths: Vec<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::discard_changes(repo, paths, host));
+    }
+
+    pub fn refresh_repository(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::refresh_repository(repo, host));
+    }
+
+    pub async fn changes(&self, repo: u64) -> Option<ChangesVm> {
+        self.loop_
+            .query(move |host| changes(host.state_ref(), repo))
+            .await
+    }
+
+    pub async fn diff_header(&self, repo: u64) -> Option<DiffHeaderVm> {
+        self.loop_
+            .query(move |host| diff_header(host.state_ref(), repo))
+            .await
+    }
+
+    pub async fn diff_rows(
+        &self,
+        repo: u64,
+        generation: u64,
+        start: u32,
+        count: u32,
+    ) -> Vec<DiffRowVm> {
+        self.loop_
+            .query(move |host| diff_rows(host.state_ref(), repo, generation, start, count))
+            .await
     }
 }

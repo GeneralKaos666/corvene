@@ -18,6 +18,7 @@ path = "src/bin/uniffi-bindgen.rs"
 [dependencies]
 corvene-core = { path = "../corvene-core", default-features = false, features = ["local-host"] }
 corvene-git.workspace = true
+corvene-highlight.workspace = true
 corvene-models.workspace = true
 corvene-platform.workspace = true
 corvene-store.workspace = true

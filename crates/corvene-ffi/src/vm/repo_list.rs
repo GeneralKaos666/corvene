@@ -1,6 +1,4 @@
-//! Screen-level view models, computed from `AppState` on the loop thread.
-//! Records, not the core's types: UniFFI needs named fields and no
-//! `PathBuf`/`usize`, and a screen wants exactly its slice.
+//! The repository list.
 
 use corvene_core::AppState;
 
