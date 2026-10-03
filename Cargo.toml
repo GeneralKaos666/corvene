@@ -125,7 +125,8 @@ incremental = false
 # idle (src/window.rs); gpui-pre: text paints from its unsnapped layout origin
 # (src/elements/text.rs); gpui-pre-linux: anchored popups on X11 (the context
 # and menu bar menus; src/linux/x11) and offscreen frames; gpui-pre-wgpu:
-# rendering a window's scene to an image (src/wgpu_renderer.rs);
+# rendering a window's scene to an image, an opaque depth pass and a damage
+# scissor (src/wgpu_renderer.rs);
 # tree-sitter-scss: its build script passes a GCC flag MSVC refuses
 # (bindings/rust/build.rs); tree-sitter-agda: its scanner reads before an
 # empty array (src/scanner.c); gpui-pre-windows: anchored popups (the context
