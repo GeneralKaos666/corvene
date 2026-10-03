@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use syntect::parsing::syntax_definition::{ContextReference, MatchOperation, Pattern};
 pub use syntect::parsing::SyntaxSet;
+use syntect::parsing::syntax_definition::{ContextReference, MatchOperation, Pattern};
 use syntect::parsing::{SyntaxDefinition, SyntaxSetBuilder};
 
 use crate::ExtensionError;
