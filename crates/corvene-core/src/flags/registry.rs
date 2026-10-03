@@ -1825,6 +1825,23 @@ registry! {
         code: &["crates/corvene-github/src/api.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-core/src/tutorial.rs"],
     },
 
+    /// A repository GitHub no longer knows loses its GitHub association.
+    CLEAR_LOST_GITHUB_ASSOCIATION = 377 "clear-lost-github-association" {
+        title: "Forget GitHub repositories that are gone",
+        summary: "When GitHub answers \"not found\" for a repository's details (it was deleted, \
+                  or the account lost access), Corvene forgets that it is a GitHub repository and \
+                  stops asking the API for its pull requests, issues and checks. Adding the \
+                  repository again matches it anew.",
+        ghd_behaviour: "Keeps the stale association forever, and every API request for the \
+                        repository keeps failing.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1144)],
+        code: &["crates/corvene-core/src/forks.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
