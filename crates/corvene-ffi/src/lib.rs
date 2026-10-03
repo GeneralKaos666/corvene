@@ -11,6 +11,9 @@ uniffi::setup_scaffolding!();
 
 mod api;
 mod bridge;
+#[cfg(target_os = "android")]
+mod headless;
+mod jni;
 mod runtime;
 mod vm;
 

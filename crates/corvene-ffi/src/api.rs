@@ -86,6 +86,9 @@ impl Corvene {
         let files = PathBuf::from(files_dir);
         #[cfg(target_os = "android")]
         {
+            if !crate::jni::attached() {
+                tracing::warn!("NativeContext.attach was not called: the Keystore is unavailable");
+            }
             corvene_platform::android::prepare_environment(&files);
             corvene_platform::android::set_bridge(Box::new(crate::bridge::KotlinBridge {
                 events: events.clone(),

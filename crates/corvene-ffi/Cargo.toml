@@ -31,3 +31,5 @@ tracing-subscriber.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 android_logger = "0.15"
 log = "0.4"
+jni = "0.22"
+ndk-context = "0.1"
