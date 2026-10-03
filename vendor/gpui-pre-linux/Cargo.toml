@@ -306,7 +306,7 @@ priority = -1
 level = "allow"
 priority = 0
 
-# Corvane patch: `render_to_image` returns an image
+# Corvene patch: `render_to_image` returns an image
 [dependencies.image]
 version = "0.25"
 default-features = false

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""GitHub Desktop ⇄ Corvane 1:1 parity harness.
+"""GitHub Desktop ⇄ Corvene 1:1 parity harness.
 
 Runs YAML scenarios (tools/parity/scenarios) against a private GitHub Desktop
-instance and a Corvane instance side by side: same window size, same default
+instance and a Corvene instance side by side: same window size, same default
 panel widths, same fixture repository, same input at the same window points.
 Every `snap` step captures both apps, diffs them and fails the step when the
 difference exceeds its threshold. Results: `<out>/index.html` (side by side,
@@ -41,13 +41,13 @@ import accounts  # noqa: E402
 import fixture  # noqa: E402
 import imgdiff  # noqa: E402
 import report  # noqa: E402
-from drivers import Corvane, Ghd, page_height, page_rect, park_pointer  # noqa: E402
+from drivers import Corvene, Ghd, page_height, page_rect, park_pointer  # noqa: E402
 
 
 class Absent:
-    """Stands in for Corvane under `--ghd-only` (spec extraction runs)."""
+    """Stands in for Corvene under `--ghd-only` (spec extraction runs)."""
 
-    name = "corvane"
+    name = "corvene"
     scale = 2.0
 
     def __getattr__(self, _name):
@@ -103,7 +103,7 @@ class Run:
     def __init__(self, args):
         self.args = args
         self.out = Path(args.out)
-        self.binary = Path(args.corvane)
+        self.binary = Path(args.corvene)
 
     # -- one scenario in one theme ---------------------------------------
     def scenario(self, sc: dict, theme: str) -> dict:
@@ -129,13 +129,13 @@ class Run:
         repo_c = fixture.build(work / "u") if setup == "repo" else None
 
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
-        cv = Absent() if self.args.ghd_only else Corvane(self.binary, work / "corvane-data", work / "logs" / "corvane.log", theme)
+        cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme)
         result = {"name": sc["name"], "theme": theme, "file": sc["_file"], "description": sc.get("description", ""), "snaps": [], "error": None, "notes": []}
         started = time.time()
         try:
             both(ghd.start, cv.start)
             if abs(ghd.scale - cv.scale) > 0.01:
-                result["notes"].append(f"scale differs: GHD {ghd.scale} vs Corvane {cv.scale}")
+                result["notes"].append(f"scale differs: GHD {ghd.scale} vs Corvene {cv.scale}")
             ls = {"theme": theme}
             if setup != "welcome":
                 ls["has-shown-welcome-flow"] = "1"
@@ -152,7 +152,7 @@ class Run:
                 if not self.args.ghd_only and (
                     int(info["w"]) != cfg["width"] or int(info["h"]) != page_height(cfg["height"])
                 ):
-                    result["notes"].append(f"Corvane viewport is {info['w']}x{info['h']}")
+                    result["notes"].append(f"Corvene viewport is {info['w']}x{info['h']}")
                 if setup != "welcome":
                     cv.hook("complete-welcome")
                 if repo_c:
@@ -184,10 +184,10 @@ class Run:
         return result
 
     # -- steps -----------------------------------------------------------
-    def step(self, i, step: dict, ghd: Ghd, cv: Corvane, cfg, shots: Path, result):
+    def step(self, i, step: dict, ghd: Ghd, cv: Corvene, cfg, shots: Path, result):
         step = dict(step)
         wait = step.pop("wait", None)
-        per_app = {"ghd": step.pop("ghd", None), "corvane": step.pop("corvane", None)}
+        per_app = {"ghd": step.pop("ghd", None), "corvene": step.pop("corvene", None)}
         if "snap" in step:
             self.snap(step["snap"], i, ghd, cv, cfg, shots, result)
             return
@@ -197,14 +197,14 @@ class Run:
             g, c = ghd.menu_items(), cv.menu_items() if not self.args.ghd_only else []
             # an empty GHD menu means the right-click missed: never a pass
             ok = bool(g) and (self.args.ghd_only or g == c)
-            result.setdefault("menus", []).append({"name": name, "ghd": g, "corvane": c, "pass": ok})
+            result.setdefault("menus", []).append({"name": name, "ghd": g, "corvene": c, "pass": ok})
             if not ok:
                 result["snaps"].append({"name": f"menu: {name}", "stem": "", "note": "native menu items differ",
                                         "percent": 100.0, "coverage": 0.0, "threshold": 0, "pass": False,
-                                        "size_mismatch": "", "ghd": "", "corvane": "", "diff": "", "regions": [],
-                                        "menu": {"ghd": g, "corvane": c}})
-            print(f"    {'ok  ' if ok else 'FAIL'} menu {name}: {len(g)} GHD / {len(c)} Corvane items", flush=True)
-            # Corvane's real menu held its main thread; let queued work land
+                                        "size_mismatch": "", "ghd": "", "corvene": "", "diff": "", "regions": [],
+                                        "menu": {"ghd": g, "corvene": c}})
+            print(f"    {'ok  ' if ok else 'FAIL'} menu {name}: {len(g)} GHD / {len(c)} Corvene items", flush=True)
+            # Corvene's real menu held its main thread; let queued work land
             time.sleep((wait if wait is not None else cfg["settle"]) / 1000)
             return
         if "context_menu_pick" in step:
@@ -240,7 +240,7 @@ class Run:
         for key in ("hover", "click", "dblclick", "rclick", "press", "release"):
             if key in step:
                 resolved[key] = ghd.resolve(step[key])
-        for app, drv in (("ghd", ghd), ("corvane", cv)):
+        for app, drv in (("ghd", ghd), ("corvene", cv)):
             action = per_app[app] if per_app[app] is not None else step
             if isinstance(action, dict) and action.get("skip"):
                 continue
@@ -257,7 +257,7 @@ class Run:
         if "dblclick" in action:
             drv.click(*pt("dblclick"), clicks=2, mods=mods)
         if "rclick" in action:
-            # opens a contextual menu: GHD's is recorded, Corvane's pops,
+            # opens a contextual menu: GHD's is recorded, Corvene's pops,
             # is recorded and closes itself (compare with `context_menu`)
             if drv.name == "ghd":
                 drv.eval("window.__parityMenu=null")
@@ -292,12 +292,12 @@ class Run:
             if drv.name == "ghd":
                 drv.eval(accounts.ghd_js(action["accounts"]))
             else:
-                drv.hook("fake-accounts", accounts.corvane_arg(action["accounts"]))
+                drv.hook("fake-accounts", accounts.corvene_arg(action["accounts"]))
         if "eval" in action and drv.name == "ghd":
             drv.eval(action["eval"])
-        if "action" in action and drv.name == "corvane":
+        if "action" in action and drv.name == "corvene":
             drv.cmd("action", name=action["action"])
-        if "hook" in action and drv.name == "corvane":
+        if "hook" in action and drv.name == "corvene":
             h = action["hook"]
             drv.hook(h["name"], h.get("arg", ""))
         if "resize" in action:
@@ -329,16 +329,16 @@ class Run:
                 return
             prev = cur
 
-    def snap(self, spec, i, ghd: Ghd, cv: Corvane, cfg, shots: Path, result):
+    def snap(self, spec, i, ghd: Ghd, cv: Corvene, cfg, shots: Path, result):
         spec = {"name": spec} if isinstance(spec, str) else dict(spec)
         name = spec.get("name", f"step{i}")
         stem = f"{i:02d}-{name}"
-        pg, pc = shots / f"{stem}-ghd.png", shots / f"{stem}-corvane.png"
+        pg, pc = shots / f"{stem}-ghd.png", shots / f"{stem}-corvene.png"
         if self.args.ghd_only:
             ghd.snap(pg)
             result["snaps"].append({"name": name, "stem": stem, "note": spec.get("note", ""), "ghd_only": True,
                                     "percent": 0.0, "coverage": 0.0, "threshold": 0, "pass": True, "size_mismatch": "",
-                                    "ghd": pg.name, "corvane": "", "diff": "", "regions": []})
+                                    "ghd": pg.name, "corvene": "", "diff": "", "regions": []})
             print(f"    snap {name}", flush=True)
             return
         both(lambda: self.stable_snap(ghd, pg), lambda: self.stable_snap(cv, pc))
@@ -366,7 +366,7 @@ class Run:
             "pass": res.percent <= threshold,
             "size_mismatch": res.size_mismatch,
             "ghd": pg.name,
-            "corvane": pc.name,
+            "corvene": pc.name,
             "diff": f"{stem}-diff.png",
             "regions": [
                 {
@@ -375,7 +375,7 @@ class Run:
                     "hint": r.hint(),
                     "shift": r.shift,
                     "ghd_color": r.ghd_color,
-                    "corvane_color": r.corvane_color,
+                    "corvene_color": r.corvene_color,
                     "element": r.element,
                     "crop": r.crop,
                 }
@@ -393,10 +393,10 @@ def main():
     ap.add_argument("--themes", default="dark,light")
     ap.add_argument("--out", default=str(ROOT / "target" / "parity" / datetime.now().strftime("%Y%m%d-%H%M%S")))
     ap.add_argument(
-        "--corvane",
-        default=str(ROOT / "target" / "debug" / ("corvane.exe" if sys.platform == "win32" else "corvane")),
+        "--corvene",
+        default=str(ROOT / "target" / "debug" / ("corvene.exe" if sys.platform == "win32" else "corvene")),
     )
-    ap.add_argument("--build", action="store_true", help="cargo build -p corvane --features snapshots first")
+    ap.add_argument("--build", action="store_true", help="cargo build -p corvene --features snapshots first")
     ap.add_argument("--size", metavar="WxH", help="window size for both apps instead of the scenarios' 1367x814")
     ap.add_argument("--threshold", type=float)
     ap.add_argument("--tolerance", type=int)
@@ -422,9 +422,9 @@ def main():
         print("no scenarios matched", file=sys.stderr)
         return 2
     if args.build:
-        subprocess.run(["cargo", "build", "-p", "corvane", "--features", "snapshots"], cwd=ROOT, check=True)
-    if not args.ghd_only and not Path(args.corvane).exists():
-        print(f"{args.corvane} missing: cargo build -p corvane --features snapshots (or --build)", file=sys.stderr)
+        subprocess.run(["cargo", "build", "-p", "corvene", "--features", "snapshots"], cwd=ROOT, check=True)
+    if not args.ghd_only and not Path(args.corvene).exists():
+        print(f"{args.corvene} missing: cargo build -p corvene --features snapshots (or --build)", file=sys.stderr)
         return 2
 
     park_pointer()

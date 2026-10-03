@@ -7,11 +7,11 @@ with `url` + `revision`) into target/grammar-src/<name>/.
     python3 tools/ts-queries/fetch.py --update   # (re)pin sha256 / symbol in sources.lock.json
 
 These grammars have no usable crate (none published, or one whose Rust
-bindings pin an older tree-sitter runtime), so corvane-grammars' build.rs
+bindings pin an older tree-sitter runtime), so corvene-grammars' build.rs
 compiles their `parser.c` (+ scanner) itself. Only `src/`, `queries/` and
 the metadata files are extracted. `sources.lock.json` pins each tarball's
 sha256 and records the grammar's C entry point; a mismatch is an error.
-`CORVANE_GRAMMAR_SOURCES` overrides the destination (build.rs reads it too).
+`CORVENE_GRAMMAR_SOURCES` overrides the destination (build.rs reads it too).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / "tools" / "ts-queries"
 LOCK = TOOLS / "sources.lock.json"
-DEST = Path(os.environ.get("CORVANE_GRAMMAR_SOURCES", ROOT / "target" / "grammar-src"))
+DEST = Path(os.environ.get("CORVENE_GRAMMAR_SOURCES", ROOT / "target" / "grammar-src"))
 
 
 def load() -> dict:
@@ -47,7 +47,7 @@ def tarball_url(url: str, revision: str) -> str:
     return f"https://codeload.github.com/{repo}/tar.gz/{revision}"
 
 
-TREE_SITTER = os.environ.get("CORVANE_TREE_SITTER", "tree-sitter")
+TREE_SITTER = os.environ.get("CORVENE_TREE_SITTER", "tree-sitter")
 # the CLI that generates parser.c for `generate = true` grammars (matches the runtime)
 TREE_SITTER_VERSION = "0.27.0"
 
@@ -76,7 +76,7 @@ def fetch(name: str, lang: dict, pins: dict, update: bool) -> dict:
     cache = DEST / "_downloads" / f"{name}-{lang['revision'][:12]}.tar.gz"
     cache.parent.mkdir(parents=True, exist_ok=True)
     if not cache.exists():
-        req = urllib.request.Request(url, headers={"User-Agent": "corvane-grammars"})
+        req = urllib.request.Request(url, headers={"User-Agent": "corvene-grammars"})
         data = urllib.request.urlopen(req, timeout=120).read()
         cache.write_bytes(data)
     data = cache.read_bytes()
@@ -121,7 +121,7 @@ def generate(name: str, out: Path) -> None:
 
     version = subprocess.run([TREE_SITTER, "--version"], capture_output=True, text=True, check=True).stdout.split()[-1]
     if version != TREE_SITTER_VERSION:
-        raise SystemExit(f"{name}: needs tree-sitter {TREE_SITTER_VERSION} to generate, found {version} (CORVANE_TREE_SITTER)")
+        raise SystemExit(f"{name}: needs tree-sitter {TREE_SITTER_VERSION} to generate, found {version} (CORVENE_TREE_SITTER)")
     args = [TREE_SITTER, "generate"]
     if not (out / "grammar.js").exists():
         args.append("src/grammar.json")

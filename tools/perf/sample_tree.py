@@ -4,7 +4,7 @@ function on one thread (the main thread by default), Rust v0 symbols shortened
 to `crate::…::name`.
 
     sample <pid> 5 -file out.txt
-    python3 tools/perf/sample_tree.py out.txt [--thread main] [--top 60] [--filter corvane]
+    python3 tools/perf/sample_tree.py out.txt [--thread main] [--top 60] [--filter corvene]
 """
 
 from __future__ import annotations

@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: Also build the Corvane-Full variant (the tree-sitter grammars compiled in)
+        description: Also build the Corvene-Full variant (the tree-sitter grammars compiled in)
         type: boolean
         default: true
       linux_release:
@@ -156,16 +156,16 @@ jobs:
         if: matrix.variant == 'full'
       - name: build
         env:
-          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+          CORVENE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVENE_GITHUB_CLIENT_SECRET }}
         run: |
           # an empty secret must not count as "has a client secret" (307-sign-in-flow)
-          [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
-          cargo build --release -p corvane --no-default-features \
+          [[ -n "$CORVENE_GITHUB_CLIENT_SECRET" ]] || unset CORVENE_GITHUB_CLIENT_SECRET
+          cargo build --release -p corvene --no-default-features \
             ${{ matrix.variant == 'full' && '--features full' || '' }} --target "${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: bin-${{ matrix.variant }}-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/corvane
+          path: target/${{ matrix.target }}/release/corvene
           retention-days: 1
 
   macos-assets:
@@ -195,8 +195,8 @@ jobs:
           for variant in $VARIANTS; do
             for t in aarch64-apple-darwin x86_64-apple-darwin; do
               mkdir -p "target/$t/release"
-              cp "bins/bin-$variant-$t/corvane" "target/$t/release/corvane"
-              chmod +x "target/$t/release/corvane"
+              cp "bins/bin-$variant-$t/corvene" "target/$t/release/corvene"
+              chmod +x "target/$t/release/corvene"
             done
             # the universal bundle, and one per architecture for a smaller download
             for arch in universal arm64 x86_64; do
@@ -214,7 +214,7 @@ jobs:
 
   # x86_64 and aarch64 build natively. The 32-bit ones are cross-compiled on
   # the runner of the same family (Debian multiarch has their libraries) and
-  # may fail without holding up the release: nothing upstream of Corvane
+  # may fail without holding up the release: nothing upstream of Corvene
   # (GPUI least of all) is tested on 32-bit Linux.
   linux:
     name: build · package (Linux ${{ matrix.arch }})
@@ -289,9 +289,9 @@ jobs:
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
       - name: build and package
         env:
-          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+          CORVENE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVENE_GITHUB_CLIENT_SECRET }}
         run: |
-          [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
+          [[ -n "$CORVENE_GITHUB_CLIENT_SECRET" ]] || unset CORVENE_GITHUB_CLIENT_SECRET
           packaging/linux/package.sh
           ls -l target/linux
       - uses: actions/upload-artifact@v4
@@ -353,15 +353,15 @@ jobs:
       - name: build and package
         shell: pwsh
         env:
-          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
+          CORVENE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVENE_GITHUB_CLIENT_SECRET }}
           WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
           SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
           TARGET: ${{ matrix.target }}
           FULL: ${{ matrix.variant == 'full' && '1' || '0' }}
         run: |
-          if (-not $env:CORVANE_GITHUB_CLIENT_SECRET) { Remove-Item Env:CORVANE_GITHUB_CLIENT_SECRET -ErrorAction SilentlyContinue }
+          if (-not $env:CORVENE_GITHUB_CLIENT_SECRET) { Remove-Item Env:CORVENE_GITHUB_CLIENT_SECRET -ErrorAction SilentlyContinue }
           if ($env:WINDOWS_SIGNING_PFX_BASE64) {
-            $pfx = Join-Path $env:RUNNER_TEMP "corvane-signing.pfx"
+            $pfx = Join-Path $env:RUNNER_TEMP "corvene-signing.pfx"
             [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX_BASE64))
             $env:SIGN_PFX = $pfx
           }
@@ -381,7 +381,7 @@ jobs:
   # runner; also the play flavour's bundle (.aab, with the grammars as an
   # on-demand module), which stays a workflow artifact: it is uploaded to
   # Google Play by hand. The APKs are signed with the keystore in the
-  # CORVANE_ANDROID_KEYSTORE_BASE64 secret and only then added to the draft
+  # CORVENE_ANDROID_KEYSTORE_BASE64 secret and only then added to the draft
   # release; without it they stay workflow artifacts, unsigned. A failure
   # here does not hold up the other platforms.
   android:
@@ -425,33 +425,33 @@ jobs:
           key: android-git-4abi-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
       - name: build and package
         env:
-          CORVANE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVANE_GITHUB_CLIENT_SECRET }}
-          CORVANE_ANDROID_KEYSTORE_BASE64: ${{ secrets.CORVANE_ANDROID_KEYSTORE_BASE64 }}
-          CORVANE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CORVANE_ANDROID_KEYSTORE_PASSWORD }}
-          CORVANE_ANDROID_KEY_ALIAS: ${{ secrets.CORVANE_ANDROID_KEY_ALIAS }}
-          CORVANE_ANDROID_KEY_PASSWORD: ${{ secrets.CORVANE_ANDROID_KEY_PASSWORD }}
+          CORVENE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVENE_GITHUB_CLIENT_SECRET }}
+          CORVENE_ANDROID_KEYSTORE_BASE64: ${{ secrets.CORVENE_ANDROID_KEYSTORE_BASE64 }}
+          CORVENE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CORVENE_ANDROID_KEYSTORE_PASSWORD }}
+          CORVENE_ANDROID_KEY_ALIAS: ${{ secrets.CORVENE_ANDROID_KEY_ALIAS }}
+          CORVENE_ANDROID_KEY_PASSWORD: ${{ secrets.CORVENE_ANDROID_KEY_PASSWORD }}
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          [[ -n "$CORVANE_GITHUB_CLIENT_SECRET" ]] || unset CORVANE_GITHUB_CLIENT_SECRET
+          [[ -n "$CORVENE_GITHUB_CLIENT_SECRET" ]] || unset CORVENE_GITHUB_CLIENT_SECRET
           suffix=-unsigned
-          if [[ -n "$CORVANE_ANDROID_KEYSTORE_BASE64" ]]; then
+          if [[ -n "$CORVENE_ANDROID_KEYSTORE_BASE64" ]]; then
             umask 077
-            printf '%s' "$CORVANE_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/corvane.jks"
-            export CORVANE_ANDROID_KEYSTORE="$RUNNER_TEMP/corvane.jks"
+            printf '%s' "$CORVENE_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/corvene.jks"
+            export CORVENE_ANDROID_KEYSTORE="$RUNNER_TEMP/corvene.jks"
             suffix=
           fi
           # BUNDLE=1: also the .aab for Google Play with the grammar module;
           # PER_ABI=1: a package per ABI next to the one with all four
           BUNDLE=1 PER_ABI=1 packaging/android/build.sh release
-          rm -f "$RUNNER_TEMP/corvane.jks"
+          rm -f "$RUNNER_TEMP/corvene.jks"
           mkdir -p target/android
           outputs=packaging/android/app/build/outputs
-          cp $outputs/bundle/playRelease/*.aab "target/android/Corvane-$VERSION-android-play$suffix.aab"
+          cp $outputs/bundle/playRelease/*.aab "target/android/Corvene-$VERSION-android-play$suffix.aab"
           for flavour in foss play; do
             apk="$(ls $outputs/apk/$flavour/release/*.apk | head -1)"
-            cp "$apk" "target/android/Corvane-$VERSION-android-$flavour-universal$suffix.apk"
+            cp "$apk" "target/android/Corvene-$VERSION-android-$flavour-universal$suffix.apk"
             for abi in arm64-v8a:arm64 armeabi-v7a:armv7 x86_64:x86_64 x86:x86; do
-              cp "$outputs/per-abi/$flavour-${abi%%:*}.apk" "target/android/Corvane-$VERSION-android-$flavour-${abi##*:}$suffix.apk"
+              cp "$outputs/per-abi/$flavour-${abi%%:*}.apk" "target/android/Corvene-$VERSION-android-$flavour-${abi##*:}$suffix.apk"
             done
           done
           ls -l target/android
@@ -545,7 +545,7 @@ jobs:
           else
             gh release create "$PACKS_TAG" --latest=false --target "$GITHUB_SHA" \
               --title "Packs" \
-              --notes "Optional components Corvane downloads on demand (Settings › Advanced): the tree-sitter grammars. Not an application release; see the latest release for Corvane itself."
+              --notes "Optional components Corvene downloads on demand (Settings › Advanced): the tree-sitter grammars. Not an application release; see the latest release for Corvene itself."
           fi
           mkdir -p merged
           [[ -f merged/packs-manifest.json ]] || echo '{"schema": 1, "packs": []}' > merged/packs-manifest.json
@@ -595,7 +595,7 @@ jobs:
       # no macOS job in a `linux_release` run: the cask's half comes from the release's zip
       - name: the release's macOS zip
         if: inputs.linux_release
-        run: gh release download "$RELEASE_TAG" -p "Corvane-$VERSION-macos-universal.zip" -D assets
+        run: gh release download "$RELEASE_TAG" -p "Corvene-$VERSION-macos-universal.zip" -D assets
       - name: upload
         if: env.RELEASE_TAG != ''
         run: |
@@ -609,7 +609,7 @@ jobs:
             gh release upload "$RELEASE_TAG" --clobber "${files[@]}"
           else
             gh release create "$RELEASE_TAG" --draft --verify-tag \
-              --title "Corvane ${RELEASE_TAG#v}" \
+              --title "Corvene ${RELEASE_TAG#v}" \
               --notes "- [New] …" \
               "${files[@]}"
           fi
@@ -627,11 +627,11 @@ jobs:
         run: |
           sha() { sha256sum "$1" | cut -d' ' -f1; }
           packaging/homebrew/stamp.py --version "$VERSION" \
-            --macos "$(sha "assets/Corvane-$VERSION-macos-universal.zip")" \
-            --x86_64-linux "$(sha "assets/Corvane-$VERSION-x86_64.AppImage")" \
-            --arm64-linux "$(sha "assets/Corvane-$VERSION-aarch64.AppImage")"
+            --macos "$(sha "assets/Corvene-$VERSION-macos-universal.zip")" \
+            --x86_64-linux "$(sha "assets/Corvene-$VERSION-x86_64.AppImage")" \
+            --arm64-linux "$(sha "assets/Corvene-$VERSION-aarch64.AppImage")"
           {
-            echo "## Corvane $VERSION"
+            echo "## Corvene $VERSION"
             echo
             echo '```'
             ls -l assets | tail -n +2
@@ -639,13 +639,13 @@ jobs:
             echo
             echo "## Homebrew cask"
             echo
-            echo "Copy the \`cask\` artifact's corvane.rb to wasi-master/homebrew-corvane after publishing the release."
+            echo "Copy the \`cask\` artifact's corvene.rb to wasi-master/homebrew-corvene after publishing the release."
             echo
             echo '```ruby'
-            sed -n '/^  version/,/x86_64_linux/p' packaging/homebrew/Casks/corvane.rb
+            sed -n '/^  version/,/x86_64_linux/p' packaging/homebrew/Casks/corvene.rb
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: cask
-          path: packaging/homebrew/Casks/corvane.rb
+          path: packaging/homebrew/Casks/corvene.rb

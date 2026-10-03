@@ -3,23 +3,23 @@
 #
 #   packaging/release.sh                 # release build → target/release-assets/
 #   FULL=1 packaging/release.sh          # the "full" variant (packs compiled in)
-#   SKIP_BUILD=1 packaging/release.sh    # reuse target/release/corvane
+#   SKIP_BUILD=1 packaging/release.sh    # reuse target/release/corvene
 #   ARCH=arm64 packaging/release.sh      # one architecture of a `--target` build (arm64 | x86_64 | universal)
-#   UPDATE_CASK=1 packaging/release.sh   # also stamp packaging/homebrew/Casks/corvane.rb (macOS half)
+#   UPDATE_CASK=1 packaging/release.sh   # also stamp packaging/homebrew/Casks/corvene.rb (macOS half)
 #   WITH_PACKS=1 packaging/release.sh    # also the pack archives (packs.sh) → target/release-assets/packs/
 #   ALLOW_ADHOC=1 packaging/release.sh   # without the code-signing certificate (testing)
 #
-# Output: Corvane[-Full]-<version>-macos-<universal|arch>.zip (+ .dmg) and the
+# Output: Corvene[-Full]-<version>-macos-<universal|arch>.zip (+ .dmg) and the
 # cask's sha256 on stdout. Creates no git tags or remotes.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/target/release-assets"
 VERSION="$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/')"
-VARIANT="Corvane"
+VARIANT="Corvene"
 FEATURES=()
 if [[ "${FULL:-0}" == "1" ]]; then
-  VARIANT="Corvane-Full"
+  VARIANT="Corvene-Full"
   FEATURES=(--features full)
 fi
 
@@ -32,7 +32,7 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   echo "building $VARIANT $VERSION (release)…"
   # --no-default-features: precompiled Metal shaders (needs Xcode), not the
   # development builds' runtime compilation
-  (cd "$ROOT" && cargo build --release -p corvane --no-default-features "${FEATURES[@]}")
+  (cd "$ROOT" && cargo build --release -p corvene --no-default-features "${FEATURES[@]}")
 fi
 
 # a universal binary when both per-target builds exist (CI: two `cargo build
@@ -40,9 +40,9 @@ fi
 # the per-target builds (or insists on the universal one) instead
 ARCH_TAG="$(uname -m)"
 [[ "$ARCH_TAG" == "arm64" ]] && ARCH_TAG="arm64" || ARCH_TAG="x86_64"
-BIN="$ROOT/target/release/corvane"
-ARM_BIN="$ROOT/target/aarch64-apple-darwin/release/corvane"
-INTEL_BIN="$ROOT/target/x86_64-apple-darwin/release/corvane"
+BIN="$ROOT/target/release/corvene"
+ARM_BIN="$ROOT/target/aarch64-apple-darwin/release/corvene"
+INTEL_BIN="$ROOT/target/x86_64-apple-darwin/release/corvene"
 case "${ARCH:-}" in
   arm64 | x86_64)
     mkdir -p "$ROOT/target/release"
@@ -66,11 +66,11 @@ esac
 [[ -x "$BIN" ]] || { echo "no release binary at $BIN" >&2; exit 1; }
 
 "$ROOT/packaging/bundle.sh" release
-APP="$ROOT/target/bundle/Corvane.app"
+APP="$ROOT/target/bundle/Corvene.app"
 # An ad-hoc release has a new designated requirement, so every install would
 # ask for its Keychain items again (packaging/signing-cert.sh)
-if ! codesign -dvv "$APP" 2>&1 | grep -q '^Authority=Corvane Self-Signed$' && [[ "${ALLOW_ADHOC:-0}" != "1" ]]; then
-  echo "Corvane.app is not signed with \"Corvane Self-Signed\": run packaging/signing-cert.sh import <p12>, or ALLOW_ADHOC=1" >&2
+if ! codesign -dvv "$APP" 2>&1 | grep -q '^Authority=Corvene Self-Signed$' && [[ "${ALLOW_ADHOC:-0}" != "1" ]]; then
+  echo "Corvene.app is not signed with \"Corvene Self-Signed\": run packaging/signing-cert.sh import <p12>, or ALLOW_ADHOC=1" >&2
   exit 1
 fi
 mkdir -p "$OUT"
@@ -81,7 +81,7 @@ ZIP="$OUT/$BASE.zip"
 DMG="$OUT/$BASE.dmg"
 rm -f "$ZIP" "$DMG"
 (cd "$(dirname "$APP")" && ditto -c -k --sequesterRsrc --keepParent "$(basename "$APP")" "$ZIP")
-hdiutil create -quiet -volname Corvane -srcfolder "$APP" -ov -format UDZO "$DMG"
+hdiutil create -quiet -volname Corvene -srcfolder "$APP" -ov -format UDZO "$DMG"
 echo "zip: $ZIP ($(stat -f%z "$ZIP") bytes)"
 echo "dmg: $DMG"
 

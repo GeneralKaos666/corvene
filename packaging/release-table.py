@@ -8,7 +8,7 @@ with a `## Downloads` section: platforms as rows, architectures as columns,
 every asset a short link in its cell (`.dmg`, `.deb`, `foss`, …). A section
 this script wrote earlier is replaced, the rest of the body is kept. The
 section goes last and under a heading, so the Release Notes dialog
-(`corvane_core::release_notes`) does not read it as notes.
+(`corvene_core::release_notes`) does not read it as notes.
 """
 
 import argparse
@@ -35,7 +35,7 @@ def classify(name):
     """(row, column, label) of an asset, or None for one the table leaves out."""
     lower = name.lower()
     extension = re.search(r"\.(dmg|zip|exe|msi|appimage|deb|rpm|apk)$", lower)
-    if not extension or not lower.startswith("corvane"):
+    if not extension or not lower.startswith("corvene"):
         return None
     extension = extension.group(1)
     if extension == "apk" or "android" in lower:
@@ -56,12 +56,12 @@ def classify(name):
     if column is None:
         return None
     if row == "Android":
-        # the flavour: Corvane-<v>-android-<flavour>[-<arch>].apk
+        # the flavour: Corvene-<v>-android-<flavour>[-<arch>].apk
         flavour = re.search(r"android-([a-z]+)[-.]", lower)
         label = flavour.group(1) if flavour else ".apk"
     else:
         label = ".AppImage" if extension == "appimage" else f".{extension}"
-    if lower.startswith("corvane-full"):
+    if lower.startswith("corvene-full"):
         label = f"Full {label}"
     return row, column, label
 

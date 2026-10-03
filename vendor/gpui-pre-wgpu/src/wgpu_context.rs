@@ -113,7 +113,7 @@ impl raw_window_handle::HasDisplayHandle for WebDisplaySource {
     }
 }
 
-/// Corvane patch: how long the last `present` blocked, in nanoseconds. On
+/// Corvene patch: how long the last `present` blocked, in nanoseconds. On
 /// Android the buffer queue holds a frame back until the GPU finished the
 /// one before, so this is the GPU's share of a frame; the platform reports
 /// it to the system's performance hints.
@@ -121,7 +121,7 @@ impl raw_window_handle::HasDisplayHandle for WebDisplaySource {
 pub static ANDROID_LAST_PRESENT_NANOS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-/// Corvane patch: makes [`WgpuContext::instance`] offer OpenGL ES only.
+/// Corvene patch: makes [`WgpuContext::instance`] offer OpenGL ES only.
 #[cfg(target_os = "android")]
 pub static ANDROID_GL_ONLY: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -454,7 +454,7 @@ impl WgpuContext {
 
     #[cfg(not(target_family = "wasm"))]
     pub fn instance(display: Option<Box<dyn wgpu::wgt::WgpuHasDisplayHandle>>) -> wgpu::Instance {
-        // Corvane patch: the Android platform retries with OpenGL ES alone
+        // Corvene patch: the Android platform retries with OpenGL ES alone
         // when a Vulkan driver loses its device at start-up (the emulator's)
         #[cfg(target_os = "android")]
         let backends = if ANDROID_GL_ONLY.load(std::sync::atomic::Ordering::Relaxed) {

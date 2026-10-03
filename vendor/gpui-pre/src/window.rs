@@ -755,7 +755,7 @@ pub struct HitboxId(u64);
 static HOVER_PERSISTS_WHILE_TYPING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// Corvane patch: whether hover styles and tooltips survive key presses for
+/// Corvene patch: whether hover styles and tooltips survive key presses for
 /// the elements the pointer hovered before (Chromium's `:hover`), instead of
 /// every hitbox counting as unhovered in keyboard modality.
 pub fn set_hover_persists_while_typing(persists: bool) {
@@ -789,7 +789,7 @@ impl HitboxId {
         if window.captured_hitbox == Some(self) {
             return true;
         }
-        // Corvane patch: like Chromium's `:hover`, hover follows pointer
+        // Corvene patch: like Chromium's `:hover`, hover follows pointer
         // input only: an element hovered at the last pointer event stays
         // hovered (also while typing), and one that appears under the resting
         // pointer isn't hovered until the pointer moves
@@ -1005,7 +1005,7 @@ pub(crate) struct Frame {
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
     pub(crate) hitboxes: Vec<Hitbox>,
-    /// Corvane patch: the element path that inserted each hitbox (only
+    /// Corvene patch: the element path that inserted each hitbox (only
     /// recorded while hover persists through typing).
     pub(crate) hitbox_owners: FxHashMap<HitboxId, Arc<[ElementId]>>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
@@ -1191,7 +1191,7 @@ pub struct Window {
     sprite_atlas: Arc<dyn PlatformAtlas>,
     text_system: Arc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
-    /// Corvane patch: the mode [`Window::with_text_rendering_mode`] sets
+    /// Corvene patch: the mode [`Window::with_text_rendering_mode`] sets
     /// for the text painted inside it.
     text_rendering_override: Option<TextRenderingMode>,
     rem_size: Pixels,
@@ -1219,12 +1219,12 @@ pub struct Window {
     pub(crate) rendered_frame: Frame,
     pub(crate) next_frame: Frame,
     next_hitbox_id: HitboxId,
-    /// Corvane patch: where this frame's elements start before snapping to
+    /// Corvene patch: where this frame's elements start before snapping to
     /// device pixels, by their snapped origin in device pixels (Windows).
     unsnapped_origins: FxHashMap<(i32, i32), Bounds<Pixels>>,
-    /// Corvane patch: the element paths hovered at the last pointer input.
+    /// Corvene patch: the element paths hovered at the last pointer input.
     sticky_hover: Vec<Arc<[ElementId]>>,
-    /// Corvane patch: a wheel scroll moved content under the pointer;
+    /// Corvene patch: a wheel scroll moved content under the pointer;
     /// refresh `sticky_hover` after the next frame's hit test.
     sticky_hover_after_scroll: bool,
     pub(crate) next_tooltip_id: TooltipId,
@@ -3824,7 +3824,7 @@ impl Window {
                 self.with_rendered_view(deferred_draw.current_view, |window| {
                     window.with_content_mask(content_mask, |window| {
                         window.with_rem_size(Some(deferred_draw.rem_size), |window| {
-                            // Corvane patch: off macOS overlays (dialogs,
+                            // Corvene patch: off macOS overlays (dialogs,
                             // foldouts, popovers, tooltips) paint text in
                             // grayscale like Chromium in their composited
                             // layers
@@ -4777,7 +4777,7 @@ impl Window {
         Ok(())
     }
 
-    /// Corvane patch: paints the text inside `f` in `mode` instead of the
+    /// Corvene patch: paints the text inside `f` in `mode` instead of the
     /// app's (Chromium draws text in a composited layer without an opaque
     /// background, such as a virtualized list's, in grayscale).
     pub fn with_text_rendering_mode<R>(
@@ -5166,7 +5166,7 @@ impl Window {
     /// GPUI itself automatically in order to pass your element its `Bounds` automatically.
     ///
     /// This method should only be called as part of element drawing.
-    /// Corvane patch: remember which elements the pointer hovers, on pointer
+    /// Corvene patch: remember which elements the pointer hovers, on pointer
     /// events only (redraws and key presses leave the set as it was).
     fn update_sticky_hover(&mut self) {
         if !hover_persists_while_typing() {
@@ -5213,7 +5213,7 @@ impl Window {
         )
     }
 
-    /// Corvane patch: where the element laid out at `origin` this frame
+    /// Corvene patch: where the element laid out at `origin` this frame
     /// starts before snapping (Windows; `origin` itself elsewhere). A root
     /// nested in it is placed there, so that halves of a device pixel carry
     /// on into it as they do in Chromium.
@@ -5231,7 +5231,7 @@ impl Window {
             .map_or(origin, |bounds| bounds.origin)
     }
 
-    /// Corvane patch: [`Self::unsnapped_origin`] with the element's size
+    /// Corvene patch: [`Self::unsnapped_origin`] with the element's size
     /// before snapping, when `bounds` are the ones it was laid out with.
     pub fn unsnapped_bounds(&self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
         if !cfg!(windows) {
@@ -5252,7 +5252,7 @@ impl Window {
         }
     }
 
-    /// Corvane patch: the element's size before layout snapped it to device
+    /// Corvene patch: the element's size before layout snapped it to device
     /// pixels.
     pub fn unsnapped_layout_size(&mut self, layout_id: LayoutId) -> Size<Pixels> {
         let scale_factor = self.scale_factor();
@@ -5267,7 +5267,7 @@ impl Window {
         )
     }
 
-    /// Corvane patch: the element's origin before layout snapped it to
+    /// Corvene patch: the element's origin before layout snapped it to
     /// device pixels (the element offset is applied as in `layout_bounds`).
     pub fn unsnapped_layout_origin(&mut self, layout_id: LayoutId) -> Point<Pixels> {
         let scale_factor = self.scale_factor();
@@ -5283,7 +5283,7 @@ impl Window {
         self.invalidator.debug_assert_prepaint();
 
         let scale_factor = self.scale_factor();
-        // Corvane patch: on Windows the edges are snapped where they fall in
+        // Corvene patch: on Windows the edges are snapped where they fall in
         // the window, element offset included, as Chromium snaps them (rows
         // of 43.5 device pixels in a list are 43 and 44 tall by turns and
         // leave no gaps)

@@ -144,7 +144,7 @@ impl CosmicTextSystem {
         }))
     }
 
-    /// Corvane patch: fontdb does not look for system fonts on Android, so
+    /// Corvene patch: fontdb does not look for system fonts on Android, so
     /// the platform points it at `/system/fonts`. The files are memory
     /// mapped when a face is first used.
     #[cfg(target_os = "android")]
@@ -465,7 +465,7 @@ impl CosmicTextSystemState {
                 "Segoe Fluent Icons",
             ];
 
-            // Corvane patch: an emoji font has no 'm' either, and removing
+            // Corvene patch: an emoji font has no 'm' either, and removing
             // its face would also take it out of emoji fallback
             if font.as_swash().charmap().map('m') == 0
                 && !allowed_bad_font_names.contains(&postscript_name.as_str())

@@ -11,16 +11,16 @@ val cargoVersion: String = Regex("""(?m)^version = "([^"]+)"""")
     .groupValues[1]
 
 // -Pabis=arm64-v8a packages one ABI's libraries (build.sh PER_ABI=1); a
-// package has every ABI Corvane builds otherwise
+// package has every ABI Corvene builds otherwise
 val packagedAbis: List<String> =
     (findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
 android {
-    namespace = "com.wasimaster.corvane"
+    namespace = "com.wasimaster.corvene"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.wasimaster.corvane"
+        applicationId = "com.wasimaster.corvene"
         // Android 8: Vulkan 1.0 and the APIs the platform layer uses
         minSdk = 26
         targetSdk = 35
@@ -36,7 +36,7 @@ android {
         buildConfig = true
     }
 
-    // Two ways Corvane is distributed, from the same native library:
+    // Two ways Corvene is distributed, from the same native library:
     //
     // foss: GitHub Releases and F-Droid. May ask for "All files access" to
     //   open repositories on shared storage in place (src/foss declares the
@@ -61,14 +61,14 @@ android {
     // The release key stays outside the repository: a keystore file and its
     // passwords from the environment (the CI secrets). Without them the
     // release package is left unsigned, to be signed with apksigner.
-    val keystore = System.getenv("CORVANE_ANDROID_KEYSTORE")
+    val keystore = System.getenv("CORVENE_ANDROID_KEYSTORE")
     signingConfigs {
         if (keystore != null) {
             create("release") {
                 storeFile = file(keystore)
-                storePassword = System.getenv("CORVANE_ANDROID_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("CORVANE_ANDROID_KEY_ALIAS")
-                keyPassword = System.getenv("CORVANE_ANDROID_KEY_PASSWORD")
+                storePassword = System.getenv("CORVENE_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("CORVENE_ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("CORVENE_ANDROID_KEY_PASSWORD")
             }
         }
     }
@@ -105,7 +105,7 @@ android {
 }
 
 dependencies {
-    // the periodic background fetch (CorvaneFetchWorker)
+    // the periodic background fetch (CorveneFetchWorker)
     implementation("androidx.work:work-runtime:2.10.0")
     // Play Feature Delivery: the on-demand grammar module (GrammarModule).
     // Only the play flavour links it; foss stays free of Google libraries.

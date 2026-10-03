@@ -1,0 +1,15 @@
+[package]
+name = "corvene-packs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene on-demand component packs"
+
+[dependencies]
+corvene-platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+tracing.workspace = true
+ureq.workspace = true

@@ -1,8 +1,8 @@
 # CodeMirror oracle
 
 GitHub Desktop colours diffs with CodeMirror 5 modes run by its highlighter
-worker (`app/src/highlighter/index.ts`). Corvane ports those modes to Rust
-(`crates/corvane-highlight/src/cm`) and proves each port against GHD's own
+worker (`app/src/highlighter/index.ts`). Corvene ports those modes to Rust
+(`crates/corvene-highlight/src/cm`) and proves each port against GHD's own
 JavaScript: this directory runs the original modes in Node on sample files
 and records the tokens, and `tests/cm_golden.rs` requires the Rust port to
 produce exactly the same tokens (boundaries and styles, `m-<mode>` class
@@ -11,7 +11,7 @@ included).
 ```bash
 python3 tools/cm-oracle/extract.py           # CodeMirror + modes from the installed GHD → target/cm-oracle
 python3 tools/cm-oracle/gen.py [sample…]      # samples/* → expected/*.tokens (needs node)
-cargo test -p corvane-highlight --test cm_golden
+cargo test -p corvene-highlight --test cm_golden
 ```
 
 Nothing from GHD is committed; `extract.py` rebuilds the JavaScript from the
@@ -22,20 +22,20 @@ port from end up in `target/cm-oracle/node_modules/codemirror/mode/<name>/<name>
 ## Porting a mode
 
 1. Read the JS mode and every mode it `require`s / `CodeMirror.getMode`s.
-2. Write `crates/corvane-highlight/src/cm/modes/<name>.rs`: a type that
+2. Write `crates/corvene-highlight/src/cm/modes/<name>.rs`: a type that
    implements `cm::Mode` (or a `cm::simple::SimpleMode` table for
    `defineSimpleMode` modes). Port line by line; keep the JS function names
    in comments so the two can be compared. Register it: `pub mod <name>;` and
    its MIME types in `modes::mode_for_mime` (with the MIME's option object,
    e.g. `text/typescript` → javascript with `typescript: true`).
-3. Add `crates/corvane-highlight/tests/cm/samples/<name>.<ext>` (and more
+3. Add `crates/corvene-highlight/tests/cm/samples/<name>.<ext>` (and more
    files for other MIME variants): realistic code that exercises every
    branch of the mode - strings of every kind, comments (line + multi-line
    state carried across lines), numbers, keywords, definitions, operators,
    nested constructs, unterminated constructs at end of line, blank lines,
    tabs, non-ASCII text. Several hundred tokens per sample.
 4. `python3 tools/cm-oracle/gen.py <sample>` then
-   `cargo test -p corvane-highlight --test cm_golden` until it passes.
+   `cargo test -p corvene-highlight --test cm_golden` until it passes.
 
 ### JS → Rust translation notes
 

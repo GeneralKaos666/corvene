@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The launcher icon's foreground layer: Corvane's branch glyph.
+<!-- The launcher icon's foreground layer: Corvene's branch glyph.
      Drawn on the 108 dp adaptive icon canvas; the glyph stays inside the
      66 dp safe zone, so every launcher mask (circle, squircle, rounded
-     square) shows it whole. Source: assets/icon/Corvane.svg. -->
+     square) shows it whole. Source: assets/icon/Corvene.svg. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"

@@ -4,7 +4,7 @@ setup: repo
 steps:
   - fixture: move
   - ghd: {eval: "require('electron').ipcRenderer.emit('focus', {})"}
-    corvane: {hook: {name: refresh}}
+    corvene: {hook: {name: refresh}}
     wait: 1500
   - dump: {name: missing, root: "#missing-repository-view"}
   - snap: {name: missing, mask: [[403, 403, 561, 42]], note: "the last-seen path differs by one glyph per app (n / u); GPUI wraps it at a slash where Chromium also breaks after a hyphen"}

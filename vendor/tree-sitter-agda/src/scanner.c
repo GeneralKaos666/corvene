@@ -37,7 +37,7 @@
 
 #define VEC_CLEAR(vec) (vec).len = 0;
 
-// Corvane patch: the queue is a ring (`index % cap`), so growing it has to
+// Corvene patch: the queue is a ring (`index % cap`), so growing it has to
 // move its elements to where the new capacity puts them. Upstream only
 // reallocated, after which the front could be read from memory nothing was
 // ever written to.
@@ -258,7 +258,7 @@ void tree_sitter_agda_external_scanner_deserialize(void *payload,
     scanner->queued_dedent_count = 0;
     VEC_CLEAR(scanner->indents);
 
-    // Corvane patch: an empty state always starts at column 0. Upstream only
+    // Corvene patch: an empty state always starts at column 0. Upstream only
     // did this for a NULL buffer and otherwise left `indents` empty, after
     // which `VEC_BACK` reads before the array (zero by luck with some
     // allocators, garbage with Windows's).

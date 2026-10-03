@@ -787,7 +787,7 @@ pub struct Background {
 }
 
 impl Background {
-    /// Corvane patch: whether this is one fully opaque colour, which hides
+    /// Corvene patch: whether this is one fully opaque colour, which hides
     /// whatever was painted under it (the wgpu renderer leaves out quads
     /// that such a quad covers).
     pub fn is_opaque_solid(&self) -> bool {

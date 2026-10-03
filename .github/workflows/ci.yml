@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       bundle:
-        description: Also build and upload a signed Corvane.app
+        description: Also build and upload a signed Corvene.app
         type: boolean
         default: true
 
@@ -68,7 +68,7 @@ jobs:
           # on main still saves what it compiled
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
-      # grammars built from source (crates/corvane-grammars/build.rs); the
+      # grammars built from source (crates/corvene-grammars/build.rs); the
       # tree-sitter tests need all of them
       - uses: ./.github/actions/grammar-sources
       - name: clippy
@@ -79,7 +79,7 @@ jobs:
 
       - name: build (release, precompiled Metal shaders)
         if: inputs.bundle
-        run: cargo build --release --no-default-features -p corvane
+        run: cargo build --release --no-default-features -p corvene
       - name: code-signing certificate
         if: inputs.bundle
         env:
@@ -93,14 +93,14 @@ jobs:
         run: |
           export DEVELOPER_DIR="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)/Contents/Developer"
           packaging/bundle.sh release
-          test -f target/bundle/Corvane.app/Contents/Resources/Assets.car
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' target/bundle/Corvane.app/Contents/Info.plist
-          ditto -c -k --keepParent target/bundle/Corvane.app target/bundle/Corvane.app.zip
+          test -f target/bundle/Corvene.app/Contents/Resources/Assets.car
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' target/bundle/Corvene.app/Contents/Info.plist
+          ditto -c -k --keepParent target/bundle/Corvene.app target/bundle/Corvene.app.zip
       - uses: actions/upload-artifact@v4
         if: inputs.bundle
         with:
-          name: Corvane.app
-          path: target/bundle/Corvane.app.zip
+          name: Corvene.app
+          path: target/bundle/Corvene.app.zip
 
   linux:
     name: clippy · test (Linux)
@@ -140,12 +140,12 @@ jobs:
       # integration tests
       - name: package smoke test (.deb)
         run: |
-          cargo build -p corvane
-          PACKAGE_BIN=target/debug/corvane packaging/linux/package.sh
-          deb="$(ls target/linux/corvane_*_amd64.deb)"
+          cargo build -p corvene
+          PACKAGE_BIN=target/debug/corvene packaging/linux/package.sh
+          deb="$(ls target/linux/corvene_*_amd64.deb)"
           dpkg-deb --info "$deb"
-          dpkg-deb --contents "$deb" | grep -E 'usr/lib/corvane/corvane$|usr/lib/corvane/bin/corvane$|usr/bin/corvane -> |applications/com.wasimaster.corvane.desktop$'
-          CORVANE_CLI_DRY_RUN=1 packaging/linux/corvane.sh open . | grep -q '^x-corvane://openLocalRepo/'
+          dpkg-deb --contents "$deb" | grep -E 'usr/lib/corvene/corvene$|usr/lib/corvene/bin/corvene$|usr/bin/corvene -> |applications/com.wasimaster.corvene.desktop$'
+          CORVENE_CLI_DRY_RUN=1 packaging/linux/corvene.sh open . | grep -q '^x-corvene://openLocalRepo/'
 
 
   # MSVC; GPUI's DirectX backend needs nothing installed. Git for Windows on
@@ -175,15 +175,15 @@ jobs:
       - name: package smoke test (installer)
         shell: pwsh
         run: |
-          cargo build -p corvane
+          cargo build -p corvene
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --no-progress -y
           }
-          $env:PACKAGE_BIN = "target\debug\corvane.exe"
+          $env:PACKAGE_BIN = "target\debug\corvene.exe"
           packaging\windows\package.ps1
-          if (-not (Get-ChildItem target\windows\Corvane-*-x86_64-setup.exe)) { throw "no installer" }
-          $help = cmd /c packaging\windows\corvane.bat --help
-          if (-not ($help -match "Corvane CLI usage")) { throw "the command line tool printed no usage" }
+          if (-not (Get-ChildItem target\windows\Corvene-*-x86_64-setup.exe)) { throw "no installer" }
+          $help = cmd /c packaging\windows\corvene.bat --help
+          if (-not ($help -match "Corvene CLI usage")) { throw "the command line tool printed no usage" }
 
   # Both Android packages (foss and play) from one native library, on a
   # Linux runner: cargo-ndk cross-compiles, Gradle packages. One ABI is
@@ -230,7 +230,7 @@ jobs:
       # rustc reports this lint for thread locals only on Android targets
       - name: clippy
         run: >
-          cargo ndk -t arm64-v8a -P 26 clippy -p corvane --lib --
+          cargo ndk -t arm64-v8a -P 26 clippy -p corvene --lib --
           -D warnings -A clippy::missing_const_for_thread_local
       - name: package (foss and play)
         run: packaging/android/build.sh debug
@@ -240,7 +240,7 @@ jobs:
         run: |
           UNITS=json packaging/android/grammars.sh
           cd packaging/android && ./gradlew --no-daemon :app:bundlePlayDebug
-          unzip -l app/build/outputs/bundle/playDebug/app-play-debug.aab | grep -q 'grammars/lib/arm64-v8a/libcorvane_ts_index.so'
+          unzip -l app/build/outputs/bundle/playDebug/app-play-debug.aab | grep -q 'grammars/lib/arm64-v8a/libcorvene_ts_index.so'
       - name: the play package asks for no all files access
         run: |
           aapt="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)"
@@ -248,6 +248,6 @@ jobs:
           ! "$aapt" dump permissions packaging/android/app/build/outputs/apk/play/debug/app-play-debug.apk | grep -q MANAGE_EXTERNAL_STORAGE
       - uses: actions/upload-artifact@v4
         with:
-          name: corvane-android-debug
+          name: corvene-android-debug
           path: packaging/android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error

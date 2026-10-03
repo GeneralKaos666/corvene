@@ -1,7 +1,7 @@
 name: Homebrew cask
 
 # Run by hand (Actions → Homebrew cask → Run workflow) after the tap
-# (wasi-master/homebrew-corvane) has a new cask: installs it with Homebrew on
+# (wasi-master/homebrew-corvene) has a new cask: installs it with Homebrew on
 # Linux, checks what `app_image` put in place and uninstalls it again.
 
 on:
@@ -37,20 +37,20 @@ jobs:
         run: |
           brew update
           brew --version
-          brew install --cask wasi-master/corvane/corvane
+          brew install --cask wasi-master/corvene/corvene
       - name: check the installed image
         run: |
-          image="$HOME/Applications/Corvane.AppImage"
+          image="$HOME/Applications/Corvene.AppImage"
           ls -l "$image"
           test -x "$image"
           # what the updater looks for (`is_homebrew_appimage`)
-          test -d "$(brew --prefix)/Caskroom/corvane"
+          test -d "$(brew --prefix)/Caskroom/corvene"
           # the image is this machine's and holds the app (no FUSE on the runner)
           cd "$RUNNER_TEMP"
           "$image" --appimage-extract > /dev/null
-          file squashfs-root/usr/lib/corvane/corvane | tee /dev/stderr | grep -q "${{ matrix.arch == 'aarch64' && 'aarch64' || 'x86-64' }}"
-          test -f squashfs-root/usr/share/icons/hicolor/256x256/apps/com.wasimaster.corvane.png
+          file squashfs-root/usr/lib/corvene/corvene | tee /dev/stderr | grep -q "${{ matrix.arch == 'aarch64' && 'aarch64' || 'x86-64' }}"
+          test -f squashfs-root/usr/share/icons/hicolor/256x256/apps/com.wasimaster.corvene.png
       - name: uninstall
         run: |
-          brew uninstall --cask --zap corvane
-          test ! -e "$HOME/Applications/Corvane.AppImage"
+          brew uninstall --cask --zap corvene
+          test ! -e "$HOME/Applications/Corvene.AppImage"

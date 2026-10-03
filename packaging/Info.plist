@@ -5,17 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Corvane</string>
+    <string>Corvene</string>
     <key>CFBundleExecutable</key>
-    <string>corvane</string>
+    <string>corvene</string>
     <key>CFBundleIconFile</key>
-    <string>Corvane</string>
+    <string>Corvene</string>
     <key>CFBundleIdentifier</key>
-    <string>com.wasimaster.corvane</string>
+    <string>com.wasimaster.corvene</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Corvane</string>
+    <string>Corvene</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -36,18 +36,18 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.wasimaster.corvane.auth</string>
+            <string>com.wasimaster.corvene.auth</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>x-corvane-auth</string>
+                <string>x-corvene-auth</string>
             </array>
         </dict>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.wasimaster.corvane.open</string>
+            <string>com.wasimaster.corvene.open</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>x-corvane</string>
+                <string>x-corvene</string>
             </array>
         </dict>
     </array>
@@ -57,12 +57,12 @@
             <key>NSMenuItem</key>
             <dict>
                 <key>default</key>
-                <string>Open in Corvane</string>
+                <string>Open in Corvene</string>
             </dict>
             <key>NSMessage</key>
-            <string>openInCorvane</string>
+            <string>openInCorvene</string>
             <key>NSPortName</key>
-            <string>Corvane</string>
+            <string>Corvene</string>
             <key>NSRequiredContext</key>
             <dict/>
             <key>NSSendFileTypes</key>

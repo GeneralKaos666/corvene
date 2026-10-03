@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Corvane's Android package: the bundled git (git/build.sh), the Rust
+# Build Corvene's Android package: the bundled git (git/build.sh), the Rust
 # library with cargo-ndk, then the APK with Gradle.
 #
 #   packaging/android/build.sh [debug|profiling|release] [foss|play]
@@ -10,8 +10,8 @@
 # debuggable, so simpleperf and run-as work) or release.
 #
 # Without a flavour both packages are built (app/build.gradle.kts). A release
-# is signed when CORVANE_ANDROID_KEYSTORE, CORVANE_ANDROID_KEYSTORE_PASSWORD,
-# CORVANE_ANDROID_KEY_ALIAS and CORVANE_ANDROID_KEY_PASSWORD are set.
+# is signed when CORVENE_ANDROID_KEYSTORE, CORVENE_ANDROID_KEYSTORE_PASSWORD,
+# CORVENE_ANDROID_KEY_ALIAS and CORVENE_ANDROID_KEY_PASSWORD are set.
 #
 # Needs the Android SDK and NDK (ANDROID_HOME, ANDROID_NDK_HOME), a JDK 17+
 # (JAVA_HOME), `cargo install cargo-ndk`, the Rust targets of the ABIS, and
@@ -48,13 +48,13 @@ for abi in $ABIS; do
 done
 [ -z "$missing" ] || packaging/android/git/build.sh $missing
 
-# `--lib`: the activity loads libcorvane.so; Android has no use for the binary.
+# `--lib`: the activity loads libcorvene.so; Android has no use for the binary.
 # API 26 is the minimum the manifest declares.
-cargo ndk "${targets[@]}" -P 26 -o "$JNI_LIBS" build -p corvane --lib $profile_flag
+cargo ndk "${targets[@]}" -P 26 -o "$JNI_LIBS" build -p corvene --lib $profile_flag
 
-# git's askpass helper (crates/corvane-askpass), an executable packaged like
+# git's askpass helper (crates/corvene-askpass), an executable packaged like
 # the bundled git's
-cargo ndk "${targets[@]}" -P 26 build -p corvane-askpass $profile_flag
+cargo ndk "${targets[@]}" -P 26 build -p corvene-askpass $profile_flag
 for abi in $ABIS; do
   case "$abi" in
     arm64-v8a) triple=aarch64-linux-android ;;
@@ -62,16 +62,16 @@ for abi in $ABIS; do
     x86_64) triple=x86_64-linux-android ;;
     x86) triple=i686-linux-android ;;
   esac
-  cp "target/$triple/$PROFILE/corvane-askpass" "$JNI_LIBS/$abi/libcorvane-askpass.so"
+  cp "target/$triple/$PROFILE/corvene-askpass" "$JNI_LIBS/$abi/libcorvene-askpass.so"
 done
 
 # A debug library carries a gigabyte of debug info; the package keeps the
 # symbol table (backtraces) only.
 STRIP="$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -name llvm-strip | head -1)"
 for abi in $ABIS; do
-  "$STRIP" --strip-debug "$JNI_LIBS/$abi/libcorvane.so"
-  "$STRIP" "$JNI_LIBS/$abi/libcorvane-askpass.so"
-  # cargo-ndk also copies the cdylib of a dependency that libcorvane.so
+  "$STRIP" --strip-debug "$JNI_LIBS/$abi/libcorvene.so"
+  "$STRIP" "$JNI_LIBS/$abi/libcorvene-askpass.so"
+  # cargo-ndk also copies the cdylib of a dependency that libcorvene.so
   # already links statically
   rm -f "$JNI_LIBS/$abi"/libandroid_native_keyring_store-*.so
 done

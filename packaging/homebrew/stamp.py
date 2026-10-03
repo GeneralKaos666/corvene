@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rewrite `version` and `sha256` values in the cask (Casks/corvane.rb).
+"""Rewrite `version` and `sha256` values in the cask (Casks/corvene.rb).
 
     stamp.py [--version V] [--macos SHA] [--x86_64-linux SHA] [--arm64-linux SHA]
 
@@ -14,7 +14,7 @@ import re
 import sys
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-parser.add_argument("--cask", default=pathlib.Path(__file__).parent / "Casks/corvane.rb")
+parser.add_argument("--cask", default=pathlib.Path(__file__).parent / "Casks/corvene.rb")
 parser.add_argument("--version")
 parser.add_argument("--macos")
 parser.add_argument("--x86_64-linux")

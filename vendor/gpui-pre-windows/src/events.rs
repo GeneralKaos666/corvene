@@ -93,7 +93,7 @@ impl WindowsWindowInner {
             // whichever window was active before the click. If that handler consumes the
             // press, `DefWindowProc` never sees it, so the window is never activated at all.
             // So, let's eagerly activate the window.
-            // Corvane patch: a click on an anchored popup (a menu) leaves its
+            // Corvene patch: a click on an anchored popup (a menu) leaves its
             // parent the active window.
             WM_MOUSEACTIVATE => {
                 let style = unsafe { get_window_long(handle, GWL_EXSTYLE) } as u32;

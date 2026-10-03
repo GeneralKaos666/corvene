@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Latency benchmarks for the actions people use most.
 
-Drives a Corvane build (`--features snapshots`) over `CORVANE_CONTROL` with the
+Drives a Corvene build (`--features snapshots`) over `CORVENE_CONTROL` with the
 same input the parity harness sends and times, inside the app, how long each
 action takes until the state it asks for is there (`bench` command in
-`crates/corvane/src/parity_control.rs`) plus the frame that shows it.
+`crates/corvene/src/parity_control.rs`) plus the frame that shows it.
 
-    cargo build --profile profiling -p corvane --features snapshots
+    cargo build --profile profiling -p corvene --features snapshots
     python3 tools/perf/fixture.py big target/perf/big
-    python3 tools/perf/bench.py [--binary target/profiling/corvane] [--repo target/perf/big] [--runs 5] [case…]
+    python3 tools/perf/bench.py [--binary target/profiling/corvene] [--repo target/perf/big] [--runs 5] [case…]
 
 Prints a table (median / p90 / max of total ms per case) and writes
-`target/perf/latest.json`. `CORVANE_FLAGS` passes through (compare presets
-or experimental flags: `CORVANE_FLAGS=preset=github-desktop`).
+`target/perf/latest.json`. `CORVENE_FLAGS` passes through (compare presets
+or experimental flags: `CORVENE_FLAGS=preset=github-desktop`).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "parity"))
-from drivers import Corvane  # noqa: E402
+from drivers import Corvene  # noqa: E402
 
 W, H = 1367, 814
 # GHD layout at 1367×814 (points): tabs, the Changes list's first row
@@ -54,13 +54,13 @@ class Bench:
     def __init__(self, binary: Path, repo: Path, runs: int, extra_env: dict):
         self.binary, self.repo, self.runs, self.extra_env = binary, repo, runs, extra_env
         self.results: dict[str, list[dict]] = {}
-        self.data = Path(tempfile.mkdtemp(prefix="corvane-perf-"))
-        self.cv: Corvane | None = None
+        self.data = Path(tempfile.mkdtemp(prefix="corvene-perf-"))
+        self.cv: Corvene | None = None
 
     # -- app lifecycle ---------------------------------------------------
     def start(self) -> float:
         started = time.perf_counter()
-        self.cv = Corvane(self.binary, self.data, self.data / "corvane.log", "dark")
+        self.cv = Corvene(self.binary, self.data, self.data / "corvene.log", "dark")
         self.cv.start(timeout=60, extra_env=self.extra_env)
         return started
 
@@ -248,7 +248,7 @@ class Bench:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--binary", type=Path, default=ROOT / "target" / "profiling" / "corvane")
+    ap.add_argument("--binary", type=Path, default=ROOT / "target" / "profiling" / "corvene")
     ap.add_argument("--repo", type=Path, default=ROOT / "target" / "perf" / "big")
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--out", type=Path, default=ROOT / "target" / "perf" / "latest.json")
@@ -256,7 +256,7 @@ def main():
     ap.add_argument("cases", nargs="*")
     args = ap.parse_args()
     # the default preset unless asked (the parity driver pins github-desktop)
-    extra = {"CORVANE_FLAGS": os.environ.get("CORVANE_FLAGS", "")}
+    extra = {"CORVENE_FLAGS": os.environ.get("CORVENE_FLAGS", "")}
     b = Bench(args.binary.resolve(), args.repo.resolve(), args.runs, extra)
     try:
         b.setup()

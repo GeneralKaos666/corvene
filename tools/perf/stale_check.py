@@ -5,7 +5,7 @@ re-render) and a forced full re-render; a difference means a cached view
 missed an update. The parity harness cannot see this (its snaps re-render
 everything). A 3 px wide difference is the text caret blinking.
 
-    python3 tools/perf/stale_check.py [--binary target/profiling/corvane] [--repo target/perf/big]
+    python3 tools/perf/stale_check.py [--binary target/profiling/corvene] [--repo target/perf/big]
 """
 import argparse
 import sys
@@ -19,11 +19,11 @@ from bench import ROOT, Bench, row_y  # noqa: E402
 from PIL import Image, ImageChops  # noqa: E402
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--binary", type=Path, default=ROOT / "target" / "profiling" / "corvane")
+ap.add_argument("--binary", type=Path, default=ROOT / "target" / "profiling" / "corvene")
 ap.add_argument("--repo", type=Path, default=ROOT / "target" / "perf" / "big")
 args = ap.parse_args()
-S = tempfile.mkdtemp(prefix="corvane-stale-")
-b = Bench(args.binary.resolve(), args.repo.resolve(), 1, {"CORVANE_FLAGS": ""})
+S = tempfile.mkdtemp(prefix="corvene-stale-")
+b = Bench(args.binary.resolve(), args.repo.resolve(), 1, {"CORVENE_FLAGS": ""})
 b.setup(); b.bench([], "idle")
 cv = b.cv
 steps = [

@@ -1,0 +1,29 @@
+[package]
+name = "corvene-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene views, widgets and theme (GPUI)"
+
+[dependencies]
+gpui-kit.workspace = true
+corvene-core.workspace = true
+corvene-highlight.workspace = true
+corvene-packs.workspace = true
+corvene-git.workspace = true
+corvene-github.workspace = true
+corvene-platform.workspace = true
+tracing.workspace = true
+libc = "0.2"
+# fast content hashes for the diff token cache (whole files, every new diff)
+rustc-hash = "2"
+# `746-intra-line-graphemes`: intra-line ranges end on grapheme boundaries
+unicode-segmentation = "1"
+# image diffs: dimensions + the "Difference" blend (same major as GPUI's);
+# tga: decoded to PNG for `755-tga-image-diff`
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tga"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+cocoa = "0.26"
+raw-window-handle = "0.6"

@@ -15,5 +15,5 @@ Apache-2.0 build recipes):
 declares no `bzero` there, and an app may not create hard links (the
 `known_hosts` backup).
 
-`openssh-home.patch` is Corvane's: ssh takes the home directory from
+`openssh-home.patch` is Corvene's: ssh takes the home directory from
 `$HOME`.

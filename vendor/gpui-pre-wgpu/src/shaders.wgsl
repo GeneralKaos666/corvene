@@ -536,7 +536,7 @@ struct QuadVarying {
     @location(3) @interpolate(flat) background_solid: vec4<f32>,
     @location(4) @interpolate(flat) background_color0: vec4<f32>,
     @location(5) @interpolate(flat) background_color1: vec4<f32>,
-    // Corvane patch: the part of a solid quad that is its background and
+    // Corvene patch: the part of a solid quad that is its background and
     // nothing else (inside the borders and the rounded corners; all of a
     // quad that has neither), as min.xy and max.zw in device pixels. Decided
     // once per quad, so the fragment shader does not read the instance from
@@ -589,7 +589,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
 
-    // Corvane patch: see `QuadVarying.interior` (what the fast paths below
+    // Corvene patch: see `QuadVarying.interior` (what the fast paths below
     // return for these pixels, without the instance)
     if (all(input.position.xy >= input.interior.xy) &&
             all(input.position.xy <= input.interior.zw)) {

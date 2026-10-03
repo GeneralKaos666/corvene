@@ -1,4 +1,4 @@
-Corvane is a native Git client with the interface of GitHub Desktop, written in Rust. On Android it keeps the desktop layout for tablets, Chromebooks and desktop modes.
+Corvene is a native Git client with the interface of GitHub Desktop, written in Rust. On Android it keeps the desktop layout for tablets, Chromebooks and desktop modes.
 
 - Clone, commit, branch, merge, rebase, stash, cherry-pick, push and pull
 - Diffs with syntax highlighting, line and hunk selection

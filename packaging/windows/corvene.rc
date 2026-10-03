@@ -1,0 +1,36 @@
+// Resources of corvene.exe (crates/corvene/build.rs compiles this).
+// Icon 1 is the one GPUI gives the window and Explorer shows for the file;
+// the manifest comes from GPUI's own resource script.
+#define VS_VERSION_INFO 1
+#define VS_FFI_FILEFLAGSMASK 0x3FL
+#define VOS_NT_WINDOWS32 0x00040004L
+#define VFT_APP 0x00000001L
+
+1 ICON "corvene.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION CORVENE_VERSION_COMMAS
+PRODUCTVERSION CORVENE_VERSION_COMMAS
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "Wasi Master"
+            VALUE "FileDescription", "Corvene"
+            VALUE "FileVersion", CORVENE_VERSION
+            VALUE "InternalName", "corvene"
+            VALUE "OriginalFilename", "corvene.exe"
+            VALUE "ProductName", "Corvene"
+            VALUE "ProductVersion", CORVENE_VERSION
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04B0
+    END
+END

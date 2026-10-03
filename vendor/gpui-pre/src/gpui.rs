@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
-// Corvane: vendored (a path dependency, so cargo does not cap its lints)
+// Corvene: vendored (a path dependency, so cargo does not cap its lints)
 #![allow(warnings)]
 #![allow(clippy::type_complexity)] // Not useful, GPUI makes heavy use of callbacks
 #![allow(clippy::collapsible_else_if)] // False positives in platform specific code
@@ -168,7 +168,7 @@ pub use keymap::*;
 pub use path_builder::*;
 pub use platform::*;
 pub use profiler::*;
-// Corvane patch: the Android platform (vendor/gpui-pre-android) dispatches
+// Corvene patch: the Android platform (vendor/gpui-pre-android) dispatches
 // through the priority queue too
 #[cfg(any(
     target_os = "windows",

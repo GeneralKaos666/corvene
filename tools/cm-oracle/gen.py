@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate golden token files for crates/corvane-highlight/tests/cm.
+"""Regenerate golden token files for crates/corvene-highlight/tests/cm.
 
 Every `samples/<name>.<ext>` gets `expected/<name>.<ext>.tokens` with one
 `line start length style` row per token, as GitHub Desktop's highlighter
@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-TESTS = ROOT / "crates" / "corvane-highlight" / "tests" / "cm"
+TESTS = ROOT / "crates" / "corvene-highlight" / "tests" / "cm"
 ORACLE = ROOT / "target" / "cm-oracle"
 
 

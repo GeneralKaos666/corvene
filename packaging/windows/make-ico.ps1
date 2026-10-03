@@ -1,10 +1,10 @@
-# Writes packaging/windows/corvane.ico from assets/icon/Corvane-1024.png:
+# Writes packaging/windows/corvene.ico from assets/icon/Corvene-1024.png:
 # the sizes Windows asks for (16 to 256 px), each stored as a PNG.
 # Run again when the icon changes; the .ico is checked in.
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 $root = Resolve-Path "$PSScriptRoot\..\.."
-$source = [System.Drawing.Image]::FromFile("$root\assets\icon\Corvane-1024.png")
+$source = [System.Drawing.Image]::FromFile("$root\assets\icon\Corvene-1024.png")
 $sizes = 16, 20, 24, 32, 40, 48, 64, 256
 $images = foreach ($size in $sizes) {
     $bitmap = New-Object System.Drawing.Bitmap $size, $size
@@ -36,5 +36,5 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 }
 foreach ($image in $images) { $writer.Write($image) }
 $writer.Flush()
-[System.IO.File]::WriteAllBytes("$PSScriptRoot\corvane.ico", $out.ToArray())
-"wrote $PSScriptRoot\corvane.ico ($($out.Length) bytes)"
+[System.IO.File]::WriteAllBytes("$PSScriptRoot\corvene.ico", $out.ToArray())
+"wrote $PSScriptRoot\corvene.ico ($($out.Length) bytes)"

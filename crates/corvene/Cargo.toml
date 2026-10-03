@@ -1,0 +1,93 @@
+[package]
+name = "corvene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native GitHub Desktop clone"
+default-run = "corvene"
+
+[[bin]]
+name = "corvene"
+path = "src/main.rs"
+
+# Android: the NativeActivity loads `libcorvene.so`, which has `main.rs` as a
+# module (`android.rs`). Empty on every other platform.
+[lib]
+name = "corvene"
+path = "src/android.rs"
+crate-type = ["cdylib"]
+test = false
+doctest = false
+doc = false
+
+[features]
+# Compile Metal shaders at runtime so a full Xcode install is not required for
+# development builds. Release CI passes --no-default-features to precompile.
+default = ["runtime-shaders"]
+runtime-shaders = ["gpui-pre-apple/runtime_shaders"]
+# Offscreen window snapshots for visual checks without screen-recording rights:
+# `CORVENE_SNAPSHOT=<png> [CORVENE_SNAPSHOT_DELAY_MS=4000]` renders the window
+# after the delay, saves it and quits; `CORVENE_CONTROL=<port>` serves the parity
+# harness (tools/parity). Development only (pulls GPUI's test support).
+# The "full" build: every on-demand pack compiled in.
+full = ["corvene-highlight/bundled-tree-sitter"]
+snapshots = [
+    "dep:gpui-pre",
+    "dep:gpui-pre-macos",
+    "dep:image",
+    "dep:serde_json",
+    "gpui-pre/test-support",
+    "gpui-pre-macos/test-support",
+    "dep:gpui-pre-linux",
+    "gpui-pre-linux/test-support",
+    "dep:gpui-pre-windows",
+    "gpui-pre-windows/test-support",
+]
+
+[dependencies]
+libc = "0.2"
+gpui-kit.workspace = true
+gpui-pre = { version = "=0.3.7", optional = true }
+serde_json = { workspace = true, optional = true }
+image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+corvene-core.workspace = true
+corvene-github.workspace = true
+corvene-highlight.workspace = true
+corvene-platform.workspace = true
+corvene-store.workspace = true
+corvene-ui.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+rust-embed.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+gpui-pre-apple = { workspace = true, optional = true }
+gpui-pre-macos = { version = "=0.3.7", optional = true }
+
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
+# `snapshots`: offscreen frames (`render_to_image`) on Linux
+gpui-pre-linux = { version = "=0.3.7", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# `snapshots`: offscreen frames (`render_to_image`) on Windows
+gpui-pre-windows = { version = "=0.3.7", optional = true }
+dunce = "1"
+
+# the executable's icon and version information (build.rs)
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# the Android platform layer for the pinned GPUI (gpui-mobile's src/android)
+gpui-pre-android = { path = "../../vendor/gpui-pre-android" }
+# calls into packaging/android's CorveneActivity
+jni = "0.22"
+ndk-context = "0.1"
+# the assets are compiled in even in debug builds: the device has no
+# checkout to read them from
+rust-embed = { workspace = true, features = ["debug-embed"] }

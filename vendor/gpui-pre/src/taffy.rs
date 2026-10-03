@@ -342,14 +342,14 @@ impl TaffyLayoutEngine {
     // snapped independently, but the raw content-box origin can carry a
     // 1dp residual into descendants.
 
-    /// Corvane patch: the node's border-box origin before pixel snapping.
+    /// Corvene patch: the node's border-box origin before pixel snapping.
     pub fn unrounded_origin(&mut self, id: LayoutId, scale_factor: f32) -> Point<Pixels> {
         self.layout_bounds(id, scale_factor);
         let origin = self.absolute_outer_origins[&id];
         Point::new(Pixels(origin.x / scale_factor), Pixels(origin.y / scale_factor))
     }
 
-    /// Corvane patch: the node's border box before pixel snapping, in
+    /// Corvene patch: the node's border box before pixel snapping, in
     /// device pixels.
     pub fn unrounded_bounds(&mut self, id: LayoutId, scale_factor: f32) -> Bounds<f32> {
         self.layout_bounds(id, scale_factor);
@@ -384,7 +384,7 @@ impl TaffyLayoutEngine {
             .insert(id, absolute_outer_origin);
 
         let absolute_far = absolute_outer_origin + Point::from(Size::from(layout_size));
-        // Corvane patch: off macOS edges snap like Chromium's pixel snapping
+        // Corvene patch: off macOS edges snap like Chromium's pixel snapping
         // (`LayoutUnit::Round`, halves up), so a box at y = 172.5 lands on
         // 173 as in Electron
         let snap = |v: f32| {
@@ -436,7 +436,7 @@ impl From<LayoutId> for NodeId {
 }
 
 fn snap_measured_size_to_device_pixels(size: Size<Pixels>, scale_factor: f32) -> Size<f32> {
-    // Corvane patch: on Windows a measured height stays fractional, as a
+    // Corvene patch: on Windows a measured height stays fractional, as a
     // line box's is in Chromium (three 16.5 px lines are 74.25 device pixels
     // at 150 %, not 75); the width is still rounded up so that text given
     // exactly its own width never wraps
@@ -558,7 +558,7 @@ impl ToTaffy<taffy::style::Style> for Style {
 
 impl ToTaffy<f32> for AbsoluteLength {
     fn to_taffy(&self, rem_size: Pixels, scale_factor: f32) -> f32 {
-        // Corvane patch: on Windows, where 150 % scaling is the usual one,
+        // Corvene patch: on Windows, where 150 % scaling is the usual one,
         // lengths stay fractional as Chromium's do (29 px rows are 43.5
         // device pixels, drawn 43 and 44 tall by turns); `layout_bounds`
         // snaps the edges

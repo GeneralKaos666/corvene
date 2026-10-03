@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Corvene
+GenericName=Git Client
+Comment=Native GitHub Desktop clone
+Exec=/usr/lib/corvene/corvene %U
+TryExec=/usr/lib/corvene/corvene
+Icon=com.wasimaster.corvene
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;github;version control;
+StartupNotify=true
+StartupWMClass=com.wasimaster.corvene
+MimeType=x-scheme-handler/x-corvene;x-scheme-handler/x-corvene-auth;
+SingleMainWindow=true

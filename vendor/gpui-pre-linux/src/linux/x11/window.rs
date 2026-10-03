@@ -75,7 +75,7 @@ x11rb::atom_manager! {
         _NET_WM_MOVERESIZE,
         _NET_WM_WINDOW_TYPE,
         _NET_WM_WINDOW_TYPE_NOTIFICATION,
-        // Corvane patch: anchored popups
+        // Corvene patch: anchored popups
         _NET_WM_WINDOW_TYPE_POPUP_MENU,
         _NET_WM_WINDOW_TYPE_DIALOG,
         _NET_WM_STATE_MODAL,
@@ -449,7 +449,7 @@ pub(crate) fn handle_connection_error(err: ConnectionError) -> anyhow::Error {
     }
 }
 
-/// Corvane patch: where an anchored popup of `size` (device pixels) goes, in
+/// Corvene patch: where an anchored popup of `size` (device pixels) goes, in
 /// root coordinates. The anchor rectangle is in the parent's logical
 /// coordinates; the parent's root origin comes from the server (a window
 /// manager's frame makes the parent's own `ConfigureNotify` origin relative
@@ -571,7 +571,7 @@ impl X11WindowState {
         supports_xinput_gestures: bool,
         is_bgr: bool,
     ) -> anyhow::Result<Self> {
-        // Corvane patch: anchored popups (menus) are override-redirect windows
+        // Corvene patch: anchored popups (menus) are override-redirect windows
         // placed at their anchor in root coordinates, like Chromium's X11
         // menus. Without a parent there is nothing to anchor to.
         let popup = match &params.kind {
@@ -637,7 +637,7 @@ impl X11WindowState {
             bounds.size.height = 600.into();
         }
 
-        // Corvane patch: a popup's origin comes from its anchor, in root
+        // Corvene patch: a popup's origin comes from its anchor, in root
         // coordinates, with no offset workaround.
         let popup_origin = match (&popup, parent_window.as_ref()) {
             (Some(options), Some(parent)) => Some(popup_origin(
@@ -736,7 +736,7 @@ impl X11WindowState {
                 )?;
             }
 
-            // Corvane patch: what Chromium sets on its menu windows, for
+            // Corvene patch: what Chromium sets on its menu windows, for
             // compositors that shade or animate by type
             if popup.is_some() {
                 if let Some(parent) = parent_window.as_ref() {
@@ -1790,7 +1790,7 @@ impl PlatformWindow for X11Window {
         self.0.state.borrow().background_appearance
     }
 
-    // Corvane patch: offscreen frames for the parity harness
+    // Corvene patch: offscreen frames for the parity harness
     #[cfg(feature = "test-support")]
     fn render_to_image(&self, scene: &gpui::Scene) -> anyhow::Result<image::RgbaImage> {
         self.0.state.borrow_mut().renderer.render_to_image(scene)

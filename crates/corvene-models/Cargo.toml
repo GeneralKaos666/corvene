@@ -1,0 +1,9 @@
+[package]
+name = "corvene-models"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene domain models (leaf crate shared by git, github, core)"
+
+[dependencies]
+serde.workspace = true

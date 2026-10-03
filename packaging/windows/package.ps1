@@ -1,6 +1,6 @@
-# Build Corvane's Windows installer from a release build:
-#   target\windows\Corvane-<version>-<x86_64|aarch64|i686>-setup.exe
-#   target\windows\Corvane-Full-<version>-<arch>-setup.exe      (FULL=1)
+# Build Corvene's Windows installer from a release build:
+#   target\windows\Corvene-<version>-<x86_64|aarch64|i686>-setup.exe
+#   target\windows\Corvene-Full-<version>-<arch>-setup.exe      (FULL=1)
 #
 # Needs Inno Setup 6 (`iscc.exe` on the PATH, in its default folder, or
 # $env:ISCC).
@@ -14,7 +14,7 @@
 #   SKIP_BUILD=1          reuse the release binary that is there
 #   PACKAGE_BIN=<binary>  package that binary instead (CI's debug build)
 #   SIGN_PFX=<file>, SIGN_PFX_PASSWORD
-#                         Authenticode-sign corvane.exe and the installer with
+#                         Authenticode-sign corvene.exe and the installer with
 #                         this certificate (signtool from the Windows SDK);
 #                         without it they are unsigned
 #   SIGN_TIMESTAMP_URL    the timestamp server (default: DigiCert's)
@@ -23,7 +23,7 @@ $root = (Resolve-Path "$PSScriptRoot\..\..").Path
 Set-Location $root
 
 $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-$version = ($metadata.packages | Where-Object { $_.name -eq "corvane" }).version
+$version = ($metadata.packages | Where-Object { $_.name -eq "corvene" }).version
 $machine = switch ($env:PROCESSOR_ARCHITECTURE) {
     "AMD64" { "x86_64" }
     "ARM64" { "aarch64" }
@@ -34,11 +34,11 @@ $target = $env:TARGET
 $arch = if ($target) { $target.Split("-")[0] } else { $machine }
 if ($arch -notin "x86_64", "aarch64", "i686") { throw "unsupported architecture $arch" }
 $full = $env:FULL -eq "1"
-$name = if ($full) { "Corvane-Full" } else { "Corvane" }
+$name = if ($full) { "Corvene-Full" } else { "Corvene" }
 $out = "$root\target\windows"
 
 if (-not $env:SKIP_BUILD -and -not $env:PACKAGE_BIN) {
-    $build = @("build", "--release", "-p", "corvane")
+    $build = @("build", "--release", "-p", "corvene")
     if ($target) { $build += @("--target", $target) }
     if ($full) { $build += @("--features", "full") }
     cargo @build
@@ -47,9 +47,9 @@ if (-not $env:SKIP_BUILD -and -not $env:PACKAGE_BIN) {
 $bin = if ($env:PACKAGE_BIN) {
     $env:PACKAGE_BIN
 } elseif ($target) {
-    "$root\target\$target\release\corvane.exe"
+    "$root\target\$target\release\corvene.exe"
 } else {
-    "$root\target\release\corvane.exe"
+    "$root\target\release\corvene.exe"
 }
 if (-not (Test-Path $bin)) { throw "no $bin" }
 
@@ -63,7 +63,7 @@ function Sign-File([string]$file) {
     }
     if (-not $signtool) { throw "signtool.exe (Windows SDK) was not found" }
     $timestamp = if ($env:SIGN_TIMESTAMP_URL) { $env:SIGN_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
-    $sign = @("sign", "/fd", "SHA256", "/f", $env:SIGN_PFX, "/tr", $timestamp, "/td", "SHA256", "/d", "Corvane")
+    $sign = @("sign", "/fd", "SHA256", "/f", $env:SIGN_PFX, "/tr", $timestamp, "/td", "SHA256", "/d", "Corvene")
     if ($env:SIGN_PFX_PASSWORD) { $sign += @("/p", $env:SIGN_PFX_PASSWORD) }
     & $signtool @sign $file
     if ($LASTEXITCODE -ne 0) { throw "signing $file failed" }
@@ -72,9 +72,9 @@ function Sign-File([string]$file) {
 $stage = "$out\stage-$name-$arch"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
-Copy-Item $bin "$stage\corvane.exe"
-Copy-Item packaging\windows\corvane.bat "$stage\bin\corvane.bat"
-Sign-File "$stage\corvane.exe"
+Copy-Item $bin "$stage\corvene.exe"
+Copy-Item packaging\windows\corvene.bat "$stage\bin\corvene.bat"
+Sign-File "$stage\corvene.exe"
 
 $iscc = $env:ISCC
 if (-not $iscc) {
@@ -90,7 +90,7 @@ if (-not $iscc) {
 }
 if (-not $iscc) { throw "Inno Setup 6 (iscc.exe) was not found; set ISCC to its path" }
 
-& $iscc /Qp "/DAppVersion=$version" "/DArch=$arch" "/DBaseName=$name" "/DStage=$stage" "/DOut=$out" packaging\windows\corvane.iss
+& $iscc /Qp "/DAppVersion=$version" "/DArch=$arch" "/DBaseName=$name" "/DStage=$stage" "/DOut=$out" packaging\windows\corvene.iss
 if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
 $setup = "$out\$name-$version-$arch-setup.exe"
 Sign-File $setup

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Corvane</string>
+    <string name="app_name">Corvene</string>
     <string name="documents_summary">Repositories</string>
     <string name="grammars_title">Tree-sitter grammars</string>
-    <string name="home_title">Corvane settings</string>
+    <string name="home_title">Corvene settings</string>
     <string name="home_summary">Git configuration and SSH keys</string>
     <string name="channel_pull_requests">Pull requests</string>
     <string name="channel_transfers">Network operations</string>
-    <string name="transfer_running">Corvane is talking to a remote</string>
-    <string name="importing">Importing %1$s into Corvane…</string>
+    <string name="transfer_running">Corvene is talking to a remote</string>
+    <string name="importing">Importing %1$s into Corvene…</string>
 </resources>

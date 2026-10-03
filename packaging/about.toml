@@ -1,5 +1,5 @@
 # cargo-about configuration for assets/acknowledgements.json
-# (packaging/acknowledgements.sh). Licenses Corvane's dependency tree may use;
+# (packaging/acknowledgements.sh). Licenses Corvene's dependency tree may use;
 # `cargo about` fails on anything not listed so a new license gets a look.
 accepted = [
     "MIT",

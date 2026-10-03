@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """TextMate grammars for the languages no other highlighter covers, compiled
-into the default build (crates/corvane-highlight/assets/syntaxes.packdump).
+into the default build (crates/corvene-highlight/assets/syntaxes.packdump).
 
     python3 tools/tm-grammars/sync.py            # convert into tools/tm-grammars/syntaxes/
-    cargo run -p corvane-highlight --features pack-builder --example tm-build -- \\
+    cargo run -p corvene-highlight --features pack-builder --example tm-build -- \\
         tools/tm-grammars/syntaxes target/tm/samples.json \\
-        crates/corvane-highlight/assets/syntaxes.packdump tools/tm-grammars/rejected.txt
+        crates/corvene-highlight/assets/syntaxes.packdump tools/tm-grammars/rejected.txt
 
 Source: GitHub Linguist at LINGUIST_TAG. Its release ships every grammar it
 vendors (VS Code, Atom, Sublime Text and TextMate bundles; all permissive,
@@ -100,13 +100,13 @@ def covered_types() -> set[str]:
         for lang in tomllib.load(f).values():
             covered |= {"." + e for e in lang.get("extensions", [])}
             covered |= set(lang.get("filenames", []))
-    modes = (ROOT / "crates" / "corvane-highlight" / "src" / "cm" / "modes" / "mod.rs").read_text()
+    modes = (ROOT / "crates" / "corvene-highlight" / "src" / "cm" / "modes" / "mod.rs").read_text()
     covered |= set(re.findall(r'"(\.[^"]+)"\s*(?:\||=>)', modes))
     covered |= set(re.findall(r'"([a-z0-9_.-]+)"\s*=>\s*"text/', modes))
     existing = WORK / "existing.json"
     if not existing.exists():
         existing.write_text(subprocess.run(
-            ["cargo", "run", "-q", "-p", "corvane-highlight", "--features", "pack-builder", "--example", "list-syntaxes"],
+            ["cargo", "run", "-q", "-p", "corvene-highlight", "--features", "pack-builder", "--example", "list-syntaxes"],
             cwd=ROOT, check=True, capture_output=True, text=True,
         ).stdout)
     for s in json.loads(existing.read_text()):

@@ -1,7 +1,7 @@
 """Deterministic fixture repository shown by both apps.
 
 Fixed author, committer and dates make every copy byte-identical (same SHAs),
-so GHD and Corvane each get their own copy (no index.lock races, destructive
+so GHD and Corvene each get their own copy (no index.lock races, destructive
 scenarios stay possible) that renders the same text.
 """
 

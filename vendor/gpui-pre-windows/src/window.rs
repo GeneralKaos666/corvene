@@ -437,7 +437,7 @@ impl WindowsWindow {
         params: WindowParams,
         creation_info: WindowCreationInfo,
     ) -> Result<Self> {
-        // Corvane patch: an anchored popup (a menu) is a popup window owned by
+        // Corvene patch: an anchored popup (a menu) is a popup window owned by
         // its parent, which it never takes the activation from; where it goes
         // is worked out from its anchor once it exists.
         let popup = match &params.kind {
@@ -577,7 +577,7 @@ impl WindowsWindow {
         set_non_rude_hwnd(hwnd, true);
         configure_dwm_dark_mode(hwnd, appearance);
         this.state.border_offset.update(hwnd)?;
-        // Corvane patch: a popup goes where its anchor puts it, with the
+        // Corvene patch: a popup goes where its anchor puts it, with the
         // rounded corners Windows 11 gives menus, and is shown without
         // being activated
         if let Some((options, parent)) = &popup {
@@ -626,7 +626,7 @@ impl WindowsWindow {
     }
 }
 
-/// Corvane patch: the native window of a GPUI window on this thread.
+/// Corvene patch: the native window of a GPUI window on this thread.
 fn find_window(handle: AnyWindowHandle) -> Option<HWND> {
     unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
         // SAFETY: `lparam` is the vector `find_window` passes below
@@ -651,7 +651,7 @@ fn find_window(handle: AnyWindowHandle) -> Option<HWND> {
     })
 }
 
-/// Corvane patch: where an anchored popup of `size` goes, in screen
+/// Corvene patch: where an anchored popup of `size` goes, in screen
 /// coordinates (device pixels). The anchor rectangle is in the parent's
 /// logical coordinates. The result stays inside the work area of the
 /// monitor the anchor is on as the constraint adjustment allows: flipped

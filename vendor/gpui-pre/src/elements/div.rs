@@ -3200,7 +3200,7 @@ impl Interactivity {
                 let check_is_hovered_during_prepaint = Rc::new({
                     let pending_mouse_down = pending_mouse_down.clone();
                     let source_bounds = hitbox.bounds;
-                    // Corvane patch: a tooltip stays open through typing when
+                    // Corvene patch: a tooltip stays open through typing when
                     // its element keeps its `:hover` (see `HitboxId::is_hovered`)
                     let owner = window.hitbox_owner(hitbox.id);
                     move |window: &Window| {

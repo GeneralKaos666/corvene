@@ -35,7 +35,7 @@ document.querySelectorAll('.snap').forEach(card=>{
     views.forEach(v=>v.hidden=v.dataset.mode!==b.dataset.mode);
     clearInterval(blink);
     if(b.dataset.mode==='blink'){const img=card.querySelector('.view[data-mode=blink] img');let f=0;
-      blink=setInterval(()=>{f^=1;img.src=f?img.dataset.b:img.dataset.a;img.nextElementSibling.textContent=f?'Corvane':'GitHub Desktop'},650)}
+      blink=setInterval(()=>{f^=1;img.src=f?img.dataset.b:img.dataset.a;img.nextElementSibling.textContent=f?'Corvene':'GitHub Desktop'},650)}
   });
   const r=card.querySelector('.swipe input');
   if(r) r.oninput=()=>card.querySelector('.swipe .top').style.clipPath=`inset(0 ${100-r.value}% 0 0)`;
@@ -60,7 +60,7 @@ def write(out: Path, results: list[dict], defaults: dict):
             f'<td>{sum(s["pass"] for s in r["snaps"])}/{len(r["snaps"])}</td><td>{worst:.2f}%</td><td class="muted">{_e(r["description"])}</td></tr>'
         )
     body = [
-        "<main><h1>GitHub Desktop ⇄ Corvane parity</h1>",
+        "<main><h1>GitHub Desktop ⇄ Corvene parity</h1>",
         f'<p class="muted">{len(snaps) - len(bad)}/{len(snaps)} snaps within threshold · default threshold {defaults["threshold"]}% · '
         f'tolerance Δ{defaults["tolerance"]} flat / Δ{defaults["edge_tolerance"]} edges · {defaults["radius"]}pt positional slack · window {defaults["width"]}×{defaults["height"]}</p>',
         "<table><tr><th>Scenario</th><th>Theme</th><th>Status</th><th>Snaps</th><th>Worst</th><th>About</th></tr>",
@@ -83,21 +83,21 @@ def write(out: Path, results: list[dict], defaults: dict):
             body.append(f'<p class="muted">GHD DOM dump: <a href="{base + dump}">{_e(dump)}</a></p>')
         for s in r["snaps"]:
             if s.get("menu"):
-                g, c = s["menu"]["ghd"], s["menu"]["corvane"]
+                g, c = s["menu"]["ghd"], s["menu"]["corvene"]
                 body.append(f'<div class="card"><div class="snaphead"><h3>{_e(s["name"])}</h3><span class="b bad">items differ</span></div>'
                             f'<div class="pair"><figure><pre>{_e(chr(10).join(g))}</pre><figcaption>GitHub Desktop</figcaption></figure>'
-                            f'<figure><pre>{_e(chr(10).join(c))}</pre><figcaption>Corvane</figcaption></figure></div></div>')
+                            f'<figure><pre>{_e(chr(10).join(c))}</pre><figcaption>Corvene</figcaption></figure></div></div>')
                 continue
             if s.get("ghd_only"):
                 body.append(f'<div class="card"><h3>{_e(s["name"])}</h3><img loading="lazy" style="max-width:100%" src="{base + s["ghd"]}"></div>')
                 continue
             badge = (f'<span class="b {"ok" if s["pass"] else "bad"}">{s["percent"]:.3f}% px / ≤{s["threshold"]}%</span>'
                      f'<span class="muted">{s.get("coverage", 0):.1f}% of 4pt blocks differ</span>')
-            g, c, d = base + s["ghd"], base + s["corvane"], base + s["diff"]
+            g, c, d = base + s["ghd"], base + s["corvene"], base + s["diff"]
             regions = "".join(
                 f'<tr><td>{i}</td><td><code>{x["rect"]}</code></td><td>{x["share"]:.3f}%</td><td>{_e(x["hint"])}'
                 + (f'<br><span class="sw" style="background:{x["ghd_color"]}"></span><code>{x["ghd_color"]}</code> → '
-                   f'<span class="sw" style="background:{x["corvane_color"]}"></span><code>{x["corvane_color"]}</code>' if x["ghd_color"] else "")
+                   f'<span class="sw" style="background:{x["corvene_color"]}"></span><code>{x["corvene_color"]}</code>' if x["ghd_color"] else "")
                 + f'</td><td><code>{_e(x["element"])}</code></td><td class="crop"><img loading="lazy" src="{base + x["crop"]}"></td></tr>'
                 for i, x in enumerate(s["regions"], 1)
             )
@@ -109,11 +109,11 @@ def write(out: Path, results: list[dict], defaults: dict):
                 '<button data-mode="swipe">swipe</button><button data-mode="blink">blink</button></span></div>'
                 f'<div class="view" data-mode="diff"><img loading="lazy" src="{d}"></div>'
                 f'<div class="view pair" data-mode="pair" hidden><figure><img loading="lazy" src="{g}"><figcaption>GitHub Desktop</figcaption></figure>'
-                f'<figure><img loading="lazy" src="{c}"><figcaption>Corvane</figcaption></figure></div>'
+                f'<figure><img loading="lazy" src="{c}"><figcaption>Corvene</figcaption></figure></div>'
                 f'<div class="view" data-mode="swipe" hidden><div class="swipe"><img loading="lazy" src="{c}"><img class="top" loading="lazy" src="{g}"></div>'
-                '<input type="range" min="0" max="100" value="50" aria-label="GitHub Desktop share"><div class="muted">left: GitHub Desktop · right: Corvane</div></div>'
+                '<input type="range" min="0" max="100" value="50" aria-label="GitHub Desktop share"><div class="muted">left: GitHub Desktop · right: Corvene</div></div>'
                 f'<div class="view" data-mode="blink" hidden><img loading="lazy" src="{g}" data-a="{g}" data-b="{c}"><div class="muted">GitHub Desktop</div></div>'
-                + (f'<table><tr><th>#</th><th>Rect (pt)</th><th>Share</th><th>Hint</th><th>GHD element</th><th>GHD · Corvane · diff</th></tr>{regions}</table>' if regions else "")
+                + (f'<table><tr><th>#</th><th>Rect (pt)</th><th>Share</th><th>Hint</th><th>GHD element</th><th>GHD · Corvene · diff</th></tr>{regions}</table>' if regions else "")
                 + "</div>"
             )
     body.append("</main>")

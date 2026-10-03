@@ -1120,7 +1120,7 @@ impl WgpuRenderer {
         self.max_texture_size
     }
 
-    /// Corvane patch: draw `scene` into an offscreen texture with this
+    /// Corvene patch: draw `scene` into an offscreen texture with this
     /// window's own core (its sprite atlas holds the scene's glyphs and
     /// images) and read it back, for `PlatformWindow::render_to_image`.
     #[cfg(all(not(target_family = "wasm"), any(test, feature = "test-support")))]
@@ -1242,7 +1242,7 @@ impl WgpuRenderer {
             return false;
         }
 
-        // Corvane patch: see `ANDROID_LAST_PRESENT_NANOS`
+        // Corvene patch: see `ANDROID_LAST_PRESENT_NANOS`
         #[cfg(target_os = "android")]
         let presenting = std::time::Instant::now();
         frame.present();
@@ -1673,7 +1673,7 @@ impl WgpuRendererCore {
     ) -> Result<InstanceBindings> {
         Ok(InstanceBindings {
             quads: {
-                // Corvane patch: see `without_hidden_quads`
+                // Corvene patch: see `without_hidden_quads`
                 #[cfg(target_os = "android")]
                 let visible = without_hidden_quads(&scene.quads);
                 #[cfg(target_os = "android")]
@@ -2973,7 +2973,7 @@ mod tests {
     }
 }
 
-/// Corvane patch: copy `texture` (in `core.target_format`) back to the CPU
+/// Corvene patch: copy `texture` (in `core.target_format`) back to the CPU
 /// as RGBA, as `WgpuHeadlessRenderer::read_image` does.
 #[cfg(all(not(target_family = "wasm"), any(test, feature = "test-support")))]
 fn read_texture(core: &WgpuRendererCore, texture: &wgpu::Texture) -> anyhow::Result<image::RgbaImage> {
@@ -3045,7 +3045,7 @@ fn read_texture(core: &WgpuRendererCore, texture: &wgpu::Texture) -> anyhow::Res
         .ok_or_else(|| anyhow::anyhow!("Failed to create an image from the readback"))
 }
 
-/// Corvane patch (Android): the quads of a scene with those emptied that a
+/// Corvene patch (Android): the quads of a scene with those emptied that a
 /// later opaque quad covers completely, or `None` when there is none.
 ///
 /// GPUI paints back to front: the window's background, each panel's over it,

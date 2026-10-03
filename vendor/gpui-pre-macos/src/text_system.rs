@@ -71,13 +71,13 @@ struct MacTextSystemState {
     font_ids_by_postscript_name: HashMap<String, FontId>,
     font_ids_by_font_key: HashMap<FontKey, SmallVec<[FontId; 4]>>,
     postscript_names_by_font_id: HashMap<FontId, String>,
-    /// Corvane patch: exact-`wght` instances of variable fonts, by (named
+    /// Corvene patch: exact-`wght` instances of variable fonts, by (named
     /// instance, requested weight bits).
     weight_variants: HashMap<(FontId, u32), FontId>,
-    /// Corvane patch: fonts requested with the private `czom` feature (CSS
+    /// Corvene patch: fonts requested with the private `czom` feature (CSS
     /// `zoom` × 100): their text is shaped at `size / zoom` and scaled back.
     layout_zoom: HashMap<FontId, f32>,
-    /// Corvane patch: the sized copies `layout_line` shapes with, by (font,
+    /// Corvene patch: the sized copies `layout_line` shapes with, by (font,
     /// size bits). CoreText keeps a font's glyph caches only while the font
     /// is alive; a fresh copy per line rebuilt them for every shaped line
     /// (`TFont::InitASCIIDataCache`, a third of a diff's first frame).
@@ -245,14 +245,14 @@ impl PlatformTextSystem for MacTextSystem {
         let rgba: Rgba = color.into();
         let luminance = 0.2126 * rgba.r + 0.7152 * rgba.g + 0.0722 * rgba.b;
         let level = ((4.0 * luminance) + 0.5).floor() as i32;
-        // Corvane patch: at the top level (white and near-white text) CG's
+        // Corvene patch: at the top level (white and near-white text) CG's
         // dilation is 4–6 % heavier than Chromium's text; level 3 matches it
         // within ~1 % (measured against GitHub Desktop, 11–13 px SF / SF Mono)
         level.clamp(0, 3) as u8
     }
 }
 
-/// Corvane patch: the private feature tag a view uses to say its text is
+/// Corvene patch: the private feature tag a view uses to say its text is
 /// under a CSS `zoom` (value: zoom × 100). Chromium lays such text out at the
 /// unzoomed size and scales it, so SF's size-dependent tracking is the
 /// unzoomed size's.
@@ -324,7 +324,7 @@ impl MacTextSystemState {
         fallbacks: Option<&FontFallbacks>,
     ) -> Result<SmallVec<[FontId; 4]>> {
         let name = gpui::font_name_with_fallbacks(name, ".AppleSystemUIFont");
-        // Corvane patch: `czom` is not an OpenType feature
+        // Corvene patch: `czom` is not an OpenType feature
         let features = &FontFeatures(std::sync::Arc::new(
             features
                 .tag_value_list()
@@ -435,7 +435,7 @@ impl MacTextSystemState {
         Ok(font_ids)
     }
 
-    /// Corvane patch. A variable font's named instances ("Light",
+    /// Corvene patch. A variable font's named instances ("Light",
     /// "Semibold") sit at their own `wght` values; Chromium instead sets the
     /// axis to the CSS weight itself. For a non-regular weight of a font with
     /// a `wght` axis, register an instance at exactly that weight (its
@@ -637,10 +637,10 @@ impl MacTextSystemState {
         let mut string = CFMutableAttributedString::new();
         let mut max_ascent = 0.0f32;
         let mut max_descent = 0.0f32;
-        // Corvane patch: the fonts set on the runs, to map glyph runs back to
+        // Corvene patch: the fonts set on the runs, to map glyph runs back to
         // their `FontId` (exact-weight variants share a PostScript name)
         let mut run_fonts: Vec<(CTFont, FontId)> = Vec::new();
-        // Corvane patch: CSS zoom (the line is shaped at size / zoom)
+        // Corvene patch: CSS zoom (the line is shaped at size / zoom)
         let zoom = font_runs
             .iter()
             .find_map(|run| self.layout_zoom.get(&run.font_id))

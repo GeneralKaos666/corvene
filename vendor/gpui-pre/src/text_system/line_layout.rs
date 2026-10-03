@@ -458,7 +458,7 @@ impl WrappedLineLayout {
 pub(crate) struct LineLayoutCache {
     previous_frame: Mutex<FrameCache>,
     current_frame: RwLock<FrameCache>,
-    /// Corvane patch: lines the last frame did not use, kept for a while.
+    /// Corvene patch: lines the last frame did not use, kept for a while.
     retired: Mutex<RetiredLines>,
     platform_text_system: Arc<dyn PlatformTextSystem>,
     /// Advances when [`TextSystem::add_fonts`] successfully changes the font database.
@@ -486,7 +486,7 @@ struct FrameCache {
     used_wrapped_lines_by_hash: Vec<Arc<HashedCacheKey>>,
 }
 
-/// Corvane patch: shaped lines that dropped out of the frame caches (a tab
+/// Corvene patch: shaped lines that dropped out of the frame caches (a tab
 /// switched away from, rows scrolled out of view), in two generations of at
 /// most [`RETIRED_GENERATION`] lines. Switching back or scrolling back reuses
 /// them instead of shaping every line again (CoreText, the bulk of such a

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The self-signed code-signing certificate Corvane.app is signed with
+# The self-signed code-signing certificate Corvene.app is signed with
 # (packaging/release.md, "Code-signing certificate").
 #
 #   packaging/signing-cert.sh create [dir]   # new certificate → login keychain, .p12 + password in dir
@@ -13,7 +13,7 @@
 # KEYCHAIN=<path> imports into another keychain (testing).
 set -euo pipefail
 
-NAME="Corvane Self-Signed"
+NAME="Corvene Self-Signed"
 OPENSSL=/usr/bin/openssl # LibreSSL: its .p12 files import without -legacy
 KEYCHAIN="${KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 
@@ -28,12 +28,12 @@ import_p12() {
 
 case "${1:-}" in
   create)
-    DIR="${2:-$HOME/.corvane-signing}"
+    DIR="${2:-$HOME/.corvene-signing}"
     if has_identity "$KEYCHAIN"; then
       echo "\"$NAME\" is already in $KEYCHAIN; delete it in Keychain Access to make a new one" >&2
       exit 1
     fi
-    [[ -e "$DIR/corvane-signing.p12" ]] && { echo "$DIR/corvane-signing.p12 exists; import it instead" >&2; exit 1; }
+    [[ -e "$DIR/corvene-signing.p12" ]] && { echo "$DIR/corvene-signing.p12 exists; import it instead" >&2; exit 1; }
     mkdir -p "$DIR" && chmod 700 "$DIR"
     WORK="$(mktemp -d)"
     trap 'rm -rf "$WORK"' EXIT
@@ -57,18 +57,18 @@ EOF
     PASSWORD="$("$OPENSSL" rand -hex 24)"
     (umask 077
       "$OPENSSL" pkcs12 -export -name "$NAME" -inkey "$WORK/key.pem" -in "$WORK/cert.pem" \
-        -passout "pass:$PASSWORD" -out "$DIR/corvane-signing.p12"
-      printf '%s\n' "$PASSWORD" > "$DIR/corvane-signing.password")
-    import_p12 "$DIR/corvane-signing.p12" "$PASSWORD" "$KEYCHAIN"
+        -passout "pass:$PASSWORD" -out "$DIR/corvene-signing.p12"
+      printf '%s\n' "$PASSWORD" > "$DIR/corvene-signing.password")
+    import_p12 "$DIR/corvene-signing.p12" "$PASSWORD" "$KEYCHAIN"
     cat <<EOF
 imported "$NAME" into $KEYCHAIN
-saved $DIR/corvane-signing.p12 and $DIR/corvane-signing.password
+saved $DIR/corvene-signing.p12 and $DIR/corvene-signing.password
 
 Keep both in the password manager: releases must keep this certificate.
 The first codesign run asks to use the key: click Always Allow.
 For CI, add two repository secrets:
-  MACOS_SIGNING_P12           base64 < "$DIR/corvane-signing.p12" | pbcopy
-  MACOS_SIGNING_P12_PASSWORD  pbcopy < "$DIR/corvane-signing.password"
+  MACOS_SIGNING_P12           base64 < "$DIR/corvene-signing.p12" | pbcopy
+  MACOS_SIGNING_P12_PASSWORD  pbcopy < "$DIR/corvene-signing.password"
 EOF
     ;;
 
@@ -90,14 +90,14 @@ EOF
     : "${MACOS_SIGNING_P12:?MACOS_SIGNING_P12 (base64 .p12) is not set}"
     : "${MACOS_SIGNING_P12_PASSWORD:?MACOS_SIGNING_P12_PASSWORD is not set}"
     TMP="${RUNNER_TEMP:-$(mktemp -d)}"
-    KC="$TMP/corvane-signing.keychain-db"
+    KC="$TMP/corvene-signing.keychain-db"
     KC_PASSWORD="$("$OPENSSL" rand -hex 24)"
-    (umask 077; printf '%s' "$MACOS_SIGNING_P12" | base64 --decode > "$TMP/corvane-signing.p12")
+    (umask 077; printf '%s' "$MACOS_SIGNING_P12" | base64 --decode > "$TMP/corvene-signing.p12")
     security create-keychain -p "$KC_PASSWORD" "$KC"
     security set-keychain-settings "$KC" # no auto-lock
     security unlock-keychain -p "$KC_PASSWORD" "$KC"
-    import_p12 "$TMP/corvane-signing.p12" "$MACOS_SIGNING_P12_PASSWORD" "$KC"
-    rm -f "$TMP/corvane-signing.p12"
+    import_p12 "$TMP/corvene-signing.p12" "$MACOS_SIGNING_P12_PASSWORD" "$KC"
+    rm -f "$TMP/corvene-signing.p12"
     # codesign may use the key without a (headless, unanswerable) prompt
     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PASSWORD" "$KC" >/dev/null
     # keep the runner's own keychains searchable

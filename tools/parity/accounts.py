@@ -9,8 +9,8 @@ accounts injected instead:
   component; its `accounts` and the `ApiRepositoriesStore` state are replaced
   and an update is emitted (no API call happens: every account already has its
   repositories, and the fake tokens are never used).
-- Corvane: the `fake-accounts` control hook puts the same accounts and
-  repositories into `AppState` (`crates/corvane/src/parity_control.rs`).
+- Corvene: the `fake-accounts` control hook puts the same accounts and
+  repositories into `AppState` (`crates/corvene/src/parity_control.rs`).
 """
 
 import json
@@ -103,9 +103,9 @@ def ghd_js(name: str) -> str:
 })()""" % json.dumps(FIXTURES[name])
 
 
-def corvane_arg(name: str) -> str:
+def corvene_arg(name: str) -> str:
     """The `fake-accounts` hook argument: `{accounts, repositories}` as serde
-    reads `corvane_models::Account` / `GitHubRepository`."""
+    reads `corvene_models::Account` / `GitHubRepository`."""
     accounts, repositories = [], {}
     for a in FIXTURES[name]:
         primary = next((e for e in a["emails"] if e["primary"]), None)

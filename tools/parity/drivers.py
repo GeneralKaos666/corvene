@@ -6,7 +6,7 @@ its settings are never touched) and `--remote-debugging-port`. Input goes
 through `Input.dispatch*Event`, which reaches the renderer without window
 focus, and `Page.captureScreenshot` renders the page offscreen.
 
-Corvane is driven through its `CORVANE_CONTROL` socket (crates/corvane/src/
+Corvene is driven through its `CORVENE_CONTROL` socket (crates/corvene/src/
 parity_control.rs, `--features snapshots`), which injects the same input into
 GPUI's event dispatch and renders frames offscreen.
 
@@ -110,7 +110,7 @@ def park_pointer():
 
     Both apps are driven by synthetic input, but the window manager centres
     their windows under the real pointer (Xvfb starts it mid-screen), and
-    Chromium hovers whatever is under it while Corvane does not."""
+    Chromium hovers whatever is under it while Corvene does not."""
     if IS_MAC or not os.environ.get("DISPLAY"):
         return
     try:
@@ -151,47 +151,47 @@ def platform_keys(spec: str) -> str:
         for chord in spec.split(" ")
     )
 
-# GHD menu-event names (app/src/main-process/menu/menu-event.ts) → Corvane
-# actions (crates/corvane-ui/src/actions.rs). GHD menu accelerators live in the
+# GHD menu-event names (app/src/main-process/menu/menu-event.ts) → Corvene
+# actions (crates/corvene-ui/src/actions.rs). GHD menu accelerators live in the
 # main process and never see CDP key events, so shortcuts are replayed as the
 # menu events they trigger.
 MENU_ACTIONS = {
-    "show-changes": "corvane::ShowChanges",
-    "show-history": "corvane::ShowHistory",
-    "choose-repository": "corvane::ShowRepositoryList",
-    "show-branches": "corvane::ShowBranchesList",
-    "show-worktrees": "corvane::ShowWorktreesList",
-    "create-worktree": "corvane::NewWorktree",
-    "go-to-commit-message": "corvane::GoToSummary",
-    "show-stashed-changes": "corvane::ToggleStashedChanges",
-    "hide-stashed-changes": "corvane::ToggleStashedChanges",
-    "toggle-changes-filter": "corvane::ToggleChangesFilter",
-    "show-preferences": "corvane::OpenSettings",
-    "show-about": "corvane::About",
-    "add-local-repository": "corvane::AddLocalRepository",
-    "create-repository": "corvane::NewRepository",
-    "clone-repository": "corvane::CloneRepository",
-    "create-branch": "corvane::NewBranch",
-    "rename-branch": "corvane::RenameBranch",
-    "delete-branch": "corvane::DeleteBranch",
-    "discard-all-changes": "corvane::DiscardAllChanges",
-    "stash-all-changes": "corvane::StashAllChanges",
-    "update-branch-with-contribution-target-branch": "corvane::UpdateFromDefaultBranch",
-    "compare-to-branch": "corvane::CompareToBranch",
-    "merge-branch": "corvane::MergeIntoCurrentBranch",
-    "squash-and-merge-branch": "corvane::SquashAndMergeIntoCurrentBranch",
-    "rebase-branch": "corvane::RebaseCurrentBranch",
-    "show-repository-settings": "corvane::RepositorySettings",
-    "remove-repository": "corvane::RemoveRepository",
-    "push": "corvane::Push",
-    "pull": "corvane::Pull",
-    "fetch": "corvane::Fetch",
-    "preview-pull-request": "corvane::PreviewPullRequest",
-    "open-pull-request": "corvane::CreatePullRequest",
-    "find-text": "corvane::Find",
-    "select-all": "corvane::SelectAll",
-    "increase-active-resizable-width": "corvane::ExpandActiveResizable",
-    "decrease-active-resizable-width": "corvane::ContractActiveResizable",
+    "show-changes": "corvene::ShowChanges",
+    "show-history": "corvene::ShowHistory",
+    "choose-repository": "corvene::ShowRepositoryList",
+    "show-branches": "corvene::ShowBranchesList",
+    "show-worktrees": "corvene::ShowWorktreesList",
+    "create-worktree": "corvene::NewWorktree",
+    "go-to-commit-message": "corvene::GoToSummary",
+    "show-stashed-changes": "corvene::ToggleStashedChanges",
+    "hide-stashed-changes": "corvene::ToggleStashedChanges",
+    "toggle-changes-filter": "corvene::ToggleChangesFilter",
+    "show-preferences": "corvene::OpenSettings",
+    "show-about": "corvene::About",
+    "add-local-repository": "corvene::AddLocalRepository",
+    "create-repository": "corvene::NewRepository",
+    "clone-repository": "corvene::CloneRepository",
+    "create-branch": "corvene::NewBranch",
+    "rename-branch": "corvene::RenameBranch",
+    "delete-branch": "corvene::DeleteBranch",
+    "discard-all-changes": "corvene::DiscardAllChanges",
+    "stash-all-changes": "corvene::StashAllChanges",
+    "update-branch-with-contribution-target-branch": "corvene::UpdateFromDefaultBranch",
+    "compare-to-branch": "corvene::CompareToBranch",
+    "merge-branch": "corvene::MergeIntoCurrentBranch",
+    "squash-and-merge-branch": "corvene::SquashAndMergeIntoCurrentBranch",
+    "rebase-branch": "corvene::RebaseCurrentBranch",
+    "show-repository-settings": "corvene::RepositorySettings",
+    "remove-repository": "corvene::RemoveRepository",
+    "push": "corvene::Push",
+    "pull": "corvene::Pull",
+    "fetch": "corvene::Fetch",
+    "preview-pull-request": "corvene::PreviewPullRequest",
+    "open-pull-request": "corvene::CreatePullRequest",
+    "find-text": "corvene::Find",
+    "select-all": "corvene::SelectAll",
+    "increase-active-resizable-width": "corvene::ExpandActiveResizable",
+    "decrease-active-resizable-width": "corvene::ContractActiveResizable",
 }
 
 # GPUI key name → (DOM key, DOM code, Windows virtual key code, mac editing command)
@@ -262,14 +262,14 @@ class Ghd:
                     str(GHD_APP),
                     f"--remote-debugging-port={self.port}",
                     f"--user-data-dir={self.profile}",
-                    # captures in sRGB, like Corvane's render_to_image; without it
+                    # captures in sRGB, like Corvene's render_to_image; without it
                     # Chromium converts to the display profile (#1d2125 → #16191c)
                     "--force-color-profile=srgb",
                     # Chromium refuses to run as root with its sandbox
                     *(["--no-sandbox"] if not IS_MAC and not IS_WIN and os.geteuid() == 0 else []),
                     # extra switches, e.g. `--proxy-server=127.0.0.1:9` to keep
                     # GHD offline where its network would fail differently
-                    # from Corvane's (an intercepting proxy Chromium does not
+                    # from Corvene's (an intercepting proxy Chromium does not
                     # trust opens an "Untrusted server" dialog)
                     *shlex.split(os.environ.get("PARITY_GHD_ARGS", "")),
                     *([f"--proxy-server={DEAD_PROXY}"] if OFFLINE else []),
@@ -640,10 +640,10 @@ class Ghd:
         path.write_bytes(base64.b64decode(r["data"]))
 
 
-class Corvane:
-    """A Corvane instance with an isolated data dir under `CORVANE_CONTROL`."""
+class Corvene:
+    """A Corvene instance with an isolated data dir under `CORVENE_CONTROL`."""
 
-    name = "corvane"
+    name = "corvene"
 
     def __init__(self, binary: Path, data_dir: Path, log: Path, theme: str):
         self.binary = binary
@@ -658,15 +658,15 @@ class Corvane:
 
     def start(self, timeout: float = 20, extra_env: dict | None = None):
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        env = {k: v for k, v in os.environ.items() if not k.startswith("CORVANE_")}
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CORVENE_")}
         env.update(
-            CORVANE_DATA_DIR=str(self.data_dir),
-            CORVANE_CONTROL=str(self.port),
-            CORVANE_THEME=self.theme,
-            CORVANE_LOG=env.get("PARITY_CORVANE_LOG", "info"),
+            CORVENE_DATA_DIR=str(self.data_dir),
+            CORVENE_CONTROL=str(self.port),
+            CORVENE_THEME=self.theme,
+            CORVENE_LOG=env.get("PARITY_CORVENE_LOG", "info"),
             # every flag at its GHD value, so the diff measures true parity
-            # (.docs/flags.md); PARITY_CORVANE_FLAGS overrides
-            CORVANE_FLAGS=env.get("PARITY_CORVANE_FLAGS", "preset=github-desktop"),
+            # (.docs/flags.md); PARITY_CORVENE_FLAGS overrides
+            CORVENE_FLAGS=env.get("PARITY_CORVENE_FLAGS", "preset=github-desktop"),
         )
         if not IS_MAC and not IS_WIN:
             # the avatar and emoji caches live under XDG_CACHE_HOME, not the
@@ -686,15 +686,15 @@ class Corvane:
                 self.file = self.sock.makefile("rw")
                 info = self.cmd("ping")
                 self.scale = info.get("scale", DEFAULT_SCALE)
-                # CORVANE_THEME only overrides the look; store the setting too,
+                # CORVENE_THEME only overrides the look; store the setting too,
                 # as GHD's fixture does (Settings › Appearance shows it)
                 self.hook("theme", self.theme)
                 return
             except OSError:
                 if self.proc.poll() is not None:
-                    raise RuntimeError(f"corvane exited early (see {self.log})")
+                    raise RuntimeError(f"corvene exited early (see {self.log})")
                 time.sleep(0.2)
-        raise RuntimeError("corvane control socket did not come up")
+        raise RuntimeError("corvene control socket did not come up")
 
     def stop(self):
         if self.file:
@@ -717,10 +717,10 @@ class Corvane:
         self.file.flush()
         line = self.file.readline()
         if not line:
-            raise RuntimeError("corvane closed the control socket")
+            raise RuntimeError("corvene closed the control socket")
         reply = json.loads(line)
         if not reply.get("ok"):
-            raise RuntimeError(f"corvane {cmd}: {reply.get('error')}")
+            raise RuntimeError(f"corvene {cmd}: {reply.get('error')}")
         return reply
 
     def hook(self, name: str, arg: str = ""):
@@ -764,7 +764,7 @@ class Corvane:
     def menu(self, event: str):
         action = MENU_ACTIONS.get(event)
         if not action:
-            raise LookupError(f"no Corvane action mapped for GHD menu event {event!r} (drivers.MENU_ACTIONS)")
+            raise LookupError(f"no Corvene action mapped for GHD menu event {event!r} (drivers.MENU_ACTIONS)")
         self.cmd("action", name=action)
 
     def popup(self, name: str):

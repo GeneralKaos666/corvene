@@ -1,0 +1,31 @@
+[package]
+name = "corvene-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene application state, models and dispatcher"
+
+[dependencies]
+corvene-git.workspace = true
+corvene-highlight.workspace = true
+corvene-packs.workspace = true
+corvene-github.workspace = true
+corvene-models.workspace = true
+corvene-platform.workspace = true
+corvene-store.workspace = true
+gpui-kit = { workspace = true, default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+rust-embed.workspace = true
+notify = "7"
+dunce = "1"
+regex.workspace = true
+pulldown-cmark.workspace = true
+async-channel = "2"
+
+[dev-dependencies]
+tempfile = "3"
+smol = "2"

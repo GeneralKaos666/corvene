@@ -2,7 +2,7 @@ fn main() {
     let src_dir = std::path::Path::new("src");
 
     let mut c_config = cc::Build::new();
-    // Corvane patch: MSVC's cl refuses the GCC flag
+    // Corvene patch: MSVC's cl refuses the GCC flag
     c_config.flag_if_supported("-Wno-unused-parameter");
     c_config.std("c11").include(src_dir);
 

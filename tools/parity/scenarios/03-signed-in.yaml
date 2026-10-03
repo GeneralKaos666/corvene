@@ -23,7 +23,7 @@ steps:
   - snap: filtered
   - key: cmd-a backspace
   - type: "nothing-matches"
-  - snap: {name: no-results, threshold: 2.5, note: "GHD shrinks the section to the message's width, Corvane keeps half-width panes (deviations.md › Blank slate)"}
+  - snap: {name: no-results, threshold: 2.5, note: "GHD shrinks the section to the message's width, Corvene keeps half-width panes (deviations.md › Blank slate)"}
 ---
 name: signed-in-blank-slate-two-accounts
 description: Two accounts, the AccountPicker above the list and its popover

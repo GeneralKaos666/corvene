@@ -1,4 +1,4 @@
-# Grammars of crates/corvane-grammars and where their queries come from
+# Grammars of crates/corvene-grammars and where their queries come from
 # (tools/ts-queries/README.md). `gen.py` writes the crate's Cargo features and
 # grammar table from this file; `sync.py` vendors the queries.
 #
@@ -7,7 +7,7 @@
 #   symbol     = the C function, for packages with pre-0.23 bindings
 #   extensions = lowercase suffixes after a dot; filenames = exact lowercase names
 #   first_line = regex over the first line (shebangs); aliases = injection names
-#   source     = nvim | upstream | helix | corvane  (queries; see README.md)
+#   source     = nvim | upstream | helix | corvene  (queries; see README.md)
 #   nvim / helix = the language's directory there (default: the key)
 #   highlights / injections / locals = upstream query paths in the package
 
@@ -397,7 +397,7 @@ version = "1.1.0"
 language = "LANGUAGE"
 extensions = ["kt", "kts"]
 aliases = ["kt"]
-source = "corvane"
+source = "corvene"
 
 
 [less]

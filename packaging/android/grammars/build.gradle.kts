@@ -5,8 +5,8 @@
 //
 // It has no code of its own. `packaging/android/grammars.sh` fills
 // src/main/jniLibs with one library per grammar unit
-// (libcorvane_ts_<unit>.so, built by tools/ts-queries/build_unit.py) and
-// their index (libcorvane_ts_index.so, a JSON file under a library's name
+// (libcorvene_ts_<unit>.so, built by tools/ts-queries/build_unit.py) and
+// their index (libcorvene_ts_index.so, a JSON file under a library's name
 // so the installer extracts it next to them).
 
 plugins {
@@ -14,7 +14,7 @@ plugins {
 }
 
 android {
-    namespace = "com.wasimaster.corvane.grammars"
+    namespace = "com.wasimaster.corvene.grammars"
     compileSdk = 35
 
     defaultConfig {

@@ -24,7 +24,7 @@ runs:
           | gunzip > "$RUNNER_TEMP/ts-cli/bin/tree-sitter${exe:-}"
         chmod +x "$RUNNER_TEMP/ts-cli/bin/tree-sitter${exe:-}"
         "$RUNNER_TEMP/ts-cli/bin/tree-sitter${exe:-}" --version
-        echo "CORVANE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter${exe:-}" >> "$GITHUB_ENV"
+        echo "CORVENE_TREE_SITTER=$RUNNER_TEMP/ts-cli/bin/tree-sitter${exe:-}" >> "$GITHUB_ENV"
         # Windows: Python is `python` there and reads files in the system
         # code page unless told otherwise
         if [[ "$RUNNER_OS" == Windows ]]; then

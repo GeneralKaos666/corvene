@@ -613,7 +613,7 @@ impl IntoElement for StyledText {
 #[derive(Default, Clone)]
 pub struct TextLayout(
     Rc<RefCell<Option<TextLayoutInner>>>,
-    // Corvane patch: the layout node, to paint from its unsnapped origin
+    // Corvene patch: the layout node, to paint from its unsnapped origin
     Rc<std::cell::Cell<Option<LayoutId>>>,
 );
 
@@ -632,7 +632,7 @@ struct TextLayoutInner {
     truncate_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
-    /// Corvane patch: where the glyphs are painted. Layout snaps boxes to
+    /// Corvene patch: where the glyphs are painted. Layout snaps boxes to
     /// device pixels; Chromium keeps fractional layout and rounds only the
     /// glyph baseline (and picks the subpixel x variant from the true x).
     text_origin: Option<Point<Pixels>>,
@@ -651,7 +651,7 @@ impl TextLayout {
         let line_height = text_style
             .line_height
             .to_pixels(font_size.into(), window.rem_size());
-        // Corvane patch: off macOS lines keep a fractional height, as
+        // Corvene patch: off macOS lines keep a fractional height, as
         // Chromium's line boxes do (`line-height: 1.5` at 11 px is 16.5 px
         // a line, not 16); the glyphs are snapped where they are painted.
         let line_height = if cfg!(target_os = "macos") {
@@ -784,7 +784,7 @@ impl TextLayout {
                 for line in &lines {
                     let line_size = line.size(line_height);
                     size.height += line_size.height;
-                    // Corvane patch: off macOS keep Chromium's LayoutUnit
+                    // Corvene patch: off macOS keep Chromium's LayoutUnit
                     // precision (1/64 px, rounded up) rather than a whole
                     // pixel, so inline runs add up as they do in Electron
                     size.width = if cfg!(target_os = "macos") {
@@ -813,7 +813,7 @@ impl TextLayout {
     }
 
     fn prepaint(&self, bounds: Bounds<Pixels>, text: &str, window: &mut Window) {
-        // Corvane patch: the glyphs keep the layout's sub-device-pixel offset
+        // Corvene patch: the glyphs keep the layout's sub-device-pixel offset
         // that snapping took off the box (callers may pass other bounds, so
         // only the delta is applied)
         let text_origin = self.1.get().map(|layout_id| {

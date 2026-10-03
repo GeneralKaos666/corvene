@@ -1,6 +1,6 @@
 # GitHub Desktop parity harness
 
-Drives GitHub Desktop 3.6.6 and Corvane side by side with identical input,
+Drives GitHub Desktop 3.6.6 and Corvene side by side with identical input,
 captures both after every `snap` step, diffs the captures and fails any step
 whose difference exceeds its threshold. Use it to find and burn down every
 visual / behavioural deviation from GHD, including states that take several
@@ -8,7 +8,7 @@ clicks to reach, hover and pressed states.
 
 ```bash
 pip3 install -r tools/parity/requirements.txt   # pillow numpy pyyaml websocket-client (scipy optional)
-cargo build -p corvane --features snapshots
+cargo build -p corvene --features snapshots
 python3 tools/parity/parity.py                  # all scenarios, dark + light
 python3 tools/parity/parity.py 'branch-*' preferences --themes dark
 python3 tools/parity/parity.py --list
@@ -21,11 +21,11 @@ the run can gate a change.
 
 ## How it works
 
-| | GitHub Desktop | Corvane |
+| | GitHub Desktop | Corvene |
 |---|---|---|
-| Instance | private copy: `--user-data-dir=<scratch>` (your GHD and its settings are untouched) | `CORVANE_DATA_DIR=<scratch>` (your store is untouched) |
-| Control | Chrome DevTools Protocol (`--remote-debugging-port`) | `CORVANE_CONTROL=<port>` socket (`crates/corvane/src/parity_control.rs`, `--features snapshots`) |
-| Flags | - | `CORVANE_FLAGS=preset=github-desktop`: every deviation at its GHD value (`.docs/flags.md`); `PARITY_CORVANE_FLAGS=<spec>` overrides |
+| Instance | private copy: `--user-data-dir=<scratch>` (your GHD and its settings are untouched) | `CORVENE_DATA_DIR=<scratch>` (your store is untouched) |
+| Control | Chrome DevTools Protocol (`--remote-debugging-port`) | `CORVENE_CONTROL=<port>` socket (`crates/corvene/src/parity_control.rs`, `--features snapshots`) |
+| Flags | - | `CORVENE_FLAGS=preset=github-desktop`: every deviation at its GHD value (`.docs/flags.md`); `PARITY_CORVENE_FLAGS=<spec>` overrides |
 | Input | `Input.dispatchMouseEvent` / `dispatchKeyEvent` / `insertText` into the renderer | synthetic `PlatformInput` into GPUI's window dispatch |
 | Menus | `menu-event` IPC emitted in the renderer (accelerators live in the main process) | the mapped action (`drivers.MENU_ACTIONS`) |
 | Capture | `Page.captureScreenshot` | `Window::draw` + `render_to_image` |
@@ -41,7 +41,7 @@ and GHD's CSS transitions disabled (`--no-freeze` keeps them) so captures never
 land mid-animation.
 
 Targets resolve in GHD's DOM (`{css: …}` / `{text: …, within: …}`) or are
-literal window points; **both apps receive the same point**, so a Corvane
+literal window points; **both apps receive the same point**, so a Corvene
 element that is not where GHD has it misses the click and the next snap shows
 it.
 
@@ -61,11 +61,11 @@ which tracks layout mismatches better (a misplaced text column changes few
 pixels but many blocks). Differences are grouped into regions (4pt blocks); for
 each region the report gives
 
-- a hint: *"Corvane content is offset 3pt right of GHD"* (best-aligning shift
-  search) or *"colour/content: GHD #1f2328 vs Corvane #24292e"* (median colours
+- a hint: *"Corvene content is offset 3pt right of GHD"* (best-aligning shift
+  search) or *"colour/content: GHD #1f2328 vs Corvene #24292e"* (median colours
   of the differing pixels),
 - the GHD DOM path at the region centre (which GHD component to read),
-- a zoomed GHD · Corvane · diff crop.
+- a zoomed GHD · Corvene · diff crop.
 
 The report (`target/parity/<run>/index.html`, `latest` symlink) shows every
 snap as diff overlay, side by side, swipe and blink; `results.json` holds the
@@ -93,15 +93,15 @@ steps:
   - key: cmd-a backspace                 # GPUI keystroke syntax, space separated
   - type: "feature/login"
   - menu: show-preferences               # GHD menu-event name
-  - popup: {ghd: test-release-notes-popup, corvane: release-notes}   # GHD test hook / CORVANE_POPUP
+  - popup: {ghd: test-release-notes-popup, corvene: release-notes}   # GHD test hook / CORVENE_POPUP
   - accounts: dotcom                     # fake signed-in accounts + repository lists (accounts.py: dotcom | enterprise | two)
   - resize: [1100, 700]
   - wait: 500                            # alone: sleep; on a step: settle time after it (default 350ms)
   - ghd: {eval: "…"}                     # app-specific step (either side can be `{skip: true}`)
-    corvane: {hook: {name: popup, arg: about}}   # hooks: complete-welcome, add-repo, theme, popup, refresh (GHD's `focus` IPC)
+    corvene: {hook: {name: popup, arg: about}}   # hooks: complete-welcome, add-repo, theme, popup, refresh (GHD's `focus` IPC)
   - fixture: move                        # rename both fixture repositories away (missing repository)
   - context_menu: add                    # compare both apps' last native menu (items, separators, disabled/checked)
-  - context_menu_pick: "Clone Repository…"   # choose an item in both (GHD: resolves its IPC; Corvane: menu-pick)
+  - context_menu_pick: "Clone Repository…"   # choose an item in both (GHD: resolves its IPC; Corvene: menu-pick)
   - dump: open                           # GHD DOM boxes + computed styles as JSON ({name, root: css})
   - snap: open                           # or {name, threshold, tolerance, edge_tolerance, radius, mask: [[x,y,w,h]…], region: [x,y,w,h], note}
 ```
@@ -114,7 +114,7 @@ each should carry a `note` pointing at `.docs/deviations.md`.
 Neither app can sign in during a run, so `accounts: <fixture>` injects the
 accounts and repository lists of `accounts.py` into both: GHD's `AppStore`
 (found through the root component's React fiber) gets them as `accounts` and
-`ApiRepositoriesStore` state, Corvane gets them through the `fake-accounts`
+`ApiRepositoriesStore` state, Corvene gets them through the `fake-accounts`
 control hook. No API call is made (every list is already loaded; the tokens
 are fake), so only views that render from that state can be compared: the
 signed-in blank slate, Welcome › Configure Git after "Skip this step",
@@ -130,14 +130,14 @@ as openbox, `DISPLAY=:99`) and a session bus:
 
 ```bash
 export PARITY_GHD_APP=$HOME/desktop/dist/desktop-linux-x64/desktop
-cargo build -p corvane --features snapshots
+cargo build -p corvene --features snapshots
 dbus-run-session -- python3 tools/parity/parity.py main-window
 ```
 
 - Scenarios keep macOS chords: `cmd` is Ctrl off macOS, and AppKit editing
   commands are only sent on macOS. Menu items are matched case-insensitively
   (GHD's Linux labels are sentence case).
-- Captures are the page: CDP leaves Electron's menu bar out, and Corvane's
+- Captures are the page: CDP leaves Electron's menu bar out, and Corvene's
   control socket works in page coordinates below its own menu bar
   (`PAGE_TOP` in `parity_control.rs`). Scale is 1.
 - Scenarios are written for GHD's macOS page, which starts with a 32 pt
@@ -160,8 +160,8 @@ dbus-run-session -- python3 tools/parity/parity.py main-window
   the app menu bar, open/save panels). Contextual menus are compared as
   item lists instead: GHD's `show-contextual-menu` IPC is intercepted in the
   renderer (GHD's menu is not popped: CDP cannot dismiss a main-process
-  menu), while Corvane pops its real `NSMenu`, records it and closes it after
-  `CORVANE_MENU_HOLD_MS` (default 1500) so the control loop is only held
+  menu), while Corvene pops its real `NSMenu`, records it and closes it after
+  `CORVENE_MENU_HOLD_MS` (default 1500) so the control loop is only held
   briefly (`context_menu` / `context_menu_pick` steps). Pixel comparisons of
   popped menus need a screen capture: do them as a visual pass with a
   screen-capable tool.

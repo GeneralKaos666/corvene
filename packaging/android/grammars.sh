@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the play flavour's grammar module: every tree-sitter grammar unit as
 # a native library in grammars/src/main/jniLibs, with the index the loader
-# reads (corvane_highlight::treesitter::load_pack) next to them.
+# reads (corvene_highlight::treesitter::load_pack) next to them.
 #
 #   packaging/android/grammars.sh
 #
@@ -14,7 +14,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ABIS="${ABIS:-arm64-v8a armeabi-v7a x86_64 x86}"
 OUT="$ROOT/packaging/android/grammars/src/main/jniLibs"
 NDK_BIN="$(dirname "$(find "${ANDROID_NDK_HOME:?needs ANDROID_NDK_HOME}/toolchains/llvm/prebuilt" -name llvm-nm | head -1)")"
-export CORVANE_CC="$NDK_BIN/clang" CORVANE_CXX="$NDK_BIN/clang++"
+export CORVENE_CC="$NDK_BIN/clang" CORVENE_CXX="$NDK_BIN/clang++"
 UNITS="${UNITS:-$(python3 "$ROOT/tools/ts-queries/gen.py" --units all | cut -d' ' -f1)}"
 
 rm -rf "$OUT"
@@ -29,7 +29,7 @@ for abi in $ABIS; do
   mkdir -p "$OUT/$abi"
   built=()
   for unit in $UNITS; do
-    lib="$OUT/$abi/libcorvane_ts_$unit.so"
+    lib="$OUT/$abi/libcorvene_ts_$unit.so"
     if python3 "$ROOT/tools/ts-queries/build_unit.py" "$unit" "$lib" --target "$target" 2>/dev/null; then
       built+=("$unit")
     else
@@ -44,8 +44,8 @@ import json, os, sys
 index = json.load(sys.stdin)
 for unit in index["units"]:
     name = os.path.basename(unit["file"]).split(".")[0]
-    unit["file"] = "libcorvane_ts_" + name + ".so"
+    unit["file"] = "libcorvene_ts_" + name + ".so"
 json.dump(index, sys.stdout)
-' > "$OUT/$abi/libcorvane_ts_index.so"
+' > "$OUT/$abi/libcorvene_ts_index.so"
   echo "$abi: ${#built[@]} units, $(du -sh "$OUT/$abi" | cut -f1)"
 done

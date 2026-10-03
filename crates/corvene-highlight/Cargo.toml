@@ -1,0 +1,40 @@
+[package]
+name = "corvene-highlight"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene diff syntax highlighting (CodeMirror ports, syntect, tree-sitter)"
+
+[features]
+# The "full" build: every tree-sitter grammar linked in instead of the
+# `tree-sitter-all` / `tree-sitter-rest` packs.
+bundled-tree-sitter = ["dep:corvene-grammars", "corvene-grammars/all"]
+# the tools that write assets/syntaxes.packdump (tools/tm-grammars)
+pack-builder = ["syntect/dump-create", "syntect/yaml-load"]
+
+[dependencies]
+corvene-grammars = { workspace = true, optional = true }
+fancy-regex = "0.16"
+# gunzips grammar pack units (already in the app through GPUI)
+flate2 = "1"
+libloading.workspace = true
+regex.workspace = true
+regex-automata = "0.4"
+serde.workspace = true
+serde_json.workspace = true
+syntect.workspace = true
+tracing.workspace = true
+tree-sitter.workspace = true
+tree-sitter-language.workspace = true
+two-face.workspace = true
+
+[dev-dependencies]
+corvene-grammars = { workspace = true, features = ["all"] }
+
+[[example]]
+name = "list-syntaxes"
+required-features = ["pack-builder"]
+
+[[example]]
+name = "tm-build"
+required-features = ["pack-builder"]

@@ -7,7 +7,7 @@ subpixel positions, which should not fail a step, while a 1-point layout
 offset, a wrong colour or a missing element still does.
 
 Differences are grouped into regions (8-connected 4pt blocks). For each region the
-report says whether it is a pure offset (the Corvane crop matches GHD after
+report says whether it is a pure offset (the Corvene crop matches GHD after
 shifting by dx, dy points) or a colour / content difference (median colours of
 the differing pixels on both sides).
 """
@@ -30,10 +30,10 @@ class Region:
     h: float
     pixels: int
     share: float  # % of the compared area
-    shift: tuple[int, int] | None = None  # (dx, dy) points that best aligns Corvane to GHD
+    shift: tuple[int, int] | None = None  # (dx, dy) points that best aligns Corvene to GHD
     shift_gain: float = 0.0  # residual reduction of that shift, 0..1
     ghd_color: str = ""
-    corvane_color: str = ""
+    corvene_color: str = ""
     element: str = ""  # GHD DOM path at the region centre
     crop: str = ""
 
@@ -46,9 +46,9 @@ class Region:
                 parts.append(f"{abs(dx)}pt {'right' if dx > 0 else 'left'}")
             if dy:
                 parts.append(f"{abs(dy)}pt {'down' if dy > 0 else 'up'}")
-            return "Corvane content is offset " + " and ".join(parts) + " of GHD"
-        if self.ghd_color and self.corvane_color and self.ghd_color != self.corvane_color:
-            return f"colour/content: GHD {self.ghd_color} vs Corvane {self.corvane_color}"
+            return "Corvene content is offset " + " and ".join(parts) + " of GHD"
+        if self.ghd_color and self.corvene_color and self.ghd_color != self.corvene_color:
+            return f"colour/content: GHD {self.ghd_color} vs Corvene {self.corvene_color}"
         return "content differs"
 
 
@@ -156,7 +156,7 @@ def _best_shift(a: np.ndarray, b: np.ndarray, max_shift: int) -> tuple[tuple[int
 
 def compare(
     ghd_png: Path,
-    corvane_png: Path,
+    corvene_png: Path,
     out_dir: Path,
     stem: str,
     scale: float,
@@ -167,10 +167,10 @@ def compare(
     region: list | None = None,
     max_regions: int = 12,
 ) -> Result:
-    a, b = _load(ghd_png), _load(corvane_png)
+    a, b = _load(ghd_png), _load(corvene_png)
     size_note = ""
     if a.shape != b.shape:
-        size_note = f"GHD {a.shape[1]}x{a.shape[0]} vs Corvane {b.shape[1]}x{b.shape[0]} (cropped to the common area)"
+        size_note = f"GHD {a.shape[1]}x{a.shape[0]} vs Corvene {b.shape[1]}x{b.shape[0]} (cropped to the common area)"
         h, w = min(a.shape[0], b.shape[0]), min(a.shape[1], b.shape[1])
         a, b = a[:h, :w], b[:h, :w]
     ox = oy = 0
@@ -239,7 +239,7 @@ def compare(
         sub = mism[y0:y1, x0:x1]
         if sub.any():
             reg.ghd_color = _hex(np.median(a[y0:y1, x0:x1][sub], axis=0))
-            reg.corvane_color = _hex(np.median(b[y0:y1, x0:x1][sub], axis=0))
+            reg.corvene_color = _hex(np.median(b[y0:y1, x0:x1][sub], axis=0))
         # offset search at 1x on the region plus a margin
         m = int(10 * scale)
         cx0, cy0, cx1, cy1 = max(0, x0 - m), max(0, y0 - m), min(W, x1 + m), min(H, y1 + m)
@@ -247,7 +247,7 @@ def compare(
         cb = b[cy0:cy1:s, cx0:cx1:s]
         if ca.size and ca.shape[0] * ca.shape[1] < 400_000:
             (dx, dy), reg.shift_gain = _best_shift(ca, cb, 8)
-            # b(p - d) matches a(p): Corvane's content sits at -d relative to GHD
+            # b(p - d) matches a(p): Corvene's content sits at -d relative to GHD
             reg.shift = (-dx, -dy)
         reg.crop = _crop_triptych(img_a, img_b, mism, (cx0, cy0, cx1, cy1), out_dir / f"{stem}-r{i}.png")
 
@@ -291,7 +291,7 @@ def _crop_triptych(img_a, img_b, mism, box, path: Path) -> str:
     out = Image.new("RGB", (size[0] * 3 + 16, size[1] + label_h), (30, 30, 30))
     draw = ImageDraw.Draw(out)
     font = _font(13)
-    for i, (tile, label) in enumerate(zip(tiles, ("GitHub Desktop", "Corvane", "diff"))):
+    for i, (tile, label) in enumerate(zip(tiles, ("GitHub Desktop", "Corvene", "diff"))):
         x = i * (size[0] + 8)
         out.paste(tile, (x, label_h))
         draw.text((x + 4, 3), label, fill=(220, 220, 220), font=font)

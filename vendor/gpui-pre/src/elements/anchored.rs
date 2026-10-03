@@ -76,7 +76,7 @@ impl Anchored {
         self
     }
 
-    /// Corvane patch: keep the element `padding` inside the window's left
+    /// Corvene patch: keep the element `padding` inside the window's left
     /// and right edges only, letting it overflow vertically (floating-ui's
     /// `shift({ padding })` for a top or bottom placement).
     pub fn shift_horizontally(mut self, padding: Pixels) -> Self {
@@ -272,7 +272,7 @@ pub enum AnchoredFitMode {
     SnapToWindowWithMargin(Edges<Pixels>),
     /// Switch which corner anchor this anchored element is attached to.
     SwitchAnchor,
-    /// Corvane patch: see [`Anchored::shift_horizontally`].
+    /// Corvene patch: see [`Anchored::shift_horizontally`].
     ShiftHorizontally(Pixels),
 }
 

@@ -1,5 +1,5 @@
 #![cfg(target_os = "macos")]
-// Corvane: vendored (a path dependency, so cargo does not cap its lints)
+// Corvene: vendored (a path dependency, so cargo does not cap its lints)
 #![allow(warnings)]
 //! macOS platform implementation for GPUI.
 //!

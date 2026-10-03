@@ -1,0 +1,11 @@
+[package]
+name = "corvene-askpass"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene's GIT_ASKPASS helper for Android"
+
+# Android only: there the app is a library inside an activity, so git cannot
+# run it as `GIT_ASKPASS` the way it runs the desktop binary. This helper is
+# packaged as libcorvene-askpass.so and asks the running app.
+[dependencies]

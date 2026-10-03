@@ -218,10 +218,10 @@ impl AndroidPlatform {
             }
         );
         let mut overran = false;
-        // `adb shell setprop debug.corvane.render_scale 1` pins the scale
+        // `adb shell setprop debug.corvene.render_scale 1` pins the scale
         // (measurements, or a user who prefers sharp over smooth)
         let mut render_scale = RenderScaleGovernor {
-            pinned: system_property(c"debug.corvane.render_scale")
+            pinned: system_property(c"debug.corvene.render_scale")
                 .and_then(|value| value.parse::<f32>().ok())
                 .map(|scale| scale.clamp(0.5, 1.0)),
             ..Default::default()

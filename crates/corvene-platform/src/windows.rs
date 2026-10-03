@@ -1,0 +1,106 @@
+//! Win32 pieces shared by the modules' Windows arms.
+
+use std::os::windows::process::CommandExt;
+use std::path::Path;
+use std::process::{Command, Stdio};
+
+use windows::Win32::UI::WindowsAndMessaging::{
+    SPI_GETFONTSMOOTHING, SPI_GETFONTSMOOTHINGTYPE, SPI_GETHIGHCONTRAST,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+};
+
+/// Corvene is a GUI program: a console program it starts would open a
+/// console window of its own without this creation flag.
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// For the programs that are meant to get a console (the shells).
+pub const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+/// The AppUserModelID the installer's Start menu shortcut carries; toasts
+/// are shown under it.
+pub const APP_USER_MODEL_ID: &str = "com.wasimaster.corvene";
+
+/// Settings › Accessibility › Contrast themes (`SPI_GETHIGHCONTRAST`).
+pub fn high_contrast() -> bool {
+    use windows::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
+    let mut info = HIGHCONTRASTW {
+        cbSize: size_of::<HIGHCONTRASTW>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the call fills `info`, whose size it is told
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            info.cbSize,
+            Some((&raw mut info).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    read.is_ok() && info.dwFlags.contains(HCF_HIGHCONTRASTON)
+}
+
+/// Whether ClearType is on (Chromium draws subpixel text then, grayscale
+/// with plain font smoothing).
+pub fn cleartype() -> bool {
+    const FE_FONTSMOOTHINGCLEARTYPE: u32 = 2;
+    let mut smoothing = 0i32;
+    let mut kind = 0u32;
+    // SAFETY: each call writes one BOOL / UINT to the pointer it is given
+    unsafe {
+        let on = SystemParametersInfoW(
+            SPI_GETFONTSMOOTHING,
+            0,
+            Some((&raw mut smoothing).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+        let which = SystemParametersInfoW(
+            SPI_GETFONTSMOOTHINGTYPE,
+            0,
+            Some((&raw mut kind).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+        on.is_ok() && which.is_ok() && smoothing != 0 && kind == FE_FONTSMOOTHINGCLEARTYPE
+    }
+}
+
+/// Settings › Time & language › Country or region, as ISO 3166-1 alpha-2.
+pub fn country_code() -> Option<String> {
+    let mut name = [0u16; 16];
+    // SAFETY: the call writes at most `name.len()` UTF-16 units
+    let len = unsafe { windows::Win32::Globalization::GetUserDefaultGeoName(&mut name) };
+    let len = usize::try_from(len).ok()?.checked_sub(1)?;
+    let code = String::from_utf16(name.get(..len)?).ok()?;
+    (code.len() == 2 && code.chars().all(|c| c.is_ascii_alphabetic()))
+        .then(|| code.to_ascii_uppercase())
+}
+
+/// Electron's `shell.showItemInFolder`: an Explorer window on the item's
+/// folder with the item selected.
+pub fn show_item_in_folder(path: &Path) -> std::io::Result<()> {
+    // Explorer parses its own command line: the path is quoted as a whole,
+    // after the comma
+    Command::new("explorer.exe")
+        .raw_arg(format!("/select,\"{}\"", path.display()))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(drop)
+}
+
+/// `HKEY_CURRENT_USER\Software\Classes\<scheme>` pointing at `exe`, the way
+/// Electron's `app.setAsDefaultProtocolClient` writes it.
+pub fn register_url_scheme(scheme: &str, exe: &Path) -> windows_registry::Result<()> {
+    let key = windows_registry::CURRENT_USER.create(format!("Software\\Classes\\{scheme}"))?;
+    key.set_string("", format!("URL:{scheme}"))?;
+    key.set_string("URL Protocol", "")?;
+    key.create("shell\\open\\command")?
+        .set_string("", format!("\"{}\" \"%1\"", exe.display()))
+}
+
+/// The command registered for `scheme`, if any.
+pub fn url_scheme_command(scheme: &str) -> Option<String> {
+    windows_registry::CURRENT_USER
+        .open(format!("Software\\Classes\\{scheme}\\shell\\open\\command"))
+        .and_then(|key| key.get_string(""))
+        .ok()
+}

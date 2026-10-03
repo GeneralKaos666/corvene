@@ -1623,7 +1623,7 @@ impl LinuxClient for X11Client {
         params: WindowParams,
     ) -> anyhow::Result<Box<dyn PlatformWindow>> {
         let mut state = self.0.borrow_mut();
-        // Corvane patch: an anchored popup is placed against the window it
+        // Corvene patch: an anchored popup is placed against the window it
         // names, not whichever window has the keyboard focus.
         let parent_window = match &params.kind {
             gpui::WindowKind::AnchoredPopup(options) => state

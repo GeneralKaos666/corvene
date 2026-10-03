@@ -1010,7 +1010,7 @@ fn aligned_origin_x(
 }
 
 
-/// Corvane patch: the baseline's offset from the top of a `line_height`
+/// Corvene patch: the baseline's offset from the top of a `line_height`
 /// line. Off macOS this follows Chromium on Linux, which rounds the font's
 /// ascent and descent to device pixels (`FontMetrics::AscentDescentWithHacks`)
 /// and puts the half leading's floor above the text, so text lines up with

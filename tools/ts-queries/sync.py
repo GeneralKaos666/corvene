@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendor tree-sitter highlight queries into crates/corvane-grammars/queries.
+"""Vendor tree-sitter highlight queries into crates/corvene-grammars/queries.
 
     python3 tools/ts-queries/sync.py                 # every grammar in languages.toml
     python3 tools/ts-queries/sync.py rust haskell    # some
@@ -14,14 +14,14 @@ grammar, see README.md):
   found with `cargo metadata`; tree-sitter.json says which files);
 - nvim: nvim-treesitter at NVIM_REV (Apache-2.0);
 - helix: Helix at HELIX_REV (MPL-2.0);
-- corvane: hand-written, kept as is (tools/ts-queries/corvane/<name>/).
+- corvene: hand-written, kept as is (tools/ts-queries/corvene/<name>/).
 
 nvim and Helix queries are rewritten for tree-sitter-highlight: `; inherits:`
 is resolved, `#lua-match?` / `#vim-match?` become `#match?`, predicates and
 directives it cannot evaluate are dropped (noted in the file header), and
 Helix files are reversed pattern by pattern (Helix lets the first matching pattern win,
 tree-sitter-highlight the last). Files in tools/ts-queries/patches/<name>/
-are appended (Corvane additions, MIT).
+are appended (Corvene additions, MIT).
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOLS = ROOT / "tools" / "ts-queries"
-OUT = ROOT / "crates" / "corvane-grammars" / "queries"
+OUT = ROOT / "crates" / "corvene-grammars" / "queries"
 CACHE = ROOT / "target" / "ts-queries"
 KINDS = ("highlights", "injections", "locals")
 
@@ -46,7 +46,7 @@ NVIM_REV = "728e031f6b11d03d1f0708b7dc4fb0f1d9c8a137"
 HELIX_REPO = "https://github.com/helix-editor/helix"
 HELIX_REV = "ba40e547426b0f9896c8bdc699a4ab11f2b37dbc"
 
-LICENSES = {"nvim": "Apache-2.0", "helix": "MPL-2.0", "corvane": "MIT"}
+LICENSES = {"nvim": "Apache-2.0", "helix": "MPL-2.0", "corvene": "MIT"}
 
 
 def load_languages() -> dict:
@@ -65,7 +65,7 @@ def packages() -> dict[str, dict]:
     if _packages is None:
         meta = json.loads(
             subprocess.run(
-                ["cargo", "metadata", "--format-version", "1", "--features", "corvane-grammars/all"],
+                ["cargo", "metadata", "--format-version", "1", "--features", "corvene-grammars/all"],
                 cwd=ROOT,
                 check=True,
                 capture_output=True,
@@ -84,7 +84,7 @@ def packages() -> dict[str, dict]:
 
 
 def source_dir(name: str) -> Path:
-    return Path(os.environ.get("CORVANE_GRAMMAR_SOURCES", ROOT / "target" / "grammar-src")) / name
+    return Path(os.environ.get("CORVENE_GRAMMAR_SOURCES", ROOT / "target" / "grammar-src")) / name
 
 
 def upstream_files(name: str, lang: dict) -> tuple[dict[str, list[Path]], str] | None:
@@ -409,14 +409,14 @@ def render_source(name: str, lang: dict, source: str) -> dict[str, str] | None:
             rels = ", ".join(str(p.relative_to(base)) for p in files[kind])
             out[kind] = header(name, f"{label}: {rels}" if rels else label) + body if body else header(name, label)
         return out
-    if source == "corvane":
-        base = TOOLS / "corvane" / name
+    if source == "corvene":
+        base = TOOLS / "corvene" / name
         if not (base / "highlights.scm").exists():
             return None
         for kind in KINDS:
             path = base / f"{kind}.scm"
             body = path.read_text() if path.exists() else ""
-            out[kind] = header(name, "Corvane (MIT)") + body
+            out[kind] = header(name, "Corvene (MIT)") + body
         return out
     found = other_files(source, name, lang)
     if not found:
@@ -441,12 +441,12 @@ def with_patches(name: str, files: dict[str, str]) -> dict[str, str]:
     for kind in KINDS:
         patch = TOOLS / "patches" / name / f"{kind}.scm"
         if patch.exists():
-            files[kind] += f"\n; Corvane additions (tools/ts-queries/patches/{name}/{kind}.scm, MIT)\n" + patch.read_text()
+            files[kind] += f"\n; Corvene additions (tools/ts-queries/patches/{name}/{kind}.scm, MIT)\n" + patch.read_text()
     return files
 
 
 def third_party(languages: dict) -> str:
-    """crates/corvane-grammars/THIRD_PARTY.md: every grammar's package and
+    """crates/corvene-grammars/THIRD_PARTY.md: every grammar's package and
     query source with their licenses (shipped inside the grammar packs)."""
     lines = [
         "# Third-party grammars and queries",
@@ -477,7 +477,7 @@ def third_party(languages: dict) -> str:
         "",
         "nvim-treesitter queries: Apache-2.0, https://github.com/nvim-treesitter/nvim-treesitter.",
         "Helix queries: MPL-2.0, https://github.com/helix-editor/helix (source of the modified files:",
-        "`crates/corvane-grammars/queries/` in https://github.com/wasi-master/corvane).",
+        "`crates/corvene-grammars/queries/` in https://github.com/wasi-master/corvene).",
         "",
     ]
     return "\n".join(lines)
@@ -495,7 +495,7 @@ def main(argv: list[str]) -> int:
             print(f"{name}: not in languages.toml", file=sys.stderr)
             return 1
         if candidates:
-            for source in ("upstream", "nvim", "helix", "corvane"):
+            for source in ("upstream", "nvim", "helix", "corvene"):
                 files = render(name, lang, source)
                 if not files:
                     continue
@@ -507,7 +507,7 @@ def main(argv: list[str]) -> int:
         source = lang["source"]
         files = render(name, lang, source)
         if files is None and "--fallback" in argv:
-            for source in ("nvim", "upstream", "helix", "corvane"):
+            for source in ("nvim", "upstream", "helix", "corvene"):
                 files = render(name, lang, source)
                 if files is not None:
                     break
@@ -528,7 +528,7 @@ def main(argv: list[str]) -> int:
             print(f"{name}: {source}")
     if not candidates:
         doc = third_party(languages)
-        path = ROOT / "crates" / "corvane-grammars" / "THIRD_PARTY.md"
+        path = ROOT / "crates" / "corvene-grammars" / "THIRD_PARTY.md"
         if check:
             if not path.exists() or path.read_text() != doc:
                 stale.append(str(path.relative_to(ROOT)))

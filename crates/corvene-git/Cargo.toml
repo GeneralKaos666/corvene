@@ -1,0 +1,21 @@
+[package]
+name = "corvene-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene git engine: gitoxide reads, git CLI writes"
+
+[dependencies]
+corvene-models.workspace = true
+gix.workspace = true
+libc = "0.2"
+dunce = "1"
+thiserror.workspace = true
+tracing.workspace = true
+
+# Android has no Trash; discarded files are deleted there
+[target.'cfg(not(target_os = "android"))'.dependencies]
+trash = "5"
+
+[dev-dependencies]
+tempfile = "3"

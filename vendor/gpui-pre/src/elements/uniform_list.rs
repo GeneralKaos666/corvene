@@ -506,7 +506,7 @@ impl Element for UniformList {
                                 AvailableSpace::Definite(item_height),
                             );
                             item.layout_as_root(available_space, window, cx);
-                            // Corvane patch: not `prepaint_at`, which would
+                            // Corvene patch: not `prepaint_at`, which would
                             // take the first row's origin for the list's own
                             // (rows are placed from the list's snapped origin,
                             // as in Chromium's scrolling layers)
@@ -562,7 +562,7 @@ impl Element for UniformList {
             window,
             cx,
             |_, window, cx| {
-                // Corvane patch: off macOS rows paint text like Chromium in
+                // Corvene patch: off macOS rows paint text like Chromium in
                 // a virtualized grid's composited layer: grayscale
                 let mut paint = |window: &mut Window, cx: &mut App| {
                     for item in &mut request_layout.items {

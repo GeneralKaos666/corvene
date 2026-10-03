@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cross-build the git Corvane bundles on Android: git itself, the HTTPS
+# Cross-build the git Corvene bundles on Android: git itself, the HTTPS
 # transport (curl + OpenSSL, statically linked into git-remote-https), the
 # OpenSSH client and git-lfs. Termux's build recipes are the reference for
 # the flags.
@@ -16,8 +16,8 @@
 #   libgit-lfs.so             git-lfs
 #   libgit-sh-*.so …          git's shell scripts (submodule, mergetool)
 #
-# At start-up Corvane links the names git expects to them
-# (crates/corvane-platform/src/android/git.rs) and sets GIT_EXEC_PATH.
+# At start-up Corvene links the names git expects to them
+# (crates/corvene-platform/src/android/git.rs) and sets GIT_EXEC_PATH.
 #
 # Needs ANDROID_NDK_HOME, make, perl (OpenSSL's Configure) and Go (git-lfs).
 # Env: API (26), OUT (app/src/main/jniLibs), WORK (target/android-git),
@@ -218,7 +218,7 @@ MAK
       (
         cd "$build/openssh"
         # An app has no passwd entry worth the name: its home is $HOME
-        # (Corvane's app-private storage). The configure answers below are
+        # (Corvene's app-private storage). The configure answers below are
         # Termux's for bionic.
         patch -p1 <"$HERE/patches/openssh-home.patch"
         # Termux's: bionic declares no bzero here, and an app may not

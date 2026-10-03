@@ -1,4 +1,4 @@
-// The Gradle project that packages Corvane for Android: the Rust library
+// The Gradle project that packages Corvene for Android: the Rust library
 // (built by cargo-ndk, see build.sh) inside a NativeActivity.
 
 pluginManagement {
@@ -17,7 +17,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Corvane"
+rootProject.name = "Corvene"
 include(":app")
 // the tree-sitter grammars as an on-demand feature module (Google Play)
 include(":grammars")

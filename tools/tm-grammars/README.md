@@ -4,21 +4,21 @@ The default build highlights languages no other engine covers with TextMate
 grammars from Sublime Text, VS Code, Atom and TextMate bundles, as collected
 (and license-checked) by GitHub Linguist. They are converted to
 sublime-syntax, the format syntect reads, and compiled with syntect's own
-default set into `crates/corvane-highlight/assets/syntaxes.packdump`, which
-`corvane_highlight::syntaxes` loads instead of syntect's built-in set.
+default set into `crates/corvene-highlight/assets/syntaxes.packdump`, which
+`corvene_highlight::syntaxes` loads instead of syntect's built-in set.
 
 | File | Written by |
 |---|---|
 | `syntaxes/<scope>.sublime-syntax` (converted grammars, each naming its source and license) | `sync.py` |
 | `THIRD_PARTY.md` (language, scope, license, source) | `sync.py` |
 | `rejected.txt` (grammars that failed their samples) | the `tm-build` example |
-| `crates/corvane-highlight/assets/syntaxes.packdump` | the `tm-build` example |
+| `crates/corvene-highlight/assets/syntaxes.packdump` | the `tm-build` example |
 
 ```bash
 python3 tools/tm-grammars/sync.py
-cargo run -p corvane-highlight --features pack-builder --example tm-build -- \
+cargo run -p corvene-highlight --features pack-builder --example tm-build -- \
     tools/tm-grammars/syntaxes target/tm/samples.json \
-    crates/corvane-highlight/assets/syntaxes.packdump tools/tm-grammars/rejected.txt
+    crates/corvene-highlight/assets/syntaxes.packdump tools/tm-grammars/rejected.txt
 ```
 
 ## What is taken

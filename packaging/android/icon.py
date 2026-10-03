@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Renders Corvane's Android icon from the geometry of the adaptive icon
+"""Renders Corvene's Android icon from the geometry of the adaptive icon
 layers (app/src/main/res/drawable/ic_launcher_*.xml): the 512 px store icon
 (full bleed, no mask or shadow, as Google Play and F-Droid want it) and, with
 --preview, the masks a launcher applies.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-SCALE = 0.098  # glyph units (assets/icon/Corvane.svg) per dp
+SCALE = 0.098  # glyph units (assets/icon/Corvene.svg) per dp
 TX, TY = 54 - 489.5 * SCALE, 54 - 512 * SCALE
 NODES = [(665, 343), (665, 681), (528, 502)]
 TOP, BOTTOM = (0x8A, 0x5C, 0xFF), (0x43, 0x18, 0xB8)

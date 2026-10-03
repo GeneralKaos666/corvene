@@ -19,10 +19,10 @@ command -v cargo-about >/dev/null || {
 
 cd "$ROOT"
 cargo about generate --format json --config packaging/about.toml \
-  --manifest-path "$ROOT/crates/corvane/Cargo.toml" -o "$RAW"
+  --manifest-path "$ROOT/crates/corvene/Cargo.toml" -o "$RAW"
 
 # Compact form: each license text once, each crate once (sorted by name), and
-# Corvane's own LICENSE.
+# Corvene's own LICENSE.
 python3 - "$RAW" "$ROOT/LICENSE" "$OUT" <<'PY'
 import json, sys
 
@@ -36,7 +36,7 @@ for lic in raw["licenses"]:
         texts.append(text)
     for used in lic["used_by"]:
         krate = used["crate"]
-        if krate["name"].startswith("corvane"):
+        if krate["name"].startswith("corvene"):
             continue
         key = (krate["name"], krate["version"])
         entry = crates.setdefault(key, {

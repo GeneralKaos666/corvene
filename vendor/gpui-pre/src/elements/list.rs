@@ -1614,7 +1614,7 @@ impl Element for List {
         });
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            // Corvane patch: off macOS rows paint text like Chromium in a
+            // Corvene patch: off macOS rows paint text like Chromium in a
             // virtualized grid's composited layer: grayscale
             let mode = if cfg!(target_os = "macos") {
                 None

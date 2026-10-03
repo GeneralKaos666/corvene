@@ -502,7 +502,7 @@ fn prepaint_view(
                 let prepaint_start = window.prepaint_index();
                 let (element, accessed_entities) = cx.detect_accessed_entities(|cx| {
                     let mut element = render(window, cx);
-                    // Corvane patch: see `Window::unsnapped_bounds`
+                    // Corvene patch: see `Window::unsnapped_bounds`
                     let bounds = window.unsnapped_bounds(bounds);
                     element.layout_as_root(Size::<AvailableSpace>::from(bounds.size), window, cx);
                     element.prepaint_at(bounds.origin, window, cx);

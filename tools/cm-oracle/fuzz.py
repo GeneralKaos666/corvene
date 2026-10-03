@@ -7,7 +7,7 @@ tokens for each variant with cmtok.js, and leaves a samples/ + expected/
 pair the golden test runs against:
 
     python3 tools/cm-oracle/fuzz.py target/cm-fuzz
-    CM_GOLDEN_DIR=target/cm-fuzz cargo test -p corvane-highlight --test cm_golden
+    CM_GOLDEN_DIR=target/cm-fuzz cargo test -p corvene-highlight --test cm_golden
 
 Variants GHD itself throws on or loops forever on (rust, toml) are dropped.
 """
@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 ROOT=Path(__file__).resolve().parents[2]; sys.path.insert(0,str(ROOT/'tools/cm-oracle'))
 import gen
 ext,base,module=gen.tables()
-T=ROOT/'crates/corvane-highlight/tests/cm'
+T=ROOT/'crates/corvene-highlight/tests/cm'
 OUT=Path(sys.argv[1] if len(sys.argv)>1 else ROOT/'target'/'cm-fuzz'); shutil.rmtree(OUT,ignore_errors=True)
 (OUT/'samples').mkdir(parents=True); (OUT/'expected').mkdir()
 def variants(text):
