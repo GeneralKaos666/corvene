@@ -1418,6 +1418,20 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/index_lock.rs", "crates/corvene-ui/src/dialogs/simple.rs"],
     },
 
+    /// Bold filter matches in the clone list, like the other lists.
+    CONSISTENT_FILTER_HIGHLIGHT = 274 "consistent-filter-highlight" {
+        title: "Bold filter matches when cloning",
+        summary: "In Clone a Repository's lists (and the signed-in blank slate) the characters \
+                  matching the filter are bold, as in the branch and repository lists.",
+        ghd_behaviour: "Black on bright yellow (an unstyled `<mark>`), unlike every other list.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6898)],
+        code: &["crates/corvene-ui/src/cloneable_repositories.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
