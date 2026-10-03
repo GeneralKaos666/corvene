@@ -1,0 +1,24 @@
+[package]
+name = "corvene-extensions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene language extensions: editor grammars (VS Code, Atom, Zed, TextMate, Sublime) for diff highlighting"
+
+[dependencies]
+corvene-platform.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+# the runtime reads converted grammars from their sublime-syntax text and
+# writes the user set as a dump, so both syntect loaders are on here
+syntect = { workspace = true, features = ["yaml-load", "dump-create"] }
+thiserror.workspace = true
+tracing.workspace = true
+# syntect's YAML reader; also emits the converted grammars and reads
+# `.YAML-tmLanguage` sources
+yaml-rust = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
