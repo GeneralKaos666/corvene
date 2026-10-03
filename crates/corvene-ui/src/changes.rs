@@ -44,6 +44,8 @@
 //! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
 //! - adding yourself or a second token for the same co-author is refused
 //!   with a hint under the co-authors box (`779-co-author-validation`).
+//! - each repository keeps its commit message, also across restarts
+//!   (`776-persist-commit-drafts`).
 //! - typing a character in the file list types it into the summary
 //!   (`653-type-to-commit-summary`).
 //! - → in the empty summary types the generated placeholder
@@ -205,6 +207,8 @@ pub struct ChangesSidebar {
     co_author_hint: Option<(SharedString, std::time::Instant)>,
     /// The summary's placeholder as last set (`getPlaceholderMessage`).
     summary_placeholder: SharedString,
+    /// `776-persist-commit-drafts`: the repository the form's text belongs to.
+    draft_repo: Option<u64>,
 }
 
 /// What the repository rules say about the commit being written
@@ -245,6 +249,33 @@ impl ChangesSidebar {
                 {
                     Dispatcher::create_tag(repo, name, sha, String::new(), cx);
                 }
+            }
+            // Corvene (`776-persist-commit-drafts`): each repository keeps its
+            // own message; another repository's commits never clear it
+            let selected = state.read(cx).selected;
+            if selected != this.draft_repo
+                && state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::PERSIST_COMMIT_DRAFTS)
+            {
+                let first = this.draft_repo.is_none();
+                if let Some(previous) = std::mem::replace(&mut this.draft_repo, selected) {
+                    this.save_draft(previous, cx);
+                }
+                let draft = selected.and_then(|id| state.read(cx).commit_drafts.get(&id).cloned());
+                // the first repository keeps what the form has without a draft
+                if draft.is_some() || !first {
+                    let draft = draft.unwrap_or_default();
+                    this.summary
+                        .update(cx, |s, cx| s.set_value(draft.summary, window, cx));
+                    this.description
+                        .update(cx, |s, cx| s.set_value(draft.description, window, cx));
+                    this.recalled = None;
+                    this.refresh_spelling(CommitField::Summary, cx);
+                    this.refresh_spelling(CommitField::Description, cx);
+                }
+                this.seen_commit_nonce = nonce;
             }
             if nonce != this.seen_commit_nonce {
                 this.seen_commit_nonce = nonce;
@@ -409,6 +440,7 @@ impl ChangesSidebar {
             recalled: None,
             co_author_hint: None,
             summary_placeholder: "Summary (required)".into(),
+            draft_repo: None,
         }
     }
 
@@ -417,6 +449,11 @@ impl ChangesSidebar {
     fn on_input_event(&mut self, field: CommitField, ev: &InputEvent, cx: &mut Context<Self>) {
         if matches!(ev, InputEvent::Change) && field != CommitField::CoAuthors {
             self.recalled = None;
+            if let Some(id) = self.draft_repo
+                && self.state.read(cx).selected == Some(id)
+            {
+                self.save_draft(id, cx);
+            }
         }
         match ev {
             InputEvent::Change if field == CommitField::CoAuthors => {
@@ -433,6 +470,17 @@ impl ChangesSidebar {
             }
             _ => {}
         }
+    }
+
+    /// `776-persist-commit-drafts`: the form's message is repository `id`'s
+    /// draft (none when untouched).
+    fn save_draft(&self, id: u64, cx: &mut Context<Self>) {
+        let draft = corvene_core::drafts::CommitDraft::normalized(
+            &self.summary.read(cx).value(),
+            &self.description.read(cx).value(),
+            self.seen_template.1.as_deref(),
+        );
+        Dispatcher::set_commit_draft(id, draft, cx);
     }
 
     fn field_text_and_caret(&self, field: CommitField, cx: &App) -> (String, usize) {

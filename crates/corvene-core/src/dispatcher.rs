@@ -86,6 +86,14 @@ impl Dispatcher {
         } else {
             std::collections::HashMap::new()
         };
+        // Corvene (`776-persist-commit-drafts`): last session's drafts
+        let commit_drafts = if flags.bool(crate::flags::ids::PERSIST_COMMIT_DRAFTS) {
+            let mut saved = store.commit_drafts().unwrap_or_default();
+            saved.retain(|id, _| repositories.iter().any(|r| r.id == *id));
+            saved
+        } else {
+            std::collections::HashMap::new()
+        };
         // `876-git-spawn-error-details`
         corvene_git::set_explain_missing_workdir(
             flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
@@ -139,6 +147,8 @@ impl Dispatcher {
             update: crate::updater::UpdateState::default(),
             packs: crate::packs::PacksState::default(),
             alive: crate::alive::AliveState::default(),
+            commit_drafts,
+            commit_drafts_nonce: 0,
         });
         AppState::install(state.clone(), cx);
         cx.background_executor()

@@ -13,6 +13,7 @@ pub mod compare;
 pub mod crash_reports;
 pub mod diff_cache;
 pub mod dispatcher;
+pub mod drafts;
 pub mod emoji;
 pub mod filter;
 pub mod flags;

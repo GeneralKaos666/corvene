@@ -1078,6 +1078,10 @@ pub struct AppState {
     pub packs: crate::packs::PacksState,
     /// Alive subscriptions (`AliveStore`) and notification dedup state.
     pub alive: crate::alive::AliveState,
+    /// `776-persist-commit-drafts`: each repository's unfinished commit
+    /// message, and a counter that debounces writing them.
+    pub commit_drafts: HashMap<u64, crate::drafts::CommitDraft>,
+    pub commit_drafts_nonce: u64,
 }
 
 impl AppState {

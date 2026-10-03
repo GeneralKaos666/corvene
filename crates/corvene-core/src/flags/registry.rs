@@ -3659,6 +3659,22 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Commit messages survive switching repositories and restarts.
+    PERSIST_COMMIT_DRAFTS = 776 "persist-commit-drafts" {
+        title: "Keep commit message drafts",
+        summary: "Each repository keeps its own unfinished commit summary and description: \
+                  switching to another repository and back, or quitting and reopening Corvene, \
+                  brings it back. A commit clears it.",
+        ghd_behaviour: "Drafts are kept per repository in memory only and are gone after a \
+                        restart.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3664)],
+        code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

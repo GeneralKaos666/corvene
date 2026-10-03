@@ -356,6 +356,13 @@ pub trait StoreExt {
     ) -> Result<()>;
     fn selected_repository(&self) -> Result<Option<u64>>;
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()>;
+    /// Unfinished commit messages by repository id (flag
+    /// `776-persist-commit-drafts`).
+    fn commit_drafts(&self) -> Result<std::collections::HashMap<u64, crate::drafts::CommitDraft>>;
+    fn save_commit_drafts(
+        &self,
+        drafts: &std::collections::HashMap<u64, crate::drafts::CommitDraft>,
+    ) -> Result<()>;
 
     fn accounts(&self) -> Result<Vec<Account>>;
     fn save_accounts(&self, accounts: &[Account]) -> Result<()>;
@@ -428,6 +435,17 @@ impl StoreExt for Store {
 
     fn selected_repository(&self) -> Result<Option<u64>> {
         self.get("ui.selected_repository")
+    }
+
+    fn commit_drafts(&self) -> Result<std::collections::HashMap<u64, crate::drafts::CommitDraft>> {
+        Ok(self.get("changes.commit_drafts")?.unwrap_or_default())
+    }
+
+    fn save_commit_drafts(
+        &self,
+        drafts: &std::collections::HashMap<u64, crate::drafts::CommitDraft>,
+    ) -> Result<()> {
+        self.set("changes.commit_drafts", drafts)
     }
 
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()> {
