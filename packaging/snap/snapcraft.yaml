@@ -1,0 +1,64 @@
+# Corvene's snap, made from the release's Linux .tar.gz: packaging/snap/prepare.sh
+# copies this file (version filled in) and the archive into a folder that
+# `snapcraft pack` builds. Not in the Snap Store: the release carries the
+# .snap, installed with `snap install --dangerous`.
+#
+# git, git-lfs and ssh come from Ubuntu 24.04 inside the snap. Two
+# interfaces are not connected on their own:
+#   snap connect corvene:password-manager-service   (the account tokens)
+#   snap connect corvene:ssh-keys                   (git over SSH with ~/.ssh)
+name: corvene
+title: Corvene
+version: '@VERSION@'
+summary: Native Git client that looks and works like GitHub Desktop
+description: |
+  Corvene is a native reimplementation of GitHub Desktop: the same changes,
+  history, branches and pull request workflow, without Electron.
+license: MIT
+website: https://github.com/wasi-master/corvene
+issues: https://github.com/wasi-master/corvene/issues
+base: core24
+grade: stable
+confinement: strict
+
+apps:
+  corvene:
+    command: usr/lib/corvene/corvene
+    # GTK-free, but the extension brings the desktop libraries, fonts,
+    # Wayland and the GPU drivers (gpu-2404)
+    extensions: [gnome]
+    desktop: usr/share/applications/com.wasimaster.corvene.desktop
+    common-id: com.wasimaster.corvene
+    environment:
+      # Ubuntu's git looks for its helpers under /usr/lib/git-core
+      GIT_EXEC_PATH: $SNAP/usr/lib/git-core
+      GIT_TEMPLATE_DIR: $SNAP/usr/share/git-core/templates
+    plugs:
+      - home
+      - removable-media
+      - network
+      - network-bind
+      - ssh-keys
+      - password-manager-service
+
+parts:
+  corvene:
+    plugin: dump
+    source: corvene.tar.gz
+    source-type: tar
+    stage-packages:
+      - git
+      - git-lfs
+      - openssh-client
+      - libvulkan1
+      - libxkbcommon-x11-0
+    override-prime: |
+      craftctl default
+      # the snap's entry runs the snap's app, with the icon from inside it
+      sed -i \
+        -e 's|^Exec=.*|Exec=corvene %U|' \
+        -e '/^TryExec=/d' \
+        -e 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/scalable/apps/com.wasimaster.corvene.svg|' \
+        usr/share/applications/com.wasimaster.corvene.desktop
+      # the command line tool needs a binary outside the sandbox
+      rm -f usr/bin/corvene

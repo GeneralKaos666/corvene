@@ -1,0 +1,75 @@
+# Corvene's Flatpak, made from the release's Linux .tar.gz by
+# packaging/flatpak/build.sh (which puts the archive next to this file as
+# corvene.tar.gz). Not on Flathub: the release carries it as a bundle.
+#
+# The sandbox has its own git (built here, with no Perl, Python or Tcl/Tk
+# parts) because the runtime has none. Repositories outside the home folder
+# need `flatpak override --user --filesystem=<path> com.wasimaster.corvene`.
+# Editors and shells are the sandbox's own: the host's are not reachable
+# (no --talk-name=org.freedesktop.Flatpak).
+id: com.wasimaster.corvene
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: corvene
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # repositories live anywhere in the home folder
+  - --filesystem=home
+  # git over SSH with the user's agent
+  - --socket=ssh-auth
+  # the account tokens (Secret Service: GNOME Keyring, KWallet, KeePassXC)
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.freedesktop.Notifications
+cleanup:
+  - /share/man
+  - /share/gitweb
+  - /share/git-gui
+  - /share/gitk
+modules:
+  - name: git
+    buildsystem: autotools
+    builddir: false
+    config-opts:
+      - --without-tcltk
+    make-args:
+      - NO_PERL=YesPlease
+      - NO_PYTHON=YesPlease
+      - NO_GETTEXT=YesPlease
+      - NO_TCLTK=YesPlease
+      - INSTALL_SYMLINKS=YesPlease
+    make-install-args:
+      - NO_PERL=YesPlease
+      - NO_PYTHON=YesPlease
+      - NO_GETTEXT=YesPlease
+      - NO_TCLTK=YesPlease
+      - INSTALL_SYMLINKS=YesPlease
+    sources:
+      - type: archive
+        url: https://mirrors.edge.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz
+        sha256: 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
+
+  - name: corvene
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 usr/lib/corvene/corvene /app/lib/corvene/corvene
+      - mkdir -p /app/bin && ln -s ../lib/corvene/corvene /app/bin/corvene
+      # Flatpak exports the entry with its own Exec; the app takes the
+      # x-corvene:// URLs itself (no command line tool in the sandbox)
+      - mkdir -p /app/share/applications
+      - >-
+        sed -e 's|^Exec=.*|Exec=corvene %U|' -e '/^TryExec=/d'
+        usr/share/applications/com.wasimaster.corvene.desktop
+        > /app/share/applications/com.wasimaster.corvene.desktop
+      - install -Dm644 usr/share/metainfo/com.wasimaster.corvene.metainfo.xml -t /app/share/metainfo
+      - install -Dm644 usr/share/icons/hicolor/256x256/apps/com.wasimaster.corvene.png -t /app/share/icons/hicolor/256x256/apps
+      - install -Dm644 usr/share/icons/hicolor/scalable/apps/com.wasimaster.corvene.svg -t /app/share/icons/hicolor/scalable/apps
+      - install -Dm644 usr/share/licenses/*/LICENSE -t /app/share/licenses/com.wasimaster.corvene
+    sources:
+      - type: archive
+        path: corvene.tar.gz
+        strip-components: 1

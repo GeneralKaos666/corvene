@@ -147,8 +147,9 @@ fn agent(global_timeout: Option<Duration>) -> ureq::Agent {
 }
 
 /// Ask the feed for the latest release; `Ok(None)` when it is not newer
-/// than `current_version` (or is a draft).
-pub fn check_latest(current_version: &str) -> Result<Option<ReleaseInfo>, UpdateError> {
+/// than `current_version` (or is a draft). `full`: this is a `Corvene-Full`
+/// build, which updates to the release's `Corvene-Full-…` asset.
+pub fn check_latest(current_version: &str, full: bool) -> Result<Option<ReleaseInfo>, UpdateError> {
     let url = feed_url();
     debug!(%url, "checking for updates");
     let mut response = agent(Some(Duration::from_secs(30)))
@@ -167,27 +168,23 @@ pub fn check_latest(current_version: &str) -> Result<Option<ReleaseInfo>, Update
         .map_err(|err| UpdateError::Feed(err.to_string()))?;
     let release: ApiRelease =
         serde_json::from_str(&body).map_err(|err| UpdateError::Feed(err.to_string()))?;
-    release_info(release, current_version)
-}
-
-fn release_info(
-    release: ApiRelease,
-    current_version: &str,
-) -> Result<Option<ReleaseInfo>, UpdateError> {
     release_info_for(
         release,
         current_version,
         std::env::consts::OS,
         std::env::consts::ARCH,
+        full,
     )
 }
 
-/// [`release_info`] for an `os` / `arch` pair (`std::env::consts` values).
+/// The release's update for an `os` / `arch` pair (`std::env::consts`
+/// values) and variant.
 fn release_info_for(
     release: ApiRelease,
     current_version: &str,
     os: &str,
     arch: &str,
+    full: bool,
 ) -> Result<Option<ReleaseInfo>, UpdateError> {
     if release.draft {
         return Ok(None);
@@ -197,7 +194,7 @@ fn release_info_for(
         debug!(latest = %version, running = %current_version, "no update available");
         return Ok(None);
     }
-    let Some(zip) = pick_asset(&release.assets, os, arch) else {
+    let Some(zip) = pick_asset(&release.assets, os, arch, full) else {
         return Err(UpdateError::NoAsset(release.tag_name));
     };
     let Some(sha256) = zip.digest.as_deref().and_then(sha256_digest) else {
@@ -225,9 +222,17 @@ fn sha256_digest(digest: &str) -> Option<String> {
 }
 
 /// The asset an `os` / `arch` machine installs: the macOS `.zip`
-/// ([`pick_zip_asset`]) or, anywhere else, the AppImage
-/// ([`pick_appimage_asset`]; the `.deb` is never picked).
-fn pick_asset<'a>(assets: &'a [ApiAsset], os: &str, arch: &str) -> Option<&'a ApiAsset> {
+/// ([`pick_zip_asset`]), the Windows installer ([`pick_setup_asset`]) or,
+/// anywhere else, the AppImage ([`pick_appimage_asset`]; the `.deb`, `.rpm`,
+/// `.tar.gz`, Flatpak and snap are never picked). `full` picks among the
+/// `Corvene-Full-…` assets, otherwise those are skipped.
+fn pick_asset<'a>(
+    assets: &'a [ApiAsset],
+    os: &str,
+    arch: &str,
+    full: bool,
+) -> Option<&'a ApiAsset> {
+    let assets = assets.iter().filter(|a| is_variant(&a.name, full));
     if os == "macos" {
         pick_zip_asset(assets, arch)
     } else if os == "windows" {
@@ -237,55 +242,67 @@ fn pick_asset<'a>(assets: &'a [ApiAsset], os: &str, arch: &str) -> Option<&'a Ap
     }
 }
 
-/// The `.zip` for this machine: a universal / macOS zip, else one naming
-/// this architecture; pack archives and the `Corvene-Full` zip are skipped.
-fn pick_zip_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset> {
+/// Is `name` an asset of the `Corvene-Full` variant (`full`) or of the
+/// default one?
+fn is_variant(name: &str, full: bool) -> bool {
+    if full {
+        name.starts_with("Corvene-Full-")
+    } else {
+        name.starts_with("Corvene-") && !name.starts_with("Corvene-Full-")
+    }
+}
+
+/// The macOS `.zip` for this machine (`Corvene-<version>-macos-<arch>.zip`):
+/// the universal one, else one naming this architecture. Pack archives and
+/// the Windows portable zips are skipped.
+fn pick_zip_asset<'a>(
+    assets: impl Iterator<Item = &'a ApiAsset>,
+    arch: &str,
+) -> Option<&'a ApiAsset> {
     let zips: Vec<&ApiAsset> = assets
-        .iter()
-        .filter(|a| a.name.ends_with(".zip"))
-        .filter(|a| !a.name.contains("pack") && !a.name.contains("Full"))
+        .filter(|a| a.name.ends_with(".zip") && a.name.contains("-macos-"))
         .collect();
     let arch = match arch {
         "aarch64" => "arm64",
         other => other,
     };
-    let lower = |a: &&ApiAsset| a.name.to_ascii_lowercase();
     zips.iter()
-        .find(|a| lower(a).contains("universal"))
-        .or_else(|| zips.iter().find(|a| lower(a).contains(arch)))
-        .or_else(|| zips.iter().find(|a| lower(a).contains("macos")))
+        .find(|a| a.name.contains("-universal"))
+        .or_else(|| zips.iter().find(|a| a.name.contains(arch)))
         .or_else(|| zips.first())
         .copied()
 }
 
-/// `Corvene-<version>-<arch>.AppImage` (`packaging/linux/package.sh`),
+/// `Corvene[-Full]-<version>-<arch>.AppImage` (`packaging/linux/package.sh`),
 /// `<arch>` being what AppImages call `std::env::consts::ARCH` (`x86_64`
-/// and `aarch64` as they are, `i686` for `x86`, `armhf` for `arm`); a `Corvene-Full-…` image (should there ever be one) is
-/// skipped.
-fn pick_appimage_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset> {
+/// and `aarch64` as they are, `i686` for `x86`, `armhf` for `arm`).
+fn pick_appimage_asset<'a>(
+    mut assets: impl Iterator<Item = &'a ApiAsset>,
+    arch: &str,
+) -> Option<&'a ApiAsset> {
     let arch = match arch {
         "x86" => "i686",
         "arm" => "armhf",
         other => other,
     };
     let suffix = format!("-{arch}.AppImage");
-    assets.iter().find(|a| {
-        a.name.starts_with("Corvene-") && !a.name.contains("Full") && a.name.ends_with(&suffix)
-    })
+    assets.find(|a| a.name.ends_with(&suffix))
 }
 
-/// `Corvene-<version>-<arch>-setup.exe` (`packaging/windows/package.ps1`),
-/// `<arch>` being `x86_64` and `aarch64` as `std::env::consts::ARCH` spells
-/// them and `i686` for `x86`; the `Corvene-Full-…` installer is skipped.
-fn pick_setup_asset<'a>(assets: &'a [ApiAsset], arch: &str) -> Option<&'a ApiAsset> {
+/// `Corvene[-Full]-<version>-<arch>-setup.exe`
+/// (`packaging/windows/package.ps1`), `<arch>` being `x86_64` and `aarch64`
+/// as `std::env::consts::ARCH` spells them and `i686` for `x86`; the `.msi`
+/// and the portable `.zip` are never picked.
+fn pick_setup_asset<'a>(
+    mut assets: impl Iterator<Item = &'a ApiAsset>,
+    arch: &str,
+) -> Option<&'a ApiAsset> {
     let arch = match arch {
         "x86" => "i686",
         other => other,
     };
     let suffix = format!("-{arch}-setup.exe");
-    assets.iter().find(|a| {
-        a.name.starts_with("Corvene-") && !a.name.contains("Full") && a.name.ends_with(&suffix)
-    })
+    assets.find(|a| a.name.ends_with(&suffix))
 }
 
 /// `MAJOR.MINOR.PATCH[-pre]`; a pre-release sorts before its release.
@@ -829,7 +846,7 @@ mod tests {
                 asset("Corvene-0.2.0-macos-universal.dmg"),
             ],
         };
-        let info = release_info_for(release, "0.1.0", "macos", "aarch64")
+        let info = release_info_for(release, "0.1.0", "macos", "aarch64", false)
             .unwrap()
             .unwrap();
         assert_eq!(info.version, "0.2.0");
@@ -849,7 +866,7 @@ mod tests {
             assets: vec![asset("Corvene-0.0.1-macos-universal.zip")],
         };
         assert_eq!(
-            release_info_for(release, "0.1.0", "macos", "x86_64").unwrap(),
+            release_info_for(release, "0.1.0", "macos", "x86_64", false).unwrap(),
             None
         );
         release = ApiRelease {
@@ -862,7 +879,7 @@ mod tests {
             assets: vec![],
         };
         assert_eq!(
-            release_info_for(release, "0.1.0", "macos", "x86_64").unwrap(),
+            release_info_for(release, "0.1.0", "macos", "x86_64", false).unwrap(),
             None
         );
         release = ApiRelease {
@@ -878,7 +895,7 @@ mod tests {
             }],
         };
         assert!(matches!(
-            release_info_for(release, "0.1.0", "macos", "x86_64"),
+            release_info_for(release, "0.1.0", "macos", "x86_64", false),
             Err(UpdateError::NoDigest(_))
         ));
     }
@@ -964,28 +981,46 @@ mod tests {
 
     #[test]
     fn linux_picks_the_appimage_for_its_architecture() {
-        let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "linux", "x86_64")
-            .unwrap()
-            .unwrap();
+        let info = release_info_for(
+            release_with(&LINUX_ASSETS),
+            "0.1.0",
+            "linux",
+            "x86_64",
+            false,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(info.zip_name, "Corvene-0.2.0-x86_64.AppImage");
-        let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "linux", "aarch64")
-            .unwrap()
-            .unwrap();
+        let info = release_info_for(
+            release_with(&LINUX_ASSETS),
+            "0.1.0",
+            "linux",
+            "aarch64",
+            false,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(info.zip_name, "Corvene-0.2.0-aarch64.AppImage");
         // the 32-bit builds, by their AppImage names
         for (arch, name) in [
             ("x86", "Corvene-0.2.0-i686.AppImage"),
             ("arm", "Corvene-0.2.0-armhf.AppImage"),
         ] {
-            let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "linux", arch)
+            let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "linux", arch, false)
                 .unwrap()
                 .unwrap();
             assert_eq!(info.zip_name, name);
         }
         // macOS still takes the zip from the same release
-        let info = release_info_for(release_with(&LINUX_ASSETS), "0.1.0", "macos", "aarch64")
-            .unwrap()
-            .unwrap();
+        let info = release_info_for(
+            release_with(&LINUX_ASSETS),
+            "0.1.0",
+            "macos",
+            "aarch64",
+            false,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(info.zip_name, "Corvene-0.2.0-macos-universal.zip");
     }
 
@@ -1003,11 +1038,80 @@ mod tests {
             ("aarch64", "Corvene-0.2.0-aarch64-setup.exe"),
             ("x86", "Corvene-0.2.0-i686-setup.exe"),
         ] {
-            let info = release_info_for(release_with(&assets), "0.1.0", "windows", arch)
+            let info = release_info_for(release_with(&assets), "0.1.0", "windows", arch, false)
                 .unwrap()
                 .unwrap();
             assert_eq!(info.zip_name, name);
         }
+    }
+
+    /// Every kind of asset a release carries, both variants.
+    const ALL_ASSETS: [&str; 22] = [
+        "Corvene-0.2.0-windows-x86_64-portable.zip",
+        "Corvene-Full-0.2.0-windows-x86_64-portable.zip",
+        "Corvene-0.2.0-macos-universal.zip",
+        "Corvene-0.2.0-macos-arm64.zip",
+        "Corvene-Full-0.2.0-macos-universal.zip",
+        "Corvene-Full-0.2.0-macos-universal.dmg",
+        "Corvene-0.2.0-x86_64.msi",
+        "Corvene-0.2.0-x86_64-setup.exe",
+        "Corvene-Full-0.2.0-x86_64.msi",
+        "Corvene-Full-0.2.0-x86_64-setup.exe",
+        "Corvene-0.2.0-linux-x86_64.tar.gz",
+        "Corvene-Full-0.2.0-linux-x86_64.tar.gz",
+        "Corvene-0.2.0-x86_64.flatpak",
+        "Corvene-0.2.0-x86_64.snap",
+        "Corvene-0.2.0-x86_64.AppImage",
+        "Corvene-Full-0.2.0-x86_64.AppImage",
+        "corvene-0.2.0-1.x86_64.rpm",
+        "corvene-full-0.2.0-1.x86_64.rpm",
+        "corvene_0.2.0_amd64.deb",
+        "corvene-full_0.2.0_amd64.deb",
+        "Corvene-0.2.0-android-foss-arm64.apk",
+        "Corvene-Full-0.2.0-android-foss-arm64.apk",
+    ];
+
+    #[test]
+    fn each_variant_updates_to_its_own_asset() {
+        for (os, arch, full, name) in [
+            (
+                "macos",
+                "aarch64",
+                false,
+                "Corvene-0.2.0-macos-universal.zip",
+            ),
+            (
+                "macos",
+                "aarch64",
+                true,
+                "Corvene-Full-0.2.0-macos-universal.zip",
+            ),
+            ("windows", "x86_64", false, "Corvene-0.2.0-x86_64-setup.exe"),
+            (
+                "windows",
+                "x86_64",
+                true,
+                "Corvene-Full-0.2.0-x86_64-setup.exe",
+            ),
+            ("linux", "x86_64", false, "Corvene-0.2.0-x86_64.AppImage"),
+            (
+                "linux",
+                "x86_64",
+                true,
+                "Corvene-Full-0.2.0-x86_64.AppImage",
+            ),
+        ] {
+            let info = release_info_for(release_with(&ALL_ASSETS), "0.1.0", os, arch, full)
+                .unwrap()
+                .unwrap();
+            assert_eq!(info.zip_name, name, "{os} {arch} full={full}");
+        }
+        // a Windows portable zip is never a macOS update
+        let windows_only = release_with(&["Corvene-0.2.0-windows-x86_64-portable.zip"]);
+        assert!(matches!(
+            release_info_for(windows_only, "0.1.0", "macos", "x86_64", false),
+            Err(UpdateError::NoAsset(_))
+        ));
     }
 
     #[test]
@@ -1017,22 +1121,22 @@ mod tests {
             "Corvene-0.2.0-macos-universal.zip",
         ]);
         assert!(matches!(
-            release_info_for(only_deb, "0.1.0", "linux", "x86_64"),
+            release_info_for(only_deb, "0.1.0", "linux", "x86_64", false),
             Err(UpdateError::NoAsset(_))
         ));
         let other_arch = release_with(&["Corvene-0.2.0-aarch64.AppImage"]);
         assert!(matches!(
-            release_info_for(other_arch, "0.1.0", "linux", "x86_64"),
+            release_info_for(other_arch, "0.1.0", "linux", "x86_64", false),
             Err(UpdateError::NoAsset(_))
         ));
         let mut no_digest = release_with(&["Corvene-0.2.0-x86_64.AppImage"]);
         no_digest.assets[0].digest = None;
         assert!(matches!(
-            release_info_for(no_digest, "0.1.0", "linux", "x86_64"),
+            release_info_for(no_digest, "0.1.0", "linux", "x86_64", false),
             Err(UpdateError::NoDigest(_))
         ));
         let full = [asset("Corvene-Full-0.2.0-x86_64.AppImage")];
-        assert!(pick_appimage_asset(&full, "x86_64").is_none());
+        assert!(pick_asset(&full, "linux", "x86_64", false).is_none());
     }
 }
 

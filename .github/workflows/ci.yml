@@ -118,7 +118,7 @@ jobs:
             clang mold pkg-config \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libfontconfig-dev libfreetype-dev libvulkan-dev \
-            gnome-keyring dbus-x11 zip unzip hunspell-en-us
+            gnome-keyring dbus-x11 zip unzip hunspell-en-us rpm
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -138,13 +138,21 @@ jobs:
       # the .deb layout from a debug binary (release.yml packages the
       # release build); `cargo test` builds no binary for a crate without
       # integration tests
-      - name: package smoke test (.deb)
+      - name: package smoke test (.deb, .rpm, .tar.gz)
         run: |
           cargo build -p corvene
-          PACKAGE_BIN=target/debug/corvene packaging/linux/package.sh
+          PACKAGE_BIN=target/debug/corvene FORMATS="deb rpm tar" packaging/linux/package.sh
+          layout='usr/lib/corvene/corvene$|usr/lib/corvene/bin/corvene$|usr/bin/corvene|applications/com.wasimaster.corvene.desktop$|metainfo/com.wasimaster.corvene.metainfo.xml$'
           deb="$(ls target/linux/corvene_*_amd64.deb)"
           dpkg-deb --info "$deb"
-          dpkg-deb --contents "$deb" | grep -E 'usr/lib/corvene/corvene$|usr/lib/corvene/bin/corvene$|usr/bin/corvene -> |applications/com.wasimaster.corvene.desktop$'
+          [[ "$(dpkg-deb --contents "$deb" | grep -cE "$layout")" -eq 5 ]]
+          rpm="$(ls target/linux/corvene-*.x86_64.rpm)"
+          rpm -qip "$rpm"
+          rpm -qp --requires "$rpm" | grep -q '^/usr/bin/git$'
+          [[ "$(rpm -qlp "$rpm" | grep -cE "$layout")" -eq 5 ]]
+          [[ "$(tar -tzf target/linux/Corvene-*-linux-x86_64.tar.gz | grep -cE "$layout")" -eq 5 ]]
+          python3 packaging/aur/stamp.py --version "$(ls target/linux/Corvene-*-linux-x86_64.tar.gz | sed -E 's/.*Corvene-(.*)-linux-x86_64.tar.gz/\1/')" --assets target/linux --out target/aur
+          bash -n target/aur/corvene-bin/PKGBUILD
           CORVENE_CLI_DRY_RUN=1 packaging/linux/corvene.sh open . | grep -q '^x-corvene://openLocalRepo/'
 
 
@@ -170,18 +178,26 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace --no-fail-fast
-      # the installer from a debug binary (release.yml packages the release
-      # build), and the command line tool's batch file
-      - name: package smoke test (installer)
+      # the installer, the .msi and the portable zip from a debug binary
+      # (release.yml packages the release build), and the command line
+      # tool's batch file
+      - name: package smoke test (installer, .msi, portable zip)
         shell: pwsh
         run: |
           cargo build -p corvene
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --no-progress -y
           }
+          dotnet tool install --global wix --version 5.0.2
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $env:PACKAGE_BIN = "target\debug\corvene.exe"
           packaging\windows\package.ps1
           if (-not (Get-ChildItem target\windows\Corvene-*-x86_64-setup.exe)) { throw "no installer" }
+          if (-not (Get-ChildItem target\windows\Corvene-*-x86_64.msi)) { throw "no .msi" }
+          $zip = Get-ChildItem target\windows\Corvene-*-windows-x86_64-portable.zip
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $entries = [IO.Compression.ZipFile]::OpenRead($zip.FullName).Entries.FullName -replace '\\', '/'
+          if (-not ($entries -contains "Corvene/corvene.exe" -and $entries -contains "Corvene/bin/corvene.bat")) { throw "the portable zip lacks corvene.exe or bin/corvene.bat: $entries" }
           $help = cmd /c packaging\windows\corvene.bat --help
           if (-not ($help -match "Corvene CLI usage")) { throw "the command line tool printed no usage" }
 

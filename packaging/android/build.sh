@@ -18,6 +18,8 @@
 # for the bundled git: make, perl and Go.
 #
 # Env: ABIS (default "arm64-v8a armeabi-v7a x86_64 x86"), SKIP_GRADLE=1 (library only),
+# FULL=1 (the "full" library: every tree-sitter grammar compiled in, so no
+# pack download; needs tools/ts-queries/fetch.py's sources),
 # BUNDLE=1 (also the .aab for Google Play, with the grammar module),
 # PER_ABI=1 (also a package per ABI, in app/build/outputs/per-abi/ as
 # <flavour>-<abi>.apk: a fraction of the download of the one with every ABI).
@@ -50,7 +52,9 @@ done
 
 # `--lib`: the activity loads libcorvene.so; Android has no use for the binary.
 # API 26 is the minimum the manifest declares.
-cargo ndk "${targets[@]}" -P 26 -o "$JNI_LIBS" build -p corvene --lib $profile_flag
+features=()
+[ "${FULL:-0}" = 1 ] && features=(--features full)
+cargo ndk "${targets[@]}" -P 26 -o "$JNI_LIBS" build -p corvene --lib $profile_flag ${features[@]+"${features[@]}"}
 
 # git's askpass helper (crates/corvene-askpass), an executable packaged like
 # the bundled git's

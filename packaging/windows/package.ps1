@@ -1,9 +1,13 @@
-# Build Corvene's Windows installer from a release build:
-#   target\windows\Corvene-<version>-<x86_64|aarch64|i686>-setup.exe
-#   target\windows\Corvene-Full-<version>-<arch>-setup.exe      (FULL=1)
+# Build Corvene's Windows packages from a release build:
+#   target\windows\Corvene-<version>-<x86_64|aarch64|i686>-setup.exe   per-user installer (Inno Setup)
+#   target\windows\Corvene-<version>-<arch>.msi                        machine-wide package (WiX)
+#   target\windows\Corvene-<version>-windows-<arch>-portable.zip       no installer
+# and with FULL=1 the same as Corvene-Full-<version>-….
 #
 # Needs Inno Setup 6 (`iscc.exe` on the PATH, in its default folder, or
-# $env:ISCC).
+# $env:ISCC) and WiX Toolset 5 (`wix` on the PATH:
+# `dotnet tool install --global wix --version 5.0.2`; without it there is no
+# .msi).
 #
 # Env:
 #   TARGET=<Rust target>  another architecture than this machine's
@@ -13,8 +17,9 @@
 #                         compiled in (needs tools/ts-queries/fetch.py's sources)
 #   SKIP_BUILD=1          reuse the release binary that is there
 #   PACKAGE_BIN=<binary>  package that binary instead (CI's debug build)
+#   FORMATS="setup msi zip"  a subset of the packages
 #   SIGN_PFX=<file>, SIGN_PFX_PASSWORD
-#                         Authenticode-sign corvene.exe and the installer with
+#                         Authenticode-sign corvene.exe and the installers with
 #                         this certificate (signtool from the Windows SDK);
 #                         without it they are unsigned
 #   SIGN_TIMESTAMP_URL    the timestamp server (default: DigiCert's)
@@ -76,23 +81,63 @@ Copy-Item $bin "$stage\corvene.exe"
 Copy-Item packaging\windows\corvene.bat "$stage\bin\corvene.bat"
 Sign-File "$stage\corvene.exe"
 
-$iscc = $env:ISCC
-if (-not $iscc) {
-    $found = Get-Command iscc.exe -ErrorAction SilentlyContinue
-    if ($found) { $iscc = $found.Source }
-}
-if (-not $iscc) {
-    $iscc = @(
-        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-}
-if (-not $iscc) { throw "Inno Setup 6 (iscc.exe) was not found; set ISCC to its path" }
+$formats = if ($env:FORMATS) { $env:FORMATS.Split(" ", [StringSplitOptions]::RemoveEmptyEntries) } else { @("setup", "msi", "zip") }
 
-& $iscc /Qp "/DAppVersion=$version" "/DArch=$arch" "/DBaseName=$name" "/DStage=$stage" "/DOut=$out" packaging\windows\corvene.iss
-if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
-$setup = "$out\$name-$version-$arch-setup.exe"
-Sign-File $setup
+# ---- the portable zip ------------------------------------------------------
+# corvene.exe and bin\corvene.bat in a Corvene folder: no installer, no
+# PATH entry, no self-update (updater.rs: no unins000.exe next to it)
+if ("zip" -in $formats) {
+    $zip = "$out\$name-$version-windows-$arch-portable.zip"
+    $portable = "$out\portable-$name-$arch"
+    if (Test-Path $portable) { Remove-Item -Recurse -Force $portable }
+    New-Item -ItemType Directory -Force $portable | Out-Null
+    Copy-Item -Recurse $stage "$portable\Corvene"
+    if (Test-Path $zip) { Remove-Item -Force $zip }
+    Compress-Archive -Path "$portable\Corvene" -DestinationPath $zip -CompressionLevel Optimal
+    Remove-Item -Recurse -Force $portable
+    Get-Item $zip | Select-Object Name, Length
+}
+
+# ---- the MSI -----------------------------------------------------------------
+if ("msi" -in $formats) {
+    $wix = (Get-Command wix.exe -ErrorAction SilentlyContinue).Source
+    if (-not $wix) {
+        Write-Warning "wix (WiX Toolset 5) was not found: skipping the .msi"
+    } else {
+        $msiArch = switch ($arch) { "x86_64" { "x64" } "aarch64" { "arm64" } "i686" { "x86" } }
+        # Windows Installer versions are numeric: a pre-release (0.2.0-beta.1) installs as 0.2.0
+        $msiVersion = $version.Split("-")[0]
+        $msi = "$out\$name-$version-$arch.msi"
+        & $wix build -arch $msiArch -d "Version=$msiVersion" -d "Stage=$stage" -d ("Full=" + [int]$full) `
+            -bindpath packaging\windows -o $msi packaging\windows\corvene.wxs
+        if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+        # the .wixpdb next to it is not wanted
+        Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($msi, ".wixpdb"))
+        Sign-File $msi
+        Get-Item $msi | Select-Object Name, Length
+    }
+}
+
+# ---- the Inno Setup installer --------------------------------------------------
+if ("setup" -in $formats) {
+    $iscc = $env:ISCC
+    if (-not $iscc) {
+        $found = Get-Command iscc.exe -ErrorAction SilentlyContinue
+        if ($found) { $iscc = $found.Source }
+    }
+    if (-not $iscc) {
+        $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+        ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+    }
+    if (-not $iscc) { throw "Inno Setup 6 (iscc.exe) was not found; set ISCC to its path" }
+
+    & $iscc /Qp "/DAppVersion=$version" "/DArch=$arch" "/DBaseName=$name" "/DStage=$stage" "/DOut=$out" packaging\windows\corvene.iss
+    if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+    $setup = "$out\$name-$version-$arch-setup.exe"
+    Sign-File $setup
+    Get-Item $setup | Select-Object Name, Length
+}
 Remove-Item -Recurse -Force $stage
-Get-Item $setup | Select-Object Name, Length

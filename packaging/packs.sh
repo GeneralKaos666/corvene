@@ -5,6 +5,12 @@
 #   PACKS=tree-sitter-all packaging/packs.sh   # only some (space-separated)
 #   PACK_OS=android PACKS="tree-sitter-all tree-sitter-rest" packaging/packs.sh
 #                                       # the Android packs, from any host
+#   PACK_TARGETS=i686-unknown-linux-gnu packaging/packs.sh
+#                                       # cross-built packs for other Rust
+#                                       # targets of this OS (Linux: needs the
+#                                       # target's gcc cross toolchain, which
+#                                       # clang finds; Windows: the MSVC
+#                                       # libraries of that architecture)
 #
 # On Windows this runs in Git Bash, with Python as `python` (or PYTHON=<exe>)
 # and LLVM's clang on the PATH.
@@ -24,8 +30,9 @@
 # 0.27.0 (CORVENE_TREE_SITTER=<path>, or `tree-sitter` on PATH; node runs their
 # grammar.js). On macOS the dylibs are built for every macOS Rust target
 # installed (`rustup target add x86_64-apple-darwin` for Intel packs; a
-# warning names the missing one); on Linux for the build machine's
-# architecture (release.yml builds each natively).
+# warning names the missing one); on Linux and Windows for the build
+# machine's architecture (release.yml builds the 64-bit ones natively and
+# the 32-bit ones with PACK_TARGETS).
 set -euo pipefail
 
 # C grammars compile for the oldest macOS Corvene supports (Info.plist
@@ -117,7 +124,9 @@ PY
 wants() { [[ " $PACKS " == *" $1 "* ]]; }
 
 TARGETS=()
-if [[ "$PACK_OS" == android ]]; then
+if [[ -n "${PACK_TARGETS:-}" ]]; then
+  read -r -a TARGETS <<< "$PACK_TARGETS"
+elif [[ "$PACK_OS" == android ]]; then
   # API 26, the application's minimum
   TARGETS=(aarch64-linux-android26 armv7a-linux-androideabi26 x86_64-linux-android26 i686-linux-android26)
 elif [[ "$PACK_OS" == macos ]]; then
@@ -166,7 +175,8 @@ build_units() {
     elif [[ "$PACK_OS" == windows ]]; then
       llvm-readobj --coff-exports "$lib" | grep -q 'Name: corvene_grammars_v1$' || { echo "$lib does not export corvene_grammars_v1" >&2; exit 1; }
     else
-      "${NDK_BIN:+$NDK_BIN/llvm-}nm" -D --defined-only "$lib" | grep -q ' corvene_grammars_v1$' || { echo "$lib does not export corvene_grammars_v1" >&2; exit 1; }
+      # NM: the cross toolchain's nm for PACK_TARGETS (i686-linux-gnu-nm)
+      "${NDK_BIN:+$NDK_BIN/llvm-}${NM:-nm}" -D --defined-only "$lib" | grep -q ' corvene_grammars_v1$' || { echo "$lib does not export corvene_grammars_v1" >&2; exit 1; }
     fi
     gzip -9 -n -c "$lib" > "$lib.gz"
     rm "$lib"
@@ -196,6 +206,11 @@ if wants tree-sitter-all || wants tree-sitter-rest; then
   for t in "${TARGETS[@]}"; do
     echo "building the tree-sitter grammar units for ${t%%-*}…"
     build_units "$t"
+    # a published pack is never rebuilt: an empty one would stay empty
+    if [[ ${#BUILT[@]} -eq 0 ]]; then
+      echo "warning: no grammar built for $t; no packs for it" >&2
+      continue
+    fi
     wants tree-sitter-all && grammar_pack all "${t%%-*}"
     wants tree-sitter-rest && grammar_pack rest "${t%%-*}"
   done

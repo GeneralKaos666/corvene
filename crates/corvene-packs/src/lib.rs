@@ -82,8 +82,10 @@ pub enum PackKind {
 const GRAMMAR_INDEX: &str = "index.json";
 
 /// The `target` of manifest entries for native packs this build can load:
-/// `<os>-<arch>` (`macos-aarch64`, `linux-x86_64`). Native packs are per
-/// architecture rather than universal: the grammar tables are large.
+/// `<os>-<arch>` (`macos-aarch64`, `linux-x86_64`), `<arch>` spelled like
+/// the first part of the Rust target the pack is built for
+/// (`packaging/packs.sh`: `linux-armv7`, `windows-i686`). Native packs are
+/// per architecture rather than universal: the grammar tables are large.
 pub fn pack_target() -> &'static str {
     // Android has its own C library: a Linux pack does not load there
     if cfg!(all(target_os = "android", target_arch = "aarch64")) {
@@ -103,17 +105,15 @@ pub fn pack_target() -> &'static str {
     } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         "windows-x86_64"
     } else if cfg!(target_os = "windows") {
-        // no packs are published for the 32-bit build
-        "windows-x86"
+        "windows-i686"
     } else if cfg!(target_arch = "aarch64") {
         "linux-aarch64"
     } else if cfg!(target_arch = "x86_64") {
         "linux-x86_64"
     } else if cfg!(target_arch = "arm") {
-        // no packs are published for the 32-bit builds
         "linux-armv7"
     } else {
-        "linux-x86"
+        "linux-i686"
     }
 }
 

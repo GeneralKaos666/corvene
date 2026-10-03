@@ -219,9 +219,11 @@ impl Dispatcher {
             })
         };
         let version = env!("CARGO_PKG_VERSION");
+        // a Corvene-Full build stays one across updates
+        let full = corvene_highlight::treesitter::bundled();
         spawn_bg(
             cx,
-            move || updater::check_latest(version),
+            move || updater::check_latest(version, full),
             move |result, cx| Self::update_check_finished(nonce, user_initiated, result, cx),
         );
     }

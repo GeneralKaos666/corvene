@@ -47,18 +47,24 @@ Direct download from [GitHub Releases](https://github.com/wasi-master/corvene/re
 brew install --cask wasi-master/corvene/corvene
 ```
 
-Or download the `.deb` or the AppImage for your architecture from [GitHub Releases](https://github.com/wasi-master/corvene/releases).
+Or download the package for your distribution and architecture from [GitHub Releases](https://github.com/wasi-master/corvene/releases) (`x86_64`, `aarch64` / `arm64`, and the less tested 32-bit `i686` and `armhf`). Install a newer package the same way to update; only the AppImage updates itself.
 
-- Debian and Ubuntu: `sudo apt install ./corvene_<version>_amd64.deb` (`arm64` on ARM). Install a newer `.deb` the same way to update.
+- Debian and Ubuntu: `sudo apt install ./corvene_<version>_amd64.deb` (`arm64` on ARM).
+- Fedora, openSUSE, RHEL and friends: `sudo dnf install ./corvene-<version>-1.x86_64.rpm` (`zypper install` on openSUSE).
 - Any distribution: `chmod +x Corvene-<version>-x86_64.AppImage` (`aarch64` on ARM), then run it. The AppImage updates itself in place.
+- Flatpak: `flatpak install --user Corvene-<version>-x86_64.flatpak` (the runtime comes from [Flathub](https://flathub.org/)). It sees your home folder; `flatpak override --user --filesystem=<path> com.wasimaster.corvene` adds others.
+- Snap: `sudo snap install --dangerous Corvene-<version>-x86_64.snap`, then `sudo snap connect corvene:password-manager-service` (signed-in accounts) and `sudo snap connect corvene:ssh-keys` (git over SSH).
+- Arch Linux: the `corvene-bin` PKGBUILD from the release workflow, or unpack `Corvene-<version>-linux-x86_64.tar.gz` (the `.deb`'s `/usr` tree) anywhere and run `usr/lib/corvene/corvene`.
+
+Every format also comes as `Corvene-Full` (`corvene-full` for the `.deb` and `.rpm`): the same app with every tree-sitter grammar built in, so Settings › Advanced has nothing to download. It replaces the plain package and updates to the next Full release.
 
 An AppImage (from Homebrew or downloaded) adds itself to the application menu and registers the `x-corvene://` links on first launch: it writes `~/.local/share/applications/com.wasimaster.corvene.desktop` and its icon under `~/.local/share/icons/hicolor`, and updates them when you move the file. It leaves this to [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) or appimaged when one of them already added the AppImage. Delete those files to remove the entry (`brew uninstall --zap corvene` does).
 
-File → Install Command Line Tool links `corvene` into `~/.local/bin`, the same command line tool GitHub Desktop has. A Flatpak is not available yet.
+File → Install Command Line Tool links `corvene` into `~/.local/bin`, the same command line tool GitHub Desktop has (the `.deb`, `.rpm` and `.tar.gz` put it in `/usr/bin` already; the Flatpak and the snap have none).
 
 ### Android
 
-Download `Corvene-<version>-android-foss-arm64.apk` (most phones and tablets; `-armv7` for 32-bit ones, `-x86_64` for most Chromebooks and emulators, `-universal` has every architecture) from [GitHub Releases](https://github.com/wasi-master/corvene/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The play package next to it is the Google Play flavour, without "All files access". Android support is experimental and was tested on few devices, so expect rough edges.
+Download `Corvene-<version>-android-foss-arm64.apk` (most phones and tablets; `-armv7` for 32-bit ones, `-x86_64` for most Chromebooks and emulators, `-universal` has every architecture) from [GitHub Releases](https://github.com/wasi-master/corvene/releases) and open it; Android asks once to let your browser or file manager install apps. Install a newer package the same way to update: repositories, accounts and settings stay. The play package next to it is the Google Play flavour, without "All files access". `Corvene-Full-<version>-android-foss-<abi>.apk` has every tree-sitter grammar built in instead of downloading them. Android support is experimental and was tested on few devices, so expect rough edges.
 
 ## Building
 

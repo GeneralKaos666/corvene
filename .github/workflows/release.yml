@@ -6,7 +6,8 @@ name: Release
 # [Improved] / [Fixed] items) and publishes it.
 #
 # Every platform builds at once, as workflow artifacts; `publish` collects
-# them once all of them are through. Nothing here runs fmt, clippy or the
+# them once all of them are through. Each platform builds the default and
+# the Corvene-Full variant (every tree-sitter grammar compiled in). Nothing here runs fmt, clippy or the
 # tests: ci.yml does on every push to main, so tag a commit CI has passed. The on-demand packs do
 # not go on the app's release: they live on the rolling `packs` release
 # (never the latest one), and are only built when it lacks the pack version
@@ -23,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: Also build the Corvene-Full variant (the tree-sitter grammars compiled in)
+        description: Also build the Corvene-Full variants (the tree-sitter grammars compiled in)
         type: boolean
         default: true
       linux_release:
@@ -102,9 +103,17 @@ jobs:
               {"name": "macos", "runner": "macos-26", "targets": ["macos-aarch64", "macos-x86_64"]},
               {"name": "linux-x86_64", "runner": "ubuntu-24.04", "targets": ["linux-x86_64"]},
               {"name": "linux-aarch64", "runner": "ubuntu-24.04-arm", "targets": ["linux-aarch64"]},
+              # the 32-bit ones, cross-built with the target's gcc toolchain
+              # (which clang finds) on the runner of the same family
+              {"name": "linux-i686", "runner": "ubuntu-24.04", "targets": ["linux-i686"], "optional": True,
+               "pack_targets": "i686-unknown-linux-gnu", "apt": "gcc-i686-linux-gnu", "nm": "i686-linux-gnu-nm"},
+              {"name": "linux-armv7", "runner": "ubuntu-24.04-arm", "targets": ["linux-armv7"], "optional": True,
+               "pack_targets": "armv7-unknown-linux-gnueabihf", "apt": "gcc-arm-linux-gnueabihf", "nm": "arm-linux-gnueabihf-nm"},
               {"name": "android", "runner": "ubuntu-24.04", "targets": ["android-aarch64", "android-armv7a", "android-x86_64", "android-i686"]},
               {"name": "windows-x86_64", "runner": "windows-latest", "targets": ["windows-x86_64"]},
               {"name": "windows-aarch64", "runner": "windows-11-arm", "targets": ["windows-aarch64"]},
+              {"name": "windows-i686", "runner": "windows-latest", "targets": ["windows-i686"], "optional": True,
+               "pack_targets": "i686-pc-windows-msvc"},
           ]
           have = {(p["name"], p["version"], p.get("target")) for p in json.load(open("have.json"))["packs"]}
           force = os.environ["FORCE"] == "true"
@@ -212,16 +221,20 @@ jobs:
             target/release-assets/*.dmg
           compression-level: 0
 
-  # x86_64 and aarch64 build natively. The 32-bit ones are cross-compiled on
-  # the runner of the same family (Debian multiarch has their libraries) and
-  # may fail without holding up the release: nothing upstream of Corvene
-  # (GPUI least of all) is tested on 32-bit Linux.
+  # The .deb, .rpm, .tar.gz and AppImage of each architecture and variant
+  # (packaging/linux/package.sh). x86_64 and aarch64 build natively. The
+  # 32-bit ones are cross-compiled on the runner of the same family (Debian
+  # multiarch has their libraries) and may fail without holding up the
+  # release: nothing upstream of Corvene (GPUI least of all) is tested on
+  # 32-bit Linux.
   linux:
-    name: build · package (Linux ${{ matrix.arch }})
+    name: build · package (Linux ${{ matrix.arch }}, ${{ matrix.variant }})
     needs: plan
     strategy:
       fail-fast: false
       matrix:
+        arch: [x86_64, aarch64, i686, armhf]
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
         include:
           - arch: x86_64
             host: x86_64
@@ -253,7 +266,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang mold pkg-config \
+            clang mold pkg-config rpm \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libfontconfig-dev libfreetype-dev libvulkan-dev
       - name: system packages (cross)
@@ -262,7 +275,7 @@ jobs:
           sudo dpkg --add-architecture ${{ matrix.foreign }}
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang pkg-config ${{ matrix.gcc }} \
+            clang pkg-config rpm ${{ matrix.gcc }} \
             libxcb1-dev:${{ matrix.foreign }} libxkbcommon-dev:${{ matrix.foreign }} \
             libxkbcommon-x11-dev:${{ matrix.foreign }} libwayland-dev:${{ matrix.foreign }} \
             libfontconfig-dev:${{ matrix.foreign }} libfreetype-dev:${{ matrix.foreign }} \
@@ -278,7 +291,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-linux-${{ matrix.arch }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.variant == 'default' }}
+      # the full build links every grammar in
+      - uses: ./.github/actions/grammar-sources
+        if: matrix.variant == 'full'
+
       - name: appimagetool
         run: |
           curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
@@ -290,20 +307,112 @@ jobs:
       - name: build and package
         env:
           CORVENE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVENE_GITHUB_CLIENT_SECRET }}
+          FULL: ${{ matrix.variant == 'full' && '1' || '0' }}
         run: |
           [[ -n "$CORVENE_GITHUB_CLIENT_SECRET" ]] || unset CORVENE_GITHUB_CLIENT_SECRET
           packaging/linux/package.sh
           ls -l target/linux
       - uses: actions/upload-artifact@v4
         with:
-          name: assets-linux-${{ matrix.arch }}
+          name: assets-linux-${{ matrix.arch }}-${{ matrix.variant }}
           path: |
             target/linux/*.deb
+            target/linux/*.rpm
+            target/linux/*.tar.gz
             target/linux/*.AppImage
           compression-level: 0
 
-  # The Windows installers (Inno Setup, per user), one job per architecture
-  # and variant. x86_64 and aarch64 build natively; the 32-bit one is
+  # The Flatpak bundle of each 64-bit architecture and variant, made from the
+  # `linux` job's .tar.gz (packaging/flatpak). Flathub's runtime has no
+  # 32-bit builds. Not on Flathub; a failure does not hold up the release.
+  flatpak:
+    name: Flatpak (${{ matrix.arch }}, ${{ matrix.variant }})
+    needs: [plan, linux]
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: assets-linux-${{ matrix.arch }}-${{ matrix.variant }}
+          path: linux
+      - name: flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+      - name: build
+        run: |
+          packaging/flatpak/build.sh linux/*-linux-${{ matrix.arch }}.tar.gz target/flatpak-out
+          ls -l target/flatpak-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-flatpak-${{ matrix.arch }}-${{ matrix.variant }}
+          path: target/flatpak-out/*.flatpak
+          compression-level: 0
+
+  # The snap of each 64-bit architecture and variant (strict confinement,
+  # core24), made from the `linux` job's .tar.gz (packaging/snap) with
+  # snapcraft in LXD. Not in the Snap Store; a failure does not hold up the
+  # release.
+  snap:
+    name: snap (${{ matrix.arch }}, ${{ matrix.variant }})
+    needs: [plan, linux]
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: assets-linux-${{ matrix.arch }}-${{ matrix.variant }}
+          path: linux
+      - name: prepare
+        run: packaging/snap/prepare.sh linux/*-linux-${{ matrix.arch }}.tar.gz target/snap
+      - uses: snapcore/action-build@v1
+        id: snapcraft
+        with:
+          path: target/snap
+      - name: rename
+        env:
+          SNAP_FILE: ${{ steps.snapcraft.outputs.snap }}
+          NAME: ${{ matrix.variant == 'full' && 'Corvene-Full' || 'Corvene' }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          mkdir -p target/snap-out
+          mv "$SNAP_FILE" "target/snap-out/$NAME-$VERSION-${{ matrix.arch }}.snap"
+          ls -l target/snap-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-snap-${{ matrix.arch }}-${{ matrix.variant }}
+          path: target/snap-out/*.snap
+          compression-level: 0
+
+  # The Windows packages (packaging/windows/package.ps1: the per-user Inno
+  # Setup installer, the machine-wide .msi and the portable .zip), one job
+  # per architecture and variant. x86_64 and aarch64 build natively; the 32-bit one is
   # cross-compiled on the x86_64 runner and, like Linux's, is not something
   # GPUI is tested on. No job here holds up the release. The installers are
   # Authenticode-signed when the WINDOWS_SIGNING_PFX_BASE64 secret holds a
@@ -350,6 +459,12 @@ jobs:
               -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --no-progress -y
           }
+      # WiX 5 (MS-RL): 6 and later need the Open Source Maintenance Fee EULA
+      - name: WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: build and package
         shell: pwsh
         env:
@@ -374,7 +489,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: assets-windows-${{ matrix.arch }}-${{ matrix.variant }}
-          path: target/windows/*-setup.exe
+          path: |
+            target/windows/*-setup.exe
+            target/windows/*.msi
+            target/windows/*-portable.zip
           compression-level: 0
 
   # The Android packages (foss and play: one per ABI and one with all four) on a Linux
@@ -383,13 +501,20 @@ jobs:
   # Google Play by hand. The APKs are signed with the keystore in the
   # CORVENE_ANDROID_KEYSTORE_BASE64 secret and only then added to the draft
   # release; without it they stay workflow artifacts, unsigned. A failure
-  # here does not hold up the other platforms.
+  # here does not hold up the other platforms. The Corvene-Full variant is
+  # the foss flavour with every grammar compiled in, one package per ABI
+  # (one with all four would be several hundred MB): Google Play gets the
+  # grammars as a module instead.
   android:
-    name: build · sign (Android)
+    name: build · sign (Android, ${{ matrix.variant }})
     needs: plan
     if: ${{ !inputs.linux_release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     continue-on-error: true
     env:
       NDK_VERSION: 27.3.13750724
@@ -401,7 +526,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-android
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.variant == 'default' }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -416,7 +541,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-ndk
-      # the play bundle's grammar module
+      # the play bundle's grammar module, the full library
       - uses: ./.github/actions/grammar-sources
       - name: cache the bundled git
         uses: actions/cache@v4
@@ -440,24 +565,35 @@ jobs:
             export CORVENE_ANDROID_KEYSTORE="$RUNNER_TEMP/corvene.jks"
             suffix=
           fi
+          mkdir -p target/android
+          outputs=packaging/android/app/build/outputs
+          abis="arm64-v8a:arm64 armeabi-v7a:armv7 x86_64:x86_64 x86:x86"
+          if [[ "${{ matrix.variant }}" == full ]]; then
+            # FULL=1: the grammars compiled into the library; foss only, per ABI
+            FULL=1 PER_ABI=1 packaging/android/build.sh release foss
+            rm -f "$RUNNER_TEMP/corvene.jks"
+            for abi in $abis; do
+              cp "$outputs/per-abi/foss-${abi%%:*}.apk" "target/android/Corvene-Full-$VERSION-android-foss-${abi##*:}$suffix.apk"
+            done
+            ls -l target/android
+            exit 0
+          fi
           # BUNDLE=1: also the .aab for Google Play with the grammar module;
           # PER_ABI=1: a package per ABI next to the one with all four
           BUNDLE=1 PER_ABI=1 packaging/android/build.sh release
           rm -f "$RUNNER_TEMP/corvene.jks"
-          mkdir -p target/android
-          outputs=packaging/android/app/build/outputs
           cp $outputs/bundle/playRelease/*.aab "target/android/Corvene-$VERSION-android-play$suffix.aab"
           for flavour in foss play; do
             apk="$(ls $outputs/apk/$flavour/release/*.apk | head -1)"
             cp "$apk" "target/android/Corvene-$VERSION-android-$flavour-universal$suffix.apk"
-            for abi in arm64-v8a:arm64 armeabi-v7a:armv7 x86_64:x86_64 x86:x86; do
+            for abi in $abis; do
               cp "$outputs/per-abi/$flavour-${abi%%:*}.apk" "target/android/Corvene-$VERSION-android-$flavour-${abi##*:}$suffix.apk"
             done
           done
           ls -l target/android
       - uses: actions/upload-artifact@v4
         with:
-          name: assets-android
+          name: assets-android-${{ matrix.variant }}
           path: target/android/*
           compression-level: 0
 
@@ -473,7 +609,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.packs) }}
     runs-on: ${{ matrix.runner }}
-    continue-on-error: ${{ matrix.name == 'android' || startsWith(matrix.name, 'windows') }}
+    continue-on-error: ${{ matrix.name == 'android' || startsWith(matrix.name, 'windows') || matrix.optional == true }}
     # Windows: packs.sh runs in Git Bash, with the runner's LLVM clang
     defaults:
       run:
@@ -487,7 +623,7 @@ jobs:
         if: startsWith(matrix.name, 'linux')
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang
+          sudo apt-get install -y --no-install-recommends clang ${{ matrix.apt }}
       # packs.sh builds for every macOS Rust target that is installed
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.name == 'macos'
@@ -501,6 +637,10 @@ jobs:
           echo "PACK_OS=android" >> "$GITHUB_ENV"
       - uses: ./.github/actions/grammar-sources
       - name: build
+        env:
+          # the 32-bit packs: cross-built for these Rust targets
+          PACK_TARGETS: ${{ matrix.pack_targets }}
+          NM: ${{ matrix.nm || 'nm' }}
         run: |
           packaging/packs.sh target/packs
           mv target/packs/packs-manifest.json "target/packs/packs-manifest-${{ matrix.name }}.json"
@@ -576,7 +716,7 @@ jobs:
   # Homebrew cask its version and hashes.
   publish:
     name: draft release · Homebrew cask
-    needs: [plan, macos-assets, linux, android, windows]
+    needs: [plan, macos-assets, linux, flatpak, snap, android, windows]
     if: >-
       ${{ !cancelled() && needs.linux.result == 'success'
           && (inputs.linux_release || needs.macos-assets.result == 'success') }}
@@ -602,7 +742,8 @@ jobs:
           shopt -s nullglob
           # unsigned Android packages and the Play bundle stay workflow artifacts
           files=()
-          for file in assets/*.zip assets/*.dmg assets/*.deb assets/*.AppImage assets/*.apk assets/*-setup.exe; do
+          for file in assets/*.zip assets/*.dmg assets/*.deb assets/*.rpm assets/*.tar.gz assets/*.AppImage \
+              assets/*.flatpak assets/*.snap assets/*.apk assets/*-setup.exe assets/*.msi; do
             [[ "$file" == *-unsigned.apk ]] || files+=("$file")
           done
           if gh release view "$RELEASE_TAG" --json tagName > /dev/null 2>&1; then
@@ -649,3 +790,19 @@ jobs:
         with:
           name: cask
           path: packaging/homebrew/Casks/corvene.rb
+      # corvene-bin and corvene-full-bin from the .tar.gz files, pushed to
+      # the AUR by hand once the release is published (packaging/aur/stamp.py)
+      - name: AUR packages
+        run: |
+          packaging/aur/stamp.py --version "$VERSION" --assets assets --out target/aur
+          {
+            echo
+            echo "## AUR"
+            echo
+            echo "Copy the \`aur\` artifact's folders to the corvene-bin and corvene-full-bin AUR repositories after publishing the release."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur
+          path: target/aur
+          include-hidden-files: true

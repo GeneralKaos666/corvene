@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres, Flathub, the snap store).
+     packaging/linux/package.sh fills in @VERSION@ and @DATE@. -->
+<component type="desktop-application">
+  <id>com.wasimaster.corvene</id>
+  <name>Corvene</name>
+  <summary>Native Git client that looks and works like GitHub Desktop</summary>
+  <developer id="com.wasimaster">
+    <name>Wasi Master</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      Corvene is a native reimplementation of GitHub Desktop: the same
+      changes, history, branches and pull request workflow, without Electron.
+    </p>
+    <ul>
+      <li>Stage files, lines and hunks, and commit with co-authors</li>
+      <li>Browse history, cherry-pick, squash, reorder and revert commits</li>
+      <li>Create, merge, rebase and compare branches</li>
+      <li>Sign in to GitHub and GitHub Enterprise, and check out pull requests</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.wasimaster.corvene.desktop</launchable>
+  <icon type="stock">com.wasimaster.corvene</icon>
+  <url type="homepage">https://github.com/wasi-master/corvene</url>
+  <url type="bugtracker">https://github.com/wasi-master/corvene/issues</url>
+  <url type="vcs-browser">https://github.com/wasi-master/corvene</url>
+  <categories>
+    <category>Development</category>
+    <category>RevisionControl</category>
+  </categories>
+  <keywords>
+    <keyword>git</keyword>
+    <keyword>github</keyword>
+    <keyword>version control</keyword>
+  </keywords>
+  <provides>
+    <binary>corvene</binary>
+  </provides>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

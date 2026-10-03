@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Corvene's Windows Installer package (WiX Toolset 5), built by package.ps1:
+    wix build -arch <x64|arm64|x86> -d Version=<version> -d Stage=<folder>
+              -d Full=<0|1> -o <out.msi> corvene.wxs
+
+  For machine-wide deployment (Group Policy, Intune, `msiexec /i … /qn`),
+  like GitHub Desktop's MSI: installed for every user into Program Files.
+    corvene.exe          the app
+    bin\corvene.bat      the command line tool (its folder goes on the system PATH)
+  plus a Start menu shortcut with the AppUserModelID toasts are shown under.
+  The x-corvene / x-corvene-auth URL schemes are the user's: Corvene
+  registers them for whoever starts it (url_schemes::register takes schemes
+  no installed Corvene holds). It has no unins000.exe, so
+  Corvene does not update itself here (updater.rs): a newer .msi replaces
+  this one (MajorUpgrade). The per-user Inno Setup installer (corvene.iss)
+  is the one that updates itself.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <?if $(var.Full) = 1 ?>
+    <?define ProductName = "Corvene Full" ?>
+  <?else?>
+    <?define ProductName = "Corvene" ?>
+  <?endif?>
+  <!-- one upgrade code for both variants: installing one replaces the other -->
+  <?define UpgradeCode = "9A4E2F7C-1D3B-4C6A-8E5F-0B7D9C2A4E61" ?>
+  <Package Name="$(var.ProductName)" Manufacturer="Wasi Master" Version="$(var.Version)"
+           UpgradeCode="$(var.UpgradeCode)" Scope="perMachine" Compressed="yes">
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="corvene.ico" SourceFile="corvene.ico" />
+    <Property Id="ARPPRODUCTICON" Value="corvene.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/wasi-master/corvene" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/wasi-master/corvene/issues" />
+
+    <!-- Program Files (x86) for the 32-bit package, Program Files otherwise -->
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Corvene">
+        <Component Id="App">
+          <File Id="CorveneExe" Source="$(var.Stage)\corvene.exe" KeyPath="yes" />
+        </Component>
+        <Directory Id="BinFolder" Name="bin">
+          <Component Id="Cli">
+            <File Source="$(var.Stage)\bin\corvene.bat" KeyPath="yes" />
+            <Environment Id="PathEntry" Name="PATH" Value="[BinFolder]" Part="last" Action="set" System="yes" Permanent="no" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="CorveneShortcut" Name="$(var.ProductName)" Target="[#CorveneExe]" WorkingDirectory="INSTALLFOLDER">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="com.wasimaster.corvene" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="Software\Corvene" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Package>
+</Wix>

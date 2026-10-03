@@ -48,8 +48,9 @@ packaging/signing-cert.sh create   # → login keychain, ~/.corvene-signing/corv
    lands in `target/release-assets/`.
 3. Create the GitHub release for the tag and upload the `.zip` and `.dmg`
    files in `target/release-assets/`. The self-updater reads
-   `GET /repos/wasi-master/corvene/releases/latest`, picks the `.zip` whose
-   name contains `universal` (else the machine's architecture, else `macos`)
+   `GET /repos/wasi-master/corvene/releases/latest`, picks the `-macos-` `.zip`
+   of its variant (`Corvene-Full-…` for a Full build) whose name contains
+   `universal` (else the machine's architecture)
    and checks the download against the asset's `digest` (the sha256 GitHub
    computes at upload and shows next to the asset). The release body is
    Markdown; list items tagged `[New]` / `[Improved]` / `[Fixed]` /
@@ -75,6 +76,17 @@ A pack is installed by version, so a published `(pack, version, platform)`
 is never built or uploaded again: bump the pack's version
 (`corvene_grammars::PACK_VERSION`) to ship new grammars. The manifest keeps
 the older entries (with their `min_app`) for the apps that still need them.
+
+Every platform Corvene ships for has packs: `macos-{aarch64,x86_64}`,
+`linux-{x86_64,aarch64,i686,armv7}`, `windows-{x86_64,aarch64,i686}` and
+`android-{aarch64,armv7a,x86_64,i686}` (`corvene_packs::pack_target`; the
+architecture is spelled like the start of the Rust target). The 32-bit
+Linux and Windows ones are cross-built (`PACK_TARGETS=<Rust target>
+packaging/packs.sh`: on Linux with the target's gcc cross toolchain, which
+clang finds, and `NM=<triplet>-nm`; on Windows with the MSVC libraries of
+that architecture), and their jobs may fail without holding up the others.
+A target for which no grammar builds gets no pack at all, never an empty
+one (a published pack is never rebuilt).
 
 By hand: `packaging/packs.sh` on each platform (`PACK_OS=android` for the
 Android ones), add the `packs` entries of its `packs-manifest.json` to the
@@ -103,17 +115,25 @@ workflow artifacts:
   universal bundle and once per architecture (`ARCH=arm64` / `x86_64`:
   `Corvene-<version>-macos-arm64.zip`, a smaller download). The updater and
   the cask take the universal zip.
-- `linux` (x86_64 and aarch64, and cross-compiled i686 and armhf) and
-  `android`.
+- `linux` (x86_64 and aarch64, and cross-compiled i686 and armhf; each in
+  both variants): the `.deb`, `.rpm`, `.tar.gz` and AppImage.
+- `flatpak` and `snap` (x86_64 and aarch64, both variants), made from the
+  `linux` jobs' `.tar.gz`.
+- `windows` (x86_64, aarch64, i686; both variants): the installer, the
+  `.msi` and the portable `.zip`.
+- `android` (default: both flavours, per ABI and universal, plus the Play
+  bundle; full: the foss flavour per ABI).
 - `packs`: only the platforms `plan` listed; `publish-packs` uploads them to
   the `packs` release and merges their entries into its manifest.
 - `publish`: once every build is through, a **draft** release
-  with the installers (`.zip`, `.dmg`, `.deb`, `.AppImage`, signed `.apk`),
+  with the installers (`.zip`, `.dmg`, `.deb`, `.rpm`, `.tar.gz`,
+  `.AppImage`, `.flatpak`, `.snap`, `-setup.exe`, `.msi`, signed `.apk`),
   its notes ending in a Downloads table of them
   (`packaging/release-table.py`: platforms as rows, architectures as
   columns, one short link per asset),
-  and the `cask` artifact: `corvene.rb` with the version and every sha256
-  filled in (also in the run summary).
+  the `cask` artifact: `corvene.rb` with the version and every sha256
+  filled in (also in the run summary), and the `aur` artifact
+  ([AUR](#aur)).
 
 Repository secrets: `MACOS_SIGNING_P12`, `MACOS_SIGNING_P12_PASSWORD`, and
 optionally `CORVENE_GITHUB_CLIENT_SECRET` (without it the `307-sign-in-flow`
@@ -123,7 +143,7 @@ After the run: write the release notes in the draft above its `## Downloads`
 section (the Release Notes dialog skips that section; a later run rewrites
 it and keeps the rest), publish it (the
 self-updater ignores drafts), then copy the `cask` artifact's `corvene.rb`
-to the tap.
+to the tap and the `aur` artifact's two folders to the AUR.
 "Run workflow" with `linux_release` set to a published release's tag
 (`gh workflow run release.yml --ref main -f linux_release=v0.1.0`) skips
 macOS and Android, builds the Linux assets from that branch, replaces them
@@ -167,17 +187,44 @@ update launches without Gatekeeper's "Open Anyway" dance.
 - `corvene_<version>_amd64.deb` / `corvene_<version>_arm64.deb`
 - `Corvene-<version>-x86_64.AppImage` / `Corvene-<version>-aarch64.AppImage`
 
+- `corvene-<version>-1.x86_64.rpm` / `corvene-<version>-1.aarch64.rpm`
+  (when `rpmbuild` is installed: `apt install rpm` on Debian and Ubuntu)
+- `Corvene-<version>-linux-x86_64.tar.gz` / `…-linux-aarch64.tar.gz`: the
+  `.deb`'s `usr` tree in a `Corvene-<version>-linux-<arch>/` folder, to unpack
+  into `/` or `/usr/local` (`tar -xzf … --strip-components=1 -C /usr/local`
+  puts `bin/corvene` on the `PATH`; the desktop entry starts
+  `/usr/lib/corvene/corvene`, so only an unpacked-into-`/` tree has a working
+  entry) or to run in place (`usr/lib/corvene/corvene`). The AUR packages,
+  the Flatpak and the snap are made from it.
+
 for the architecture of the machine it runs on (release.yml builds both,
-the arm64 ones on an `ubuntu-24.04-arm` runner).
+the arm64 ones on an `ubuntu-24.04-arm` runner). `FORMATS="deb rpm tar
+appimage"` picks some of them.
+
+`FULL=1` builds the `Corvene-Full` variant of each (every tree-sitter
+grammar compiled in): `corvene-full_….deb`, `corvene-full-….rpm`,
+`Corvene-Full-<version>-linux-<arch>.tar.gz` and
+`Corvene-Full-<version>-<arch>.AppImage`. The `corvene-full` packages
+conflict with and replace `corvene` (the same files), so a machine has one
+or the other. A Full AppImage updates itself to the next Full AppImage,
+like every Full build (the updater only picks assets of its own variant).
+
+The `.rpm` is the staged tree as it is (no `%build`); its `Requires` are the
+ELF libraries rpm finds plus `/usr/bin/git`, `/usr/bin/perl` and
+`/usr/bin/xdg-open` (files, since Fedora, openSUSE and RHEL name the
+packages differently). Cross-built 32-bit packages are `rpmbuild --target`
+with the strip and debuginfo passes off (`i686`, `armv7hl`). Both the
+`.deb` and the `.rpm` install `usr/share/metainfo/com.wasimaster.corvene.metainfo.xml`
+(AppStream, for software centres).
 
 `TARGET=i686-unknown-linux-gnu` or `TARGET=armv7-unknown-linux-gnueabihf`
 cross-compiles the 32-bit ones (`_i386.deb` / `-i686.AppImage`,
 `_armhf.deb` / `-armhf.AppImage`): release.yml does on the runner of the
 same family, with the target's gcc and the `:i386` / `:armhf` development
 libraries from Debian multiarch (the linkers are in `.cargo/config.toml`).
-Those two jobs may fail without holding up a release: nothing upstream is
-tested on 32-bit Linux. They have no tree-sitter packs and no Homebrew
-cask.
+Those jobs may fail without holding up a release: nothing upstream is
+tested on 32-bit Linux. Their tree-sitter packs are cross-built
+([Packs](#packs)); there is no Homebrew cask, Flatpak or snap for them.
 
 A `v<version>` tag does this in release.yml's `linux` jobs; `publish` adds
 both to the draft release. The machine's tree-sitter packs
@@ -209,7 +256,8 @@ the `.deb`'s entry under `$XDG_DATA_DIRS` are left alone, and with the
 AppImage removes the entry once its image is gone. `package.sh` must keep
 shipping the icons at those paths in the AppDir.
 
-A `.deb` install (`/usr/lib/corvene`) is never updated in place: like a
+A `.deb`, `.rpm`, `.tar.gz`, AUR, Flatpak or snap install is never updated
+in place (none of them is an AppImage): like a
 Homebrew cask on macOS, the banner and About only say that the release is
 available and to update with the package manager.
 
@@ -220,6 +268,52 @@ The Homebrew cask installs the same AppImage as
 swapped: the banner says `brew upgrade corvene`. The
 `publish` job stamps both AppImages' sha256 into the cask.
 
+### Flatpak
+
+`packaging/flatpak/build.sh <Corvene[-Full]-<version>-linux-<arch>.tar.gz> [out]`
+builds `Corvene[-Full]-<version>-<arch>.flatpak`, a single-file bundle of
+`com.wasimaster.corvene` (`packaging/flatpak/com.wasimaster.corvene.yml`,
+runtime `org.freedesktop.Platform` 26.08 from Flathub, which the bundle
+names so `flatpak install` fetches it). x86_64 and aarch64 only, on a
+machine of that architecture, with `flatpak` and `flatpak-builder`
+installed. The sandbox builds its own git (the runtime has none; no Perl,
+Python or Tcl/Tk parts, no git-lfs) and may read and write the home folder,
+talk to the Secret Service (account tokens), notifications and the SSH
+agent. Not on Flathub: install the bundle with
+`flatpak install --user Corvene-<version>-x86_64.flatpak` (the other
+variant: `--reinstall`, same application id). Limits of the sandbox:
+repositories outside the home folder need
+`flatpak override --user --filesystem=<path> com.wasimaster.corvene`, and
+External Editor / Open in Shell only find what is inside the sandbox.
+release.yml's `flatpak` jobs build them; a failure there does not hold up
+the release.
+
+### Snap
+
+`packaging/snap/prepare.sh <archive> <dir>` writes `<dir>/snap/snapcraft.yaml`
+(the version filled in) and the archive's `usr` tree; `snapcraft pack` in
+`<dir>` builds the snap (core24, strict confinement, the `gnome` extension
+for the desktop libraries and GPU drivers; git, git-lfs and ssh from Ubuntu
+24.04 inside it, `GIT_EXEC_PATH` pointing there). release.yml's `snap` jobs
+build it with `snapcore/action-build` (LXD) on x86_64 and arm64 runners as
+`Corvene[-Full]-<version>-<arch>.snap`; a failure there does not hold up the
+release. Not in the Snap Store: `sudo snap install --dangerous
+Corvene-<version>-x86_64.snap`, then `sudo snap connect
+corvene:password-manager-service` (account tokens) and `sudo snap connect
+corvene:ssh-keys` (git over SSH); neither connects on its own.
+
+### AUR
+
+`packaging/aur/stamp.py --version <v> --assets <folder> [--out target/aur]`
+writes `corvene-bin/` and `corvene-full-bin/` (each a `PKGBUILD` and its
+`.SRCINFO`) from the `.tar.gz` files in `<folder>`: binary packages that
+unpack the release's archive into `/` for x86_64, aarch64, i686 and armv7h
+(an architecture without an archive is left out). They conflict with each
+other. The `publish` job leaves them as the `aur` artifact; after
+publishing the release, copy each folder into a clone of
+`ssh://aur@aur.archlinux.org/<name>.git` and push (the maintainer's AUR SSH
+key; nothing in CI holds one).
+
 ## Android
 
 `packaging/android/build.sh release` builds the `foss` and `play` packages
@@ -227,6 +321,12 @@ with every ABI (arm64-v8a, armeabi-v7a, x86_64, x86) in each; `PER_ABI=1`
 also one per ABI. release.yml uploads all ten as
 `Corvene-<version>-android-<foss|play>-<arm64|armv7|x86_64|x86|universal>.apk`; the
 `play` bundle (`.aab`) stays a workflow artifact for Google Play.
+`FULL=1` compiles every tree-sitter grammar into the library: release.yml's
+full job builds the foss flavour so, one package per ABI
+(`Corvene-Full-<version>-android-foss-<abi>.apk`; one with all four would be
+several hundred MB). It has the same application id and key, so it
+installs over the default foss package and back. The play flavour has no
+full variant: Google Play delivers the grammars as an on-demand module.
 
 They are signed with the key from `packaging/android/keystore.sh create`
 (`~/.corvene-signing/corvene-android.jks` and `.password`; needs a JDK's
@@ -241,11 +341,18 @@ means every user uninstalls first.
 
 ## Windows
 
-`packaging/windows/package.ps1` builds the installer from a release build
-into `target\windows\`:
+`packaging/windows/package.ps1` builds the Windows packages from a release
+build into `target\windows\`:
 
-- `Corvene-<version>-<x86_64|aarch64|i686>-setup.exe`
-- `Corvene-Full-<version>-<arch>-setup.exe` with `FULL=1` (every tree-sitter
+- `Corvene-<version>-<x86_64|aarch64|i686>-setup.exe`: the per-user
+  installer, which updates itself
+- `Corvene-<version>-<arch>.msi`: the machine-wide package (WiX Toolset 5,
+  `packaging/windows/corvene.wxs`; skipped when `wix` is not on the `PATH`:
+  `dotnet tool install --global wix --version 5.0.2`; WiX 6 and later need
+  the Open Source Maintenance Fee EULA)
+- `Corvene-<version>-windows-<arch>-portable.zip`: a `Corvene` folder with
+  `corvene.exe` and `bin\corvene.bat`, no installer
+- the same as `Corvene-Full-<version>-…` with `FULL=1` (every tree-sitter
   grammar compiled in)
 
 for the architecture of the machine it runs on, or for `TARGET=<Rust
@@ -273,8 +380,8 @@ certificate yet (one is bought from a certificate authority), so SmartScreen
 warns about the download and a PC with Smart App Control on refuses it.
 
 The `packs` job builds the Windows tree-sitter packs
-(`tree-sitter-{all,rest}-<v>-windows-<x86_64|aarch64>.zip`, DLL units) on
-Windows runners: `packaging/packs.sh` in Git Bash, with LLVM's clang. By hand that
+(`tree-sitter-{all,rest}-<v>-windows-<x86_64|aarch64|i686>.zip`, DLL units) on
+Windows runners (i686 cross-built on the x86_64 one): `packaging/packs.sh` in Git Bash, with LLVM's clang. By hand that
 needs Python as `python` (or `PYTHON=<exe>`), clang on the `PATH` and the
 tree-sitter CLI (`CORVENE_TREE_SITTER`).
 
@@ -285,8 +392,20 @@ GitHub lists for the asset. "Install and Restart" copies the installer,
 checks the copy, quits,
 and a hidden PowerShell runs the copy with `/VERYSILENT` once Corvene has
 exited and then starts the new Corvene. A Corvene that was not installed by
-the installer (`cargo run`, an unpacked copy: no `unins000.exe` next to it)
-only says that the release is available.
+the installer (`cargo run`, the portable zip, the `.msi`: no `unins000.exe`
+next to it) only says that the release is available. A Full install updates
+to the release's `Corvene-Full-…-setup.exe`.
+
+The `.msi` is for deployment to many machines (`msiexec /i
+Corvene-<version>-x86_64.msi /qn`, Group Policy, Intune), like GitHub
+Desktop's: per machine into `Program Files\Corvene` (`Program Files (x86)`
+for i686), `bin` on the system `PATH`, an all-users Start menu shortcut with
+the AppUserModelID. A newer `.msi` replaces it (MajorUpgrade; the default
+and Full packages share the upgrade code, so either replaces the other). It
+writes no URL schemes: Corvene registers `x-corvene` / `x-corvene-auth` for
+the user who starts it (`url_schemes::register`). Its version is the
+release's without a pre-release suffix (Windows Installer versions are
+numeric).
 
 `packaging/windows/corvene.ico` is generated from the app icon by
 `packaging/windows/make-ico.ps1`; run it again when the icon changes.

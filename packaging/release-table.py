@@ -23,18 +23,18 @@ ARCHITECTURES = [
     ("Universal", r"universal"),
     ("x86_64", r"x86_64|amd64|x64"),
     ("ARM64", r"aarch64|arm64"),
-    ("ARMv7", r"armv7l?|armhf|arm32|aarch32"),
+    ("ARMv7", r"armv7l?|armv7hl|armhf|arm32|aarch32"),
     ("x86 (32-bit)", r"x86_32|i[36]86|x86"),
 ]
 START, END = "<!-- downloads -->", "<!-- /downloads -->"
 # how the links of one cell are ordered
-ORDER = [".dmg", ".zip", ".exe", ".msi", ".AppImage", ".deb", ".rpm", "foss", "play"]
+ORDER = [".dmg", ".zip", ".exe", ".msi", "portable", ".AppImage", ".deb", ".rpm", ".tar.gz", ".flatpak", ".snap", "foss", "play"]
 
 
 def classify(name):
     """(row, column, label) of an asset, or None for one the table leaves out."""
     lower = name.lower()
-    extension = re.search(r"\.(dmg|zip|exe|msi|appimage|deb|rpm|apk)$", lower)
+    extension = re.search(r"\.(dmg|zip|exe|msi|appimage|deb|rpm|tar\.gz|flatpak|snap|apk)$", lower)
     if not extension or not lower.startswith("corvene"):
         return None
     extension = extension.group(1)
@@ -42,7 +42,7 @@ def classify(name):
         row = "Android"
     elif extension in ("exe", "msi") or "windows" in lower:
         row = "Windows"
-    elif extension in ("appimage", "deb", "rpm") or "linux" in lower:
+    elif extension in ("appimage", "deb", "rpm", "tar.gz", "flatpak", "snap") or "linux" in lower:
         row = "Linux"
     elif extension == "dmg" or "macos" in lower:
         row = "macOS"
@@ -59,6 +59,8 @@ def classify(name):
         # the flavour: Corvene-<v>-android-<flavour>[-<arch>].apk
         flavour = re.search(r"android-([a-z]+)[-.]", lower)
         label = flavour.group(1) if flavour else ".apk"
+    elif extension == "zip" and row == "Windows":
+        label = "portable"
     else:
         label = ".AppImage" if extension == "appimage" else f".{extension}"
     if lower.startswith("corvene-full"):
