@@ -10,9 +10,9 @@ use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 
 use crate::runtime::Services;
 use crate::vm::{
-    BannerVm, BranchesVm, ChangesVm, CommitDetailVm, DiffHeaderVm, DiffRowVm, HistoryVm, PopupVm,
-    RepoListVm, banner, branches, changes, commit_detail, diff_header, diff_rows, history, popup,
-    repo_list,
+    BannerVm, BranchesVm, ChangesVm, CommitDetailVm, DesignStyleVm, DiffHeaderVm, DiffRowVm,
+    HistoryVm, PopupVm, RepoListVm, SettingsVm, ThemeVm, banner, branches, changes, commit_detail,
+    diff_header, diff_rows, history, popup, repo_list, settings,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -85,10 +85,10 @@ impl Corvene {
         #[cfg(target_os = "android")]
         {
             corvene_platform::android::prepare_environment(&files);
-            corvene_platform::android::set_bridge(crate::bridge::KotlinBridge {
+            corvene_platform::android::set_bridge(Box::new(crate::bridge::KotlinBridge {
                 events: events.clone(),
                 info: info.clone(),
-            });
+            }));
         }
         #[cfg(not(target_os = "android"))]
         let _ = (&files, &info);
@@ -345,5 +345,30 @@ impl Corvene {
 
     pub async fn banner(&self) -> Option<BannerVm> {
         self.loop_.query(|host| banner(host.state_ref())).await
+    }
+
+    // ---- settings ----
+
+    pub fn set_design_style(&self, style: DesignStyleVm) {
+        self.loop_.post(move |host| {
+            Dispatcher::update_settings(host, |settings| settings.design_style = style.into())
+        });
+    }
+
+    pub fn set_theme(&self, theme: ThemeVm) {
+        self.loop_.post(move |host| {
+            Dispatcher::update_settings(host, |settings| {
+                settings.theme = match theme {
+                    ThemeVm::Light => corvene_models::ThemeSetting::Light,
+                    ThemeVm::Dark => corvene_models::ThemeSetting::Dark,
+                    ThemeVm::System => corvene_models::ThemeSetting::System,
+                    ThemeVm::HighContrast => corvene_models::ThemeSetting::HighContrast,
+                }
+            })
+        });
+    }
+
+    pub async fn settings(&self) -> SettingsVm {
+        self.loop_.query(|host| settings(host.state_ref())).await
     }
 }

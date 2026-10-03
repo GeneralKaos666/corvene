@@ -608,6 +608,40 @@ pub enum Section {
     History,
 }
 
+/// Settings › Appearance › Design style: which design language the Android
+/// app draws with (the desktop app only stores it). Corvene addition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DesignStyle {
+    /// GitHub for Android: Primer colours over Material components, Inter,
+    /// Octicons, a bottom navigation bar.
+    #[default]
+    GitHubMobile,
+    /// GitHub Desktop's look transplanted: its tokens, toolbar and density.
+    GitHubDesktop,
+    /// Material 3 with the device's dynamic colours.
+    Material,
+}
+
+impl DesignStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DesignStyle::GitHubMobile => "github-mobile",
+            DesignStyle::GitHubDesktop => "github-desktop",
+            DesignStyle::Material => "material",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "github-mobile" => Some(DesignStyle::GitHubMobile),
+            "github-desktop" => Some(DesignStyle::GitHubDesktop),
+            "material" => Some(DesignStyle::Material),
+            _ => None,
+        }
+    }
+}
+
 /// Settings › Appearance › Theme (`ApplicationTheme`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]

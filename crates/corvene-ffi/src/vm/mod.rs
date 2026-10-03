@@ -8,6 +8,7 @@ pub mod diff;
 pub mod history;
 pub mod popup;
 pub mod repo_list;
+pub mod settings;
 
 pub use branches::*;
 pub use changes::*;
@@ -15,3 +16,4 @@ pub use diff::*;
 pub use history::*;
 pub use popup::*;
 pub use repo_list::*;
+pub use settings::*;
