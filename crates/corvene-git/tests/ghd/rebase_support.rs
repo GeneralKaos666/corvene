@@ -1,4 +1,4 @@
-//! Helpers shared by lane `rebase`'s ports of GitHub Desktop's rebase tests
+//! Helpers shared by `corvene-git`'s ports of GitHub Desktop's rebase tests
 //! (`rebase-full-test.ts`, `rebase/detect-conflict-test.ts`,
 //! `rebase/progress-test.ts`).
 //!

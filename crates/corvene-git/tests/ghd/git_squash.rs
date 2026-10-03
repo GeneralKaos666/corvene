@@ -17,7 +17,7 @@
 use corvene_git::{RebaseOptions, RebaseResult};
 use corvene_models::Commit;
 use corvene_test_support::{
-    TestRepo, Tree, TreeEntry, exec, get_status_or_throw, git, make_commit,
+    TestRepo, Tree, TreeEntry, exec, get_commits, get_status_or_throw, git, make_commit,
     setup_empty_repository_default_main,
 };
 
@@ -42,10 +42,6 @@ fn squash(
         RebaseOptions::default(),
         |_| {},
     )
-}
-
-fn get_commits(repository: &TestRepo, revision: &str, limit: usize) -> Vec<Commit> {
-    corvene_git::get_commits(repository.path(), revision, 0, limit).expect("getCommits")
 }
 
 /// `getChangedFiles(repository, sha).files.map(f => f.path).join(' ')`.

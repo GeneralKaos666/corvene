@@ -10,18 +10,18 @@ cases are ported, ignored or skipped:
 - `check.py` matches that list against the `// GHD:` markers in
   `crates/**/*.rs` and the skip lists in `skips/*.tsv`.
 - `crates/corvene-test-support` holds GitHub Desktop's fixtures (byte for
-  byte), the isolated test environment and the ports of
-  `app/test/helpers`. Its crate docs map every GitHub Desktop helper to its
-  Rust name and list the store-level helpers that are not ported there.
+  byte), the isolated test environment, the ports of `app/test/helpers`
+  and the helpers many test files share (see [Shared helpers](#shared-helpers)).
+  Its crate docs map every GitHub Desktop helper to its Rust name and list
+  the store-level helpers that are not ported there.
 
 ## Running
 
 ```sh
-cargo test -p corvene-test-support             # the support crate's own checks
-cargo test -p corvene-git --test ghd_infra     # one lane's root (see Layout)
-cargo test -p corvene-git --test 'ghd*'        # every GHD root of a crate
-cargo test -p corvene-git --test ghd           # after the roots are merged
-cargo test -p corvene-git --test ghd -- --ignored   # watch ignored cases fail
+cargo test --workspace --test ghd              # every crate's ported tests
+cargo test --workspace --test ghd -- git_status     # one module (a name filter)
+cargo test --workspace --test ghd -- --ignored      # watch ignored cases fail
+cargo test --workspace --test support          # the support crate's own checks
 
 python3 tools/ghd-tests/check.py               # summary; exit 1 if any case is unaccounted for
 python3 tools/ghd-tests/check.py --missing     # cases neither ported nor skipped
@@ -41,10 +41,13 @@ only acceptable non-zero exit is "N missing".
 Ported tests are integration tests (`tests/`) of the crate that has the
 Corvene code under test (`corvene-git`, `corvene-core`, `corvene-github`,
 `corvene-platform`, `corvene-store`, `corvene-ui`, `corvene-models`; each
-has `corvene-test-support` as a dev-dependency). Never use
-`corvene-test-support` from a `#[cfg(test)]` module in `src/`: it depends
-on `corvene-git` and `corvene-models`, so inside those crates' unit tests
-its types come from a second copy of the crate and do not match.
+has `corvene-test-support` as a dev-dependency). Each of those crates has
+one test target, `ghd`: `crates/<crate>/tests/ghd/main.rs`, which holds
+only `mod <name>;` lines (in alphabetical order), one per module file next
+to it. Never use `corvene-test-support` from a `#[cfg(test)]` module in
+`src/`: it depends on `corvene-git` and `corvene-models`, so inside those
+crates' unit tests its types come from a second copy of the crate and do
+not match.
 
 - One GitHub Desktop test file becomes one module file
   `crates/<crate>/tests/ghd/<name>.rs`. `<name>` is the path below `unit/`
@@ -53,27 +56,53 @@ its types come from a second copy of the crate and do not match.
   → `diff_parser.rs`, `unit/stores/git-store-test.ts` →
   `stores_git_store.rs`. The one name that is a Rust keyword gets a
   trailing `_`: `unit/enum-test.ts` → `enum_.rs`.
-- While lanes run in parallel, each lane compiles its modules through its
-  own root `crates/<crate>/tests/ghd_<lane>.rs`, which holds only lines like
+- A new module file needs its `mod <name>;` line in that crate's
+  `tests/ghd/main.rs`; the module files are not targets of their own.
 
-  ```rust
-  #[path = "ghd/git_status.rs"]
-  mod git_status;
-  ```
+### Shared helpers
 
-  so one lane's half-written module never breaks another lane's build.
-  `crates/corvene-git/tests/ghd_infra.rs` is the reference.
-- At the end the roots are merged into `crates/<crate>/tests/ghd/main.rs`
-  (`mod git_status;` per module, no `#[path]`) and the `ghd_<lane>.rs`
-  files are deleted. Cargo builds `tests/ghd/main.rs` as the test target
-  `ghd`; the module files next to it are not targets of their own.
-- Helpers shared by several modules of one lane live in
-  `tests/ghd/<lane>_support.rs`, included by the lane root
-  (`#[path = "ghd/<lane>_support.rs"] mod <lane>_support;`) and used as
-  `crate::<lane>_support::…`, which keeps working after the merge. Helpers
-  that only one module needs stay in that module. Do not change
-  `corvene-test-support` from a lane without coordinating: every lane
-  builds against it.
+Look in `corvene-test-support` before writing a helper, and move a helper
+there as soon as a second module needs it (when it needs nothing but
+`corvene-git` and `corvene-models`; see below), with a doc comment naming
+the GitHub Desktop function or helper it mirrors:
+
+- `app/test/helpers`: `setup_fixture_repository`, `setup_empty_repository`
+  and the other repository builders, `make_commit`, `get_status_or_throw`,
+  `get_branch_or_error`, `git_hub_repo_fixture` (with
+  `GitHubRepoFixtureOptions`, built like GitHub Desktop's object literal:
+  `GitHubRepoFixtureOptions { owner: "desktop", name: "desktop",
+  ..Default::default() }`)…
+- `lib/git` functions tests call for setup and checks: `get_branches(path,
+  &prefixes)` (`[]` for a directory that is not a repository),
+  `create_commit` (fails the test) / `try_create_commit` (returns the
+  `Result`, takes `CommitOptions`), `get_commits`, `get_commit`,
+  `git_error_message` (`GitError.message`), `get_working_directory_diff`,
+  `load_tip` (`GitStore.tip` after `loadStatus()`), `create_bare_upstream`.
+- models: `new_repository(path, id, git_hub_repository)`,
+  `working_directory_file_change(path, kind, selection)` (porcelain
+  columns left neutral; set the ones the code under test reads),
+  `from_files`, `conflicted_count`, `ghd_text` (`DiffLine.text`),
+  `unified_diff_end`.
+- Node and JavaScript: `write_file`, `append_file`, `base64`, `date_parse`
+  (`Date.parse` of a UTC timestamp), `to_iso_string`.
+- HTTP: `serve(StubResponse::new(status, body))` answers every request
+  with that response and returns the base URL (`with_status_text`,
+  `with_header` for the rest of GitHub Desktop's `new Response(…)`);
+  `serve_with(|request| …)` answers per request (route on
+  `request.path()`) and records the requests (`server.requests()`,
+  `server.request_heads()`); `unreachable_endpoint()` is a URL nothing
+  listens on (a stub that throws).
+- `has_git_lfs()`: whether the test git runs `git lfs`.
+
+`corvene-test-support` depends on `corvene-git` and `corvene-models` only
+(never `corvene-core`: that would pull GPUI into every `corvene-git` test
+binary). Helpers that need another crate's types live in that crate's
+tests: `tests/ghd/<topic>_support.rs` when several modules share them,
+declared in `main.rs` like any module and used as
+`crate::<topic>_support::…`; a helper only one module needs stays in that
+module. The flags of the `github-desktop` preset are
+`corvene_core::flags::github_desktop_flags()` (and
+`github_desktop_overrides()` for a hand-built `AppState`).
 
 ## Writing a ported test
 
@@ -128,9 +157,14 @@ fn stages_a_conflicted_file_after_manual_resolution() {
   ExecOptions { env, .. })` or `git_command(..).env(..)`; GitHub Desktop's
   `env: { HOME }` (a private global config for one call) becomes
   `env: vec![("HOME".into(), home.path().into())]`. A GitHub Desktop test
-  that sets `process.env` for its whole body can only be ported when the
-  Corvene function under test takes the variables per call; otherwise
-  ignore it with `ghd: env:`. Never turn on `corvene_git::hook_env`
+  that sets `process.env` around a call (`GIT_CONFIG_PARAMETERS`, …) runs
+  that part inside `corvene_git::process::with_env(&[(name, value)], || …)`,
+  which gives the variables to every git command started on the test's
+  thread until the closure returns (see `git_clone.rs`); code that runs git
+  on other threads, or reads the variables itself, cannot be ported that
+  way: ignore it with `ghd: env:`. The proxy variables are cleared and
+  `NO_PROXY` covers `127.0.0.1`, `localhost` and `::1`, so the stub servers
+  are reached directly. Never turn on `corvene_git::hook_env`
   (`set_hook_env`, or the Git hooks environment setting in a store test):
   it copies the login shell's `HOME` and `GIT_*` into every git process of
   the binary.
@@ -140,8 +174,11 @@ fn stages_a_conflicted_file_after_manual_resolution() {
   or depends on it being empty (`configured_default_branch`) holds `let
   _global = lock_global_config();` for its whole body; the file (and
   `$HOME/.config/git`) is empty when the guard is handed out and after it
-  drops. Prefer a per-call `HOME` (above) when the code under test takes
-  one.
+  drops. The other tests still read it meanwhile, so prefer a per-call
+  `HOME` or `with_env` (above) when the code under test takes one or runs
+  git on the test's thread. Never delete or rewrite those files in place
+  yourself: git dies when a configuration file it saw a moment ago is gone
+  (the guard empties them with an atomic `rename`).
 - **Fixtures** are read-only: use `setup_fixture_repository("name")` (a
   temporary copy with every `_git` renamed to `.git`) and
   `get_fixture_path([..])` only to read files.
@@ -177,7 +214,7 @@ reports any other form as an error). Kinds:
 ## Skips
 
 Cases that are not ported at all are listed in `skips/*.tsv` (one file per
-topic or lane, so lanes do not edit the same file):
+topic, so parallel work does not edit the same file):
 
 ```
 # comment

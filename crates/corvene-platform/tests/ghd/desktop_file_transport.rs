@@ -12,9 +12,9 @@
 //! instant GitHub Desktop's cases set with `t.mock.timers`.
 
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
-use corvene_test_support::create_temp_directory;
+use corvene_test_support::{create_temp_directory, date_parse};
 
 /// Stand-in for GitHub Desktop's `DesktopFileTransport`
 /// (`main-process/desktop-file-transport.ts`). Replace it with the Corvene
@@ -39,23 +39,6 @@ impl DesktopFileTransport {
 
     /// `transport.close()`
     fn close(self) {}
-}
-
-/// `Date.parse` of the UTC timestamps the cases use
-/// (`YYYY-MM-DDTHH:MM:SS.000Z`).
-fn date_parse(iso: &str) -> SystemTime {
-    let number = |range: std::ops::Range<usize>| -> i64 { iso[range].parse().unwrap() };
-    let (year, month, day) = (number(0..4), number(5..7), number(8..10));
-    let (hour, minute, second) = (number(11..13), number(14..16), number(17..19));
-    // Howard Hinnant's days-from-civil
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    let seconds = days * 86_400 + hour * 3600 + minute * 60 + second;
-    UNIX_EPOCH + Duration::from_secs(u64::try_from(seconds).unwrap())
 }
 
 fn read_dir_names(dir: &Path) -> Vec<String> {

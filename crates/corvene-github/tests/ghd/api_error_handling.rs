@@ -12,21 +12,24 @@
 //!   `message` (`"request failed"` when there is none) and, with
 //!   `Client::with_error_details(true)`, the `errors[].message`s in
 //!   parentheses. So [`api_error`] serves the case's response from a local
-//!   HTTP server (`api_support::serve`; the body is the case's `apiError`
-//!   as JSON, or empty for `null`) to a real `Client` and returns the error
-//!   its request fails with. `responseStatus` is `GitHubError::Api.status`
-//!   and `message` is `GitHubError::Api.message` (the `Display` of the
-//!   error adds `GitHub returned <status>: ` in front of it).
+//!   HTTP server (`corvene_test_support::serve`; the body is the case's
+//!   `apiError` as JSON, or empty for `null`) to a real `Client` and returns
+//!   the error its request fails with. `responseStatus` is
+//!   `GitHubError::Api.status` and `message` is `GitHubError::Api.message`
+//!   (the `Display` of the error adds `GitHub returned <status>: ` in front
+//!   of it).
 //!   `with_error_details` is flag `311-api-error-details`, passed at its
 //!   GitHub Desktop value (off). `GitHubError` keeps no parsed body, so
 //!   `apiError` is a stand-in ([`api_error_body`]).
 //! - `getAbsoluteUrl(endpoint, path)` is
-//!   `Endpoint::from_api_base(endpoint).api(path)`, as in `http.rs`.
+//!   `Endpoint::from_api_base(endpoint).api(path)`
+//!   (`crate::api_support::get_absolute_url`), as in `http.rs`.
 
 use corvene_github::{Client, Endpoint, GitHubError};
+use corvene_test_support::{StubResponse, serve};
 use serde_json::{Value, json};
 
-use crate::api_support::{StubResponse, serve};
+use crate::api_support::get_absolute_url;
 
 /// GitHub Desktop's `new APIError(response, apiError)` for a response with
 /// `status` / `status_text` from `url_path` (relative to the endpoint): the
@@ -38,12 +41,11 @@ fn api_error(
     api_error: Option<Value>,
 ) -> GitHubError {
     let body = api_error.map(|e| e.to_string()).unwrap_or_default();
-    let endpoint = serve(StubResponse {
-        status,
-        status_text,
-        headers: vec![("Content-Type", "application/json")],
-        body,
-    });
+    let endpoint = serve(
+        StubResponse::new(status, body)
+            .with_status_text(status_text)
+            .with_header("Content-Type", "application/json"),
+    );
     // flag 311-api-error-details at its GitHub Desktop value
     let client = Client::new(Endpoint::from_api_base(&endpoint), "token").with_error_details(false);
     let result = match url_path.split('/').collect::<Vec<_>>().as_slice() {
@@ -152,11 +154,6 @@ mod api_error {
             assert_eq!(response_status(&error), status);
         }
     }
-}
-
-/// GitHub Desktop's `getAbsoluteUrl(endpoint, path)`.
-fn get_absolute_url(endpoint: &str, path: &str) -> String {
-    Endpoint::from_api_base(endpoint).api(path)
 }
 
 mod get_absolute_url {

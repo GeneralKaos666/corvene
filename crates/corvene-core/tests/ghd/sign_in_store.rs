@@ -19,10 +19,10 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use crate::accounts_support::{
+    AccountsStore, InMemoryStore, USERS, get_dot_com_api_endpoint, new_account,
+};
 use corvene_core::Account;
-use corvene_github::Endpoint;
-
-use crate::accounts_support::{AccountsStore, InMemoryStore, USERS, new_account};
 
 /// GitHub Desktop's `SignInStep`.
 #[allow(dead_code)]
@@ -115,11 +115,6 @@ fn create_accounts_store(accounts: &[Account]) -> AccountsStore {
         data_store.set_item(USERS, &serialized);
     }
     AccountsStore::new(data_store)
-}
-
-/// `getDotComAPIEndpoint()`.
-fn get_dot_com_api_endpoint() -> String {
-    Endpoint::github_com().api_base
 }
 
 /// `createDotComAccount(login = 'octocat')`.

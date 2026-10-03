@@ -12,9 +12,9 @@
 //! Desktop's methods; `new CloningRepository(path, url)` is a
 //! [`CloneState`] (see `cloning_repository.rs`).
 
-use std::path::PathBuf;
-
 use corvene_core::CloneState;
+
+use crate::cloning_support::cloning_repository;
 
 /// Stand-in for GitHub Desktop's `CloningRepositoriesStore`. Replace its
 /// methods with gpui-free Corvene calls once there are some and remove the
@@ -53,17 +53,6 @@ impl CloningRepositoriesStore {
     /// `store.onDidUpdate(callback)`.
     fn on_did_update(&mut self, _callback: impl FnMut() + 'static) {
         unimplemented!("no gpui-free clone store")
-    }
-}
-
-/// `new CloningRepository(path, url)`.
-fn cloning_repository(path: &str, url: &str) -> CloneState {
-    CloneState {
-        url: url.to_string(),
-        path: PathBuf::from(path),
-        description: String::new(),
-        value: None,
-        cancel: corvene_git::CancelToken::new(),
     }
 }
 

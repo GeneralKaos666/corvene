@@ -13,15 +13,16 @@
 //! are `PullRequest` / `PullRequestRef` (`gitHubRepository` is
 //! `repository`, `ref` is `ref_name`, the `Date` is `created_at` as the
 //! API's ISO-8601 text), `GitHubRepository` is `GitHubRepository`
-//! ([`git_hub_repo_fixture`] for `helpers/github-repo-builder.ts`
-//! `gitHubRepoFixture`), and `Branch` is `Branch` (`upstream` holds the full
-//! `refs/remotes/...` name Corvene reads from git; the tip's author date is
-//! `tip_time`).
+//! (`corvene_test_support::git_hub_repo_fixture` for
+//! `helpers/github-repo-builder.ts` `gitHubRepoFixture`), and `Branch` is
+//! `Branch` (`upstream` holds the full `refs/remotes/...` name Corvene
+//! reads from git; the tip's author date is `tip_time`).
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use corvene_core::pull_requests::forked_remotes_to_prune;
 use corvene_core::{Branch, BranchKind, GitHubRepository, PullRequest, PullRequestRef, Remote};
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture, to_iso_string};
 
 fn now_secs() -> i64 {
     SystemTime::now()
@@ -30,47 +31,11 @@ fn now_secs() -> i64 {
         .as_secs() as i64
 }
 
-/// `new Date()` as the ISO-8601 text Corvene keeps for a pull request.
+/// `new Date()` as the ISO-8601 text Corvene keeps for a pull request
+/// (whole seconds, as the API writes it).
 fn iso8601_now() -> String {
-    let secs = now_secs();
-    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    // civil_from_days (H. Hinnant)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rem / 3_600,
-        rem % 3_600 / 60,
-        rem % 60
-    )
-}
-
-/// `helpers/github-repo-builder.ts` `gitHubRepoFixture({ owner, name })`:
-/// a github.com repository whose HTML URL is `https://github.com/<owner>/<name>`
-/// and clone URL that plus `.git`.
-fn git_hub_repo_fixture(owner: &str, name: &str) -> GitHubRepository {
-    let html_url = format!("https://github.com/{owner}/{name}");
-    GitHubRepository {
-        endpoint: "https://api.github.com".to_string(),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: false,
-        fork: false,
-        parent: None,
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
+    let iso = to_iso_string(UNIX_EPOCH + Duration::from_secs(now_secs() as u64));
+    format!("{}Z", &iso[..19])
 }
 
 fn create_sample_pull_request(
@@ -173,7 +138,11 @@ fn never_prunes_remotes_with_local_branches() {
 // GHD: unit/find-forked-remotes-to-prune-test.ts › findForkedRemotesToPrune › never prunes remotes with pull requests
 #[test]
 fn never_prunes_remotes_with_pull_requests() {
-    let fork_repository = git_hub_repo_fixture(TEST_USER_NAME, "desktop");
+    let fork_repository = git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        owner: TEST_USER_NAME,
+        name: "desktop",
+        ..Default::default()
+    });
     let open_prs = [create_sample_pull_request(
         fork_repository,
         TEST_USER_NAME,

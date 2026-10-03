@@ -158,6 +158,41 @@ pub fn set_network_stall_timeout(seconds: u32) {
     LOW_SPEED_TIME.store(seconds, Ordering::Relaxed);
 }
 
+thread_local! {
+    /// Variables [`with_env`] adds to the git commands of this thread.
+    static SCOPED_ENV: std::cell::RefCell<Vec<(OsString, OsString)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Run `f` with `env` added to the environment of every git command it
+/// starts on the current thread, as if the variables were in the process
+/// environment: a command's own [`GitCommand::env`] /
+/// [`GitCommand::env_remove`] still win. Commands started on other threads,
+/// and after `f` returns, do not see them.
+///
+/// This is how GitHub Desktop's tests that set `process.env` around one call
+/// (`GIT_CONFIG_PARAMETERS`, …) are ported without touching the environment
+/// of the other tests, which run on parallel threads of the same process.
+pub fn with_env<R>(env: &[(&str, &str)], f: impl FnOnce() -> R) -> R {
+    /// Drops the variables again, also when `f` panics.
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SCOPED_ENV.with(|scoped| scoped.borrow_mut().truncate(self.0));
+        }
+    }
+    let _restore = SCOPED_ENV.with(|scoped| {
+        let mut scoped = scoped.borrow_mut();
+        let len = scoped.len();
+        scoped.extend(
+            env.iter()
+                .map(|(k, v)| (OsString::from(k), OsString::from(v))),
+        );
+        Restore(len)
+    });
+    f()
+}
+
 /// Told when a network command starts (`true`) and ends (`false`): Android
 /// keeps the process alive with a foreground service while one runs.
 static NETWORK_OBSERVER: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
@@ -301,6 +336,12 @@ impl GitCommand {
                 cmd.env(k, v);
             }
         }
+        // `with_env`: part of the inherited environment for this thread
+        SCOPED_ENV.with(|scoped| {
+            for (k, v) in scoped.borrow().iter() {
+                cmd.env(k, v);
+            }
+        });
         // GHD: never let git prompt on a terminal; force stable English output.
         cmd.env("GIT_TERMINAL_PROMPT", "0")
             .env("LC_ALL", "en_US.UTF-8")
@@ -583,5 +624,33 @@ mod tests {
         assert!(envs(&status).is_empty());
         set_network_stall_timeout(0);
         assert!(envs(&fetch).is_empty());
+    }
+
+    fn env_value(cmd: &GitCommand, key: &str) -> Option<String> {
+        cmd.command()
+            .get_envs()
+            .find(|(k, _)| *k == OsStr::new(key))
+            .and_then(|(_, v)| Some(v?.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn with_env_reaches_this_threads_commands_inside_the_call_only() {
+        const KEY: &str = "GIT_CONFIG_PARAMETERS";
+        let git = Arc::new(crate::find_git().unwrap());
+        let plain = GitCommand::new(git.clone()).args(["status"]);
+        let own = plain.clone().env(KEY, "'a.b=own'");
+        with_env(&[(KEY, "'protocol.version=0'")], || {
+            assert_eq!(
+                env_value(&plain, KEY).as_deref(),
+                Some("'protocol.version=0'")
+            );
+            assert_eq!(env_value(&own, KEY).as_deref(), Some("'a.b=own'"));
+            let other_thread = plain.clone();
+            let seen = std::thread::spawn(move || env_value(&other_thread, KEY))
+                .join()
+                .unwrap();
+            assert_eq!(seen, None);
+        });
+        assert_eq!(env_value(&plain, KEY), None);
     }
 }

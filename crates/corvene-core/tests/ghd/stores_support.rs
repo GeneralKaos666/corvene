@@ -1,4 +1,6 @@
-//! Helpers shared by the `stores` lane's `corvene-core` modules.
+//! Helpers shared by `corvene-core`'s ports of GitHub Desktop's store
+//! tests (`unit/git-store-cache-test.ts`,
+//! `unit/repository-state-cache-test.ts`).
 //!
 //! GitHub Desktop's per-repository caches (`GitStoreCache`,
 //! `RepositoryStateCache`) are Corvene's `AppState::repo_states`, reached
@@ -13,7 +15,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use corvene_core::AppState;
-use corvene_core::flags::{EnvFlags, FlagOverrides, Flags, Preset};
+use corvene_core::flags::{EnvFlags, github_desktop_flags, github_desktop_overrides};
 use corvene_store::Store;
 use tempfile::TempDir;
 
@@ -42,17 +44,12 @@ impl DerefMut for TestAppState {
 pub fn app_state() -> TestAppState {
     let dir = corvene_test_support::create_temp_directory();
     let store = Store::open_in(dir.path()).expect("open the store");
-    let flag_overrides = FlagOverrides {
-        preset: Preset::GitHubDesktop,
-        ..Default::default()
-    };
-    let flags_env = EnvFlags::default();
-    let flags = Flags::resolve(&flag_overrides, &flags_env);
+    let flags = github_desktop_flags();
     let state = AppState {
         store: Arc::new(store),
         settings: Default::default(),
-        flag_overrides,
-        flags_env,
+        flag_overrides: github_desktop_overrides(),
+        flags_env: EnvFlags::default(),
         flags: flags.clone(),
         flags_at_launch: flags,
         git: None,

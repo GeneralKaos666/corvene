@@ -29,14 +29,12 @@
 //!   Desktop's `isConflictedFile` only narrows the type for
 //!   `isManualConflict`).
 
-use std::io::Write as _;
-
 use corvene_git::GitError;
 use corvene_models::{FileStatus, FileStatusKind, GitStatusEntry, SubmoduleStatus};
 use corvene_test_support::{
-    DEFAULT_STRING_LENGTH, exec, generate_string, get_status_or_throw, git,
-    setup_conflicted_repo_with_multiple_files, setup_empty_directory, setup_empty_repository,
-    setup_fixture_repository, setup_local_config,
+    DEFAULT_STRING_LENGTH, append_file, conflicted_count, exec, generate_string,
+    get_status_or_throw, git, setup_conflicted_repo_with_multiple_files, setup_empty_directory,
+    setup_empty_repository, setup_fixture_repository, setup_local_config, write_file,
 };
 
 /// Stand-in for GitHub Desktop's `renameIncludesModifications`
@@ -47,26 +45,6 @@ use corvene_test_support::{
 /// the `#[ignore]`s.
 fn rename_includes_modifications(_status: &FileStatus) -> bool {
     unimplemented!("corvene_models::FileStatus has no renameIncludesModifications")
-}
-
-fn write_file(path: std::path::PathBuf, contents: &str) {
-    std::fs::write(&path, contents).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
-}
-
-fn append_file(path: &std::path::Path, contents: &str) {
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(path)
-        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
-    file.write_all(contents.as_bytes())
-        .unwrap_or_else(|e| panic!("append {}: {e}", path.display()));
-}
-
-fn conflicted_count(files: &[corvene_models::WorkingDirectoryFileChange]) -> usize {
-    files
-        .iter()
-        .filter(|f| f.status.kind == FileStatusKind::Conflicted)
-        .count()
 }
 
 // ---------------------------------------------------------------------------
@@ -153,11 +131,11 @@ fn parses_conflicted_files_resulting_from_popping_a_stash() {
     exec(["commit", "-m", "initial commit"], repository.path());
 
     // write a change to the readme into the stash
-    append_file(&readme, &generate_string(DEFAULT_STRING_LENGTH));
+    append_file(&readme, generate_string(DEFAULT_STRING_LENGTH));
     exec(["stash"], repository.path());
 
     // write a different change to the README and commit it
-    append_file(&readme, &generate_string(DEFAULT_STRING_LENGTH));
+    append_file(&readme, generate_string(DEFAULT_STRING_LENGTH));
     exec(["commit", "-am", "later commit"], repository.path());
 
     // pop the stash to introduce a conflict into the index

@@ -18,9 +18,7 @@
 
 use std::path::Path;
 
-use corvene_test_support::{TestRepo, git, setup_fixture_repository};
-
-use crate::history_support::get_branches;
+use corvene_test_support::{TestRepo, get_branches, git, setup_fixture_repository};
 
 /// GitHub Desktop's `SubmoduleEntry` (`models/submodule.ts`).
 #[derive(Debug)]

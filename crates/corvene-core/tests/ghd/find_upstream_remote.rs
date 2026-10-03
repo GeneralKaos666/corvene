@@ -12,31 +12,12 @@
 //! remote points at the parent instead. [`find_upstream_remote`] stands in
 //! for it.
 //!
-//! [`git_hub_repo_fixture`] ports `helpers/github-repo-builder.ts`
-//! `gitHubRepoFixture` for `corvene_models::GitHubRepository` (dotcom
-//! endpoint, `htmlUrl` and `${htmlUrl}.git` as GitHub Desktop builds them).
+//! `helpers/github-repo-builder.ts` `gitHubRepoFixture` is
+//! `corvene_test_support::git_hub_repo_fixture`.
 
 use corvene_core::UPSTREAM_REMOTE_NAME;
 use corvene_models::{GitHubRepository, Remote};
-
-/// `helpers/github-repo-builder.ts` `gitHubRepoFixture({ owner, name })`.
-fn git_hub_repo_fixture(owner: &str, name: &str) -> GitHubRepository {
-    let html_url = format!("https://github.com/{owner}/{name}");
-    GitHubRepository {
-        endpoint: "https://api.github.com".into(),
-        owner: owner.into(),
-        name: name.into(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: false,
-        fork: false,
-        parent: None,
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
-}
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
 
 /// Stand-in for GitHub Desktop's `findUpstreamRemote(parent, remotes)`
 /// (`lib/stores/helpers/find-upstream-remote.ts`).
@@ -48,7 +29,11 @@ fn find_upstream_remote(_parent: &GitHubRepository, _remotes: &[Remote]) -> Opti
 #[test]
 #[ignore = "ghd: missing: Corvene has no findUpstreamRemote (lib/stores/helpers/find-upstream-remote.ts), only UPSTREAM_REMOTE_NAME and url_matches_remote"]
 fn finds_the_upstream() {
-    let parent = git_hub_repo_fixture("somsubhra", "github-release-stats");
+    let parent = git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        owner: "somsubhra",
+        name: "github-release-stats",
+        ..Default::default()
+    });
     let remotes = [Remote {
         name: "upstream".into(),
         url: "https://github.com/Somsubhra/github-release-stats.git".into(),

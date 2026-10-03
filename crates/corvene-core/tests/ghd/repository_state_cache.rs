@@ -27,7 +27,8 @@
 //!   `filterText` goes through the stand-ins [`set_compare_filter_text`] /
 //!   [`compare_filter_text`].
 //!
-//! - `gitHubRepoFixture({ name, owner })` is [`github_repo_fixture`].
+//! - `gitHubRepoFixture({ name, owner })` is
+//!   `corvene_test_support::git_hub_repo_fixture`.
 //! - `createSamplePullRequest(gitHubRepository)` is
 //!   [`create_sample_pull_request`].
 
@@ -41,6 +42,8 @@ use corvene_core::{
     GitStatusEntry, PullRequest, PullRequestRef, Repository, WorkingDirectoryFileChange,
     WorkingDirectoryStatus,
 };
+
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
 
 use crate::stores_support::app_state;
 
@@ -75,28 +78,6 @@ fn repository() -> Repository {
     Repository::new(1, PathBuf::from("/something/path"))
 }
 
-/// GitHub Desktop's `gitHubRepoFixture({ name, owner })` on github.com
-/// (`helpers/github-repo-builder.ts`): `htmlURL`
-/// `https://github.com/<owner>/<name>`, `cloneURL` the same with `.git`,
-/// `isPrivate` `null` (Corvene: `false`), no parent.
-fn github_repo_fixture(owner: &str, name: &str) -> GitHubRepository {
-    let html_url = format!("https://github.com/{owner}/{name}");
-    GitHubRepository {
-        endpoint: "https://api.github.com".to_string(),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: false,
-        fork: false,
-        parent: None,
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
-}
-
 /// `createSamplePullRequest(gitHubRepository)`: `new PullRequest(new Date(),
 /// 'something', 1, head, base, 'shiftkey', false, 'something body')`. The
 /// creation date (`new Date()`) is not read by the case.
@@ -126,7 +107,11 @@ fn create_sample_pull_request(github_repository: &GitHubRepository) -> PullReque
 #[test]
 fn can_update_branches_state_for_a_repository() {
     let mut repository = repository();
-    let github_repository = github_repo_fixture("desktop", "desktop");
+    let github_repository = git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        name: "desktop",
+        owner: "desktop",
+        ..Default::default()
+    });
     let first_pull_request = create_sample_pull_request(&github_repository);
     // Corvene keys pull requests by GitHub repository (see the module docs)
     repository.github = Some(github_repository.clone());

@@ -33,19 +33,9 @@ use std::path::Path;
 use corvene_git::{checkout_branch, create_branch, delete_local_branch, delete_remote_branch};
 use corvene_models::{Branch, Tip};
 use corvene_test_support::{
-    exec, exec_ok, git, setup_empty_repository, setup_fixture_repository,
+    exec, exec_ok, get_branches, git, load_tip, setup_empty_repository, setup_fixture_repository,
     setup_local_fork_of_repository,
 };
-
-use crate::refs_support::get_branches;
-
-/// GitHub Desktop's `store.tip` after `new GitStore(repository, ...)` and
-/// `loadStatus()`.
-fn load_tip(repository: &Path) -> Tip {
-    corvene_git::open_repository(repository)
-        .unwrap_or_else(|err| panic!("open {}: {err}", repository.display()))
-        .tip
-}
 
 /// Stand-in for GitHub Desktop's `Branch.upstreamWithoutRemote`
 /// (`models/branch.ts`: `removeRemotePrefix(upstream)`). Replace it with

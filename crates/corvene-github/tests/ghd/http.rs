@@ -7,19 +7,9 @@
 //! `corvene_github::Endpoint::api(path)`; the endpoint is
 //! `Endpoint::github_com()` for `getDotComAPIEndpoint()` and
 //! `Endpoint::from_api_base(endpoint)` for an enterprise endpoint string.
-//! [`get_absolute_url`] is that call.
+//! `crate::api_support::get_absolute_url` is that call.
 
-use corvene_github::Endpoint;
-
-/// GitHub Desktop's `getDotComAPIEndpoint()`.
-fn get_dot_com_api_endpoint() -> String {
-    Endpoint::github_com().api_base
-}
-
-/// GitHub Desktop's `getAbsoluteUrl(endpoint, path)`.
-fn get_absolute_url(endpoint: &str, path: &str) -> String {
-    Endpoint::from_api_base(endpoint).api(path)
-}
+use crate::api_support::{get_absolute_url, get_dot_com_api_endpoint};
 
 mod dotcom_endpoint {
     use super::*;

@@ -126,6 +126,7 @@ fn tutorial_step_instructions(
 /// What a suggested action of `TutorialDone` does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)] // built by the real TutorialDone content
+#[allow(clippy::large_enum_variant)] // a few values per test, compared whole
 enum TutorialDoneAction {
     /// `dispatcher.showGitHubExplore(repository)` (the repository's id).
     ShowGitHubExplore(u64),

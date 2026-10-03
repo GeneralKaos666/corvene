@@ -22,23 +22,16 @@
 use corvene_git::GitError;
 use corvene_models::{Branch, BranchKind, Tip};
 use corvene_test_support::{
-    TestRepo, exec, get_status_or_throw, git, setup_empty_repository, setup_fixture_repository,
+    TestRepo, exec, get_branches, get_status_or_throw, git, git_error_message, load_tip,
+    setup_empty_repository, setup_fixture_repository,
     setup_repository_with_uninitialized_submodule,
 };
 
-use crate::index_support::{get_branches, git_error_message, regex_test};
+use crate::index_support::regex_test;
 
 /// `checkoutBranch(repository, branch, null)`.
 fn checkout_branch(repository: &TestRepo, branch: &Branch) -> Result<(), GitError> {
     corvene_git::checkout_branch(git(), repository.path(), branch)
-}
-
-/// `const store = new GitStore(repository, …); await store.loadStatus();
-/// store.tip`.
-fn load_tip(repository: &TestRepo) -> Tip {
-    corvene_git::open_repository(repository.path())
-        .expect("loadStatus")
-        .tip
 }
 
 // GHD: unit/git/checkout-test.ts › git/checkout › throws when invalid characters are used for branch name

@@ -37,9 +37,10 @@ use std::sync::Arc;
 
 use corvene_core::state::RepositoryState;
 use corvene_core::{
-    Diff, DiffSelection, DiffSelectionType, FileStatus, FileStatusKind, GitStatusEntry,
+    Diff, DiffSelection, DiffSelectionType, FileStatusKind, GitStatusEntry,
     WorkingDirectoryFileChange, WorkingDirectoryStatus,
 };
+use corvene_test_support::{from_files, working_directory_file_change};
 
 /// Stand-in for GitHub Desktop's `updateChangedFiles(state, status,
 /// clearPartialState)`: the changes state after merging `status` into
@@ -55,7 +56,8 @@ fn update_changed_files(
     )
 }
 
-/// `new WorkingDirectoryFileChange(path, { kind: Modified | New }, selection)`.
+/// `new WorkingDirectoryFileChange(path, { kind: Modified | New }, selection)`,
+/// with the porcelain columns git reports for that kind (`A.` / `.M`).
 fn file_change(
     path: &str,
     kind: FileStatusKind,
@@ -65,21 +67,11 @@ fn file_change(
         FileStatusKind::New => (GitStatusEntry::Added, GitStatusEntry::Unchanged, "A."),
         _ => (GitStatusEntry::Unchanged, GitStatusEntry::Modified, ".M"),
     };
-    WorkingDirectoryFileChange {
-        path: path.to_string(),
-        old_path: None,
-        status: FileStatus {
-            kind,
-            index,
-            working_tree,
-            score: None,
-            code: code.to_string(),
-            submodule: false,
-            submodule_status: None,
-            conflict_markers: None,
-        },
-        selection,
-    }
+    let mut file = working_directory_file_change(path, kind, selection);
+    file.status.index = index;
+    file.status.working_tree = working_tree;
+    file.status.code = code.to_string();
+    file
 }
 
 /// `allSelected`.
@@ -103,14 +95,6 @@ fn files() -> Vec<WorkingDirectoryFileChange> {
             none_selected(),
         ),
     ]
-}
-
-/// `WorkingDirectoryStatus.fromFiles(files)`.
-fn from_files(files: Vec<WorkingDirectoryFileChange>) -> WorkingDirectoryStatus {
-    WorkingDirectoryStatus {
-        files,
-        ..Default::default()
-    }
 }
 
 /// `selection: { kind: WorkingDirectory, selectedFileIDs, diff }`.

@@ -11,7 +11,7 @@
 //! stand-in ([`endpoint_satisfies`]) and are ignored as that deviation.
 //! `getDotComAPIEndpoint()` is `Endpoint::github_com().api_base`.
 
-use corvene_github::Endpoint;
+use crate::api_support::get_dot_com_api_endpoint;
 
 /// GitHub Desktop's `VersionConstraint`: `es` is `boolean | string` (a
 /// semver range such as `>= 3.1.0`). Only the stand-in reads it, and it
@@ -56,11 +56,6 @@ fn endpoint_satisfies(
         let _ = (&constraint, &get_version);
         unimplemented!("Corvene has no endpointSatisfies (GHES version gating)")
     }
-}
-
-/// GitHub Desktop's `getDotComAPIEndpoint()`.
-fn get_dot_com_api_endpoint() -> String {
-    Endpoint::github_com().api_base
 }
 
 fn test_dot_com(constraint: bool, endpoint_version: Option<&str>) -> bool {

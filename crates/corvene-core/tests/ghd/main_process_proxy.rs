@@ -27,21 +27,24 @@ struct FileInformation {
     is_directory: bool,
 }
 
+/// A dependency that takes a path and may fail with a message.
+type PathDependency<T> = Box<dyn Fn(&Path) -> Result<T, String>>;
+
 /// GitHub Desktop's `IShowFolderContentsDependencies`.
 #[allow(dead_code)] // read by the real `showFolderContents`
 struct ShowFolderContentsDependencies {
     /// Whether the current platform is macOS.
     is_darwin: bool,
     /// Reads file information for the target path.
-    stat: Box<dyn Fn(&Path) -> Result<FileInformation, String>>,
+    stat: PathDependency<FileInformation>,
     /// Determines whether a path is a macOS application bundle.
-    is_application_bundle: Box<dyn Fn(&Path) -> Result<bool, String>>,
+    is_application_bundle: PathDependency<bool>,
     /// Requests confirmation before revealing a potentially executable path.
     confirm_reveal: Box<dyn Fn() -> Result<bool, String>>,
     /// Opens a directory directly in the platform file manager.
     open_directory: Box<dyn Fn(&Path)>,
     /// Reveals and selects a path in the platform file manager.
-    reveal_item: Box<dyn Fn(&Path) -> Result<(), String>>,
+    reveal_item: PathDependency<()>,
 }
 
 /// Stand-in for GitHub Desktop's `showFolderContents(path, dependencies)`

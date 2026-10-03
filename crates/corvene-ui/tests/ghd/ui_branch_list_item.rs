@@ -23,13 +23,14 @@
 //!
 //! The two drop cases are skipped in `tools/ghd-tests/skips/ui1.tsv`.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
+use corvene_test_support::date_parse;
 use corvene_ui::relative_time::relative;
 
 /// `Date.parse('2026-03-26T12:00:00.000Z')`
 fn now() -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(1_774_526_400)
+    date_parse("2026-03-26T12:00:00.000Z")
 }
 
 /// What GitHub Desktop's `BranchListItem` shows: the name and the author

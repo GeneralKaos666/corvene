@@ -21,10 +21,16 @@
 //!   using any helper first. The helpers call it themselves.
 //! - Never call `std::env::set_var` / `remove_var` in a test: tests run on
 //!   parallel threads. Pass per-invocation variables with
-//!   [`exec_with`] / [`ExecOptions::env`] or [`git_command`]`.env(..)`.
+//!   [`exec_with`] / [`ExecOptions::env`] or [`git_command`]`.env(..)`, and
+//!   GitHub Desktop's `process.env` around a call with
+//!   `corvene_git::process::with_env` (every git command of the test's
+//!   thread until it returns).
 //! - The global git configuration (`$HOME/.gitconfig`) is shared by every
 //!   test of the binary. A test that writes it, or depends on it being
 //!   empty, holds [`lock_global_config`] for its whole body.
+//! - No proxy: the proxy variables are cleared and `NO_PROXY` covers
+//!   `127.0.0.1`, `localhost` and `::1`, where the [`http`] stub servers
+//!   listen.
 //!
 //! # Map of GitHub Desktop's helpers
 //!
@@ -49,16 +55,44 @@
 //! | `helpers/repository-builder-pull-test.ts` | [`repository_builder_pull::create_repository`] |
 //! | `helpers/repository-builder-long-rebase-test.ts` | [`repository_builder_long_rebase::create_repository`] |
 //! | `helpers/repository-builder-branch-pruner.ts` | [`repository_builder_branch_pruner::create_repository`] |
+//! | `helpers/github-repo-builder.ts` | [`git_hub_repo_fixture`] with [`GitHubRepoFixtureOptions`], [`DOT_COM_API_ENDPOINT`] |
+//!
+//! # Shared beyond `app/test/helpers`
+//!
+//! Functions of GitHub Desktop's app and of Node that many test files call
+//! for setup or checks, ported once here instead of in each test module:
+//!
+//! | GitHub Desktop | here |
+//! | --- | --- |
+//! | `lib/git/for-each-ref.ts` `getBranches` | [`get_branches`] |
+//! | `lib/git/commit.ts` `createCommit` | [`create_commit`], [`try_create_commit`] |
+//! | `lib/git/log.ts` `getCommits`, `getCommit` | [`get_commits`], [`get_commit`] |
+//! | `lib/git/core.ts` `GitError.message` | [`git_error_message`] |
+//! | `lib/git/diff.ts` `getWorkingDirectoryDiff` | [`get_working_directory_diff`] |
+//! | `GitStore.tip` after `loadStatus()` | [`load_tip`] |
+//! | `unit/git/push-test.ts` `createBareUpstream` | [`create_bare_upstream`] |
+//! | `new Repository(path, id, gitHubRepository, false)` | [`new_repository`] |
+//! | `new WorkingDirectoryFileChange(path, { kind }, selection)` | [`working_directory_file_change`] |
+//! | `WorkingDirectoryStatus.fromFiles` | [`from_files`] |
+//! | `files.filter(f => f.status.kind === Conflicted).length` | [`conflicted_count`] |
+//! | `DiffLine.text`, `DiffHunk.unifiedDiffEnd` | [`ghd_text`], [`unified_diff_end`] |
+//! | Node `fs.writeFile`, `fs.appendFile` | [`write_file`], [`append_file`] |
+//! | Node `Buffer.toString('base64')` | [`base64`] |
+//! | `Date.parse`, `Date.prototype.toISOString` | [`date_parse`], [`to_iso_string`] |
+//! | a `Response` / stubbed `fetch` for API code | [`http`]: [`serve`], [`serve_with`], [`unreachable_endpoint`] |
+//! | dugite's bundled Git LFS | [`has_git_lfs`] |
 //!
 //! # Not ported here
 //!
 //! These helpers drive GitHub Desktop's stores, API, Electron or React
-//! layers. The lane that ports the tests needing them ports them next to
-//! those tests (in the crate that has the equivalent code):
+//! layers, whose Corvene equivalents live in crates this one cannot depend
+//! on (`corvene-core` would pull GPUI into every test binary). They are
+//! ported next to the tests that need them (in the crate that has the
+//! equivalent code; `tests/ghd/*_support.rs` when several modules share
+//! them):
 //!
 //! - `helpers/repository-builder-branch-pruner.ts` `setupRepository` /
 //!   `primeCaches` (`RepositoriesStore`, `RepositoryStateCache`, `GitStore`),
-//! - `helpers/github-repo-builder.ts` (`GitHubRepository` models),
 //! - `helpers/mock-api.ts`, `helpers/app-store-test-harness.ts`,
 //!   `helpers/in-memory-dispatcher.ts`, `helpers/changes-state-helper.ts`,
 //! - `helpers/stores/*` (in-memory stores), `helpers/databases/*` (Dexie
@@ -71,7 +105,12 @@ pub mod env;
 pub mod exec;
 pub mod fixture;
 pub mod git_helpers;
+pub mod github_repo_builder;
+pub mod http;
+pub mod lib_git;
 pub mod local_config;
+pub mod models;
+pub mod node;
 pub mod random_data;
 pub mod repositories;
 pub mod repository_builder_branch_pruner;
@@ -87,10 +126,23 @@ pub use env::{
     AUTHOR_EMAIL, AUTHOR_NAME, GlobalConfigGuard, home_dir, init, isolated_before_main,
     lock_global_config,
 };
-pub use exec::{ExecOptions, ExecResult, exec, exec_ok, exec_with, git, git_command};
+pub use exec::{ExecOptions, ExecResult, exec, exec_ok, exec_with, git, git_command, has_git_lfs};
 pub use fixture::{fixtures_dir, get_fixture_path};
 pub use git_helpers::{get_branch_or_error, get_ref_or_error, get_tip_or_error};
+pub use github_repo_builder::{
+    DOT_COM_API_ENDPOINT, GitHubRepoFixtureOptions, git_hub_repo_fixture, new_repository,
+};
+pub use http::{StubRequest, StubResponse, StubServer, serve, serve_with, unreachable_endpoint};
+pub use lib_git::{
+    create_bare_upstream, create_commit, get_branches, get_commit, get_commits,
+    get_working_directory_diff, git_error_message, load_tip, try_create_commit,
+};
 pub use local_config::setup_local_config;
+pub use models::{
+    FileChanges, conflicted_count, from_files, ghd_text, unified_diff_end,
+    working_directory_file_change,
+};
+pub use node::{append_file, base64, date_parse, to_iso_string, write_file};
 pub use random_data::{DEFAULT_STRING_LENGTH, generate_string};
 pub use repositories::{
     DEFAULT_GIT_DESCRIPTION, TestRepo, setup_conflicted_repo,

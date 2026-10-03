@@ -1,4 +1,5 @@
-//! Helpers shared by lane `mco`'s squash and reorder ports.
+//! Helpers shared by `corvene-git`'s ports of GitHub Desktop's squash and
+//! reorder tests (`unit/git/squash-test.ts`, `unit/git/reorder-test.ts`).
 
 use std::path::PathBuf;
 

@@ -1,6 +1,6 @@
-//! Shared by the `lists` lane's `corvene-ui` modules: GitHub Desktop's
-//! `RowIndexPath` (`ui/lib/list/list-row-index-path.ts`), the address of a
-//! row in a list of sections.
+//! Shared by `corvene-ui`'s ports of GitHub Desktop's list tests: GitHub
+//! Desktop's `RowIndexPath` (`ui/lib/list/list-row-index-path.ts`), the
+//! address of a row in a list of sections.
 
 /// GitHub Desktop's `RowIndexPath`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

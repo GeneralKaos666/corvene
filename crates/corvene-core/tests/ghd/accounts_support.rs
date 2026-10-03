@@ -1,4 +1,6 @@
-//! Helpers shared by the `accounts` lane's `corvene-core` modules.
+//! Helpers shared by `corvene-core`'s ports of GitHub Desktop's account
+//! tests (`unit/accounts-store-test.ts`, `unit/find-account-test.ts`,
+//! `unit/stores/sign-in-store-test.ts`).
 //!
 //! GitHub Desktop's `AccountsStore` (`lib/stores/accounts-store.ts`) keeps
 //! the accounts in an `IDataStore` (`localStorage`, item `users`) and their
@@ -23,8 +25,8 @@
 use std::sync::Arc;
 
 use corvene_core::Account;
-use corvene_core::flags::{EnvFlags, FlagOverrides, Flags, Preset};
 use corvene_core::persistence::StoreExt;
+use corvene_github::Endpoint;
 use corvene_store::Store;
 use tempfile::TempDir;
 
@@ -118,13 +120,16 @@ pub fn new_account(
     }
 }
 
-/// The flags of the `github-desktop` preset (what the parity harness runs
-/// with), for passing a flag's GitHub Desktop value to a function that takes
-/// it as a parameter.
-pub fn ghd_flags() -> Flags {
-    let overrides = FlagOverrides {
-        preset: Preset::GitHubDesktop,
-        ..Default::default()
-    };
-    Flags::resolve(&overrides, &EnvFlags::default())
+/// GitHub Desktop's `getDotComAPIEndpoint()` (`lib/api.ts`):
+/// `Endpoint::github_com().api_base`.
+pub fn get_dot_com_api_endpoint() -> String {
+    Endpoint::github_com().api_base
+}
+
+/// GitHub Desktop's `getEnterpriseAPIURL(endpoint)` (`lib/api.ts`):
+/// `Endpoint::enterprise(endpoint, false).api_base`.
+pub fn get_enterprise_api_url(endpoint: &str) -> String {
+    Endpoint::enterprise(endpoint, false)
+        .expect("a valid Enterprise address")
+        .api_base
 }

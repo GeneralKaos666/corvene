@@ -45,12 +45,12 @@
 //! The status the cases read is `get_status_or_throw`, GitHub Desktop's
 //! `getStatusOrThrow`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use corvene_core::{Branch, BranchKind, Commit, FileStatusKind, Tip, WorkingDirectoryFileChange};
 use corvene_test_support::{
-    TestRepo, Tree, TreeEntry, clone_local_repository, exec, get_status_or_throw, git, make_commit,
-    setup_empty_repository, setup_fixture_repository, switch_to,
+    TestRepo, Tree, TreeEntry, clone_local_repository, exec, get_commit, get_status_or_throw, git,
+    make_commit, setup_empty_repository, setup_fixture_repository, switch_to, write_file,
 };
 use corvene_ui::branch_list::group_branches;
 
@@ -146,19 +146,6 @@ impl GitStore {
             .flat_map(|group| group.branches)
             .collect();
     }
-}
-
-/// GitHub Desktop's `getCommit(repository, ref)`.
-fn get_commit(repository: &TestRepo, reference: &str) -> Option<Commit> {
-    corvene_git::get_commits(repository.path(), reference, 0, 1)
-        .unwrap_or_else(|err| panic!("read {reference}: {err}"))
-        .into_iter()
-        .next()
-}
-
-/// `writeFile(path, contents)`.
-fn write_file(path: &Path, contents: &str) {
-    std::fs::write(path, contents).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
 }
 
 // GHD: unit/git-store-test.ts › GitStore › loadCommitBatch › includes HEAD when loading commits

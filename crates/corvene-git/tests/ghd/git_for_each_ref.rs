@@ -16,10 +16,8 @@ use std::path::Path;
 
 use corvene_models::BranchKind;
 use corvene_test_support::{
-    setup_empty_directory, setup_empty_repository, setup_fixture_repository,
+    get_branches, setup_empty_directory, setup_empty_repository, setup_fixture_repository,
 };
-
-use crate::refs_support::get_branches;
 
 /// GitHub Desktop's `ITrackingBranch` (`models/branch.ts`).
 #[allow(dead_code)]

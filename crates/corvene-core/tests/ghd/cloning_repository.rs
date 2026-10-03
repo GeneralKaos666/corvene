@@ -18,21 +18,9 @@
 //! an equality key; `CloneState` is compared with `PartialEq` and has no
 //! such string, so that case is skipped (`tools/ghd-tests/skips/stores.tsv`).
 
-use std::path::PathBuf;
-
 use corvene_core::CloneState;
 
-/// `new CloningRepository(path, url)`: a clone that has not reported any
-/// progress yet.
-fn cloning_repository(path: &str, url: &str) -> CloneState {
-    CloneState {
-        url: url.to_string(),
-        path: PathBuf::from(path),
-        description: String::new(),
-        value: None,
-        cancel: corvene_git::CancelToken::new(),
-    }
-}
+use crate::cloning_support::cloning_repository;
 
 /// Stand-in for GitHub Desktop's `CloningRepository.name`, the repository
 /// name the cloning view shows (`Path.basename(url, '.git')`). `CloneState`

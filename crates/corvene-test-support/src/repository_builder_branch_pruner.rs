@@ -1,8 +1,8 @@
 //! Port of `createRepository` from
 //! `app/test/helpers/repository-builder-branch-pruner.ts`. Its
 //! `setupRepository` (and the private `primeCaches`) fill GitHub Desktop's
-//! `RepositoriesStore` / `RepositoryStateCache` and belong to the
-//! store-level lane that ports the branch pruner tests.
+//! `RepositoriesStore` / `RepositoryStateCache` and belong next to the
+//! branch pruner tests (`corvene-core`'s `tests/ghd/branch_pruner.rs`).
 
 use crate::exec::exec;
 use crate::repositories::{TestRepo, setup_empty_repository};

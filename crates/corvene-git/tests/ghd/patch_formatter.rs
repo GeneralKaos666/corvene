@@ -17,58 +17,36 @@
 //! - `new WorkingDirectoryFileChange(path, { kind }, selection)` is a
 //!   `WorkingDirectoryFileChange` of that kind ([`file_change`]); GitHub
 //!   Desktop's status carries nothing but the kind, so the other fields are
-//!   those of an unstaged change (index unchanged), which is what
-//!   `modified-file.md` is in `repo-with-changes`.
+//!   those of an unstaged change (index unchanged, working tree modified),
+//!   which is what `modified-file.md` is in `repo-with-changes`.
 //! - `DiffSelection.fromInitialSelection(All | None)` is
 //!   `DiffSelection::all()` / `none()`, `withRangeSelection` `with_range`,
 //!   `withLineSelection` `with_line`.
-//! - `hunk.unifiedDiffEnd` is [`unified_diff_end`]: Corvene's `DiffHunk`
-//!   has no such field.
+//! - `hunk.unifiedDiffEnd` is `corvene_test_support::unified_diff_end`:
+//!   Corvene's `DiffHunk` has no such field.
 //! - GitHub Desktop's `DiffLine.text` keeps the `+` / `-` / ` ` prefix;
 //!   Corvene's drops it and `DiffLine::kind` says which it was.
 
-use corvene_git::{format_patch, parse_unified, working_directory_diff};
+use corvene_git::{format_patch, parse_unified};
 use corvene_models::{
-    Diff, DiffHunk, DiffLineKind, DiffSelection, FileStatus, FileStatusKind, GitStatusEntry,
+    Diff, DiffHunk, DiffLineKind, DiffSelection, FileStatusKind, GitStatusEntry,
     WorkingDirectoryFileChange,
 };
-use corvene_test_support::{TestRepo, git, setup_fixture_repository};
+use corvene_test_support::{
+    get_working_directory_diff, setup_fixture_repository, unified_diff_end,
+    working_directory_file_change,
+};
 
-/// `new WorkingDirectoryFileChange(path, { kind }, selection)`.
+/// `new WorkingDirectoryFileChange(path, { kind }, selection)` for an
+/// unstaged change (see the module doc).
 fn file_change(
     path: &str,
     kind: FileStatusKind,
     selection: DiffSelection,
 ) -> WorkingDirectoryFileChange {
-    WorkingDirectoryFileChange {
-        path: path.to_string(),
-        old_path: None,
-        status: FileStatus {
-            kind,
-            index: GitStatusEntry::Unchanged,
-            working_tree: GitStatusEntry::Modified,
-            score: None,
-            code: String::new(),
-            submodule: false,
-            submodule_status: None,
-            conflict_markers: None,
-        },
-        selection,
-    }
-}
-
-/// GitHub Desktop's `DiffHunk.unifiedDiffEnd`: the index of the hunk's last
-/// line in the unified diff (`linesConsumed + lines.length - 1` in
-/// `DiffParser.parseHunk`; `lines` starts with the header line, as
-/// Corvene's do).
-fn unified_diff_end(hunk: &DiffHunk) -> u32 {
-    hunk.unified_diff_start + hunk.lines.len() as u32 - 1
-}
-
-/// `getWorkingDirectoryDiff(repository, file)`.
-fn get_working_directory_diff(repository: &TestRepo, file: &WorkingDirectoryFileChange) -> Diff {
-    working_directory_diff(git(), repository.path(), file, false, false, false)
-        .expect("getWorkingDirectoryDiff")
+    let mut file = working_directory_file_change(path, kind, selection);
+    file.status.working_tree = GitStatusEntry::Modified;
+    file
 }
 
 /// The hunks of a diff after `assert.equal(diff.kind, DiffType.Text)`.

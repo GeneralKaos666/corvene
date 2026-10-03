@@ -12,6 +12,7 @@
 use std::path::Path;
 
 use corvene_packs::sha256_file;
+use corvene_test_support::write_file;
 
 /// Stand-in for GitHub Desktop's `getFileHash(path, 'sha1')`
 /// (`lib/get-file-hash.ts`). Replace it with the Corvene function once
@@ -27,10 +28,6 @@ fn mkdtemp() -> tempfile::TempDir {
         .prefix("hash-test-")
         .tempdir()
         .expect("create a temporary directory")
-}
-
-fn write_file(path: &Path, contents: &str) {
-    std::fs::write(path, contents).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
 }
 
 // GHD: unit/get-file-hash-test.ts › get-file-hash › returns consistent sha256 hash for known content

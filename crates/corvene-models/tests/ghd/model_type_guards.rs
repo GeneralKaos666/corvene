@@ -24,6 +24,7 @@
 //!   `Repository::is_fork_contributing_to_parent()`.
 
 use corvene_models::{GitHubRepository, Repository};
+use corvene_test_support::new_repository;
 
 /// GitHub Desktop's `isRepositoryWithGitHubRepository(repository)`: the
 /// `github` field is set.
@@ -45,14 +46,6 @@ fn get_github_html_url(repository: &Repository) -> Option<String> {
     repository
         .non_fork_github()
         .map(|github| github.html_url.clone())
-}
-
-/// `new Repository(path, id, gitHubRepository, false)`
-fn repository(path: &str, id: u64, github: Option<GitHubRepository>) -> Repository {
-    let mut repository = Repository::new(id, path);
-    repository.github = github;
-    repository.missing = false;
-    repository
 }
 
 /// `new GitHubRepository(name, new Owner(login, endpoint, _), _, false,
@@ -82,7 +75,7 @@ fn github_repository(
 }
 
 fn create_plain_repository() -> Repository {
-    repository("/path/to/repo", 1, None)
+    new_repository("/path/to/repo", 1, None)
 }
 
 fn create_github_repository() -> Repository {
@@ -94,7 +87,7 @@ fn create_github_repository() -> Repository {
         "https://github.com/owner/repo.git",
         None,
     );
-    repository("/path/to/repo", 1, Some(gh_repo))
+    new_repository("/path/to/repo", 1, Some(gh_repo))
 }
 
 fn create_forked_github_repository() -> Repository {
@@ -114,7 +107,7 @@ fn create_forked_github_repository() -> Repository {
         "https://github.com/fork-owner/repo.git",
         Some(parent_gh_repo),
     );
-    repository("/path/to/fork", 2, Some(forked_gh_repo))
+    new_repository("/path/to/fork", 2, Some(forked_gh_repo))
 }
 
 // GHD: unit/model-type-guards-test.ts › Repository type guards › isRepositoryWithGitHubRepository › returns false for a plain local repository

@@ -26,11 +26,9 @@
 //!   finds the entry inline. [`get_last_desktop_stash_entry_for_branch`] is
 //!   a stand-in.
 
-use std::io::Write;
-
 use corvene_models::{FileStatusKind, StashEntry};
 use corvene_test_support::{
-    DEFAULT_STRING_LENGTH, TestRepo, exec, generate_string, get_status_or_throw, git,
+    DEFAULT_STRING_LENGTH, TestRepo, append_file, exec, generate_string, get_status_or_throw, git,
     setup_empty_repository,
 };
 
@@ -72,15 +70,6 @@ fn setup() -> TestRepo {
     repository
 }
 
-fn append_file(path: &std::path::Path, contents: &str) {
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(path)
-        .unwrap_or_else(|e| panic!("append {}: {e}", path.display()));
-    file.write_all(contents.as_bytes()).unwrap();
-}
-
 /// The test file's `stash(repository, branchName, message)`: `git stash
 /// push -m <message>`, a Desktop message when `message` is `None`.
 fn stash(repository: &TestRepo, branch_name: &str, message: Option<&str>) {
@@ -104,8 +93,8 @@ fn generate_test_stash_entry(
         Some("Should get filtered")
     };
     append_file(
-        &repository.join("README.md"),
-        &generate_string(DEFAULT_STRING_LENGTH),
+        repository.join("README.md"),
+        generate_string(DEFAULT_STRING_LENGTH),
     );
     stash(repository, branch_name, message);
 }
@@ -151,7 +140,7 @@ fn returns_all_stash_entries_created_by_desktop() {
 #[test]
 fn creates_a_stash_entry_when_repo_is_not_unborn_or_in_any_kind_of_conflict_or_rebase_state() {
     let repository = setup();
-    append_file(&repository.join("README.md"), "just testing stuff");
+    append_file(repository.join("README.md"), "just testing stuff");
 
     corvene_git::create_desktop_stash(git(), repository.path(), "master")
         .expect("createDesktopStashEntry");
@@ -333,7 +322,7 @@ fn restores_changes_and_drops_stash() {
     assert_eq!(desktop_entries.len(), 1);
 
     let readme = repository.join("README.md");
-    append_file(&readme, &generate_string(DEFAULT_STRING_LENGTH));
+    append_file(&readme, generate_string(DEFAULT_STRING_LENGTH));
     exec(["commit", "-am", "later commit"], repository.path());
 
     let status = get_status_or_throw(&repository);

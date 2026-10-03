@@ -16,7 +16,7 @@
 use std::any::Any;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use corvene_core::parse_iso8601;
+use corvene_test_support::{date_parse, to_iso_string};
 
 /// GitHub Desktop's `Unit` (`keyof typeof units`).
 #[allow(dead_code)] // GitHub Desktop's whole list; the cases use a few
@@ -66,32 +66,7 @@ fn date_now() -> i64 {
 
 /// JavaScript's `new Date(isoString)`.
 fn new_date(iso: &str) -> SystemTime {
-    parse_iso8601(iso).unwrap()
-}
-
-/// JavaScript's `date.toISOString()` (UTC, milliseconds, `Z`), for times
-/// after the epoch.
-fn to_iso_string(date: SystemTime) -> String {
-    let since = date.duration_since(UNIX_EPOCH).unwrap();
-    let millis = since.subsec_millis();
-    let secs = i64::try_from(since.as_secs()).unwrap();
-    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
-    // civil-from-days (Howard Hinnant)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
+    date_parse(iso)
 }
 
 // GHD: unit/offset-from-test.ts › offset-from › offsetFrom with number input › offsets by seconds

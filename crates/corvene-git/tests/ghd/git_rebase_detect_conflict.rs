@@ -14,27 +14,16 @@
 use std::collections::BTreeMap;
 
 use corvene_git::RebaseResult;
-use corvene_models::{FileStatusKind, RebaseInternalState, WorkingDirectoryStatus};
+use corvene_models::{RebaseInternalState, WorkingDirectoryStatus};
 use corvene_test_support::{
-    exec, get_branch_or_error, get_status_or_throw, git, repository_builder_rebase,
+    conflicted_count, exec, get_branch_or_error, get_status_or_throw, git,
+    repository_builder_rebase, write_file,
 };
 
 use crate::rebase_support::{abort_rebase, continue_rebase, rebase};
 
 const BASE_BRANCH_NAME: &str = "base-branch";
 const FEATURE_BRANCH_NAME: &str = "this-is-a-feature";
-
-fn write_file(path: std::path::PathBuf, contents: &str) {
-    std::fs::write(&path, contents).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
-}
-
-fn conflicted_count(status: &WorkingDirectoryStatus) -> usize {
-    status
-        .files
-        .iter()
-        .filter(|f| f.status.kind == FileStatusKind::Conflicted)
-        .count()
-}
 
 // ---------------------------------------------------------------------------
 // detect conflicts

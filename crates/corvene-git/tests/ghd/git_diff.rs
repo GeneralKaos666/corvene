@@ -52,27 +52,17 @@ use std::path::{Path, PathBuf};
 
 use corvene_git::{
     GitError, KnownGitError, blob_bytes, known_git_error, merge_base_changed_files,
-    merge_base_file_diff, working_directory_diff,
+    merge_base_file_diff,
 };
 use corvene_models::{
-    CommittedFileChange, Diff, DiffHunk, DiffLine, DiffLineKind, DiffSelection, DiffWarnings,
-    FileStatus, FileStatusKind, GitStatusEntry, ImageBlob, SubmoduleDiff,
-    WorkingDirectoryFileChange, image_media_type,
+    CommittedFileChange, Diff, DiffHunk, DiffSelection, DiffWarnings, FileStatus, FileStatusKind,
+    GitStatusEntry, ImageBlob, SubmoduleDiff, WorkingDirectoryFileChange, image_media_type,
 };
 use corvene_test_support::{
-    TestRepo, Tree, TreeEntry, exec, exec_ok, get_status_or_throw, git, make_commit,
-    setup_empty_repository, setup_fixture_repository, switch_to,
+    TestRepo, Tree, TreeEntry, append_file, base64, exec, exec_ok, get_status_or_throw,
+    get_working_directory_diff, ghd_text, git, make_commit, setup_empty_repository,
+    setup_fixture_repository, switch_to,
 };
-
-/// GitHub Desktop's `DiffLine.text` of a Corvene line.
-fn ghd_text(line: &DiffLine) -> String {
-    match line.kind {
-        DiffLineKind::Hunk => line.text.clone(),
-        DiffLineKind::Add => format!("+{}", line.text),
-        DiffLineKind::Delete => format!("-{}", line.text),
-        DiffLineKind::Context => format!(" {}", line.text),
-    }
-}
 
 /// GitHub Desktop's `ITextDiff.text` of these hunks.
 fn diff_text(hunks: &[DiffHunk]) -> String {
@@ -101,12 +91,6 @@ fn git_expecting(args: &[&str], path: &Path, expected_errors: &[KnownGitError]) 
             result.stderr
         ),
     }
-}
-
-/// GitHub Desktop's `getWorkingDirectoryDiff(repository, file)`.
-fn get_working_directory_diff(repo: &TestRepo, file: &WorkingDirectoryFileChange) -> Diff {
-    working_directory_diff(git(), repo.path(), file, false, false, false)
-        .unwrap_or_else(|err| panic!("getWorkingDirectoryDiff({}): {err}", file.path))
 }
 
 /// GitHub Desktop's `ITextDiff` as these tests read it.
@@ -188,25 +172,6 @@ fn get_blob_image(repo: &TestRepo, path: &str, commitish: &str) -> ImageBlob {
         bytes,
         media_type: image_media_type(path).unwrap_or_default().to_string(),
     }
-}
-
-/// GitHub Desktop's `Image.contents`: `Buffer.toString('base64')`.
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = (u32::from(chunk[0]) << 16)
-            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
-            | u32::from(*chunk.get(2).unwrap_or(&0));
-        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
-            if i <= chunk.len() {
-                out.push(ALPHABET[((n >> shift) & 63) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
 }
 
 /// GitHub Desktop's `IStatusEntry` (`lib/status-parser.ts`), as
@@ -882,18 +847,6 @@ fn loads_the_diff_of_a_file_between_two_branches_if_merged() {
 
     assert!(!diff_text(&hunks).contains("bar"));
     assert!(diff_text(&hunks).contains("feature"));
-}
-
-/// `fs.appendFile(path, data)`.
-fn append_file(path: &Path, data: &str) {
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(path)
-        .unwrap_or_else(|err| panic!("open {}: {err}", path.display()));
-    file.write_all(data.as_bytes())
-        .unwrap_or_else(|err| panic!("append to {}: {err}", path.display()));
 }
 
 /// `new FileChange(path, { kind })`: a file of a commit as Corvene's

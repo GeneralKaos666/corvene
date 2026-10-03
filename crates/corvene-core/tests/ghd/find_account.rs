@@ -28,22 +28,12 @@ use corvene_core::clone_info::{Candidate, resolve_with};
 use corvene_core::flags::ids::{CLONE_PREFERS_SSH, CLONE_SHORTHAND_NOT_FOUND};
 use corvene_github::{Endpoint, RepositoryCloneInfo};
 
-use crate::accounts_support::{ghd_flags, new_account};
+use corvene_core::flags::github_desktop_flags;
+
+use crate::accounts_support::{get_dot_com_api_endpoint, get_enterprise_api_url, new_account};
 
 /// The clone URL prefix that names the candidate whose lookup answered.
 const CANDIDATE: &str = "candidate:";
-
-/// `getDotComAPIEndpoint()`.
-fn get_dot_com_api_endpoint() -> String {
-    Endpoint::github_com().api_base
-}
-
-/// `getEnterpriseAPIURL(endpoint)`.
-fn get_enterprise_api_url(endpoint: &str) -> String {
-    Endpoint::enterprise(endpoint, false)
-        .expect("a valid Enterprise address")
-        .api_base
-}
 
 /// `Account.anonymous()`: `new Account('', getDotComAPIEndpoint(), '', [],
 /// '', -1, '', 'free')`. Corvene's ids are unsigned, so the id is 0.
@@ -81,7 +71,7 @@ fn find_account_for_remote_url(
             }),
         )
     };
-    let flags = ghd_flags();
+    let flags = github_desktop_flags();
     let info = resolve_with(
         url_or_repository_alias,
         &candidates,

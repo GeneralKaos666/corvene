@@ -31,8 +31,9 @@
 //!   `line.new_line` and `line.no_trailing_newline`; `line.originalLineNumber`
 //!   is `XLine::original`.
 
-use corvene_core::{Diff, DiffLine, DiffLineKind};
+use corvene_core::{Diff, DiffLineKind};
 use corvene_git::parse_raw_diff;
+use corvene_test_support::ghd_text;
 use corvene_ui::diff_expansion::{XHunk, from_hunks};
 
 /// GitHub Desktop's `IRawDiff`, as these tests read it.
@@ -54,16 +55,6 @@ fn parse(text: &str) -> RawDiff {
     // `IRawDiff.hunks`: none for Corvene's `Diff::Empty` / `Diff::Binary`
     let hunks = from_hunks(diff.hunks().unwrap_or(&[]), None);
     RawDiff { diff, hunks }
-}
-
-/// GitHub Desktop's `DiffLine.text` of a Corvene line.
-fn ghd_text(line: &DiffLine) -> String {
-    match line.kind {
-        DiffLineKind::Hunk => line.text.clone(),
-        DiffLineKind::Add => format!("+{}", line.text),
-        DiffLineKind::Delete => format!("-{}", line.text),
-        DiffLineKind::Context => format!(" {}", line.text),
-    }
 }
 
 // Atom doesn't like lines with just one space and tries to

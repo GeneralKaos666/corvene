@@ -26,12 +26,10 @@
 //!   is a `corvene_models::Account` with the same fields (the token lives in
 //!   the keychain, not in the model).
 //! - `gitHubRepoFixture` (`helpers/github-repo-builder.ts`) is
-//!   [`github_repo_fixture`].
+//!   `corvene_test_support::git_hub_repo_fixture`.
 
 use corvene_models::{Account, GitHubRepository, Remote, github_from_remote, url_matches_remote};
-
-/// GitHub Desktop's `getDotComAPIEndpoint()`.
-const DOTCOM_API_ENDPOINT: &str = "https://api.github.com";
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
 
 /// `new Account(login, endpoint, '', [], '', 1, '', 'free')`, as every case
 /// builds it.
@@ -65,29 +63,6 @@ fn url_matches_remote_of(url: &str, remote: &Remote) -> bool {
 /// Corvene's `remote_branch_name` asks it.
 fn url_matches_clone_url(url: &str, github_repository: &GitHubRepository) -> bool {
     url_matches_remote(url, &github_repository.clone_url)
-}
-
-/// GitHub Desktop's `gitHubRepoFixture({ owner, name, isPrivate })` on
-/// github.com: `htmlURL` is `https://github.com/<owner>/<name>`, `cloneURL`
-/// the same with `.git`, `isPrivate` `null` (Corvene: `false`) when not
-/// given, no parent (so not a fork), no default branch, archived or
-/// permissions.
-fn github_repo_fixture(owner: &str, name: &str, is_private: Option<bool>) -> GitHubRepository {
-    let html_url = format!("https://github.com/{owner}/{name}");
-    GitHubRepository {
-        endpoint: DOTCOM_API_ENDPOINT.to_string(),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: is_private.unwrap_or(false),
-        fork: false,
-        parent: None,
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
 }
 
 fn remote(url: &str) -> Remote {
@@ -229,7 +204,12 @@ fn with_ssh_remote_matches_html_url_from_api() {
 
 /// The `cloneUrlMatches` describe's `repository`.
 fn clone_url_matches_repository() -> GitHubRepository {
-    github_repo_fixture("shiftkey", "desktop", Some(false))
+    git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        owner: "shiftkey",
+        name: "desktop",
+        is_private: Some(false),
+        ..Default::default()
+    })
 }
 
 // GHD: unit/repository-matching-test.ts › repository-matching › cloneUrlMatches › returns true for exact match

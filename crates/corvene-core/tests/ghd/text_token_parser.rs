@@ -29,7 +29,10 @@ use std::collections::HashMap;
 
 use corvene_core::emoji::{CUSTOM, CustomEmoji};
 use corvene_core::text_tokens::{Token, TokenRepository, tokenize};
-use corvene_models::{GitHubRepository, Repository};
+use corvene_models::Repository;
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
+
+use crate::text_tokens_support::{TokenType, kind, text, url};
 
 /// GitHub Desktop's `Emoji` (`lib/emoji.ts`) without an `emoji` character,
 /// i.e. one of GitHub's image-only emoji. `aliases` is not read by the
@@ -76,63 +79,11 @@ impl Tokenizer {
     }
 }
 
-/// GitHub Desktop's `TokenType`.
-#[derive(Debug, PartialEq, Eq)]
-enum TokenType {
-    Text,
-    Emoji,
-    Link,
-}
-
-/// GitHub Desktop's `token.kind`.
-fn kind(token: &Token) -> TokenType {
-    match token {
-        Token::Text(_) => TokenType::Text,
-        Token::Emoji { .. } => TokenType::Emoji,
-        Token::Link { .. } => TokenType::Link,
-    }
-}
-
-/// GitHub Desktop's `token.text`.
-fn text(token: &Token) -> &str {
-    match token {
-        Token::Text(text) | Token::Emoji { text, .. } | Token::Link { text, .. } => text,
-    }
-}
-
-/// GitHub Desktop's `(token as HyperlinkMatch).url`.
-fn url(token: &Token) -> &str {
-    match token {
-        Token::Link { url, .. } => url,
-        other => panic!("not a HyperlinkMatch: {other:?}"),
-    }
-}
-
 /// Stand-in for GitHub Desktop's `(token as EmojiMatch).path`, the image of
 /// the emoji (`Emoji.url` from the map). `Token::Emoji` has no such field:
 /// Corvene shows an image-only emoji's shortcode instead of its image.
 fn path(_token: &Token) -> &str {
     unimplemented!("text_tokens::Token::Emoji carries no image path (GHD EmojiMatch.path)")
-}
-
-/// GitHub Desktop's `gitHubRepoFixture({ name, owner, isPrivate })`
-/// (`test/helpers/github-repo-builder.ts`): a GitHub.com repository.
-fn git_hub_repo_fixture(name: &str, owner: &str, is_private: bool) -> GitHubRepository {
-    let html_url = format!("https://github.com/{owner}/{name}");
-    GitHubRepository {
-        endpoint: "https://api.github.com".to_string(),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: is_private,
-        fork: false,
-        parent: None,
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
 }
 
 const HOST: &str = "https://github.com";
@@ -148,7 +99,12 @@ fn html_url() -> String {
 /// Repository('some/path/to/repo', 1, gitHubRepository, false)`.
 fn repository() -> Repository {
     let mut repository = Repository::new(1, "some/path/to/repo");
-    repository.github = Some(git_hub_repo_fixture(NAME, LOGIN, false));
+    repository.github = Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        name: NAME,
+        owner: LOGIN,
+        is_private: Some(false),
+        ..Default::default()
+    }));
     repository.missing = false;
     repository
 }

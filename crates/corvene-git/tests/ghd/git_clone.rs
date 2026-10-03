@@ -18,14 +18,18 @@
 //! - `isClonePathSensitive`: `corvene_git::clone` clones into any path.
 //!
 //! "clones with a custom default branch name" forces protocol v0 with
-//! `GIT_CONFIG_PARAMETERS='protocol.version=0'` in the process environment.
-//! Tests cannot change the process environment and `corvene_git::clone`
-//! takes no environment, so the port sets the same configuration in the
-//! (locked) global git configuration, which git reads for every command of
-//! the test just as it reads `GIT_CONFIG_PARAMETERS`.
+//! `GIT_CONFIG_PARAMETERS='protocol.version=0'` in the process environment
+//! for the whole case. Tests cannot change the process environment (the
+//! other tests run on parallel threads), so the port runs the case inside
+//! `corvene_git::process::with_env`, which gives the same variable to every
+//! git command the case starts on its thread, `corvene_git::clone`'s
+//! included. (Writing it to the shared global configuration instead leaked
+//! protocol v0 into the clones of the other cases, and emptying that file
+//! afterwards could kill their git while it read the configuration.)
 
 use std::path::{Path, PathBuf};
 
+use corvene_git::process::with_env;
 use corvene_git::{CloneProgress, GitError};
 use corvene_test_support::{
     Tree, TreeEntry, create_temp_directory, exec, exec_ok, git, home_dir, lock_global_config,
@@ -200,32 +204,31 @@ fn clones_with_a_custom_default_branch_name() {
     // branch name is not advertised (protocol v0/v1). Force protocol v0
     // so we can verify the option actually drives the result, rather than
     // having the remote's initial-branch setting do the work.
-    // (GitHub Desktop: GIT_CONFIG_PARAMETERS='protocol.version=0'; here the
-    // global configuration, see the module doc.)
-    let _global = lock_global_config();
-    exec_ok(["config", "--global", "protocol.version", "0"], home_dir());
+    // (GitHub Desktop: process.env.GIT_CONFIG_PARAMETERS for the case; here
+    // `with_env`, see the module doc.)
+    with_env(&[("GIT_CONFIG_PARAMETERS", "'protocol.version=0'")], || {
+        // Bare repo defaults to 'master' — clone must use defaultBranch to get 'trunk'
+        let (_bare_parent, source) = create_empty_bare_repository();
 
-    // Bare repo defaults to 'master' — clone must use defaultBranch to get 'trunk'
-    let (_bare_parent, source) = create_empty_bare_repository();
+        let dest_path = create_temp_directory();
+        let clone_path = dest_path.path().join("cloned");
 
-    let dest_path = create_temp_directory();
-    let clone_path = dest_path.path().join("cloned");
+        clone(
+            path_str(&source),
+            &clone_path,
+            &CloneOptions {
+                default_branch: Some("trunk".into()),
+                ..CloneOptions::default()
+            },
+            None,
+        )
+        .expect("clone");
 
-    clone(
-        path_str(&source),
-        &clone_path,
-        &CloneOptions {
-            default_branch: Some("trunk".into()),
-            ..CloneOptions::default()
-        },
-        None,
-    )
-    .expect("clone");
+        assert!(clone_path.join(".git").exists());
 
-    assert!(clone_path.join(".git").exists());
-
-    let result = exec(["symbolic-ref", "HEAD"], &clone_path);
-    assert_eq!(result.stdout.trim(), "refs/heads/trunk");
+        let result = exec(["symbolic-ref", "HEAD"], &clone_path);
+        assert_eq!(result.stdout.trim(), "refs/heads/trunk");
+    });
 }
 
 // GHD: unit/git/clone-test.ts › git/clone › rejects cloning into ~/.ssh

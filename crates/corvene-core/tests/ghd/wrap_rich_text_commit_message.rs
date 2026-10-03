@@ -18,66 +18,21 @@
 //! emoji shortcode.
 
 use corvene_core::text_tokens::{Token, TokenRepository};
-use corvene_models::{GitHubRepository, Repository};
+use corvene_models::Repository;
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
 
-/// GitHub Desktop's `TokenType`.
-#[derive(Debug, PartialEq, Eq)]
-enum TokenType {
-    Emoji,
-    Link,
-    Text,
-}
-
-/// GitHub Desktop's `token.kind`.
-fn kind(token: &Token) -> TokenType {
-    match token {
-        Token::Text(_) => TokenType::Text,
-        Token::Emoji { .. } => TokenType::Emoji,
-        Token::Link { .. } => TokenType::Link,
-    }
-}
-
-/// GitHub Desktop's `token.text`.
-fn text(token: &Token) -> &str {
-    match token {
-        Token::Text(text) | Token::Emoji { text, .. } | Token::Link { text, .. } => text,
-    }
-}
-
-/// GitHub Desktop's `(token as HyperlinkMatch).url`.
-fn url(token: &Token) -> &str {
-    match token {
-        Token::Link { url, .. } => url,
-        other => panic!("not a HyperlinkMatch: {other:?}"),
-    }
-}
-
-/// GitHub Desktop's `gitHubRepoFixture({ owner, name })`
-/// (`test/helpers/github-repo-builder.ts`): a GitHub.com repository.
-fn git_hub_repo_fixture(owner: &str, name: &str) -> GitHubRepository {
-    let html_url = format!("https://github.com/{owner}/{name}");
-    GitHubRepository {
-        endpoint: "https://api.github.com".to_string(),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: false,
-        fork: false,
-        parent: None,
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
-}
+use crate::text_tokens_support::{TokenType, kind, text, url};
 
 /// The describe's `tokenizer`: `new Tokenizer(new Map(), new Repository('.',
 /// -1, gitHubRepoFixture({ owner: 'niik', name: 'commit-summary-wrap-tests'
 /// }), false))`, i.e. the repository links point into.
 fn tokenizer() -> Option<TokenRepository> {
     let mut repo = Repository::new(0, ".");
-    repo.github = Some(git_hub_repo_fixture("niik", "commit-summary-wrap-tests"));
+    repo.github = Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        owner: "niik",
+        name: "commit-summary-wrap-tests",
+        ..Default::default()
+    }));
     TokenRepository::of(&repo)
 }
 

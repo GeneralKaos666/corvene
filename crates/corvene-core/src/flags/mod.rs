@@ -506,6 +506,26 @@ impl Default for Flags {
     }
 }
 
+/// The stored layer of the `github-desktop` preset with no overrides: what
+/// the parity harness runs (`CORVENE_FLAGS=preset=github-desktop`). For
+/// tests that build an `AppState` by hand.
+#[doc(hidden)]
+pub fn github_desktop_overrides() -> FlagOverrides {
+    FlagOverrides {
+        preset: Preset::GitHubDesktop,
+        ..Default::default()
+    }
+}
+
+/// The flags of [`github_desktop_overrides`] with no `CORVENE_FLAGS`:
+/// every flag at its GitHub Desktop value. For tests (the ports of GitHub
+/// Desktop's unit tests) that pass a flag's GitHub Desktop value to code
+/// taking it as a parameter.
+#[doc(hidden)]
+pub fn github_desktop_flags() -> Flags {
+    Flags::resolve(&github_desktop_overrides(), &EnvFlags::default())
+}
+
 impl Flags {
     /// Preset base, then valid stored overrides, then `CORVENE_FLAGS`
     /// (locking); a flag this build cannot honour resolves to its GHD value.

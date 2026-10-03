@@ -15,16 +15,16 @@
 //!   `updateBranchProtectionsFromAPI`) has no Corvene counterpart either
 //!   (Corvene only asks `push_control` for the current branch). GitHub
 //!   Desktop stubs `API.request`; here the stubbed response comes from a
-//!   local HTTP server (`api_support::serve`) that a real `Client` talks
-//!   to, and the failing request is a connection to a port nothing listens
-//!   on. The call itself is a stand-in ([`fetch_protected_branches`]).
+//!   local HTTP server (`corvene_test_support::serve`) that a real `Client`
+//!   talks to, and the failing request is a connection to a port nothing
+//!   listens on. The call itself is a stand-in ([`fetch_protected_branches`]).
 
 use std::collections::HashMap;
 
 use corvene_github::{Client, Endpoint};
 use serde_json::json;
 
-use crate::api_support::{StubResponse, serve, unreachable_endpoint};
+use corvene_test_support::{StubResponse, serve, unreachable_endpoint};
 
 /// The response headers GitHub Desktop's cases build (`new Headers(…)`).
 type Headers = Vec<(String, String)>;

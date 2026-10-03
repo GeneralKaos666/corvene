@@ -19,9 +19,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use corvene_git::{checkout_branch, create_branch, recent_branches, rename_branch};
-use corvene_test_support::{exec, git, setup_fixture_repository};
-
-use crate::refs_support::get_branches;
+use corvene_test_support::{exec, get_branches, git, setup_fixture_repository};
 
 fn create_and_checkout(repository: &Path, name: &str) {
     create_branch(git(), repository, name, None, false).expect("createBranch");

@@ -26,8 +26,9 @@
 //! Flag `106-calendar-relative-dates` only changes ages past a week and is
 //! not involved (the offsets are under a day).
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
+use corvene_test_support::date_parse;
 use corvene_ui::format::format_date;
 use corvene_ui::relative_time::relative;
 
@@ -38,7 +39,7 @@ const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// `Date.parse('2026-03-26T12:00:00.000Z')`.
 fn now() -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(1_774_526_400)
+    date_parse("2026-03-26T12:00:00.000Z")
 }
 
 /// GitHub Desktop's `RelativeTimeInfo`.

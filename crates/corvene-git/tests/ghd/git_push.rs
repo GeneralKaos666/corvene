@@ -24,27 +24,9 @@ use std::path::Path;
 use corvene_git::GitError;
 use corvene_models::Remote;
 use corvene_test_support::{
-    TestRepo, Tree, TreeEntry, create_temp_directory, exec, git, make_commit,
-    setup_empty_repository,
+    TestRepo, Tree, TreeEntry, create_bare_upstream, exec, git, make_commit, setup_empty_repository,
 };
 use tempfile::TempDir;
-
-/// GitHub Desktop's `createBareUpstream(t, source)`: a bare clone of
-/// `source` in a new temporary directory, to use as an upstream remote.
-/// Bare repos accept pushes to any branch.
-fn create_bare_upstream(source: &TestRepo) -> TempDir {
-    let bare_path = create_temp_directory();
-    exec(
-        [
-            OsStr::new("clone"),
-            OsStr::new("--bare"),
-            source.path().as_os_str(),
-            bare_path.path().as_os_str(),
-        ],
-        source.path(),
-    );
-    bare_path
-}
 
 /// `{ name: 'origin', url: barePath }`.
 fn origin(bare_path: &Path) -> Remote {

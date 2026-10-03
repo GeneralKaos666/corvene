@@ -165,26 +165,183 @@ fn commands_that_want_an_editor_fail_at_once() {
     );
 }
 
+/// The global configuration file reads as no configuration.
+fn empty_or_missing(path: &Path) -> bool {
+    std::fs::read(path).map_or(true, |bytes| bytes.is_empty())
+}
+
 #[test]
 fn global_config_lock_starts_and_ends_empty() {
     let path;
     {
         let guard = lock_global_config();
         path = guard.path();
-        assert!(!path.exists());
+        assert!(empty_or_missing(&path));
         let dir = create_temp_directory();
         exec_ok(
             ["config", "--global", "init.defaultBranch", "trunk"],
             dir.path(),
         );
-        assert!(path.exists());
+        assert!(!empty_or_missing(&path));
         let value = exec(
             ["config", "--global", "--get", "init.defaultBranch"],
             dir.path(),
         );
         assert_eq!(value.stdout.trim(), "trunk");
     }
-    assert!(!path.exists());
+    assert!(empty_or_missing(&path));
+}
+
+#[test]
+fn emptying_the_global_config_never_removes_it() {
+    // what used to break unrelated clones: git checks that the global
+    // configuration exists, then opens it; removing it in between kills git
+    let dir = create_temp_directory();
+    {
+        let _guard = lock_global_config();
+        exec_ok(["config", "--global", "protocol.version", "0"], dir.path());
+    }
+    let guard = lock_global_config();
+    assert!(guard.path().exists(), "the emptied file stays");
+    assert!(empty_or_missing(&guard.path()));
+}
+
+#[test]
+fn proxies_are_off_for_the_stub_servers() {
+    for name in [
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+    ] {
+        assert!(std::env::var_os(name).is_none(), "{name} is set");
+    }
+    assert_eq!(
+        std::env::var("NO_PROXY").as_deref(),
+        Ok("127.0.0.1,localhost,::1")
+    );
+}
+
+#[test]
+fn stub_servers_answer_route_and_record() {
+    use std::io::{Read, Write};
+
+    fn get(url: &str, path: &str) -> String {
+        let address = url.trim_start_matches("http://");
+        let mut stream = std::net::TcpStream::connect(address).expect("connect");
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: {address}\r\nX-Test: yes\r\n\r\n"
+        )
+        .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
+
+    let url = serve(StubResponse::new(404, "{}").with_header("Content-Type", "application/json"));
+    let response = get(&url, "/x");
+    assert!(
+        response.starts_with("HTTP/1.1 404 Not Found\r\n"),
+        "{response}"
+    );
+    assert!(
+        response.contains("Content-Type: application/json\r\n"),
+        "{response}"
+    );
+    assert!(response.ends_with("\r\n\r\n{}"), "{response}");
+
+    let server = serve_with(|request| match request.path() {
+        "/user" => StubResponse::new(200, "me"),
+        _ => StubResponse::new(500, "").with_status_text("Nope"),
+    });
+    assert!(get(server.url(), "/user?a=1").ends_with("\r\n\r\nme"));
+    assert!(get(server.url(), "/other").starts_with("HTTP/1.1 500 Nope\r\n"));
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(requests[0].target, "/user?a=1");
+    assert_eq!(requests[0].header("x-test"), Some("yes"));
+    assert!(server.request_heads()[1].starts_with("GET /other HTTP/1.1\r\n"));
+
+    let unreachable = unreachable_endpoint();
+    let address = unreachable.trim_start_matches("http://");
+    assert!(std::net::TcpStream::connect(address).is_err());
+}
+
+#[test]
+fn dates_parse_and_format_like_javascript() {
+    let date = date_parse("2026-03-26T12:00:00.000Z");
+    assert_eq!(
+        date,
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_774_526_400)
+    );
+    assert_eq!(date_parse("2026-03-26T12:00:00Z"), date);
+    assert_eq!(to_iso_string(date), "2026-03-26T12:00:00.000Z");
+    let date = date_parse("2024-02-29T23:59:58.25Z");
+    assert_eq!(to_iso_string(date), "2024-02-29T23:59:58.250Z");
+    assert_eq!(
+        to_iso_string(std::time::UNIX_EPOCH),
+        "1970-01-01T00:00:00.000Z"
+    );
+}
+
+#[test]
+fn base64_pads_like_buffer() {
+    assert_eq!(base64(b""), "");
+    assert_eq!(base64(b"f"), "Zg==");
+    assert_eq!(base64(b"fo"), "Zm8=");
+    assert_eq!(base64(b"foo"), "Zm9v");
+    assert_eq!(base64(&[0xff, 0xfe, 0xfd, 0xfc]), "//79/A==");
+}
+
+#[test]
+fn get_branches_filters_by_prefix_and_ignores_non_repositories() {
+    let repo = setup_two_commit_repo();
+    exec_ok(["branch", "feature/one"], repo.path());
+    exec_ok(["branch", "feature-two"], repo.path());
+    let names = |prefixes: &[&str]| -> Vec<String> {
+        let mut names: Vec<String> = get_branches(repo.path(), prefixes)
+            .into_iter()
+            .map(|b| b.full_name)
+            .collect();
+        names.sort();
+        names
+    };
+    assert_eq!(names(&["refs/heads/feature"]), ["refs/heads/feature/one"]);
+    assert_eq!(
+        names(&["refs/heads/feature-two"]),
+        ["refs/heads/feature-two"]
+    );
+    assert_eq!(names(&[]).len(), 3);
+    let not_a_repo = setup_empty_directory();
+    assert!(get_branches(not_a_repo.path(), &[]).is_empty());
+}
+
+#[test]
+fn git_hub_repo_fixture_builds_like_github_desktop() {
+    let parent = git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        owner: "desktop",
+        name: "desktop",
+        ..Default::default()
+    });
+    assert_eq!(parent.endpoint, DOT_COM_API_ENDPOINT);
+    assert_eq!(parent.html_url, "https://github.com/desktop/desktop");
+    assert_eq!(parent.clone_url, "https://github.com/desktop/desktop.git");
+    assert!(!parent.fork && !parent.private);
+    let fork = git_hub_repo_fixture(GitHubRepoFixtureOptions {
+        owner: "me",
+        name: "desktop",
+        parent: Some(parent.clone()),
+        is_private: Some(true),
+        endpoint: Some("https://ghe.io"),
+    });
+    assert_eq!(fork.endpoint, "https://ghe.io");
+    assert_eq!(fork.html_url, "https://ghe.io/me/desktop");
+    assert!(fork.fork && fork.private);
+    assert_eq!(fork.parent.as_deref(), Some(&parent));
 }
 
 #[test]

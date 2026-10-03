@@ -6,14 +6,16 @@
 //!   is not one function in Corvene: `Dispatcher::commit`
 //!   (`corvene-core/src/dispatcher.rs`) runs `corvene_git::unstage_all`,
 //!   `stage_files` and `stage_partial_files` (together GHD's `stageFiles`,
-//!   `lib/git/update-index.ts`) and `commit` in that order. [`create_commit`]
+//!   `lib/git/update-index.ts`) and `commit` in that order.
+//!   `corvene_test_support::try_create_commit` (imported as `create_commit`)
 //!   makes the same calls, always unstaging first as GHD does (the
 //!   dispatcher skips the reset when every file is fully selected and
 //!   nothing is conflicted), and returns what `corvene_git::commit` returns.
 //! - `createMergeCommit(repository, files, manualResolutions)` is
 //!   `corvene_git::create_merge_commit` (resolutions in a `BTreeMap`).
 //! - `getCommits(repository, 'HEAD', n)` and `getCommit(repository, 'HEAD')`
-//!   are `corvene_git::get_commits`, `getChangedFiles` is
+//!   are `corvene_git::get_commits` (`corvene_test_support::get_commits` /
+//!   `get_commit`), `getChangedFiles` is
 //!   `corvene_git::get_changed_files`.
 //! - `getWorkingDirectoryDiff(repository, file)` is
 //!   `corvene_git::working_directory_diff` with GHD's settings: whitespace
@@ -33,42 +35,31 @@
 //!   replace the selection ([`with_selection`], [`with_include_all`]).
 //! - GHD's `DiffHunk.unifiedDiffEnd` is `unifiedDiffStart + lines.length - 1`
 //!   (`lib/diff-parser.ts`); Corvene's `DiffHunk` has only the start
-//!   ([`unified_diff_end`]). GHD's `DiffLine.text` starts with the `+` / `-`
-//!   / space marker, which Corvene keeps in `DiffLine::kind`.
+//!   (`corvene_test_support::unified_diff_end`). GHD's `DiffLine.text`
+//!   starts with the `+` / `-` / space marker, which Corvene keeps in
+//!   `DiffLine::kind`.
 //! - GHD's `parentSHAs` is `Commit::parents`, `shortSha` is
 //!   `Commit::short_sha()`, `status.currentTip` is
 //!   `WorkingDirectoryStatus::current_tip`.
 //! - A rejected git call's message (`GitError.message`, `lib/git/core.ts`):
 //!   the description of a recognised error, else git's output
-//!   ([`git_error_message`], from `GitFailure::description` /
-//!   `GitFailure::output`).
+//!   (`corvene_test_support::git_error_message`, from
+//!   `GitFailure::description` / `GitFailure::output`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use corvene_git::{CommitOptions, GitError};
 use corvene_models::{
-    ChangesetData, Commit, Diff, DiffHunk, DiffLineKind, DiffSelection, FileStatus, FileStatusKind,
+    ChangesetData, Diff, DiffHunk, DiffLineKind, DiffSelection, FileStatus, FileStatusKind,
     GitStatusEntry, ManualConflictResolution, WorkingDirectoryFileChange, WorkingDirectoryStatus,
 };
+use corvene_test_support::try_create_commit as create_commit;
 use corvene_test_support::{
-    TestRepo, exec, get_status_or_throw, git, setup_conflicted_repo,
-    setup_conflicted_repo_with_multiple_files, setup_empty_repository, setup_fixture_repository,
+    TestRepo, exec, get_commit, get_commits, get_status_or_throw, git, git_error_message,
+    setup_conflicted_repo, setup_conflicted_repo_with_multiple_files, setup_empty_repository,
+    setup_fixture_repository, unified_diff_end,
 };
-
-/// GitHub Desktop's `createCommit(repository, message, files, options)`.
-fn create_commit(
-    repository: &TestRepo,
-    message: &str,
-    files: &[WorkingDirectoryFileChange],
-    options: &CommitOptions,
-) -> Result<String, GitError> {
-    let path = repository.path();
-    corvene_git::unstage_all(git(), path)?;
-    corvene_git::stage_files(git(), path, files)?;
-    corvene_git::stage_partial_files(git(), path, files)?;
-    corvene_git::commit(git(), path, message, options)
-}
 
 /// GitHub Desktop's `createMergeCommit(repository, files, manualResolutions)`.
 fn create_merge_commit(
@@ -81,16 +72,6 @@ fn create_merge_commit(
         .map(|(path, resolution)| (path.to_string(), *resolution))
         .collect();
     corvene_git::create_merge_commit(git(), repository.path(), files, &resolutions)
-}
-
-/// GitHub Desktop's `getCommits(repository, revisionRange, limit)`.
-fn get_commits(repository: &TestRepo, revision: &str, limit: usize) -> Vec<Commit> {
-    corvene_git::get_commits(repository.path(), revision, 0, limit).expect("getCommits")
-}
-
-/// GitHub Desktop's `getCommit(repository, ref)` (`null` is `None`).
-fn get_commit(repository: &TestRepo, reference: &str) -> Option<Commit> {
-    get_commits(repository, reference, 1).into_iter().next()
 }
 
 /// GitHub Desktop's `getChangedFiles(repository, sha)`.
@@ -108,11 +89,6 @@ fn get_text_diff(repository: &TestRepo, file: &WorkingDirectoryFileChange) -> Ve
         Diff::Text { hunks, .. } => hunks,
         other => panic!("expected a text diff, got {other:?}"),
     }
-}
-
-/// GitHub Desktop's `DiffHunk.unifiedDiffEnd`.
-fn unified_diff_end(hunk: &DiffHunk) -> u32 {
-    hunk.unified_diff_start + hunk.lines.len() as u32 - 1
 }
 
 /// `new WorkingDirectoryFileChange(path, { kind }, selection)`, with the
@@ -152,16 +128,6 @@ fn with_include_all(file: &WorkingDirectoryFileChange) -> WorkingDirectoryFileCh
 /// GitHub Desktop's `status.workingDirectory.withIncludeAllFiles(true)`.
 fn with_include_all_files(status: &WorkingDirectoryStatus) -> Vec<WorkingDirectoryFileChange> {
     status.files.iter().map(with_include_all).collect()
-}
-
-/// What GitHub Desktop's `GitError.message` holds for a failed git call.
-fn git_error_message(err: &GitError) -> String {
-    match err.failure() {
-        Some(failure) => failure
-            .description("Settings")
-            .unwrap_or_else(|| failure.output.clone()),
-        None => err.to_string(),
-    }
 }
 
 /// `/There are no changes to commit./.test(message)`: the text followed by

@@ -23,9 +23,9 @@ use std::collections::HashMap;
 
 use corvene_core::filter::{matches_options, no_results_message};
 use corvene_core::{
-    DiffSelection, DiffSelectionType, FileListFilter, FileStatus, FileStatusKind, GitStatusEntry,
-    WorkingDirectoryFileChange,
+    DiffSelection, DiffSelectionType, FileListFilter, FileStatusKind, WorkingDirectoryFileChange,
 };
+use corvene_test_support::working_directory_file_change;
 
 /// GitHub Desktop's `IChangesListItem` (`ui/changes/filter-changes-list.tsx`).
 #[derive(Clone, Debug)]
@@ -35,30 +35,6 @@ struct ChangesListItem {
     #[allow(dead_code)]
     text: Vec<String>,
     change: WorkingDirectoryFileChange,
-}
-
-/// `new WorkingDirectoryFileChange(path, { kind }, selection)`: a status
-/// with only its kind.
-fn working_directory_file_change(
-    path: &str,
-    kind: FileStatusKind,
-    selection: DiffSelection,
-) -> WorkingDirectoryFileChange {
-    WorkingDirectoryFileChange {
-        path: path.to_string(),
-        old_path: None,
-        status: FileStatus {
-            kind,
-            index: GitStatusEntry::Unchanged,
-            working_tree: GitStatusEntry::Unchanged,
-            score: None,
-            code: String::new(),
-            submodule: false,
-            submodule_status: None,
-            conflict_markers: None,
-        },
-        selection,
-    }
 }
 
 /// `createTestFile`

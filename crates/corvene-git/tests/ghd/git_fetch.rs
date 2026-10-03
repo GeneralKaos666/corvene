@@ -24,18 +24,9 @@
 //!   branch's `name` as in GitHub Desktop. `Branch.tip.sha` is
 //!   `Branch::tip`.
 
-use std::path::Path;
-
 use corvene_git::fast_forward_branches;
 use corvene_models::Branch;
-use corvene_test_support::{git, setup_fixture_repository};
-
-/// GitHub Desktop's `getBranches(repository)` (`lib/git/for-each-ref.ts`).
-fn get_branches(repository: &Path) -> Vec<Branch> {
-    corvene_git::open_repository(repository)
-        .unwrap_or_else(|err| panic!("getBranches in {}: {err}", repository.display()))
-        .branches
-}
+use corvene_test_support::{get_branches, git, setup_fixture_repository};
 
 /// GitHub Desktop's `branchWithName(branches, name)`: the first branch named
 /// `name`.
@@ -69,7 +60,7 @@ fn fast_forwards_branches_using_fetch() {
     fast_forward_branches(git(), repository.path())
         .unwrap_or_else(|err| panic!("fastForwardBranches: {err}"));
 
-    let result_branches = get_branches(repository.path());
+    let result_branches = get_branches(repository.path(), &[]);
 
     // Only the branch behind was updated to match its upstream
     let branch_behind = branch_with_name(&result_branches, "branch-behind");

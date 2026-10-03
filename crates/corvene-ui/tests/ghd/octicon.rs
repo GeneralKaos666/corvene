@@ -13,7 +13,8 @@
 //! [`icon_for_repository`] is a stand-in taking either kind
 //! ([`RepositoryOrCloning`]).
 
-use corvene_core::{CloneState, GitHubRepository, Repository};
+use corvene_core::{CloneState, Repository};
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture, new_repository};
 use corvene_ui::icons::Octicon;
 
 /// GitHub Desktop's `Repository | CloningRepository`.
@@ -28,64 +29,6 @@ enum RepositoryOrCloning<'a> {
 /// there is one and remove the `#[ignore]`s.
 fn icon_for_repository(_repository: RepositoryOrCloning<'_>) -> Octicon {
     unimplemented!("Corvene has no iconForRepository (ui/octicons/repository.ts)")
-}
-
-/// GitHub Desktop's `getDotComAPIEndpoint()`.
-const DOTCOM_API_ENDPOINT: &str = "https://api.github.com";
-
-/// GitHub Desktop's `IGitHubRepoFixtureOptions`
-/// (`app/test/helpers/github-repo-builder.ts`).
-#[derive(Default)]
-struct GitHubRepoFixtureOptions<'a> {
-    owner: &'a str,
-    name: &'a str,
-    parent: Option<GitHubRepository>,
-    is_private: Option<bool>,
-    /// github.com when `None`.
-    endpoint: Option<&'a str>,
-}
-
-/// GitHub Desktop's `gitHubRepoFixture(options)`: a `GitHubRepository` with
-/// the html URL `<endpoint or https://github.com>/<owner>/<name>` and that
-/// URL plus `.git` as the clone URL. Corvene's model has no database ids,
-/// so GitHub Desktop's id counter has nothing to set. GitHub Desktop's
-/// `isPrivate: null` (not given) is `private: false`, the value Corvene keeps
-/// for an unknown visibility, and GitHub Desktop's `fork` is derived from the
-/// parent (`!!parent`), so `fork` is set exactly when a parent is given.
-fn github_repo_fixture(options: GitHubRepoFixtureOptions<'_>) -> GitHubRepository {
-    let GitHubRepoFixtureOptions {
-        owner,
-        name,
-        parent,
-        is_private,
-        endpoint,
-    } = options;
-    let html_url = format!(
-        "{}/{owner}/{name}",
-        endpoint.unwrap_or("https://github.com")
-    );
-    GitHubRepository {
-        endpoint: endpoint.unwrap_or(DOTCOM_API_ENDPOINT).to_string(),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: is_private.unwrap_or(false),
-        fork: parent.is_some(),
-        parent: parent.map(Box::new),
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
-}
-
-/// `new Repository(path, id, gitHubRepository, false)`
-fn repository(path: &str, id: u64, github: Option<GitHubRepository>) -> Repository {
-    let mut repository = Repository::new(id, path);
-    repository.github = github;
-    repository.missing = false;
-    repository
 }
 
 // GHD: unit/octicon-test.ts › octicon/iconForRepository › shows download icon for cloning repository
@@ -109,7 +52,7 @@ fn shows_download_icon_for_cloning_repository() {
 #[test]
 #[ignore = "ghd: missing: no iconForRepository (ui/octicons/repository.ts); inlined in RepositoryList::row and toolbar.rs"]
 fn shows_computer_icon_for_non_github_repository() {
-    let repository = repository("C:/some/path/to/repo", 1, None);
+    let repository = new_repository("C:/some/path/to/repo", 1, None);
     let icon = icon_for_repository(RepositoryOrCloning::Repository(&repository));
     assert_eq!(icon, Octicon::DeviceDesktop);
 }
@@ -118,13 +61,13 @@ fn shows_computer_icon_for_non_github_repository() {
 #[test]
 #[ignore = "ghd: missing: no iconForRepository (ui/octicons/repository.ts); inlined in RepositoryList::row and toolbar.rs"]
 fn shows_repo_icon_for_public_github_repository() {
-    let github_repository = github_repo_fixture(GitHubRepoFixtureOptions {
+    let github_repository = git_hub_repo_fixture(GitHubRepoFixtureOptions {
         owner: "me",
         name: "my-repo",
         is_private: Some(false),
         ..Default::default()
     });
-    let repository = repository("C:/some/path/to/repo", 1, Some(github_repository));
+    let repository = new_repository("C:/some/path/to/repo", 1, Some(github_repository));
     let icon = icon_for_repository(RepositoryOrCloning::Repository(&repository));
     assert_eq!(icon, Octicon::Repo);
 }
@@ -133,13 +76,13 @@ fn shows_repo_icon_for_public_github_repository() {
 #[test]
 #[ignore = "ghd: missing: no iconForRepository (ui/octicons/repository.ts); inlined in RepositoryList::row and toolbar.rs"]
 fn shows_lock_icon_for_private_github_repository() {
-    let github_repository = github_repo_fixture(GitHubRepoFixtureOptions {
+    let github_repository = git_hub_repo_fixture(GitHubRepoFixtureOptions {
         owner: "me",
         name: "my-repo",
         is_private: Some(true),
         ..Default::default()
     });
-    let repository = repository("C:/some/path/to/repo", 1, Some(github_repository));
+    let repository = new_repository("C:/some/path/to/repo", 1, Some(github_repository));
     let icon = icon_for_repository(RepositoryOrCloning::Repository(&repository));
     assert_eq!(icon, Octicon::Lock);
 }
@@ -148,18 +91,18 @@ fn shows_lock_icon_for_private_github_repository() {
 #[test]
 #[ignore = "ghd: missing: no iconForRepository (ui/octicons/repository.ts); inlined in RepositoryList::row and toolbar.rs"]
 fn shows_fork_icon_for_forked_github_repository() {
-    let github_repository = github_repo_fixture(GitHubRepoFixtureOptions {
+    let github_repository = git_hub_repo_fixture(GitHubRepoFixtureOptions {
         owner: "me",
         name: "my-repo",
         is_private: Some(false),
-        parent: Some(github_repo_fixture(GitHubRepoFixtureOptions {
+        parent: Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
             owner: "you",
             name: "my-repo",
             ..Default::default()
         })),
         ..Default::default()
     });
-    let repository = repository("C:/some/path/to/repo", 1, Some(github_repository));
+    let repository = new_repository("C:/some/path/to/repo", 1, Some(github_repository));
     let icon = icon_for_repository(RepositoryOrCloning::Repository(&repository));
     assert_eq!(icon, Octicon::RepoForked);
 }

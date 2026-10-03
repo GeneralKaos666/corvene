@@ -12,22 +12,22 @@
 //! which `corvene_github::Client::current_user` works out from that same
 //! answer. [`new_account`] (GitHub Desktop's `new Account(login, endpoint,
 //! token, emails, avatarURL, id, name, plan)`) therefore serves the case's
-//! `/user` and `/user/emails` answers from a local HTTP server to
-//! `current_user`, so the conversion is Corvene's own, and then gives the
-//! account the case's endpoint (it would be the local server's otherwise).
+//! `/user` and `/user/emails` answers from a local HTTP server
+//! (`corvene_test_support::serve_with`) to `current_user`, so the
+//! conversion is Corvene's own, and then gives the account the case's
+//! endpoint (it would be the local server's otherwise).
 //! GitHub Desktop's id `-1` (no id) is `0`: Corvene's ids are unsigned, and
 //! no expected value depends on the id in those cases.
 //!
 //! `getDotComAPIEndpoint()` is `Endpoint::github_com().api_base`,
 //! `getEnterpriseAPIURL(url)` is `Endpoint::enterprise(url, false).api_base`.
 
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
-use std::thread;
-
 use corvene_github::{Client, Endpoint};
 use corvene_models::Account;
+use corvene_test_support::{StubResponse, serve_with};
 use serde_json::json;
+
+use crate::api_support::get_dot_com_api_endpoint;
 
 /// GitHub Desktop's `IAPIEmail`.
 struct ApiEmail {
@@ -37,54 +37,11 @@ struct ApiEmail {
     visibility: Option<&'static str>,
 }
 
-/// GitHub Desktop's `getDotComAPIEndpoint()`.
-fn get_dot_com_api_endpoint() -> String {
-    Endpoint::github_com().api_base
-}
-
 /// GitHub Desktop's `getEnterpriseAPIURL(endpoint)`.
 fn get_enterprise_api_url(endpoint: &str) -> String {
     Endpoint::enterprise(endpoint, false)
         .expect("an enterprise address")
         .api_base
-}
-
-/// Answer `GET …/user` with `user` and `GET …/user/emails` with `emails`
-/// (anything else is a 404) until the test ends; returns the API base.
-fn serve_user(user: String, emails: String) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { return };
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut request_line = String::new();
-            reader.read_line(&mut request_line).unwrap();
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
-                if line == "\r\n" || line.is_empty() {
-                    break;
-                }
-            }
-            let path = request_line.split(' ').nth(1).unwrap_or_default();
-            let path = path.split('?').next().unwrap_or_default();
-            let (status, body) = if path.ends_with("/user/emails") {
-                ("200 OK", emails.as_str())
-            } else if path.ends_with("/user") {
-                ("200 OK", user.as_str())
-            } else {
-                ("404 Not Found", r#"{"message":"Not Found"}"#)
-            };
-            write!(
-                stream,
-                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            )
-            .unwrap();
-        }
-    });
-    format!("http://127.0.0.1:{port}/api/v3")
 }
 
 /// GitHub Desktop's `new Account(login, endpoint, token, emails, avatarURL,
@@ -122,7 +79,20 @@ fn new_account(
             .collect(),
     )
     .to_string();
-    let base = serve_user(user, emails);
+    // `GET …/user` answers `user`, `GET …/user/emails` answers `emails`,
+    // anything else is a 404
+    let server = serve_with(move |request| {
+        let path = request.path();
+        let response = if path.ends_with("/user/emails") {
+            StubResponse::new(200, emails.clone())
+        } else if path.ends_with("/user") {
+            StubResponse::new(200, user.clone())
+        } else {
+            StubResponse::new(404, r#"{"message":"Not Found"}"#)
+        };
+        response.with_header("Content-Type", "application/json")
+    });
+    let base = format!("{}/api/v3", server.url());
     let mut account = Client::new(Endpoint::from_api_base(&base), token)
         .current_user(Vec::new())
         .expect("current_user");

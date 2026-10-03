@@ -23,10 +23,11 @@
 
 use corvene_git::GitError;
 use corvene_test_support::{
-    TestRepo, exec, get_status_or_throw, git, setup_empty_repository, setup_local_config,
+    TestRepo, exec, get_status_or_throw, git, git_error_message, setup_empty_repository,
+    setup_local_config,
 };
 
-use crate::index_support::{git_error_message, regex_test};
+use crate::index_support::regex_test;
 
 /// `readGitIgnoreAtRoot(repository)`.
 fn read_git_ignore_at_root(repository: &TestRepo) -> Result<Option<String>, GitError> {

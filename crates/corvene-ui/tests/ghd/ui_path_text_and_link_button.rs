@@ -28,9 +28,8 @@
 //! element to look for) and `availableWidth` (a width in which the path
 //! fits, so nothing is truncated).
 
-use corvene_core::{
-    DiffSelection, FileStatus, FileStatusKind, GitStatusEntry, WorkingDirectoryFileChange,
-};
+use corvene_core::{DiffSelection, FileStatusKind, GitStatusEntry, WorkingDirectoryFileChange};
+use corvene_test_support::working_directory_file_change;
 use corvene_ui::format::display_path;
 
 /// Stand-in for GitHub Desktop's `truncateMid(value, length)`
@@ -50,21 +49,11 @@ fn truncate_path(_path: &str, _length: usize) -> String {
 /// A changed file at `path` (the changes list row's model), status
 /// Modified with nothing else set.
 fn file_change(path: &str) -> WorkingDirectoryFileChange {
-    WorkingDirectoryFileChange {
-        path: path.to_string(),
-        old_path: None,
-        status: FileStatus {
-            kind: FileStatusKind::Modified,
-            index: GitStatusEntry::Unchanged,
-            working_tree: GitStatusEntry::Modified,
-            score: None,
-            code: ".M".to_string(),
-            submodule: false,
-            submodule_status: None,
-            conflict_markers: None,
-        },
-        selection: DiffSelection::all(),
-    }
+    let mut file =
+        working_directory_file_change(path, FileStatusKind::Modified, DiffSelection::all());
+    file.status.working_tree = GitStatusEntry::Modified;
+    file.status.code = ".M".to_string();
+    file
 }
 
 /// GitHub Desktop's `extract(path)`: `(normalizedFileName,

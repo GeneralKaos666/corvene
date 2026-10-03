@@ -34,12 +34,13 @@ use std::collections::BTreeMap;
 
 use corvene_git::{CherryPickResult, CherryPickSnapshot, MergeOutcome};
 use corvene_models::{
-    Branch, Commit, CommitOneLine, FileStatusKind, ManualConflictResolution, McoProgress,
+    Branch, CommitOneLine, FileStatusKind, ManualConflictResolution, McoProgress,
     WorkingDirectoryFileChange,
 };
 use corvene_test_support::{
-    TestRepo, Tree, TreeEntry, create_branch, exec, get_branch_or_error, get_status_or_throw, git,
-    make_commit, repository_builder_cherry_pick, switch_to,
+    TestRepo, Tree, TreeEntry, conflicted_count, create_branch, exec, get_branch_or_error,
+    get_commit, get_commits, get_status_or_throw, git, make_commit, repository_builder_cherry_pick,
+    switch_to, write_file,
 };
 
 const FEATURE_BRANCH_NAME: &str = "this-is-a-feature";
@@ -72,10 +73,6 @@ fn setup() -> Setup {
 
 fn tip(branch: &Branch) -> &str {
     branch.tip.as_deref().expect("branch has a tip")
-}
-
-fn write_file(path: std::path::PathBuf, contents: &str) {
-    std::fs::write(&path, contents).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
 }
 
 /// GitHub Desktop's `cherryPick(repository, commits, progressCallback?)`
@@ -145,19 +142,6 @@ fn get_cherry_pick_snapshot(repository: &TestRepo) -> Option<CherryPickSnapshot>
     corvene_git::cherry_pick_snapshot(git(), repository.path())
 }
 
-/// GitHub Desktop's `getCommit(repository, ref)`.
-fn get_commit(repository: &TestRepo, reference: &str) -> Option<Commit> {
-    corvene_git::get_commits(repository.path(), reference, 0, 1)
-        .expect("getCommit")
-        .into_iter()
-        .next()
-}
-
-/// GitHub Desktop's `getCommits(repository, revisionRange, limit)`.
-fn get_commits(repository: &TestRepo, revision_range: &str, limit: usize) -> Vec<Commit> {
-    corvene_git::get_commits(repository.path(), revision_range, 0, limit).expect("getCommits")
-}
-
 /// GitHub Desktop's `getCommitsInRange(repository, range)`.
 fn get_commits_in_range(repository: &TestRepo, range: &str) -> Option<Vec<CommitOneLine>> {
     corvene_git::commits_in_range(git(), repository.path(), range).expect("getCommitsInRange")
@@ -225,13 +209,6 @@ fn make_conflict_commit(repository: &TestRepo) {
         )],
     );
     make_commit(repository, &conflicting_commit);
-}
-
-fn conflicted_count(files: &[WorkingDirectoryFileChange]) -> usize {
-    files
-        .iter()
-        .filter(|f| f.status.kind == FileStatusKind::Conflicted)
-        .count()
 }
 
 // GHD: unit/git/cherry-pick-test.ts › git/cherry-pick › successfully cherry-picked one commit without conflicts

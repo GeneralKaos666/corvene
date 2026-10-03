@@ -1,5 +1,5 @@
-//! Helpers shared by the `sync` lane's `corvene-git` modules (GitHub
-//! Desktop's `app/test/unit/git/{fetch,push,remote}-test.ts` and
+//! Helpers shared by `corvene-git`'s ports of GitHub Desktop's sync tests
+//! (`app/test/unit/git/{fetch,push,remote}-test.ts` and
 //! `unit/git/pull/*-test.ts`).
 
 use corvene_git::GitError;

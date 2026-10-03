@@ -21,8 +21,8 @@
 
 use corvene_core::{
     DiffSelection, FileStatus, FileStatusKind, GitStatusEntry, WorkingDirectoryFileChange,
-    WorkingDirectoryStatus,
 };
+use corvene_test_support::from_files;
 use corvene_ui::widgets::status_label;
 
 /// GitHub Desktop's `mapStatus(status)`.
@@ -80,14 +80,6 @@ fn make_file(path: &str, kind: FileStatusKind) -> WorkingDirectoryFileChange {
         old_path: None,
         status,
         selection: DiffSelection::all(),
-    }
-}
-
-/// GitHub Desktop's `WorkingDirectoryStatus.fromFiles(files)`.
-fn from_files(files: Vec<WorkingDirectoryFileChange>) -> WorkingDirectoryStatus {
-    WorkingDirectoryStatus {
-        files,
-        ..Default::default()
     }
 }
 

@@ -26,10 +26,9 @@ use std::collections::HashMap;
 
 use corvene_models::Remote;
 use corvene_test_support::{
-    TestRepo, get_status_or_throw, git, setup_fixture_repository, setup_local_fork_of_repository,
+    TestRepo, create_commit, get_branches, get_commit, get_status_or_throw, git, git_error_message,
+    setup_fixture_repository, setup_local_fork_of_repository,
 };
-
-use crate::history_support::{create_commit, get_branches, get_commit, git_error_message};
 
 /// GitHub Desktop's `createTag(repository, name, targetCommitSha)`.
 fn create_tag(

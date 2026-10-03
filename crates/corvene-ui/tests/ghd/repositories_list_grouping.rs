@@ -16,13 +16,15 @@
 //! Types: GitHub Desktop's `Repository` is `corvene_models::Repository`
 //! (`Repository::new(id, path)`, `github` for the `GitHubRepository`);
 //! `ILocalRepositoryState` is `corvene_core::RepoIndicator` (the
-//! foldout's ahead/behind and changed-file counts); [`git_hub_repo_fixture`]
-//! is GitHub Desktop's `helpers/github-repo-builder.ts`.
+//! foldout's ahead/behind and changed-file counts);
+//! `corvene_test_support::git_hub_repo_fixture` is GitHub Desktop's
+//! `helpers/github-repo-builder.ts`.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use corvene_core::{GitHubRepository, RepoIndicator, Repository};
+use corvene_core::{RepoIndicator, Repository};
+use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture, new_repository};
 
 /// GitHub Desktop's `RepositoryListGroup`.
 #[allow(dead_code)]
@@ -87,54 +89,28 @@ fn group_repositories(
     )
 }
 
-/// GitHub Desktop's `gitHubRepoFixture({ owner, name, endpoint })`: the
-/// HTML URL is `<endpoint or https://github.com>/<owner>/<name>`, the
-/// owner's endpoint GitHub.com's API unless one is given.
-fn git_hub_repo_fixture(owner: &str, name: &str, endpoint: Option<&str>) -> GitHubRepository {
-    let html_url = format!(
-        "{}/{owner}/{name}",
-        endpoint.unwrap_or("https://github.com")
-    );
-    GitHubRepository {
-        endpoint: endpoint.unwrap_or("https://api.github.com").to_string(),
-        owner: owner.to_string(),
-        name: name.to_string(),
-        clone_url: format!("{html_url}.git"),
-        html_url,
-        default_branch: None,
-        private: false,
-        fork: false,
-        parent: None,
-        archived: false,
-        permissions: None,
-        allow_forking: None,
-    }
-}
-
-/// GitHub Desktop's `new Repository(path, id, gitHubRepository, false)`.
-fn repository(path: &str, id: u64, git_hub_repository: Option<GitHubRepository>) -> Repository {
-    let mut repository = Repository::new(id, path);
-    repository.github = git_hub_repository;
-    repository
-}
-
 /// The `repositories` of the test's `describe`.
 fn repositories() -> Vec<Repository> {
     vec![
-        repository("repo1", 1, None),
-        repository(
+        new_repository("repo1", 1, None),
+        new_repository(
             "repo2",
             2,
-            Some(git_hub_repo_fixture("me", "my-repo2", None)),
+            Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+                owner: "me",
+                name: "my-repo2",
+                ..Default::default()
+            })),
         ),
-        repository(
+        new_repository(
             "repo3",
             3,
-            Some(git_hub_repo_fixture(
-                "",
-                "my-repo3",
-                Some("https://github.big-corp.com/api/v3"),
-            )),
+            Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+                owner: "",
+                name: "my-repo3",
+                endpoint: Some("https://github.big-corp.com/api/v3"),
+                ..Default::default()
+            })),
         ),
     ]
 }
@@ -174,11 +150,27 @@ fn groups_repositories_by_owners_enterprise_other() {
 #[ignore = "ghd: missing: groupRepositories (ui/repositories-list/group-repositories.ts) is inside RepositoryFoldout::groups, which needs a gpui App and returns no group kinds"]
 fn sorts_repositories_alphabetically_within_each_group() {
     let cache = HashMap::new();
-    let repo_a = repository("a", 1, None);
-    let repo_b = repository("b", 2, Some(git_hub_repo_fixture("me", "b", None)));
-    let repo_c = repository("c", 2, None);
-    let repo_d = repository("d", 2, Some(git_hub_repo_fixture("me", "d", None)));
-    let repo_z = repository("z", 3, None);
+    let repo_a = new_repository("a", 1, None);
+    let repo_b = new_repository(
+        "b",
+        2,
+        Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+            owner: "me",
+            name: "b",
+            ..Default::default()
+        })),
+    );
+    let repo_c = new_repository("c", 2, None);
+    let repo_d = new_repository(
+        "d",
+        2,
+        Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+            owner: "me",
+            name: "d",
+            ..Default::default()
+        })),
+    );
+    let repo_z = new_repository("z", 3, None);
 
     let grouped = group_repositories(&[repo_c, repo_b, repo_z, repo_d, repo_a], &cache, &[]);
     assert_eq!(grouped.len(), 2);
@@ -205,25 +197,43 @@ fn sorts_repositories_alphabetically_within_each_group() {
 #[ignore = "ghd: missing: groupRepositories (ui/repositories-list/group-repositories.ts) is inside RepositoryFoldout::groups (needs a gpui App, no needsDisambiguation); Corvene also groups GHES repositories by owner, not one enterprise group per host"]
 fn only_disambiguates_enterprise_repositories() {
     let cache = HashMap::new();
-    let repo_a = repository("repo", 1, Some(git_hub_repo_fixture("user1", "repo", None)));
-    let repo_b = repository("repo", 2, Some(git_hub_repo_fixture("user2", "repo", None)));
-    let repo_c = repository(
-        "enterprise-repo",
-        3,
-        Some(git_hub_repo_fixture(
-            "business",
-            "enterprise-repo",
-            Some("https://ghe.io/api/v3"),
-        )),
+    let repo_a = new_repository(
+        "repo",
+        1,
+        Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+            owner: "user1",
+            name: "repo",
+            ..Default::default()
+        })),
     );
-    let repo_d = repository(
+    let repo_b = new_repository(
+        "repo",
+        2,
+        Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+            owner: "user2",
+            name: "repo",
+            ..Default::default()
+        })),
+    );
+    let repo_c = new_repository(
         "enterprise-repo",
         3,
-        Some(git_hub_repo_fixture(
-            "silliness",
-            "enterprise-repo",
-            Some("https://ghe.io/api/v3"),
-        )),
+        Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+            owner: "business",
+            name: "enterprise-repo",
+            endpoint: Some("https://ghe.io/api/v3"),
+            ..Default::default()
+        })),
+    );
+    let repo_d = new_repository(
+        "enterprise-repo",
+        3,
+        Some(git_hub_repo_fixture(GitHubRepoFixtureOptions {
+            owner: "silliness",
+            name: "enterprise-repo",
+            endpoint: Some("https://ghe.io/api/v3"),
+            ..Default::default()
+        })),
     );
 
     let grouped = group_repositories(&[repo_a, repo_b, repo_c, repo_d], &cache, &[]);
