@@ -1,0 +1,10 @@
+# [PackageDev] target_format: plist, ext: tmLanguage
+name: Grault
+scopeName: source.grault
+fileTypes: [grault]
+patterns:
+  - match: \b(select|from)\b
+    name: keyword.other.grault
+  - begin: '"'
+    end: '"'
+    name: string.quoted.double.grault

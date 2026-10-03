@@ -230,8 +230,9 @@ pub fn parse_text(text: &str, format: GrammarFormat) -> Result<TmGrammar, Extens
     TmGrammar::from_value(&value)
 }
 
-/// Read a grammar file, deciding the format from its contents first and its
-/// name second.
+/// Read a grammar file: the format its name says first, then the one its
+/// first bytes suggest (a `.tmLanguage` holding JSON, a `.json` with a
+/// comment header), whichever parses.
 pub fn parse_file(path: &Path) -> Result<TmGrammar, ExtensionError> {
     let meta = std::fs::metadata(path)?;
     if meta.len() > crate::MAX_GRAMMAR_BYTES as u64 {
@@ -241,12 +242,31 @@ pub fn parse_file(path: &Path) -> Result<TmGrammar, ExtensionError> {
         )));
     }
     let text = std::fs::read_to_string(path)?;
-    let format = GrammarFormat::sniff(&text)
-        .or_else(|| GrammarFormat::from_path(path))
-        .ok_or_else(|| {
-            ExtensionError::Convert(format!("{} is not a grammar file", path.display()))
-        })?;
-    parse_text(&text, format)
+    let mut candidates: Vec<GrammarFormat> = Vec::new();
+    for format in [GrammarFormat::from_path(path), GrammarFormat::sniff(&text)]
+        .into_iter()
+        .flatten()
+    {
+        if !candidates.contains(&format) {
+            candidates.push(format);
+        }
+    }
+    if candidates.is_empty() {
+        return Err(ExtensionError::Convert(format!(
+            "{} is not a grammar file",
+            path.display()
+        )));
+    }
+    let mut first_error = None;
+    for format in candidates {
+        match parse_text(&text, format) {
+            Ok(grammar) => return Ok(grammar),
+            Err(err) => first_error.get_or_insert(err),
+        };
+    }
+    Err(first_error.unwrap_or_else(|| {
+        ExtensionError::Convert(format!("{} is not a grammar file", path.display()))
+    }))
 }
 
 #[cfg(test)]

@@ -7,6 +7,8 @@ description = "Corvene language extensions: editor grammars (VS Code, Atom, Zed,
 
 [dependencies]
 corvene-platform.workspace = true
+# gunzips tar.gz extensions and backs the zip reader
+flate2 = "1"
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -14,8 +16,14 @@ sha2 = "0.10"
 # the runtime reads converted grammars from their sublime-syntax text and
 # writes the user set as a dump, so both syntect loaders are on here
 syntect = { workspace = true, features = ["yaml-load", "dump-create"] }
+tar = "0.4"
 thiserror.workspace = true
+# Zed's extension.toml and config.toml
+toml = "1"
 tracing.workspace = true
+# .vsix, .sublime-package and plugin archives; entries are read one by one
+# and written by this crate, never by the library's extractor
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 # syntect's YAML reader; also emits the converted grammars and reads
 # `.YAML-tmLanguage` sources
 yaml-rust = "0.4"

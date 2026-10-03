@@ -8,9 +8,13 @@
 //! into the highlighter is `corvene_highlight::user`; downloading, the UI
 //! and the state machine live in `corvene_core::extensions`.
 
+pub mod archive;
 pub mod cache;
 pub mod cson;
+pub mod install;
+pub mod manifest;
 pub mod plist;
+pub mod scan;
 pub mod tm;
 pub mod value;
 
@@ -39,6 +43,13 @@ pub enum ExtensionError {
     /// compile, an invalid scope).
     #[error("{0}")]
     Compile(String),
+    /// An archive that breaks the extraction policy (a path outside the
+    /// target, a symlink, too many or too large entries) or is not one.
+    #[error("{0}")]
+    Archive(String),
+    /// A folder or archive with nothing Corvene can use as a grammar.
+    #[error("{0}")]
+    NotAnExtension(String),
 }
 
 impl ExtensionError {

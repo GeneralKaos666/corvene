@@ -1,0 +1,7 @@
+'name': 'Qux'
+'scopeName': 'source.qux'
+'type': 'tree-sitter'
+'parser': 'tree-sitter-qux'
+'fileTypes': ['qux']
+'scopes':
+  'program': 'source.qux'
