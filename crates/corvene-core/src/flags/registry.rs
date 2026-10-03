@@ -4286,6 +4286,21 @@ registry! {
         code: &["crates/corvene-ui/src/markdown.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// The commit author's name links to their GitHub profile.
+    COMMIT_AUTHOR_LINKS = 890 "commit-author-links" {
+        title: "Link commit authors to their profiles",
+        summary: "In a GitHub repository the selected commit's author name opens their GitHub \
+                  profile when the login is known: a no-reply address, a signed-in account with \
+                  that e-mail, or a collaborator from the commit box's @ suggestions.",
+        ghd_behaviour: "The author name is plain text.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3785)],
+        code: &["crates/corvene-ui/src/selected_commit.rs", "crates/corvene-core/src/autocomplete.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

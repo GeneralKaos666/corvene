@@ -17,7 +17,8 @@
 //! (flag `804`). A file's menu can revert that file's
 //! changes from the commit (flag `814`).
 //! A file's context menu adds "Open All Files of Commit in <editor>"
-//! (`712-open-multiple-files`).
+//! (`712-open-multiple-files`). The author's name can link to their GitHub
+//! profile (`890-commit-author-links`).
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher, Popup, UnreachableCommitsTab};
 use gpui_kit::component::resizable::{
@@ -532,6 +533,21 @@ impl SelectedCommitView {
                 .flags
                 .bool(corvene_core::flags::ids::CROSS_REPOSITORY_ISSUE_LINKS),
         };
+        // `890-commit-author-links`: the author's GitHub profile, when known
+        let author_url = s
+            .flags
+            .bool(corvene_core::flags::ids::COMMIT_AUTHOR_LINKS)
+            .then(|| s.repository(id).and_then(|r| r.github.as_ref()))
+            .flatten()
+            .and_then(|gh| {
+                let login = corvene_core::autocomplete::login_for_email(
+                    &commit.author.email,
+                    gh,
+                    &s.accounts,
+                    &s.mentionables,
+                )?;
+                Some(corvene_github::Endpoint::from_api_base(&gh.endpoint).web(&login))
+            });
         // `889-issue-title-tooltips`
         let issue_titles = s
             .flags
@@ -678,7 +694,20 @@ impl SelectedCommitView {
                                             zpx(16.),
                                             cx,
                                         ))
-                                        .child(commit.author.name.clone()),
+                                        .child(match author_url {
+                                            Some(url) => link_button(
+                                                "commit-author-link",
+                                                commit.author.name.clone(),
+                                                cx,
+                                            )
+                                            .text_size(FONT_SIZE_SM())
+                                            .ghd_tooltip(url.clone())
+                                            .on_click(move |_, _, cx| {
+                                                Dispatcher::open_url(&url, cx)
+                                            })
+                                            .into_any_element(),
+                                            None => commit.author.name.clone().into_any_element(),
+                                        }),
                                 )
                                 .when(extras, |d| {
                                     let date = commit.author.date();

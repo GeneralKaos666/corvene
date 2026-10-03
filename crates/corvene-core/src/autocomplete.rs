@@ -267,6 +267,40 @@ pub fn cache_key(github: &GitHubRepository) -> String {
     github.html_url.clone()
 }
 
+/// Corvene `890-commit-author-links`: the GitHub login behind a commit
+/// author's e-mail in `github`'s repository: a no-reply address, a signed-in
+/// account of that endpoint with the address, or a mentionable user (the
+/// commit box's @ suggestions) with it.
+pub fn login_for_email(
+    email: &str,
+    github: &GitHubRepository,
+    accounts: &[corvene_models::Account],
+    mentionables: &MentionableCaches,
+) -> Option<String> {
+    if let Some(login) = corvene_models::stealth_email_login(email, &github.endpoint) {
+        return Some(login);
+    }
+    let email = email.trim();
+    if email.is_empty() {
+        return None;
+    }
+    if let Some(account) = accounts.iter().find(|a| {
+        a.endpoint == github.endpoint && a.emails.iter().any(|e| e.eq_ignore_ascii_case(email))
+    }) {
+        return Some(account.login.clone());
+    }
+    mentionables
+        .get(&cache_key(github))?
+        .users
+        .iter()
+        .find(|u| {
+            u.email
+                .as_deref()
+                .is_some_and(|e| e.eq_ignore_ascii_case(email))
+        })
+        .map(|u| u.login.clone())
+}
+
 impl Dispatcher {
     pub(crate) fn api_for(
         github: &GitHubRepository,
@@ -637,6 +671,45 @@ mod tests {
         assert_eq!(parse_co_author_address("Jane jane@example.com"), None);
     }
     use super::*;
+
+    #[test]
+    fn logins_for_author_emails() {
+        let gh = GitHubRepository {
+            endpoint: "https://api.github.com".into(),
+            owner: "o".into(),
+            name: "r".into(),
+            html_url: "https://github.com/o/r".into(),
+            clone_url: String::new(),
+            default_branch: None,
+            private: false,
+            fork: false,
+            parent: None,
+            archived: false,
+            permissions: None,
+            allow_forking: None,
+        };
+        let mut mentionables = MentionableCaches::new();
+        mentionables.insert(
+            cache_key(&gh),
+            MentionableCache {
+                users: vec![MentionableUser {
+                    login: "mona".into(),
+                    name: None,
+                    email: Some("Mona@Example.com".into()),
+                    avatar_url: None,
+                }],
+                ..MentionableCache::default()
+            },
+        );
+        let login = |email: &str| login_for_email(email, &gh, &[], &mentionables);
+        assert_eq!(
+            login("7+hub@users.noreply.github.com").as_deref(),
+            Some("hub")
+        );
+        assert_eq!(login("mona@example.com").as_deref(), Some("mona"));
+        assert_eq!(login("someone@example.com"), None);
+        assert_eq!(login(""), None);
+    }
 
     #[test]
     fn folder_completions_list_matching_sub_folders() {
