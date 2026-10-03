@@ -79,6 +79,7 @@ pub(crate) fn main() {
         warn!("{err}");
     }
     let launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
+    sync_renderer_flags(&launch_flags);
     phase(started, "store opened");
 
     #[cfg(not(target_os = "android"))]
@@ -227,6 +228,7 @@ pub(crate) fn main() {
                     s.flags
                         .bool(corvene_core::flags::ids::CALENDAR_RELATIVE_DATES),
                 );
+                sync_renderer_flags(&s.flags);
                 (
                     s.settings.theme,
                     s.settings.welcome_completed,
@@ -1440,6 +1442,19 @@ fn apply_theme(setting: ThemeSetting, cx: &mut App) {
     for window in cx.windows() {
         window.update(cx, |_, window, _| window.refresh()).ok();
     }
+}
+
+/// Flags `908-opaque-depth-pass` and `909-damage-scissor`: the wgpu
+/// renderer's (Linux, Android) overdraw switches, applied from the next frame.
+fn sync_renderer_flags(flags: &corvene_core::Flags) {
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
+    {
+        use corvene_core::flags::ids;
+        gpui_wgpu::set_opaque_depth_pass(flags.bool(ids::OPAQUE_DEPTH_PASS));
+        gpui_wgpu::set_damage_scissor(flags.bool(ids::DAMAGE_SCISSOR));
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "android")))]
+    let _ = flags;
 }
 
 fn phase(started: Instant, what: &str) {

@@ -58,6 +58,19 @@ fn android_built_in() -> Availability {
     }
 }
 
+/// The wgpu renderer's switches: macOS and Windows draw with another one.
+fn wgpu_renderer_only() -> Availability {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "android"
+    )) {
+        Availability::Available
+    } else {
+        Availability::BuiltIn("Only the Linux and Android renderer has this.")
+    }
+}
+
 fn product_name(s: &str) -> Result<(), &'static str> {
     let s = s.trim();
     if s.is_empty() {
@@ -4227,6 +4240,40 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[],
         code: &["crates/corvene-git/src/log_gix.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// The wgpu renderer draws opaque quads first with a depth test.
+    OPAQUE_DEPTH_PASS = 908 "opaque-depth-pass" {
+        title: "Renderer: opaque depth pass",
+        summary: "Linux and Android: the solid insides of opaque panels, rows and lines are drawn \
+                  first, front to back, with a depth buffer, so everything they cover is skipped \
+                  by the GPU instead of being shaded and blended underneath. The picture is the \
+                  same pixel for pixel; mobile GPUs spend most of a frame on that overdraw. \
+                  Not yet tried on a phone.",
+        ghd_behaviour: "Chromium's compositor; Corvene's renderer otherwise blends every quad \
+                        over the previous one.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: wgpu_renderer_only,
+        upstream: &[],
+        code: &["vendor/gpui-pre-wgpu/src/wgpu_renderer.rs", "crates/corvene/src/main.rs"],
+    },
+
+    /// The wgpu renderer redraws only what changed since the last frame.
+    DAMAGE_SCISSOR = 909 "damage-scissor" {
+        title: "Renderer: redraw only what changed",
+        summary: "Linux and Android: a frame that differs from the last one in a small area (a \
+                  blinking caret, a hovered row) redraws only that area into a kept copy of \
+                  the window and copies it to the screen. Not yet tried on a phone.",
+        ghd_behaviour: "Chromium's compositor; Corvene's renderer otherwise redraws the whole \
+                        window every frame.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: wgpu_renderer_only,
+        upstream: &[],
+        code: &["vendor/gpui-pre-wgpu/src/wgpu_renderer.rs", "crates/corvene/src/main.rs"],
     },
 
     // ---- 1000 Experimental ----

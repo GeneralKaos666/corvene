@@ -1434,6 +1434,7 @@ dependencies = [
  "gpui-pre-apple",
  "gpui-pre-linux",
  "gpui-pre-macos",
+ "gpui-pre-wgpu",
  "gpui-pre-windows",
  "image",
  "jni 0.22.4",
