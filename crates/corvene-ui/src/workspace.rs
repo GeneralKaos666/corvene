@@ -2,6 +2,10 @@
 //!
 //! Deviation: `407-smaller-minimum-sizes` lowers the sidebar minimum from
 //! GHD's 220 px (`ui/app.tsx` `sidebarWidth`) to 120 px.
+//! Deviation: `655-section-switch-restores-commit-focus` gives the commit
+//! summary or description back its focus when Changes is shown again after
+//! another section (GHD `ui/repository.tsx` unmounts the commit form with
+//! the tab, so its focus is lost).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -105,6 +109,10 @@ pub struct Workspace {
     launch_focus_pending: bool,
     /// History shows the diff alone (`801-history-review-mode`).
     review_mode: bool,
+    /// The section as of the last render, and the commit field that had
+    /// focus when Changes was left (`655-section-switch-restores-commit-focus`).
+    rendered_section: Section,
+    left_commit_field: Option<FocusHandle>,
 }
 
 /// GHD `sidebarWidth` minimum (220 px), or 120 px with
@@ -235,6 +243,8 @@ impl Workspace {
             focus_section_list: false,
             launch_focus_pending: true,
             review_mode: false,
+            rendered_section: Section::Changes,
+            left_commit_field: None,
             dialogs,
             diff_view,
             welcome,
@@ -988,7 +998,27 @@ impl Render for Workspace {
         let review = self.review_mode_active(cx);
         self.selected_commit
             .update(cx, |v, cx| v.set_file_list_hidden(review, cx));
-        if std::mem::take(&mut self.focus_section_list) {
+        // Corvene (`655-section-switch-restores-commit-focus`): leaving
+        // Changes remembers a focused summary / description, coming back
+        // focuses it again (before the list `603` would focus)
+        let restore_commit_focus = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::SECTION_SWITCH_RESTORES_COMMIT_FOCUS);
+        let previous = std::mem::replace(&mut self.rendered_section, self.section);
+        let mut restored = false;
+        if restore_commit_focus && previous != self.section {
+            if previous == Section::Changes {
+                self.left_commit_field = self.changes.read(cx).focused_commit_field(window);
+            } else if self.section == Section::Changes
+                && let Some(handle) = self.left_commit_field.take()
+            {
+                window.focus(&handle, cx);
+                restored = true;
+            }
+        }
+        if std::mem::take(&mut self.focus_section_list) && !restored {
             let handle = match self.section {
                 Section::Changes => self.changes.read(cx).list_focus_handle(),
                 Section::History => self.history.read(cx).list_focus_handle(),

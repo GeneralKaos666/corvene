@@ -2612,6 +2612,21 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Back on Changes, the commit field that had focus gets it again.
+    SECTION_SWITCH_RESTORES_COMMIT_FOCUS = 655 "section-switch-restores-commit-focus" {
+        title: "Return to the commit message after History",
+        summary: "Leaving the Changes tab while typing the commit summary or description (for \
+                  History, with a tab, ⌘2 or ⌃Tab) and coming back puts the caret back in that \
+                  field, instead of on the changes list or nowhere.",
+        ghd_behaviour: "Focus is not restored when Changes is shown again.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19390)],
+        code: &["crates/corvene-ui/src/workspace.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

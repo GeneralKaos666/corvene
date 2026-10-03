@@ -1353,6 +1353,15 @@ impl ChangesSidebar {
         cx.notify();
     }
 
+    /// The summary or description field when it has focus
+    /// (`655-section-switch-restores-commit-focus`).
+    pub fn focused_commit_field(&self, window: &Window) -> Option<FocusHandle> {
+        [&self.summary_focus, &self.description_focus]
+            .into_iter()
+            .find(|h| h.is_focused(window))
+            .cloned()
+    }
+
     /// Corvene (`603-focus-list-on-section-switch`).
     pub fn list_focus_handle(&self) -> FocusHandle {
         self.list_focus.clone()
