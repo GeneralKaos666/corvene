@@ -4784,6 +4784,7 @@ impl Dispatcher {
             cx.update(|cx| match result {
                 Ok(account) => {
                     info!(login = %account.login, endpoint = %account.endpoint, "signed in");
+                    Self::check_git_email_after_sign_in(account.clone(), cx);
                     let retry = Self::state(cx).update(cx, |s, cx| {
                         s.accounts.retain(|a| a.endpoint != account.endpoint);
                         s.accounts.push(account);
@@ -4807,6 +4808,34 @@ impl Dispatcher {
                 }
                 Err(err) => Self::set_sign_in_step(SignInStep::Error(err.to_string()), cx),
             });
+        })
+        .detach();
+    }
+
+    /// `352-git-email-mismatch-banner`: after signing in outside the Welcome
+    /// flow (which asks for the identity itself), a banner when the global
+    /// `user.email` is unset or would not link commits to `account`. Reads
+    /// only; Settings › Git changes it.
+    fn check_git_email_after_sign_in(account: Account, cx: &mut App) {
+        let (enabled, git) = {
+            let s = Self::state(cx).read(cx);
+            (
+                s.flags.bool(crate::flags::ids::GIT_EMAIL_MISMATCH_BANNER)
+                    && s.settings.welcome_completed,
+                s.git.clone(),
+            )
+        };
+        let Some(git) = git.filter(|_| enabled) else {
+            return;
+        };
+        let task = cx
+            .background_executor()
+            .spawn(async move { corvene_git::global_config_value(git, "user.email") });
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            let email = task.await;
+            if let Some(banner) = crate::mco::Banner::for_git_email(&account, email.as_deref()) {
+                cx.update(|cx| Self::set_banner(banner, cx));
+            }
         })
         .detach();
     }

@@ -1914,6 +1914,23 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
+    /// After sign-in, say when the Git email won't link commits.
+    GIT_EMAIL_MISMATCH_BANNER = 352 "git-email-mismatch-banner" {
+        title: "Git email check after signing in",
+        summary: "Signing in to an account (outside the Welcome flow) checks the global Git \
+                  email: when none is set, or it is not one of the account's addresses, a banner \
+                  says commits won't be linked to the account and links to Settings › Git. \
+                  Nothing is changed.",
+        ghd_behaviour: "Says nothing at sign-in; only Settings › Git and the commit form warn \
+                        about an email that doesn't match.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14692)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-ui/src/banner.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
