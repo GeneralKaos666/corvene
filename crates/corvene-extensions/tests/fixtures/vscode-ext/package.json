@@ -1,0 +1,23 @@
+{
+  // a VS Code extension with two grammars
+  "name": "sample-langs",
+  "displayName": "Sample Languages",
+  "version": "1.2.3",
+  "publisher": "corvene-tests",
+  "description": "Two toy languages.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/example/sample-langs.git" },
+  "contributes": {
+    "languages": [
+      { "id": "foo", "aliases": ["Foo", "foo"], "extensions": [".foo", ".FOO2"], "filenames": ["Foofile"],
+        "filenamePatterns": ["*.foo.bar", "**/.fooconfig"], "firstLine": "^#!.*\\bfoo\\b" },
+      { "id": "bar", "aliases": ["Bar"], "extensions": [".bar"] },
+      { "id": "no-grammar", "extensions": [".ng"] }
+    ],
+    "grammars": [
+      { "language": "foo", "scopeName": "source.foo", "path": "./syntaxes/foo.tmLanguage.json" },
+      { "language": "bar", "scopeName": "source.bar", "path": "./syntaxes/bar.tmLanguage" },
+      { "scopeName": "inject.foo", "path": "./syntaxes/inject.json", "injectTo": ["source.foo"] }
+    ]
+  }
+}

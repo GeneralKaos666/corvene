@@ -25,6 +25,29 @@ use tracing::{debug, error, info, warn};
 // `pub(crate)`: on Android this file is a module of the activity's native
 // library (`android.rs`), whose `android_main` calls it
 pub(crate) fn main() {
+    // `corvene --verify-grammar <library>`: load a grammar library built by a
+    // language extension and exit 0 when it reads (run as a helper process
+    // by corvene_core::extensions, so a library that crashes on load never
+    // takes the app down)
+    {
+        let mut args = std::env::args().skip(1);
+        if args.next().as_deref() == Some("--verify-grammar") {
+            let Some(path) = args.next() else {
+                eprintln!("usage: corvene --verify-grammar <library>");
+                std::process::exit(2);
+            };
+            match corvene_highlight::treesitter::verify_library(std::path::Path::new(&path)) {
+                Ok(names) => {
+                    println!("{}", names.join("\n"));
+                    std::process::exit(0);
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
     // `GIT_ASKPASS` runs this same binary; answer git and exit before touching GPUI.
     if std::env::var_os("CORVENE_ASKPASS").is_some() {
         askpass::run();
@@ -79,6 +102,7 @@ pub(crate) fn main() {
         warn!("{err}");
     }
     let launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
+    sync_renderer_flags(&launch_flags);
     phase(started, "store opened");
 
     #[cfg(not(target_os = "android"))]
@@ -227,6 +251,7 @@ pub(crate) fn main() {
                     s.flags
                         .bool(corvene_core::flags::ids::CALENDAR_RELATIVE_DATES),
                 );
+                sync_renderer_flags(&s.flags);
                 (
                     s.settings.theme,
                     s.settings.welcome_completed,
@@ -419,6 +444,9 @@ pub(crate) fn main() {
         //   ready / Homebrew / package manager state: the banner, plus About or
         //   the Release Notes with "Install and Restart")
         //   flags[:<search>] (Corvene › Flags…, with the search box prefilled)
+        //   language-extensions[:find|:find=<suffix>|:import|:consent] (Settings › Appearance ›
+        //   Language extensions…; flag 111; :consent offers the first grammar waiting for a
+        //   build from source, flag 1001)
         //   git-error[:raw|:known|:push|:plain] (the error dialog for a failed pull:
         //   a merge blocked by local changes, an output nobody has words for, a
         //   failure GHD describes, a push a protected branch rejected, or an error
@@ -438,6 +466,17 @@ pub(crate) fn main() {
         on_menu_action(cx, |_: &RemoveRepository, cx| {
             if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
                 Dispatcher::request_remove_repository(id, cx);
+            }
+        });
+        on_menu_action(cx, |_: &MoveToSharedStorage, cx| {
+            if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                Dispatcher::show_popup(
+                    Popup::MoveToSharedStorage {
+                        repo: id,
+                        then: corvene_core::AfterSharedStorageMove::Nothing,
+                    },
+                    cx,
+                );
             }
         });
         on_menu_action(cx, |_: &OpenFlags, cx| Dispatcher::open_flags(None, cx));
@@ -989,6 +1028,7 @@ pub(crate) fn main() {
         Dispatcher::start_update_checks(cx);
         // on-demand packs installed earlier (extended grammars)
         Dispatcher::load_installed_packs(cx);
+        Dispatcher::load_language_extensions(cx);
         on_menu_action(cx, move |_: &RebaseCurrentBranch, cx| {
             if let Some((id, _)) = current_branch(cx)
                 && !Dispatcher::refuse_merge_while_conflicted(id, cx)
@@ -1019,7 +1059,7 @@ pub(crate) fn main() {
                     .read(cx)
                     .repo_states
                     .get(&id)
-                    .and_then(|r| r.status.as_ref())
+                    .and_then(|r| r.status.as_deref())
                     .map(|st| st.files.iter().map(|f| f.path.clone()).collect())
                     .unwrap_or_default();
                 Dispatcher::request_discard_changes(id, paths, cx);
@@ -1226,6 +1266,32 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         (other, _) if other == "flags" || other.starts_with("flags:") => {
             Dispatcher::open_flags(other.strip_prefix("flags:").map(str::to_string), cx)
         }
+        (other, _)
+            if other == "language-extensions" || other.starts_with("language-extensions:") =>
+        {
+            use corvene_core::extensions::ExtensionsFocus;
+            let consent = other.ends_with(":consent");
+            let focus = match other.strip_prefix("language-extensions:") {
+                Some("consent") => None,
+                Some("find") => Some(ExtensionsFocus::Find),
+                Some("import") => Some(ExtensionsFocus::Import),
+                Some(rest) => rest
+                    .strip_prefix("find=")
+                    .map(|suffix| ExtensionsFocus::Suffix(suffix.to_string())),
+                None => None,
+            };
+            Dispatcher::open_language_extensions(focus, None, cx);
+            if consent {
+                // the extensions load in the background: ask once they have
+                cx.spawn(async move |cx: &mut AsyncApp| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(1500))
+                        .await;
+                    cx.update(Dispatcher::request_first_grammar_build);
+                })
+                .detach();
+            }
+        }
         (other, _) if other.starts_with("preferences") => {
             use corvene_core::PreferencesTab as Tab;
             let tab = match other.strip_prefix("preferences:") {
@@ -1407,6 +1473,27 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         // the sign-in dialog (device flow by default, browser flow link)
         ("sign-in", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx),
         ("sign-in-enterprise", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx),
+        // `GenericGitAuthentication` after a failed fetch (`:user` with the
+        // login known, so only the password is asked for)
+        (name @ ("generic-git-auth" | "generic-git-auth:user"), Some(id)) => {
+            Dispatcher::show_popup(
+                Popup::GenericGitAuthentication {
+                    repo: id,
+                    remote_url: "https://git.example.com/octocat/spoon-knife.git".into(),
+                    host: "git.example.com".into(),
+                    username: name.ends_with(":user").then(|| "octocat".into()),
+                    retry: corvene_core::RetryAction::Fetch,
+                },
+                cx,
+            )
+        }
+        ("ssh-key-passphrase", _) => Dispatcher::show_popup(
+            Popup::SshKeyPassphrase {
+                path: "/Users/octocat/.ssh/id_ed25519".into(),
+                wrong: false,
+            },
+            cx,
+        ),
         ("test-notifications", Some(id)) => {
             Dispatcher::show_popup(Popup::TestNotifications { repo: id }, cx)
         }
@@ -1452,6 +1539,19 @@ fn apply_theme(setting: ThemeSetting, cx: &mut App) {
     for window in cx.windows() {
         window.update(cx, |_, window, _| window.refresh()).ok();
     }
+}
+
+/// Flags `908-opaque-depth-pass` and `909-damage-scissor`: the wgpu
+/// renderer's (Linux, Android) overdraw switches, applied from the next frame.
+fn sync_renderer_flags(flags: &corvene_core::Flags) {
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))]
+    {
+        use corvene_core::flags::ids;
+        gpui_wgpu::set_opaque_depth_pass(flags.bool(ids::OPAQUE_DEPTH_PASS));
+        gpui_wgpu::set_damage_scissor(flags.bool(ids::DAMAGE_SCISSOR));
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "android")))]
+    let _ = flags;
 }
 
 fn phase(started: Instant, what: &str) {

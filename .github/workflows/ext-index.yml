@@ -1,0 +1,62 @@
+# The offline language extension index (tools/ext-index): built weekly from
+# the open registries and published on the rolling `packs` release next to
+# the grammar packs, with its entry added to packs-manifest.json.
+name: Extension index
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PACKS_TAG: packs
+
+jobs:
+  index:
+    name: build and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: crawl
+        run: python3 tools/ext-index/crawl.py language-extensions-index.json --pages 12
+      - name: package
+        id: package
+        run: |
+          version="$(date -u +%Y.%m.%d)"
+          file="language-extensions-index-$version.json.gz"
+          gzip -9 -n -c language-extensions-index.json > "$file"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+          FILE: ${{ steps.package.outputs.file }}
+        run: |
+          base="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$PACKS_TAG"
+          curl -fsSL -o packs-manifest.json "$base/packs-manifest.json" || echo '{"schema": 1, "packs": []}' > packs-manifest.json
+          python3 - "$VERSION" "$FILE" "$base" <<'PY'
+          import hashlib, json, os, sys
+          version, file, base = sys.argv[1:]
+          manifest = json.load(open("packs-manifest.json"))
+          packs = [p for p in manifest.get("packs", []) if p.get("kind") != "language-extensions-index"]
+          packs.append({
+              "name": "language-extensions-index", "version": version, "min_app": "0.1.0",
+              "url": f"{base}/{file}", "sha256": hashlib.sha256(open(file, "rb").read()).hexdigest(),
+              "size": os.path.getsize(file), "kind": "language-extensions-index",
+          })
+          manifest["packs"] = packs
+          manifest.setdefault("schema", 1)
+          json.dump(manifest, open("packs-manifest.json", "w"), indent=1)
+          PY
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: ${{ steps.package.outputs.file }}
+        run: |
+          gh release view "$PACKS_TAG" >/dev/null 2>&1 || gh release create "$PACKS_TAG" --title "Packs" --notes "On-demand components; not an app release." --prerelease
+          gh release upload "$PACKS_TAG" "$FILE" packs-manifest.json --clobber

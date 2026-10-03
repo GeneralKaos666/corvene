@@ -1,0 +1,25 @@
+# Baz
+'scopeName': 'source.baz'
+'name': 'Baz'
+'fileTypes': [
+  'baz'
+  'Bazfile'
+]
+'firstLineMatch': '^#!.*\\bbaz\\b'
+'patterns': [
+  {
+    'match': '\\b(module|import)\\b'
+    'name': 'keyword.control.baz'
+  }
+  {
+    'begin': "'"
+    'end': "'"
+    'name': 'string.quoted.single.baz'
+  }
+  {
+    'match': '''
+      \\$[A-Za-z_]+
+    '''
+    'name': 'variable.other.baz'
+  }
+]

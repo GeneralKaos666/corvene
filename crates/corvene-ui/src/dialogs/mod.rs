@@ -22,8 +22,10 @@ mod fork_dialogs;
 mod history_dialogs;
 mod import_git_config;
 mod import_github_desktop;
+mod language_extensions;
 mod mco_dialogs;
 mod move_to_applications_folder;
+mod move_to_shared_storage;
 mod open_pull_request;
 mod preferences;
 mod pull_request_notifications;
@@ -534,6 +536,16 @@ impl DialogHost {
             Popup::Flags { query } => cx
                 .new(|cx| FlagsDialog::new(state, query.clone(), window, cx))
                 .into(),
+            Popup::LanguageExtensions { focus, .. } => cx
+                .new(|cx| {
+                    language_extensions::LanguageExtensionsDialog::new(
+                        state,
+                        focus.clone(),
+                        window,
+                        cx,
+                    )
+                })
+                .into(),
             Popup::RepositorySettings { repo, tab } => cx
                 .new(|cx| RepositorySettingsDialog::new(state, *repo, *tab, window, cx))
                 .into(),
@@ -588,6 +600,17 @@ impl DialogHost {
                 .into(),
             Popup::ExternalEditorError { .. } | Popup::ShellError { .. } => cx
                 .new(|_| IntegrationErrorDialog::new(popup.clone()))
+                .into(),
+            Popup::MoveToSharedStorage { repo, then } => cx
+                .new(|cx| {
+                    move_to_shared_storage::MoveToSharedStorageDialog::new(
+                        state,
+                        *repo,
+                        then.clone(),
+                        window,
+                        cx,
+                    )
+                })
                 .into(),
             Popup::UnreachableCommits { repo, tab } => cx
                 .new(|_| UnreachableCommitsDialog::new(state, *repo, *tab))

@@ -93,6 +93,7 @@ impl Dispatcher {
             cloning: Default::default(),
             ahead_behind: Default::default(),
             branch_pruner_generation: 0,
+            shared_storage_move: None,
             pending_aliases: Vec::new(),
             sign_in_store: SignInStore::new(sign_in_accounts.clone()),
             sign_in_accounts,
@@ -125,6 +126,7 @@ impl Dispatcher {
             pending_open_in_desktop: None,
             update: crate::updater::UpdateState::default(),
             packs: crate::packs::PacksState::default(),
+            extensions: crate::extensions::ExtensionsState::default(),
             alive: crate::alive::AliveState::default(),
         });
         AppState::install(state.clone(), cx);
@@ -951,6 +953,7 @@ impl Dispatcher {
                         "all" => corvene_git::IgnoreSubmodules::All,
                         _ => corvene_git::IgnoreSubmodules::AsConfigured,
                     },
+                    in_process: s.flags.bool(crate::flags::ids::IN_PROCESS_STATUS),
                 },
                 // GHD `RecentBranchesLimit` is 5
                 usize::try_from(s.flags.number(crate::flags::ids::RECENT_BRANCHES_COUNT))
@@ -970,20 +973,25 @@ impl Dispatcher {
             Self::recover_missing_worktree(id, path, cx);
             return;
         }
-        let already_running = state.update(cx, |s, _| {
+        let started = Instant::now();
+        // the status the new one is merged with off the main thread
+        // (`changes_state::merge_changed_files`), and whether that merge
+        // drops partial selections
+        let starting = state.update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
             if rs.loading {
                 rs.refresh_pending = true;
-                return true;
+                return None;
             }
             rs.loading = true;
-            rs.refresh_started = Some(Instant::now());
+            rs.refresh_started = Some(started);
             // no notify: a refresh that changes nothing re-renders nothing
-            false
+            Some((rs.status.clone(), rs.clear_partial_state))
         });
-        if already_running {
+        let Some((previous_status, merged_clearing)) = starting else {
             return;
-        }
+        };
+        let merged_from = previous_status.clone();
         // `708-changes-busy-indicator`: the spinner shows once a refresh has
         // taken this long
         if state
@@ -1005,6 +1013,9 @@ impl Dispatcher {
             })
             .detach();
         }
+        // the branch and worktrees are ready long before a big tree's
+        // status: they are shown as soon as they are read
+        let (early_tx, early_rx) = async_channel::bounded(1);
         let work = cx.background_executor().spawn(async move {
             let result = (|| {
                 let Some(git) = git else {
@@ -1016,12 +1027,20 @@ impl Dispatcher {
                 // processes. GHD runs these one after another.
                 std::thread::scope(|scope| {
                     let path = path.as_path();
+                    let previous = previous_status.as_deref();
                     let status = spawn_git(scope, &git, move |git| {
                         let started = Instant::now();
-                        // the previous selections are carried over on the
-                        // main thread (`changes_state::apply_changed_files`)
                         let status =
-                            corvene_git::get_status_with(git.clone(), path, None, status_options);
+                            corvene_git::get_status_with(git.clone(), path, None, status_options)
+                                // GHD `updateChangedFiles`' merge, here: it
+                                // copies and sorts every file
+                                .map(|status| {
+                                    crate::changes_state::merge_changed_files(
+                                        status,
+                                        previous,
+                                        merged_clearing,
+                                    )
+                                });
                         // `903-refresh-stale-index`: a slow status is most often
                         // one re-reading files whose stat data went stale
                         if refresh_stale_index
@@ -1054,6 +1073,8 @@ impl Dispatcher {
                     });
                     let configured = spawn_git(scope, &git, corvene_git::configured_default_branch);
                     let info = open_repository(path)?;
+                    let worktrees = join(worktrees);
+                    let _ = early_tx.try_send((info.clone(), worktrees.clone()));
                     let remote = crate::git_store::default_remote_name(&info).map(str::to_string);
                     let head = remote.clone().map(|remote| {
                         let workdir = info.workdir.clone();
@@ -1187,7 +1208,7 @@ impl Dispatcher {
                                 .flatten()
                         }),
                         pull_with_rebase: join(pull_with_rebase),
-                        worktrees: join(worktrees),
+                        worktrees,
                         upstream_rewritten,
                         last_local_commit: last_local_commit.map(|c| crate::state::LastCommit {
                             at: std::time::UNIX_EPOCH
@@ -1195,6 +1216,14 @@ impl Dispatcher {
                             sha: c.sha,
                             summary: c.summary,
                         }),
+                    };
+                    // an unchanged status keeps the previous allocation, so
+                    // the swap below is a pointer compare and views keep
+                    // their caches (100,000 files take a while to compare
+                    // and re-filter)
+                    let status = match previous_status.as_ref() {
+                        Some(previous) if **previous == status => previous.clone(),
+                        _ => Arc::new(status),
                     };
                     Ok((info, ahead_behind, Some(status), Some(extras)))
                 })
@@ -1209,8 +1238,41 @@ impl Dispatcher {
             (result, unsafe_main)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
+            let Ok((mut info, worktrees)) = early_rx.recv().await else {
+                return;
+            };
+            cx.update(|cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let slash_remotes = s.flags.bool(crate::flags::ids::REMOTE_NAMES_WITH_SLASHES);
+                    let rs = s.repo_state_mut(id);
+                    if rs.refresh_started != Some(started) {
+                        return;
+                    }
+                    if !slash_remotes {
+                        forget_remote_names(&mut info);
+                    }
+                    let mut changed = set(&mut rs.info, Some(info));
+                    changed |= set(&mut rs.worktrees, worktrees);
+                    if changed {
+                        cx.notify();
+                    }
+                })
+            });
+        })
+        .detach();
+        cx.spawn(async move |cx: &mut AsyncApp| {
             let (result, unsafe_main) = work.await;
             cx.update(|cx| {
+                // a worktree switch abandons the running refresh (it read
+                // the old directory) and starts its own
+                let superseded = Self::state(cx)
+                    .read(cx)
+                    .repo_states
+                    .get(&id)
+                    .is_none_or(|rs| rs.refresh_started != Some(started));
+                if superseded {
+                    return;
+                }
                 let snapshots = result
                     .as_ref()
                     .ok()
@@ -1291,8 +1353,15 @@ impl Dispatcher {
                                 }
                             }
                             if let Some(mut status) = status {
-                                if exclude_untracked {
-                                    exclude_new_untracked(&mut status, repo_state.status.as_ref());
+                                let same = repo_state
+                                    .status
+                                    .as_ref()
+                                    .is_some_and(|s| Arc::ptr_eq(s, &status));
+                                if exclude_untracked && !same {
+                                    exclude_new_untracked(
+                                        Arc::make_mut(&mut status),
+                                        repo_state.status.as_deref(),
+                                    );
                                 }
                                 let conflict_state = crate::mco::derive_conflict_state(
                                     &status,
@@ -1303,9 +1372,11 @@ impl Dispatcher {
                                 // while their files are still changed
                                 let clear_partial_state =
                                     std::mem::take(&mut repo_state.clear_partial_state);
-                                changed |= crate::changes_state::apply_changed_files(
+                                changed |= crate::changes_state::apply_merged_files(
                                     repo_state,
                                     status,
+                                    merged_from.as_ref(),
+                                    merged_clearing,
                                     clear_partial_state,
                                 );
                                 selected = repo_state.selected_file.clone();
@@ -1554,7 +1625,7 @@ impl Dispatcher {
             let Some(path) = rs.selected_file.as_ref() else {
                 return;
             };
-            let Some(status) = rs.status.as_ref() else {
+            let Some(status) = rs.status.as_deref() else {
                 return;
             };
             let Some(file) = status.files.iter().find(|f| &f.path == path).cloned() else {
@@ -1644,13 +1715,17 @@ impl Dispatcher {
                     .collect(),
                 _ => Default::default(),
             };
-            if let Some(f) = rs
-                .status
-                .as_mut()
-                .and_then(|st| st.files.iter_mut().find(|f| f.path == path))
+            // usually unchanged: only then copy the shared status
+            let update = rs.status.as_deref().and_then(|st| {
+                let i = st.files.iter().position(|f| f.path == path)?;
+                let selection = st.files[i].selection.with_selectable_lines(selectable);
+                (selection != st.files[i].selection).then_some((i, selection))
+            });
+            if let Some((i, selection)) = update
+                && let Some(st) = rs.status.as_mut().map(Arc::make_mut)
             {
-                let selection = f.selection.with_selectable_lines(selectable);
-                changed |= set(&mut f.selection, selection);
+                st.files[i].selection = selection;
+                changed = true;
             }
             // the same diff again (a refresh): nothing to draw
             if changed {
@@ -1672,7 +1747,7 @@ impl Dispatcher {
         };
         let (Some(info), Some(status), Some(selected)) = (
             rs.info.as_ref(),
-            rs.status.as_ref(),
+            rs.status.as_deref(),
             rs.selected_file.as_ref(),
         ) else {
             return;
@@ -1961,6 +2036,10 @@ impl Dispatcher {
             };
             (Self::ordered_selection(rs), rs.commits_contiguous)
         };
+        let in_process = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
         if ordered.is_empty() || (ordered.len() > 1 && !contiguous) {
             return;
         }
@@ -1971,7 +2050,7 @@ impl Dispatcher {
         }
         let key = ordered.clone();
         let task = cx.background_executor().spawn(async move {
-            let data = compute_changeset(git, &workdir, &ordered)?;
+            let data = compute_changeset(git, &workdir, &ordered, in_process)?;
             crate::diff_cache::store_changeset(&workdir, &ordered, data.clone());
             Ok(data)
         });
@@ -2120,6 +2199,7 @@ impl Dispatcher {
             return;
         }
         let hide_whitespace = s.settings.hide_whitespace_in_history_diff;
+        let in_process = s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
         let (Some(git), Some(rs)) = (s.git.clone(), s.repo_states.get(&id)) else {
             return;
         };
@@ -2151,7 +2231,9 @@ impl Dispatcher {
                     let data = match crate::diff_cache::changeset(&workdir, &shas) {
                         Some(data) => data,
                         None => {
-                            let Ok(data) = compute_changeset(git.clone(), &workdir, &shas) else {
+                            let Ok(data) =
+                                compute_changeset(git.clone(), &workdir, &shas, in_process)
+                            else {
                                 continue;
                             };
                             crate::diff_cache::store_changeset(&workdir, &shas, data.clone());
@@ -2260,7 +2342,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|rs| rs.status.as_ref())
+            .and_then(|rs| rs.status.as_deref())
             .is_some_and(|st| !st.files.is_empty())
     }
 
@@ -2607,11 +2689,12 @@ impl Dispatcher {
 
     /// The local-changes half of [`Self::request_undo_commit`].
     pub fn request_undo_commit_after_tags(id: u64, cx: &mut App) {
-        let (confirm, overlap_only) = {
+        let (confirm, overlap_only, in_process) = {
             let s = Self::state(cx).read(cx);
             (
                 s.settings.confirm_undo_commit,
                 s.flags.bool(crate::flags::ids::UNDO_WARNS_ONLY_ON_OVERLAP),
+                s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES),
             )
         };
         if !(confirm && Self::working_directory_dirty(id, cx)) {
@@ -2626,7 +2709,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|rs| rs.status.as_ref())
+            .and_then(|rs| rs.status.as_deref())
             .map(|st| {
                 st.files
                     .iter()
@@ -2634,9 +2717,9 @@ impl Dispatcher {
                     .collect()
             })
             .unwrap_or_default();
-        let task = cx
-            .background_executor()
-            .spawn(async move { corvene_git::get_changed_files(git, &workdir, "HEAD") });
+        let task = cx.background_executor().spawn(async move {
+            corvene_git::get_changed_files(git, &workdir, "HEAD", in_process)
+        });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let changed = task.await;
             cx.update(|cx| {
@@ -2776,7 +2859,7 @@ impl Dispatcher {
             let rs = s.repo_states.get(&id);
             let info = rs.and_then(|r| r.info.as_ref());
             (
-                rs.and_then(|r| r.status.as_ref())
+                rs.and_then(|r| r.status.as_deref())
                     .is_some_and(|st| !st.files.is_empty()),
                 rs.is_some_and(|r| r.desktop_stash().is_some()),
                 info.is_some_and(|i| matches!(i.tip, corvene_models::Tip::Valid { .. })),
@@ -2963,7 +3046,7 @@ impl Dispatcher {
         let skip = s
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| {
                 st.files
                     .iter()
@@ -3617,7 +3700,7 @@ impl Dispatcher {
     /// Toggle the include checkbox of one file (`_changeFileIncluded`).
     pub fn toggle_file_included(id: u64, path: String, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(status) = s.repo_state_mut(id).status.as_mut() {
+            if let Some(status) = s.repo_state_mut(id).status.as_mut().map(Arc::make_mut) {
                 if let Some(f) = status.files.iter_mut().find(|f| f.path == path) {
                     // GHD: an indeterminate checkbox click checks it (Partial -> All)
                     f.selection = if f.selection.kind() == DiffSelectionType::All {
@@ -3659,6 +3742,7 @@ impl Dispatcher {
                 .repo_state_mut(id)
                 .status
                 .as_mut()
+                .map(Arc::make_mut)
                 .and_then(|st| st.files.iter_mut().find(|f| f.path == path))
             {
                 f.selection = edit(&f.selection);
@@ -3671,8 +3755,15 @@ impl Dispatcher {
     /// the files currently visible through the filter.
     pub fn set_files_included(id: u64, paths: Vec<String>, include: bool, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(status) = s.repo_state_mut(id).status.as_mut() {
-                for f in status.files.iter_mut().filter(|f| paths.contains(&f.path)) {
+            if let Some(status) = s.repo_state_mut(id).status.as_mut().map(Arc::make_mut) {
+                // a set: the header checkbox passes every visible path
+                let paths: std::collections::HashSet<&str> =
+                    paths.iter().map(String::as_str).collect();
+                for f in status
+                    .files
+                    .iter_mut()
+                    .filter(|f| paths.contains(f.path.as_str()))
+                {
                     f.selection = if include {
                         f.selection.select_all()
                     } else {
@@ -3705,7 +3796,7 @@ impl Dispatcher {
     /// Header checkbox (`_changeIncludeAllFiles`).
     pub fn toggle_include_all(id: u64, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(status) = s.repo_state_mut(id).status.as_mut() {
+            if let Some(status) = s.repo_state_mut(id).status.as_mut().map(Arc::make_mut) {
                 let select_all = status.include_all() != Some(true);
                 for f in &mut status.files {
                     f.selection = if select_all {
@@ -4051,10 +4142,11 @@ impl Dispatcher {
     }
 
     /// Android: the system page where the user grants "All files access",
-    /// so repositories on shared storage can be used in place.
-    #[cfg(target_os = "android")]
+    /// so repositories on shared storage can be used in place. Nothing
+    /// elsewhere.
     pub fn request_all_files_access(cx: &mut App) {
         let _ = cx;
+        #[cfg(target_os = "android")]
         if let Some(bridge) = corvene_platform::android::bridge() {
             bridge.request_all_files_access();
         }
@@ -4102,7 +4194,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| {
                 st.files
                     .iter()
@@ -4119,7 +4211,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .is_some_and(|st| {
                 !st.has_conflicts()
                     && !st.hidden_index_entries
@@ -4324,11 +4416,14 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| {
+                // Discard All passes every path: a set, not a search per file
+                let paths: std::collections::HashSet<&str> =
+                    paths.iter().map(String::as_str).collect();
                 st.files
                     .iter()
-                    .filter(|f| paths.contains(&f.path))
+                    .filter(|f| paths.contains(f.path.as_str()))
                     .cloned()
                     .collect()
             })
@@ -4373,7 +4468,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| st.files.clone())
             .unwrap_or_default();
         let flags = &Self::state(cx).read(cx).flags;
@@ -4416,7 +4511,7 @@ impl Dispatcher {
             let total = s
                 .repo_states
                 .get(&id)
-                .and_then(|r| r.status.as_ref())
+                .and_then(|r| r.status.as_deref())
                 .map(|st| st.files.len())
                 .unwrap_or(0);
             (s.settings.confirm_discard_changes, total)
@@ -4589,11 +4684,13 @@ impl Dispatcher {
             };
             let files: Vec<_> = rs
                 .status
-                .as_ref()
+                .as_deref()
                 .map(|st| {
+                    let paths: std::collections::HashSet<&str> =
+                        paths.iter().map(String::as_str).collect();
                     st.files
                         .iter()
-                        .filter(|f| paths.contains(&f.path))
+                        .filter(|f| paths.contains(f.path.as_str()))
                         .cloned()
                         .collect()
                 })
@@ -5340,7 +5437,7 @@ struct RefreshExtras {
 /// GHD parses a branch's remote name up to the first `/`
 /// (`remote-names-with-slashes` off): drop the names matched against the
 /// configured remotes so [`corvene_models::Branch`] falls back to that split.
-fn forget_remote_names(info: &mut corvene_models::RepositoryInfo) {
+pub(crate) fn forget_remote_names(info: &mut corvene_models::RepositoryInfo) {
     for branch in &mut info.branches {
         branch.remote_name = None;
     }
@@ -5425,15 +5522,17 @@ fn compute_working_diff(
 }
 
 /// The changed files of one commit or of a contiguous range (oldest first).
+/// `in_process`: flag `907-in-process-commit-files`.
 fn compute_changeset(
     git: Arc<corvene_git::GitBinary>,
     workdir: &Path,
     ordered: &[String],
+    in_process: bool,
 ) -> corvene_git::error::Result<Arc<corvene_models::ChangesetData>> {
     if ordered.len() > 1 {
-        corvene_git::get_commit_range_changed_files(git, workdir, ordered)
+        corvene_git::get_commit_range_changed_files(git, workdir, ordered, in_process)
     } else {
-        corvene_git::get_changed_files(git, workdir, &ordered[0])
+        corvene_git::get_changed_files(git, workdir, &ordered[0], in_process)
     }
     .map(Arc::new)
 }
@@ -5528,9 +5627,12 @@ fn exclude_new_untracked(
     status: &mut corvene_models::WorkingDirectoryStatus,
     previous: Option<&corvene_models::WorkingDirectoryStatus>,
 ) {
+    let known: std::collections::HashSet<&str> = previous
+        .map(|p| p.files.iter().map(|f| f.path.as_str()).collect())
+        .unwrap_or_default();
     for file in &mut status.files {
         if file.status.kind == corvene_models::FileStatusKind::Untracked
-            && !previous.is_some_and(|p| p.files.iter().any(|f| f.path == file.path))
+            && !known.contains(file.path.as_str())
         {
             file.selection = corvene_models::DiffSelection::none();
         }
@@ -5539,7 +5641,7 @@ fn exclude_new_untracked(
 
 /// Node's `path.resolve(path)`: made absolute against the current directory,
 /// with `.` and `..` components folded lexically (symlinks untouched).
-fn resolve_path(path: &std::path::Path) -> PathBuf {
+pub(crate) fn resolve_path(path: &std::path::Path) -> PathBuf {
     use std::path::Component;
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let mut out = PathBuf::new();
@@ -5602,7 +5704,8 @@ pub(crate) fn replace_diff(
 
 /// Whether any of `committed` is among `local` (flag `818`).
 fn paths_overlap<'a>(mut committed: impl Iterator<Item = &'a String>, local: &[String]) -> bool {
-    committed.any(|p| local.contains(p))
+    let local: std::collections::HashSet<&str> = local.iter().map(String::as_str).collect();
+    committed.any(|p| local.contains(p.as_str()))
 }
 
 #[cfg(test)]
@@ -5708,12 +5811,12 @@ mod replace_diff_tests {
 
 /// Android: what a repository outside the app-private filesystem needs
 /// before git will work in it. Shared storage belongs to another user id
-/// (git's "dubious ownership") and keeps neither file modes nor symbolic
-/// links; a folder imported through the Storage Access Framework arrived
-/// without its file modes. Failures are left for the commands that follow to
-/// report.
+/// (git's "dubious ownership"), keeps neither file modes nor symbolic
+/// links and folds case; a folder imported through the Storage Access
+/// Framework arrived without its file modes. Failures are left for the
+/// commands that follow to report.
 #[cfg(target_os = "android")]
-fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
+pub(crate) fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
     if !path.join(".git").exists() {
         return;
     }
@@ -5724,7 +5827,10 @@ fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
             let _ = corvene_git::add_safe_directory(git.clone(), path);
         }
         let _ = corvene_git::set_local_config_value(git.clone(), path, "core.symlinks", "false");
-        let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
+        let _ = corvene_git::set_local_config_value(git.clone(), path, "core.filemode", "false");
+        if crate::shared_storage::folds_case(&path.join(".git")) {
+            let _ = corvene_git::set_local_config_value(git, path, "core.ignorecase", "true");
+        }
     } else if imported {
         let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
     }

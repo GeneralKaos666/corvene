@@ -1,0 +1,135 @@
+---
+import { REPO_URL } from "../lib/github";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const path = Astro.url.pathname.replace(/\/$/, "");
+const inDocs = path.startsWith(`${base}/docs`);
+
+const links = [
+  { href: `${base}/#features`, label: "Features" },
+  { href: `${base}/#benchmarks`, label: "Benchmarks" },
+  { href: `${base}/#downloads`, label: "Downloads" },
+  { href: `${base}/#faq`, label: "FAQ" },
+  { href: `${base}/docs/`, label: "Docs", current: inDocs },
+];
+---
+
+<header class="sticky top-0 z-50 w-full border-b border-edge bg-canvas/90 backdrop-blur-md">
+  <div class="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center gap-6">
+      <a href={`${base}/`} class="group flex items-center gap-2.5" aria-label="Corvene home">
+        <img src={`${base}/icon/Corvene-256.png`} alt="" width="28" height="28" class="h-7 w-7 object-contain" />
+        <span class="text-lg font-bold tracking-tight text-fg">Corvene</span>
+      </a>
+
+      <nav aria-label="Primary" class="hidden items-center gap-1 md:flex">
+        {
+          links.map((link) => (
+            <a
+              href={link.href}
+              aria-current={link.current ? "page" : undefined}
+              class={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors hover:bg-canvas-subtle hover:text-fg ${
+                link.current ? "text-fg" : "text-fg-secondary"
+              }`}
+            >
+              {link.label}
+            </a>
+          ))
+        }
+      </nav>
+    </div>
+
+    <div class="flex items-center gap-2 sm:gap-3">
+      <a
+        href={REPO_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="btn-default h-8 gap-1.5 px-2.5 py-0 text-xs"
+        aria-label="Corvene on GitHub"
+      >
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+          <path
+            d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"
+          ></path>
+        </svg>
+        <span class="hidden sm:inline">GitHub</span>
+        <span id="github-star-count" class="hidden rounded bg-canvas-hover px-1.5 font-mono text-[11px] tabular-nums text-fg" hidden></span>
+      </a>
+
+      <a href={`${base}/#download`} class="btn-primary h-8 px-3.5 py-0 text-xs">
+        <svg class="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14ZM7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z" />
+        </svg>
+        <span>Download</span>
+      </a>
+
+      <button
+        id="menu-toggle"
+        type="button"
+        class="btn-default h-8 w-8 p-0 md:hidden"
+        aria-controls="mobile-nav"
+        aria-expanded="false"
+        aria-label="Open menu"
+      >
+        <svg class="menu-icon h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z" />
+        </svg>
+        <svg class="close-icon hidden h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <nav id="mobile-nav" aria-label="Primary" class="hidden border-t border-edge bg-canvas md:hidden" hidden>
+    <ul class="mx-auto max-w-7xl space-y-1 px-4 py-3 sm:px-6">
+      {
+        links.map((link) => (
+          <li>
+            <a
+              href={link.href}
+              aria-current={link.current ? "page" : undefined}
+              class="block rounded-md px-3 py-2 text-sm font-medium text-fg-secondary hover:bg-canvas-subtle hover:text-fg"
+            >
+              {link.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </nav>
+</header>
+
+<script>
+  import { fetchStarCount, formatCount } from "../lib/github";
+
+  const toggle = document.getElementById("menu-toggle");
+  const nav = document.getElementById("mobile-nav");
+  if (toggle && nav) {
+    const setOpen = (open: boolean) => {
+      nav.hidden = !open;
+      nav.classList.toggle("hidden", !open);
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+      toggle.querySelector(".menu-icon")?.classList.toggle("hidden", open);
+      toggle.querySelector(".close-icon")?.classList.toggle("hidden", !open);
+    };
+    toggle.addEventListener("click", () => setOpen(nav.hidden));
+    nav.addEventListener("click", (event) => {
+      if ((event.target as Element).closest("a")) setOpen(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !nav.hidden) setOpen(false);
+    });
+  }
+
+  fetchStarCount().then((count) => {
+    const el = document.getElementById("github-star-count");
+    if (el && count !== null) {
+      el.textContent = formatCount(count);
+      el.hidden = false;
+      el.classList.remove("hidden");
+      el.setAttribute("aria-label", `${count} stars`);
+    }
+  });
+</script>

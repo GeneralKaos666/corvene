@@ -65,6 +65,7 @@ pub fn app_state() -> TestAppState {
         cloning: Default::default(),
         ahead_behind: Default::default(),
         branch_pruner_generation: 0,
+        shared_storage_move: None,
         pending_aliases: Vec::new(),
         sign_in_store: corvene_core::sign_in::SignInStore::new(sign_in_accounts.clone()),
         sign_in_accounts,
@@ -97,6 +98,7 @@ pub fn app_state() -> TestAppState {
         pending_open_in_desktop: None,
         update: Default::default(),
         packs: Default::default(),
+        extensions: Default::default(),
         alive: Default::default(),
     };
     TestAppState { state, _dir: dir }

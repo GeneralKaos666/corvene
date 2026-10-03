@@ -13,7 +13,7 @@ use corvene_core::Dispatcher;
 use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
-use crate::widgets::text_box;
+use crate::widgets::password_text_box;
 
 pub struct SshKeyPassphraseDialog {
     path: PathBuf,
@@ -55,10 +55,9 @@ impl Render for SshKeyPassphraseDialog {
                  one, in storage no other application can read, so that fetches in the \
                  background can use it.",
             )
-            .child(text_box(
+            .child(password_text_box(
                 "ssh-key-passphrase-input",
                 &self.passphrase,
-                None,
                 window,
                 cx,
             ))

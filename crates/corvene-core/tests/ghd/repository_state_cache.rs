@@ -125,10 +125,13 @@ fn can_update_changes_state_for_a_repository() {
 
     // cache.updateChangesState(repository, () => ({ workingDirectory, commitMessage, showCoAuthoredBy }))
     let changes_state = cache.repo_state_mut(repository.id);
-    changes_state.status = Some(WorkingDirectoryStatus {
-        files,
-        ..Default::default()
-    });
+    changes_state.status = Some(
+        WorkingDirectoryStatus {
+            files,
+            ..Default::default()
+        }
+        .into(),
+    );
     changes_state.commit_message = CommitMessage::new(summary, None);
     changes_state.show_co_authored_by = true;
 

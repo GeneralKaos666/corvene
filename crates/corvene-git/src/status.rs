@@ -33,6 +33,9 @@ pub struct StatusOptions {
     /// `--ignore-submodules=<when>`; GHD passes nothing, so only
     /// `submodule.<name>.ignore` applies. Flag `ignore-submodules`.
     pub ignore_submodules: IgnoreSubmodules,
+    /// Read the status in-process with gitoxide (`status_gix.rs`), git
+    /// only when that fails. Flag `906-in-process-status`.
+    pub in_process: bool,
 }
 
 /// What `git status` leaves out about submodules.
@@ -72,23 +75,32 @@ pub fn get_status_with(
                     "no" | "false" | "off" | "0"
                 )
             });
-    let untracked = if hide_untracked {
-        "--untracked-files=no"
-    } else {
-        "--untracked-files=all"
+    let in_process = options
+        .in_process
+        .then(|| crate::status_gix::status(workdir, options, hide_untracked))
+        .flatten();
+    let mut status = match in_process {
+        Some(status) => status,
+        None => {
+            let untracked = if hide_untracked {
+                "--untracked-files=no"
+            } else {
+                "--untracked-files=all"
+            };
+            let mut args = vec!["status", untracked];
+            match options.ignore_submodules {
+                IgnoreSubmodules::AsConfigured => {}
+                IgnoreSubmodules::Dirty => args.push("--ignore-submodules=dirty"),
+                IgnoreSubmodules::All => args.push("--ignore-submodules=all"),
+            }
+            args.extend(["--branch", "--porcelain=2", "-z"]);
+            let out = GitCommand::new(git.clone())
+                .args(args)
+                .current_dir(workdir)
+                .run()?;
+            parse_porcelain_v2(&out.stdout)
+        }
     };
-    let mut args = vec!["status", untracked];
-    match options.ignore_submodules {
-        IgnoreSubmodules::AsConfigured => {}
-        IgnoreSubmodules::Dirty => args.push("--ignore-submodules=dirty"),
-        IgnoreSubmodules::All => args.push("--ignore-submodules=all"),
-    }
-    args.extend(["--branch", "--porcelain=2", "-z"]);
-    let out = GitCommand::new(git.clone())
-        .args(args)
-        .current_dir(workdir)
-        .run()?;
-    let mut status = parse_porcelain_v2(&out.stdout);
     let git_dir = crate::paths::git_dir(workdir);
     status.merge_head_found = git_dir.join("MERGE_HEAD").exists();
     status.rebase_in_progress =
@@ -100,9 +112,16 @@ pub fn get_status_with(
         apply_conflict_details(git, workdir, &mut status);
     }
     if let Some(prev) = previous {
+        // by path: a linear search per file is quadratic, minutes on a tree
+        // with 100,000 untracked files
+        let old: std::collections::HashMap<&str, &corvene_models::DiffSelection> = prev
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), &f.selection))
+            .collect();
         for file in &mut status.files {
-            if let Some(old) = prev.files.iter().find(|f| f.path == file.path) {
-                file.selection = old.selection.clone();
+            if let Some(selection) = old.get(file.path.as_str()) {
+                file.selection = (*selection).clone();
             }
         }
     }
@@ -179,10 +198,34 @@ pub fn working_directory_line_stats(
         Err(err) => return Err(err),
     };
     let mut stats = parse_numstat(&out.stdout);
+    // untracked files are counted again only when their size or mtime moved:
+    // reading every file of a 100,000-file untracked tree on each refresh
+    // takes seconds
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+    type Counts = HashMap<String, (u64, std::time::SystemTime, Option<u64>)>;
+    static SEEN: LazyLock<Mutex<HashMap<std::path::PathBuf, Counts>>> =
+        LazyLock::new(Default::default);
+    let previous = SEEN
+        .lock()
+        .ok()
+        .and_then(|mut seen| seen.remove(workdir))
+        .unwrap_or_default();
+    let mut counted = Counts::new();
     for file in &status.files {
-        if file.status.kind == FileStatusKind::Untracked
-            && let Some(lines) = untracked_line_count(&workdir.join(&file.path))
-        {
+        if file.status.kind != FileStatusKind::Untracked {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(workdir.join(&file.path)) else {
+            continue;
+        };
+        let stamp = (meta.len(), meta.modified().unwrap_or(std::time::UNIX_EPOCH));
+        let lines = match previous.get(&file.path) {
+            Some(&(len, mtime, lines)) if (len, mtime) == stamp => lines,
+            _ => untracked_line_count(&workdir.join(&file.path), &meta),
+        };
+        counted.insert(file.path.clone(), (stamp.0, stamp.1, lines));
+        if let Some(lines) = lines {
             stats.insert(
                 file.path.clone(),
                 LineStats {
@@ -191,6 +234,9 @@ pub fn working_directory_line_stats(
                 },
             );
         }
+    }
+    if let Ok(mut seen) = SEEN.lock() {
+        seen.insert(workdir.to_path_buf(), counted);
     }
     Ok(stats)
 }
@@ -209,8 +255,7 @@ fn parse_numstat(stdout: &[u8]) -> std::collections::HashMap<String, LineStats> 
         .collect()
 }
 
-fn untracked_line_count(path: &Path) -> Option<u64> {
-    let meta = std::fs::metadata(path).ok()?;
+fn untracked_line_count(path: &Path, meta: &std::fs::Metadata) -> Option<u64> {
     if !meta.is_file() || meta.len() > UNTRACKED_LINE_COUNT_LIMIT {
         return None;
     }
@@ -269,8 +314,7 @@ pub fn parse_porcelain_v2(stdout: &[u8]) -> WorkingDirectoryStatus {
             _ => {}
         }
     }
-    status.hidden_index_entries = files.hidden_index_entries;
-    status.files = files.slots.into_iter().flatten().collect();
+    files.finish(&mut status);
     status
 }
 
@@ -349,9 +393,10 @@ fn parse_header(rest: &str, status: &mut WorkingDirectoryStatus) {
 
 /// GHD `buildStatusMap`: the changed files keyed on their path, in git's
 /// order (a `Map` keeps insertion order). Removed entries leave an empty
-/// slot so the index stays valid.
+/// slot so the index stays valid. The in-process status (`status_gix.rs`)
+/// builds its files with it too, fed in git's order.
 #[derive(Default)]
-struct FileMap {
+pub(crate) struct FileMap {
     slots: Vec<Option<WorkingDirectoryFileChange>>,
     index: std::collections::HashMap<String, usize>,
     /// An index entry was left out
@@ -360,7 +405,7 @@ struct FileMap {
 }
 
 impl FileMap {
-    fn push(
+    pub(crate) fn push(
         &mut self,
         path: &str,
         old_path: Option<String>,
@@ -409,6 +454,13 @@ impl FileMap {
                 self.slots.push(Some(file));
             }
         }
+    }
+
+    /// The files in insertion order, and whether an index entry was left
+    /// out, into `status`.
+    pub(crate) fn finish(self, status: &mut WorkingDirectoryStatus) {
+        status.hidden_index_entries = self.hidden_index_entries;
+        status.files = self.slots.into_iter().flatten().collect();
     }
 }
 

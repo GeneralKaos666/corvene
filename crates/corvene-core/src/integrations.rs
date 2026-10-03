@@ -420,6 +420,7 @@ impl Dispatcher {
                                 suggest_default_editor: false,
                                 open_preferences: true,
                             },
+                            None,
                             cx,
                         );
                     }
@@ -430,14 +431,35 @@ impl Dispatcher {
         let editor = match editors::find_editor_or_default(&editors, selected.as_deref()) {
             Ok(Some(editor)) => editor.clone(),
             Ok(None) => {
-                Self::show_editor_error(editors::no_editor_error(), cx);
+                Self::show_editor_error(editors::no_editor_error(), None, cx);
                 return;
             }
             Err(err) => {
-                Self::show_editor_error(err, cx);
+                Self::show_editor_error(err, None, cx);
                 return;
             }
         };
+        // Android: a Termux editor cannot reach Corvene's own storage; the
+        // error offers to move the repository (`shared_storage`)
+        #[cfg(target_os = "android")]
+        if editor.bundle_id.starts_with(editors::TERMUX_PREFIX)
+            && let Some(offer) = Self::shared_storage_move_for(
+                &path,
+                |relative| crate::AfterSharedStorageMove::OpenEditor { relative, line },
+                cx,
+            )
+        {
+            Self::show_editor_error(
+                editors::EditorError {
+                    message: corvene_platform::android::TERMUX_PRIVATE_STORAGE.to_string(),
+                    suggest_default_editor: false,
+                    open_preferences: false,
+                },
+                Some(offer),
+                cx,
+            );
+            return;
+        }
         spawn_bg(
             cx,
             move || match line {
@@ -454,19 +476,24 @@ impl Dispatcher {
             },
             |result, cx| {
                 if let Err(err) = result {
-                    Self::show_editor_error(err, cx);
+                    Self::show_editor_error(err, None, cx);
                 }
             },
         );
     }
 
-    fn show_editor_error(err: editors::EditorError, cx: &mut App) {
+    fn show_editor_error(
+        err: editors::EditorError,
+        move_to_shared_storage: Option<crate::SharedStorageMove>,
+        cx: &mut App,
+    ) {
         warn!(message = %err.message, "external editor");
         Self::show_popup(
             Popup::ExternalEditorError {
                 message: err.message,
                 suggest_default_editor: err.suggest_default_editor,
                 open_preferences: err.open_preferences,
+                move_to_shared_storage,
             },
             cx,
         );
@@ -505,6 +532,7 @@ impl Dispatcher {
                                     "{message} Please open {} and check your custom shell.",
                                     corvene_platform::editors::SETTINGS_LABEL
                                 ),
+                                move_to_shared_storage: None,
                             },
                             cx,
                         );
@@ -526,12 +554,28 @@ impl Dispatcher {
                         "Could not find shell '{selected}'. Please open {} and choose an installed shell.",
                         corvene_platform::editors::SETTINGS_LABEL
                     ),
+                    move_to_shared_storage: None,
                 },
                 cx,
             );
             return;
         };
         let path = path.to_path_buf();
+        // Android: Termux cannot reach Corvene's own storage; the error
+        // offers to move the repository (`shared_storage`)
+        #[cfg(target_os = "android")]
+        if let Some(offer) =
+            Self::shared_storage_move_for(&path, |_| crate::AfterSharedStorageMove::OpenShell, cx)
+        {
+            Self::show_popup(
+                Popup::ShellError {
+                    message: corvene_platform::android::TERMUX_PRIVATE_STORAGE.to_string(),
+                    move_to_shared_storage: Some(offer),
+                },
+                cx,
+            );
+            return;
+        }
         spawn_bg(
             cx,
             move || shells::launch(&found, &path),
@@ -542,6 +586,7 @@ impl Dispatcher {
                             message: format!(
                                 "Something went wrong while trying to start the shell: {err}"
                             ),
+                            move_to_shared_storage: None,
                         },
                         cx,
                     );

@@ -317,6 +317,8 @@ fn ghd_dialog_width(id: &str) -> Option<f32> {
         | "add-existing-repository"
         | "dialog-initialize-lfs" => 400.,
         "dialog-preferences" => 600.,
+        // Corvene: Language Extensions (list + details, three tabs)
+        "language-extensions" => 760.,
         _ => return None,
     })
 }
@@ -692,7 +694,8 @@ fn dialog_impl(
                         .when_some(plain_title.clone(), |d, title| d.aria_label(title))
                         .children(plain_title.map(window_title))
                         .min_w(zpx(400.).min(widest))
-                        .max_w(zpx(600.).min(widest))
+                        // a dialog wider than GHD's 600 px cap says so in `ghd_dialog_width`
+                        .max_w(zpx(ghd_dialog_width(id).map_or(600., |w| w.max(600.))).min(widest))
                         .when_some(ghd_dialog_width(id), |d, w| d.w(zpx(w).min(widest)))
                         // a `<dialog>` never outgrows the viewport; the content scrolls
                         .max_h(viewport.height)

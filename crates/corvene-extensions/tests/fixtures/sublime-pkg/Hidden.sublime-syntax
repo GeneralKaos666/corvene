@@ -1,0 +1,9 @@
+%YAML 1.2
+---
+name: Corge Helper
+hidden: true
+scope: source.corge.helper
+contexts:
+  main:
+    - match: x
+      scope: keyword.x

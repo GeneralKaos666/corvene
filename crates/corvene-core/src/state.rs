@@ -481,6 +481,13 @@ pub enum Popup {
     Flags {
         query: Option<String>,
     },
+    /// Settings › Appearance › Language extensions… (no GHD equivalent;
+    /// flag `111-language-extensions`). `return_to` reopens Settings on
+    /// that tab when the dialog closes.
+    LanguageExtensions {
+        focus: Option<crate::extensions::ExtensionsFocus>,
+        return_to: Option<PreferencesTab>,
+    },
     /// `RepositorySettings`
     RepositorySettings {
         repo: u64,
@@ -499,10 +506,23 @@ pub enum Popup {
         message: String,
         suggest_default_editor: bool,
         open_preferences: bool,
+        /// Android: the editor runs in Termux, which cannot reach the
+        /// repository in Corvene's own storage; "Move to shared storage…"
+        /// replaces the Settings button.
+        move_to_shared_storage: Option<SharedStorageMove>,
     },
     /// `OpenShellFailed`
     ShellError {
         message: String,
+        /// Android: as for `ExternalEditorError`.
+        move_to_shared_storage: Option<SharedStorageMove>,
+    },
+    /// Android (no GHD equivalent): copies a repository from Corvene's own
+    /// storage to a folder on shared storage and uses it from there
+    /// (`dialogs::move_to_shared_storage`).
+    MoveToSharedStorage {
+        repo: u64,
+        then: AfterSharedStorageMove,
     },
     /// `UnreachableCommits`: which selected commits the range diff covers.
     UnreachableCommits {
@@ -557,6 +577,7 @@ impl Popup {
             | Self::SquashCommitMessage { repo, .. }
             | Self::RepositorySettings { repo, .. }
             | Self::ConfirmRemoveRepository { repo, .. }
+            | Self::MoveToSharedStorage { repo, .. }
             | Self::UnreachableCommits { repo, .. } => Some(*repo),
             _ => None,
         }
@@ -809,6 +830,55 @@ fn basename_without(path: &str, ext: &str) -> String {
     }
 }
 
+/// Android: a repository in Corvene's own storage that Termux could not
+/// reach, and what runs again once it was moved to shared storage
+/// (`Popup::MoveToSharedStorage`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedStorageMove {
+    pub repo: u64,
+    pub then: AfterSharedStorageMove,
+}
+
+/// What `Dispatcher::move_to_shared_storage` runs at the new location.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AfterSharedStorageMove {
+    Nothing,
+    /// "Open in Termux" at the repository root.
+    OpenShell,
+    /// A Termux editor on `relative` (to the repository root), at `line`.
+    OpenEditor {
+        relative: PathBuf,
+        line: Option<u32>,
+    },
+}
+
+/// A move to shared storage in progress (`AppState::shared_storage_move`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedStorageMoveState {
+    pub repo: u64,
+    pub destination: PathBuf,
+    pub stage: SharedStorageMoveStage,
+    /// Stops the copy; the partial copy is removed.
+    pub cancel: corvene_git::CancelToken,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SharedStorageMoveStage {
+    /// `done` of `total` files and folders copied.
+    Copying { done: u64, total: u64 },
+    /// git is reading the copy (configuration, index refresh, open).
+    Checking,
+    /// The move stopped; the dialog shows why and offers the form again.
+    Failed(String),
+}
+
+impl SharedStorageMoveStage {
+    /// No more progress will come.
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+}
+
 /// What deleting a branch would lose (`860-delete-branch-warnings`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeleteBranchPreview {
@@ -843,8 +913,10 @@ pub struct RepositoryState {
     pub trusting_path: bool,
     pub last_refresh: Option<Instant>,
     pub section: Section,
-    /// `git status` result (`IChangesState.workingDirectory`).
-    pub status: Option<WorkingDirectoryStatus>,
+    /// `git status` result (`IChangesState.workingDirectory`). Shared: a
+    /// refresh hands it to the next one and views key caches on the
+    /// pointer, so every change goes through `Arc::make_mut`.
+    pub status: Option<Arc<WorkingDirectoryStatus>>,
     /// Lines added / deleted per changed file against HEAD (Corvene
     /// addition, flag `changes-line-counts`; empty while the flag is off).
     pub line_stats: Arc<HashMap<String, corvene_git::LineStats>>,
@@ -1120,7 +1192,7 @@ impl RepositoryState {
     }
 
     pub fn changed_files(&self) -> usize {
-        self.status.as_ref().map(|s| s.files.len()).unwrap_or(0)
+        self.status.as_deref().map(|s| s.files.len()).unwrap_or(0)
     }
 
     /// [`Self::stash`] when a Desktop made it for this branch: the entry a new
@@ -1161,6 +1233,8 @@ pub struct AppState {
     /// Bumped by `Dispatcher::start_background_pruner`, so the previous
     /// repository's pruning timer stops (GHD `currentBranchPruner`).
     pub branch_pruner_generation: u64,
+    /// Android: a repository being moved to shared storage.
+    pub shared_storage_move: Option<SharedStorageMoveState>,
     /// `224-alias-when-adding`: aliases typed in New / Add / Clone, applied
     /// when the repository at that (resolved) path is added.
     pub pending_aliases: Vec<(PathBuf, String)>,
@@ -1226,6 +1300,9 @@ pub struct AppState {
     pub update: crate::updater::UpdateState,
     /// On-demand packs.
     pub packs: crate::packs::PacksState,
+    /// Language extensions (`crate::extensions`): installed grammars, the
+    /// manager dialog's search and progress.
+    pub extensions: crate::extensions::ExtensionsState,
     /// Alive subscriptions (`AliveStore`) and notification dedup state.
     pub alive: crate::alive::AliveState,
 }

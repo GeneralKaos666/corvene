@@ -3,7 +3,8 @@
 //! - `rebase`, `abortRebase`, `continueRebase` (`lib/git/rebase.ts`) are
 //!   `crate::rebase_support::{rebase, abort_rebase, continue_rebase}` over
 //!   `corvene_git::rebase` / `abort_rebase` / `continue_rebase`.
-//! - `getChangedFiles(repository, sha)` is `corvene_git::get_changed_files`.
+//! - `getChangedFiles(repository, sha)` is `corvene_git::get_changed_files`
+//!   with git (`in_process` off).
 //! - GitHub Desktop's status fields are `WorkingDirectoryStatus`'s:
 //!   `rebaseInternalState` is `rebase_internal_state` (`None` is `null`),
 //!   `workingDirectory.files` is `files`, `currentBranch` is `branch`
@@ -361,6 +362,7 @@ fn setup_continue_with_additional_changes() -> ContinueWithAdditionalChanges {
         git(),
         repository.path(),
         status.current_tip.as_deref().expect("current tip"),
+        false,
     )
     .expect("getChangedFiles");
 

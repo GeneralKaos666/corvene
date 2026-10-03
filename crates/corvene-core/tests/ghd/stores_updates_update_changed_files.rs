@@ -97,7 +97,7 @@ fn create_state(
         diff: None,
     });
     RepositoryState {
-        status: Some(working_directory.unwrap_or_default()),
+        status: Some(working_directory.unwrap_or_default().into()),
         selected_file: selection.selected_file_ids.first().cloned(),
         selected_files: selection.selected_file_ids,
         diff: selection.diff,

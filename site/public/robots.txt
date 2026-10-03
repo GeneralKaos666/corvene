@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://wasi-master.github.io/corvene/sitemap-index.xml

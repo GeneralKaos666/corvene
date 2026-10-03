@@ -140,8 +140,10 @@ pub fn working_directory_patch(
         .iter()
         .partition(|f| !f.status.submodule && f.status.kind.is_new_or_untracked());
     let mut patch = Vec::new();
-    if !tracked.is_empty() {
-        let paths = tracked
+    // in batches: every path of a huge change set would pass the system's
+    // argument size limit
+    for batch in tracked.chunks(1000) {
+        let paths = batch
             .iter()
             .flat_map(|f| std::iter::once(&f.path).chain(f.old_path.as_ref()));
         let out = GitCommand::new(git.clone())

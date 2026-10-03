@@ -34,7 +34,7 @@
 //! History Review Mode, Window › Corvene (shows the window hidden with ⌘W)
 //! and Help › Show Release Notes; off macOS "Flags…" and "Install Command
 //! Line Tool…" sit under File after "Options…" (GHD's Linux menu has no app
-//! menu).
+//! menu). On Android, Repository › Move to shared storage… follows Remove.
 
 use corvene_core::AppState;
 use corvene_core::flags::{Flags, ids};
@@ -472,8 +472,13 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             FetchAllRepositories,
         ));
     }
+    repository.push(item(remove_repo_label, RemoveRepository));
+    // Android: a repository in Corvene's own storage can move to shared
+    // storage, where Termux reaches it (`corvene_core::shared_storage`)
+    if cfg!(target_os = "android") {
+        repository.push(item("&Move to shared storage…", MoveToSharedStorage));
+    }
     repository.extend([
-        item(remove_repo_label, RemoveRepository),
         separator(),
         item(l("View on GitHub", "&View on GitHub"), ViewOnGitHub),
     ]);

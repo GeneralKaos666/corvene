@@ -14,6 +14,7 @@
 pub mod cm;
 pub mod syntaxes;
 pub mod treesitter;
+pub mod user;
 
 use std::ops::Range;
 use std::str::FromStr;
@@ -150,7 +151,9 @@ pub fn highlight_lines<'a>(
     highlight_lines_with(Engine::GitHubDesktop, path, lines)
 }
 
-/// [`highlight_lines`] with the tokenizers `engine` chains.
+/// [`highlight_lines`] with the tokenizers `engine` chains. A grammar the
+/// user installed ([`user`]) runs first for the files its extension claims
+/// and prefers, and last for the ones it only fills gaps for.
 pub fn highlight_lines_with<'a>(
     engine: Engine,
     path: &str,
@@ -158,16 +161,20 @@ pub fn highlight_lines_with<'a>(
 ) -> Option<Vec<Vec<Span>>> {
     let lines: Vec<&str> = lines.into_iter().collect();
     let all = lines.len();
+    if let Some(spans) = user::highlight(path, &lines, all, true, false) {
+        return Some(spans);
+    }
     let ts = || treesitter::highlight(path, &lines, MAX_HIGHLIGHT_BYTES);
-    match engine {
-        Engine::GitHubDesktop => highlight_prefix(path, &lines, all),
+    let built_in = match engine {
+        Engine::GitHubDesktop => builtin_prefix(path, &lines, all),
         Engine::TreeSitterFallback => cm_highlight(path, &lines, all)
             .or_else(ts)
             .or_else(|| syntect_highlight(path, &lines, all)),
         Engine::TreeSitter => ts()
             .or_else(|| cm_highlight(path, &lines, all))
             .or_else(|| syntect_highlight(path, &lines, all)),
-    }
+    };
+    built_in.or_else(|| user::highlight(path, &lines, all, false, false))
 }
 
 /// The first `stop` lines of [`highlight_lines`] (GitHub Desktop's
@@ -175,9 +182,42 @@ pub fn highlight_lines_with<'a>(
 /// from the top and only read later lines to look ahead, so the result is
 /// exactly what the whole run gives for those lines: a diff shows the part
 /// on screen from this and fills in the rest later. Tree-sitter parses whole
-/// files and has no such prefix.
+/// files and has no such prefix, so a user tree-sitter grammar yields
+/// `None` here (the caller then tokenizes the whole file).
 pub fn highlight_prefix(path: &str, lines: &[&str], stop: usize) -> Option<Vec<Vec<Span>>> {
+    user::highlight(path, lines, stop, true, true)
+        .or_else(|| builtin_prefix(path, lines, stop))
+        .or_else(|| user::highlight(path, lines, stop, false, true))
+}
+
+fn builtin_prefix(path: &str, lines: &[&str], stop: usize) -> Option<Vec<Vec<Span>>> {
     cm_highlight(path, lines, stop).or_else(|| syntect_highlight(path, lines, stop))
+}
+
+/// One number views key their token caches on: it changes whenever the set
+/// of grammars does (a tree-sitter pack loaded, a user extension installed,
+/// enabled or re-ranked).
+pub fn generation() -> u64 {
+    treesitter::generation()
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(user::generation())
+}
+
+/// Whether a compiled-in tokenizer covers `path`: a CodeMirror mode, a
+/// syntect grammar, or (when `engine` runs it) a tree-sitter grammar. False
+/// for files only a user extension could colour: the diff's "no syntax
+/// highlighting" hint keys on this. Loads nothing.
+pub fn has_builtin_highlighting(engine: Engine, path: &str, first_line: &str) -> bool {
+    if cm_covers(path, first_line) {
+        return true;
+    }
+    if syntaxes::sets()
+        .iter()
+        .any(|ss| syntax_for(ss, path, first_line).is_some())
+    {
+        return true;
+    }
+    engine != Engine::GitHubDesktop && treesitter::has_grammar(path, first_line)
 }
 
 /// The ported CodeMirror mode GHD would pick for `path`: by extension or
@@ -215,6 +255,17 @@ fn syntect_highlight(path: &str, lines: &[&str], stop: usize) -> Option<Vec<Vec<
     let (ss, syntax) = sets
         .iter()
         .find_map(|ss| syntax_for(ss, path, first).map(|s| (ss, s)))?;
+    Some(syntect_highlight_in(ss, syntax, lines, stop))
+}
+
+/// Tokenize the first `stop` lines with `syntax` from `ss` (built-in or
+/// user set).
+fn syntect_highlight_in(
+    ss: &SyntaxSet,
+    syntax: &SyntaxReference,
+    lines: &[&str],
+    stop: usize,
+) -> Vec<Vec<Span>> {
     let classes = classifier();
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
@@ -255,7 +306,7 @@ fn syntect_highlight(path: &str, lines: &[&str], stop: usize) -> Option<Vec<Vec<
         }
         out.push(spans);
     }
-    Some(out)
+    out
 }
 
 impl Classifier {

@@ -496,6 +496,16 @@ public class CorveneActivity extends NativeActivity {
         }
     }
 
+    /** The root of shared storage ("/storage/emulated/0" for the primary user). */
+    public static String sharedStorageDir() {
+        try {
+            File dir = Environment.getExternalStorageDirectory();
+            return dir == null ? "" : dir.getPath();
+        } catch (RuntimeException e) {
+            return "";
+        }
+    }
+
     /** MANAGE_EXTERNAL_STORAGE is granted (Android 11+). */
     public static boolean hasAllFilesAccess() {
         return Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager();

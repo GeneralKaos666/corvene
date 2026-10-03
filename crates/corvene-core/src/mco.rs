@@ -675,7 +675,7 @@ impl Dispatcher {
                 let rs = s.repo_states.get(&id);
                 let loaded = rs.is_some_and(|r| r.info.is_some());
                 let rebasing = rs
-                    .and_then(|r| r.status.as_ref())
+                    .and_then(|r| r.status.as_deref())
                     .is_some_and(|st| st.rebase_in_progress);
                 (loaded && s.flags.bool(crate::flags::ids::NO_BRANCH_EXPLAINED)).then_some(
                     if rebasing {
@@ -713,7 +713,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| st.files.clone())
             .unwrap_or_default()
     }
@@ -733,7 +733,7 @@ impl Dispatcher {
     fn apply_status(rs: &mut RepositoryState, mut status: WorkingDirectoryStatus) {
         status.sort_files();
         rs.conflict_state = derive_conflict_state(&status, rs.conflict_state.as_ref());
-        rs.status = Some(status);
+        rs.status = Some(Arc::new(status));
     }
 
     /// `_checkForUncommittedChanges`: rebase-style operations need a clean
@@ -1353,7 +1353,7 @@ impl Dispatcher {
     pub fn set_all_manual_resolutions(id: u64, resolution: ManualConflictResolution, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
-            let Some(status) = rs.status.as_ref() else {
+            let Some(status) = rs.status.as_deref() else {
                 return;
             };
             let Some(conflict) = rs.conflict_state.as_mut() else {
@@ -1393,7 +1393,7 @@ impl Dispatcher {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
             match (
-                rs.and_then(|r| r.status.as_ref()),
+                rs.and_then(|r| r.status.as_deref()),
                 rs.and_then(|r| r.conflict_state.as_ref()),
             ) {
                 (Some(status), Some(conflict)) => {
@@ -2561,7 +2561,7 @@ impl Dispatcher {
                             .read(cx)
                             .repo_states
                             .get(&id)
-                            .and_then(|r| r.status.as_ref())
+                            .and_then(|r| r.status.as_deref())
                             .is_some_and(|st| st.squash_msg_found),
                         source_branch: None,
                     },

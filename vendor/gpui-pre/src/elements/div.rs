@@ -3191,6 +3191,10 @@ impl Interactivity {
                     .long_press_tooltip_active
                     .get_or_insert_with(Default::default)
                     .clone();
+                let hidden_by_mouse_down = element_state
+                    .tooltip_hidden_by_mouse_down
+                    .get_or_insert_with(Default::default)
+                    .clone();
 
                 let tooltip_is_hoverable = tooltip_builder.hoverable;
                 let build_tooltip = Rc::new(move |window: &mut Window, cx: &mut App| {
@@ -3221,6 +3225,10 @@ impl Interactivity {
                         pending_mouse_down.borrow().is_none() && hitbox.is_hovered(window)
                     }
                 });
+                let is_over_element = Rc::new({
+                    let hitbox = hitbox.clone();
+                    move |window: &Window| hitbox.is_hovered(window)
+                });
                 register_tooltip_mouse_handlers(
                     &active_tooltip,
                     self.tooltip_id,
@@ -3229,6 +3237,10 @@ impl Interactivity {
                     check_is_hovered_during_prepaint,
                     long_press_tooltip_active,
                     self.tooltip_show_delay,
+                    TooltipMouseDownHide {
+                        hidden: hidden_by_mouse_down,
+                        is_over_element,
+                    },
                     window,
                 );
             }
@@ -3627,6 +3639,9 @@ pub struct InteractiveElementState {
     ongoing_scroll: Option<Rc<RefCell<OngoingScroll>>>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
     long_press_tooltip_active: Option<Rc<Cell<bool>>>,
+    /// Corvene patch: a mouse-down on the element hid its tooltip, which
+    /// stays hidden until the pointer leaves the element.
+    tooltip_hidden_by_mouse_down: Option<Rc<Cell<bool>>>,
 }
 
 /// Whether or not the element or a group that contains it is clicked by the mouse.
@@ -3712,6 +3727,16 @@ pub(crate) fn set_tooltip_on_window(
     Some(window.set_tooltip(tooltip))
 }
 
+/// Corvene patch: GHD's `Tooltip` (`app/src/ui/lib/tooltip.tsx`,
+/// `onTargetMouseDown`) hides on a mouse-down on its target, cancelling a
+/// pending show, and shows again only on the next `mouseenter`. A press
+/// sets `hidden`, the target then doesn't count as hovered (a move within
+/// it brings nothing back) until `is_over_element` says the pointer left.
+pub(crate) struct TooltipMouseDownHide {
+    pub(crate) hidden: Rc<Cell<bool>>,
+    pub(crate) is_over_element: Rc<dyn Fn(&Window) -> bool>,
+}
+
 pub(crate) fn register_tooltip_mouse_handlers(
     active_tooltip: &Rc<RefCell<Option<ActiveTooltip>>>,
     tooltip_id: Option<TooltipId>,
@@ -3720,17 +3745,39 @@ pub(crate) fn register_tooltip_mouse_handlers(
     check_is_hovered_during_prepaint: Rc<dyn Fn(&Window) -> bool>,
     long_press_tooltip_active: Rc<Cell<bool>>,
     show_delay: Option<Duration>,
+    mouse_down_hide: TooltipMouseDownHide,
     window: &mut Window,
 ) {
     let current_view = window.current_view();
     let show_delay = show_delay.unwrap_or(DEFAULT_TOOLTIP_SHOW_DELAY);
+    // Corvene patch: see `TooltipMouseDownHide` (a long press, which never
+    // follows a mouse-down, still shows the tooltip)
+    let TooltipMouseDownHide {
+        hidden: hidden_by_mouse_down,
+        is_over_element,
+    } = mouse_down_hide;
+    let long_press_is_hovered = check_is_hovered.clone();
+    let check_is_hovered: Rc<dyn Fn(&Window) -> bool> = Rc::new({
+        let hidden = hidden_by_mouse_down.clone();
+        move |window: &Window| !hidden.get() && check_is_hovered(window)
+    });
+    let check_is_hovered_during_prepaint: Rc<dyn Fn(&Window) -> bool> = Rc::new({
+        let hidden = hidden_by_mouse_down.clone();
+        move |window: &Window| !hidden.get() && check_is_hovered_during_prepaint(window)
+    });
 
     window.on_mouse_event({
         let active_tooltip = active_tooltip.clone();
         let build_tooltip = build_tooltip.clone();
         let check_is_hovered = check_is_hovered.clone();
         let check_is_hovered_during_prepaint = check_is_hovered_during_prepaint.clone();
+        let hidden_by_mouse_down = hidden_by_mouse_down.clone();
+        let is_over_element = is_over_element.clone();
         move |_: &MouseMoveEvent, phase, window, cx| {
+            // Corvene patch: GHD `onTargetMouseLeave` ends the hiding
+            if hidden_by_mouse_down.get() && !is_over_element(window) {
+                hidden_by_mouse_down.set(false);
+            }
             handle_tooltip_mouse_move(
                 &active_tooltip,
                 &build_tooltip,
@@ -3748,11 +3795,27 @@ pub(crate) fn register_tooltip_mouse_handlers(
 
     window.on_mouse_event({
         let active_tooltip = active_tooltip.clone();
+        let hidden_by_mouse_down = hidden_by_mouse_down.clone();
         move |_: &MouseDownEvent, _phase, window: &mut Window, _cx| {
-            if !tooltip_id.is_some_and(|tooltip_id| tooltip_id.is_hovered(window)) {
+            if tooltip_id.is_some_and(|tooltip_id| tooltip_id.is_hovered(window)) {
+                return;
+            }
+            // Corvene patch: a press on the element hides its tooltip,
+            // shown or pending, until the pointer leaves the element
+            if is_over_element(window) {
+                hidden_by_mouse_down.set(true);
+                clear_active_tooltip(&active_tooltip, window);
+            } else {
+                hidden_by_mouse_down.set(false);
                 clear_active_tooltip_if_not_hoverable(&active_tooltip, window);
             }
         }
+    });
+
+    // Corvene patch: leaving the window is leaving the element (GHD gets a
+    // `mouseleave` there too)
+    window.on_mouse_event(move |_: &MouseExitEvent, _phase, _window, _cx| {
+        hidden_by_mouse_down.set(false);
     });
 
     window.on_mouse_event({
@@ -3765,7 +3828,9 @@ pub(crate) fn register_tooltip_mouse_handlers(
             }
 
             match event.phase {
-                TouchPhase::Started if !window.default_prevented() && check_is_hovered(window) => {
+                TouchPhase::Started
+                    if !window.default_prevented() && long_press_is_hovered(window) =>
+                {
                     if show_tooltip(
                         &active_tooltip,
                         &build_tooltip,
@@ -4446,7 +4511,8 @@ mod tests {
     use super::*;
     use crate::{
         AnyWindowHandle, AppContext as _, Context, GestureTuning, InputEvent, Keystroke,
-        MouseMoveEvent, TestAppContext, TouchEvent, TouchId, canvas, util::FluentBuilder as _,
+        MouseMoveEvent, PlatformInput, TestAppContext, TouchEvent, TouchId, canvas,
+        util::FluentBuilder as _,
     };
     use std::{cell::Cell, rc::Weak};
 
@@ -5170,6 +5236,152 @@ mod tests {
             .unwrap();
 
         assert!(active_tooltip.borrow().is_none());
+    }
+
+    struct ClickableTooltipOwner {
+        captured_active_tooltip: CapturedActiveTooltip,
+        clicks: Rc<Cell<usize>>,
+    }
+
+    impl Render for ClickableTooltipOwner {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let clicks = self.clicks.clone();
+            TooltipCaptureElement {
+                child: div()
+                    .size_full()
+                    .child(
+                        div()
+                            .id("target")
+                            .w(px(50.))
+                            .h(px(50.))
+                            .tooltip(|_, cx| cx.new(|_| TestTooltipView).into())
+                            .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+                    )
+                    .into_any_element(),
+                captured_active_tooltip: self.captured_active_tooltip.clone(),
+            }
+        }
+    }
+
+    fn mouse_input(test_app: &mut TestAppContext, window: AnyWindowHandle, event: PlatformInput) {
+        test_app
+            .update_window(window, |_, window, cx| {
+                window.dispatch_event(event, cx);
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+    }
+
+    fn mouse_move_to(position: Point<Pixels>) -> PlatformInput {
+        MouseMoveEvent {
+            position,
+            modifiers: Default::default(),
+            pressed_button: None,
+        }
+        .to_platform_input()
+    }
+
+    #[test]
+    fn tooltip_stays_hidden_after_mouse_down_until_pointer_leaves() {
+        let mut test_app = TestAppContext::single();
+        let captured_active_tooltip: CapturedActiveTooltip = Rc::new(RefCell::new(None));
+        let clicks = Rc::new(Cell::new(0));
+        let window = test_app.add_window({
+            let captured_active_tooltip = captured_active_tooltip.clone();
+            let clicks = clicks.clone();
+            move |_, _| ClickableTooltipOwner {
+                captured_active_tooltip,
+                clicks,
+            }
+        });
+        let window: AnyWindowHandle = window.into();
+        test_app
+            .update_window(window, |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+        let inside = point(px(10.), px(10.));
+        let show = |test_app: &mut TestAppContext| {
+            test_app
+                .dispatcher
+                .advance_clock(DEFAULT_TOOLTIP_SHOW_DELAY * 2);
+            test_app.run_until_parked();
+            test_app
+                .update_window(window, |_, window, cx| window.draw(cx).clear(cx))
+                .unwrap();
+        };
+
+        mouse_input(&mut test_app, window, mouse_move_to(inside));
+        show(&mut test_app);
+        let active_tooltip = captured_active_tooltip
+            .borrow()
+            .clone()
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        assert!(matches!(
+            active_tooltip.borrow().as_ref(),
+            Some(ActiveTooltip::Visible { .. })
+        ));
+
+        // a click where the pointer rests hides it
+        let down = MouseDownEvent {
+            position: inside,
+            button: MouseButton::Left,
+            modifiers: Default::default(),
+            click_count: 1,
+            first_mouse: false,
+        };
+        let up = MouseUpEvent {
+            position: inside,
+            button: MouseButton::Left,
+            modifiers: Default::default(),
+            click_count: 1,
+        };
+        mouse_input(&mut test_app, window, mouse_move_to(inside));
+        mouse_input(&mut test_app, window, down.clone().to_platform_input());
+        mouse_input(&mut test_app, window, up.clone().to_platform_input());
+        assert_eq!(clicks.get(), 1);
+        show(&mut test_app);
+        assert!(active_tooltip.borrow().is_none(), "shown after the click");
+
+        // and moving within the element doesn't bring it back
+        mouse_input(
+            &mut test_app,
+            window,
+            mouse_move_to(point(px(12.), px(12.))),
+        );
+        show(&mut test_app);
+        assert!(
+            active_tooltip.borrow().is_none(),
+            "shown after a move inside"
+        );
+
+        // leaving and coming back does
+        mouse_input(
+            &mut test_app,
+            window,
+            mouse_move_to(point(px(75.), px(75.))),
+        );
+        mouse_input(&mut test_app, window, mouse_move_to(inside));
+        show(&mut test_app);
+        assert!(matches!(
+            active_tooltip.borrow().as_ref(),
+            Some(ActiveTooltip::Visible { .. })
+        ));
+
+        // a press before the delay runs out cancels the pending show
+        mouse_input(
+            &mut test_app,
+            window,
+            mouse_move_to(point(px(75.), px(75.))),
+        );
+        mouse_input(&mut test_app, window, mouse_move_to(inside));
+        mouse_input(&mut test_app, window, down.to_platform_input());
+        mouse_input(&mut test_app, window, up.to_platform_input());
+        show(&mut test_app);
+        assert!(
+            active_tooltip.borrow().is_none(),
+            "shown after an early click"
+        );
     }
 
     struct MouseDownOutOwner {

@@ -374,7 +374,7 @@ pub fn toolbar_models(
         .unwrap_or(corvene_core::ForcePushState::NotAvailable);
     let pull_with_rebase = repo_state.is_some_and(|s| s.pull_with_rebase);
     let rebase_in_progress = repo_state
-        .and_then(|s| s.status.as_ref())
+        .and_then(|s| s.status.as_deref())
         .is_some_and(|st| st.rebase_in_progress);
     let base = ToolbarButtonModel {
         id: "toolbar-push-pull",

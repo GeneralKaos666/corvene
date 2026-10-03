@@ -9,7 +9,8 @@
 //!   (Corvene's carries the reason).
 //! - `getCommit(repository, 'HEAD')` / `getCommits(repository, 'HEAD', 5)`
 //!   are `corvene_git::get_commits(path, "HEAD", 0, 1 | 5)`.
-//! - `getChangedFiles(repository, sha)` is `corvene_git::get_changed_files`.
+//! - `getChangedFiles(repository, sha)` is `corvene_git::get_changed_files`
+//!   with git (`in_process` off).
 //! - `getRebaseInternalState` is `corvene_git::rebase_internal_state`.
 //! - `continueRebase(repository, files, undefined, { gitEditor })` is
 //!   `corvene_git::continue_rebase` with `git_editor`
@@ -48,7 +49,8 @@ fn squash(
 /// `getChangedFiles(repository, sha).files.map(f => f.path).join(' ')`.
 fn changed_file_paths(repository: &TestRepo, sha: &str) -> String {
     let squashed_changeset_data =
-        corvene_git::get_changed_files(git(), repository.path(), sha).expect("getChangedFiles");
+        corvene_git::get_changed_files(git(), repository.path(), sha, false)
+            .expect("getChangedFiles");
     squashed_changeset_data
         .files
         .iter()

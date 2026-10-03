@@ -71,6 +71,10 @@ gpui-pre-macos = { version = "=0.3.7", optional = true }
 # `snapshots`: offscreen frames (`render_to_image`) on Linux
 gpui-pre-linux = { version = "=0.3.7", optional = true }
 
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))'.dependencies]
+# the renderer's overdraw switches (flags `908`, `909`)
+gpui-pre-wgpu = "=0.3.7"
+
 [target.'cfg(windows)'.dependencies]
 # `snapshots`: offscreen frames (`render_to_image`) on Windows
 gpui-pre-windows = { version = "=0.3.7", optional = true }

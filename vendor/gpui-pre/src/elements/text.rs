@@ -2,8 +2,8 @@ use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, TextOverflow,
-    TextRun, TextStyle, TooltipId, TruncateFrom, WhiteSpace, Window, WrappedLine,
-    WrappedLineLayout, register_tooltip_mouse_handlers, set_tooltip_on_window,
+    TextRun, TextStyle, TooltipId, TooltipMouseDownHide, TruncateFrom, WhiteSpace, Window,
+    WrappedLine, WrappedLineLayout, register_tooltip_mouse_handlers, set_tooltip_on_window,
 };
 use anyhow::Context as _;
 use gpui_util::ResultExt;
@@ -1069,6 +1069,8 @@ pub struct InteractiveTextState {
     hovered_index: Rc<Cell<Option<usize>>>,
     active_tooltip: Rc<RefCell<Option<ActiveTooltip>>>,
     long_press_tooltip_active: Rc<Cell<bool>>,
+    /// Corvene patch: see `TooltipMouseDownHide`.
+    tooltip_hidden_by_mouse_down: Rc<Cell<bool>>,
 }
 
 /// InteractiveTest is a wrapper around StyledText that adds mouse interactions.
@@ -1319,6 +1321,10 @@ impl Element for InteractiveText {
                         }
                     });
 
+                    let is_over_element = Rc::new({
+                        let hitbox = hitbox.clone();
+                        move |window: &Window| hitbox.is_hovered(window)
+                    });
                     register_tooltip_mouse_handlers(
                         &active_tooltip,
                         self.tooltip_id,
@@ -1327,6 +1333,10 @@ impl Element for InteractiveText {
                         check_is_hovered_during_prepaint,
                         interactive_state.long_press_tooltip_active.clone(),
                         None,
+                        TooltipMouseDownHide {
+                            hidden: interactive_state.tooltip_hidden_by_mouse_down.clone(),
+                            is_over_element,
+                        },
                         window,
                     );
                 }

@@ -125,9 +125,11 @@ pub fn extend_keeping(
         .unwrap_or(origin);
     let previous = selection_between(order, origin, end);
     let range = selection_between(order, origin, target);
+    let dropped: std::collections::HashSet<&str> =
+        previous.iter().chain(&range).map(String::as_str).collect();
     let mut out: Vec<String> = selected
         .iter()
-        .filter(|p| !previous.contains(p) && !range.contains(p))
+        .filter(|p| !dropped.contains(p.as_str()))
         .cloned()
         .collect();
     out.extend(range);

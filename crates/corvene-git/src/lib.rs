@@ -18,6 +18,7 @@ pub mod ignore;
 pub mod index_lock;
 pub mod lfs_progress;
 pub mod log;
+mod log_gix;
 pub mod ops;
 pub mod patch;
 pub mod paths;
@@ -36,6 +37,7 @@ pub mod repo;
 mod spawn;
 pub mod ssh;
 pub mod status;
+mod status_gix;
 pub mod submodule;
 pub mod terminal;
 pub mod worktree;
@@ -95,7 +97,7 @@ pub use log::{
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,
     clone_with_options, global_identity, init_repository, is_clone_path_sensitive,
-    normalize_clone_url, parse_clone_progress, path_status, readme_exists,
+    normalize_clone_url, parse_clone_progress, path_status, readme_exists, refresh_index,
     repository_name_from_url, root_path_status, set_global_identity,
 };
 pub use patch::{

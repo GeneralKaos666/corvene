@@ -262,6 +262,35 @@ def index_json(languages: dict, rest: list[str], variant: str, built: set[str], 
     }
 
 
+def repos_json(languages: dict) -> dict[str, list[str]]:
+    """`owner/repo` (lowercase) -> grammar names, for
+    crates/corvene-highlight/assets/grammar-repos.json: a language extension
+    naming the same repository reuses Corvene's grammar instead of building
+    it. Source grammars give their `url`; crate grammars their package's
+    `repository` from cargo metadata."""
+    import sync  # noqa: PLC0415
+
+    def normalize(url: str | None) -> str | None:
+        if not url:
+            return None
+        url = url.strip().rstrip("/")
+        url = url.removesuffix(".git")
+        for prefix in ("https://github.com/", "http://github.com/", "git@github.com:", "github:"):
+            if url.startswith(prefix):
+                parts = url[len(prefix):].split("/")
+                if len(parts) >= 2 and parts[0] and parts[1]:
+                    return f"{parts[0].lower()}/{parts[1].lower()}"
+        return None
+
+    packages = sync.packages()
+    out: dict[str, list[str]] = {}
+    for name, lang in sorted(languages.items()):
+        repo = normalize(lang["url"]) if is_source(lang) else normalize(packages.get(lang["package"], {}).get("repository"))
+        if repo:
+            out.setdefault(repo, []).append(name)
+    return out
+
+
 def collisions(languages: dict) -> list[str]:
     """File types two grammars claim (detection would pick by name order)."""
     owners: dict[str, set[str]] = {}
@@ -288,6 +317,11 @@ def main(argv: list[str]) -> int:
                 units.setdefault(unit_of(name, lang), []).append(name)
         for unit, names in sorted(units.items()):
             print(unit, *names)
+        return 0
+    if "--repos" in argv:
+        path = ROOT / "crates" / "corvene-highlight" / "assets" / "grammar-repos.json"
+        path.write_text(json.dumps(repos_json(languages), indent=1) + "\n")
+        print(f"wrote {path}")
         return 0
     if "--index" in argv:
         # index.json of a pack: `--index <all|rest> [--ext so] <units that built…>`

@@ -481,7 +481,7 @@ fn repository_facts(
         push_pull_fetch_in_progress: repo_state.is_some_and(|r| r.push_pull_in_progress),
         has_remote: info.is_some_and(|i| corvene_git::find_default_remote(&i.remotes).is_some()),
         conflict_state: repo_state.and_then(|r| r.conflict_state.as_ref()),
-        working_directory: repo_state.and_then(|r| r.status.as_ref()),
+        working_directory: repo_state.and_then(|r| r.status.as_deref()),
     })
 }
 

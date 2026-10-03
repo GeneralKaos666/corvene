@@ -1,0 +1,9 @@
+{
+  "name": "language-baz",
+  "version": "0.3.0",
+  "description": "Baz support in Atom",
+  "repository": "https://github.com/example/language-baz",
+  "license": "MIT",
+  "engines": { "atom": "*" },
+  "dependencies": { "tree-sitter-qux": "https://github.com/example/tree-sitter-qux#deadbeef" }
+}

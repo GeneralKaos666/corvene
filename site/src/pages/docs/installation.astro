@@ -1,0 +1,152 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import CodeBlock from "../../components/CodeBlock.astro";
+import { BREW_COMMAND, RELEASES_URL } from "../../lib/github";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<DocsLayout
+  currentSlug="installation"
+  title="Installation"
+  description="Requirements and packages for macOS, Windows, Linux and Android, and what the Standard and Full editions are."
+>
+  <p>
+    Every package is on <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">GitHub Releases</a> and linked
+    from the <a href={`${base}/#downloads`}>downloads list</a>, which also shows each file's size and sha256. Replace
+    <code>&lt;version&gt;</code> below with the release you downloaded.
+  </p>
+
+  <h2 id="editions">Standard and Full editions</h2>
+  <p>Every format on every platform comes twice:</p>
+  <ul>
+    <li>
+      <strong>Standard</strong> (<code>Corvene-…</code>, about 23 MB on macOS): GitHub Desktop's syntax highlighter is built
+      in. Tree-sitter grammars for 300+ more languages are an optional download under Settings › Advanced.
+    </li>
+    <li>
+      <strong>Full</strong> (<code>Corvene-Full-…</code>, <code>corvene-full</code> for the .deb and .rpm): the same app with
+      every tree-sitter grammar compiled in, about 170 MB more per architecture, for machines without internet access.
+      It replaces the Standard package and updates to the next Full release.
+    </li>
+  </ul>
+
+  <h2 id="macos">macOS</h2>
+  <ul>
+    <li>macOS 10.15.7 Catalina or newer on Intel, macOS 11 Big Sur or newer on Apple Silicon.</li>
+    <li>
+      <code>git</code> 2.38 or newer on your <code>PATH</code>: the Xcode Command Line Tools from Xcode 14.3 on ship 2.39,
+      or install Homebrew's.
+    </li>
+  </ul>
+  <h3>Homebrew (recommended)</h3>
+  <CodeBlock code={BREW_COMMAND} />
+  <p>
+    The cask clears the quarantine attribute, so Gatekeeper does not block the app. <code>brew upgrade</code> updates it,
+    as does the app's own updater.
+  </p>
+  <h3>Direct download</h3>
+  <p>
+    <code>Corvene-&lt;version&gt;-macos-universal.dmg</code> runs on both architectures; the <code>-arm64</code> and
+    <code>-x86_64</code> files are smaller downloads of one slice each. The <code>.zip</code> files hold the same app and
+    are what the updater installs.
+  </p>
+  <p>
+    Corvene is signed with a self-signed certificate rather than notarized by Apple, so the first launch of a downloaded
+    copy is blocked. Click <strong>Done</strong>, then open <strong>System Settings › Privacy &amp; Security</strong> and click
+    <strong>Open Anyway</strong> (on macOS 14 and older, right-click the app and choose Open). Or clear the flag:
+  </p>
+  <CodeBlock code="xattr -d com.apple.quarantine /Applications/Corvene.app" />
+  <p>Updates the app downloads itself carry no quarantine flag, so this happens once.</p>
+
+  <h2 id="windows">Windows</h2>
+  <ul>
+    <li>Windows 10 or 11 on x64, ARM64 or 32-bit x86.</li>
+    <li><a href="https://git-scm.com/download/win" target="_blank" rel="noopener noreferrer">Git for Windows</a> on your <code>PATH</code>.</li>
+  </ul>
+  <h3>Installer</h3>
+  <p>
+    <code>Corvene-&lt;version&gt;-&lt;x86_64|aarch64|i686&gt;-setup.exe</code> installs per user without administrator
+    rights into <code>%LOCALAPPDATA%\Programs\Corvene</code>, puts <code>corvene</code> on your <code>PATH</code>, registers
+    the <code>x-corvene://</code> links and updates itself.
+  </p>
+  <h3>Windows Installer (.msi)</h3>
+  <p>
+    For deployment with Group Policy or Intune: <code>Corvene-&lt;version&gt;-&lt;arch&gt;.msi</code> installs for every user
+    into <code>Program Files\Corvene</code>. Deploy a newer .msi to update; the app only announces new releases.
+  </p>
+  <CodeBlock code="msiexec /i Corvene-<version>-x86_64.msi /qn" />
+  <h3>Portable</h3>
+  <p>
+    <code>Corvene-&lt;version&gt;-windows-&lt;arch&gt;-portable.zip</code> holds a folder with <code>corvene.exe</code>: unzip
+    anywhere (a USB stick works) and run. No installer, no <code>PATH</code> entry, no self-update.
+  </p>
+
+  <h2 id="linux">Linux</h2>
+  <ul>
+    <li>A distribution with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 or later) on x86_64 or arm64. 32-bit i686 and armhf packages exist but have had little testing.</li>
+    <li>An X11 or Wayland session and a Vulkan driver (Mesa's work).</li>
+    <li>A Secret Service keyring for signed-in accounts: GNOME Keyring, KWallet or KeePassXC.</li>
+    <li><code>git</code> 2.40 or newer. Ubuntu 22.04 ships an older one; use the git-core PPA there.</li>
+  </ul>
+  <p>Install a newer package the same way to update. Only the AppImage (and so the Homebrew cask) updates itself.</p>
+
+  <h3>Homebrew</h3>
+  <CodeBlock code={BREW_COMMAND} />
+  <p>Installs the AppImage as <code>~/Applications/Corvene.AppImage</code>; <code>brew upgrade corvene</code> updates it.</p>
+
+  <h3>Debian, Ubuntu, Mint</h3>
+  <CodeBlock code="sudo apt install ./corvene_<version>_amd64.deb" />
+
+  <h3>Fedora, openSUSE, RHEL</h3>
+  <CodeBlock code="sudo dnf install ./corvene-<version>-1.x86_64.rpm" />
+  <p><code>zypper install</code> on openSUSE.</p>
+
+  <h3>AppImage</h3>
+  <CodeBlock code={"chmod +x Corvene-<version>-x86_64.AppImage\n./Corvene-<version>-x86_64.AppImage"} />
+  <p>
+    On first launch the AppImage adds itself to the application menu and registers the <code>x-corvene://</code> links,
+    unless AppImageLauncher or appimaged already did. It updates itself in place.
+  </p>
+
+  <h3>Flatpak</h3>
+  <CodeBlock code="flatpak install --user Corvene-<version>-x86_64.flatpak" />
+  <p>
+    The runtime comes from Flathub. The sandbox has its own git and sees your home folder;
+    <code>flatpak override --user --filesystem=&lt;path&gt; com.wasimaster.corvene</code> adds other locations. External
+    editors and shells are limited to what the sandbox contains.
+  </p>
+
+  <h3>Snap</h3>
+  <CodeBlock code={"sudo snap install --dangerous Corvene-<version>-x86_64.snap\nsudo snap connect corvene:password-manager-service\nsudo snap connect corvene:ssh-keys"} />
+  <p>Strictly confined, with git, Git LFS and OpenSSH inside. The two interfaces are for signed-in accounts and git over SSH.</p>
+
+  <h3>Tarball and Arch Linux</h3>
+  <p>
+    <code>Corvene-&lt;version&gt;-linux-&lt;arch&gt;.tar.gz</code> holds the .deb's <code>usr/</code> tree. Run
+    <code>usr/lib/corvene/corvene</code> in place or unpack it into <code>/</code>. Each release also produces
+    <code>corvene-bin</code> and <code>corvene-full-bin</code> PKGBUILDs that install this tarball.
+  </p>
+
+  <h2 id="android">Android</h2>
+  <ul>
+    <li>Android 8.0 or newer on arm64, armv7, x86_64 or x86, with a Vulkan driver (OpenGL ES is the fallback).</li>
+    <li>Nothing else: git, OpenSSH and Git LFS are bundled.</li>
+  </ul>
+  <p>
+    Download <code>Corvene-&lt;version&gt;-android-foss-arm64.apk</code> for most phones and tablets (<code>-armv7</code> for
+    32-bit ones, <code>-x86_64</code> for most Chromebooks and emulators, <code>-universal</code> for every architecture)
+    and open it. Android asks once to let your browser or file manager install apps. Install a newer APK the same way to
+    update; repositories, accounts and settings stay.
+  </p>
+  <p>
+    The <code>play</code> package next to it is the Google Play flavour without "All files access". The Full edition is one
+    APK per architecture; a universal one would be several hundred megabytes.
+  </p>
+  <div class="note note-attention">
+    <svg class="text-attention" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" />
+    </svg>
+    <p>Android support is experimental and has been tested on few devices. Expect rough edges.</p>
+  </div>
+</DocsLayout>

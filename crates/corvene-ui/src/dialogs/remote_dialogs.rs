@@ -18,7 +18,8 @@ use crate::tab_bar::{TabModel, tab_bar};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
-    Inline, button, checkbox, code_ref, link_button, paragraph, primary_button, text_box,
+    Inline, button, checkbox, code_ref, labeled, link_button, paragraph, password_text_box,
+    primary_button, text_box,
 };
 
 /// GHD `sanitizedRepositoryName`: only `[A-Za-z0-9_.-]`, others become `-`.
@@ -543,6 +544,14 @@ impl GenericGitAuthDialog {
         let password = cx.new(|cx| InputState::new(window, cx).masked(true));
         cx.observe(&username_state, |_, _, cx| cx.notify()).detach();
         cx.observe(&password, |_, _, cx| cx.notify()).detach();
+        // `Dialog.focusFirstSuitableChild`: the first input that is shown
+        let first = if username.is_some() {
+            &password
+        } else {
+            &username_state
+        };
+        let handle = first.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
         Self {
             repo,
             remote_url,
@@ -557,7 +566,6 @@ impl GenericGitAuthDialog {
 
 impl Render for GenericGitAuthDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = cx.ghd();
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let username = self
             .fixed_username
@@ -566,28 +574,20 @@ impl Render for GenericGitAuthDialog {
         let password = self.password.read(cx).value().to_string();
         let disabled = username.is_empty() || password.is_empty();
         let (repo, host, retry) = (self.repo, self.host.clone(), self.retry.clone());
-        let mono = |text: String| {
-            div()
-                .font_family(crate::theme::mono_font())
-                .px(zpx(3.))
-                .rounded(zpx(3.))
-                .bg(t.box_alt_background)
-                .child(text)
-        };
+        // `dialog#generic-git-auth { width: 450px }` sizes the box
         let content = div()
-            .w(crate::theme::fit_width(450.))
             .flex()
             .flex_col()
             .gap(SPACING())
             .child({
                 let mut parts: Vec<Inline> = vec![
                     "We were unable to authenticate with ".into(),
-                    mono(self.remote_url.clone()).into_any_element().into(),
+                    code_ref(self.remote_url.clone(), cx).into_any_element().into(),
                 ];
                 match &self.fixed_username {
                     Some(u) => {
                         parts.push(". Please enter the password for the user ".into());
-                        parts.push(mono(u.clone()).into_any_element().into());
+                        parts.push(code_ref(u.clone(), cx).into_any_element().into());
                         parts.push(" to try again.".into());
                     }
                     None => parts
@@ -596,28 +596,21 @@ impl Render for GenericGitAuthDialog {
                 paragraph(parts)
             })
             .when(self.fixed_username.is_none(), |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(SPACING_HALF())
-                        .child("Username")
-                        .child(text_box("auth-username", &self.username, None, window, cx)),
-                )
+                d.child(labeled(
+                    "Username",
+                    text_box("auth-username", &self.username, None, window, cx),
+                    cx,
+                ))
             })
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACING_HALF())
-                    .child("Password")
-                    .child(text_box("auth-password", &self.password, None, window, cx)),
-            )
+            .child(labeled(
+                "Password",
+                password_text_box("auth-password", &self.password, window, cx),
+                cx,
+            ))
             .child(
                 paragraph(vec![
                     "Depending on your repository's hosting service, you might need to use a Personal Access Token (PAT) as your password. Learn more about creating a PAT in the ".into(),
                     link_button("auth-docs", "integration docs", cx)
-                        .text_size(FONT_SIZE_SM())
                         .on_click(|_, _, cx| {
                             Dispatcher::open_url(
                                 "https://github.com/desktop/desktop/tree/development/docs/integrations",
@@ -627,9 +620,7 @@ impl Render for GenericGitAuthDialog {
                         .into_any_element()
                         .into(),
                     ".".into(),
-                ])
-                .text_size(FONT_SIZE_SM())
-                .text_color(t.text_secondary),
+                ]),
             );
         dialog(
             "dialog-generic-git-auth",

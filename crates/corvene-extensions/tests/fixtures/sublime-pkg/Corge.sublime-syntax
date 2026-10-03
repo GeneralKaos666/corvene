@@ -1,0 +1,14 @@
+%YAML 1.2
+---
+name: Corge
+file_extensions:
+  - corge
+  - Corgefile
+first_line_match: "^#!.*corge"
+scope: source.corge
+contexts:
+  main:
+    - match: \b(def|end)\b
+      scope: keyword.control.corge
+    - match: '#.*$'
+      scope: comment.line.corge

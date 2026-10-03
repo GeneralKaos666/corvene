@@ -184,7 +184,7 @@ impl AppState {
             current_branch: branch.map(|b| b.name.clone()),
             default_branch: rs.and_then(|rs| rs.default_branch.clone()),
             changed_files: rs
-                .and_then(|rs| rs.status.as_ref())
+                .and_then(|rs| rs.status.as_deref())
                 .map_or(0, |st| st.files.len()),
             tip_has_parent,
             ahead: rs.and_then(|rs| rs.ahead_behind).map(|ab| ab.ahead),

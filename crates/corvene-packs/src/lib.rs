@@ -77,6 +77,9 @@ pub enum PackKind {
     TreeSitterAll,
     /// the tree-sitter grammars for languages no CodeMirror port covers.
     TreeSitterRest,
+    /// the offline language extension index (tools/ext-index), one
+    /// gzipped JSON file rather than an archive.
+    LanguageExtensionsIndex,
 }
 
 /// The index of a tree-sitter pack: its grammars and the gzipped library
@@ -127,6 +130,7 @@ impl PackKind {
             PackKind::GitLfs => "git-lfs",
             PackKind::TreeSitterAll => "tree-sitter-all",
             PackKind::TreeSitterRest => "tree-sitter-rest",
+            PackKind::LanguageExtensionsIndex => "language-extensions-index",
         }
     }
 
@@ -137,6 +141,7 @@ impl PackKind {
             PackKind::GitLfs => "Git LFS",
             PackKind::TreeSitterAll => "Tree-sitter grammars",
             PackKind::TreeSitterRest => "Tree-sitter grammars for other languages",
+            PackKind::LanguageExtensionsIndex => "Language extension index",
         }
     }
 
@@ -146,6 +151,7 @@ impl PackKind {
             PackKind::GitPortable => "bin/git",
             PackKind::GitLfs => "bin/git-lfs",
             PackKind::TreeSitterAll | PackKind::TreeSitterRest => GRAMMAR_INDEX,
+            PackKind::LanguageExtensionsIndex => "index.json.gz",
         }
     }
 }

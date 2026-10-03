@@ -99,6 +99,8 @@ gpui_kit::actions!(
         Fetch,
         FetchAllRepositories,
         RemoveRepository,
+        // Android only (no GHD equivalent): Repository › Move to shared storage…
+        MoveToSharedStorage,
         ViewOnGitHub,
         ViewUpstreamOnGitHub,
         OpenInShell,

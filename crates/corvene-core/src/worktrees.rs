@@ -56,24 +56,23 @@ impl Dispatcher {
         let probe = path.clone();
         spawn_bg(
             cx,
-            move || {
-                open_repository(&probe)
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
-            },
+            move || open_repository(&probe).map_err(|e| e.to_string()),
             move |result, cx| {
-                if let Err(err) = result {
-                    Self::show_error(
-                        "Could not switch worktree",
-                        format!(
-                            "The worktree path '{}' does not appear to be a valid Git repository.\n{err}",
-                            path.display()
-                        ),
-                        cx,
-                    );
-                    return;
-                }
-                Self::apply_worktree_path(id, path, cx);
+                let info = match result {
+                    Ok(info) => info,
+                    Err(err) => {
+                        Self::show_error(
+                            "Could not switch worktree",
+                            format!(
+                                "The worktree path '{}' does not appear to be a valid Git repository.\n{err}",
+                                path.display()
+                            ),
+                            cx,
+                        );
+                        return;
+                    }
+                };
+                Self::apply_worktree_path(id, path, Some(info), cx);
             },
         );
     }
@@ -81,7 +80,18 @@ impl Dispatcher {
     /// Repoint the repository entry (persisted, GHD
     /// `RepositoriesStore.switchWorktree`) and refresh + rewatch it. When
     /// another entry already has `path`, that one is selected instead.
-    fn apply_worktree_path(id: u64, path: PathBuf, cx: &mut App) {
+    ///
+    /// Deviation: GHD keeps showing the old worktree's state until its
+    /// refresh finishes, behind any refresh already running. Here the
+    /// running refresh is abandoned, the old worktree's changes, selection
+    /// and diff are dropped at once (a commit must not see them), and `info`
+    /// (read while checking the path) shows the new branch right away.
+    fn apply_worktree_path(
+        id: u64,
+        path: PathBuf,
+        info: Option<corvene_models::RepositoryInfo>,
+        cx: &mut App,
+    ) {
         let switched = Self::state(cx).update(cx, |s, cx| {
             // the main worktree from the last refresh; `None` keeps the
             // recorded one
@@ -105,6 +115,25 @@ impl Dispatcher {
             if s.watched_repo == Some(id) {
                 s.watched_repo = None;
                 s.watcher = None;
+            }
+            let slash_remotes = s.flags.bool(crate::flags::ids::REMOTE_NAMES_WITH_SLASHES);
+            let rs = s.repo_state_mut(id);
+            rs.loading = false;
+            rs.refresh_pending = false;
+            rs.refresh_started = None;
+            rs.status = None;
+            rs.line_stats = Default::default();
+            rs.selected_file = None;
+            rs.selected_files.clear();
+            rs.diff = None;
+            rs.diff_contents = None;
+            rs.diff_old_contents = None;
+            rs.diff_generation += 1;
+            if let Some(mut info) = info {
+                if !slash_remotes {
+                    crate::dispatcher::forget_remote_names(&mut info);
+                }
+                rs.info = Some(info);
             }
             cx.notify();
             Some(Ok(()))
@@ -166,7 +195,7 @@ impl Dispatcher {
             move |result, cx| match result {
                 Ok(path) => {
                     Self::close_popups_where(|p| matches!(p, Popup::AddWorktree { .. }), cx);
-                    Self::apply_worktree_path(id, path, cx);
+                    Self::apply_worktree_path(id, path, None, cx);
                 }
                 Err(err) => Self::show_error("Could not create worktree", err, cx),
             },
@@ -200,7 +229,7 @@ impl Dispatcher {
         let base = if deleting_current {
             match main {
                 Some(main) => {
-                    Self::apply_worktree_path(id, main.clone(), cx);
+                    Self::apply_worktree_path(id, main.clone(), None, cx);
                     main
                 }
                 None => {
@@ -265,7 +294,7 @@ impl Dispatcher {
                         .repository(id)
                         .map(|r| r.path.clone());
                     if current.is_some_and(|c| same_path(&c, &old)) {
-                        Self::apply_worktree_path(id, new, cx);
+                        Self::apply_worktree_path(id, new, None, cx);
                     } else {
                         Self::refresh_repository(id, cx);
                     }
@@ -334,7 +363,7 @@ impl Dispatcher {
                             Self::select_repository(other, cx);
                         }
                     }
-                    None => Self::apply_worktree_path(id, main, cx),
+                    None => Self::apply_worktree_path(id, main, None, cx),
                 }
             },
         );

@@ -3,8 +3,10 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
-    ScaledPixels, Scene, Size, get_gamma_correction_ratios,
+    AtlasTextureId, Background, BorderStyle, Bounds, ContentMask, Corners, DevicePixels, Edges,
+    GpuSpecs, MonochromeSprite, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels,
+    Scene, Shadow, Size, SubpixelSprite, TransformationMatrix, Underline,
+    get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -15,6 +17,7 @@ use std::num::NonZeroU64;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_INSTANCE_BUFFER_SIZE: u64 = 256 * 1024 * 1024;
 
@@ -55,12 +58,85 @@ fn least_common_multiple(left: u64, right: u64) -> u64 {
     left / first * right
 }
 
+/// Corvene patch: the damage scissor's helper shaders (`shaders_damage.wgsl`).
+const DAMAGE_SHADERS: &str = include_str!("shaders_damage.wgsl");
+
+/// Corvene patch: see [`set_opaque_depth_pass`].
+static OPAQUE_DEPTH_PASS: AtomicBool = AtomicBool::new(false);
+
+/// Corvene patch: see [`set_damage_scissor`].
+static DAMAGE_SCISSOR: AtomicBool = AtomicBool::new(false);
+
+/// Corvene patch: turns the opaque depth pass on or off, for every window
+/// from its next frame on (off by default).
+///
+/// GPUI paints back to front with blending and no depth test, so every
+/// panel, row and diff line is shaded over the one before it: on a phone's
+/// tile-based GPU that overdraw is most of a frame's cost. With this on,
+/// each primitive gets a depth from its place in the paint order (later is
+/// nearer). The quads that are opaque over their interior (a solid colour of
+/// alpha 1, inside their borders, rounded corners and content mask, snapped
+/// to whole pixels) are drawn first, front to back, writing depth with
+/// blending off; then everything is drawn in the usual order with a depth
+/// test and no depth writes, so what a later opaque quad hides is rejected
+/// before it is shaded (and so is each opaque quad's own interior, which the
+/// first pass already drew). The image stays the same.
+pub fn set_opaque_depth_pass(enabled: bool) {
+    OPAQUE_DEPTH_PASS.store(enabled, Ordering::Relaxed);
+}
+
+/// Corvene patch: whether the opaque depth pass is on, see
+/// [`set_opaque_depth_pass`].
+pub fn opaque_depth_pass() -> bool {
+    OPAQUE_DEPTH_PASS.load(Ordering::Relaxed)
+}
+
+/// Corvene patch: turns the damage scissor on or off, for every window from
+/// its next frame on (off by default).
+///
+/// With this on, a window draws into a texture that keeps the last frame and
+/// then copies it to the swapchain image (which does not keep its content).
+/// The new scene is compared with the last one, primitive by primitive; when
+/// only a small part changed (a caret, a hovered row, a badge), only the
+/// rectangle around the changed primitives is cleared and redrawn, with a
+/// scissor. A frame that changed in more than three quarters of its area,
+/// or whose size, colours or sprite atlas changed, is drawn whole, as is the
+/// first. The extra copy of the whole frame costs a frame's worth of memory
+/// bandwidth, far less than shading it on a phone.
+pub fn set_damage_scissor(enabled: bool) {
+    DAMAGE_SCISSOR.store(enabled, Ordering::Relaxed);
+}
+
+/// Corvene patch: whether the damage scissor is on, see
+/// [`set_damage_scissor`].
+pub fn damage_scissor() -> bool {
+    DAMAGE_SCISSOR.load(Ordering::Relaxed)
+}
+
+/// Corvene patch: the switches as one frame reads them, so that a frame
+/// sees one value of each (and tests can set them without the globals).
+#[derive(Clone, Copy, Debug, Default)]
+struct FrameOptions {
+    opaque_depth_pass: bool,
+    damage_scissor: bool,
+}
+
+impl FrameOptions {
+    fn current() -> Self {
+        Self {
+            opaque_depth_pass: opaque_depth_pass(),
+            damage_scissor: damage_scissor(),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GlobalParams {
     viewport_size: [f32; 2],
     premultiplied_alpha: u32,
-    pad: u32,
+    /// Corvene patch: see `with_order_depth` in `shaders.wgsl` (was padding)
+    order_is_depth: u32,
 }
 
 #[repr(C)]
@@ -134,6 +210,10 @@ struct WgpuPipelines {
     poly_sprites: wgpu::RenderPipeline,
     #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
+    /// Corvene patch: the opaque quads, front to back, writing depth with
+    /// blending off; only in the set built with a depth format (see
+    /// `set_opaque_depth_pass`)
+    opaque_quads: Option<wgpu::RenderPipeline>,
 }
 
 /// One frame allocation of instance data, ready to bind.
@@ -194,6 +274,16 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    /// Corvene patch: `pipelines` with a depth test, built when the opaque
+    /// depth pass is first used (see `set_opaque_depth_pass`)
+    depth_pipelines: Option<WgpuPipelines>,
+    /// Corvene patch: the opaque depth pass's depth buffer, the size of the
+    /// frame, rebuilt like the path textures
+    depth_texture: Option<wgpu::Texture>,
+    depth_view: Option<wgpu::TextureView>,
+    /// Corvene patch: see `set_damage_scissor`
+    damage_pipelines: Option<DamagePipelines>,
+    damage: Option<DamageState>,
 }
 
 struct CachedTextureBindGroup {
@@ -207,6 +297,10 @@ impl WgpuResources {
         self.path_intermediate_view = None;
         self.path_msaa_texture = None;
         self.path_msaa_view = None;
+        // Corvene patch: these are the size of the frame too
+        self.depth_texture = None;
+        self.depth_view = None;
+        self.damage = None;
     }
 }
 
@@ -225,6 +319,15 @@ struct WgpuRendererCore {
     adapter_info: wgpu::AdapterInfo,
     target_format: wgpu::TextureFormat,
     max_texture_size: u32,
+    /// Corvene patch: the format of the opaque depth pass's depth buffer
+    depth_format: wgpu::TextureFormat,
+    /// Corvene patch: what `resources.pipelines` blend for, to build the
+    /// opaque depth pass's set alike
+    alpha_mode: wgpu::CompositeAlphaMode,
+    /// Corvene patch: the opaque depth pass's per-frame data, kept to reuse
+    /// its memory
+    depth_scratch: DepthScratch,
+    depth_bytes: Vec<u8>,
 }
 
 /// GPU resources of a windowed renderer. A surface is only ever configured against the
@@ -262,6 +365,12 @@ pub struct WgpuRenderer {
     observed_error_generation: u64,
     last_surface_error: Option<String>,
     needs_redraw: bool,
+    /// Corvene patch: whether the surface's images can be copied to, for
+    /// the damage scissor (see `set_damage_scissor`)
+    surface_copy_dst: bool,
+    /// Corvene patch: the retained frame could not be shown on this surface
+    /// (see `set_damage_scissor`); frames are drawn directly from then on.
+    damage_unusable: bool,
 }
 
 impl WgpuRenderer {
@@ -478,6 +587,8 @@ impl WgpuRenderer {
             observed_error_generation: 0,
             last_surface_error: None,
             needs_redraw: false,
+            surface_copy_dst: surface_caps.usages.contains(wgpu::TextureUsages::COPY_DST),
+            damage_unusable: false,
         })
     }
 }
@@ -662,6 +773,10 @@ impl WgpuRendererCore {
         path_sample_count: u32,
         dual_source_blending: bool,
         uses_webgl_instance_data: bool,
+        // Corvene patch: `Some` builds the set for the opaque depth pass (see
+        // `set_opaque_depth_pass`): every pipeline that draws to the frame
+        // tests depth (without writing it), and `opaque_quads` exists
+        depth_format: Option<wgpu::TextureFormat>,
     ) -> WgpuPipelines {
         // Diagnostic guard: verify the device actually has
         // DUAL_SOURCE_BLENDING. We have a crash report (ZED-5G1) where a
@@ -718,58 +833,95 @@ impl WgpuRendererCore {
             write_mask: wgpu::ColorWrites::ALL,
         };
 
-        let create_pipeline = |name: &str,
-                               vs_entry: &str,
-                               fs_entry: &str,
-                               globals_layout: &wgpu::BindGroupLayout,
-                               data_layout: &wgpu::BindGroupLayout,
-                               texture_layout: Option<&wgpu::BindGroupLayout>,
-                               topology: wgpu::PrimitiveTopology,
-                               color_targets: &[Option<wgpu::ColorTargetState>],
-                               sample_count: u32,
-                               module: &wgpu::ShaderModule| {
-            let mut bind_group_layouts = vec![Some(globals_layout), Some(data_layout)];
-            bind_group_layouts.extend(texture_layout.map(Some));
-            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(&format!("{name}_layout")),
-                bind_group_layouts: &bind_group_layouts,
-                immediate_size: 0,
-            });
+        let create_pipeline =
+            |name: &str,
+             vs_entry: &str,
+             fs_entry: &str,
+             globals_layout: &wgpu::BindGroupLayout,
+             data_layout: &wgpu::BindGroupLayout,
+             texture_layout: Option<&wgpu::BindGroupLayout>,
+             topology: wgpu::PrimitiveTopology,
+             color_targets: &[Option<wgpu::ColorTargetState>],
+             sample_count: u32,
+             module: &wgpu::ShaderModule,
+             depth_stencil: Option<wgpu::DepthStencilState>| {
+                let mut bind_group_layouts = vec![Some(globals_layout), Some(data_layout)];
+                bind_group_layouts.extend(texture_layout.map(Some));
+                let pipeline_layout =
+                    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some(&format!("{name}_layout")),
+                        bind_group_layouts: &bind_group_layouts,
+                        immediate_size: 0,
+                    });
 
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(name),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module,
-                    entry_point: Some(vs_entry),
-                    buffers: &[],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module,
-                    entry_point: Some(fs_entry),
-                    targets: color_targets,
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(name),
+                    layout: Some(&pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module,
+                        entry_point: Some(vs_entry),
+                        buffers: &[],
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module,
+                        entry_point: Some(fs_entry),
+                        targets: color_targets,
+                        compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology,
+                        strip_index_format: None,
+                        front_face: wgpu::FrontFace::Ccw,
+                        cull_mode: None,
+                        polygon_mode: wgpu::PolygonMode::Fill,
+                        unclipped_depth: false,
+                        conservative: false,
+                    },
+                    depth_stencil,
+                    multisample: wgpu::MultisampleState {
+                        count: sample_count,
+                        mask: !0,
+                        alpha_to_coverage_enabled: false,
+                    },
+                    multiview_mask: None,
+                    cache: None,
+                })
+            };
+
+        // Corvene patch: see `set_opaque_depth_pass`
+        let depth_tested = depth_format.map(|format| wgpu::DepthStencilState {
+            format,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        });
+        let opaque_quads = depth_format.map(|format| {
+            create_pipeline(
+                "opaque_quads",
+                "vs_quad",
+                "fs_quad",
+                &layouts.globals,
+                &layouts.instances,
+                None,
+                wgpu::PrimitiveTopology::TriangleStrip,
+                &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                1,
+                &shader_module,
+                Some(wgpu::DepthStencilState {
+                    format,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
                 }),
-                primitive: wgpu::PrimitiveState {
-                    topology,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: sample_count,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview_mask: None,
-                cache: None,
-            })
-        };
+            )
+        });
 
         let quads = create_pipeline(
             "quads",
@@ -782,6 +934,7 @@ impl WgpuRendererCore {
             &[Some(color_target.clone())],
             1,
             &shader_module,
+            depth_tested.clone(),
         );
 
         let shadows = create_pipeline(
@@ -795,6 +948,7 @@ impl WgpuRendererCore {
             &[Some(color_target.clone())],
             1,
             &shader_module,
+            depth_tested.clone(),
         );
 
         let path_rasterization = create_pipeline(
@@ -812,6 +966,8 @@ impl WgpuRendererCore {
             })],
             path_sample_count,
             &shader_module,
+            // drawn into the path textures, in a pass of its own
+            None,
         );
 
         let paths_blend = wgpu::BlendState {
@@ -842,6 +998,7 @@ impl WgpuRendererCore {
             })],
             1,
             &shader_module,
+            depth_tested.clone(),
         );
 
         let underlines = create_pipeline(
@@ -855,6 +1012,7 @@ impl WgpuRendererCore {
             &[Some(color_target.clone())],
             1,
             &shader_module,
+            depth_tested.clone(),
         );
 
         let mono_sprites = create_pipeline(
@@ -868,6 +1026,7 @@ impl WgpuRendererCore {
             &[Some(color_target.clone())],
             1,
             &shader_module,
+            depth_tested.clone(),
         );
 
         let subpixel_sprites = if let Some(subpixel_module) = &subpixel_shader_module {
@@ -899,6 +1058,7 @@ impl WgpuRendererCore {
                 })],
                 1,
                 subpixel_module,
+                depth_tested.clone(),
             ))
         } else {
             None
@@ -915,6 +1075,7 @@ impl WgpuRendererCore {
             &[Some(color_target.clone())],
             1,
             &shader_module,
+            depth_tested.clone(),
         );
 
         let surfaces = create_pipeline(
@@ -928,6 +1089,7 @@ impl WgpuRendererCore {
             &[Some(color_target)],
             1,
             &shader_module,
+            depth_tested,
         );
 
         WgpuPipelines {
@@ -940,6 +1102,7 @@ impl WgpuRendererCore {
             subpixel_sprites,
             poly_sprites,
             surfaces,
+            opaque_quads,
         }
     }
 
@@ -1039,6 +1202,13 @@ impl WgpuRenderer {
         if let Some(ref texture) = resources.path_msaa_texture {
             texture.destroy();
         }
+        // Corvene patch: the opaque depth pass's and the damage scissor's
+        if let Some(ref texture) = resources.depth_texture {
+            texture.destroy();
+        }
+        if let Some(ref damage) = resources.damage {
+            damage.texture.destroy();
+        }
 
         // Invalidate intermediate textures - they will be lazily recreated
         // in draw() after we confirm the surface is healthy. This avoids
@@ -1081,7 +1251,11 @@ impl WgpuRenderer {
             core.rendering_params.path_sample_count,
             core.dual_source_blending,
             core.uses_webgl_instance_data,
+            None,
         );
+        // Corvene patch: built again with the new blending when next used
+        resources.depth_pipelines = None;
+        core.alpha_mode = new_alpha_mode;
 
         if let RendererState::Ready { surface, core } = &self.state {
             surface.configure(&core.resources.device, &self.surface_config);
@@ -1151,7 +1325,18 @@ impl WgpuRenderer {
                 view_formats: &[],
             });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        core.render_frame(scene, &view, size, false, wgpu::Color::BLACK)?;
+        let options = FrameOptions {
+            damage_scissor: false,
+            ..FrameOptions::current()
+        };
+        core.render_frame(
+            scene,
+            FrameTarget::View(&view),
+            size,
+            false,
+            wgpu::Color::BLACK,
+            options,
+        )?;
         read_texture(core, &texture)
     }
 
@@ -1199,6 +1384,27 @@ impl WgpuRenderer {
             self.failed_frame_count = 0;
         }
 
+        // Corvene patch: see `set_damage_scissor`. The swapchain images are
+        // copied to when it is on (where they can be), and the retained
+        // frame is let go of when it is off.
+        let mut options = FrameOptions::current();
+        options.damage_scissor &= !self.damage_unusable;
+        let copy_dst = options.damage_scissor && self.surface_copy_dst;
+        if copy_dst
+            != self
+                .surface_config
+                .usage
+                .contains(wgpu::TextureUsages::COPY_DST)
+        {
+            self.surface_config
+                .usage
+                .set(wgpu::TextureUsages::COPY_DST, copy_dst);
+            surface.configure(&core.resources.device, &self.surface_config);
+        }
+        if !options.damage_scissor {
+            core.resources.damage = None;
+        }
+
         let frame = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
@@ -1231,15 +1437,40 @@ impl WgpuRenderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let premultiplied_alpha =
             self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+        // Corvene patch: see `set_damage_scissor`
+        let target = if options.damage_scissor {
+            FrameTarget::Retained(&frame.texture)
+        } else {
+            FrameTarget::View(&frame_view)
+        };
         if let Err(error) = core.render_frame(
             scene,
-            &frame_view,
+            target,
             size,
             premultiplied_alpha,
             wgpu::Color::TRANSPARENT,
+            options,
         ) {
             log::error!("{error:#}");
-            return false;
+            // Corvene patch: a surface the retained frame cannot be shown on
+            // must not stop every frame: draw this one (and the rest) directly
+            if !options.damage_scissor {
+                return false;
+            }
+            self.damage_unusable = true;
+            core.resources.damage = None;
+            options.damage_scissor = false;
+            if let Err(error) = core.render_frame(
+                scene,
+                FrameTarget::View(&frame_view),
+                size,
+                premultiplied_alpha,
+                wgpu::Color::TRANSPARENT,
+                options,
+            ) {
+                log::error!("{error:#}");
+                return false;
+            }
         }
 
         // Corvene patch: see `ANDROID_LAST_PRESENT_NANOS`
@@ -1277,7 +1508,24 @@ impl WgpuRendererCore {
             rendering_params.path_sample_count,
             dual_source_blending,
             uses_webgl_instance_data,
+            None,
         );
+        // Corvene patch: see `set_opaque_depth_pass`. Both formats can be
+        // render attachments everywhere (WebGPU, Vulkan, GLES 3); 32-bit
+        // float tells apart millions of primitives.
+        let depth_format = [
+            wgpu::TextureFormat::Depth32Float,
+            wgpu::TextureFormat::Depth24Plus,
+        ]
+        .into_iter()
+        .find(|format| {
+            context
+                .adapter
+                .get_texture_format_features(*format)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        })
+        .unwrap_or(wgpu::TextureFormat::Depth24Plus);
         let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("atlas_sampler"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -1396,6 +1644,11 @@ impl WgpuRendererCore {
                 path_intermediate_view: None,
                 path_msaa_texture: None,
                 path_msaa_view: None,
+                depth_pipelines: None,
+                depth_texture: None,
+                depth_view: None,
+                damage_pipelines: None,
+                damage: None,
             },
             atlas,
             path_globals_offset,
@@ -1410,6 +1663,10 @@ impl WgpuRendererCore {
             adapter_info: context.adapter.get_info(),
             target_format,
             max_texture_size,
+            depth_format,
+            alpha_mode,
+            depth_scratch: DepthScratch::default(),
+            depth_bytes: Vec::new(),
         }
     }
 
@@ -1460,10 +1717,11 @@ impl WgpuRendererCore {
     fn render_frame(
         &mut self,
         scene: &Scene,
-        target_view: &wgpu::TextureView,
+        target: FrameTarget<'_>,
         size: Size<DevicePixels>,
         premultiplied_alpha: bool,
         clear_color: wgpu::Color,
+        options: FrameOptions,
     ) -> Result<wgpu::SubmissionIndex> {
         anyhow::ensure!(
             size.width.0 > 0 && size.height.0 > 0,
@@ -1489,7 +1747,7 @@ impl WgpuRendererCore {
         let globals = GlobalParams {
             viewport_size: [size.width.0 as f32, size.height.0 as f32],
             premultiplied_alpha: premultiplied_alpha as u32,
-            pad: 0,
+            order_is_depth: 0,
         };
         let path_globals = GlobalParams {
             premultiplied_alpha: 0,
@@ -1511,22 +1769,126 @@ impl WgpuRendererCore {
             bytemuck::bytes_of(&gamma_params),
         );
 
-        self.record_frame(scene, target_view, clear_color)
-            .inspect_err(|_| {
-                // Queue writes are staged before encoding; flush them even if the frame fails.
-                self.resources.queue.submit(std::iter::empty());
-            })
+        self.record_frame(
+            scene,
+            target,
+            size,
+            premultiplied_alpha,
+            clear_color,
+            options,
+        )
+        .inspect_err(|_| {
+            // Queue writes are staged before encoding; flush them even if the frame fails.
+            self.resources.queue.submit(std::iter::empty());
+        })
     }
 
     fn record_frame(
         &mut self,
         scene: &Scene,
-        frame_view: &wgpu::TextureView,
+        target: FrameTarget<'_>,
+        size: Size<DevicePixels>,
+        premultiplied_alpha: bool,
         clear_color: wgpu::Color,
+        options: FrameOptions,
     ) -> Result<wgpu::SubmissionIndex> {
+        // Corvene patch: see `without_hidden_quads` (decided here, so that
+        // the opaque depth pass draws the quads the frame draws)
+        #[cfg(target_os = "android")]
+        let visible = without_hidden_quads(&scene.quads);
+        #[cfg(target_os = "android")]
+        let quads: &[Quad] = visible.as_deref().unwrap_or(&scene.quads);
+        #[cfg(not(target_os = "android"))]
+        let quads: &[Quad] = &scene.quads;
+
+        // Corvene patch: see `set_damage_scissor`. The retained frame is
+        // drawn into (only where the scene changed) and then shown.
+        let (frame_view, presented, damage) = match target {
+            FrameTarget::View(view) => (view.clone(), None, None),
+            FrameTarget::Retained(texture) => {
+                let key = DamageKey {
+                    size,
+                    clear_color,
+                    premultiplied_alpha,
+                    is_bgr: self.is_bgr,
+                    atlas_version: self.atlas.version(),
+                    opaque_depth_pass: options.opaque_depth_pass,
+                };
+                let (view, plan, shown) = self.plan_damage(scene, key)?;
+                (view, Some(texture), Some((plan, key, shown)))
+            }
+        };
+        let plan = damage
+            .as_ref()
+            .map_or(DamagePlan::Full, |(plan, _, _)| *plan);
+
+        // Corvene patch: see `set_opaque_depth_pass`
+        let mut depth = std::mem::take(&mut self.depth_scratch);
+        let use_depth = options.opaque_depth_pass
+            && plan != DamagePlan::Unchanged
+            && self.prepare_depth(&mut depth, scene, quads, size);
+
+        let mut encoder =
+            self.resources()
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("main_encoder"),
+                });
+        let encoded = if plan == DamagePlan::Unchanged {
+            Ok(())
+        } else {
+            self.encode_scene(
+                &mut encoder,
+                scene,
+                quads,
+                &frame_view,
+                size,
+                clear_color,
+                plan,
+                use_depth.then_some(&depth),
+            )
+        };
+        self.depth_scratch = depth;
+        encoded?;
+        if let Some(presented) = presented {
+            self.present_retained(&mut encoder, presented)?;
+        }
+
+        let submission = self
+            .resources()
+            .queue
+            .submit(std::iter::once(encoder.finish()));
+        // Corvene patch: the retained frame now shows this scene (which,
+        // unchanged, it already knows)
+        if let Some((plan, key, shown)) = damage {
+            let mut shown = shown.unwrap_or_default();
+            if plan != DamagePlan::Unchanged {
+                shown.fill(scene, key);
+            }
+            if let Some(damage) = self.resources.damage.as_mut() {
+                damage.shown = Some(shown);
+            }
+        }
+        Ok(submission)
+    }
+
+    /// Draws `scene` into `frame_view`: the frame's body before the Corvene
+    /// patches for the opaque depth pass (`depth`) and the damage scissor
+    /// (`plan`).
+    fn encode_scene(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &Scene,
+        quads: &[Quad],
+        frame_view: &wgpu::TextureView,
+        size: Size<DevicePixels>,
+        clear_color: wgpu::Color,
+        plan: DamagePlan,
+        depth: Option<&DepthScratch>,
+    ) -> Result<()> {
         let mut instance_offset = 0;
         let instance_bindings = self
-            .write_instances(scene, &mut instance_offset)
+            .write_instances(scene, quads, depth, &mut instance_offset)
             .with_context(|| {
                 format!(
                     "scene too large: {} paths, {} shadows, {} quads, {} underlines, {} monochrome sprites, {} subpixel sprites, {} polychrome sprites",
@@ -1541,82 +1903,111 @@ impl WgpuRendererCore {
             })?;
         self.prepare_texture_bind_groups(scene);
 
-        let mut encoder =
-            self.resources()
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("main_encoder"),
-                });
+        // Corvene patch: see `set_opaque_depth_pass`
+        let opaque_quads = match depth {
+            Some(depth) => {
+                self.resources.queue.write_buffer(
+                    &self.resources.globals_buffer,
+                    std::mem::offset_of!(GlobalParams, order_is_depth) as u64,
+                    bytemuck::bytes_of(&1u32),
+                );
+                let binding = self.write_instance_binding(
+                    "opaque_quads_bind_group",
+                    &mut instance_offset,
+                    &depth.opaque_quads,
+                )?;
+                Some((binding, depth.opaque_quads.len() as u32))
+            }
+            None => None,
+        };
+        let depth_view = depth.and(self.resources.depth_view.clone());
+        // kept between the passes that paths split the frame into
+        let depth_store = if scene.paths.is_empty() {
+            wgpu::StoreOp::Discard
+        } else {
+            wgpu::StoreOp::Store
+        };
+        let depth_attachment = |load| depth_view.as_ref().map(|view| (view, load, depth_store));
+        let depth_tested = depth.is_some();
+
+        // Corvene patch: see `set_damage_scissor`
+        let scissor = match plan {
+            DamagePlan::Partial(scissor) => Some(scissor),
+            DamagePlan::Full | DamagePlan::Unchanged => None,
+        };
 
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: frame_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
+            let mut pass = begin_main_pass(
+                encoder,
+                "main_pass",
+                frame_view,
+                match scissor {
+                    Some(_) => wgpu::LoadOp::Load,
+                    None => wgpu::LoadOp::Clear(clear_color),
+                },
+                depth_attachment(wgpu::LoadOp::Clear(1.0)),
+            );
+            if let Some([x, y, width, height]) = scissor {
+                pass.set_scissor_rect(x, y, width, height);
+                self.clear_damage(&mut pass, clear_color, depth_tested);
+            }
+            if let Some((binding, count)) = &opaque_quads
+                && let Some(pipeline) = &self.pipelines(depth_tested).opaque_quads
+            {
+                self.draw_instances(binding, pipeline, 0..*count, &mut pass);
+            }
 
+            let mut path_batches = depth.map(|depth| depth.path_batches.iter().copied());
             for batch in scene.batches() {
                 match batch {
                     PrimitiveBatch::Quads(range) => self.draw_instances(
                         &instance_bindings.quads,
-                        &self.resources().pipelines.quads,
+                        &self.pipelines(depth_tested).quads,
                         instance_range(range),
                         &mut pass,
                     ),
                     PrimitiveBatch::Shadows(range) => self.draw_instances(
                         &instance_bindings.shadows,
-                        &self.resources().pipelines.shadows,
+                        &self.pipelines(depth_tested).shadows,
                         instance_range(range),
                         &mut pass,
                     ),
                     PrimitiveBatch::Paths(range) => {
+                        // Corvene patch: see `set_opaque_depth_pass`
+                        let path_depth = path_batches.as_mut().and_then(Iterator::next);
                         let paths = &scene.paths[range];
                         if paths.is_empty() {
                             continue;
                         }
 
                         drop(pass);
-                        let rasterized = self.draw_paths_to_intermediate(
-                            &mut encoder,
-                            paths,
-                            &mut instance_offset,
-                        )?;
+                        let rasterized =
+                            self.draw_paths_to_intermediate(encoder, paths, &mut instance_offset)?;
 
-                        pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some("main_pass_continued"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: frame_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Load,
-                                    store: wgpu::StoreOp::Store,
-                                },
-                                depth_slice: None,
-                            })],
-                            depth_stencil_attachment: None,
-                            ..Default::default()
-                        });
+                        pass = begin_main_pass(
+                            encoder,
+                            "main_pass_continued",
+                            frame_view,
+                            wgpu::LoadOp::Load,
+                            depth_attachment(wgpu::LoadOp::Load),
+                        );
+                        // Corvene patch: see `set_damage_scissor`
+                        if let Some([x, y, width, height]) = scissor {
+                            pass.set_scissor_rect(x, y, width, height);
+                        }
 
                         if rasterized {
                             self.draw_paths_from_intermediate(
                                 paths,
                                 &mut instance_offset,
                                 &mut pass,
+                                path_depth.map(|depth| (depth, size)),
                             )?;
                         }
                     }
                     PrimitiveBatch::Underlines(range) => self.draw_instances(
                         &instance_bindings.underlines,
-                        &self.resources().pipelines.underlines,
+                        &self.pipelines(depth_tested).underlines,
                         instance_range(range),
                         &mut pass,
                     ),
@@ -1624,21 +2015,20 @@ impl WgpuRendererCore {
                         self.draw_sprites(
                             &instance_bindings.monochrome_sprites,
                             texture_id,
-                            &self.resources().pipelines.mono_sprites,
+                            &self.pipelines(depth_tested).mono_sprites,
                             instance_range(range),
                             &mut pass,
                         )?;
                     }
                     PrimitiveBatch::SubpixelSprites { texture_id, range } => {
-                        let resources = self.resources();
+                        let pipelines = self.pipelines(depth_tested);
                         self.draw_sprites(
                             &instance_bindings.subpixel_sprites,
                             texture_id,
-                            resources
-                                .pipelines
+                            pipelines
                                 .subpixel_sprites
                                 .as_ref()
-                                .unwrap_or(&resources.pipelines.mono_sprites),
+                                .unwrap_or(&pipelines.mono_sprites),
                             instance_range(range),
                             &mut pass,
                         )?;
@@ -1647,7 +2037,7 @@ impl WgpuRendererCore {
                         self.draw_sprites(
                             &instance_bindings.polychrome_sprites,
                             texture_id,
-                            &self.resources().pipelines.poly_sprites,
+                            &self.pipelines(depth_tested).poly_sprites,
                             instance_range(range),
                             &mut pass,
                         )?;
@@ -1658,56 +2048,288 @@ impl WgpuRendererCore {
                 }
             }
         }
+        Ok(())
+    }
 
-        let submission = self
-            .resources()
-            .queue
-            .submit(std::iter::once(encoder.finish()));
-        Ok(submission)
+    /// Corvene patch: the pipelines of a frame, with the opaque depth pass's
+    /// depth test (see `set_opaque_depth_pass`) or without.
+    fn pipelines(&self, depth_tested: bool) -> &WgpuPipelines {
+        match &self.resources.depth_pipelines {
+            Some(pipelines) if depth_tested => pipelines,
+            _ => &self.resources.pipelines,
+        }
     }
 
     fn write_instances(
         &mut self,
         scene: &Scene,
+        quads: &[Quad],
+        // Corvene patch: see `set_opaque_depth_pass`
+        depth: Option<&DepthScratch>,
         instance_offset: &mut u64,
     ) -> Result<InstanceBindings> {
         Ok(InstanceBindings {
-            quads: {
-                // Corvene patch: see `without_hidden_quads`
-                #[cfg(target_os = "android")]
-                let visible = without_hidden_quads(&scene.quads);
-                #[cfg(target_os = "android")]
-                let quads = visible.as_deref().unwrap_or(&scene.quads);
-                #[cfg(not(target_os = "android"))]
-                let quads = &scene.quads;
-                self.write_instance_binding("quads_bind_group", instance_offset, quads)?
-            },
-            shadows: self.write_instance_binding(
+            quads: self.write_ordered_binding(
+                "quads_bind_group",
+                instance_offset,
+                quads,
+                depth.map(|depth| &depth.quads[..]),
+            )?,
+            shadows: self.write_ordered_binding(
                 "shadows_bind_group",
                 instance_offset,
                 &scene.shadows,
+                depth.map(|depth| &depth.shadows[..]),
             )?,
-            underlines: self.write_instance_binding(
+            underlines: self.write_ordered_binding(
                 "underlines_bind_group",
                 instance_offset,
                 &scene.underlines,
+                depth.map(|depth| &depth.underlines[..]),
             )?,
-            monochrome_sprites: self.write_instance_binding(
+            monochrome_sprites: self.write_ordered_binding(
                 "monochrome_sprites_bind_group",
                 instance_offset,
                 &scene.monochrome_sprites,
+                depth.map(|depth| &depth.monochrome_sprites[..]),
             )?,
-            subpixel_sprites: self.write_instance_binding(
+            subpixel_sprites: self.write_ordered_binding(
                 "subpixel_sprites_bind_group",
                 instance_offset,
                 &scene.subpixel_sprites,
+                depth.map(|depth| &depth.subpixel_sprites[..]),
             )?,
-            polychrome_sprites: self.write_instance_binding(
+            polychrome_sprites: self.write_ordered_binding(
                 "polychrome_sprites_bind_group",
                 instance_offset,
                 &scene.polychrome_sprites,
+                depth.map(|depth| &depth.polychrome_sprites[..]),
             )?,
         })
+    }
+
+    /// Corvene patch: `write_instance_binding`, with each record's `order`
+    /// (its first four bytes) replaced by its depth when `depths` is given
+    /// (see `set_opaque_depth_pass` and `with_order_depth` in the shaders).
+    fn write_ordered_binding<T>(
+        &mut self,
+        label: &str,
+        instance_offset: &mut u64,
+        instances: &[T],
+        depths: Option<&[f32]>,
+    ) -> Result<InstanceBinding> {
+        let Some(depths) = depths else {
+            return self.write_instance_binding(label, instance_offset, instances);
+        };
+        let stride = std::mem::size_of::<T>();
+        anyhow::ensure!(
+            stride >= 4 && depths.len() == instances.len(),
+            "{label}: {} depths for {} instances",
+            depths.len(),
+            instances.len()
+        );
+        let mut bytes = std::mem::take(&mut self.depth_bytes);
+        bytes.clear();
+        bytes.extend_from_slice(unsafe { Self::instance_bytes(instances) });
+        for (record, depth) in bytes.chunks_exact_mut(stride).zip(depths) {
+            record[..4].copy_from_slice(&depth.to_bits().to_ne_bytes());
+        }
+        let binding = self.write_instance_bytes(label, instance_offset, &bytes, stride as u64);
+        self.depth_bytes = bytes;
+        binding
+    }
+
+    /// Corvene patch: see `set_opaque_depth_pass`. Fills `depth` for this
+    /// frame and makes the pipelines and the depth buffer it needs; false
+    /// when the frame is drawn as well without (no opaque quad, or more
+    /// primitives than the depth values tell apart).
+    fn prepare_depth(
+        &mut self,
+        depth: &mut DepthScratch,
+        scene: &Scene,
+        quads: &[Quad],
+        size: Size<DevicePixels>,
+    ) -> bool {
+        if !depth.fill(scene, quads) {
+            return false;
+        }
+        let resources = &mut self.resources;
+        if resources.depth_pipelines.is_none() {
+            resources.depth_pipelines = Some(Self::create_pipelines(
+                &resources.device,
+                &resources.bind_group_layouts,
+                self.target_format,
+                self.alpha_mode,
+                self.rendering_params.path_sample_count,
+                self.dual_source_blending,
+                self.uses_webgl_instance_data,
+                Some(self.depth_format),
+            ));
+        }
+        let (width, height) = (size.width.0 as u32, size.height.0 as u32);
+        if !resources
+            .depth_texture
+            .as_ref()
+            .is_some_and(|texture| texture.width() == width && texture.height() == height)
+        {
+            let texture = resources.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("opaque_depth"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.depth_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            resources.depth_view =
+                Some(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+            resources.depth_texture = Some(texture);
+        }
+        true
+    }
+
+    /// Corvene patch: see `set_damage_scissor`. Makes the retained frame
+    /// (and the helper pipelines) for a frame of `key.size` and decides what
+    /// of it to draw again; also returns what it showed, for its memory.
+    fn plan_damage(
+        &mut self,
+        scene: &Scene,
+        key: DamageKey,
+    ) -> Result<(wgpu::TextureView, DamagePlan, Option<DamageSnapshot>)> {
+        let resources = &mut self.resources;
+        if resources.damage_pipelines.is_none() {
+            resources.damage_pipelines = Some(DamagePipelines::new(
+                &resources.device,
+                self.target_format,
+                self.depth_format,
+            ));
+        }
+        let (width, height) = (key.size.width.0 as u32, key.size.height.0 as u32);
+        if !resources.damage.as_ref().is_some_and(|damage| {
+            damage.texture.width() == width && damage.texture.height() == height
+        }) {
+            let texture = resources.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("retained_frame"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.target_format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            resources.damage = Some(DamageState {
+                texture,
+                view,
+                shown: None,
+            });
+        }
+        let damage = resources
+            .damage
+            .as_mut()
+            .context("the retained frame was not created")?;
+        // unknown until this frame is submitted
+        let shown = damage.shown.take();
+        let plan = match &shown {
+            Some(shown) if shown.key == key => shown.plan(scene, key.size),
+            _ => DamagePlan::Full,
+        };
+        Ok((damage.view.clone(), plan, shown))
+    }
+
+    /// Corvene patch: see `set_damage_scissor`. Fills the scissor rectangle
+    /// of `pass` with the clear colour.
+    fn clear_damage(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        clear_color: wgpu::Color,
+        depth_tested: bool,
+    ) {
+        let Some(pipelines) = &self.resources.damage_pipelines else {
+            return;
+        };
+        pass.set_pipeline(if depth_tested {
+            &pipelines.clear_with_depth
+        } else {
+            &pipelines.clear
+        });
+        pass.set_blend_constant(clear_color);
+        pass.draw(0..3, 0..1);
+    }
+
+    /// Corvene patch: see `set_damage_scissor`. Copies the retained frame to
+    /// `presented` (a swapchain image), with a texture copy when its usage
+    /// allows, otherwise with a draw.
+    fn present_retained(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        presented: &wgpu::Texture,
+    ) -> Result<()> {
+        let resources = &self.resources;
+        let damage = resources
+            .damage
+            .as_ref()
+            .context("the retained frame was not created")?;
+        anyhow::ensure!(
+            presented.size() == damage.texture.size(),
+            "the retained frame is {:?}, the presented one {:?}",
+            damage.texture.size(),
+            presented.size()
+        );
+        if presented.usage().contains(wgpu::TextureUsages::COPY_DST)
+            && presented.format() == damage.texture.format()
+        {
+            encoder.copy_texture_to_texture(
+                damage.texture.as_image_copy(),
+                presented.as_image_copy(),
+                damage.texture.size(),
+            );
+            return Ok(());
+        }
+        anyhow::ensure!(
+            presented.format() == self.target_format,
+            "cannot show the retained frame in {:?}",
+            presented.format()
+        );
+        let pipelines = resources
+            .damage_pipelines
+            .as_ref()
+            .context("the damage pipelines were not created")?;
+        let bind_group = resources
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("retained_frame_bind_group"),
+                layout: &pipelines.blit_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&damage.view),
+                }],
+            });
+        let view = presented.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut pass = begin_main_pass(
+            encoder,
+            "retained_frame_blit",
+            &view,
+            // every pixel is written: nothing to load
+            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            None,
+        );
+        pass.set_pipeline(&pipelines.blit);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.draw(0..3, 0..1);
+        Ok(())
     }
 
     fn create_texture_bind_group(
@@ -1842,6 +2464,9 @@ impl WgpuRendererCore {
         paths: &[Path<ScaledPixels>],
         instance_offset: &mut u64,
         pass: &mut wgpu::RenderPass<'_>,
+        // Corvene patch: the batch's depth and the frame's size, with the
+        // opaque depth pass (see `set_opaque_depth_pass`)
+        depth: Option<(f32, Size<DevicePixels>)>,
     ) -> Result<()> {
         let first_path = &paths[0];
         let sprites: Vec<PathSprite> = if paths.last().map(|p| &p.order) == Some(&first_path.order)
@@ -1870,14 +2495,25 @@ impl WgpuRendererCore {
             &path_intermediate_view,
         );
         let resources = self.resources();
-        pass.set_pipeline(&resources.pipelines.paths);
+        pass.set_pipeline(&self.pipelines(depth.is_some()).paths);
         pass.set_bind_group(0, &resources.globals_bind_group, &[]);
         pass.set_bind_group(1, &instances.bind_group, &[]);
         pass.set_bind_group(2, &texture, &[]);
+        // Corvene patch: the path sprites carry no order to take a depth
+        // from, so the viewport's depth range puts the whole batch (z = 0)
+        // at its depth
+        if let Some((depth, size)) = depth {
+            let (width, height) = (size.width.0 as f32, size.height.0 as f32);
+            pass.set_viewport(0.0, 0.0, width, height, depth, depth);
+        }
         pass.draw(
             0..4,
             instances.first_instance..instances.first_instance + sprites.len() as u32,
         );
+        if let Some((_, size)) = depth {
+            let (width, height) = (size.width.0 as f32, size.height.0 as f32);
+            pass.set_viewport(0.0, 0.0, width, height, 0.0, 1.0);
+        }
         Ok(())
     }
 
@@ -1958,10 +2594,27 @@ impl WgpuRendererCore {
         instances: &[T],
     ) -> Result<InstanceBinding> {
         let data = unsafe { Self::instance_bytes(instances) };
+        self.write_instance_bytes(
+            label,
+            instance_offset,
+            data,
+            std::mem::size_of::<T>() as u64,
+        )
+    }
+
+    /// Corvene patch: the body of `write_instance_binding`, for records of
+    /// `stride` bytes given as bytes (see `write_ordered_binding`).
+    fn write_instance_bytes(
+        &mut self,
+        label: &str,
+        instance_offset: &mut u64,
+        data: &[u8],
+        stride: u64,
+    ) -> Result<InstanceBinding> {
         // wgpu rejects zero-sized bindings, so empty primitive arrays still
         // reserve the 16-byte minimum.
         let size = (data.len() as u64).max(16);
-        let stride = (std::mem::size_of::<T>() as u64).max(1);
+        let stride = stride.max(1);
         let (alignment, allocation_size) = if self.uses_webgl_instance_data {
             // The texture transport has no binding offset: the shader indexes
             // the instance texture absolutely, so each allocation must start on
@@ -2450,8 +3103,19 @@ impl WgpuHeadlessRenderer {
             .ok_or_else(|| anyhow::anyhow!("Headless render target was not created"))?
             .view
             .clone();
-        self.core
-            .render_frame(scene, &view, size, false, wgpu::Color::BLACK)?;
+        // Corvene patch: see `FrameOptions`
+        let options = FrameOptions {
+            damage_scissor: false,
+            ..FrameOptions::current()
+        };
+        self.core.render_frame(
+            scene,
+            FrameTarget::View(&view),
+            size,
+            false,
+            wgpu::Color::BLACK,
+            options,
+        )?;
         Ok(())
     }
 
@@ -2976,7 +3640,10 @@ mod tests {
 /// Corvene patch: copy `texture` (in `core.target_format`) back to the CPU
 /// as RGBA, as `WgpuHeadlessRenderer::read_image` does.
 #[cfg(all(not(target_family = "wasm"), any(test, feature = "test-support")))]
-fn read_texture(core: &WgpuRendererCore, texture: &wgpu::Texture) -> anyhow::Result<image::RgbaImage> {
+fn read_texture(
+    core: &WgpuRendererCore,
+    texture: &wgpu::Texture,
+) -> anyhow::Result<image::RgbaImage> {
     let device = &core.resources.device;
     let (width, height) = (texture.width(), texture.height());
     let bytes_per_row = width * 4;
@@ -3011,11 +3678,16 @@ fn read_texture(core: &WgpuRendererCore, texture: &wgpu::Texture) -> anyhow::Res
             depth_or_array_layers: 1,
         },
     );
-    let submission = core.resources.queue.submit(std::iter::once(encoder.finish()));
+    let submission = core
+        .resources
+        .queue
+        .submit(std::iter::once(encoder.finish()));
     let (sender, receiver) = std::sync::mpsc::channel();
-    buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-        let _ = sender.send(result);
-    });
+    buffer
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
     device
         .poll(wgpu::PollType::Wait {
             submission_index: Some(submission),
@@ -3028,7 +3700,10 @@ fn read_texture(core: &WgpuRendererCore, texture: &wgpu::Texture) -> anyhow::Res
         .map_err(|error| anyhow::anyhow!("Failed to map the readback buffer: {error}"))?;
     let mapped = buffer.slice(..).get_mapped_range();
     let mut pixels = Vec::with_capacity((bytes_per_row * height) as usize);
-    for row in mapped.chunks_exact(padded_bytes_per_row as usize).take(height as usize) {
+    for row in mapped
+        .chunks_exact(padded_bytes_per_row as usize)
+        .take(height as usize)
+    {
         pixels.extend_from_slice(&row[..bytes_per_row as usize]);
     }
     drop(mapped);
@@ -3153,3 +3828,750 @@ fn without_hidden_quads(quads: &[gpui::Quad]) -> Option<Vec<gpui::Quad>> {
     }
     result
 }
+
+/// Corvene patch: where a frame is drawn.
+enum FrameTarget<'a> {
+    /// Straight into this view, cleared first.
+    View(&'a wgpu::TextureView),
+    /// Into the retained frame, only where the scene changed, then copied
+    /// to this texture (see `set_damage_scissor`).
+    Retained(&'a wgpu::Texture),
+}
+
+/// Corvene patch: the main pass of a frame, with the opaque depth pass's
+/// depth buffer when it is given (see `set_opaque_depth_pass`).
+fn begin_main_pass<'e>(
+    encoder: &'e mut wgpu::CommandEncoder,
+    label: &str,
+    view: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+    depth: Option<(&wgpu::TextureView, wgpu::LoadOp<f32>, wgpu::StoreOp)>,
+) -> wgpu::RenderPass<'e> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load,
+                store: wgpu::StoreOp::Store,
+            },
+            depth_slice: None,
+        })],
+        depth_stencil_attachment: depth.map(|(view, load, store)| {
+            wgpu::RenderPassDepthStencilAttachment {
+                view,
+                depth_ops: Some(wgpu::Operations { load, store }),
+                stencil_ops: None,
+            }
+        }),
+        ..Default::default()
+    })
+}
+
+// Corvene patch: `write_ordered_binding` writes a primitive's depth over its
+// first four bytes, which must be its `order`.
+const _: () = {
+    assert!(std::mem::offset_of!(Quad, order) == 0);
+    assert!(std::mem::offset_of!(Shadow, order) == 0);
+    assert!(std::mem::offset_of!(Underline, order) == 0);
+    assert!(std::mem::offset_of!(MonochromeSprite, order) == 0);
+    assert!(std::mem::offset_of!(SubpixelSprite, order) == 0);
+    assert!(std::mem::offset_of!(PolychromeSprite, order) == 0);
+};
+
+/// Corvene patch: above this many primitives in a frame the depth values
+/// (1 / (count + 1) apart) would come too close for 24-bit depth buffers,
+/// and the frame is drawn without the opaque depth pass.
+const MAX_DEPTH_PRIMITIVES: usize = 1 << 22;
+
+/// Corvene patch: one frame's data for the opaque depth pass (see
+/// `set_opaque_depth_pass`), kept between frames to reuse its memory.
+#[derive(Default)]
+struct DepthScratch {
+    /// The depth of each primitive, by kind and index in the scene: the
+    /// primitives are numbered in paint order, and later ones are nearer
+    /// (smaller, the test passes when less), all strictly between 0 and 1.
+    shadows: Vec<f32>,
+    quads: Vec<f32>,
+    underlines: Vec<f32>,
+    monochrome_sprites: Vec<f32>,
+    subpixel_sprites: Vec<f32>,
+    polychrome_sprites: Vec<f32>,
+    /// One depth for each batch of paths (they are drawn together from the
+    /// path texture), in paint order.
+    path_batches: Vec<f32>,
+    /// The opaque part of each quad that has one, front to back, with its
+    /// depth as its `order`.
+    opaque_quads: Vec<Quad>,
+}
+
+impl DepthScratch {
+    /// Fills these for `scene`, whose quads are drawn as `quads` (the
+    /// scene's, or as many with some emptied). False when the frame is
+    /// drawn as well without: no opaque quad, too many primitives, or a
+    /// batch that does not fit its primitives.
+    fn fill(&mut self, scene: &Scene, quads: &[Quad]) -> bool {
+        let count = scene.shadows.len()
+            + quads.len()
+            + scene.paths.len()
+            + scene.underlines.len()
+            + scene.monochrome_sprites.len()
+            + scene.subpixel_sprites.len()
+            + scene.polychrome_sprites.len();
+        if count >= MAX_DEPTH_PRIMITIVES {
+            return false;
+        }
+        let step = 1.0 / (count + 1) as f64;
+        let depth_of = |rank: usize| (1.0 - (rank + 1) as f64 * step) as f32;
+        let reset = |depths: &mut Vec<f32>, len: usize| {
+            depths.clear();
+            depths.resize(len, 1.0);
+        };
+        reset(&mut self.shadows, scene.shadows.len());
+        reset(&mut self.quads, quads.len());
+        reset(&mut self.underlines, scene.underlines.len());
+        reset(&mut self.monochrome_sprites, scene.monochrome_sprites.len());
+        reset(&mut self.subpixel_sprites, scene.subpixel_sprites.len());
+        reset(&mut self.polychrome_sprites, scene.polychrome_sprites.len());
+        self.path_batches.clear();
+        self.opaque_quads.clear();
+
+        let mut rank = 0;
+        for batch in scene.batches() {
+            let (depths, range) = match batch {
+                PrimitiveBatch::Shadows(range) => (&mut self.shadows, range),
+                PrimitiveBatch::Quads(range) => (&mut self.quads, range),
+                PrimitiveBatch::Underlines(range) => (&mut self.underlines, range),
+                PrimitiveBatch::MonochromeSprites { range, .. } => {
+                    (&mut self.monochrome_sprites, range)
+                }
+                PrimitiveBatch::SubpixelSprites { range, .. } => {
+                    (&mut self.subpixel_sprites, range)
+                }
+                PrimitiveBatch::PolychromeSprites { range, .. } => {
+                    (&mut self.polychrome_sprites, range)
+                }
+                PrimitiveBatch::Paths(range) => {
+                    self.path_batches.push(depth_of(rank));
+                    rank += range.len();
+                    continue;
+                }
+                PrimitiveBatch::Surfaces(_) => continue,
+            };
+            let Some(depths) = depths.get_mut(range) else {
+                return false;
+            };
+            for depth in depths {
+                *depth = depth_of(rank);
+                rank += 1;
+            }
+        }
+
+        for (quad, depth) in quads.iter().zip(&self.quads).rev() {
+            if let Some(bounds) = opaque_interior(quad) {
+                self.opaque_quads.push(Quad {
+                    order: depth.to_bits(),
+                    border_style: BorderStyle::Solid,
+                    bounds,
+                    content_mask: ContentMask { bounds },
+                    background: quad.background,
+                    border_color: quad.border_color,
+                    corner_radii: Corners::default(),
+                    border_widths: Edges::default(),
+                });
+            }
+        }
+        !self.opaque_quads.is_empty()
+    }
+}
+
+/// Corvene patch: the whole pixels of `quad` that `fs_quad` paints with its
+/// background colour at alpha 1 and nothing else, if any: a solid opaque
+/// background, inside the borders and the rounded corners (the shader's
+/// `QuadVarying.interior`) and inside the content mask, shrunk to whole
+/// pixels so that every pixel centre is half a pixel inside.
+fn opaque_interior(quad: &Quad) -> Option<Bounds<ScaledPixels>> {
+    if !quad.background.is_opaque_solid() {
+        return None;
+    }
+    let widths = &quad.border_widths;
+    let radii = &quad.corner_radii;
+    let edges = [
+        widths.top.0,
+        widths.right.0,
+        widths.bottom.0,
+        widths.left.0,
+        radii.top_left.0,
+        radii.top_right.0,
+        radii.bottom_right.0,
+        radii.bottom_left.0,
+    ];
+    // the shader's interior is only sure for these
+    if !edges.iter().all(|edge| *edge >= 0.0 && edge.is_finite()) {
+        return None;
+    }
+    let edge = edges.into_iter().fold(0.0, f32::max);
+    let inset = if edge == 0.0 { 0.0 } else { edge + 1.0 };
+    let [left, top, right, bottom] = intersect_rects(
+        dilate_rect(rect_of(&quad.bounds), -inset),
+        rect_of(&quad.content_mask.bounds),
+    );
+    let (left, top, right, bottom) = (left.ceil(), top.ceil(), right.floor(), bottom.floor());
+    if !(right > left && bottom > top) {
+        return None;
+    }
+    Some(Bounds {
+        origin: Point {
+            x: ScaledPixels(left),
+            y: ScaledPixels(top),
+        },
+        size: Size {
+            width: ScaledPixels(right - left),
+            height: ScaledPixels(bottom - top),
+        },
+    })
+}
+
+/// Corvene patch: `bounds` as [left, top, right, bottom].
+fn rect_of(bounds: &Bounds<ScaledPixels>) -> [f32; 4] {
+    let (x, y) = (bounds.origin.x.0, bounds.origin.y.0);
+    [x, y, x + bounds.size.width.0, y + bounds.size.height.0]
+}
+
+fn intersect_rects(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    [
+        a[0].max(b[0]),
+        a[1].max(b[1]),
+        a[2].min(b[2]),
+        a[3].min(b[3]),
+    ]
+}
+
+fn dilate_rect(rect: [f32; 4], by: f32) -> [f32; 4] {
+    [rect[0] - by, rect[1] - by, rect[2] + by, rect[3] + by]
+}
+
+/// Corvene patch: the damage scissor's helper pipelines (see
+/// `set_damage_scissor` and `shaders_damage.wgsl`).
+struct DamagePipelines {
+    /// Fills the scissor rectangle with the blend constant.
+    clear: wgpu::RenderPipeline,
+    /// The same, in a pass with the opaque depth pass's depth buffer.
+    clear_with_depth: wgpu::RenderPipeline,
+    blit_layout: wgpu::BindGroupLayout,
+    /// Copies the retained frame to a target that cannot be copied to.
+    blit: wgpu::RenderPipeline,
+}
+
+impl DamagePipelines {
+    fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+    ) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("damage_shaders"),
+            source: wgpu::ShaderSource::Wgsl(DAMAGE_SHADERS.into()),
+        });
+        let clear_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("damage_clear_layout"),
+            bind_group_layouts: &[],
+            immediate_size: 0,
+        });
+        let blit_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("retained_frame_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("damage_blit_layout"),
+            bind_group_layouts: &[Some(&blit_layout)],
+            immediate_size: 0,
+        });
+        let pipeline = |label: &str,
+                        layout: &wgpu::PipelineLayout,
+                        fs_entry: &str,
+                        blend: Option<wgpu::BlendState>,
+                        depth_stencil: Option<wgpu::DepthStencilState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_fullscreen"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some(fs_entry),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let constant = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Constant,
+            dst_factor: wgpu::BlendFactor::Zero,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let clear_blend = Some(wgpu::BlendState {
+            color: constant,
+            alpha: constant,
+        });
+        Self {
+            clear: pipeline("damage_clear", &clear_layout, "fs_clear", clear_blend, None),
+            clear_with_depth: pipeline(
+                "damage_clear_with_depth",
+                &clear_layout,
+                "fs_clear",
+                clear_blend,
+                Some(wgpu::DepthStencilState {
+                    format: depth_format,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+            ),
+            blit: pipeline("damage_blit", &blit_pipeline_layout, "fs_blit", None, None),
+            blit_layout,
+        }
+    }
+}
+
+/// Corvene patch: the retained frame of the damage scissor (see
+/// `set_damage_scissor`).
+struct DamageState {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    /// What `texture` shows, `None` when that is not known.
+    shown: Option<DamageSnapshot>,
+}
+
+/// Corvene patch: what else than the scene a frame's pixels depend on; a
+/// frame whose key differs from the last one's is drawn whole.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct DamageKey {
+    size: Size<DevicePixels>,
+    clear_color: wgpu::Color,
+    premultiplied_alpha: bool,
+    is_bgr: bool,
+    /// changes when a tile of the sprite atlas changes, which a sprite that
+    /// is the same in the scene would show
+    atlas_version: u64,
+    opaque_depth_pass: bool,
+}
+
+/// Corvene patch: what to draw again of the retained frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DamagePlan {
+    /// Everything (cleared first).
+    Full,
+    /// Only this rectangle of whole pixels, as x, y, width and height.
+    Partial([u32; 4]),
+    /// Nothing: the frame is the same as the last one.
+    Unchanged,
+}
+
+/// Corvene patch: the scene the retained frame shows, to compare the next
+/// one with (copies of its primitives, without the path vertices' extras).
+#[derive(Default)]
+struct DamageSnapshot {
+    key: DamageKey,
+    shadows: Vec<Shadow>,
+    quads: Vec<Quad>,
+    paths: Vec<PathSnapshot>,
+    underlines: Vec<Underline>,
+    monochrome_sprites: Vec<MonochromeSprite>,
+    subpixel_sprites: Vec<SubpixelSprite>,
+    polychrome_sprites: Vec<PolychromeSprite>,
+}
+
+/// Corvene patch: the frame drawn again whole when the changes cover more
+/// than this part of it (loading the retained frame and clearing a
+/// rectangle cost about what shading the rest would save).
+const MAX_DAMAGE_FRACTION: f32 = 0.75;
+
+impl DamageSnapshot {
+    fn fill(&mut self, scene: &Scene, key: DamageKey) {
+        self.key = key;
+        self.shadows.clear();
+        self.shadows.extend_from_slice(&scene.shadows);
+        self.quads.clear();
+        self.quads.extend_from_slice(&scene.quads);
+        self.paths.clear();
+        self.paths.extend(scene.paths.iter().map(PathSnapshot::new));
+        self.underlines.clear();
+        self.underlines.extend_from_slice(&scene.underlines);
+        self.monochrome_sprites.clear();
+        self.monochrome_sprites
+            .extend_from_slice(&scene.monochrome_sprites);
+        self.subpixel_sprites.clear();
+        self.subpixel_sprites
+            .extend_from_slice(&scene.subpixel_sprites);
+        self.polychrome_sprites.clear();
+        self.polychrome_sprites
+            .extend_from_slice(&scene.polychrome_sprites);
+    }
+
+    /// What of a frame of `size` showing this to draw again for `scene`.
+    ///
+    /// A pixel's colour is what the primitives over it paint, in paint
+    /// order: by `order`, then by kind, then by place in their kind's list
+    /// (the lists are sorted by order, and sprites by their tile within an
+    /// order). Each kind's list is compared with the last frame's group by
+    /// group of the same sort key: what the two groups start and end with
+    /// alike is unchanged, and the rest, the last frame's and this one's,
+    /// is damage. Outside the damage, every pixel then has the same
+    /// primitives (byte for byte, `order` included) over it in the same
+    /// order as before, so it is the same.
+    fn plan(&self, scene: &Scene, size: Size<DevicePixels>) -> DamagePlan {
+        let mut damage = Damage::default();
+        diff_records(&self.shadows, &scene.shadows, &mut damage);
+        diff_records(&self.quads, &scene.quads, &mut damage);
+        diff_records(&self.underlines, &scene.underlines, &mut damage);
+        diff_records(
+            &self.monochrome_sprites,
+            &scene.monochrome_sprites,
+            &mut damage,
+        );
+        diff_records(&self.subpixel_sprites, &scene.subpixel_sprites, &mut damage);
+        diff_records(
+            &self.polychrome_sprites,
+            &scene.polychrome_sprites,
+            &mut damage,
+        );
+        diff_primitives(&self.paths, &scene.paths, PathSnapshot::same, &mut damage);
+        damage.plan(size)
+    }
+}
+
+/// Corvene patch: the union of the changed primitives' footprints.
+#[derive(Default)]
+struct Damage {
+    /// [left, top, right, bottom]
+    rect: Option<[f32; 4]>,
+    /// a footprint was not finite
+    unbounded: bool,
+}
+
+impl Damage {
+    fn add(&mut self, footprint: [f32; 4]) {
+        if !footprint.iter().all(|edge| edge.is_finite()) {
+            self.unbounded = true;
+            return;
+        }
+        let [left, top, right, bottom] = footprint;
+        if right <= left || bottom <= top {
+            return;
+        }
+        self.rect = Some(match self.rect {
+            Some(rect) => [
+                rect[0].min(left),
+                rect[1].min(top),
+                rect[2].max(right),
+                rect[3].max(bottom),
+            ],
+            None => footprint,
+        });
+    }
+
+    fn plan(&self, size: Size<DevicePixels>) -> DamagePlan {
+        if self.unbounded {
+            return DamagePlan::Full;
+        }
+        let Some(rect) = self.rect else {
+            return DamagePlan::Unchanged;
+        };
+        let (width, height) = (size.width.0.max(0) as f32, size.height.0.max(0) as f32);
+        // a pixel more on each side, for antialiasing and rounding
+        let [left, top, right, bottom] = dilate_rect(rect, 1.0);
+        let left = left.floor().clamp(0.0, width);
+        let top = top.floor().clamp(0.0, height);
+        let right = right.ceil().clamp(0.0, width);
+        let bottom = bottom.ceil().clamp(0.0, height);
+        if right <= left || bottom <= top {
+            return DamagePlan::Unchanged;
+        }
+        if (right - left) * (bottom - top) > MAX_DAMAGE_FRACTION * width * height {
+            return DamagePlan::Full;
+        }
+        DamagePlan::Partial([
+            left as u32,
+            top as u32,
+            (right - left) as u32,
+            (bottom - top) as u32,
+        ])
+    }
+}
+
+/// Corvene patch: a primitive as the damage scissor compares it.
+trait DamageRecord {
+    /// What the scene sorts its kind by.
+    fn sort_key(&self) -> (u32, u32);
+    /// A rectangle (left, top, right, bottom) that holds every pixel it can
+    /// change.
+    fn footprint(&self) -> [f32; 4];
+}
+
+fn masked(rect: [f32; 4], mask: &ContentMask<ScaledPixels>) -> [f32; 4] {
+    intersect_rects(rect, rect_of(&mask.bounds))
+}
+
+/// The footprint of a sprite drawn with `transformation` (as the shaders
+/// apply it: the rows of `rotation_scale` times the position, plus the
+/// translation).
+fn transformed_footprint(
+    bounds: &Bounds<ScaledPixels>,
+    transformation: &TransformationMatrix,
+    mask: &ContentMask<ScaledPixels>,
+) -> [f32; 4] {
+    if *transformation == TransformationMatrix::unit() {
+        return masked(rect_of(bounds), mask);
+    }
+    let [left, top, right, bottom] = rect_of(bounds);
+    let [[a, b], [c, d]] = transformation.rotation_scale;
+    let [tx, ty] = transformation.translation;
+    let mut rect = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    for (x, y) in [(left, top), (right, top), (left, bottom), (right, bottom)] {
+        let (x, y) = (a * x + b * y + tx, c * x + d * y + ty);
+        rect = [
+            rect[0].min(x),
+            rect[1].min(y),
+            rect[2].max(x),
+            rect[3].max(y),
+        ];
+    }
+    masked(rect, mask)
+}
+
+impl DamageRecord for Shadow {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, 0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        // the geometry of `vs_shadow`
+        let geometry = if self.inset != 0 {
+            rect_of(&self.element_bounds)
+        } else {
+            dilate_rect(rect_of(&self.bounds), 3.0 * self.blur_radius.0.abs())
+        };
+        masked(geometry, &self.content_mask)
+    }
+}
+
+impl DamageRecord for Quad {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, 0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        masked(rect_of(&self.bounds), &self.content_mask)
+    }
+}
+
+impl DamageRecord for Underline {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, 0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        masked(rect_of(&self.bounds), &self.content_mask)
+    }
+}
+
+impl DamageRecord for MonochromeSprite {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, self.tile.tile_id.0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        transformed_footprint(&self.bounds, &self.transformation, &self.content_mask)
+    }
+}
+
+impl DamageRecord for SubpixelSprite {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, self.tile.tile_id.0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        transformed_footprint(&self.bounds, &self.transformation, &self.content_mask)
+    }
+}
+
+impl DamageRecord for PolychromeSprite {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, self.tile.tile_id.0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        masked(rect_of(&self.bounds), &self.content_mask)
+    }
+}
+
+impl DamageRecord for Path<ScaledPixels> {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, 0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        rect_of(&self.clipped_bounds())
+    }
+}
+
+/// Corvene patch: what of a path its drawing reads.
+struct PathSnapshot {
+    order: u32,
+    clipped_bounds: Bounds<ScaledPixels>,
+    color: Background,
+    vertices: Vec<(Point<ScaledPixels>, Point<f32>)>,
+}
+
+impl PathSnapshot {
+    fn new(path: &Path<ScaledPixels>) -> Self {
+        Self {
+            order: path.order,
+            clipped_bounds: path.clipped_bounds(),
+            color: path.color,
+            vertices: path
+                .vertices
+                .iter()
+                .map(|vertex| (vertex.xy_position, vertex.st_position))
+                .collect(),
+        }
+    }
+
+    fn same(&self, path: &Path<ScaledPixels>) -> bool {
+        self.order == path.order
+            && self.clipped_bounds == path.clipped_bounds()
+            && self.color == path.color
+            && self.vertices.len() == path.vertices.len()
+            && self
+                .vertices
+                .iter()
+                .zip(&path.vertices)
+                .all(|((xy, st), vertex)| *xy == vertex.xy_position && *st == vertex.st_position)
+    }
+}
+
+impl DamageRecord for PathSnapshot {
+    fn sort_key(&self) -> (u32, u32) {
+        (self.order, 0)
+    }
+
+    fn footprint(&self) -> [f32; 4] {
+        rect_of(&self.clipped_bounds)
+    }
+}
+
+/// Corvene patch: `diff_primitives` for the primitives that are uploaded
+/// as they are, compared byte for byte (the whole list first: most do not
+/// change from one frame to the next).
+fn diff_records<T: DamageRecord>(old: &[T], new: &[T], damage: &mut Damage) {
+    fn bytes<T>(records: &[T]) -> &[u8] {
+        unsafe { WgpuRendererCore::instance_bytes(records) }
+    }
+    if bytes(old) == bytes(new) {
+        return;
+    }
+    diff_primitives(
+        old,
+        new,
+        |old, new| bytes(std::slice::from_ref(old)) == bytes(std::slice::from_ref(new)),
+        damage,
+    );
+}
+
+/// Corvene patch: adds to `damage` the footprints of what differs between
+/// two lists of a kind of primitive sorted by `sort_key` (see
+/// `DamageSnapshot::plan`).
+fn diff_primitives<O: DamageRecord, N: DamageRecord>(
+    old: &[O],
+    new: &[N],
+    same: impl Fn(&O, &N) -> bool,
+    damage: &mut Damage,
+) {
+    fn group_end<T: DamageRecord>(records: &[T], start: usize) -> usize {
+        let key = records[start].sort_key();
+        records[start..]
+            .iter()
+            .position(|record| record.sort_key() != key)
+            .map_or(records.len(), |length| start + length)
+    }
+
+    let (mut old_start, mut new_start) = (0, 0);
+    while old_start < old.len() || new_start < new.len() {
+        let old_key = old.get(old_start).map(DamageRecord::sort_key);
+        let new_key = new.get(new_start).map(DamageRecord::sort_key);
+        match (old_key, new_key) {
+            (Some(old_key), Some(new_key)) if old_key == new_key => {
+                let old_end = group_end(old, old_start);
+                let new_end = group_end(new, new_start);
+                let (old_group, new_group) = (&old[old_start..old_end], &new[new_start..new_end]);
+                let prefix = old_group
+                    .iter()
+                    .zip(new_group)
+                    .take_while(|(old, new)| same(old, new))
+                    .count();
+                let suffix = old_group[prefix..]
+                    .iter()
+                    .rev()
+                    .zip(new_group[prefix..].iter().rev())
+                    .take_while(|(old, new)| same(old, new))
+                    .count();
+                for record in &old_group[prefix..old_group.len() - suffix] {
+                    damage.add(record.footprint());
+                }
+                for record in &new_group[prefix..new_group.len() - suffix] {
+                    damage.add(record.footprint());
+                }
+                old_start = old_end;
+                new_start = new_end;
+            }
+            (Some(old_key), new_key) if new_key.is_none_or(|new_key| old_key < new_key) => {
+                let old_end = group_end(old, old_start);
+                for record in &old[old_start..old_end] {
+                    damage.add(record.footprint());
+                }
+                old_start = old_end;
+            }
+            _ => {
+                let new_end = group_end(new, new_start);
+                for record in &new[new_start..new_end] {
+                    damage.add(record.footprint());
+                }
+                new_start = new_end;
+            }
+        }
+    }
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+#[path = "wgpu_renderer_corvene_tests.rs"]
+mod corvene_tests;

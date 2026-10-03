@@ -28,7 +28,7 @@ const MAX_FILES_TO_LIST: usize = 10;
 
 pub struct DiscardChangesDialog {
     repo: u64,
-    paths: Vec<String>,
+    paths: std::rc::Rc<Vec<String>>,
     all: bool,
     dont_show_again: bool,
     /// `723-discard-confirm-snooze`
@@ -41,7 +41,7 @@ impl DiscardChangesDialog {
     pub fn new(repo: u64, paths: Vec<String>, all: bool) -> Self {
         Self {
             repo,
-            paths,
+            paths: std::rc::Rc::new(paths),
             all,
             dont_show_again: false,
             snooze: false,
@@ -81,12 +81,16 @@ impl Render for DiscardChangesDialog {
                 .bool(corvene_core::flags::ids::DISCARD_SUBMODULE_NO_TRASH_HINT)
                 && s.repo_states
                     .get(&self.repo)
-                    .and_then(|rs| rs.status.as_ref())
+                    .and_then(|rs| rs.status.as_deref())
                     .is_some_and(|st| {
+                        let submodules: std::collections::HashSet<&str> = st
+                            .files
+                            .iter()
+                            .filter(|f| f.status.submodule)
+                            .map(|f| f.path.as_str())
+                            .collect();
                         !self.paths.is_empty()
-                            && self.paths.iter().all(|p| {
-                                st.files.iter().any(|f| &f.path == p && f.status.submodule)
-                            })
+                            && self.paths.iter().all(|p| submodules.contains(p.as_str()))
                     })
         };
         // `723-discard-confirm-snooze` (not for Discard All)
@@ -221,7 +225,7 @@ impl Render for DiscardChangesDialog {
                         } else if snooze && !all {
                             Dispatcher::snooze_discard_confirm(repo, cx);
                         }
-                        Dispatcher::discard_changes(repo, paths.clone(), cx);
+                        Dispatcher::discard_changes(repo, paths.to_vec(), cx);
                         Dispatcher::close_popup(cx);
                     }),
                 },

@@ -665,6 +665,13 @@ struct MacWindowState {
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: Option<WindowFrameSource>,
+    // Corvene patch: the display link is paused while the window is idle
+    // (see `step`). `frame_demand` is set by anything that needs another
+    // frame (a draw, `schedule_frame`, the invalidator's waker) and cleared
+    // before each tick; `idle_frames` counts ticks without demand.
+    frame_source_idle: bool,
+    frame_demand: bool,
+    idle_frames: u8,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
@@ -833,6 +840,8 @@ impl MacWindowState {
 
     fn start_display_link(&mut self) {
         self.stop_display_link();
+        self.frame_source_idle = false;
+        self.idle_frames = 0;
         unsafe {
             if !self
                 .native_window
@@ -856,6 +865,14 @@ impl MacWindowState {
     fn stop_display_link(&mut self) {
         if let Some(frame_source) = self.frame_source.as_mut() {
             frame_source.stop();
+        }
+    }
+
+    /// Corvene patch: a frame is wanted; wakes a display link `step` paused.
+    fn demand_frame(&mut self) {
+        self.frame_demand = true;
+        if self.frame_source_idle {
+            self.start_display_link();
         }
     }
 
@@ -1098,6 +1115,9 @@ impl MacWindow {
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
                 frame_source: None,
+                frame_source_idle: false,
+                frame_demand: false,
+                idle_frames: 0,
                 renderer: renderer::new_renderer(
                     renderer_context,
                     native_window as *mut _,
@@ -2112,7 +2132,24 @@ impl PlatformWindow for MacWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
+        this.frame_demand = true;
         this.renderer.draw(scene);
+    }
+
+    // Corvene patch: GPUI asks for frames on demand (see `step`).
+    fn schedule_frame(&self) {
+        demand_frame(&self.0);
+    }
+
+    fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
+        // weak: the waker lives in the window's invalidator, which the frame
+        // callback stored in this window's state captures
+        let state = Arc::downgrade(&self.0);
+        Some(Rc::new(move || {
+            if let Some(state) = state.upgrade() {
+                demand_frame(&state);
+            }
+        }))
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
@@ -3299,16 +3336,54 @@ extern "C" fn display_layer(this: &Object, _: Sel, _: id) {
     }
 }
 
+/// Display link ticks without a frame before the link is paused.
+const IDLE_FRAMES_BEFORE_PAUSE: u8 = 8;
+
+/// Corvene patch: GPUI's frame callback runs on every display link tick, and
+/// with nothing to draw that still cost about 1 % CPU while the window sat
+/// idle. A tick that neither drew nor asked for another frame counts as
+/// idle; after a few the display link is paused until something wants a
+/// frame again (an invalidated view or `schedule_frame`, through
+/// [`demand_frame`]), the way GPUI's Wayland and Android windows already
+/// work.
 extern "C" fn step(view: *mut c_void) {
     let view = view as id;
     let window_state = unsafe { get_window_state(&*view) };
     let mut lock = window_state.lock();
 
     if let Some(mut callback) = lock.request_frame_callback.take() {
+        lock.frame_demand = false;
         drop(lock);
         callback(Default::default());
-        window_state.lock().request_frame_callback = Some(callback);
+        let mut lock = window_state.lock();
+        lock.request_frame_callback = Some(callback);
+        if lock.frame_demand {
+            lock.idle_frames = 0;
+        } else {
+            lock.idle_frames = lock.idle_frames.saturating_add(1);
+            if lock.idle_frames >= IDLE_FRAMES_BEFORE_PAUSE && lock.frame_source.is_some() {
+                lock.stop_display_link();
+                lock.frame_source_idle = true;
+            }
+        }
     }
+}
+
+/// Wake the window's display link (main thread). GPUI never holds the
+/// window's lock while it runs app code; should a waker still fire while the
+/// lock is held (re-entrantly from a platform callback), the wake happens on
+/// the next turn of the main loop instead of deadlocking.
+fn demand_frame(state: &Arc<Mutex<MacWindowState>>) {
+    if let Some(mut lock) = state.try_lock() {
+        lock.demand_frame();
+        return;
+    }
+    let state = Arc::downgrade(state);
+    DispatchQueue::main().exec_async(move || {
+        if let Some(state) = state.upgrade() {
+            state.lock().demand_frame();
+        }
+    });
 }
 
 extern "C" fn valid_attributes_for_marked_text(_: &Object, _: Sel) -> id {

@@ -464,6 +464,9 @@ impl WgpuContext {
         };
         #[cfg(not(target_os = "android"))]
         let backends = wgpu::Backends::VULKAN | wgpu::Backends::GL;
+        // Corvene patch: so that the renderer's tests find a GPU on macOS
+        #[cfg(all(test, target_os = "macos"))]
+        let backends = backends | wgpu::Backends::METAL;
         wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
             flags: wgpu::InstanceFlags::default(),

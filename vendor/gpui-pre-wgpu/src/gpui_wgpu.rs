@@ -13,3 +13,7 @@ pub use wgpu_context::*;
 ))]
 pub use wgpu_renderer::WgpuHeadlessRenderer;
 pub use wgpu_renderer::{GpuContext, WgpuRenderer, WgpuSurfaceConfig};
+// Corvene patch: the renderer's switches against overdraw on mobile GPUs
+pub use wgpu_renderer::{
+    damage_scissor, opaque_depth_pass, set_damage_scissor, set_opaque_depth_pass,
+};

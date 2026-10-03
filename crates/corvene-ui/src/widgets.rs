@@ -1084,6 +1084,61 @@ pub fn filter_text_box(
         })
 }
 
+/// GHD `PasswordTextBox` (`ui/lib/password-text-box.tsx`): a [`text_box`]
+/// over a masked `state` whose text stops `--spacing-triple` (30 px) before
+/// the end, where a 30 px button (`.password-text-box button`: no border or
+/// fill, `--text-secondary-color` icon) shows `eye-closed` while the value
+/// is hidden and `eye` while it shows. Clicking flips the mask and puts focus
+/// back in the field.
+pub fn password_text_box(
+    id: impl Into<ElementId>,
+    state: &Entity<InputState>,
+    window: &Window,
+    cx: &App,
+) -> Stateful<Div> {
+    let t = cx.ghd();
+    let shown = !state.read(cx).presentation().is_masked();
+    let toggle_state = state.clone();
+    text_box_with_menu(id, state, None, None, window, cx)
+        .relative()
+        // `padding-right: var(--spacing-triple)`, less the kit's 4 px
+        .pr(zpx(26.))
+        .child(
+            // a `Button` tooltip: north of the button by default
+            with_directed_tooltip(
+                div()
+                    .id("toggle-password-visibility")
+                    .a11y_button("Toggle password visibility"),
+                "Toggle password visibility",
+                TooltipDirection::North,
+            )
+            .aria_toggled(if shown { Toggled::True } else { Toggled::False })
+            .absolute()
+            .right(zpx(-1.))
+            .top(zpx(-1.))
+            .w(zpx(30.))
+            .h(TEXT_FIELD_HEIGHT())
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .child(crate::icons::octicon(
+                if shown {
+                    crate::icons::Octicon::Eye
+                } else {
+                    crate::icons::Octicon::EyeClosed
+                },
+                t.text_secondary,
+            ))
+            .on_click(move |_, window, cx| {
+                toggle_state.update(cx, |input, cx| {
+                    input.toggle_masked(window, cx);
+                    input.focus(window, cx);
+                });
+            }),
+        )
+}
+
 /// A custom right-click menu for an input (the kit's native edit menu is
 /// replaced wholesale, so builders add Cut/Copy/Paste themselves).
 pub type InputMenuBuilder = std::rc::Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>;
