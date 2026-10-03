@@ -382,6 +382,11 @@ pub struct RepositoryInfo {
     /// `commit.template` contents with comment lines removed (`None` when
     /// unset, unreadable or empty).
     pub commit_template: Option<String>,
+    /// The patterns of the `diff.orderFile` file (blank and `#` lines left
+    /// out; empty when unset or unreadable), for the changes list's
+    /// "order-file" order (Corvene flag `703-changes-sort-order`).
+    #[serde(default)]
+    pub diff_order: Vec<String>,
 }
 
 impl RepositoryInfo {

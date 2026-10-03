@@ -19,7 +19,8 @@
 //! - the Filter Options popover has "Renamed files" (`705-renamed-files-filter`).
 //! - rows can show the file name without its directory
 //!   (`702-changes-file-names-only`).
-//! - the list can be ordered by status or file name (`703-changes-sort-order`).
+//! - the list can be ordered by status, file name or `diff.orderFile`
+//!   (`703-changes-sort-order`).
 //! - the filter text can match as a substring, suffix or exact name
 //!   (`704-changes-filter-match`).
 //! - a "Committing as Name <email>" line can sit above the summary
@@ -1697,7 +1698,15 @@ impl ChangesSidebar {
         // `703-changes-sort-order`
         let order = s.flags.text(corvene_core::flags::ids::CHANGES_SORT_ORDER);
         let mut sorted = None;
-        if order != "path" {
+        if order == "order-file" {
+            // `diff.orderFile` (path order when unset)
+            let patterns = rs.info.as_ref().map(|i| i.diff_order.as_slice());
+            if let Some(patterns) = patterns.filter(|p| !p.is_empty()) {
+                let mut files = status.files.clone();
+                corvene_core::filter::sort_files_by_order_file(&mut files, patterns);
+                sorted = Some(files);
+            }
+        } else if order != "path" {
             let mut files = status.files.clone();
             corvene_core::filter::sort_files(&mut files, order);
             sorted = Some(files);

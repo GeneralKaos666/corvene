@@ -5,7 +5,8 @@
 //! Deviation: [`hidden_by`] hides files matching the `706-changes-hide-globs`
 //! patterns from the list (view only; they are still committed), and the
 //! `705-renamed-files-filter` option keeps renamed files; [`sort_files`]
-//! orders the list by status or file name (`703-changes-sort-order`), and
+//! orders the list by status, file name or `diff.orderFile`
+//! ([`sort_files_by_order_file`], `703-changes-sort-order`), and
 //! [`path_match`] can match the filter text as a substring, a suffix or the
 //! exact path / file name instead of fuzzily (`704-changes-filter-match`).
 
@@ -260,6 +261,54 @@ pub fn sort_files(files: &mut [WorkingDirectoryFileChange], order: &str) {
     }
 }
 
+/// `703-changes-sort-order` "order-file": the order of the
+/// `diff.orderFile` patterns (git `diffcore-order.c`): files by the first pattern matching their
+/// path or one of its parent folders, path order among equals, unmatched
+/// files last. Patterns are globs whose `*` also crosses `/`; `[...]`
+/// classes are not supported.
+pub fn sort_files_by_order_file(files: &mut [WorkingDirectoryFileChange], patterns: &[String]) {
+    if patterns.is_empty() {
+        return;
+    }
+    files.sort_by_cached_key(|f| order_file_rank(patterns, &f.path));
+}
+
+/// The index of the first pattern matching `path` or a parent folder of it,
+/// `patterns.len()` when none does (`match_order`).
+pub fn order_file_rank(patterns: &[String], path: &str) -> usize {
+    patterns
+        .iter()
+        .position(|pattern| {
+            let mut p = path;
+            loop {
+                if wildmatch_no_pathname(pattern, p) {
+                    return true;
+                }
+                match p.rfind('/') {
+                    Some(i) => p = &p[..i],
+                    None => return false,
+                }
+            }
+        })
+        .unwrap_or(patterns.len())
+}
+
+/// `wildmatch(pattern, text, 0)` for `*` and `?` (both cross `/`).
+fn wildmatch_no_pathname(pattern: &str, text: &str) -> bool {
+    fn go(p: &[char], t: &[char]) -> bool {
+        match p.first() {
+            None => t.is_empty(),
+            Some('*') => (0..=t.len()).any(|i| go(&p[1..], &t[i..])),
+            Some('?') => !t.is_empty() && go(&p[1..], &t[1..]),
+            Some('\\') if p.len() > 1 => t.first() == Some(&p[1]) && go(&p[2..], &t[1..]),
+            Some(c) => t.first() == Some(c) && go(&p[1..], &t[1..]),
+        }
+    }
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    go(&p, &t)
+}
+
 /// Count per option, as the popover labels show them (`getFilterCounts`).
 pub fn option_count(option: FilterOption, files: &[WorkingDirectoryFileChange]) -> usize {
     let mut only = FileListFilter::default();
@@ -421,6 +470,44 @@ mod tests {
         assert!(path_match("exact", "x", "").is_none());
         // an empty query matches everything in every mode
         assert!(path_match("exact", "", path).is_some());
+    }
+
+    #[test]
+    fn order_file_ranks_first_matching_pattern() {
+        let patterns: Vec<String> = ["*.h", "src", "*test*"].map(String::from).to_vec();
+        assert_eq!(order_file_rank(&patterns, "include/a.h"), 0, "* crosses /");
+        assert_eq!(
+            order_file_rank(&patterns, "src/deep/b.c"),
+            1,
+            "a parent folder"
+        );
+        assert_eq!(order_file_rank(&patterns, "lib/test_x.rs"), 2);
+        assert_eq!(order_file_rank(&patterns, "README"), 3, "unmatched last");
+        let file = |path: &str| WorkingDirectoryFileChange {
+            path: path.to_string(),
+            old_path: None,
+            status: corvene_models::FileStatus {
+                kind: FileStatusKind::Modified,
+                index: corvene_models::GitStatusEntry::Unchanged,
+                working_tree: corvene_models::GitStatusEntry::Modified,
+                score: None,
+                code: String::new(),
+                submodule: false,
+                submodule_status: None,
+                conflict_markers: None,
+            },
+            selection: corvene_models::DiffSelection::all(),
+        };
+        // the input is git's path order; equal ranks keep it
+        let mut files = vec![
+            file("README"),
+            file("src/b.c"),
+            file("x.h"),
+            file("src/a.c"),
+        ];
+        sort_files_by_order_file(&mut files, &patterns);
+        let order: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(order, vec!["x.h", "src/b.c", "src/a.c", "README"]);
     }
 
     #[test]

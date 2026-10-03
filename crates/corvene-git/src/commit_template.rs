@@ -36,6 +36,42 @@ pub fn read(repo: &gix::Repository, workdir: &Path) -> Option<String> {
     strip_comments(&raw, comment)
 }
 
+/// The patterns of the `diff.orderFile` file (git `diffcore-order.c`
+/// `prepare_order`): one per line, blank lines and `#` comments skipped; a
+/// relative path is taken from the worktree root. Empty when unset, missing
+/// or oversized. Feeds Corvene's "order-file" changes list order (flag
+/// `703-changes-sort-order`).
+pub fn read_diff_order(repo: &gix::Repository, workdir: &Path) -> Vec<String> {
+    let cfg = repo.config_snapshot();
+    let Some(path) = cfg.trusted_path("diff.orderFile").ok().flatten() else {
+        return Vec::new();
+    };
+    let path = if path.is_relative() {
+        workdir.join(path)
+    } else {
+        path
+    };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return Vec::new();
+    };
+    if !meta.is_file() || meta.len() > MAX_TEMPLATE_BYTES {
+        return Vec::new();
+    }
+    let Ok(raw) = std::fs::read(&path) else {
+        return Vec::new();
+    };
+    order_patterns(&String::from_utf8_lossy(&raw))
+}
+
+/// An order file's lines minus blank ones and `#` comments.
+pub fn order_patterns(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
 /// `core.commentChar` (a single character; `auto` and invalid values mean `#`).
 fn comment_char(value: Option<String>) -> char {
     value
@@ -71,6 +107,14 @@ pub fn strip_comments(raw: &str, comment: char) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn order_file_skips_blank_and_comment_lines() {
+        assert_eq!(
+            order_patterns("# first\n*.h\n\n  src/*  \n*.c\n"),
+            vec!["*.h", "src/*", "*.c"]
+        );
+    }
 
     #[test]
     fn strips_comment_lines_and_trailing_blank_lines() {

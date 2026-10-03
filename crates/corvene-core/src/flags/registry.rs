@@ -228,6 +228,10 @@ const CHANGES_SORT_ORDERS: &[SelectOption] = &[
         value: "name",
         label: "File name",
     },
+    SelectOption {
+        value: "order-file",
+        label: "diff.orderFile",
+    },
 ];
 const CHANGES_FILTER_MATCHES: &[SelectOption] = &[
     SelectOption {
@@ -2670,16 +2674,18 @@ registry! {
     CHANGES_SORT_ORDER = 703 "changes-sort-order" {
         title: "Changes list order",
         summary: "How the changes list orders its files: by path, by status (conflicted, new, \
-                  modified, renamed, deleted; path order within each), or by file name. A filter \
-                  text still ranks its matches best first.",
+                  modified, renamed, deleted; path order within each), by file name, or by the \
+                  repository's diff.orderFile (files by the first glob matching them, then path; \
+                  unmatched files last; path order when it is unset). A filter text still ranks \
+                  its matches best first.",
         ghd_behaviour: "Path order (git's).",
         nature: Nature::Feature,
         kind: Kind::Select { options: CHANGES_SORT_ORDERS },
         corvene: Value::text("path"), ghd: Value::text("path"),
         familiar: Value::text("path"), max: Value::text("path"),
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(4739)],
-        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/filter.rs"],
+        upstream: &[Upstream::issue(4739), Upstream::issue(22622)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/filter.rs", "crates/corvene-git/src/commit_template.rs"],
     },
 
     /// How the changes filter text matches.
