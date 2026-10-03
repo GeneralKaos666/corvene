@@ -520,3 +520,175 @@ pub fn drag_handle_at(x: f32, y: f32) -> Option<(f32, f32)> {
             })
         })
 }
+
+// ── the process environment (shared by the GPUI and the Compose app) ────────
+
+/// An Android process starts with no `HOME` and an unwritable temporary
+/// directory. Everything Corvene and git keep lives in the app-private
+/// storage (`/data/user/0/<package>`), a full Linux filesystem:
+///
+/// * `files/home`: `HOME` (git's global config, `~/.ssh`, the XDG data and
+///   state directories)
+/// * `cache`: `XDG_CACHE_HOME`, which the system may clear
+/// * `cache/tmp`: `TMPDIR`
+/// * `files/git/bin`: the bundled git ([`bundled_git`])
+pub fn prepare_environment(files: &Path) {
+    let home = files.join("home");
+    let cache = files
+        .parent()
+        .unwrap_or(Path::new("/data/local/tmp"))
+        .join("cache");
+    let tmp = cache.join("tmp");
+    for dir in [&home, &tmp] {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let git = bundled_git(files);
+    // SAFETY: nothing else in the process reads the environment yet: this
+    // runs first on the native thread, before any Rust thread is spawned
+    unsafe {
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_CACHE_HOME", &cache);
+        std::env::set_var("TMPDIR", &tmp);
+        if let Some(git) = git {
+            // `corvene_git::find_git` and git itself (ssh, git-lfs)
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            let mut dirs = vec![git.bin.clone()];
+            dirs.extend(std::env::split_paths(&path));
+            if let Ok(path) = std::env::join_paths(dirs) {
+                std::env::set_var("PATH", path);
+            }
+            std::env::set_var("CORVENE_GIT", git.bin.join("git"));
+            // credentials: git runs the helper, which asks `serve_askpass`
+            std::env::set_var("CORVENE_ASKPASS_PROGRAM", git.bin.join("corvene-askpass"));
+            std::env::set_var("CORVENE_ASKPASS_SOCKET", cache.join("askpass.sock"));
+            std::env::set_var("GIT_EXEC_PATH", &git.bin);
+            std::env::set_var("GIT_TEMPLATE_DIR", &git.templates);
+            // No terminal to ask whether an unknown host's key is right:
+            // the first key seen is kept in ~/.ssh/known_hosts and a
+            // changed one is still refused.
+            if std::env::var_os("GIT_SSH_COMMAND").is_none() {
+                std::env::set_var(
+                    "GIT_SSH_COMMAND",
+                    format!(
+                        "{} -o StrictHostKeyChecking=accept-new",
+                        git.bin.join("ssh").display()
+                    ),
+                );
+            }
+            // there is no /etc/gitconfig
+            std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+            // The system's trusted certificates. Android names the files by
+            // OpenSSL's old subject hash, which OpenSSL 3 does not look up,
+            // so the directory alone verifies nothing: the same
+            // certificates are also handed over as one bundle.
+            std::env::set_var("GIT_SSL_CAPATH", "/system/etc/security/cacerts");
+            if let Some(bundle) = &git.ca_bundle {
+                std::env::set_var("GIT_SSL_CAINFO", bundle);
+            }
+        }
+    }
+}
+
+pub struct BundledGit {
+    /// `git`, `git-remote-https`, `ssh`, `git-lfs`, …: `GIT_EXEC_PATH`.
+    pub bin: PathBuf,
+    /// An empty `GIT_TEMPLATE_DIR` (git warns about a missing one).
+    pub templates: PathBuf,
+    /// The system's certificate store as one PEM file.
+    pub ca_bundle: Option<PathBuf>,
+}
+
+/// The executables the package carries as `lib*.so` (the only files an app
+/// may execute are those the installer extracts into its native library
+/// directory; `packaging/android/git/build.sh`), under the names git looks
+/// for: symbolic links in `files/git/bin`, made again on every start because
+/// the library directory moves with each update.
+pub fn bundled_git(files: &Path) -> Option<BundledGit> {
+    const LINKS: &[(&str, &str)] = &[
+        ("git", "libgit.so"),
+        ("git-remote-https", "libgit-remote-https.so"),
+        ("git-remote-http", "libgit-remote-https.so"),
+        ("ssh", "libssh.so"),
+        ("ssh-keygen", "libssh-keygen.so"),
+        ("git-lfs", "libgit-lfs.so"),
+        ("corvene-askpass", "libcorvene-askpass.so"),
+        ("git-sh-setup", "libgit-sh-setup.so"),
+        ("git-sh-i18n", "libgit-sh-i18n.so"),
+        ("git-submodule", "libgit-submodule.so"),
+        ("git-mergetool", "libgit-mergetool.so"),
+        ("git-mergetool--lib", "libgit-mergetool--lib.so"),
+    ];
+    let libraries = native_library_dir()?;
+    if !libraries.join("libgit.so").exists() {
+        return None;
+    }
+    let bin = files.join("git/bin");
+    let templates = files.join("git/templates");
+    let _ = std::fs::remove_dir_all(&bin);
+    for dir in [&bin, &templates] {
+        std::fs::create_dir_all(dir).ok()?;
+    }
+    for (name, library) in LINKS {
+        let target = libraries.join(library);
+        if target.exists() {
+            let _ = std::os::unix::fs::symlink(target, bin.join(name));
+        }
+    }
+    let ca_bundle = ca_bundle(&files.join("git/cacert.pem"));
+    Some(BundledGit {
+        bin,
+        templates,
+        ca_bundle,
+    })
+}
+
+/// Writes the certificates Android trusts (the Conscrypt module's store,
+/// which replaced `/system/etc/security/cacerts` in Android 14, and the ones
+/// the user installed) into `bundle`, on every start so removals and
+/// additions are followed.
+fn ca_bundle(bundle: &Path) -> Option<PathBuf> {
+    let system = [
+        "/apex/com.android.conscrypt/cacerts",
+        "/system/etc/security/cacerts",
+    ]
+    .into_iter()
+    .find(|dir| Path::new(dir).is_dir())?;
+    let mut pem = Vec::new();
+    for dir in [system, "/data/misc/user/0/cacerts-added"] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if let Ok(certificate) = std::fs::read(entry.path()) {
+                pem.extend_from_slice(&certificate);
+                pem.push(b'\n');
+            }
+        }
+    }
+    if pem.is_empty() {
+        return None;
+    }
+    std::fs::write(bundle, pem).ok()?;
+    Some(bundle.to_path_buf())
+}
+
+/// Where the installer extracted the package's native libraries: the
+/// directory this library was loaded from.
+pub fn native_library_dir() -> Option<PathBuf> {
+    let mut info = std::mem::MaybeUninit::<libc::Dl_info>::zeroed();
+    // SAFETY: `dladdr` fills `info` for an address inside this library and
+    // `dli_fname` then points at the loader's own NUL-terminated path
+    let path = unsafe {
+        if libc::dladdr(native_library_dir as *const libc::c_void, info.as_mut_ptr()) == 0 {
+            return None;
+        }
+        let name = info.assume_init().dli_fname;
+        if name.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr(name)
+            .to_string_lossy()
+            .into_owned()
+    };
+    Path::new(&path).parent().map(Path::to_path_buf)
+}

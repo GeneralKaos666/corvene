@@ -76,6 +76,43 @@ pub fn answer_with(prompt: &str, logins: HashMap<String, String>) -> Option<Stri
     }
 }
 
+/// Android: git runs the `corvene-askpass` helper, which cannot reach the
+/// Keystore itself. It connects to `CORVENE_ASKPASS_SOCKET` (in the
+/// app-private cache directory) and sends two lines, its
+/// `CORVENE_ASKPASS_LOGINS` and the prompt; the answer is [`answer_with`].
+#[cfg(target_os = "android")]
+pub fn serve_socket() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    let Some(socket) = std::env::var_os("CORVENE_ASKPASS_SOCKET") else {
+        return;
+    };
+    let _ = std::fs::remove_file(&socket);
+    let listener = match UnixListener::bind(&socket) {
+        Ok(listener) => listener,
+        Err(err) => {
+            tracing::warn!("askpass socket: {err}");
+            return;
+        }
+    };
+    let spawned = std::thread::Builder::new()
+        .name("askpass".into())
+        .spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut lines = BufReader::new(&stream).lines();
+                let (Some(Ok(logins)), Some(Ok(prompt))) = (lines.next(), lines.next()) else {
+                    continue;
+                };
+                let answer = answer_with(&prompt, parse_logins(&logins)).unwrap_or_default();
+                let _ = (&stream).write_all(answer.as_bytes());
+            }
+        });
+    if let Err(err) = spawned {
+        tracing::warn!("askpass thread: {err}");
+    }
+}
+
 /// Entry point for `CORVENE_ASKPASS=1 corvene "<prompt>"`.
 pub fn run() -> ! {
     let prompt = std::env::args().nth(1).unwrap_or_default();

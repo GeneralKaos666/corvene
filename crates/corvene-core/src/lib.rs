@@ -5,6 +5,7 @@ pub mod acknowledgements;
 pub mod alive;
 pub mod app_location;
 pub mod app_url;
+pub mod askpass;
 pub mod autocomplete;
 pub mod avatars;
 pub mod clone_info;

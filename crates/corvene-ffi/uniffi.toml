@@ -1,0 +1,6 @@
+[bindings.kotlin]
+package_name = "com.wasimaster.corvene.ffi.gen"
+cdylib_name = "corvene_ffi"
+android = true
+android_cleaner = true
+generate_immutable_records = true

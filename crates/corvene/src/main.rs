@@ -3,7 +3,7 @@
 // a debug build keeps one for its log)
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-pub(crate) mod askpass;
+pub(crate) use corvene_core::askpass;
 mod assets;
 #[cfg(windows)]
 mod cli_windows;

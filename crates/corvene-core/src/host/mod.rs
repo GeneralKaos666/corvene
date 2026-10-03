@@ -13,6 +13,8 @@
 pub mod gpui;
 #[cfg(any(target_os = "android", test, feature = "local-host"))]
 pub mod local;
+#[cfg(test)]
+mod tests;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -23,7 +25,7 @@ use std::time::Duration;
 use crate::state::AppState;
 
 #[cfg(any(target_os = "android", test, feature = "local-host"))]
-pub use local::{LocalHost, LoopHandle};
+pub use local::{LocalHost, LoopHandle, spawn_loop};
 
 /// What `Dispatcher` methods take, spelled `&mut dyn Host` in signatures so
 /// the object lifetime follows the reference (GPUI's `Context<'a, V>` is not
