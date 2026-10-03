@@ -2199,6 +2199,26 @@ registry! {
         code: &["crates/corvene/src/main.rs"],
     },
 
+    /// The release notes and conflicts dialogs grow with the window.
+    LARGER_DIALOGS = 449 "larger-dialogs" {
+        title: "Larger release notes and conflicts dialogs",
+        summary: "The release notes and \"Resolve conflicts\" dialogs take up to 80 % of the \
+                  window (at most 960 px wide), so long notes and many conflicted files need \
+                  less scrolling.",
+        ghd_behaviour: "Release notes are at most 800 × 500 px and the conflicts dialog 500 px \
+                        wide with a 285 px file list, whatever the window size.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6851)],
+        code: &[
+            "crates/corvene-ui/src/dialog.rs",
+            "crates/corvene-ui/src/dialogs/release_notes.rs",
+            "crates/corvene-ui/src/dialogs/mco_dialogs.rs",
+        ],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

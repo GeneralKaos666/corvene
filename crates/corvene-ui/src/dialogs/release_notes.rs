@@ -7,7 +7,9 @@
 //! and `#123` references); the pretext goes through `crate::markdown` instead
 //! of GHD's sandboxed Markdown webview. "Install and Restart" appears when
 //! the notes are those of the update the self-updater has ready (GHD: when
-//! the version differs from the running one).
+//! the version differs from the running one). `449-larger-dialogs`: the
+//! dialog grows to 80 % of the window (at most 960 px wide; GHD: 550 to
+//! 800 px wide and 500 px high).
 
 use corvene_core::release_notes::{RELEASE_NOTES_URL, ReleaseNote, ReleaseSummary};
 use corvene_core::{AppState, Dispatcher, UpdateStatus};
@@ -93,6 +95,13 @@ impl Render for ReleaseNotesDialog {
         let t = cx.ghd();
         let r = &self.summary;
         let viewport = crate::theme::page_size(window);
+        // `449-larger-dialogs`: width and height
+        let large = crate::dialog::larger_dialogs(cx).then(|| {
+            (
+                crate::dialog::larger_dialog_width(viewport).max(zpx(550.)),
+                (viewport.height * 0.8).max(zpx(500.)),
+            )
+        });
         let date = r
             .date_published
             .map(|d| crate::format::format_pattern("MMMM d, yyyy", &crate::format::local_time(d)));
@@ -148,8 +157,10 @@ impl Render for ReleaseNotesDialog {
                             .aria_label(format!("Release notes for version {}", r.latest_version))
                             .child(crate::dialog::window_title("Release Notes"))
                             .min_w(zpx(550.))
-                            .max_w(zpx(800.))
-                            .max_h(zpx(500.))
+                            .map(|d| match large {
+                                Some((width, height)) => d.w(width).max_h(height),
+                                None => d.max_w(zpx(800.)).max_h(zpx(500.)),
+                            })
                             .flex()
                             .flex_col()
                             .rounded(BORDER_RADIUS())
@@ -230,7 +241,8 @@ impl Render for ReleaseNotesDialog {
                                 // `.dialog-content`
                                 div()
                                     .id("release-notes-content")
-                                    .max_h(zpx(335.))
+                                    // the header and footer take the other 165 px
+                                    .max_h(large.map_or(zpx(335.), |(_, h)| h - zpx(165.)))
                                     .overflow_y_scroll()
                                     .py(SPACING())
                                     .px(SPACING_TRIPLE())

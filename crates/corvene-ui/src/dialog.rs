@@ -167,6 +167,23 @@ fn ghd_dialog_width(id: &str) -> Option<f32> {
     })
 }
 
+/// `449-larger-dialogs`: the dialogs whose lists grow with the window.
+const LARGER_DIALOGS: &[&str] = &["dialog-conflicts"];
+
+/// `449-larger-dialogs` is on.
+pub fn larger_dialogs(cx: &App) -> bool {
+    corvene_core::AppState::try_global(cx).is_some_and(|s| {
+        s.read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::LARGER_DIALOGS)
+    })
+}
+
+/// `449-larger-dialogs`: 80 % of the window, at most 960 px.
+pub fn larger_dialog_width(viewport: Size<Pixels>) -> Pixels {
+    (viewport.width * 0.8).min(zpx(960.))
+}
+
 pub fn dialog(
     id: &'static str,
     title: impl Into<SharedString>,
@@ -502,6 +519,8 @@ fn dialog_impl(
         focus_close,
     } = frame;
     let viewport = crate::theme::page_size(window);
+    let large_width = (LARGER_DIALOGS.contains(&id) && larger_dialogs(cx))
+        .then(|| larger_dialog_width(viewport).max(zpx(400.)));
     // a phone: no dialog is wider than the window
     let widest = if crate::theme::compact(window) {
         viewport.width - zpx(16.)
@@ -538,8 +557,10 @@ fn dialog_impl(
                         .when_some(plain_title.clone(), |d, title| d.aria_label(title))
                         .children(plain_title.map(window_title))
                         .min_w(zpx(400.).min(widest))
-                        .max_w(zpx(600.).min(widest))
-                        .when_some(ghd_dialog_width(id), |d, w| d.w(zpx(w).min(widest)))
+                        .max_w(zpx(600.).max(large_width.unwrap_or_default()).min(widest))
+                        .when_some(large_width.or(ghd_dialog_width(id).map(zpx)), |d, w| {
+                            d.w(w.min(widest))
+                        })
                         // a `<dialog>` never outgrows the viewport; the content scrolls
                         .max_h(viewport.height)
                         .flex()
