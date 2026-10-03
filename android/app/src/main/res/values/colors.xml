@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primer canvas: what shows behind the splash screen and the first frame -->
+    <color name="app_window_background">#FFFFFF</color>
+</resources>

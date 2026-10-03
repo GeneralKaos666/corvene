@@ -1,0 +1,20 @@
+# UniFFI's generator on its own, for `-Pcorvene.uniffiBindgen=standalone`:
+# library mode reads everything from the built libcorvene_ffi.so, so the
+# generator does not need the engine compiled for the host (several GB of
+# target/ that `cargo run -p corvene-ffi --bin uniffi-bindgen` builds).
+# The version must equal crates/corvene-ffi's uniffi (GenerateUniffiTask checks).
+[package]
+name = "corvene-uniffi-bindgen"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+uniffi = { version = "=0.32.2", features = ["cli"] }
+
+# its own workspace, not a member of the Corvene one
+[workspace]

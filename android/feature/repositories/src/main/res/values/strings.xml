@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="repo_title">Repositories</string>
+    <string name="repo_group_recent">Recent</string>
+    <string name="repo_group_other">Other</string>
+    <string name="repo_empty_title">No repositories yet</string>
+    <string name="repo_empty_description">Add a folder that holds a Git repository. Clone and Create arrive with the next milestones.</string>
+    <string name="repo_add">Add repository</string>
+    <string name="repo_remove_title">Remove %1$s?</string>
+    <string name="repo_remove_message">Corvene forgets the repository. The folder and its files stay where they are.</string>
+    <string name="repo_remove">Remove</string>
+    <string name="repo_cancel">Cancel</string>
+    <string name="repo_missing">Can\'t find this folder</string>
+    <string name="repo_changed_files">Uncommitted changes</string>
+    <string name="repo_ahead">%1$d ahead</string>
+    <string name="repo_behind">%1$d behind</string>
+    <string name="repo_failed">The engine did not start: %1$s</string>
+</resources>

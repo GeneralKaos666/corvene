@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- clone, fetch, push, the GitHub API -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- pull request notifications; asked for at run time on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- the transfer service (M-A3): a clone, fetch or push goes on after the
+         user leaves the application -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- "Open in Termux": Termux's RUN_COMMAND intent -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+    <queries>
+        <package android:name="com.termux" />
+        <!-- the editors Settings › Integrations lists -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="text/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.EDIT" />
+            <data android:mimeType="text/*" />
+        </intent>
+        <!-- editors that register for source files by extension or as
+             application/* (Pydroid, Cxxdroid, Jvdroid, Acode) -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="content" android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.EDIT" />
+            <data android:scheme="content" android:mimeType="*/*" />
+        </intent>
+    </queries>
+
+    <!-- tablets, Chromebooks and DeX: none of these is needed to run -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <application
+        android:name=".CorveneApp"
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:extractNativeLibs="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:resizeableActivity="true"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Corvene">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.Corvene.Starting"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- x-corvene://openRepo/… links and the browser sign-in's
+                 x-corvene-auth://oauth callback -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="x-corvene" />
+                <data android:scheme="x-corvene-auth" />
+            </intent-filter>
+
+            <!-- A repository's address shared from a browser or another
+                 application: the Clone dialog opens with it (M-A3). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

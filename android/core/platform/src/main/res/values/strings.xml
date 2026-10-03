@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plt_pick_needs_all_files">Corvene can only open folders in its own storage. To use a folder on shared storage in place, allow \"All files access\" for Corvene first.</string>
+    <string name="plt_pick_not_shared_storage">Corvene can only open folders in its own storage or on this device\'s shared storage.</string>
+    <string name="plt_pick_import_later">Importing a copy of a folder from another provider is not built yet.</string>
+    <string name="plt_no_app_for_url">No app can open %1$s</string>
+</resources>

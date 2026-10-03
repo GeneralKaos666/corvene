@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Corvene</string>
+    <string name="app_appearance">Appearance</string>
+    <string name="app_style_github_mobile">GitHub Mobile</string>
+    <string name="app_style_github_desktop">GitHub Desktop</string>
+    <string name="app_style_material">Material</string>
+    <string name="app_mode_system">System theme</string>
+    <string name="app_mode_light">Light</string>
+    <string name="app_mode_dark">Dark</string>
+    <string name="app_mode_high_contrast">High contrast</string>
+    <string name="app_back">Back</string>
+    <string name="app_repository_missing">This repository is no longer in the list.</string>
+    <string name="app_repository_placeholder">Changes, History and Branches arrive with M-A1.</string>
+    <string name="app_no_branch">No branch yet (refresh the list)</string>
+</resources>

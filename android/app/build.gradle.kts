@@ -1,0 +1,33 @@
+plugins {
+    id("corvene.android.application")
+    id("corvene.android.compose")
+    id("corvene.rust")
+    id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+// The application: Application + MainActivity, Navigation 3 over the
+// feature screens, the splash screen, the engine's start-up. See README.md
+// for the build properties and build-logic/ for what the plugins do.
+android {
+    namespace = "com.wasimaster.corvene"
+}
+
+dependencies {
+    implementation(project(":core:common"))
+    implementation(project(":core:design"))
+    implementation(project(":core:ffi"))
+    implementation(project(":core:platform"))
+    implementation(project(":feature:repositories"))
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.profileinstaller)
+
+    testImplementation(libs.junit)
+}

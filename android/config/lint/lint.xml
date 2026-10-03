@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Android Lint severity map (from WMKeyboard's). :app runs with
+  checkAllWarnings; this file escalates the checks that catch bugs to error
+  and silences the ones that do not apply, each with its reason.
+-->
+<lint>
+    <!-- API level misuse: minSdk 26, compileSdk 36.1. -->
+    <issue id="NewApi" severity="error" />
+    <issue id="InlinedApi" severity="error" />
+    <issue id="ObsoleteSdkInt" severity="error" />
+    <issue id="DeprecatedSinceApi" severity="error" />
+    <issue id="WrongConstant" severity="error" />
+    <issue id="ResourceType" severity="error" />
+    <issue id="Range" severity="error" />
+
+    <!-- Threading and lifecycle. -->
+    <issue id="WrongThread" severity="error" />
+    <issue id="MissingSuperCall" severity="error" />
+    <issue id="StaticFieldLeak" severity="error" />
+    <issue id="Recycle" severity="error" />
+
+    <!-- Permissions, intents, providers. -->
+    <issue id="MissingPermission" severity="error" />
+    <issue id="UnsafeIntentLaunch" severity="error" />
+    <issue id="UnsafeImplicitIntentLaunch" severity="error" />
+    <issue id="ExportedService" severity="error" />
+    <issue id="ExportedReceiver" severity="error" />
+    <issue id="GrantAllUris" severity="error" />
+    <issue id="HardcodedDebugMode" severity="error" />
+    <issue id="UnsafeDynamicallyLoadedCode" severity="error" />
+    <issue id="SetJavaScriptEnabled" severity="error" />
+
+    <!-- String formatting. -->
+    <issue id="StringFormatInvalid" severity="error" />
+    <issue id="StringFormatMatches" severity="error" />
+    <issue id="StringFormatCount" severity="error" />
+
+    <!-- Compose correctness. -->
+    <issue id="UnrememberedMutableState" severity="error" />
+    <issue id="UnrememberedAnimatable" severity="error" />
+    <issue id="MutableCollectionMutableState" severity="error" />
+    <issue id="AutoboxingStateCreation" severity="error" />
+    <issue id="CoroutineCreationDuringComposition" severity="error" />
+    <issue id="FlowOperatorInvokedInComposition" severity="error" />
+    <issue id="StateFlowValueCalledInComposition" severity="error" />
+    <issue id="ProduceStateDoesNotAssignValue" severity="error" />
+    <issue id="RememberReturnType" severity="error" />
+    <issue id="CompositionLocalNaming" severity="error" />
+    <issue id="FrequentlyChangedStateReadInComposition" severity="error" />
+    <issue id="ModifierFactoryUnreferencedReceiver" severity="error" />
+    <issue id="ModifierFactoryReturnType" severity="error" />
+    <issue id="UnnecessaryComposedModifier" severity="error" />
+    <issue id="ComposableNaming" severity="error" />
+
+    <!-- Slack's Compose checks: the correctness ones. -->
+    <issue id="ComposeMutableParameters" severity="error" />
+    <issue id="ComposeViewModelInjection" severity="error" />
+    <issue id="ComposeRememberMissing" severity="error" />
+    <issue id="ComposeModifierReused" severity="error" />
+    <issue id="ComposeModifierWithoutDefault" severity="error" />
+    <issue id="ComposeContentEmitterReturningValues" severity="error" />
+    <issue id="ComposeNamingUppercase" severity="error" />
+    <issue id="ComposeNamingLowercase" severity="error" />
+    <issue id="ComposeModifierMissing" severity="warning" />
+    <issue id="ComposeParameterOrder" severity="warning" />
+    <issue id="ComposeUnstableCollections" severity="warning" />
+    <issue id="ComposeMultipleContentEmitters" severity="warning" />
+    <!-- The design style, palette and core are CompositionLocals by design
+         (no DI): .docs/android/design-compose-app.md §2, §4. -->
+    <issue id="ComposeCompositionLocalUsage" severity="ignore" />
+    <issue id="ComposePreviewPublic" severity="ignore" />
+    <issue id="ComposePreviewNaming" severity="ignore" />
+
+    <!-- Versions are pinned on purpose, each with its reason in libs.versions.toml. -->
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <issue id="OldTargetApi" severity="ignore" />
+    <issue id="UseTomlInstead" severity="ignore" />
+    <issue id="KtxExtensionAvailable" severity="ignore" />
+
+    <!-- English only for now; translations come with M-A6. -->
+    <issue id="MissingTranslation" severity="ignore" />
+    <issue id="TypographyEllipsis" severity="ignore" />
+    <issue id="TypographyQuotes" severity="ignore" />
+    <issue id="TypographyDashes" severity="ignore" />
+
+    <!-- The UI is Compose; XML-layout checks have nothing to inspect. -->
+    <issue id="ContentDescription" severity="ignore" />
+    <issue id="RtlEnabled" severity="ignore" />
+    <issue id="SelectableText" severity="ignore" />
+    <issue id="UnknownNullness" severity="ignore" />
+    <issue id="SyntheticAccessor" severity="ignore" />
+    <issue id="ConvertToWebp" severity="ignore" />
+    <issue id="IconLocation" severity="ignore" />
+    <issue id="MonochromeLauncherIcon" severity="ignore" />
+
+    <!-- An Octicon set is generated whole; not every icon is used yet. -->
+    <issue id="UnusedResources">
+        <ignore path="**/res/drawable/cvd_oct_*" />
+        <ignore path="**/src/test/**" />
+    </issue>
+    <issue id="VectorPath" severity="ignore" />
+
+    <!-- Git and its helpers ship as executables named lib*.so (see app/build.gradle.kts). -->
+    <issue id="UnsafeNativeCodeLocation" severity="ignore" />
+
+    <!-- JNA's AWT helpers (com.sun.jna.Native.AWT) are never loaded on
+         Android; R8 drops them (-dontwarn java.awt.**). -->
+    <issue id="InvalidPackage">
+        <ignore regexp="jna" />
+    </issue>
+
+    <!-- aapt2 only resolves the adaptive launcher icon from mipmap-anydpi-v26,
+         although minSdk is 26. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="**/res/mipmap-anydpi-v26" />
+    </issue>
+
+    <!-- Unit tests run on the host JVM. -->
+    <issue id="NewApi">
+        <ignore path="**/src/test/**" />
+    </issue>
+
+    <!-- Generated: the UniFFI bindings, BuildConfig. -->
+    <issue id="all">
+        <ignore path="**/build/generated/**" />
+    </issue>
+</lint>
