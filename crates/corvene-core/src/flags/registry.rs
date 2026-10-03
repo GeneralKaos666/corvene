@@ -1434,6 +1434,22 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// Trust Repository explains when git still refuses the folder.
+    EXPLAIN_TRUST_FAILURE = 295 "explain-trust-failure" {
+        title: "Explain when Trust Repository does not help",
+        summary: "When Trust Repository added the folder to safe.directory but Git still refuses \
+                  it (network shares, WSL and UNC paths), an error explains why and shows the \
+                  safe.directory value Git itself suggests.",
+        ghd_behaviour: "Adds the folder and shows the Trust Repository view again with no \
+                        explanation, so clicking it never helps.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(19451)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/config.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

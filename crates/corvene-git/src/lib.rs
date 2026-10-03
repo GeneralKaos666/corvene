@@ -47,6 +47,7 @@ pub use commit::{
 pub use config::{
     add_safe_directory, global_config_value, global_config_values, local_config_value,
     remove_local_config_value, set_default_branch, set_global_config_value, set_local_config_value,
+    still_unsafe,
 };
 pub use detect::{GitBinary, GitVersion, find_git, find_git_prefetched, prefetch_git};
 pub use diff::{

@@ -419,7 +419,10 @@ impl Dispatcher {
     }
 
     /// GHD `MissingRepository.onTrustDirectory`: `addSafeDirectory` for the
-    /// path git named, then look at the repository again.
+    /// path git named, then look at the repository again. Deviation
+    /// (`295-explain-trust-failure`): when git still refuses the path, an
+    /// error explains why and shows the value git suggests; GHD silently
+    /// shows the Trust Repository view again.
     pub fn trust_repository(id: u64, cx: &mut App) {
         let state = Self::state(cx);
         let (git, path) = {
@@ -436,16 +439,39 @@ impl Dispatcher {
             s.repo_state_mut(id).trusting_path = true;
             cx.notify();
         });
+        let explain = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::EXPLAIN_TRUST_FAILURE);
         crate::remote::spawn_bg(
             cx,
-            move || corvene_git::add_safe_directory(git, &path),
+            move || {
+                corvene_git::add_safe_directory(git.clone(), &path)?;
+                // `explain-trust-failure`: git may still refuse the path
+                // (network shares, WSL and UNC paths are compared by the
+                // form git sees, not the one it printed)
+                let still = if explain {
+                    corvene_git::still_unsafe(git, &path)
+                } else {
+                    None
+                };
+                Ok::<_, corvene_git::GitError>(still.map(|suggested| (path, suggested)))
+            },
             move |result, cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.repo_state_mut(id).trusting_path = false;
                     cx.notify();
                 });
-                if let Err(err) = result {
-                    Self::show_error("Could not trust the repository", err.to_string(), cx);
+                match result {
+                    Err(err) => {
+                        Self::show_error("Could not trust the repository", err.to_string(), cx)
+                    }
+                    Ok(Some((path, suggested))) => Self::show_error(
+                        "Could not trust the repository",
+                        trust_failure_message(&path, suggested.as_deref()),
+                        cx,
+                    ),
+                    Ok(None) => {}
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -4927,6 +4953,21 @@ pub(crate) fn persist_repositories(s: &mut AppState) {
     }
 }
 
+/// `explain-trust-failure`: why Trust Repository did not help, with the
+/// `safe.directory` value git suggests (else the path as git printed it).
+fn trust_failure_message(path: &Path, suggested: Option<&str>) -> String {
+    let path = path.display().to_string();
+    let value = suggested.unwrap_or(&path);
+    format!(
+        "{path} was added to the safe.directory list in your global Git config, but Git still \
+         does not trust it. This happens when the folder is on a network share, a WSL or UNC \
+         path or a file system that does not record its owner, because Git compares the path \
+         in the form it sees, not the one it printed.\n\nAdd the value Git suggests instead:\n\n\
+         git config --global --add safe.directory '{value}'\n\nor, if you trust every \
+         repository on this computer, use '*' as the value."
+    )
+}
+
 pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
@@ -5219,6 +5260,25 @@ pub(crate) fn replace_diff(
 /// Whether any of `committed` is among `local` (flag `818`).
 fn paths_overlap<'a>(mut committed: impl Iterator<Item = &'a String>, local: &[String]) -> bool {
     committed.any(|p| local.contains(p))
+}
+
+#[cfg(test)]
+mod trust_failure_tests {
+    use super::trust_failure_message;
+    use std::path::Path;
+
+    #[test]
+    fn suggests_the_value_git_names() {
+        let message = trust_failure_message(
+            Path::new("//server/share/repo"),
+            Some("%(prefix)///server/share/repo"),
+        );
+        assert!(message.contains("safe.directory '%(prefix)///server/share/repo'"));
+        // never mistaken for git's own refusal (that re-opens the trust view)
+        assert!(corvene_git::dubious_ownership_path(&message).is_none());
+        let message = trust_failure_message(Path::new("/mnt/c/repo"), None);
+        assert!(message.contains("safe.directory '/mnt/c/repo'"));
+    }
 }
 
 #[cfg(test)]
