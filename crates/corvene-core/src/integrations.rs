@@ -1049,10 +1049,16 @@ impl Dispatcher {
     }
 
     /// Settings › Git › "edit your global Git config file": open `~/.gitconfig`
-    /// in the external editor (GHD opens it with the selected editor too).
+    /// in the external editor (GHD opens it with the selected editor too),
+    /// or the XDG file when that is the one git uses (GHD asks
+    /// `git config --edit --global`, `lib/git/config.ts` `getGlobalConfigPath`).
     pub fn edit_global_git_config(cx: &mut App) {
         let Some(home) = dirs_home() else { return };
-        let path = home.join(".gitconfig");
+        let path = global_git_config_path(
+            &home,
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            &|p| p.exists(),
+        );
         if !path.exists()
             && let Err(err) = std::fs::write(&path, "")
         {
@@ -1060,6 +1066,27 @@ impl Dispatcher {
         }
         Self::open_in_editor(path, cx);
     }
+}
+
+/// The global config file `git config --global` edits: `~/.gitconfig`, or
+/// `$XDG_CONFIG_HOME/git/config` (default `~/.config/git/config`) when
+/// `~/.gitconfig` doesn't exist and that does.
+fn global_git_config_path(
+    home: &Path,
+    xdg_config_home: Option<PathBuf>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> PathBuf {
+    let dot = home.join(".gitconfig");
+    if !exists(&dot) {
+        let base = xdg_config_home
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| home.join(".config"));
+        let config = base.join("git").join("config");
+        if exists(&config) {
+            return config;
+        }
+    }
+    dot
 }
 
 fn dirs_home() -> Option<PathBuf> {
@@ -1104,6 +1131,31 @@ fn write_read_only(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn global_config_falls_back_to_the_xdg_file() {
+        let home = Path::new("/home/mona");
+        let only = |file: &'static str| move |p: &Path| p == Path::new(file);
+        let xdg_default = "/home/mona/.config/git/config";
+        assert_eq!(
+            global_git_config_path(home, None, &only(xdg_default)),
+            Path::new(xdg_default)
+        );
+        assert_eq!(
+            global_git_config_path(home, Some("/xdg".into()), &only("/xdg/git/config")),
+            Path::new("/xdg/git/config")
+        );
+        // ~/.gitconfig wins, and nothing exists: ~/.gitconfig
+        let both = |p: &Path| p.ends_with(".gitconfig") || p == Path::new(xdg_default);
+        assert_eq!(
+            global_git_config_path(home, None, &both),
+            home.join(".gitconfig")
+        );
+        assert_eq!(
+            global_git_config_path(home, None, &|_| false),
+            home.join(".gitconfig")
+        );
+    }
 
     fn gh(parent: bool) -> GitHubRepository {
         let base = GitHubRepository {
