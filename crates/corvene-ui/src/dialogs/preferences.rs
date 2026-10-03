@@ -16,6 +16,9 @@
 //! With flag `871-branch-name-trailing-slash-quiet` the default branch name
 //! box does not say "Will be saved as" for a lone trailing `/` or `.`
 //! (GHD `ref-name-text-box.tsx` does).
+//! With flag `544-default-clone-location` Advanced has a "Clone location"
+//! folder picker (GHD has no setting; it remembers the last clone's parent
+//! folder, `ui/lib/default-dir.ts`).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -1674,12 +1677,13 @@ impl PreferencesDialog {
 
     fn advanced_tab(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
-        let (crash_reports, offered_packs) = {
+        let (crash_reports, offered_packs, clone_location) = {
             use corvene_core::flags::ids;
             let flags = &self.state.read(cx).flags;
             (
                 flags.bool(ids::CRASH_REPORTS),
                 corvene_core::offered_packs(flags),
+                flags.bool(ids::DEFAULT_CLONE_LOCATION),
             )
         };
         div()
@@ -1727,6 +1731,8 @@ impl PreferencesDialog {
                 .text_size(FONT_SIZE_SM())
                 .text_color(t.text_secondary),
             )
+            // Corvene addition: `544-default-clone-location`
+            .when(clone_location, |d| d.child(self.clone_location_section(cx)))
             // Corvene addition in place of GHD's Usage section (no telemetry);
             // `501-crash-reports`
             .when(crash_reports, |d| {
@@ -1749,6 +1755,86 @@ impl PreferencesDialog {
                     .children(offered_packs.iter().map(|kind| self.pack_row(*kind, cx)))
             })
             .into_any_element()
+    }
+
+    /// `544-default-clone-location`: where Clone, New Repository and the
+    /// tutorial put repositories (`Settings::clone_dir`), with Choose… and a
+    /// way back to GitHub Desktop's `~/Documents/GitHub`.
+    fn clone_location_section(&self, cx: &Context<Self>) -> AnyElement {
+        let chosen = self.draft.clone_dir.clone();
+        let shown = chosen
+            .clone()
+            .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .mt(SPACING())
+                    .child(section_heading("Clone location", cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING())
+                    .child(
+                        div()
+                            .id("prefs-clone-dir")
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(shown.display().to_string()),
+                    )
+                    .child(
+                        button("prefs-clone-dir-choose", "Choose…", cx)
+                            .flex_none()
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.choose_clone_dir(window, cx)
+                                }),
+                            ),
+                    ),
+            )
+            .child(
+                settings_description(cx)
+                    .mt(SPACING_HALF())
+                    .child("Clone and New Repository suggest this folder for new repositories."),
+            )
+            .when(chosen.is_some(), |d| {
+                d.child(
+                    link_button("prefs-clone-dir-reset", "Use the default location", cx)
+                        .mt(SPACING_HALF())
+                        .text_size(FONT_SIZE_SM())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.draft.clone_dir = None;
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn choose_clone_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                this.update(cx, |this, cx| {
+                    this.draft.clone_dir = Some(path);
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     /// One on-demand pack: its state (compiled in / installed / downloading /

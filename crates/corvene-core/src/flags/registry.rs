@@ -2442,6 +2442,20 @@ registry! {
         code: &["crates/corvene-platform/src/app_icons.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/native_menu.rs"],
     },
 
+    /// Settings › Advanced › Clone location.
+    DEFAULT_CLONE_LOCATION = 544 "default-clone-location" {
+        title: "Default clone location setting",
+        summary: "Settings › Advanced › Clone location picks the folder Clone, New Repository \
+                  and the tutorial suggest for new repositories (default ~/Documents/GitHub).",
+        ghd_behaviour: "No setting; the folder of the last clone is suggested next time.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22630)],
+        code: &["crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.
