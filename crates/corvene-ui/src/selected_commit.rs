@@ -1315,7 +1315,7 @@ impl Render for SelectedCommitView {
             .flex_col()
             .min_h_0()
             .when_some(selected_file, |d, (path, kind)| {
-                d.child(diff_header(&path, kind, &self.diff, cx))
+                d.child(diff_header(&path, kind, None, &self.diff, cx))
             })
             .child(DiffView::embed(&self.diff));
         // Corvene (`801-history-review-mode`): the diff alone, full width

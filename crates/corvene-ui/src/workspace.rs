@@ -523,6 +523,15 @@ impl Workspace {
                     .child(diff_header(
                         &file.path,
                         file.status.kind,
+                        // `762-diff-header-mtime`
+                        rs.and_then(|r| r.diff_file_modified.as_ref())
+                            .filter(|(path, _)| *path == file.path)
+                            .filter(|_| {
+                                state
+                                    .flags
+                                    .bool(corvene_core::flags::ids::DIFF_HEADER_MTIME)
+                            })
+                            .map(|(_, at)| *at),
                         &self.diff_view,
                         cx,
                     ))

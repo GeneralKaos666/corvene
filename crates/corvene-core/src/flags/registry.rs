@@ -3227,6 +3227,20 @@ registry! {
         code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs"],
     },
 
+    /// The working file's modification time in the Changes diff header.
+    DIFF_HEADER_MTIME = 762 "diff-header-mtime" {
+        title: "Modification time in the diff header",
+        summary: "The Changes tab's diff header shows when the selected file was last modified \
+                  (\"Modified 5 minutes ago\", the date and time in its tooltip).",
+        ghd_behaviour: "The header shows the path only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18300)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/workspace.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

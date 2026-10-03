@@ -1295,6 +1295,7 @@ impl Dispatcher {
     }
 
     pub fn load_diff(id: u64, cx: &mut App) {
+        Self::load_file_modified(id, cx);
         let state = Self::state(cx);
         let (git, workdir, file, options, head) = {
             let s = state.read(cx);
@@ -1410,6 +1411,40 @@ impl Dispatcher {
             }
         });
         Self::load_diff_tool(id, cx);
+    }
+
+    /// `762-diff-header-mtime`: the selected file's modification time for
+    /// the Changes diff header (re-read whenever its diff is loaded).
+    fn load_file_modified(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::DIFF_HEADER_MTIME) {
+            return;
+        }
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let (Some(info), Some(path)) = (rs.info.as_ref(), rs.selected_file.clone()) else {
+            return;
+        };
+        let full = info.workdir.join(&path);
+        crate::remote::spawn_bg(
+            cx,
+            move || {
+                std::fs::symlink_metadata(full)
+                    .and_then(|m| m.modified())
+                    .ok()
+            },
+            move |modified, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    let next = modified.map(|at| (path, at));
+                    if rs.diff_file_modified != next {
+                        rs.diff_file_modified = next;
+                        cx.notify();
+                    }
+                });
+            },
+        );
     }
 
     /// `761-too-large-diff-escape-hatch`: read `diff.tool` once the selected

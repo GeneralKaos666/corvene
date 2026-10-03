@@ -40,6 +40,9 @@
 //! configured) and "Open file in <Editor>" (GHD `ui/diff/index.tsx` only says
 //! it is too large).
 //!
+//! Deviation (`762-diff-header-mtime`): the Changes diff header can show
+//! when the working file was last modified (GHD's has the path only).
+//!
 //! Deviation (`757-diff-line-height`): the rows' height can be set (14–32
 //! px); GHD's is fixed at 20 px.
 //!
@@ -79,7 +82,7 @@ use gpui_kit::component::input::{Escape, InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::widgets::IconButtonA11y;
+use crate::widgets::{GhdTooltip, IconButtonA11y};
 
 use crate::actions::{Copy, Find, SelectAll};
 use crate::context_menu::{ContextMenu, IS_MAC, MenuItem, mac_or};
@@ -151,9 +154,12 @@ pub fn status_icon(kind: FileStatusKind, t: &GhdTheme) -> (Octicon, Hsla) {
 
 /// `.diff-header`: path (directory dimmed), the Diff Settings gear and the
 /// status icon, 29 px. The gear toggles the popover owned by `view`.
+/// `modified` (`762-diff-header-mtime`) adds the working file's modification
+/// time before the gear.
 pub fn diff_header(
     path: &str,
     kind: FileStatusKind,
+    modified: Option<std::time::SystemTime>,
     view: &Entity<DiffView>,
     cx: &App,
 ) -> impl IntoElement {
@@ -194,6 +200,16 @@ pub fn diff_header(
                         .child(div().child(file_name.to_string())),
                 ),
         )
+        .children(modified.map(|at| {
+            div()
+                .id("diff-header-modified")
+                .flex_none()
+                .ml(SPACING())
+                .text_size(FONT_SIZE_SM())
+                .text_color(t.text_secondary)
+                .child(format!("Modified {}", crate::relative_time::relative(at)))
+                .ghd_tooltip(crate::format::format_date_time(at))
+        }))
         // `.path-label-component { margin-right: 5px }`,
         // `.diff-options-component { margin-right: 5px }`
         .child(

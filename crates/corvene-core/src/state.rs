@@ -730,6 +730,9 @@ pub struct RepositoryState {
     /// `761-too-large-diff-escape-hatch`: the repository's `diff.tool`, read
     /// when a diff turned out too large to show.
     pub diff_tool: Option<String>,
+    /// `762-diff-header-mtime`: the selected working-directory file's path
+    /// and modification time.
+    pub diff_file_modified: Option<(String, std::time::SystemTime)>,
     /// Most recent commit made from Corvene in this session (`UndoCommit` bar).
     pub last_commit: Option<LastCommit>,
     /// Summaries of the upstream's commits the current branch lacks
