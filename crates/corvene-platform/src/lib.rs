@@ -38,7 +38,7 @@ pub mod url_schemes;
 pub mod windows;
 
 pub mod paths {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     pub const APP_NAME: &str = "Corvene";
 
@@ -120,17 +120,60 @@ pub mod paths {
     /// GitHub Desktop's default clone location: `~/Documents/GitHub`.
     /// Android: `files/repositories` in the app-private storage.
     pub fn default_clone_dir() -> PathBuf {
+        default_clone_dir_avoiding_onedrive(false)
+    }
+
+    /// [`default_clone_dir`]; with `avoid_onedrive`
+    /// (`545-clone-dir-avoids-onedrive`, Windows) `%USERPROFILE%\GitHub` when
+    /// Documents is synced by OneDrive, which handles Git repositories badly.
+    pub fn default_clone_dir_avoiding_onedrive(avoid_onedrive: bool) -> PathBuf {
         #[cfg(target_os = "android")]
         {
+            let _ = avoid_onedrive;
             crate::android::repositories_dir()
         }
         #[cfg(not(target_os = "android"))]
         {
-            dirs::document_dir()
-                .or_else(dirs::home_dir)
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("GitHub")
+            let home = dirs::home_dir();
+            match (dirs::document_dir(), home) {
+                (Some(documents), Some(home)) if avoid_onedrive && cfg!(windows) => {
+                    clone_dir_beside_onedrive(&documents, &home)
+                }
+                (documents, home) => documents
+                    .or(home)
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("GitHub"),
+            }
         }
+    }
+
+    /// `<documents>\GitHub`, or `<home>\GitHub` when a folder on the way to
+    /// Documents is OneDrive's (`OneDrive`, `OneDrive - Contoso`).
+    pub fn clone_dir_beside_onedrive(documents: &Path, home: &Path) -> PathBuf {
+        let onedrive = documents.components().any(|c| {
+            c.as_os_str()
+                .to_str()
+                .is_some_and(|name| name == "OneDrive" || name.starts_with("OneDrive - "))
+        });
+        if onedrive { home } else { documents }.join("GitHub")
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn onedrive_documents_clone_into_the_home_folder() {
+        let home = Path::new("/Users/mona");
+        assert_eq!(
+            clone_dir_beside_onedrive(Path::new("/Users/mona/OneDrive/Documents"), home),
+            home.join("GitHub")
+        );
+        assert_eq!(
+            clone_dir_beside_onedrive(Path::new("/Users/mona/OneDrive - Contoso/Documents"), home),
+            home.join("GitHub")
+        );
+        assert_eq!(
+            clone_dir_beside_onedrive(Path::new("/Users/mona/Documents"), home),
+            Path::new("/Users/mona/Documents/GitHub")
+        );
     }
 
     /// Candidate clone locations offered during onboarding, existing ones only

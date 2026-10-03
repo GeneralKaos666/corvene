@@ -143,6 +143,20 @@ fn app_name(s: &str) -> Result<(), &'static str> {
     }
 }
 
+/// `547-git-executable`: empty, or an absolute or `~/` path on one line.
+fn git_path(s: &str) -> Result<(), &'static str> {
+    let s = s.trim();
+    if s.contains(['\n', '\r']) {
+        Err("One line only")
+    } else if s.chars().count() > 500 {
+        Err("At most 500 characters")
+    } else if !s.is_empty() && !s.starts_with("~/") && !std::path::Path::new(s).is_absolute() {
+        Err("Enter a full path, e.g. /usr/local/bin/git")
+    } else {
+        Ok(())
+    }
+}
+
 /// A comma-separated list of GitHub logins (`229-hidden-clone-owners`).
 fn owner_list(s: &str) -> Result<(), &'static str> {
     if s.contains(['\n', '\r']) {
@@ -1636,6 +1650,54 @@ registry! {
         code: &["crates/corvene-ui/src/cloneable_repositories.rs"],
     },
 
+    /// The background fetch also runs when GitHub saw a push.
+    FETCH_ON_KNOWN_PUSH = 294 "fetch-on-known-push" {
+        title: "Fetch when GitHub reports a push",
+        summary: "Between the hourly background fetches, the selected GitHub repository is \
+                  checked every five minutes and fetched as soon as GitHub says it was pushed \
+                  to after the last fetch, so ahead/behind counts and the pull button catch up \
+                  quickly.",
+        ghd_behaviour: "Waits for the next hourly background fetch.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(22217)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-github/src/api.rs"],
+    },
+
+    /// Trust Repository explains when git still refuses the folder.
+    EXPLAIN_TRUST_FAILURE = 295 "explain-trust-failure" {
+        title: "Explain when Trust Repository does not help",
+        summary: "When Trust Repository added the folder to safe.directory but Git still refuses \
+                  it (network shares, WSL and UNC paths), an error explains why and shows the \
+                  safe.directory value Git itself suggests.",
+        ghd_behaviour: "Adds the folder and shows the Trust Repository view again with no \
+                        explanation, so clicking it never helps.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(19451)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/config.rs"],
+    },
+
+    /// Adding a repository names a stale core.worktree.
+    STALE_CORE_WORKTREE_HINT = 296 "stale-core-worktree-hint" {
+        title: "Name a stale core.worktree when adding",
+        summary: "Adding a folder whose repository's core.worktree setting points to a folder \
+                  that no longer exists stops with an explanation and the \
+                  `git config --unset core.worktree` command that fixes it.",
+        ghd_behaviour: "Fails to add the repository (or adds one that shows up missing) without \
+                        saying why.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(13654)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
@@ -1946,6 +2008,153 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
+    /// After sign-in, say when the Git email won't link commits.
+    GIT_EMAIL_MISMATCH_BANNER = 352 "git-email-mismatch-banner" {
+        title: "Git email check after signing in",
+        summary: "Signing in to an account (outside the Welcome flow) checks the global Git \
+                  email: when none is set, or it is not one of the account's addresses, a banner \
+                  says commits won't be linked to the account and links to Settings › Git. \
+                  Nothing is changed.",
+        ghd_behaviour: "Says nothing at sign-in; only Settings › Git and the commit form warn \
+                        about an email that doesn't match.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14692)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-ui/src/banner.rs"],
+    },
+
+    /// A fork for its own work opens pull requests against itself.
+    FORK_OWN_PR_TARGET = 372 "fork-own-pr-target" {
+        title: "Own-purpose forks open pull requests on themselves",
+        summary: "Create Pull Request in a fork set up \"for my own purposes\" opens GitHub's \
+                  compare page with the fork's default branch (or the chosen base) as the base \
+                  and the fork as both repositories.",
+        ghd_behaviour: "Opens the fork's pull/new page with bare branch names, and GitHub \
+                        proposes merging into the parent repository.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(15489)],
+        code: &["crates/corvene-core/src/integrations.rs"],
+    },
+
+    /// Full refresh of the pull request cache.
+    PULL_REQUESTS_FULL_REFRESH_HOURS = 373 "pull-requests-full-refresh-hours" {
+        title: "Pull requests: full refresh interval",
+        summary: "Every this many hours, and whenever the Pull Requests list's refresh button is \
+                  clicked, all open pull requests are fetched again and replace the cached list, \
+                  so deleted pull requests and those of removed or renamed repositories drop out \
+                  (0 never does).",
+        ghd_behaviour: "Only fetches pull requests updated since the newest cached one, so pull \
+                        requests that disappeared stay in the list forever.",
+        nature: Nature::BugFix,
+        kind: Kind::Number { min: 0, max: 720, unit: Some("h") },
+        corvene: Value::Number(24), ghd: Value::Number(0),
+        familiar: Value::Number(24), max: Value::Number(24),
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(21124), Upstream::issue(21567)],
+        code: &["crates/corvene-core/src/pull_requests.rs"],
+    },
+
+    /// Pull request and branch names match ignoring case as a fallback.
+    PR_BRANCH_CASE_INSENSITIVE = 374 "pr-branch-case-insensitive" {
+        title: "Match pull request branches ignoring case",
+        summary: "When no branch matches a pull request's head branch exactly, a branch whose \
+                  name differs only in case is used, so clicking the pull request switches to it \
+                  and the current branch shows its pull request even after a case-insensitive \
+                  file system folded the remote branch's name.",
+        ghd_behaviour: "Compares names exactly, so such pull requests do not switch to their \
+                        branch and are not shown as the current branch's.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(9463)],
+        code: &["crates/corvene-core/src/pull_requests.rs"],
+    },
+
+    /// Preview Pull Request explains commits without file changes.
+    PR_PREVIEW_EMPTY_FILES_MESSAGE = 375 "pr-preview-empty-files-message" {
+        title: "Preview Pull Request says when there are no file changes",
+        summary: "When the branch's commits add up to no file changes against the base branch, \
+                  Preview Pull Request says \"No file changes between <base> and <branch>.\"",
+        ghd_behaviour: "Shows an empty file list and a blank diff.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17536)],
+        code: &["crates/corvene-ui/src/dialogs/open_pull_request.rs"],
+    },
+
+    /// API errors that need SAML SSO say where to re-authorize.
+    API_SAML_SSO_HINT = 376 "api-saml-sso-hint" {
+        title: "Say when GitHub wants SSO re-authorization",
+        summary: "When publishing a repository, creating a fork or creating the tutorial \
+                  repository fails because an organization's SAML single sign-on authorization \
+                  ran out, the error ends with \"Re-authorize SSO for <org>\" and the address \
+                  GitHub gives for it.",
+        ghd_behaviour: "Shows GitHub's message only, which does not say where to authorize.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(13668)],
+        code: &["crates/corvene-github/src/api.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-core/src/tutorial.rs"],
+    },
+
+    /// A repository GitHub no longer knows loses its GitHub association.
+    CLEAR_LOST_GITHUB_ASSOCIATION = 377 "clear-lost-github-association" {
+        title: "Forget GitHub repositories that are gone",
+        summary: "When GitHub answers \"not found\" for a repository's details (it was deleted, \
+                  or the account lost access), Corvene forgets that it is a GitHub repository and \
+                  stops asking the API for its pull requests, issues and checks. Adding the \
+                  repository again matches it anew.",
+        ghd_behaviour: "Keeps the stale association forever, and every API request for the \
+                        repository keeps failing.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1144)],
+        code: &["crates/corvene-core/src/forks.rs"],
+    },
+
+    /// Publish to an organization can grant a team access.
+    PUBLISH_TEAM = 378 "publish-team" {
+        title: "Publish: Team picker",
+        summary: "Publishing a repository to an organization offers an optional Team picker \
+                  listing the organization's teams; the picked team gets access to the new \
+                  repository.",
+        ghd_behaviour: "No team; access has to be granted on GitHub afterwards.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(826)],
+        code: &["crates/corvene-ui/src/dialogs/remote_dialogs.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-github/src/api.rs"],
+    },
+
+    /// Clone checks the local path before git runs.
+    CLONE_PATH_VALIDATION = 379 "clone-path-validation" {
+        title: "Clone checks the local path",
+        summary: "The Clone dialog's local path expands a leading ~/ to the home folder, must be \
+                  a full path, and a folder that does not exist yet must be creatable: Clone \
+                  stays disabled with a reason when part of the path is a file or the location \
+                  is not writable.",
+        ghd_behaviour: "Only checks that the folder is empty; ~/ is taken literally and other bad \
+                        paths fail inside git.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13816)],
+        code: &["crates/corvene-ui/src/dialogs/clone_repository.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
@@ -2183,6 +2392,103 @@ registry! {
         ],
     },
 
+    /// Quit asks first while work is running.
+    CONFIRM_QUIT_WHILE_BUSY = 446 "confirm-quit-while-busy" {
+        title: "Confirm quitting while busy",
+        summary: "Quit (⌘Q or the menu) while a repository is being cloned, a push, pull or \
+                  fetch runs, or an update downloads or installs asks \"Quit anyway?\" first. \
+                  Quit again while it asks to quit at once.",
+        ghd_behaviour: "Quits immediately and cuts the running operation short.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12807), Upstream::issue(10559), Upstream::issue(18205)],
+        code: &[
+            "crates/corvene/src/main.rs",
+            "crates/corvene-core/src/state.rs",
+            "crates/corvene-ui/src/dialogs/confirm_quit.rs",
+        ],
+    },
+
+    /// More ways to zoom.
+    EXTRA_ZOOM_INPUTS = 447 "extra-zoom-inputs" {
+        title: "More zoom shortcuts",
+        summary: "⌘+ (⇧⌘=) and the keypad's + zoom in as ⌘= does, and ⌘ + mouse wheel (Ctrl \
+                  on Windows and Linux) zooms in and out.",
+        ghd_behaviour: "Only ⌘=, ⌘- and ⌘0 zoom.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3913)],
+        code: &["crates/corvene-ui/src/keymap.rs", "crates/corvene-ui/src/workspace.rs"],
+    },
+
+    /// The minimum window size never exceeds the screen.
+    MIN_SIZE_FITS_DISPLAY = 448 "min-size-fits-display" {
+        title: "Minimum window size fits the screen",
+        summary: "On a display smaller than the minimum window size the minimum shrinks to the \
+                  screen's usable area, so the window can still be resized and moved.",
+        ghd_behaviour: "The 960 × 660 minimum holds even on smaller screens, which forces a \
+                        window that covers or overflows the whole display.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: true, visible: true, availability: available,
+        upstream: &[Upstream::issue(17669)],
+        code: &["crates/corvene/src/main.rs"],
+    },
+
+    /// The release notes and conflicts dialogs grow with the window.
+    LARGER_DIALOGS = 449 "larger-dialogs" {
+        title: "Larger release notes and conflicts dialogs",
+        summary: "The release notes and \"Resolve conflicts\" dialogs take up to 80 % of the \
+                  window (at most 960 px wide), so long notes and many conflicted files need \
+                  less scrolling.",
+        ghd_behaviour: "Release notes are at most 800 × 500 px and the conflicts dialog 500 px \
+                        wide with a 285 px file list, whatever the window size.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6851)],
+        code: &[
+            "crates/corvene-ui/src/dialog.rs",
+            "crates/corvene-ui/src/dialogs/release_notes.rs",
+            "crates/corvene-ui/src/dialogs/mco_dialogs.rs",
+        ],
+    },
+
+    /// Banners float over the content.
+    BANNER_AS_TOAST = 450 "banner-as-toast" {
+        title: "Banners as toasts",
+        summary: "Success, conflict and update banners appear as a card in the bottom-right \
+                  corner over the content instead of a strip under the toolbar, so the lists \
+                  and the diff don't move when one appears or goes away.",
+        ghd_behaviour: "A 30 px strip under the toolbar pushes everything down.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21433)],
+        code: &["crates/corvene-ui/src/banner.rs", "crates/corvene-ui/src/workspace.rs"],
+    },
+
+    /// Edit › Undo Last Commit.
+    UNDO_COMMIT_MENU_ITEM = 451 "undo-commit-menu-item" {
+        title: "Edit › Undo Last Commit",
+        summary: "The Edit menu has \"Undo Last Commit\", which does what the Undo button under \
+                  the commit form does and is available exactly while that button shows.",
+        ghd_behaviour: "Only the Undo button under the commit form and History's context menu.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5725)],
+        code: &["crates/corvene/src/menus.rs", "crates/corvene/src/main.rs"],
+    },
+
     /// Open items stay enabled under the merge-conflicts dialog.
     CONFLICTS_DIALOG_KEEPS_OPEN_ITEMS = 456 "conflicts-dialog-keeps-open-items" {
         title: "Open items while resolving conflicts",
@@ -2275,14 +2581,15 @@ registry! {
     EXTRA_EDITORS = 507 "extra-editors" {
         title: "Detect more external editors",
         summary: "Settings › Integrations and Open in … also find editors GitHub Desktop 3.6.6 \
-                  does not know: Antigravity.",
+                  does not know: Antigravity (and on Linux Cursor and Windsurf; on Windows \
+                  Microsoft Edit, opened in a console window, and gVim).",
         ghd_behaviour: "Only its own editor table.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(22922)],
-        code: &["crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/flags/dispatch.rs"],
+        upstream: &[Upstream::issue(22922), Upstream::issue(22638), Upstream::issue(12317)],
+        code: &["crates/corvene-platform/src/editors.rs", "crates/corvene-platform/src/editors_windows.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/flags/dispatch.rs"],
     },
 
     /// A name for the custom editor.
@@ -2376,6 +2683,66 @@ registry! {
         code: &["crates/corvene-platform/src/app_icons.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/native_menu.rs"],
     },
 
+    /// Settings › Advanced › Clone location.
+    DEFAULT_CLONE_LOCATION = 544 "default-clone-location" {
+        title: "Default clone location setting",
+        summary: "Settings › Advanced › Clone location picks the folder Clone, New Repository \
+                  and the tutorial suggest for new repositories (default ~/Documents/GitHub).",
+        ghd_behaviour: "No setting; the folder of the last clone is suggested next time.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22630)],
+        code: &["crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
+    /// The default clone folder stays out of OneDrive.
+    CLONE_DIR_AVOIDS_ONEDRIVE = 545 "clone-dir-avoids-onedrive" {
+        title: "Default clone folder outside OneDrive",
+        summary: "On Windows, when OneDrive syncs the Documents folder, repositories are cloned \
+                  to %USERPROFILE%\\GitHub instead of Documents\\GitHub (syncing a repository's \
+                  .git folder corrupts it and fills the OneDrive quota).",
+        ghd_behaviour: "Always Documents\\GitHub, inside OneDrive when it backs up Documents.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: cfg!(windows), availability: available,
+        upstream: &[Upstream::issue(13017)],
+        code: &["crates/corvene-platform/src/lib.rs", "crates/corvene-core/src/state.rs"],
+    },
+
+    /// Which git to use.
+    GIT_EXECUTABLE = 547 "git-executable" {
+        title: "Git executable",
+        summary: "Full path of the git Corvene runs (e.g. /opt/homebrew/bin/git or ~/bin/git), \
+                  tried before CORVENE_GIT, PATH and the usual install locations. Empty finds \
+                  git as usual; a path that can't be run or is too old is skipped.",
+        ghd_behaviour: "Always its bundled git.",
+        nature: Nature::Feature,
+        kind: Kind::Text { placeholder: "/usr/local/bin/git", validate: git_path },
+        corvene: Value::text(""), ghd: Value::text(""),
+        familiar: Value::text(""), max: Value::text(""),
+        restart: true, visible: true, availability: available,
+        upstream: &[Upstream::issue(14222)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/detect.rs"],
+    },
+
+    /// Settings › Git path options.
+    PATH_GIT_SETTINGS = 548 "path-git-settings" {
+        title: "Settings › Git: path options",
+        summary: "Settings › Git › Default branch also offers the global core.quotepath (show \
+                  non-ASCII file names as they are in git's own output) and, on Windows, \
+                  core.longpaths (paths over 260 characters).",
+        ghd_behaviour: "Only through the global Git config file.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21157)],
+        code: &["crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/integrations.rs"],
+    },
+
     /// An external editor per repository.
     PER_REPO_EDITOR = 554 "per-repo-editor" {
         title: "Editor per repository",
@@ -2405,6 +2772,36 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(22278)],
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-platform/src/editors.rs"],
+    },
+
+    /// JetBrains IDEs registered under the 64-bit machine key.
+    JETBRAINS_64BIT_HIVE = 564 "jetbrains-64bit-hive" {
+        title: "Find JetBrains IDEs in the 64-bit registry",
+        summary: "On Windows, JetBrains IDEs installed for all users are also looked for under \
+                  the 64-bit machine uninstall key, where current installers register them.",
+        ghd_behaviour: "Only checks the 32-bit machine key and the user key, so such IDEs are \
+                        not detected.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(21990)],
+        code: &["crates/corvene-platform/src/editors_windows.rs", "crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs"],
+    },
+
+    /// Notepad++ shows a repository as a folder workspace.
+    NOTEPADPP_FOLDER_WORKSPACE = 565 "notepadpp-folder-workspace" {
+        title: "Notepad++ opens a repository as a folder workspace",
+        summary: "Open in Notepad++ hands it the repository folder with \
+                  -openFoldersAsWorkspace, so the folder shows in its Folder as Workspace panel.",
+        ghd_behaviour: "Passes the folder alone, and Notepad++ opens every file in the \
+                        repository, which can exhaust its memory in a large one.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(18960)],
+        code: &["crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
     // ---- 600 Keyboard & accessibility ----
@@ -2615,6 +3012,21 @@ registry! {
         restart: false, visible: false, availability: available,
         upstream: &[Upstream::issue(2650)],
         code: &["crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// Honour the system's Reduce Motion setting.
+    SYSTEM_REDUCE_MOTION = 643 "system-reduce-motion" {
+        title: "Follow the system's Reduce Motion",
+        summary: "With Reduce Motion on (macOS Accessibility › Display, Windows' Animation \
+                  effects off, GNOME's Reduce Animation), spinners stand still and the mouse \
+                  wheel scrolls without easing.",
+        ghd_behaviour: "Animates regardless of the system setting.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3318)],
+        code: &["crates/corvene/src/main.rs", "crates/corvene-platform/src/accessibility.rs"],
     },
 
     /// Typing in the changes list goes to the commit summary.
@@ -5005,6 +5417,21 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(1478)],
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
+    /// Create a Tag says when the tag cannot be pushed.
+    TAG_PUSH_PERMISSION_NOTE = 898 "tag-push-permission-note" {
+        title: "Create a Tag notes a read-only repository",
+        summary: "When GitHub says the account can only read the repository, Create a Tag adds \
+                  \"You can't push this tag to <owner/name>\": the tag can be created but only \
+                  exists on this computer.",
+        ghd_behaviour: "Creates the tag without a word; pushing it later fails.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(9833)],
+        code: &["crates/corvene-ui/src/dialogs/history_dialogs.rs"],
     },
 
     // ---- 900 Performance ----

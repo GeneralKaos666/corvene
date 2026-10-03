@@ -284,6 +284,13 @@ pub enum Banner {
         description: String,
         branch: Option<String>,
     },
+    /// Corvene (`352-git-email-mismatch-banner`): after signing in, the
+    /// global `user.email` is unset (`missing`) or not one of the account's
+    /// addresses on `host`; links to Settings › Git.
+    GitEmailMismatch {
+        host: String,
+        missing: bool,
+    },
 }
 
 impl Banner {
@@ -301,7 +308,21 @@ impl Banner {
             | Banner::SuccessfulSquash { .. }
             | Banner::SuccessfulReorder { .. }
             | Banner::BranchDeleted { .. } => Some(Duration::from_secs(15)),
-            Banner::ConflictsFound { .. } => None,
+            Banner::ConflictsFound { .. } | Banner::GitEmailMismatch { .. } => None,
+        }
+    }
+
+    /// `352-git-email-mismatch-banner`: the banner for a global
+    /// `user.email` of `email` after signing in to `account`, if commits
+    /// with it would not be linked to the account.
+    pub fn for_git_email(account: &corvene_models::Account, email: Option<&str>) -> Option<Self> {
+        let email = email.map(str::trim).filter(|e| !e.is_empty());
+        match email {
+            Some(email) if account.is_attributable_email(email) => None,
+            _ => Some(Banner::GitEmailMismatch {
+                host: account.host(),
+                missing: email.is_none(),
+            }),
         }
     }
 
@@ -2585,6 +2606,43 @@ fn last_retained_for_warn(mco: &Option<MultiCommitOperation>) -> Option<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_email_banner_only_for_unlinked_addresses() {
+        let account = corvene_models::Account {
+            endpoint: "https://api.github.com".into(),
+            id: 7,
+            login: "mona".into(),
+            name: None,
+            avatar_url: None,
+            emails: vec!["Mona@Example.com".into()],
+            scopes: Vec::new(),
+            plan: None,
+            private_primary_email: false,
+        };
+        assert_eq!(
+            Banner::for_git_email(&account, Some("mona@example.com")),
+            None
+        );
+        assert_eq!(
+            Banner::for_git_email(&account, Some("7+mona@users.noreply.github.com")),
+            None
+        );
+        assert_eq!(
+            Banner::for_git_email(&account, Some("other@example.com")),
+            Some(Banner::GitEmailMismatch {
+                host: "github.com".into(),
+                missing: false
+            })
+        );
+        assert_eq!(
+            Banner::for_git_email(&account, Some("  ")),
+            Some(Banner::GitEmailMismatch {
+                host: "github.com".into(),
+                missing: true
+            })
+        );
+    }
 
     #[test]
     fn rewritten_commits_are_found_by_summary_and_time() {

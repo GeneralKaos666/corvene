@@ -3,6 +3,10 @@
 //! › "Increase contrast" on macOS; on Linux the XDG desktop portal's
 //! `org.freedesktop.appearance` `contrast` setting (GNOME's Accessibility ›
 //! High Contrast, KDE's high-contrast colour schemes).
+//!
+//! [`reduce_motion`] (`643-system-reduce-motion`) reads the system's Reduce
+//! Motion / animation setting; Electron leaves it to the page's
+//! `prefers-reduced-motion`, which GHD's stylesheets don't use.
 #![allow(unexpected_cfgs)] // `objc` macros probe a `cargo-clippy` feature
 
 /// `NSWorkspace.accessibilityDisplayShouldIncreaseContrast`
@@ -24,6 +28,42 @@ pub fn increase_contrast() -> bool {
         let increase: BOOL = msg_send![workspace, accessibilityDisplayShouldIncreaseContrast];
         increase != NO
     }
+}
+
+/// `NSWorkspace.accessibilityDisplayShouldReduceMotion` (Accessibility ›
+/// Display › Reduce motion).
+#[cfg(target_os = "macos")]
+pub fn reduce_motion() -> bool {
+    use objc::runtime::{BOOL, NO, Object};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    // SAFETY: as in `increase_contrast`
+    unsafe {
+        let workspace: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace.is_null() {
+            return false;
+        }
+        let reduce: BOOL = msg_send![workspace, accessibilityDisplayShouldReduceMotion];
+        reduce != NO
+    }
+}
+
+/// Windows: Settings › Accessibility › Visual effects › Animation effects
+/// is off (`SPI_GETCLIENTAREAANIMATION`).
+#[cfg(windows)]
+pub fn reduce_motion() -> bool {
+    !crate::windows::client_area_animation()
+}
+
+/// GNOME's Accessibility › Reduce Animation (`enable-animations` false).
+#[cfg(not(any(target_os = "macos", windows)))]
+pub fn reduce_motion() -> bool {
+    std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "enable-animations"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .is_some_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "false")
 }
 
 /// Windows: a contrast theme is on.

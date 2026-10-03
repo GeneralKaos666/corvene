@@ -162,7 +162,7 @@ pub struct PersistedMentionables {
     pub fetched_at_secs: u64,
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

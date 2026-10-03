@@ -62,19 +62,27 @@ impl Dispatcher {
         // Synchronous: a few `git --version` probes (~10 ms), started on a
         // thread at the top of `main`. Avoids racing launch-time operations
         // against an async detection.
-        let (git, git_error, popup) = match corvene_git::find_git_prefetched() {
-            Ok(bin) => (Some(Arc::new(bin)), None, None),
-            Err(err) => {
-                warn!(%err, "git not usable");
-                (
-                    None,
-                    Some(err.to_string()),
-                    Some(Popup::InstallGit {
-                        reason: err.to_string(),
-                    }),
-                )
-            }
-        };
+        // `547-git-executable`: a chosen git goes first
+        let preferred = configured_git(
+            flags.text(crate::flags::ids::GIT_EXECUTABLE),
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from),
+        );
+        let (git, git_error, popup) =
+            match corvene_git::find_git_prefetched_preferring(preferred.as_deref()) {
+                Ok(bin) => (Some(Arc::new(bin)), None, None),
+                Err(err) => {
+                    warn!(%err, "git not usable");
+                    (
+                        None,
+                        Some(err.to_string()),
+                        Some(Popup::InstallGit {
+                            reason: err.to_string(),
+                        }),
+                    )
+                }
+            };
         // Corvene (`271-persist-repository-indicators`): last launch's
         // indicators until the first refresh
         let indicators = if flags.bool(crate::flags::ids::PERSIST_REPOSITORY_INDICATORS)
@@ -450,7 +458,10 @@ impl Dispatcher {
     }
 
     /// GHD `MissingRepository.onTrustDirectory`: `addSafeDirectory` for the
-    /// path git named, then look at the repository again.
+    /// path git named, then look at the repository again. Deviation
+    /// (`295-explain-trust-failure`): when git still refuses the path, an
+    /// error explains why and shows the value git suggests; GHD silently
+    /// shows the Trust Repository view again.
     pub fn trust_repository(id: u64, cx: &mut App) {
         let state = Self::state(cx);
         let (git, path) = {
@@ -467,16 +478,39 @@ impl Dispatcher {
             s.repo_state_mut(id).trusting_path = true;
             cx.notify();
         });
+        let explain = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::EXPLAIN_TRUST_FAILURE);
         crate::remote::spawn_bg(
             cx,
-            move || corvene_git::add_safe_directory(git, &path),
+            move || {
+                corvene_git::add_safe_directory(git.clone(), &path)?;
+                // `explain-trust-failure`: git may still refuse the path
+                // (network shares, WSL and UNC paths are compared by the
+                // form git sees, not the one it printed)
+                let still = if explain {
+                    corvene_git::still_unsafe(git, &path)
+                } else {
+                    None
+                };
+                Ok::<_, corvene_git::GitError>(still.map(|suggested| (path, suggested)))
+            },
             move |result, cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.repo_state_mut(id).trusting_path = false;
                     cx.notify();
                 });
-                if let Err(err) = result {
-                    Self::show_error("Could not trust the repository", err.to_string(), cx);
+                match result {
+                    Err(err) => {
+                        Self::show_error("Could not trust the repository", err.to_string(), cx)
+                    }
+                    Ok(Some((path, suggested))) => Self::show_error(
+                        "Could not trust the repository",
+                        trust_failure_message(&path, suggested.as_deref()),
+                        cx,
+                    ),
+                    Ok(None) => {}
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -596,6 +630,13 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::EXPLAIN_BAD_CONFIG);
+        // Corvene (`296-stale-core-worktree-hint`): a `core.worktree` that
+        // points at a folder that is gone is named instead of adding a
+        // repository that shows up missing
+        let stale_worktree_hint = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STALE_CORE_WORKTREE_HINT);
         let probe = cx.background_executor().spawn(async move {
             #[cfg(target_os = "android")]
             if let Some(git) = git.clone() {
@@ -613,7 +654,14 @@ impl Dispatcher {
                         err
                     }
                 })
-                .map(|info| (path, info))
+                .and_then(|info| {
+                    match corvene_git::explain_stale_worktree(&path, &info.workdir)
+                        .filter(|_| stale_worktree_hint)
+                    {
+                        Some(text) => Err(GitError::Gix(text)),
+                        None => Ok((path, info)),
+                    }
+                })
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = probe.await;
@@ -5031,6 +5079,7 @@ impl Dispatcher {
             cx.update(|cx| match result {
                 Ok(account) => {
                     info!(login = %account.login, endpoint = %account.endpoint, "signed in");
+                    Self::check_git_email_after_sign_in(account.clone(), cx);
                     let retry = Self::state(cx).update(cx, |s, cx| {
                         s.accounts.retain(|a| a.endpoint != account.endpoint);
                         s.accounts.push(account);
@@ -5054,6 +5103,34 @@ impl Dispatcher {
                 }
                 Err(err) => Self::set_sign_in_step(SignInStep::Error(err.to_string()), cx),
             });
+        })
+        .detach();
+    }
+
+    /// `352-git-email-mismatch-banner`: after signing in outside the Welcome
+    /// flow (which asks for the identity itself), a banner when the global
+    /// `user.email` is unset or would not link commits to `account`. Reads
+    /// only; Settings › Git changes it.
+    fn check_git_email_after_sign_in(account: Account, cx: &mut App) {
+        let (enabled, git) = {
+            let s = Self::state(cx).read(cx);
+            (
+                s.flags.bool(crate::flags::ids::GIT_EMAIL_MISMATCH_BANNER)
+                    && s.settings.welcome_completed,
+                s.git.clone(),
+            )
+        };
+        let Some(git) = git.filter(|_| enabled) else {
+            return;
+        };
+        let task = cx
+            .background_executor()
+            .spawn(async move { corvene_git::global_config_value(git, "user.email") });
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            let email = task.await;
+            if let Some(banner) = crate::mco::Banner::for_git_email(&account, email.as_deref()) {
+                cx.update(|cx| Self::set_banner(banner, cx));
+            }
         })
         .detach();
     }
@@ -5194,6 +5271,21 @@ pub(crate) fn persist_repositories(s: &mut AppState) {
     if let Err(err) = s.store.save_repositories(&s.repositories) {
         error!(?err, "could not save repositories");
     }
+}
+
+/// `explain-trust-failure`: why Trust Repository did not help, with the
+/// `safe.directory` value git suggests (else the path as git printed it).
+fn trust_failure_message(path: &Path, suggested: Option<&str>) -> String {
+    let path = path.display().to_string();
+    let value = suggested.unwrap_or(&path);
+    format!(
+        "{path} was added to the safe.directory list in your global Git config, but Git still \
+         does not trust it. This happens when the folder is on a network share, a WSL or UNC \
+         path or a file system that does not record its owner, because Git compares the path \
+         in the form it sees, not the one it printed.\n\nAdd the value Git suggests instead:\n\n\
+         git config --global --add safe.directory '{value}'\n\nor, if you trust every \
+         repository on this computer, use '*' as the value."
+    )
 }
 
 pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
@@ -5499,6 +5591,25 @@ fn paths_overlap<'a>(mut committed: impl Iterator<Item = &'a String>, local: &[S
 }
 
 #[cfg(test)]
+mod trust_failure_tests {
+    use super::trust_failure_message;
+    use std::path::Path;
+
+    #[test]
+    fn suggests_the_value_git_names() {
+        let message = trust_failure_message(
+            Path::new("//server/share/repo"),
+            Some("%(prefix)///server/share/repo"),
+        );
+        assert!(message.contains("safe.directory '%(prefix)///server/share/repo'"));
+        // never mistaken for git's own refusal (that re-opens the trust view)
+        assert!(corvene_git::dubious_ownership_path(&message).is_none());
+        let message = trust_failure_message(Path::new("/mnt/c/repo"), None);
+        assert!(message.contains("safe.directory '/mnt/c/repo'"));
+    }
+}
+
+#[cfg(test)]
 mod paths_overlap_tests {
     use super::paths_overlap;
 
@@ -5620,5 +5731,37 @@ fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
         let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
     } else if imported {
         let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
+    }
+}
+
+/// `547-git-executable`: the flag's path, `~/` expanded against `home`;
+/// `None` when empty.
+fn configured_git(text: &str, home: Option<PathBuf>) -> Option<PathBuf> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    match (text.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => Some(home.join(rest)),
+        _ => Some(PathBuf::from(text)),
+    }
+}
+
+#[cfg(test)]
+mod configured_git_tests {
+    use super::*;
+
+    #[test]
+    fn expands_home_and_ignores_empty() {
+        let home = Some(PathBuf::from("/Users/mona"));
+        assert_eq!(configured_git("  ", home.clone()), None);
+        assert_eq!(
+            configured_git("~/bin/git", home.clone()),
+            Some(PathBuf::from("/Users/mona/bin/git"))
+        );
+        assert_eq!(
+            configured_git(" /opt/git/bin/git ", home),
+            Some(PathBuf::from("/opt/git/bin/git"))
+        );
     }
 }

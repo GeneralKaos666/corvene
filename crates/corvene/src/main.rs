@@ -222,8 +222,16 @@ pub(crate) fn main() {
                 .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
         );
         corvene_ui::widgets::sync_hover_while_typing(cx);
+        let mut last_reduce_motion_flag = sync_reduce_motion(cx);
         cx.observe(&state, move |state, cx| {
             corvene_ui::widgets::sync_hover_while_typing(cx);
+            let reduce_motion_flag = state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::SYSTEM_REDUCE_MOTION);
+            if reduce_motion_flag != last_reduce_motion_flag {
+                last_reduce_motion_flag = sync_reduce_motion(cx);
+            }
             Dispatcher::sync_crash_reports_setting(cx);
             // accounts or Settings › Notifications changed: (un)subscribe
             Dispatcher::sync_alive_subscriptions(cx);
@@ -276,7 +284,24 @@ pub(crate) fn main() {
         })
         .detach();
 
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        // `446-confirm-quit-while-busy`: a running clone, push / pull /
+        // fetch or update asks first; Quit again while it asks quits.
+        cx.on_action(|_: &Quit, cx| {
+            let s = corvene_core::AppState::global(cx).read(cx);
+            let busy = s
+                .flags
+                .bool(corvene_core::flags::ids::CONFIRM_QUIT_WHILE_BUSY)
+                .then(|| s.busy_for_quit())
+                .flatten()
+                .filter(|_| !matches!(s.popup, Some(Popup::ConfirmQuit { .. })));
+            match busy {
+                Some(busy) => {
+                    let previous = s.popup.clone().map(Box::new);
+                    Dispatcher::show_popup(Popup::ConfirmQuit { busy, previous }, cx)
+                }
+                None => cx.quit(),
+            }
+        });
         cx.on_action(|_: &Hide, cx| cx.hide());
         cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
         cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -492,6 +517,19 @@ pub(crate) fn main() {
                 Dispatcher::show_popup(Popup::AddLicense { repo: id }, cx);
             }
         });
+        // `451-undo-commit-menu-item`: the Undo bar's button
+        on_menu_action(cx, move |_: &UndoLastCommit, cx| {
+            let s = corvene_core::AppState::global(cx).read(cx);
+            let id = s.selected.filter(|_| {
+                s.flags
+                    .bool(corvene_core::flags::ids::UNDO_COMMIT_MENU_ITEM)
+                    && s.selected_state()
+                        .is_some_and(|rs| rs.last_commit.is_some())
+            });
+            if let Some(id) = id {
+                Dispatcher::request_undo_last_commit(id, cx);
+            }
+        });
         on_menu_action(cx, move |_: &RepositorySettings, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::open_repository_settings(
@@ -642,17 +680,27 @@ pub(crate) fn main() {
                 window_size,
                 cx,
             ))),
-            // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400
+            // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400;
+            // `448-min-size-fits-display`: never more than the primary
+            // display's visible area (GHD's minimum can exceed a small
+            // screen, `main-process/app-window.ts` `minWidth` / `minHeight`)
             window_min_size: Some(if let Some(forced) = forced_size {
                 forced
-            } else if state
-                .read(cx)
-                .flags
-                .bool(corvene_core::flags::ids::SMALLER_MINIMUM_SIZES)
-            {
-                size(px(600.), px(400.))
             } else {
-                size(px(960.), px(660.))
+                let flags = &state.read(cx).flags;
+                let min = if flags.bool(corvene_core::flags::ids::SMALLER_MINIMUM_SIZES) {
+                    size(px(600.), px(400.))
+                } else {
+                    size(px(960.), px(660.))
+                };
+                match cx.primary_display() {
+                    Some(display)
+                        if flags.bool(corvene_core::flags::ids::MIN_SIZE_FITS_DISPLAY) =>
+                    {
+                        min.min(&display.visible_bounds().size)
+                    }
+                    _ => min,
+                }
             }),
             app_id: Some(corvene_platform::BUNDLE_ID.into()),
             // X11 `_NET_WM_ICON` (Electron sets the app icon on its window)
@@ -715,6 +763,9 @@ pub(crate) fn main() {
                 .update(cx, |_, window, cx| {
                     ws.update(cx, |_, cx| {
                         cx.observe_window_activation(window, |_, window, cx| {
+                            if window.is_window_active() {
+                                sync_reduce_motion(cx);
+                            }
                             let theme = APPLIED_THEME.with(|t| t.get());
                             if window.is_window_active()
                                 && theme == ThemeSetting::System
@@ -1124,6 +1175,19 @@ fn resolve_theme(setting: ThemeSetting, cx: &App) -> corvene_ui::theme::GhdTheme
         .map(|s| corvene_ui::theme::ThemeVariants::of(&s.read(cx).flags))
         .unwrap_or_default();
     resolve_theme_with(setting, high_contrast, variants, cx)
+}
+
+/// `643-system-reduce-motion`: spinners and smooth scrolling follow the
+/// system's Reduce Motion setting (read again whenever the window is
+/// activated). Returns the flag's value.
+fn sync_reduce_motion(cx: &mut App) -> bool {
+    let on = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+        s.read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::SYSTEM_REDUCE_MOTION)
+    });
+    cx.set_reduce_motion(on && corvene_platform::accessibility::reduce_motion());
+    on
 }
 
 /// `resolve_theme` before the app state exists: with `high_contrast` off a

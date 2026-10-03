@@ -8,13 +8,23 @@
 //! Deviation (`861-undo-delete-branch`): "Deleted branch" / "Restored
 //! branch" banners, with an Undo that recreates the deleted branch, are
 //! Corvene's (GHD deletes branches without a way back).
+//!
+//! Deviation (`352-git-email-mismatch-banner`): after signing in, a banner
+//! says when the global Git email won't link commits to the account (GHD
+//! warns only in Settings › Git and the commit form,
+//! `ui/lib/git-email-not-found-warning.tsx`).
+//!
+//! Deviation (`450-banner-as-toast`): [`banner_toast_frame`] floats the
+//! banner over the bottom-right corner instead of pushing the views down
+//! (GHD `ui/app.tsx` `renderBanner` puts it in the layout flow).
 
-use corvene_core::{AvailableUpdate, Banner, Dispatcher, PackageManager};
+use corvene_core::{AvailableUpdate, Banner, Dispatcher, PackageManager, Popup, PreferencesTab};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::widgets::{IconButtonA11y, ListRowA11y};
 
+use crate::context_menu::mac_or;
 use crate::icons::{Octicon, octicon};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
@@ -135,6 +145,18 @@ fn parts(banner: &Banner) -> Vec<(String, bool)> {
                 false,
             )],
         },
+        Banner::GitEmailMismatch { host, missing } => vec![(
+            if *missing {
+                format!(
+                    "No Git email is set, so your commits won't be linked to your {host} account."
+                )
+            } else {
+                format!(
+                    "Your Git email isn't one of your {host} account's, so your commits won't be linked to it."
+                )
+            },
+            false,
+        )],
     }
 }
 
@@ -166,7 +188,10 @@ fn plain_message(banner: &Banner) -> String {
 /// `renderBanner`
 pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
     let t = cx.ghd();
-    let is_conflicts = matches!(banner, Banner::ConflictsFound { .. });
+    let is_conflicts = matches!(
+        banner,
+        Banner::ConflictsFound { .. } | Banner::GitEmailMismatch { .. }
+    );
     let icon = if is_conflicts {
         octicon(Octicon::Alert, t.text).mr(SPACING())
     } else {
@@ -208,6 +233,24 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
                     .into_any_element(),
             )
         }
+        Banner::GitEmailMismatch { .. } => Some(
+            link_button(
+                "banner-git-settings",
+                mac_or("Open Git Settings", "Open Git settings"),
+                cx,
+            )
+            .ml(SPACING_HALF())
+            .on_click(|_, _, cx| {
+                Dispatcher::clear_banner(cx);
+                Dispatcher::show_popup(
+                    Popup::Preferences {
+                        tab: PreferencesTab::Git,
+                    },
+                    cx,
+                );
+            })
+            .into_any_element(),
+        ),
         _ => None,
     };
     let close_color = t.text_secondary;
@@ -276,6 +319,34 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
 /// install is told to `brew upgrade corvene` instead (Linux: any other
 /// package manager install is told to update with it). Always dismissable
 /// (Corvene has no prioritised updates).
+/// `450-banner-as-toast`: a banner as a card in the window's bottom-right
+/// corner, over the content. The banner's own bottom border is clipped (the
+/// card has a full border).
+pub fn banner_toast_frame(banner: impl IntoElement, cx: &App) -> impl IntoElement {
+    let t = cx.ghd();
+    div()
+        .id("banner-toast")
+        .occlude()
+        .absolute()
+        .right(SPACING_DOUBLE())
+        .bottom(SPACING_DOUBLE())
+        .w(zpx(480.))
+        .max_w(relative(0.9))
+        .rounded(BORDER_RADIUS())
+        .border_1()
+        .border_color(t.box_border)
+        .bg(t.background)
+        .overflow_hidden()
+        .shadow(vec![BoxShadow {
+            color: t.shadow,
+            offset: point(zpx(0.), zpx(2.)),
+            blur_radius: css_blur(7.),
+            spread_radius: zpx(0.),
+            inset: false,
+        }])
+        .child(div().mb(-zpx(1.)).child(banner))
+}
+
 pub fn update_banner(
     update: &AvailableUpdate,
     manager: Option<PackageManager>,

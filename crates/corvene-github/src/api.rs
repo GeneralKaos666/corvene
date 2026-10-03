@@ -1,4 +1,8 @@
 //! Minimal REST client: the calls core parity needs (`lib/api.ts`).
+//!
+//! Deviation (flag `api-saml-sso-hint`, `Client::with_sso_hint`): a 403
+//! with `X-GitHub-SSO: required; url=…` adds "Re-authorize SSO for <org>"
+//! and the URL to the error; GHD's `lib/api.ts` keeps GitHub's message only.
 
 use std::time::Duration;
 
@@ -19,6 +23,32 @@ pub struct Client {
     token: String,
     /// Append the body's `errors[].message` to an error's message.
     error_details: bool,
+    /// Flag `api-saml-sso-hint`: a 403 carrying `X-GitHub-SSO` says which
+    /// organization needs its SSO authorization renewed, and where.
+    sso_hint: bool,
+}
+
+/// Flag `api-saml-sso-hint`: the hint for an `X-GitHub-SSO: required;
+/// url=<authorize url>` header, naming the organization when the URL is
+/// `…/orgs/<org>/sso…`. Other values (`partial-results; organizations=…`)
+/// give no hint.
+pub fn sso_hint(header: &str) -> Option<String> {
+    let mut parts = header.split(';').map(str::trim);
+    if !parts.next()?.eq_ignore_ascii_case("required") {
+        return None;
+    }
+    let url = parts.find_map(|p| p.strip_prefix("url="))?.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let org = url
+        .split_once("/orgs/")
+        .and_then(|(_, rest)| rest.split(['/', '?']).next())
+        .filter(|org| !org.is_empty());
+    Some(match org {
+        Some(org) => format!("Re-authorize SSO for {org}: {url}"),
+        None => format!("Re-authorize SSO: {url}"),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -579,6 +609,42 @@ impl Client {
             endpoint,
             token: token.into(),
             error_details: false,
+            sso_hint: false,
+        }
+    }
+
+    /// A 403 that needs SAML SSO authorization says so (flag
+    /// `api-saml-sso-hint`; GHD shows GitHub's message only).
+    pub fn with_sso_hint(mut self, on: bool) -> Self {
+        self.sso_hint = on;
+        self
+    }
+
+    /// The message of a failed (non-2xx, non-401) response: GitHub's
+    /// `message`, with `sso_hint` the SSO authorization a 403 asks for.
+    fn failure_message(
+        &self,
+        status: u16,
+        response: &mut ureq::http::Response<ureq::Body>,
+    ) -> String {
+        let hint = if self.sso_hint && status == 403 {
+            response
+                .headers()
+                .get("x-github-sso")
+                .and_then(|v| v.to_str().ok())
+                .and_then(sso_hint)
+        } else {
+            None
+        };
+        let message = response
+            .body_mut()
+            .read_json::<ApiError>()
+            .ok()
+            .and_then(|e| e.into_message(self.error_details))
+            .unwrap_or_else(|| "request failed".into());
+        match hint {
+            Some(hint) => format!("{}. {hint}", message.trim_end_matches('.')),
+            None => message,
         }
     }
 
@@ -620,12 +686,7 @@ impl Client {
             return Err(GitHubError::Auth("token rejected".into()));
         }
         if !(200..300).contains(&status) {
-            let message = response
-                .body_mut()
-                .read_json::<ApiError>()
-                .ok()
-                .and_then(|e| e.into_message(self.error_details))
-                .unwrap_or_else(|| "request failed".into());
+            let message = self.failure_message(status, &mut response);
             return Err(GitHubError::Api { status, message });
         }
         Ok(response.body_mut().read_json()?)
@@ -716,15 +777,24 @@ impl Client {
             return Err(GitHubError::Auth("token rejected".into()));
         }
         if !(200..300).contains(&status) {
-            let message = response
-                .body_mut()
-                .read_json::<ApiError>()
-                .ok()
-                .and_then(|e| e.into_message(self.error_details))
-                .unwrap_or_else(|| "request failed".into());
+            let message = self.failure_message(status, &mut response);
             return Err(GitHubError::Api { status, message });
         }
         Ok(response.body_mut().read_json()?)
+    }
+
+    /// `GET /orgs/{org}/teams` (flag `publish-team`): the organization's
+    /// teams the account can see, as `(id, name)` sorted by name.
+    pub fn org_teams(&self, org: &str) -> Result<Vec<(u64, String)>> {
+        #[derive(Deserialize)]
+        struct Team {
+            id: u64,
+            name: String,
+        }
+        let teams: Vec<Team> = self.get_json(&format!("orgs/{org}/teams?per_page=100"))?;
+        let mut teams: Vec<(u64, String)> = teams.into_iter().map(|t| (t.id, t.name)).collect();
+        teams.sort_by_key(|(_, name)| name.to_lowercase());
+        Ok(teams)
     }
 
     /// `GET /user/orgs`: organisations the user can publish to.
@@ -740,22 +810,29 @@ impl Client {
     }
 
     /// `POST /user/repos` or `/orgs/{org}/repos` (GHD `createRepository`).
+    ///
+    /// `team_id` (flag `publish-team`, organizations only) grants that team
+    /// access to the new repository.
     pub fn create_repository(
         &self,
         org: Option<&str>,
         name: &str,
         description: &str,
         private: bool,
+        team_id: Option<u64>,
     ) -> Result<GitHubRepository> {
         let path = match org {
             Some(org) => format!("orgs/{org}/repos"),
             None => "user/repos".to_string(),
         };
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "name": name,
             "description": description,
             "private": private,
         });
+        if let (Some(team_id), Some(_)) = (team_id, org) {
+            body["team_id"] = serde_json::json!(team_id);
+        }
         let repo: ApiRepository = self.post_json(&path, &body)?;
         Ok(self.convert(repo))
     }
@@ -764,6 +841,13 @@ impl Client {
     pub fn repository(&self, owner: &str, name: &str) -> Result<GitHubRepository> {
         let repo: ApiRepository = self.get_json(&format!("repos/{owner}/{name}"))?;
         Ok(self.convert(repo))
+    }
+
+    /// `fetchPushedAt`: when anything was last pushed to `owner/name`
+    /// (`pushed_at`, ISO 8601), `None` when GitHub does not say.
+    pub fn pushed_at(&self, owner: &str, name: &str) -> Result<Option<String>> {
+        let repo: ApiRepository = self.get_json(&format!("repos/{owner}/{name}"))?;
+        Ok(repo.pushed_at)
     }
 
     /// `fetchRepositoryCloneInfo`: the clone URL (SSH when `ssh`) and default
@@ -1246,6 +1330,27 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sso_hints() {
+        assert_eq!(
+            sso_hint("required; url=https://github.com/orgs/acme/sso?authorization_request=AB12")
+                .as_deref(),
+            Some(
+                "Re-authorize SSO for acme: \
+                 https://github.com/orgs/acme/sso?authorization_request=AB12"
+            )
+        );
+        assert_eq!(
+            sso_hint("required; url=https://ghe.corp/sso/start").as_deref(),
+            Some("Re-authorize SSO: https://ghe.corp/sso/start")
+        );
+        assert_eq!(
+            sso_hint("partial-results; organizations=21955855,20582480"),
+            None
+        );
+        assert_eq!(sso_hint("required"), None);
+    }
 
     #[test]
     fn error_details_follow_the_message() {

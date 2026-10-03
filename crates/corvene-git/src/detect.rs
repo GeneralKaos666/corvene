@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::error::{GitError, Result};
 
@@ -80,6 +80,26 @@ pub fn find_git_prefetched() -> Result<GitBinary> {
         Some(Ok(result)) => result,
         _ => find_git(),
     }
+}
+
+/// [`find_git_prefetched`], trying `preferred` first: the git chosen with
+/// `547-git-executable`. One that is missing, can't be run or is too old is
+/// logged and skipped.
+pub fn find_git_prefetched_preferring(preferred: Option<&Path>) -> Result<GitBinary> {
+    if let Some(path) = preferred {
+        match probe(path) {
+            Some(version) if version >= MIN_VERSION => {
+                info!(path = %path.display(), %version, "using the configured git");
+                return Ok(GitBinary {
+                    path: path.to_path_buf(),
+                    version,
+                });
+            }
+            Some(version) => warn!(path = %path.display(), %version, "configured git too old"),
+            None => warn!(path = %path.display(), "could not run the configured git"),
+        }
+    }
+    find_git_prefetched()
 }
 
 /// Find git: `$CORVENE_GIT`, then `$PATH`, then well-known locations.

@@ -6,6 +6,8 @@
 //! summary or description back its focus when Changes is shown again after
 //! another section (GHD `ui/repository.tsx` unmounts the commit form with
 //! the tab, so its focus is lost).
+//! `447-extra-zoom-inputs`: ⌘ / Ctrl + mouse wheel zooms; GHD only zooms
+//! from the View menu's shortcuts (`main-process/menu/build-default-menu.ts`).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -18,7 +20,7 @@ use gpui_kit::component::resizable::{
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::banner::{banner_bar, update_banner};
+use crate::banner::{banner_bar, banner_toast_frame, update_banner};
 use crate::branch_list::BranchFoldout;
 use crate::changes::ChangesSidebar;
 use crate::ci_check_popover::CiCheckPopover;
@@ -952,6 +954,47 @@ impl Workspace {
     }
 }
 
+thread_local! {
+    /// Trackpad pixels scrolled with ⌘ / Ctrl held since the last zoom step.
+    static WHEEL_ZOOM_PIXELS: Cell<f32> = const { Cell::new(0.) };
+}
+
+/// `447-extra-zoom-inputs`: ⌘ / Ctrl + wheel zooms in (up) and out (down).
+/// A capture-phase listener painted before the content, so the scroll views
+/// under the pointer never see those wheel events. A mouse wheel notch is one
+/// step; a trackpad steps every 40 px.
+fn wheel_zoom_listener(workspace: WeakEntity<Workspace>) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |_, _, window, _| {
+            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _, cx| {
+                if phase != DispatchPhase::Capture || !event.modifiers.secondary() {
+                    return;
+                }
+                cx.stop_propagation();
+                let step = match event.delta {
+                    ScrollDelta::Lines(lines) => lines.y.signum() as i32,
+                    ScrollDelta::Pixels(pixels) => WHEEL_ZOOM_PIXELS.with(|acc| {
+                        let total = acc.get() + f32::from(pixels.y);
+                        if total.abs() >= 40. {
+                            acc.set(0.);
+                            total.signum() as i32
+                        } else {
+                            acc.set(total);
+                            0
+                        }
+                    }),
+                };
+                if step != 0 {
+                    workspace.update(cx, |w, cx| w.zoom(step, cx)).ok();
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_0()
+}
+
 impl Workspace {
     /// View › Zoom In (+1) / Zoom Out (-1) / Reset Zoom (0): GHD's
     /// `zoom(ZoomDirection)` steps through `ZoomInFactors`, persists the
@@ -1185,11 +1228,24 @@ impl Render for Workspace {
         if self.state.read(cx).popup.is_some() {
             key_context.add("Popup");
         }
+        let wheel_zoom = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::EXTRA_ZOOM_INPUTS);
+        let banner_toast = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::BANNER_AS_TOAST);
         div()
             .id("workspace")
             .key_context(key_context)
             .track_focus(&self.focus_handle)
             .relative()
+            .when(wheel_zoom, |d| {
+                d.child(wheel_zoom_listener(cx.entity().downgrade()))
+            })
             .size_full()
             .flex()
             .flex_col()
@@ -1206,15 +1262,18 @@ impl Render for Workspace {
             .when(!bare, |d| {
                 d.child(toolbar(buttons, &self.toolbar_resize, cx))
             })
-            .when(self.welcome.is_none(), |d| {
+            .when(self.welcome.is_none() && !banner_toast, |d| {
                 d.when_some(banner.as_ref(), |d, banner| d.child(banner_bar(banner, cx)))
             })
             // GHD shows the update banner only while no other banner is up
-            .when(self.welcome.is_none() && banner.is_none(), |d| {
-                d.when_some(update_available.as_ref(), |d, (update, manager)| {
-                    d.child(update_banner(update, *manager, cx))
-                })
-            })
+            .when(
+                self.welcome.is_none() && banner.is_none() && !banner_toast,
+                |d| {
+                    d.when_some(update_available.as_ref(), |d, (update, manager)| {
+                        d.child(update_banner(update, *manager, cx))
+                    })
+                },
+            )
             .when(self.welcome.is_none(), |d| {
                 d.child(if let Some(clone) = cloning.as_ref() {
                     div()
@@ -1272,6 +1331,17 @@ impl Render for Workspace {
             })
             .when(bare && cfg!(target_os = "macos"), |d| {
                 d.child(light_title_bar())
+            })
+            // `450-banner-as-toast`: over the content, under the foldouts
+            .when(self.welcome.is_none() && banner_toast, |d| {
+                d.when_some(banner.as_ref(), |d, banner| {
+                    d.child(banner_toast_frame(banner_bar(banner, cx), cx))
+                })
+                .when(banner.is_none(), |d| {
+                    d.when_some(update_available.as_ref(), |d, (update, manager)| {
+                        d.child(banner_toast_frame(update_banner(update, *manager, cx), cx))
+                    })
+                })
             })
             .when_some(foldout, |d, foldout| {
                 // the worktree button sits between the repository and branch buttons

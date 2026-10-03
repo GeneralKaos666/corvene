@@ -11,6 +11,7 @@ mod ci_check_run_rerun;
 pub(crate) mod clone_repository;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
+mod confirm_quit;
 mod crash_report_found;
 mod create_repository;
 mod discard_changes;
@@ -601,6 +602,9 @@ impl DialogHost {
                 .into(),
             Popup::UnreachableCommits { repo, tab } => cx
                 .new(|_| UnreachableCommitsDialog::new(state, *repo, *tab))
+                .into(),
+            Popup::ConfirmQuit { busy, previous } => cx
+                .new(|_| confirm_quit::ConfirmQuitDialog::new(busy, previous.as_deref().cloned()))
                 .into(),
         }
     }

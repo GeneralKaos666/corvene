@@ -16,6 +16,9 @@
 //! With flag `871-branch-name-trailing-slash-quiet` the default branch name
 //! box does not say "Will be saved as" for a lone trailing `/` or `.`
 //! (GHD `ref-name-text-box.tsx` does).
+//! With flag `544-default-clone-location` Advanced has a "Clone location"
+//! folder picker (GHD has no setting; it remembers the last clone's parent
+//! folder, `ui/lib/default-dir.ts`).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -118,6 +121,9 @@ pub struct PreferencesDialog {
     email_choice: Option<String>,
     /// The git config arrived and the fields were filled from it.
     git_loaded: bool,
+    /// `548-path-git-settings`: global `core.quotepath` / `core.longpaths`.
+    quotepath: bool,
+    longpaths: bool,
     /// GHD `Notifications` state: `getNotificationsPermission()` result.
     notification_permission: Option<NotificationPermission>,
     /// `CustomIntegrationForm` inputs (Integrations tab).
@@ -219,6 +225,8 @@ impl PreferencesDialog {
             default_branch,
             email_choice: None,
             git_loaded: false,
+            quotepath: true,
+            longpaths: false,
             notification_permission: None,
             custom_editor_path,
             custom_editor_args,
@@ -290,6 +298,8 @@ impl PreferencesDialog {
             return;
         };
         self.git_loaded = true;
+        self.quotepath = config.quotepath;
+        self.longpaths = config.longpaths;
         let name = config.name.unwrap_or_default();
         let email = config.email.unwrap_or_default();
         self.name.update(cx, |s, cx| s.set_value(name, window, cx));
@@ -323,12 +333,20 @@ impl PreferencesDialog {
     }
 
     fn save(&self, cx: &mut App) {
+        let path_settings = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::PATH_GIT_SETTINGS);
         Dispatcher::save_preferences(
             PreferencesSave {
                 settings: self.draft.clone(),
                 name: self.name.read(cx).value().to_string(),
                 email: self.email.read(cx).value().to_string(),
                 default_branch: self.default_branch.read(cx).value().to_string(),
+                quotepath: (self.git_loaded && path_settings).then_some(self.quotepath),
+                longpaths: (self.git_loaded && path_settings && cfg!(windows))
+                    .then_some(self.longpaths),
             },
             cx,
         );
@@ -935,6 +953,11 @@ impl PreferencesDialog {
                     .read(cx)
                     .flags
                     .bool(corvene_core::flags::ids::BRANCH_NAME_TRAILING_SLASH_QUIET);
+                let path_settings = self
+                    .state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::PATH_GIT_SETTINGS);
                 let warning =
                     crate::dialogs::branch_dialogs::ref_name_warning(&value, &sanitized, quiet)
                         .then(|| format!("Will be saved as {sanitized}."));
@@ -970,6 +993,7 @@ impl PreferencesDialog {
                         .text_size(FONT_SIZE_SM())
                         .text_color(t.text_secondary),
                     )
+                    .when(path_settings, |d| d.child(self.path_settings(cx)))
                     .child(edit_config(cx))
                     .into_any_element()
             }
@@ -1674,12 +1698,13 @@ impl PreferencesDialog {
 
     fn advanced_tab(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
-        let (crash_reports, offered_packs) = {
+        let (crash_reports, offered_packs, clone_location) = {
             use corvene_core::flags::ids;
             let flags = &self.state.read(cx).flags;
             (
                 flags.bool(ids::CRASH_REPORTS),
                 corvene_core::offered_packs(flags),
+                flags.bool(ids::DEFAULT_CLONE_LOCATION),
             )
         };
         div()
@@ -1727,6 +1752,8 @@ impl PreferencesDialog {
                 .text_size(FONT_SIZE_SM())
                 .text_color(t.text_secondary),
             )
+            // Corvene addition: `544-default-clone-location`
+            .when(clone_location, |d| d.child(self.clone_location_section(cx)))
             // Corvene addition in place of GHD's Usage section (no telemetry);
             // `501-crash-reports`
             .when(crash_reports, |d| {
@@ -1749,6 +1776,129 @@ impl PreferencesDialog {
                     .children(offered_packs.iter().map(|kind| self.pack_row(*kind, cx)))
             })
             .into_any_element()
+    }
+
+    /// `548-path-git-settings`: global `core.quotepath` (all platforms) and
+    /// `core.longpaths` (Windows) under the default branch name.
+    fn path_settings(&self, cx: &Context<Self>) -> AnyElement {
+        let weak = cx.weak_entity();
+        let set = move |apply: fn(&mut Self, bool)| {
+            let weak = weak.clone();
+            move |value: bool, _: &mut Window, cx: &mut App| {
+                weak.update(cx, |this, cx| {
+                    apply(this, value);
+                    cx.notify();
+                })
+                .ok();
+            }
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .child(div().mt(SPACING()).child(section_heading("Paths", cx)))
+            .child(checkbox_row(
+                "prefs-git-quotepath",
+                !self.quotepath,
+                "Show non-ASCII file names as they are (core.quotepath off)",
+                set(|this, v| this.quotepath = !v),
+                cx,
+            ))
+            .when(cfg!(windows), |d| {
+                d.child(checkbox_row(
+                    "prefs-git-longpaths",
+                    self.longpaths,
+                    "Allow paths longer than 260 characters (core.longpaths)",
+                    set(|this, v| this.longpaths = v),
+                    cx,
+                ))
+            })
+            .into_any_element()
+    }
+
+    /// `544-default-clone-location`: where Clone, New Repository and the
+    /// tutorial put repositories (`Settings::clone_dir`), with Choose… and a
+    /// way back to GitHub Desktop's `~/Documents/GitHub`.
+    fn clone_location_section(&self, cx: &Context<Self>) -> AnyElement {
+        let chosen = self.draft.clone_dir.clone();
+        let shown = chosen.clone().unwrap_or_else(|| {
+            corvene_platform::paths::default_clone_dir_avoiding_onedrive(
+                self.state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::CLONE_DIR_AVOIDS_ONEDRIVE),
+            )
+        });
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .mt(SPACING())
+                    .child(section_heading("Clone location", cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING())
+                    .child(
+                        div()
+                            .id("prefs-clone-dir")
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(shown.display().to_string()),
+                    )
+                    .child(
+                        button("prefs-clone-dir-choose", "Choose…", cx)
+                            .flex_none()
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.choose_clone_dir(window, cx)
+                                }),
+                            ),
+                    ),
+            )
+            .child(
+                settings_description(cx)
+                    .mt(SPACING_HALF())
+                    .child("Clone and New Repository suggest this folder for new repositories."),
+            )
+            .when(chosen.is_some(), |d| {
+                d.child(
+                    link_button("prefs-clone-dir-reset", "Use the default location", cx)
+                        .mt(SPACING_HALF())
+                        .text_size(FONT_SIZE_SM())
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.draft.clone_dir = None;
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn choose_clone_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next()
+            {
+                this.update(cx, |this, cx| {
+                    this.draft.clone_dir = Some(path);
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     /// One on-demand pack: its state (compiled in / installed / downloading /

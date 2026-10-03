@@ -77,6 +77,37 @@ pub fn add_safe_directory(git: Arc<GitBinary>, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Flag `explain-trust-failure`: whether git still refuses `path` as an
+/// unsafe repository (checked with `rev-parse --git-dir`). `Some` carries
+/// the `safe.directory` value git suggests in its refusal, when it names one.
+pub fn still_unsafe(git: Arc<GitBinary>, path: &Path) -> Option<Option<String>> {
+    match GitCommand::new(git)
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(path)
+        .run()
+    {
+        Err(crate::error::GitError::Failed { stderr, .. })
+            if crate::error::dubious_ownership_path(&stderr).is_some() =>
+        {
+            Some(suggested_safe_directory(&stderr))
+        }
+        _ => None,
+    }
+}
+
+/// The value in git's "git config --global --add safe.directory <value>"
+/// advice, unquoted.
+fn suggested_safe_directory(stderr: &str) -> Option<String> {
+    const MARKER: &str = "--add safe.directory ";
+    let line = stderr.lines().find(|l| l.contains(MARKER))?;
+    let value = line[line.find(MARKER)? + MARKER.len()..].trim();
+    let value = value
+        .strip_prefix('\'')
+        .and_then(|v| v.strip_suffix('\''))
+        .unwrap_or(value);
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 /// `git config --local --unset <key>`; a missing key (exit 5) is not an error.
 pub fn remove_local_config_value(git: Arc<GitBinary>, workdir: &Path, key: &str) -> Result<()> {
     GitCommand::new(git)
@@ -96,6 +127,21 @@ pub fn set_default_branch(git: Arc<GitBinary>, name: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::detect::find_git;
+
+    #[test]
+    fn reads_the_suggested_safe_directory() {
+        let stderr = "fatal: detected dubious ownership in repository at '//server/share/repo'\n\
+                      To add an exception for this directory, call:\n\n\
+                      \tgit config --global --add safe.directory '%(prefix)///server/share/repo'\n";
+        assert_eq!(
+            suggested_safe_directory(stderr).as_deref(),
+            Some("%(prefix)///server/share/repo")
+        );
+        assert_eq!(
+            suggested_safe_directory("fatal: not a git repository"),
+            None
+        );
+    }
 
     #[test]
     fn local_values_round_trip() {

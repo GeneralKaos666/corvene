@@ -752,7 +752,14 @@ impl McoDialog {
                 .child(
                     div()
                         .id("unmerged-files")
-                        .max_h(zpx(285.))
+                        // `449-larger-dialogs`: the list takes what 80 % of
+                        // the window leaves after the header, title and footer
+                        .max_h(if crate::dialog::larger_dialogs(cx) {
+                            (crate::theme::page_size(window).height * 0.8 - zpx(260.))
+                                .max(zpx(285.))
+                        } else {
+                            zpx(285.)
+                        })
                         .overflow_y_scroll()
                         .flex()
                         .flex_col()

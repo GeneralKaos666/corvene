@@ -56,12 +56,7 @@ impl CreateRepositoryDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let default_dir = state
-            .read(cx)
-            .settings
-            .clone_dir
-            .clone()
-            .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+        let default_dir = state.read(cx).clone_dir();
         let (initial_name, initial_dir) = match initial_path {
             Some(p) => (
                 p.file_name().map(|n| n.to_string_lossy().into_owned()),

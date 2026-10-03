@@ -38,6 +38,10 @@ pub struct PreferencesSave {
     pub name: String,
     pub email: String,
     pub default_branch: String,
+    /// `548-path-git-settings`: global `core.quotepath` / `core.longpaths`
+    /// to write; `None` leaves them alone.
+    pub quotepath: Option<bool>,
+    pub longpaths: Option<bool>,
 }
 
 /// What Repository Settings › Save applies (`repository-settings.tsx#onSubmit`).
@@ -112,21 +116,35 @@ pub fn encode_component(s: &str) -> String {
 
 /// GHD `_openCreatePullRequestInBrowser`: `${htmlURL}/pull/new/[base...]compare`;
 /// a fork contributing to its parent prefixes both refs with `owner:name:`.
+///
+/// Deviation (`372-fork-own-pr-target`, `own_fork_targets_itself`): a fork
+/// set up for its own work names itself on both sides and falls back to its
+/// own default branch as the base. GHD leaves the refs bare, and GitHub's
+/// `pull/new` page on a fork then proposes merging into the parent.
 pub fn pull_request_url(
     gh: &GitHubRepository,
     compare: &str,
     base: Option<&str>,
     contributing_to_parent: bool,
+    own_fork_targets_itself: bool,
 ) -> String {
+    let own_fork = own_fork_targets_itself && !contributing_to_parent && gh.parent.is_some();
+    let self_prefix = format!("{}:{}:", gh.owner, gh.name);
     let base_prefix = match (&gh.parent, contributing_to_parent) {
         (Some(parent), true) => format!("{}:{}:", parent.owner, parent.name),
+        _ if own_fork => self_prefix.clone(),
         _ => String::new(),
+    };
+    let base = if own_fork {
+        base.or(gh.default_branch.as_deref())
+    } else {
+        base
     };
     let encoded_base = base
         .map(|b| format!("{base_prefix}{}...", encode_component(b)))
         .unwrap_or_default();
-    let compare_prefix = if contributing_to_parent {
-        format!("{}:{}:", gh.owner, gh.name)
+    let compare_prefix = if contributing_to_parent || own_fork {
+        self_prefix
     } else {
         String::new()
     };
@@ -164,11 +182,12 @@ impl Dispatcher {
     pub fn detect_integrations(cx: &mut App) {
         let flags = &Self::state(cx).read(cx).flags;
         let extras = flags.bool(crate::flags::ids::EXTRA_EDITORS);
+        let jetbrains_64bit_hive = flags.bool(crate::flags::ids::JETBRAINS_64BIT_HIVE);
         let with_icons = flags.bool(crate::flags::ids::INTEGRATION_APP_ICONS);
         spawn_bg(
             cx,
             move || {
-                let editors = editors::available_editors(extras);
+                let editors = editors::available_editors(extras, jetbrains_64bit_hive);
                 let shells = shells::available_shells();
                 let icons = if with_icons {
                     app_icons(
@@ -233,7 +252,7 @@ impl Dispatcher {
     /// (the diff's "Open in <Editor> at Line N", flag
     /// `diff-open-in-editor-at-line`); a custom editor opens the file.
     pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut App) {
-        let (editors, selected, custom, workspace_file, folder) = {
+        let (editors, selected, custom, workspace_file, folder, folder_as_workspace) = {
             let s = Self::state(cx).read(cx);
             // `554-per-repo-editor`: the repository's own editor wins over
             // Settings (also over a custom editor)
@@ -264,6 +283,7 @@ impl Dispatcher {
                     .filter(|_| repo_editor.is_none()),
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
                 folder,
+                s.flags.bool(crate::flags::ids::NOTEPADPP_FOLDER_WORKSPACE),
             )
         };
         if let Some(custom) = custom {
@@ -321,7 +341,7 @@ impl Dispatcher {
                             .then(|| editors::code_workspace_file(&editor, &path))
                             .flatten()
                             .unwrap_or(path);
-                        editors::launch(&editor, &target)
+                        editors::launch(&editor, &target, folder_as_workspace)
                     }
                 }
             },
@@ -733,10 +753,14 @@ impl Dispatcher {
         let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) else {
             return;
         };
-        let contributing_to_parent = Self::state(cx)
-            .read(cx)
-            .repository(id)
-            .is_some_and(|r| r.is_fork_contributing_to_parent());
+        let (contributing_to_parent, own_fork_targets_itself) = {
+            let s = Self::state(cx).read(cx);
+            (
+                s.repository(id)
+                    .is_some_and(|r| r.is_fork_contributing_to_parent()),
+                s.flags.bool(crate::flags::ids::FORK_OWN_PR_TARGET),
+            )
+        };
         // the base is a remote branch name in the dialog; GitHub wants it bare
         let base = base.map(|b| {
             b.split_once('/')
@@ -744,7 +768,13 @@ impl Dispatcher {
                 .unwrap_or(b)
         });
         Self::open_url(
-            &pull_request_url(&gh, &branch, base.as_deref(), contributing_to_parent),
+            &pull_request_url(
+                &gh,
+                &branch,
+                base.as_deref(),
+                contributing_to_parent,
+                own_fork_targets_itself,
+            ),
             cx,
         );
     }
@@ -807,9 +837,15 @@ impl Dispatcher {
             cx,
             move || {
                 let identity = corvene_git::global_identity(git.clone());
+                let flag = |key: &str, default: bool| {
+                    corvene_git::global_config_value(git.clone(), key)
+                        .map_or(default, |v| config_bool(&v, default))
+                };
                 GlobalGitConfig {
                     name: identity.name,
                     email: identity.email,
+                    quotepath: flag("core.quotepath", true),
+                    longpaths: flag("core.longpaths", false),
                     default_branch: corvene_git::configured_default_branch(git),
                 }
             },
@@ -830,6 +866,8 @@ impl Dispatcher {
             name,
             email,
             default_branch,
+            quotepath,
+            longpaths,
         } = save;
         let (git, previous) = {
             let s = Self::state(cx).read(cx);
@@ -844,7 +882,12 @@ impl Dispatcher {
         let email_changed = email.trim() != previous.email.clone().unwrap_or_default().trim();
         let branch_changed =
             !default_branch.trim().is_empty() && default_branch.trim() != previous.default_branch;
-        if !(name_changed || email_changed || branch_changed) {
+        let quotepath = quotepath.filter(|v| *v != previous.quotepath);
+        let longpaths = longpaths.filter(|v| *v != previous.longpaths);
+        if !(name_changed || email_changed || branch_changed)
+            && quotepath.is_none()
+            && longpaths.is_none()
+        {
             return;
         }
         let selected = Self::state(cx).read(cx).selected;
@@ -856,6 +899,20 @@ impl Dispatcher {
                 }
                 if email_changed {
                     corvene_git::set_global_config_value(git.clone(), "user.email", email.trim())?;
+                }
+                if let Some(on) = quotepath {
+                    corvene_git::set_global_config_value(
+                        git.clone(),
+                        "core.quotepath",
+                        if on { "true" } else { "false" },
+                    )?;
+                }
+                if let Some(on) = longpaths {
+                    corvene_git::set_global_config_value(
+                        git.clone(),
+                        "core.longpaths",
+                        if on { "true" } else { "false" },
+                    )?;
                 }
                 if branch_changed {
                     corvene_git::set_default_branch(git, default_branch.trim())?;
@@ -1081,16 +1138,53 @@ impl Dispatcher {
     }
 
     /// Settings › Git › "edit your global Git config file": open `~/.gitconfig`
-    /// in the external editor (GHD opens it with the selected editor too).
+    /// in the external editor (GHD opens it with the selected editor too),
+    /// or the XDG file when that is the one git uses (GHD asks
+    /// `git config --edit --global`, `lib/git/config.ts` `getGlobalConfigPath`).
     pub fn edit_global_git_config(cx: &mut App) {
         let Some(home) = dirs_home() else { return };
-        let path = home.join(".gitconfig");
+        let path = global_git_config_path(
+            &home,
+            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            &|p| p.exists(),
+        );
         if !path.exists()
             && let Err(err) = std::fs::write(&path, "")
         {
             warn!(%err, "could not create ~/.gitconfig");
         }
         Self::open_in_editor(path, cx);
+    }
+}
+
+/// The global config file `git config --global` edits: `~/.gitconfig`, or
+/// `$XDG_CONFIG_HOME/git/config` (default `~/.config/git/config`) when
+/// `~/.gitconfig` doesn't exist and that does.
+fn global_git_config_path(
+    home: &Path,
+    xdg_config_home: Option<PathBuf>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> PathBuf {
+    let dot = home.join(".gitconfig");
+    if !exists(&dot) {
+        let base = xdg_config_home
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| home.join(".config"));
+        let config = base.join("git").join("config");
+        if exists(&config) {
+            return config;
+        }
+    }
+    dot
+}
+
+/// A git config boolean (`git-config` "Values": true / yes / on / 1 and
+/// false / no / off / 0 / empty); `default` for anything else.
+fn config_bool(value: &str, default: bool) -> bool {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => true,
+        "false" | "no" | "off" | "0" | "" => false,
+        _ => default,
     }
 }
 
@@ -1136,6 +1230,38 @@ fn write_read_only(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_git_config_booleans() {
+        assert!(config_bool("Yes", false));
+        assert!(!config_bool("off", true));
+        assert!(config_bool("maybe", true));
+    }
+
+    #[test]
+    fn global_config_falls_back_to_the_xdg_file() {
+        let home = Path::new("/home/mona");
+        let only = |file: &'static str| move |p: &Path| p == Path::new(file);
+        let xdg_default = "/home/mona/.config/git/config";
+        assert_eq!(
+            global_git_config_path(home, None, &only(xdg_default)),
+            Path::new(xdg_default)
+        );
+        assert_eq!(
+            global_git_config_path(home, Some("/xdg".into()), &only("/xdg/git/config")),
+            Path::new("/xdg/git/config")
+        );
+        // ~/.gitconfig wins, and nothing exists: ~/.gitconfig
+        let both = |p: &Path| p.ends_with(".gitconfig") || p == Path::new(xdg_default);
+        assert_eq!(
+            global_git_config_path(home, None, &both),
+            home.join(".gitconfig")
+        );
+        assert_eq!(
+            global_git_config_path(home, None, &|_| false),
+            home.join(".gitconfig")
+        );
+    }
 
     fn gh(parent: bool) -> GitHubRepository {
         let base = GitHubRepository {
@@ -1229,24 +1355,42 @@ mod tests {
     #[test]
     fn pull_request_urls() {
         assert_eq!(
-            pull_request_url(&gh(false), "feat/one", None, false),
+            pull_request_url(&gh(false), "feat/one", None, false, false),
             "https://github.com/octocat/hello/pull/new/feat%2Fone"
         );
         assert_eq!(
-            pull_request_url(&gh(false), "feat", Some("develop"), false),
+            pull_request_url(&gh(false), "feat", Some("develop"), false, false),
             "https://github.com/octocat/hello/pull/new/develop...feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, true),
+            pull_request_url(&gh(true), "feat", None, true, false),
             "https://github.com/me/hello/pull/new/me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", Some("main"), true),
+            pull_request_url(&gh(true), "feat", Some("main"), true, false),
             "https://github.com/me/hello/pull/new/octocat:hello:main...me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, false),
+            pull_request_url(&gh(true), "feat", None, false, false),
             "https://github.com/me/hello/pull/new/feat"
+        );
+        // `372`: a fork for its own work targets itself
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", None, false, true),
+            "https://github.com/me/hello/pull/new/me:hello:main...me:hello:feat"
+        );
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", Some("dev"), false, true),
+            "https://github.com/me/hello/pull/new/me:hello:dev...me:hello:feat"
+        );
+        // contributing to the parent and non-forks are unchanged by the flag
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", None, true, true),
+            "https://github.com/me/hello/pull/new/me:hello:feat"
+        );
+        assert_eq!(
+            pull_request_url(&gh(false), "feat", None, false, true),
+            "https://github.com/octocat/hello/pull/new/feat"
         );
     }
 }

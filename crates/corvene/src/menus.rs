@@ -30,6 +30,9 @@ pub struct MenuOptions {
     pub fetch_all: bool,
     /// Flag `414-linux-install-cli` (the item is always there on macOS).
     pub install_cli: bool,
+    /// Flag `451-undo-commit-menu-item`: Edit › Undo Last Commit, enabled
+    /// while the Changes tab's Undo bar shows.
+    pub undo_last_commit: Option<bool>,
     /// Flags that add key bindings and their View menu items
     /// (`612-navigation-shortcuts`, `801-history-review-mode`).
     pub keymap: corvene_ui::keymap::KeymapFlags,
@@ -55,6 +58,10 @@ impl MenuOptions {
             install_cli: !cfg!(any(target_os = "android", windows))
                 && s.flags.bool(ids::LINUX_INSTALL_CLI),
             keymap: corvene_ui::keymap::KeymapFlags::from_flags(&s.flags),
+            undo_last_commit: s.flags.bool(ids::UNDO_COMMIT_MENU_ITEM).then(|| {
+                s.selected_state()
+                    .is_some_and(|rs| rs.last_commit.is_some())
+            }),
         }
     }
 }
@@ -77,7 +84,7 @@ const fn l(mac: &'static str, other: &'static str) -> &'static str {
 /// Corvene additions: "Flags…" (no GHD equivalent), File › Import
 /// Repositories from GitHub Desktop…, Repository › Fetch All Repositories,
 /// File › Remove Repositories…, Repository › View Upstream on GitHub,
-/// Repository › Add License…,
+/// Repository › Add License…, Edit › Undo Last Commit,
 /// Window › Corvene (shows the window hidden with ⌘W) and Help › Show
 /// Release Notes; on Linux "Flags…" and "Install Command Line Tool…" sit
 /// under File after "Options…" (GHD's Linux menu has no app menu).
@@ -215,7 +222,7 @@ pub fn install(cx: &mut App, options: &MenuOptions) {
             ContractActiveResizable,
         ),
     ]);
-    let edit = Menu::new(l("Edit", "&Edit")).items([
+    let mut edit_items = vec![
         MenuItem::os_action(l("Undo", "&Undo"), Undo, OsAction::Undo),
         MenuItem::os_action(l("Redo", "&Redo"), Redo, OsAction::Redo),
         MenuItem::separator(),
@@ -229,7 +236,15 @@ pub fn install(cx: &mut App, options: &MenuOptions) {
         ),
         MenuItem::separator(),
         MenuItem::action(l("Find", "&Find"), Find),
-    ]);
+    ];
+    if let Some(enabled) = options.undo_last_commit {
+        edit_items.extend([
+            MenuItem::separator(),
+            MenuItem::action(l("Undo Last Commit", "Undo last &commit"), UndoLastCommit)
+                .disabled(!enabled),
+        ]);
+    }
+    let edit = Menu::new(l("Edit", "&Edit")).items(edit_items);
     let branch = Menu::new(l("Branch", "&Branch")).items(
         [
             MenuItem::action(l("New Branch…", "New &branch…"), NewBranch),

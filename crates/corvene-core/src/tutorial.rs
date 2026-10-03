@@ -243,12 +243,7 @@ impl Dispatcher {
             );
             return;
         };
-        let dir = Self::state(cx)
-            .read(cx)
-            .settings
-            .clone_dir
-            .clone()
-            .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+        let dir = Self::state(cx).read(cx).clone_dir();
         let path = dir.join(TUTORIAL_REPOSITORY_NAME);
         let askpass = Self::askpass_env(cx);
         let (tx, rx) = async_channel::unbounded::<(String, u8, Option<String>)>();
@@ -257,13 +252,17 @@ impl Dispatcher {
         let work_path = path.clone();
         // `InitialReadmeContents` and the repository description with `103-product-name`
         let product_name = Self::state(cx).read(cx).product_name().to_string();
+        let sso_hint = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::API_SAML_SSO_HINT);
         let task = cx.background_executor().spawn(async move {
             let progress = |title: &str, value: f32, detail: Option<String>| {
                 let _ = tx.send_blocking((title.to_string(), (value * 100.) as u8, detail));
             };
             create_tutorial_repository(
                 &git,
-                Client::new(endpoint, token),
+                Client::new(endpoint, token).with_sso_hint(sso_hint),
                 &friendly,
                 &work_path,
                 &product_name,
@@ -439,7 +438,7 @@ fn create_tutorial_repository(
     }
     let description = format!("{product_name} tutorial repository");
     let repo = client
-        .create_repository(None, TUTORIAL_REPOSITORY_NAME, &description, true)
+        .create_repository(None, TUTORIAL_REPOSITORY_NAME, &description, true, None)
         .map_err(|err| {
             let text = err.to_string();
             if text.contains("name already exists") {

@@ -3,6 +3,15 @@
 //! verbatim). An editor is installed when one of its uninstall keys exists
 //! with the expected display name and publisher, and the executable the key
 //! leads to is there.
+//!
+//! Flag `extra-editors` adds editors without uninstall keys GHD knows:
+//! Microsoft Edit (`edit.exe` on the PATH, started in a console of its own)
+//! and gVim (`gvim.exe` on the PATH or in `%ProgramFiles%\Vim\vim*`).
+//!
+//! Deviation (flag `jetbrains-64bit-hive`): JetBrains IDEs are also looked
+//! up under the 64-bit machine uninstall key, where current installers
+//! register them; GHD's `registryKeysForJetBrainsIDE` only checks the
+//! 32-bit (WOW6432Node) and user keys.
 
 use std::path::{Path, PathBuf};
 
@@ -342,8 +351,8 @@ const TABLE: &[Editor] = &[
 /// The uninstall key names of a JetBrains product for the last two years,
 /// newest first: up to 5 major and 5 minor releases a year
 /// (`<product> <year>.<major>[.<minor>]`), each under the 32-bit machine key
-/// and the user key.
-fn jetbrains_keys(product: &str, this_year: i32) -> Vec<(Hive, String)> {
+/// and the user key (and with `machine_hive` the 64-bit machine key).
+fn jetbrains_keys(product: &str, this_year: i32, machine_hive: bool) -> Vec<(Hive, String)> {
     let mut keys = Vec::new();
     for year in this_year - 2..=this_year {
         for major in 1..=5 {
@@ -351,6 +360,9 @@ fn jetbrains_keys(product: &str, this_year: i32) -> Vec<(Hive, String)> {
                 let mut key = format!("{product} {year}.{major}");
                 if minor > 0 {
                     key.push_str(&format!(".{minor}"));
+                }
+                if machine_hive {
+                    keys.push((Machine, key.clone()));
                 }
                 keys.push((Wow64, key.clone()));
                 keys.push((User, key));
@@ -413,7 +425,7 @@ fn executable_from(
     candidates.into_iter().find(|path| path.is_file())
 }
 
-fn find(editor: &Editor, year: i32) -> Option<PathBuf> {
+fn find(editor: &Editor, year: i32, machine_hive: bool) -> Option<PathBuf> {
     let from = |hive: Hive, sub_key: &str| {
         executable_from(
             &hive.open(sub_key)?,
@@ -424,7 +436,7 @@ fn find(editor: &Editor, year: i32) -> Option<PathBuf> {
     };
     match &editor.keys {
         Keys::List(keys) => keys.iter().find_map(|(hive, key)| from(*hive, key)),
-        Keys::JetBrains(product) => jetbrains_keys(product, year)
+        Keys::JetBrains(product) => jetbrains_keys(product, year, machine_hive)
             .iter()
             .find_map(|(hive, key)| from(*hive, key)),
     }
@@ -473,14 +485,77 @@ fn toolbox_editors() -> Vec<FoundEditor> {
     out
 }
 
+/// Flag `extra-editors`: Microsoft Edit, a console program.
+const MICROSOFT_EDIT: &str = "Microsoft Edit";
+
+/// The first `exe` in the PATH's folders (like `findGitOnPath`).
+fn on_path(exe: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(exe))
+        .find(|candidate| candidate.is_file())
+}
+
+/// gVim's installer puts it in `%ProgramFiles%\Vim\vim<version>`; the
+/// newest version wins.
+fn gvim() -> Option<PathBuf> {
+    on_path("gvim.exe").or_else(|| {
+        let vim = PathBuf::from(std::env::var_os("ProgramFiles")?).join("Vim");
+        let mut found: Vec<PathBuf> = std::fs::read_dir(vim)
+            .ok()?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|dir| {
+                dir.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("vim"))
+            })
+            .map(|dir| dir.join("gvim.exe"))
+            .filter(|exe| exe.is_file())
+            .collect();
+        found.sort();
+        found.pop()
+    })
+}
+
+/// Flag `extra-editors`: the editors found outside the uninstall keys.
+fn extra_editors() -> Vec<FoundEditor> {
+    [(MICROSOFT_EDIT, on_path("edit.exe")), ("gVim", gvim())]
+        .into_iter()
+        .filter_map(|(name, path)| {
+            Some(FoundEditor {
+                name: name.to_string(),
+                bundle_id: String::new(),
+                path: path?,
+            })
+        })
+        .collect()
+}
+
+/// Whether `editor` is a console program that needs a console window of its
+/// own (Microsoft Edit).
+pub fn needs_console(editor: &FoundEditor) -> bool {
+    editor.name == MICROSOFT_EDIT
+}
+
+/// Start a console editor in a new console window. Its standard handles
+/// are left alone so that it attaches to that console.
+pub fn spawn_in_console(program: &Path, args: &[&str]) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new(program)
+        .args(args)
+        .creation_flags(crate::windows::CREATE_NEW_CONSOLE)
+        .spawn()
+        .map(drop)
+}
+
 /// GHD `getAvailableEditors`: the table's installed editors, then the
-/// JetBrains Toolbox ones.
-pub fn available() -> Vec<FoundEditor> {
+/// JetBrains Toolbox ones (then, with `extras`, Microsoft Edit and gVim).
+/// `jetbrains_machine_hive`: flag `jetbrains-64bit-hive`.
+pub fn available(extras: bool, jetbrains_machine_hive: bool) -> Vec<FoundEditor> {
     let year = this_year();
     let mut out: Vec<FoundEditor> = TABLE
         .iter()
         .filter_map(|editor| {
-            find(editor, year).map(|path| FoundEditor {
+            find(editor, year, jetbrains_machine_hive).map(|path| FoundEditor {
                 name: editor.name.to_string(),
                 bundle_id: String::new(),
                 path,
@@ -488,6 +563,9 @@ pub fn available() -> Vec<FoundEditor> {
         })
         .collect();
     out.extend(toolbox_editors());
+    if extras {
+        out.extend(extra_editors());
+    }
     out
 }
 
@@ -506,9 +584,13 @@ mod tests {
 
     #[test]
     fn jetbrains_keys_are_newest_first() {
-        let keys = jetbrains_keys("WebStorm", 2026);
+        let keys = jetbrains_keys("WebStorm", 2026, false);
         assert_eq!(keys.len(), 3 * 5 * 6 * 2);
         assert_eq!(keys[0].1, "WebStorm 2026.5.5");
         assert_eq!(keys.last().unwrap().1, "WebStorm 2024.1");
+        // `jetbrains-64bit-hive`: the 64-bit machine key too
+        let keys = jetbrains_keys("WebStorm", 2026, true);
+        assert_eq!(keys.len(), 3 * 5 * 6 * 3);
+        assert!(matches!(keys.last().unwrap().0, Machine));
     }
 }
