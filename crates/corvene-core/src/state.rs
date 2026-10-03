@@ -441,6 +441,13 @@ pub enum Popup {
         repo: u64,
         tab: UnreachableCommitsTab,
     },
+    /// Corvene (`446-confirm-quit-while-busy`): Quit while a clone, push,
+    /// pull, fetch or update is running; `busy` says which and Cancel
+    /// brings back the dialog it covered (`previous`).
+    ConfirmQuit {
+        busy: &'static str,
+        previous: Option<Box<Popup>>,
+    },
 }
 
 impl Popup {
@@ -1073,6 +1080,38 @@ impl AppState {
     pub fn product_name(&self) -> &str {
         self.flags.text(crate::flags::ids::PRODUCT_NAME)
     }
+
+    /// `446-confirm-quit-while-busy`: the running operation quitting would
+    /// cut short, if any.
+    pub fn busy_for_quit(&self) -> Option<&'static str> {
+        let network = self
+            .repo_states
+            .values()
+            .any(|s| s.push_pull_in_progress && !s.quiet_background_fetch);
+        busy_for_quit(self.cloning.is_some(), network, &self.update.status)
+    }
+}
+
+/// Describes the operation a quit would interrupt: a clone, a visible push /
+/// pull / fetch, or an update being downloaded or installed (a quiet
+/// background fetch doesn't count).
+pub fn busy_for_quit(
+    cloning: bool,
+    network: bool,
+    update: &crate::updater::UpdateStatus,
+) -> Option<&'static str> {
+    use crate::updater::UpdateStatus;
+    if matches!(update, UpdateStatus::Installing) {
+        Some("An update is being installed.")
+    } else if cloning {
+        Some("A repository is being cloned.")
+    } else if network {
+        Some("A push, pull or fetch is in progress.")
+    } else if matches!(update, UpdateStatus::Downloading { .. }) {
+        Some("An update is being downloaded.")
+    } else {
+        None
+    }
 }
 
 struct AppStateHandle(Entity<AppState>);
@@ -1190,5 +1229,28 @@ mod popup_tests {
         };
         assert_eq!(rename.repository(), Some(7));
         assert_eq!(Popup::Acknowledgements.repository(), None);
+    }
+
+    #[test]
+    fn quit_confirmation_names_the_running_operation() {
+        use super::busy_for_quit;
+        use crate::updater::UpdateStatus;
+        assert_eq!(
+            busy_for_quit(false, false, &UpdateStatus::NotAvailable),
+            None
+        );
+        assert_eq!(busy_for_quit(false, false, &UpdateStatus::Checking), None);
+        assert!(
+            busy_for_quit(true, false, &UpdateStatus::NotChecked)
+                .is_some_and(|s| s.contains("cloned"))
+        );
+        assert!(
+            busy_for_quit(false, true, &UpdateStatus::NotChecked)
+                .is_some_and(|s| s.contains("push"))
+        );
+        assert!(
+            busy_for_quit(true, true, &UpdateStatus::Installing)
+                .is_some_and(|s| s.contains("installed"))
+        );
     }
 }

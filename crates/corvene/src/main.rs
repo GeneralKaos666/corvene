@@ -265,7 +265,24 @@ pub(crate) fn main() {
         })
         .detach();
 
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        // `446-confirm-quit-while-busy`: a running clone, push / pull /
+        // fetch or update asks first; Quit again while it asks quits.
+        cx.on_action(|_: &Quit, cx| {
+            let s = corvene_core::AppState::global(cx).read(cx);
+            let busy = s
+                .flags
+                .bool(corvene_core::flags::ids::CONFIRM_QUIT_WHILE_BUSY)
+                .then(|| s.busy_for_quit())
+                .flatten()
+                .filter(|_| !matches!(s.popup, Some(Popup::ConfirmQuit { .. })));
+            match busy {
+                Some(busy) => {
+                    let previous = s.popup.clone().map(Box::new);
+                    Dispatcher::show_popup(Popup::ConfirmQuit { busy, previous }, cx)
+                }
+                None => cx.quit(),
+            }
+        });
         cx.on_action(|_: &Hide, cx| cx.hide());
         cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
         cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());

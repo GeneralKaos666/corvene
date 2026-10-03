@@ -2151,6 +2151,25 @@ registry! {
         ],
     },
 
+    /// Quit asks first while work is running.
+    CONFIRM_QUIT_WHILE_BUSY = 446 "confirm-quit-while-busy" {
+        title: "Confirm quitting while busy",
+        summary: "Quit (⌘Q or the menu) while a repository is being cloned, a push, pull or \
+                  fetch runs, or an update downloads or installs asks \"Quit anyway?\" first. \
+                  Quit again while it asks to quit at once.",
+        ghd_behaviour: "Quits immediately and cuts the running operation short.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12807), Upstream::issue(10559), Upstream::issue(18205)],
+        code: &[
+            "crates/corvene/src/main.rs",
+            "crates/corvene-core/src/state.rs",
+            "crates/corvene-ui/src/dialogs/confirm_quit.rs",
+        ],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
