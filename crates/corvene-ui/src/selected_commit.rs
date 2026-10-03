@@ -532,8 +532,14 @@ impl SelectedCommitView {
                 .flags
                 .bool(corvene_core::flags::ids::CROSS_REPOSITORY_ISSUE_LINKS),
         };
+        // `889-issue-title-tooltips`
+        let issue_titles = s
+            .flags
+            .bool(corvene_core::flags::ids::ISSUE_TITLE_TOOLTIPS)
+            .then(|| s.repository(id).and_then(|r| r.non_fork_github()).cloned())
+            .flatten();
         let message = |id: &'static str, text: &str, cx: &App| {
-            crate::markdown::rich_text(
+            crate::markdown::rich_text_with_issue_titles(
                 id,
                 &corvene_core::markdown::commit_message_rich_text(
                     text,
@@ -542,6 +548,7 @@ impl SelectedCommitView {
                     rich_extras,
                     commit_base.as_deref(),
                 ),
+                issue_titles.clone(),
                 cx,
             )
         };

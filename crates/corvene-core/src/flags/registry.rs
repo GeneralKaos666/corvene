@@ -4271,6 +4271,21 @@ registry! {
         code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// Issue titles in the tooltips of `#123` links.
+    ISSUE_TITLE_TOOLTIPS = 889 "issue-title-tooltips" {
+        title: "Issue titles on #123 links",
+        summary: "Hovering a `#123` link in the selected commit's message shows \"#123 <issue \
+                  title>\" for an open issue in the issue cache the commit box's # suggestions \
+                  use (hovering loads it), else the link's URL.",
+        ghd_behaviour: "The tooltip is the link's URL (older versions showed the commit title).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2257)],
+        code: &["crates/corvene-ui/src/markdown.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
