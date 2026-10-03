@@ -57,7 +57,8 @@ def load_upstream() -> list[tuple[str, str]]:
         if not line.strip():
             continue
         file, case, _line = line.split("\t")
-        rows.append((file, case))
+        # markers and skips are read with trailing whitespace stripped
+        rows.append((file, case.rstrip()))
     return rows
 
 
