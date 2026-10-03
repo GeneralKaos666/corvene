@@ -61,6 +61,8 @@ pub(crate) fn status(
             check_dirty: false,
         },
     };
+    let renames = tree_index_renames(&repo)?;
+    let renames_off = matches!(renames, gix::status::tree_index::TrackRenames::Disabled);
     let iter = repo
         .status(gix::progress::Discard)
         .and_then(|platform| {
@@ -69,7 +71,7 @@ pub(crate) fn status(
                 .index_worktree_submodules(submodules)
                 // git status does not pair deleted and untracked files
                 .index_worktree_rewrites(None)
-                .tree_index_track_renames(gix::status::tree_index::TrackRenames::AsConfigured)
+                .tree_index_track_renames(renames)
                 .into_iter(Vec::<gix::bstr::BString>::new())
         })
         .map_err(|err| tracing::debug!(?err, "in-process status failed"))
@@ -77,6 +79,7 @@ pub(crate) fn status(
 
     let mut records: HashMap<String, Record> = HashMap::new();
     let mut intent_to_add = Vec::new();
+    let mut staged = StagedRenames::default();
     for item in iter {
         let item = item
             .map_err(|err| tracing::debug!(?err, "in-process status failed"))
@@ -132,13 +135,25 @@ pub(crate) fn status(
             gix::status::Item::TreeIndex(change) => {
                 use gix::diff::index::ChangeRef;
                 match change {
-                    ChangeRef::Addition { location, .. } => {
+                    ChangeRef::Addition {
+                        location,
+                        entry_mode,
+                        id,
+                        ..
+                    } => {
+                        staged.added(entry_mode, &id);
                         records
                             .entry(location.to_str().ok()?.to_string())
                             .or_default()
                             .x = Some('A');
                     }
-                    ChangeRef::Deletion { location, .. } => {
+                    ChangeRef::Deletion {
+                        location,
+                        entry_mode,
+                        id,
+                        ..
+                    } => {
+                        staged.deleted(entry_mode, &id);
                         records
                             .entry(location.to_str().ok()?.to_string())
                             .or_default()
@@ -172,10 +187,14 @@ pub(crate) fn status(
                         record.x = Some(if copy { 'C' } else { 'R' });
                         record.old_path = Some(source_location.to_str().ok()?.to_string());
                         record.score = (source_id == id).then_some(100);
+                        staged.renamed(&source_id, &id);
                     }
                 }
             }
         }
+    }
+    if !renames_off && !staged.settled() {
+        return None;
     }
     // an intent-to-add entry is an empty blob in the index: git shows `.A`
     for path in intent_to_add {
@@ -218,6 +237,82 @@ pub(crate) fn status(
         "in-process status"
     );
     Some(status)
+}
+
+/// git's rename detection between `HEAD` and the index, exact renames only:
+/// gitoxide's similarity measure is not git's, so an index that may hold an
+/// inexact rename is left to git ([`StagedRenames`]). `None` when git would
+/// look for copies (`status.renames=copies`), which gitoxide reports
+/// differently.
+fn tree_index_renames(repo: &gix::Repository) -> Option<gix::status::tree_index::TrackRenames> {
+    use gix::status::tree_index::TrackRenames;
+    let config = repo.config_snapshot();
+    let value = config
+        .string("status.renames")
+        .or_else(|| config.string("diff.renames"))
+        .map(|v| v.to_str_lossy().to_ascii_lowercase());
+    match value.as_deref() {
+        Some("copies" | "copy") => None,
+        Some("false" | "no" | "off" | "0") => Some(TrackRenames::Disabled),
+        _ => Some(TrackRenames::Given(gix::diff::Rewrites {
+            copies: None,
+            percentage: None,
+            limit: 0,
+            track_empty: false,
+        })),
+    }
+}
+
+/// Whether the exact-only rename pairing of `HEAD` → index is the one git
+/// makes: no staged addition and deletion of non-empty files left unpaired
+/// (git may call them an inexact rename) and no content on more than one
+/// side of a rename (git picks among such candidates by name).
+#[derive(Default)]
+struct StagedRenames {
+    added: bool,
+    deleted: bool,
+    sources: HashMap<gix::ObjectId, usize>,
+    destinations: HashMap<gix::ObjectId, usize>,
+    pairs: Vec<(gix::ObjectId, gix::ObjectId)>,
+}
+
+impl StagedRenames {
+    fn is_file(mode: gix::index::entry::Mode) -> bool {
+        matches!(
+            mode,
+            gix::index::entry::Mode::FILE
+                | gix::index::entry::Mode::FILE_EXECUTABLE
+                | gix::index::entry::Mode::SYMLINK
+        )
+    }
+
+    fn added(&mut self, mode: gix::index::entry::Mode, id: &gix::oid) {
+        if Self::is_file(mode) {
+            self.added |= !id.is_empty_blob();
+            *self.destinations.entry(id.to_owned()).or_default() += 1;
+        }
+    }
+
+    fn deleted(&mut self, mode: gix::index::entry::Mode, id: &gix::oid) {
+        if Self::is_file(mode) {
+            self.deleted |= !id.is_empty_blob();
+            *self.sources.entry(id.to_owned()).or_default() += 1;
+        }
+    }
+
+    fn renamed(&mut self, source: &gix::oid, destination: &gix::oid) {
+        *self.sources.entry(source.to_owned()).or_default() += 1;
+        *self.destinations.entry(destination.to_owned()).or_default() += 1;
+        self.pairs.push((source.to_owned(), destination.to_owned()));
+    }
+
+    fn settled(&self) -> bool {
+        !(self.added && self.deleted)
+            && self.pairs.iter().all(|(source, destination)| {
+                self.sources.get(source) == Some(&1)
+                    && self.destinations.get(destination) == Some(&1)
+            })
+    }
 }
 
 /// git's `XY` for an unmerged path (`wt-status.c`).
@@ -271,13 +366,24 @@ fn head_info(repo: &gix::Repository, status: &mut WorkingDirectoryStatus) -> Opt
         return Some(());
     };
     status.branch = Some(name.shorten().to_str().ok()?.to_string());
-    let tracking =
-        match repo.branch_remote_tracking_ref_name(name.as_ref(), gix::remote::Direction::Fetch) {
-            None => return Some(()),
+    let short = name.shorten().to_str().ok()?.to_string();
+    let config = repo.config_snapshot();
+    let merge = config.string(format!("branch.{short}.merge").as_str());
+    let remote = config.string(format!("branch.{short}.remote").as_str());
+    let tracking: gix::refs::FullName = match (&merge, &remote) {
+        (None, _) => return Some(()),
+        // `branch.<name>.remote = .`: the upstream is a local branch
+        (Some(merge), Some(remote)) if remote.as_slice() == b"." => {
+            merge.as_bstr().try_into().ok()?
+        }
+        _ => match repo
+            .branch_remote_tracking_ref_name(name.as_ref(), gix::remote::Direction::Fetch)
+        {
             Some(Ok(tracking)) => tracking,
-            // a misconfigured upstream: let git describe it
-            Some(Err(_)) => return None,
-        };
+            // configured, but not the way gitoxide maps it: let git say
+            _ => return None,
+        },
+    };
     status.upstream = Some(tracking.shorten().to_str().ok()?.to_string());
     let (Some(tip), Some(upstream)) = (
         head.id().map(|id| id.detach()),
@@ -443,7 +549,9 @@ mod tests {
         std::fs::remove_file(root.join("gone.txt")).unwrap();
         run(&root, &["rm", "-q", "staged-gone.txt"]);
         run(&root, &["mv", "move-me.txt", "moved.txt"]);
-        std::fs::write(root.join("new-staged.txt"), "n\n").unwrap();
+        // empty: a staged addition of content next to the staged deletion
+        // would leave the pairing to git (see `StagedRenames`)
+        std::fs::write(root.join("new-staged.txt"), "").unwrap();
         run(&root, &["add", "new-staged.txt"]);
         std::fs::write(root.join("ita.txt"), "intent\n").unwrap();
         run(&root, &["add", "-N", "ita.txt"]);
@@ -577,6 +685,241 @@ mod tests {
         // detached
         run(&work, &["checkout", "-q", "--detach", "HEAD~1"]);
         assert_same(&work, StatusOptions::default());
+    }
+
+    /// `Some(true)`: gitoxide answered and agreed with git; `Some(false)`:
+    /// it left the status to git.
+    fn compare(dir: &Path, options: StatusOptions) -> bool {
+        let git = Arc::new(crate::find_git().unwrap());
+        let cli = get_status_with(git.clone(), dir, None, options).unwrap();
+        let Some(gix) = status(dir, options, false) else {
+            return false;
+        };
+        assert_eq!(summary(&gix), summary(&cli), "in {}", dir.display());
+        true
+    }
+
+    /// A repository with one commit of a few files.
+    fn fresh(init_args: &[&str]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        let mut args = vec!["init", "-q", "-b", "main"];
+        args.extend_from_slice(init_args);
+        args.push(root.to_str().unwrap());
+        run(dir.path(), &args);
+        run(&root, &["config", "commit.gpgsign", "false"]);
+        for (name, body) in [
+            ("a.txt", "a\nb\nc\n"),
+            ("B.txt", "upper\n"),
+            ("crlf.txt", "one\r\ntwo\r\n"),
+            ("dir/x.txt", "x\n"),
+            ("dir/y.txt", "y\n"),
+        ] {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        run(&root, &["add", "."]);
+        run(&root, &["commit", "-q", "-m", "init"]);
+        (dir, root)
+    }
+
+    /// The gitoxide-vs-git audit: configurations and index states where the
+    /// two could disagree. Each either matches git or is left to git.
+    #[test]
+    fn matches_git_in_edge_configurations() {
+        let o = StatusOptions::default();
+        // core.fileMode=false: an exec bit change is no change
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let (_d, r) = fresh(&[]);
+            run(&r, &["config", "core.fileMode", "false"]);
+            std::fs::set_permissions(r.join("a.txt"), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+            assert!(compare(&r, o));
+        }
+        // assume-unchanged and skip-worktree entries hide their changes
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["update-index", "--assume-unchanged", "a.txt"]);
+            run(&r, &["update-index", "--skip-worktree", "dir/x.txt"]);
+            std::fs::write(r.join("a.txt"), "changed\n").unwrap();
+            std::fs::write(r.join("dir/x.txt"), "changed\n").unwrap();
+            assert!(compare(&r, o));
+        }
+        // sparse checkout (cone): files outside are skip-worktree and absent
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["sparse-checkout", "set", "--cone", "dir"]);
+            std::fs::write(r.join("dir/y.txt"), "changed\n").unwrap();
+            assert!(compare(&r, o));
+            run(&r, &["sparse-checkout", "disable"]);
+        }
+        // a case-only rename on disk with core.ignoreCase
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["config", "core.ignoreCase", "true"]);
+            std::fs::rename(r.join("B.txt"), r.join("b-tmp")).unwrap();
+            std::fs::rename(r.join("b-tmp"), r.join("b.txt")).unwrap();
+            assert!(compare(&r, o));
+        }
+        // untracked names in NFD (macOS keeps what was written)
+        {
+            let (_d, r) = fresh(&[]);
+            std::fs::write(r.join("cafe\u{301}.txt"), "nfd\n").unwrap();
+            std::fs::write(r.join("na\u{ef}ve.txt"), "nfc\n").unwrap();
+            assert!(compare(&r, o));
+            run(&r, &["config", "core.precomposeUnicode", "false"]);
+            assert!(compare(&r, o));
+        }
+        // line endings: autocrlf, text=auto renormalisation, a clean filter
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["config", "core.autocrlf", "true"]);
+            assert!(compare(&r, o));
+            std::fs::write(r.join(".gitattributes"), "*.txt text=auto\n").unwrap();
+            assert!(compare(&r, o));
+            // `tr` is not on every Windows runner
+            #[cfg(unix)]
+            {
+                std::fs::write(r.join(".gitattributes"), "*.txt filter=upper\n").unwrap();
+                run(&r, &["config", "filter.upper.clean", "tr a-z A-Z"]);
+                run(&r, &["config", "filter.upper.smudge", "cat"]);
+                assert!(compare(&r, o));
+            }
+        }
+        // index formats and extensions git may write
+        for (key, value) in [
+            ("index.version", "4"),
+            ("core.splitIndex", "true"),
+            ("core.untrackedCache", "true"),
+            ("index.skipHash", "true"),
+            ("feature.manyFiles", "true"),
+        ] {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["config", key, value]);
+            std::fs::write(r.join("a.txt"), "changed\n").unwrap();
+            std::fs::write(r.join("new.txt"), "n\n").unwrap();
+            run(&r, &["add", "new.txt"]);
+            git(&r, &["update-index", "-q", "--refresh"]);
+            run(&r, &["status", "--porcelain"]);
+            std::fs::write(r.join("untracked.txt"), "u\n").unwrap();
+            assert!(compare(&r, o), "{key}={value}");
+        }
+        // staged renames: exact in-process, inexact or ambiguous left to git
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["mv", "a.txt", "renamed.txt"]);
+            assert!(compare(&r, o));
+            std::fs::write(r.join("renamed.txt"), "a\nb\nc\nd\n").unwrap();
+            run(&r, &["add", "renamed.txt"]);
+            assert!(!compare(&r, o));
+            run(&r, &["reset", "-q", "--hard"]);
+            std::fs::copy(r.join("dir/x.txt"), r.join("copy.txt")).unwrap();
+            run(&r, &["add", "copy.txt"]);
+            run(&r, &["rm", "-q", "dir/x.txt"]);
+            assert!(compare(&r, o));
+            // git looks for copies: left to git; no renames: in-process
+            run(&r, &["config", "status.renames", "copies"]);
+            assert!(!compare(&r, o));
+            run(&r, &["config", "status.renames", "false"]);
+            assert!(compare(&r, o));
+        }
+        // a staged deletion next to an unrelated staged addition
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["rm", "-q", "a.txt"]);
+            std::fs::write(r.join("other.txt"), "other content\n").unwrap();
+            run(&r, &["add", "other.txt"]);
+            assert!(!compare(&r, o));
+        }
+        // an unborn branch with staged files
+        {
+            let dir = tempfile::tempdir().unwrap();
+            init(dir.path());
+            std::fs::write(dir.path().join("first.txt"), "f\n").unwrap();
+            run(dir.path(), &["add", "."]);
+            std::fs::write(dir.path().join("second.txt"), "s\n").unwrap();
+            assert!(compare(dir.path(), o));
+        }
+        // tracked files under an ignored directory, ignored-only and
+        // symlinked directories, a nested `.git` file
+        {
+            let (_d, r) = fresh(&[]);
+            std::fs::write(r.join(".gitignore"), "dir/\n*.log\nonly-ignored/\n").unwrap();
+            std::fs::write(r.join("dir/x.txt"), "changed\n").unwrap();
+            std::fs::write(r.join("dir/new.txt"), "ignored\n").unwrap();
+            std::fs::create_dir(r.join("only-ignored")).unwrap();
+            std::fs::write(r.join("only-ignored/z.log"), "z\n").unwrap();
+            std::fs::create_dir(r.join("mixed")).unwrap();
+            std::fs::write(r.join("mixed/m.log"), "m\n").unwrap();
+            std::fs::write(r.join("mixed/m.txt"), "m\n").unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink("dir", r.join("dir-link")).unwrap();
+            std::fs::create_dir(r.join("gitfile")).unwrap();
+            std::fs::write(r.join("gitfile/.git"), "gitdir: /nonexistent\n").unwrap();
+            assert!(compare(&r, o));
+        }
+        // a linked worktree
+        {
+            let (d, r) = fresh(&[]);
+            let wt = d.path().join("wt");
+            run(
+                &r,
+                &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "wt"],
+            );
+            std::fs::write(wt.join("a.txt"), "in worktree\n").unwrap();
+            assert!(compare(&wt, o));
+        }
+        // upstreams: a local branch, a non-default fetch refspec, no
+        // ahead/behind wanted
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["branch", "base"]);
+            run(&r, &["checkout", "-q", "-b", "topic", "--track", "base"]);
+            std::fs::write(r.join("t.txt"), "t\n").unwrap();
+            run(&r, &["add", "."]);
+            run(&r, &["commit", "-q", "-m", "t"]);
+            assert!(compare(&r, o));
+            run(&r, &["config", "status.aheadBehind", "false"]);
+            assert!(compare(&r, o));
+        }
+        // a merge in progress with every conflict resolved and staged
+        {
+            let (_d, r) = fresh(&[]);
+            run(&r, &["checkout", "-q", "-b", "side"]);
+            std::fs::write(r.join("a.txt"), "side\n").unwrap();
+            run(&r, &["commit", "-q", "-am", "side"]);
+            run(&r, &["checkout", "-q", "main"]);
+            std::fs::write(r.join("a.txt"), "main\n").unwrap();
+            run(&r, &["commit", "-q", "-am", "main"]);
+            assert!(!git(&r, &["merge", "-q", "side"]));
+            std::fs::write(r.join("a.txt"), "resolved\n").unwrap();
+            run(&r, &["add", "a.txt"]);
+            assert!(compare(&r, o));
+        }
+        // object formats and ref storage gitoxide may not read
+        for args in [
+            &["--object-format=sha256"][..],
+            &["--ref-format=reftable"][..],
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("repo");
+            let mut full = vec!["init", "-q", "-b", "main"];
+            full.extend_from_slice(args);
+            full.push(root.to_str().unwrap());
+            if !git(dir.path(), &full) {
+                continue; // an older git
+            }
+            run(&root, &["config", "commit.gpgsign", "false"]);
+            std::fs::write(root.join("a.txt"), "a\n").unwrap();
+            run(&root, &["add", "."]);
+            run(&root, &["commit", "-q", "-m", "a"]);
+            std::fs::write(root.join("a.txt"), "b\n").unwrap();
+            // gitoxide (sha1 build) reads neither: left to git
+            assert!(!compare(&root, o));
+        }
     }
 
     /// `CORVENE_BENCH_REPO=<repo> cargo test --profile profiling -p corvene-git
