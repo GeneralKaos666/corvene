@@ -17,11 +17,15 @@
 //!
 //! Deviations: text is not selectable (GPUI static text), link hover has no
 //! colour change, and inline code keeps the paragraph's font size (GHD 85 %).
+//!
+//! Deviation (`889-issue-title-tooltips`): with
+//! [`rich_text_with_issue_titles`] a `#123` link's tooltip is "#123 <title>"
+//! from the repository's issue cache (hovering loads the cache), else the URL.
 
 use std::rc::Rc;
 
-use corvene_core::Dispatcher;
 use corvene_core::markdown::{Block, RichText, resolve_link};
+use corvene_core::{Dispatcher, GitHubRepository};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -64,6 +68,7 @@ pub fn markdown(
         t: cx.ghd(),
         underline,
         link_buttons: false,
+        issues: None,
         next: std::cell::Cell::new(0),
     };
     div()
@@ -76,6 +81,17 @@ pub fn markdown(
 /// One [`RichText`] run (styled spans, clickable links) without block
 /// layout, in the surrounding text style.
 pub fn rich_text(id: impl Into<SharedString>, text: &RichText, cx: &App) -> AnyElement {
+    rich_text_with_issue_titles(id, text, None, cx)
+}
+
+/// [`rich_text`] whose `#123` links into `issues` (`889-issue-title-tooltips`)
+/// show the issue's title as their tooltip.
+pub fn rich_text_with_issue_titles(
+    id: impl Into<SharedString>,
+    text: &RichText,
+    issues: Option<GitHubRepository>,
+    cx: &App,
+) -> AnyElement {
     let underline =
         corvene_core::AppState::try_global(cx).is_some_and(|s| s.read(cx).settings.underline_links);
     Renderer {
@@ -84,9 +100,34 @@ pub fn rich_text(id: impl Into<SharedString>, text: &RichText, cx: &App) -> AnyE
         t: cx.ghd(),
         underline,
         link_buttons: true,
+        issues: issues.map(Rc::new),
         next: std::cell::Cell::new(0),
     }
     .rich(text)
+}
+
+/// `889-issue-title-tooltips`: "#N title" for issue `number` of `github` from
+/// the issue cache; a cache not read yet is loaded for the next hover.
+fn issue_title(github: &Rc<GitHubRepository>, number: u64, cx: &mut App) -> Option<String> {
+    let state = corvene_core::AppState::try_global(cx)?;
+    let key = corvene_core::autocomplete::cache_key(github);
+    let cache = state.read(cx).issues.get(&key);
+    if let Some(issue) = cache.and_then(|c| c.issues.iter().find(|i| i.number == number)) {
+        return Some(format!("#{number} {}", issue.title));
+    }
+    if !cache.is_some_and(|c| c.loaded) {
+        let github = github.clone();
+        cx.defer(move |cx| Dispatcher::refresh_issues(&github, cx));
+    }
+    None
+}
+
+/// The issue number a `#123` link of `github` points at.
+fn issue_number(text: &str, href: &str, github: &GitHubRepository) -> Option<u64> {
+    let number: u64 = text.strip_prefix('#')?.parse().ok()?;
+    let prefix = format!("{}/issues/", github.html_url).to_lowercase();
+    let rest = href.to_lowercase().strip_prefix(&prefix)?.to_string();
+    (rest.parse::<u64>().ok()? == number).then_some(number)
 }
 
 struct Renderer<'a> {
@@ -97,6 +138,8 @@ struct Renderer<'a> {
     /// GHD `RichText`'s `LinkButton`s: `--link-button-color`, and the URL as
     /// the title when the text differs (`#123`, `@name`).
     link_buttons: bool,
+    /// `889-issue-title-tooltips`: whose issue titles `#123` links show.
+    issues: Option<Rc<GitHubRepository>>,
     next: std::cell::Cell<usize>,
 }
 
@@ -226,6 +269,7 @@ impl Renderer<'_> {
         let mut ranges = Vec::new();
         let mut urls: Vec<Option<String>> = Vec::new();
         let mut titles: Vec<Option<SharedString>> = Vec::new();
+        let mut numbers: Vec<Option<u64>> = Vec::new();
         for span in &text.spans {
             let s = span.style;
             let link = span.link.is_some();
@@ -262,6 +306,11 @@ impl Renderer<'_> {
                     (self.link_buttons && text.text[span.range.clone()] != **href)
                         .then(|| SharedString::from(href.clone())),
                 );
+                numbers.push(
+                    self.issues
+                        .as_ref()
+                        .and_then(|gh| issue_number(&text.text[span.range.clone()], href, gh)),
+                );
             }
         }
         let styled = StyledText::new(SharedString::from(text.text.clone()))
@@ -270,11 +319,13 @@ impl Renderer<'_> {
         if ranges.is_empty() {
             return styled.into_any_element();
         }
-        let tips: Vec<(std::ops::Range<usize>, SharedString)> = ranges
+        let tips: Vec<(std::ops::Range<usize>, SharedString, Option<u64>)> = ranges
             .iter()
             .zip(titles)
-            .filter_map(|(r, title)| Some((r.clone(), title?)))
+            .zip(numbers)
+            .filter_map(|((r, title), number)| Some((r.clone(), title?, number)))
             .collect();
+        let issues = self.issues.clone();
         let text =
             InteractiveText::new(self.element_id(), styled).on_click(ranges, move |ix, _, cx| {
                 if let Some(Some(url)) = urls.get(ix) {
@@ -285,8 +336,13 @@ impl Renderer<'_> {
             return text.into_any_element();
         }
         text.tooltip(move |ix, window, cx| {
-            let (_, title) = tips.iter().find(|(r, _)| r.contains(&ix))?;
-            Some(crate::widgets::tooltip(title.clone())(window, cx))
+            let (_, url, number) = tips.iter().find(|(r, _, _)| r.contains(&ix))?;
+            let title = issues
+                .as_ref()
+                .zip(*number)
+                .and_then(|(gh, number)| issue_title(gh, number, cx))
+                .map_or_else(|| url.clone(), SharedString::from);
+            Some(crate::widgets::tooltip(title)(window, cx))
         })
         .into_any_element()
     }

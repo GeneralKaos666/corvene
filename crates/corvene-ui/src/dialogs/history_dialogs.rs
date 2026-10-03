@@ -6,7 +6,10 @@
 //! optional Message field (flag `823`); GHD always tags with an empty message.
 //! Undoing a tagged commit warns first (flag `819`); ⌘⏎ submits Create a Tag
 //! from its Message field (flag `824`). A pushed tag can be deleted, from the
-//! remote too, after a confirmation (flag `826`).
+//! remote too, after a confirmation (flag `826`). Create a Tag notes when
+//! the account can only read the GitHub repository, so the tag cannot be
+//! pushed there (flag `898-tag-push-permission-note`); GHD says nothing until
+//! the push fails.
 
 use corvene_core::{AppState, Dispatcher, UnreachableCommitsTab};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
@@ -321,10 +324,20 @@ impl Render for CreateTagDialog {
         let (name, error) = self.name_and_error(cx);
         let disabled = error.is_some() || name.is_empty();
         let this = cx.weak_entity();
-        let with_message = AppState::global(cx)
-            .read(cx)
-            .flags
-            .bool(corvene_core::flags::ids::TAG_MESSAGE);
+        let (with_message, read_only_repo) = {
+            let s = AppState::global(cx).read(cx);
+            (
+                s.flags.bool(corvene_core::flags::ids::TAG_MESSAGE),
+                s.repository(self.repo)
+                    .and_then(|r| r.github.as_ref())
+                    .filter(|gh| {
+                        !gh.has_write_permission()
+                            && s.flags
+                                .bool(corvene_core::flags::ids::TAG_PUSH_PERMISSION_NOTE)
+                    })
+                    .map(|gh| gh.full_name()),
+            )
+        };
         let t = cx.ghd();
         let content = div()
             .flex()
@@ -351,6 +364,18 @@ impl Render for CreateTagDialog {
                             .overflow_hidden()
                             .child(Textarea::new(&self.message)),
                     )
+            })
+            .when_some(read_only_repo, |d, repo| {
+                d.child(
+                    div()
+                        .mt(SPACING_HALF())
+                        .text_size(FONT_SIZE_SM())
+                        .text_color(t.text_secondary)
+                        .child(format!(
+                            "You can't push this tag to {repo}: your account can only read it. \
+                             The tag will only exist on this computer."
+                        )),
+                )
             });
         dialog(
             "dialog-create-tag",

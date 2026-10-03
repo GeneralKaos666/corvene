@@ -505,6 +505,37 @@ mod tests {
     }
 
     #[test]
+    fn stealth_email_logins() {
+        let dotcom = "https://api.github.com";
+        assert_eq!(
+            stealth_email_login("583231+OctoCat@users.noreply.github.com", dotcom).as_deref(),
+            Some("OctoCat")
+        );
+        assert_eq!(
+            stealth_email_login("octocat@users.noreply.github.com", dotcom).as_deref(),
+            Some("octocat")
+        );
+        assert_eq!(
+            stealth_email_login("1+dependabot[bot]@users.noreply.github.com", dotcom).as_deref(),
+            Some("dependabot[bot]")
+        );
+        assert_eq!(
+            stealth_email_login("1+mona@users.noreply.ghe.corp", "https://ghe.corp/api/v3")
+                .as_deref(),
+            Some("mona")
+        );
+        assert_eq!(stealth_email_login("mona@example.com", dotcom), None);
+        assert_eq!(
+            stealth_email_login("x+mona@users.noreply.github.com", dotcom),
+            None
+        );
+        assert_eq!(
+            stealth_email_login("@users.noreply.github.com", dotcom),
+            None
+        );
+    }
+
+    #[test]
     fn attributable_emails_include_both_noreply_forms() {
         let a = account(&["Mona@Example.com"], false);
         assert!(a.is_attributable_email("mona@example.com"));
@@ -1292,6 +1323,24 @@ pub fn stealth_email(id: u64, login: &str, endpoint: &str) -> String {
     format!("{id}+{}", legacy_stealth_email(login, endpoint))
 }
 
+/// GHD `parseStealthEmail`: the login of a no-reply address of `endpoint`'s
+/// host, either form.
+pub fn stealth_email_login(email: &str, endpoint: &str) -> Option<String> {
+    let suffix = legacy_stealth_email("", endpoint).to_ascii_lowercase();
+    let lower = email.trim().to_ascii_lowercase();
+    let local = lower.strip_suffix(&suffix)?;
+    let login = match local.split_once('+') {
+        Some((id, login)) if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) => login,
+        Some(_) => return None,
+        None => local,
+    };
+    let bare = login.strip_suffix("[bot]").unwrap_or(login);
+    // ASCII lower-casing keeps byte offsets: the login as written
+    let start = local.len() - login.len();
+    (!bare.is_empty() && bare.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'))
+        .then(|| email.trim()[start..local.len()].to_string())
+}
+
 /// GHD `WorktreeType`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorktreeType {
@@ -1405,6 +1454,11 @@ pub struct DiffWarnings {
     /// `Text` diff without hunks that carries this.
     #[serde(default)]
     pub mode_change: Option<(String, String)>,
+    /// A type change (`T` in git's status, e.g. a file replaced by a symbolic
+    /// link): git prints a deletion and an addition as two `diff --git`
+    /// sections. Holds the old and new modes (`100644`, `120000`, ...).
+    #[serde(default)]
+    pub type_change: Option<(String, String)>,
 }
 
 /// GHD `IDiff` (`DiffType`).

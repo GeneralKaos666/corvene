@@ -438,7 +438,10 @@ impl Dispatcher {
     }
 
     /// GHD `MissingRepository.onTrustDirectory`: `addSafeDirectory` for the
-    /// path git named, then look at the repository again.
+    /// path git named, then look at the repository again. Deviation
+    /// (`295-explain-trust-failure`): when git still refuses the path, an
+    /// error explains why and shows the value git suggests; GHD silently
+    /// shows the Trust Repository view again.
     pub fn trust_repository(id: u64, cx: &mut App) {
         let state = Self::state(cx);
         let (git, path) = {
@@ -455,16 +458,39 @@ impl Dispatcher {
             s.repo_state_mut(id).trusting_path = true;
             cx.notify();
         });
+        let explain = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::EXPLAIN_TRUST_FAILURE);
         crate::remote::spawn_bg(
             cx,
-            move || corvene_git::add_safe_directory(git, &path),
+            move || {
+                corvene_git::add_safe_directory(git.clone(), &path)?;
+                // `explain-trust-failure`: git may still refuse the path
+                // (network shares, WSL and UNC paths are compared by the
+                // form git sees, not the one it printed)
+                let still = if explain {
+                    corvene_git::still_unsafe(git, &path)
+                } else {
+                    None
+                };
+                Ok::<_, corvene_git::GitError>(still.map(|suggested| (path, suggested)))
+            },
             move |result, cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.repo_state_mut(id).trusting_path = false;
                     cx.notify();
                 });
-                if let Err(err) = result {
-                    Self::show_error("Could not trust the repository", err.to_string(), cx);
+                match result {
+                    Err(err) => {
+                        Self::show_error("Could not trust the repository", err.to_string(), cx)
+                    }
+                    Ok(Some((path, suggested))) => Self::show_error(
+                        "Could not trust the repository",
+                        trust_failure_message(&path, suggested.as_deref()),
+                        cx,
+                    ),
+                    Ok(None) => {}
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -584,6 +610,13 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::EXPLAIN_BAD_CONFIG);
+        // Corvene (`296-stale-core-worktree-hint`): a `core.worktree` that
+        // points at a folder that is gone is named instead of adding a
+        // repository that shows up missing
+        let stale_worktree_hint = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STALE_CORE_WORKTREE_HINT);
         let probe = cx.background_executor().spawn(async move {
             #[cfg(target_os = "android")]
             if let Some(git) = git.clone() {
@@ -601,7 +634,14 @@ impl Dispatcher {
                         err
                     }
                 })
-                .map(|info| (path, info))
+                .and_then(|info| {
+                    match corvene_git::explain_stale_worktree(&path, &info.workdir)
+                        .filter(|_| stale_worktree_hint)
+                    {
+                        Some(text) => Err(GitError::Gix(text)),
+                        None => Ok((path, info)),
+                    }
+                })
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = probe.await;
@@ -1341,6 +1381,7 @@ impl Dispatcher {
     }
 
     pub fn load_diff(id: u64, cx: &mut App) {
+        Self::load_file_modified(id, cx);
         let state = Self::state(cx);
         let (git, workdir, file, options, head) = {
             let s = state.read(cx);
@@ -1375,23 +1416,46 @@ impl Dispatcher {
             .as_ref()
             .and_then(|stamp| crate::diff_cache::working_diff(&workdir, &path, stamp))
         {
+            // `763-cancel-stale-diffs`
+            if let Some(previous) = state.update(cx, |s, _| s.repo_state_mut(id).diff_cancel.take())
+            {
+                previous.cancel();
+            }
             Self::apply_working_diff(id, &path, loaded, cx);
             Self::prefetch_working_diffs(id, cx);
             return;
         }
+        // `763-cancel-stale-diffs`: the diff still running for the previous
+        // selection (or refresh) is stopped instead of finishing unseen
+        let cancel_stale = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CANCEL_STALE_DIFFS);
+        let cancel = cancel_stale.then(corvene_git::CancelToken::new);
         state.update(cx, |s, cx| {
-            s.repo_state_mut(id).diff_loading = true;
+            let rs = s.repo_state_mut(id);
+            rs.diff_loading = true;
+            if let Some(previous) = std::mem::replace(&mut rs.diff_cancel, cancel.clone()) {
+                previous.cancel();
+            }
             cx.notify();
         });
         let work = cx.background_executor().spawn(async move {
-            let loaded = compute_working_diff(git, &workdir, &file, options);
+            let loaded = compute_working_diff(git, &workdir, &file, options, cancel.as_ref());
+            // a stopped diff is incomplete: neither cached nor shown
+            if cancel
+                .as_ref()
+                .is_some_and(corvene_git::CancelToken::is_cancelled)
+            {
+                return None;
+            }
             if let Some(stamp) = stamp {
                 crate::diff_cache::store_working_diff(&workdir, &file.path, stamp, loaded.clone());
             }
-            loaded
+            Some(loaded)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let loaded = work.await;
+            let Some(loaded) = work.await else { return };
             cx.update(|cx| {
                 Self::apply_working_diff(id, &path, loaded, cx);
                 Self::prefetch_working_diffs(id, cx);
@@ -1455,6 +1519,102 @@ impl Dispatcher {
                 cx.notify();
             }
         });
+        Self::load_diff_tool(id, cx);
+    }
+
+    /// `762-diff-header-mtime`: the selected file's modification time for
+    /// the Changes diff header (re-read whenever its diff is loaded).
+    fn load_file_modified(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::DIFF_HEADER_MTIME) {
+            return;
+        }
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let (Some(info), Some(path)) = (rs.info.as_ref(), rs.selected_file.clone()) else {
+            return;
+        };
+        let full = info.workdir.join(&path);
+        crate::remote::spawn_bg(
+            cx,
+            move || {
+                std::fs::symlink_metadata(full)
+                    .and_then(|m| m.modified())
+                    .ok()
+            },
+            move |modified, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    let next = modified.map(|at| (path, at));
+                    if rs.diff_file_modified != next {
+                        rs.diff_file_modified = next;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
+    /// `761-too-large-diff-escape-hatch`: read `diff.tool` once the selected
+    /// file's diff is too large to show, for "Open in External Diff Tool".
+    fn load_diff_tool(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        if !matches!(rs.diff.as_deref(), Some(corvene_models::Diff::TooLarge))
+            || !s.flags.bool(crate::flags::ids::TOO_LARGE_DIFF_ESCAPE_HATCH)
+        {
+            return;
+        }
+        let (Some(git), Some(info)) = (s.git.clone(), rs.info.as_ref()) else {
+            return;
+        };
+        let workdir = info.workdir.clone();
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::config_value(git, &workdir, "diff.tool"),
+            move |tool, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    if rs.diff_tool != tool {
+                        rs.diff_tool = tool;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
+    /// `761-too-large-diff-escape-hatch`: the selected file in the configured
+    /// `diff.tool` (`git difftool -y`).
+    pub fn open_in_diff_tool(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        let Some(git) = s.git.clone() else { return };
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let (Some(info), Some(path), Some(status)) = (
+            rs.info.as_ref(),
+            rs.selected_file.as_ref(),
+            rs.status.as_ref(),
+        ) else {
+            return;
+        };
+        let Some(file) = status.files.iter().find(|f| &f.path == path).cloned() else {
+            return;
+        };
+        let workdir = info.workdir.clone();
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::open_difftool(git, &workdir, &file),
+            |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not open the diff tool", err.to_string(), cx);
+                }
+            },
+        );
     }
 
     /// `901-prefetch-diffs`: compute the diffs of the files next to the
@@ -1500,7 +1660,7 @@ impl Dispatcher {
                     if crate::diff_cache::working_diff(&workdir, &file.path, &stamp).is_some() {
                         continue;
                     }
-                    let loaded = compute_working_diff(git.clone(), &workdir, &file, options);
+                    let loaded = compute_working_diff(git.clone(), &workdir, &file, options, None);
                     crate::diff_cache::store_working_diff(&workdir, &file.path, stamp, loaded);
                 }
             })
@@ -1541,24 +1701,43 @@ impl Dispatcher {
                 Self::history_first_parent(s),
             )
         };
+        // `891-unpublished-commit-links`: which of them no remote has
+        let unpublished_git = {
+            let s = state.read(cx);
+            s.flags
+                .bool(crate::flags::ids::UNPUBLISHED_COMMIT_LINKS)
+                .then(|| s.git.clone())
+                .flatten()
+        };
         state.update(cx, |s, _| s.repo_state_mut(id).commits_loading = true);
         let task = cx.background_executor().spawn(async move {
-            corvene_git::get_commits_with(
+            let unpublished = unpublished_git.and_then(|git| {
+                corvene_git::local_only_commits(git, &workdir, "HEAD", UNPUBLISHED_COMMITS_LIMIT)
+                    .ok()
+                    .filter(|shas| shas.len() < UNPUBLISHED_COMMITS_LIMIT)
+                    .map(|shas| shas.into_iter().collect::<std::collections::HashSet<_>>())
+            });
+            let commits = corvene_git::get_commits_with(
                 &workdir,
                 "HEAD",
                 skip,
                 corvene_git::COMMIT_BATCH_SIZE,
                 first_parent,
-            )
+            );
+            (commits, unpublished)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let result = task.await;
+            let (result, unpublished) = task.await;
             cx.update(|cx| {
                 let mut rewritten = Vec::new();
                 let reselect = Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
                     rs.commits_loading = false;
                     let mut changed = true;
+                    if rs.unpublished_commits != unpublished {
+                        rs.unpublished_commits = unpublished;
+                        cx.notify();
+                    }
                     match result {
                         Ok(batch) => {
                             if more {
@@ -4986,6 +5165,21 @@ pub(crate) fn persist_repositories(s: &mut AppState) {
     }
 }
 
+/// `explain-trust-failure`: why Trust Repository did not help, with the
+/// `safe.directory` value git suggests (else the path as git printed it).
+fn trust_failure_message(path: &Path, suggested: Option<&str>) -> String {
+    let path = path.display().to_string();
+    let value = suggested.unwrap_or(&path);
+    format!(
+        "{path} was added to the safe.directory list in your global Git config, but Git still \
+         does not trust it. This happens when the folder is on a network share, a WSL or UNC \
+         path or a file system that does not record its owner, because Git compares the path \
+         in the form it sees, not the one it printed.\n\nAdd the value Git suggests instead:\n\n\
+         git config --global --add safe.directory '{value}'\n\nor, if you trust every \
+         repository on this computer, use '*' as the value."
+    )
+}
+
 pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
@@ -5061,6 +5255,7 @@ fn compute_working_diff(
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
     options: WorkingDiffOptions,
+    cancel: Option<&corvene_git::CancelToken>,
 ) -> LoadedDiff {
     // the old side is read in-process meanwhile
     std::thread::scope(|scope| {
@@ -5083,9 +5278,12 @@ fn compute_working_diff(
             options.hide_whitespace,
             options.renamed_against_head,
             options.as_text,
+            cancel,
         )
         .unwrap_or_else(|err| {
-            warn!(%err, "diff failed");
+            if !matches!(err, corvene_git::GitError::Cancelled(_)) {
+                warn!(%err, "diff failed");
+            }
             corvene_models::Diff::Empty
         });
         // GHD `fileContents.newContents`: the working copy, for hunk expansion.
@@ -5098,6 +5296,10 @@ fn compute_working_diff(
         (Arc::new(diff), contents.map(Arc::new), old.map(Arc::new))
     })
 }
+
+/// `891-unpublished-commit-links`: with this many local-only commits or more
+/// none is marked (links stay as in GHD).
+const UNPUBLISHED_COMMITS_LIMIT: usize = 10_000;
 
 /// The changed files of one commit or of a contiguous range (oldest first).
 fn compute_changeset(
@@ -5278,6 +5480,25 @@ pub(crate) fn replace_diff(
 /// Whether any of `committed` is among `local` (flag `818`).
 fn paths_overlap<'a>(mut committed: impl Iterator<Item = &'a String>, local: &[String]) -> bool {
     committed.any(|p| local.contains(p))
+}
+
+#[cfg(test)]
+mod trust_failure_tests {
+    use super::trust_failure_message;
+    use std::path::Path;
+
+    #[test]
+    fn suggests_the_value_git_names() {
+        let message = trust_failure_message(
+            Path::new("//server/share/repo"),
+            Some("%(prefix)///server/share/repo"),
+        );
+        assert!(message.contains("safe.directory '%(prefix)///server/share/repo'"));
+        // never mistaken for git's own refusal (that re-opens the trust view)
+        assert!(corvene_git::dubious_ownership_path(&message).is_none());
+        let message = trust_failure_message(Path::new("/mnt/c/repo"), None);
+        assert!(message.contains("safe.directory '/mnt/c/repo'"));
+    }
 }
 
 #[cfg(test)]

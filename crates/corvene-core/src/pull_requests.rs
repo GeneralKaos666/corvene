@@ -12,6 +12,17 @@
 //! Deviation (flag `pull-requests-from-deleted-forks`): open pull requests
 //! whose head repository was deleted stay in the list (GHD drops them) and
 //! check out from the base repository's `refs/pull/<n>/head` into `pr/<n>`.
+//!
+//! Deviation (flag `pr-branch-case-insensitive`): when no branch matches a
+//! pull request's head exactly, matching falls back to ignoring case, so a
+//! remote-tracking ref whose case a case-insensitive file system folded
+//! still finds its pull request and its branch (GHD compares exactly).
+//!
+//! Deviation (flag `pull-requests-full-refresh-hours`): every N hours and on
+//! the list's refresh button the whole open list is fetched again and
+//! replaces the cache, so pull requests that were deleted or whose
+//! repository was renamed or removed drop out. GHD only ever asks for what
+//! changed since the newest cached `updated_at`, which never reports them.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -74,6 +85,9 @@ pub struct PullRequestCache {
     pub last_refreshed: Option<Instant>,
     /// `pullRequestsLastUpdated`: the newest `updated_at` seen.
     last_updated: Option<String>,
+    /// Flag `pull-requests-full-refresh-hours`: when the whole open list
+    /// was last fetched (Unix seconds, 0 = never).
+    full_refreshed_at_secs: u64,
 }
 
 pub type PullRequestCaches = HashMap<String, PullRequestCache>;
@@ -82,6 +96,16 @@ pub type PullRequestCaches = HashMap<String, PullRequestCache>;
 struct PersistedPullRequests {
     pull_requests: Vec<PullRequest>,
     last_updated: Option<String>,
+    #[serde(default)]
+    full_refreshed_at_secs: u64,
+}
+
+/// Flag `pull-requests-full-refresh-hours`: whether this refresh should
+/// fetch every open pull request instead of what changed since the last one
+/// (`every_hours` 0 never does).
+fn full_refresh_due(every_hours: i64, force: bool, last_full_secs: u64, now_secs: u64) -> bool {
+    let every_hours = every_hours.max(0) as u64;
+    every_hours > 0 && (force || now_secs.saturating_sub(last_full_secs) >= every_hours * 3600)
 }
 
 /// Cache key of a GitHub repository (endpoint + lower-cased `owner/name`).
@@ -122,24 +146,44 @@ pub(crate) fn convert_pull_request(client: &Client, pr: ApiPullRequest) -> (Pull
     )
 }
 
+/// The first item whose name equals `name`, or with `case_insensitive`
+/// (flag `pr-branch-case-insensitive`) the first that equals it ignoring
+/// case when none does exactly.
+fn find_ref_name<'a, T>(
+    mut items: impl Iterator<Item = &'a T> + Clone,
+    name_of: impl Fn(&T) -> Option<&str>,
+    name: &str,
+    case_insensitive: bool,
+) -> Option<&'a T> {
+    let exact = items.clone().find(|item| name_of(item) == Some(name));
+    if exact.is_some() || !case_insensitive {
+        return exact;
+    }
+    items.find(|item| name_of(item).is_some_and(|n| n.eq_ignore_ascii_case(name)))
+}
+
 /// `findAssociatedPullRequest`: the open PR whose head is the branch's
 /// upstream in the matching remote.
 pub fn find_associated_pull_request<'a>(
     branch: &Branch,
     pull_requests: &'a [PullRequest],
     remotes: &[Remote],
+    case_insensitive: bool,
 ) -> Option<&'a PullRequest> {
     let upstream = branch.upstream_short()?;
     let (remote_name, ref_name) = upstream.split_once('/')?;
     let remote = remotes.iter().find(|r| r.name == remote_name)?;
-    pull_requests.iter().find(|pr| {
-        pr.head.ref_name == ref_name
-            && pr
-                .head
+    find_ref_name(
+        pull_requests.iter().filter(|pr| {
+            pr.head
                 .repository
                 .as_ref()
                 .is_some_and(|r| url_matches_remote(&r.clone_url, &remote.url))
-    })
+        }),
+        |pr| Some(pr.head.ref_name.as_str()),
+        ref_name,
+        case_insensitive,
+    )
 }
 
 /// `findForkedRemotesToPrune`: Desktop-added fork remotes no open PR and
@@ -191,7 +235,13 @@ impl AppState {
     pub fn current_pull_request(&self, id: u64) -> Option<&PullRequest> {
         let info = self.repo_states.get(&id)?.info.as_ref()?;
         let branch = info.current_branch()?;
-        find_associated_pull_request(branch, self.pull_requests_for(id), &info.remotes)
+        find_associated_pull_request(
+            branch,
+            self.pull_requests_for(id),
+            &info.remotes,
+            self.flags
+                .bool(crate::flags::ids::PR_BRANCH_CASE_INSENSITIVE),
+        )
     }
 }
 
@@ -231,12 +281,16 @@ impl Dispatcher {
         let key = cache_key(&target);
         let (skip, since) = Self::state(cx).update(cx, |s, cx| {
             let store = s.store.clone();
+            let full_every_hours = s
+                .flags
+                .number(crate::flags::ids::PULL_REQUESTS_FULL_REFRESH_HOURS);
             let cache = s.pull_requests.entry(key.clone()).or_default();
             if !cache.loaded {
                 cache.loaded = true;
                 if let Ok(Some(persisted)) = store.get::<PersistedPullRequests>(&store_key(&key)) {
                     cache.pull_requests = persisted.pull_requests;
                     cache.last_updated = persisted.last_updated;
+                    cache.full_refreshed_at_secs = persisted.full_refreshed_at_secs;
                 }
                 cx.notify();
             }
@@ -251,7 +305,13 @@ impl Dispatcher {
             cache.loading = true;
             cache.last_refreshed = Some(Instant::now());
             cx.notify();
-            (false, cache.last_updated.clone())
+            let full = full_refresh_due(
+                full_every_hours,
+                force,
+                cache.full_refreshed_at_secs,
+                crate::autocomplete::now_secs(),
+            );
+            (false, cache.last_updated.clone().filter(|_| !full))
         });
         if skip {
             return;
@@ -309,6 +369,7 @@ impl Dispatcher {
                         Ok((fetched, full)) => {
                             if full {
                                 cache.pull_requests.clear();
+                                cache.full_refreshed_at_secs = crate::autocomplete::now_secs();
                             }
                             let mut newest = cache.last_updated.clone();
                             for (pr, open) in fetched {
@@ -327,6 +388,7 @@ impl Dispatcher {
                             let persisted = PersistedPullRequests {
                                 pull_requests: cache.pull_requests.clone(),
                                 last_updated: cache.last_updated.clone(),
+                                full_refreshed_at_secs: cache.full_refreshed_at_secs,
                             };
                             if let Err(err) = store.set(&store_key(&key), &persisted) {
                                 warn!(%err, "could not persist pull requests");
@@ -540,7 +602,7 @@ impl Dispatcher {
             }
             return;
         };
-        let (remotes, branches, default_remote, has_parent, ssh_like) = {
+        let (remotes, branches, default_remote, has_parent, ssh_like, case_insensitive) = {
             let s = Self::state(cx).read(cx);
             let info = s.repo_states.get(&id).and_then(|rs| rs.info.as_ref());
             let current = Self::current_remote_in(s, id);
@@ -554,6 +616,7 @@ impl Dispatcher {
                 current
                     .filter(|_| s.flags.bool(crate::flags::ids::FORK_REMOTES_KEEP_SSH))
                     .map(|r| r.url),
+                s.flags.bool(crate::flags::ids::PR_BRANCH_CASE_INSENSITIVE),
             )
         };
         let askpass = Self::askpass_env(cx);
@@ -585,18 +648,24 @@ impl Dispatcher {
                     }
                 };
                 let remote_ref = format!("{}/{}", remote.name, head_ref);
-                if let Some(local) = branches.iter().find(|b| {
-                    b.kind == BranchKind::Local && b.upstream_short() == Some(remote_ref.as_str())
-                }) {
+                if let Some(local) = find_ref_name(
+                    branches.iter().filter(|b| b.kind == BranchKind::Local),
+                    Branch::upstream_short,
+                    &remote_ref,
+                    case_insensitive,
+                ) {
                     return Ok(PullRequestBranch {
                         branch: local.clone(),
                     });
                 }
                 let find_remote_branch = |branches: &[Branch]| {
-                    branches
-                        .iter()
-                        .find(|b| b.kind == BranchKind::Remote && b.name == remote_ref)
-                        .cloned()
+                    find_ref_name(
+                        branches.iter().filter(|b| b.kind == BranchKind::Remote),
+                        |b| Some(b.name.as_str()),
+                        &remote_ref,
+                        case_insensitive,
+                    )
+                    .cloned()
                 };
                 let mut existing = find_remote_branch(&branches);
                 if existing.is_none() {
@@ -627,8 +696,14 @@ impl Dispatcher {
                     return Ok(PullRequestBranch { branch: existing });
                 }
                 let name = format!("pr/{number}");
-                corvene_git::create_branch(git.clone(), &workdir, &name, Some(&remote_ref), false)
-                    .map_err(|err| err.to_string())?;
+                corvene_git::create_branch(
+                    git.clone(),
+                    &workdir,
+                    &name,
+                    Some(&existing.name),
+                    false,
+                )
+                .map_err(|err| err.to_string())?;
                 let branch = corvene_git::open_repository(&workdir)
                     .ok()
                     .and_then(|info| {
@@ -789,6 +864,19 @@ impl Dispatcher {
 mod tests {
     use super::*;
 
+    #[test]
+    fn full_refresh_schedule() {
+        let day = 24 * 3600;
+        // off: never, not even from the refresh button
+        assert!(!full_refresh_due(0, true, 0, 10 * day));
+        // the refresh button always takes the whole list
+        assert!(full_refresh_due(24, true, 10 * day, 10 * day));
+        assert!(!full_refresh_due(24, false, 10 * day - 3600, 10 * day));
+        assert!(full_refresh_due(24, false, 9 * day, 10 * day));
+        // never fully fetched (an old cache)
+        assert!(full_refresh_due(24, false, 0, 10 * day));
+    }
+
     fn gh(owner: &str, name: &str) -> GitHubRepository {
         GitHubRepository {
             endpoint: "https://api.github.com".into(),
@@ -852,11 +940,47 @@ mod tests {
         ];
         let b = branch("feature", Some("origin/feature"), BranchKind::Local);
         assert_eq!(
-            find_associated_pull_request(&b, &prs, &remotes).map(|p| p.number),
+            find_associated_pull_request(&b, &prs, &remotes, false).map(|p| p.number),
             Some(1)
         );
         let unpublished = branch("feature", None, BranchKind::Local);
-        assert!(find_associated_pull_request(&unpublished, &prs, &remotes).is_none());
+        assert!(find_associated_pull_request(&unpublished, &prs, &remotes, false).is_none());
+    }
+
+    #[test]
+    fn falls_back_to_a_case_insensitive_branch_match() {
+        let remotes = vec![Remote {
+            name: "origin".into(),
+            url: "https://github.com/octocat/hello.git".into(),
+        }];
+        let prs = vec![
+            pr(1, "Feature/Login", gh("octocat", "hello")),
+            pr(2, "feature/other", gh("octocat", "hello")),
+        ];
+        let folded = branch(
+            "feature/login",
+            Some("origin/feature/login"),
+            BranchKind::Local,
+        );
+        assert!(find_associated_pull_request(&folded, &prs, &remotes, false).is_none());
+        assert_eq!(
+            find_associated_pull_request(&folded, &prs, &remotes, true).map(|p| p.number),
+            Some(1)
+        );
+        // an exact match wins over a case-insensitive one
+        let prs = vec![
+            pr(3, "FEATURE/OTHER", gh("octocat", "hello")),
+            pr(2, "feature/other", gh("octocat", "hello")),
+        ];
+        let exact = branch(
+            "feature/other",
+            Some("origin/feature/other"),
+            BranchKind::Local,
+        );
+        assert_eq!(
+            find_associated_pull_request(&exact, &prs, &remotes, true).map(|p| p.number),
+            Some(2)
+        );
     }
 
     #[test]

@@ -22,6 +22,12 @@
 //! API record says `allow_forking: false` gets no fork suggestion, no
 //! `CreateFork` before a push and no fork offer after a refused push; the
 //! push runs (or fails) as usual.
+//!
+//! Deviation (flag `clear-lost-github-association`): when refreshing the
+//! API record answers 404 (the repository was deleted, or the account lost
+//! access), the stored GitHub association is dropped and the repository is
+//! handled as a plain git repository (re-adding it matches it again); GHD's
+//! `repositoryWithRefreshedGitHubRepository` keeps the stale record forever.
 
 use corvene_github::Client;
 use corvene_models::{
@@ -59,6 +65,10 @@ impl Dispatcher {
             return;
         };
         let (owner, name) = (github.owner.clone(), github.name.clone());
+        let clear_lost = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CLEAR_LOST_GITHUB_ASSOCIATION);
         spawn_bg(
             cx,
             move || Client::new(endpoint, token).repository(&owner, &name),
@@ -80,6 +90,21 @@ impl Dispatcher {
                     if changed {
                         Self::refresh_branch_protection(id, cx);
                     }
+                }
+                Err(corvene_github::GitHubError::Api { status: 404, .. }) if clear_lost => {
+                    Self::state(cx).update(cx, |s, cx| {
+                        let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) else {
+                            return;
+                        };
+                        // only the record that was asked about
+                        if repo.github.as_ref() != Some(&github) {
+                            return;
+                        }
+                        info!(id, repo = %github.full_name(), "GitHub repository gone, association cleared");
+                        repo.github = None;
+                        crate::dispatcher::persist_repositories(s);
+                        cx.notify();
+                    });
                 }
                 Err(err) => warn!(id, %err, "could not refresh the GitHub repository"),
             },
@@ -138,14 +163,17 @@ impl Dispatcher {
             return;
         };
         let original = github.clone();
-        let keep_ssh = Self::state(cx)
-            .read(cx)
-            .flags
-            .bool(crate::flags::ids::FORK_REMOTES_KEEP_SSH);
+        let (keep_ssh, sso_hint) = {
+            let flags = &Self::state(cx).read(cx).flags;
+            (
+                flags.bool(crate::flags::ids::FORK_REMOTES_KEEP_SSH),
+                flags.bool(crate::flags::ids::API_SAML_SSO_HINT),
+            )
+        };
         spawn_bg(
             cx,
             move || -> Result<GitHubRepository, String> {
-                let client = Client::new(endpoint, token);
+                let client = Client::new(endpoint, token).with_sso_hint(sso_hint);
                 let mut fork = client
                     .fork_repository(&original.owner, &original.name)
                     .map_err(|err| err.to_string())?;

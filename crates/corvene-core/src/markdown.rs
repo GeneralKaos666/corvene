@@ -19,7 +19,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
-use crate::text_tokens::{Token, TokenRepository, tokenize};
+use crate::text_tokens::{Token, TokenOptions, TokenRepository, tokenize_with};
 
 /// Inline styles active over a span of text.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -221,15 +221,18 @@ struct Walk {
 /// also after punctuation and without trailing punctuation, and with
 /// `commit_base` (the repository's `html_url`) 7–40 character hex words that
 /// mix letters and digits linked to `<commit_base>/commit/<sha>`.
+///
+/// `options` are the tokenizer's own deviations ([`TokenOptions`]).
 pub fn commit_message_rich_text(
     text: &str,
     repository: Option<&TokenRepository>,
+    options: TokenOptions,
     extras: bool,
     commit_base: Option<&str>,
 ) -> RichText {
     let mut out = RichText::default();
     if !extras {
-        push_tokens(&mut out, text, repository, None);
+        push_tokens(&mut out, text, repository, options, None);
         return out;
     }
     let code = InlineStyle {
@@ -244,10 +247,16 @@ pub fn commit_message_rich_text(
                 .then_some((open, open + 1 + close))
         });
         let Some((open, close)) = span else {
-            push_tokens(&mut out, rest, repository, Some(commit_base));
+            push_tokens(&mut out, rest, repository, options, Some(commit_base));
             break;
         };
-        push_tokens(&mut out, &rest[..open], repository, Some(commit_base));
+        push_tokens(
+            &mut out,
+            &rest[..open],
+            repository,
+            options,
+            Some(commit_base),
+        );
         out.push(&rest[open + 1..close], code, None);
         rest = &rest[close + 1..];
     }
@@ -260,10 +269,11 @@ fn push_tokens(
     out: &mut RichText,
     text: &str,
     repository: Option<&TokenRepository>,
+    options: TokenOptions,
     extras: Option<Option<&str>>,
 ) {
     let plain = InlineStyle::default();
-    for token in tokenize(text, repository) {
+    for token in tokenize_with(text, repository, options) {
         match (&token, extras) {
             (Token::Text(text), Some(commit_base)) => push_autolinked(out, text, commit_base),
             (Token::Link { text, url }, Some(_)) if text == url => {
@@ -612,6 +622,7 @@ mod tests {
         let t = commit_message_rich_text(
             "Fix `foo()` per a5c3785 and https://x.io/a. Not `open\nor` 1234567 or defaced",
             None,
+            TokenOptions::default(),
             true,
             Some(base),
         );
@@ -637,7 +648,7 @@ mod tests {
             ]
         );
         // no base: SHAs stay plain
-        let t = commit_message_rich_text("see a5c3785", None, true, None);
+        let t = commit_message_rich_text("see a5c3785", None, TokenOptions::default(), true, None);
         assert!(t.spans.is_empty());
     }
 
@@ -655,7 +666,7 @@ mod tests {
         };
         let msg = ":tada: `x` a5c3785 @me (#452) https://x.io/a.";
         // GHD: emoji, issue, mention, whole-word URL; backticks and SHAs plain
-        let t = commit_message_rich_text(msg, Some(&repo), false, None);
+        let t = commit_message_rich_text(msg, Some(&repo), TokenOptions::default(), false, None);
         assert_eq!(t.text, "🎉 `x` a5c3785 @me (#452) https://x.io/a.");
         assert_eq!(
             spans(&t),
@@ -669,7 +680,13 @@ mod tests {
             ]
         );
         // `804` on top: code span, SHA, URL without the full stop
-        let t = commit_message_rich_text(msg, Some(&repo), true, Some("https://github.com/o/r"));
+        let t = commit_message_rich_text(
+            msg,
+            Some(&repo),
+            TokenOptions::default(),
+            true,
+            Some("https://github.com/o/r"),
+        );
         assert_eq!(t.text, "🎉 x a5c3785 @me (#452) https://x.io/a.");
         assert_eq!(spans(&t)[0], ("x".into(), None));
         assert_eq!(

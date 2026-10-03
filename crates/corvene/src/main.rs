@@ -214,6 +214,12 @@ pub(crate) fn main() {
                 .flags
                 .bool(corvene_core::flags::ids::CALENDAR_RELATIVE_DATES),
         );
+        corvene_highlight::cm::modes::set_extra_extensions(
+            state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
+        );
         corvene_ui::widgets::sync_hover_while_typing(cx);
         let mut last_reduce_motion_flag = sync_reduce_motion(cx);
         cx.observe(&state, move |state, cx| {
@@ -234,6 +240,10 @@ pub(crate) fn main() {
                 corvene_ui::relative_time::set_calendar_dates(
                     s.flags
                         .bool(corvene_core::flags::ids::CALENDAR_RELATIVE_DATES),
+                );
+                corvene_highlight::cm::modes::set_extra_extensions(
+                    s.flags
+                        .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
                 );
                 (
                     s.settings.theme,

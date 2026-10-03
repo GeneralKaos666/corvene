@@ -2,6 +2,10 @@
 //! `ui/push-needs-pull/push-needs-pull-warning.tsx`,
 //! `ui/rebase/confirm-force-push.tsx`, `ui/generic-git-auth/generic-git-auth.tsx`
 //! and `ui/lfs/initialize-lfs.tsx`.
+//!
+//! Deviation (flag `publish-team`): publishing to an organization offers an
+//! optional Team picker (`GET /orgs/{org}/teams`) whose team is granted
+//! access to the new repository; GHD's `publish-repository.tsx` has no team.
 
 use corvene_core::{Account, AppState, Dispatcher, RetryAction};
 use gpui_kit::component::input::InputState;
@@ -44,6 +48,10 @@ pub struct PublishRepositoryDialog {
     org: Option<String>,
     orgs: Vec<String>,
     orgs_loaded_for: Option<String>,
+    /// `publish-team`: the picked team and the organization's teams.
+    team: Option<(u64, String)>,
+    teams: Vec<(u64, String)>,
+    teams_loaded_for: Option<String>,
 }
 
 impl PublishRepositoryDialog {
@@ -83,7 +91,57 @@ impl PublishRepositoryDialog {
             org: None,
             orgs: Vec::new(),
             orgs_loaded_for: None,
+            team: None,
+            teams: Vec::new(),
+            teams_loaded_for: None,
         }
+    }
+
+    /// `publish-team`: pick another organization (or none); its teams load
+    /// on the next render.
+    fn set_org(&mut self, org: Option<String>, cx: &mut Context<Self>) {
+        if self.org != org {
+            self.org = org;
+            self.team = None;
+            self.teams.clear();
+            self.teams_loaded_for = None;
+        }
+        cx.notify();
+    }
+
+    /// `publish-team`: the teams of the picked organization.
+    fn load_teams(&mut self, account: &Account, org: &str, cx: &mut Context<Self>) {
+        if self.teams_loaded_for.as_deref() == Some(org) {
+            return;
+        }
+        self.teams_loaded_for = Some(org.to_string());
+        let Some(token) = corvene_platform::keychain::token(&account.host(), &account.login)
+            .ok()
+            .flatten()
+        else {
+            return;
+        };
+        let endpoint = corvene_github::Endpoint::from_api_base(&account.endpoint);
+        let org = org.to_string();
+        let task = cx.background_executor().spawn({
+            let org = org.clone();
+            async move {
+                corvene_github::Client::new(endpoint, token)
+                    .org_teams(&org)
+                    .unwrap_or_default()
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let teams = task.await;
+            this.update(cx, |this, cx| {
+                if this.org.as_deref() == Some(org.as_str()) {
+                    this.teams = teams;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn account(&self, cx: &App) -> Option<Account> {
@@ -135,8 +193,16 @@ impl Render for PublishRepositoryDialog {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let repo = self.repo;
         let account = self.account(cx);
+        let teams_on = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::PUBLISH_TEAM);
         if let Some(account) = &account {
             self.load_orgs(&account.clone(), cx);
+            if teams_on && let Some(org) = self.org.clone() {
+                self.load_teams(&account.clone(), &org, cx);
+            }
         }
         let t = cx.ghd();
         let publishing = self
@@ -210,6 +276,16 @@ impl Render for PublishRepositoryDialog {
                 let private = self.private;
                 let org_label = self.org.clone().unwrap_or_else(|| "None".to_string());
                 let orgs = self.orgs.clone();
+                let team_label = self
+                    .team
+                    .as_ref()
+                    .map(|(_, name)| name.clone())
+                    .unwrap_or_else(|| "None".to_string());
+                let teams = if teams_on && self.org.is_some() {
+                    self.teams.clone()
+                } else {
+                    Vec::new()
+                };
                 let weak = cx.weak_entity();
                 div()
                     .flex()
@@ -290,8 +366,7 @@ impl Render for PublishRepositoryDialog {
                                                 let weak = weak.clone();
                                                 move |_, cx| {
                                                     weak.update(cx, |this, cx| {
-                                                        this.org = None;
-                                                        cx.notify();
+                                                        this.set_org(None, cx)
                                                     })
                                                     .ok();
                                                 }
@@ -304,7 +379,57 @@ impl Render for PublishRepositoryDialog {
                                                     move |_, cx| {
                                                         let org = org.clone();
                                                         weak.update(cx, |this, cx| {
-                                                            this.org = Some(org);
+                                                            this.set_org(Some(org), cx)
+                                                        })
+                                                        .ok();
+                                                    },
+                                                ));
+                                            }
+                                            let position = ev.mouse_position().unwrap_or_default();
+                                            crate::native_menu::show_context_menu(
+                                                items, position, window, cx,
+                                            );
+                                        }),
+                                ),
+                        )
+                    })
+                    .when(!teams.is_empty(), |d| {
+                        let weak = cx.weak_entity();
+                        d.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(SPACING_HALF())
+                                .child("Team")
+                                .child(
+                                    button("publish-team", "", cx)
+                                        .w_full()
+                                        .justify_between()
+                                        .child(team_label)
+                                        .child(octicon(
+                                            Octicon::TriangleDown,
+                                            t.secondary_button_text,
+                                        ))
+                                        .on_click(move |ev: &ClickEvent, window, cx| {
+                                            let mut items = vec![MenuItem::new("None", {
+                                                let weak = weak.clone();
+                                                move |_, cx| {
+                                                    weak.update(cx, |this, cx| {
+                                                        this.team = None;
+                                                        cx.notify();
+                                                    })
+                                                    .ok();
+                                                }
+                                            })];
+                                            for team in &teams {
+                                                let team = team.clone();
+                                                let weak = weak.clone();
+                                                items.push(MenuItem::new(
+                                                    team.1.clone(),
+                                                    move |_, cx| {
+                                                        let team = team.clone();
+                                                        weak.update(cx, |this, cx| {
+                                                            this.team = Some(team);
                                                             cx.notify();
                                                         })
                                                         .ok();
@@ -340,6 +465,11 @@ impl Render for PublishRepositoryDialog {
         if let Some(account) = account {
             let disabled = name.is_empty() || publishing;
             let org = self.org.clone();
+            let team_id = self
+                .team
+                .as_ref()
+                .filter(|_| teams_on && org.is_some())
+                .map(|(id, _)| *id);
             let private = self.private;
             buttons.push(DialogButton {
                 id: "publish-ok",
@@ -361,6 +491,7 @@ impl Render for PublishRepositoryDialog {
                         private,
                         account.clone(),
                         org.clone(),
+                        team_id,
                         cx,
                     );
                 }),

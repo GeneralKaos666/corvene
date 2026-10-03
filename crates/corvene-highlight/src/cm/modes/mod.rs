@@ -3,6 +3,9 @@
 //!
 //! To port a mode: add `<name>.rs` exposing a constructor, list its MIME
 //! types in [`mode_for_mime`] and add golden fixtures (`tools/cm-oracle`).
+//!
+//! Deviation (`764-more-highlight-extensions`): `.jsonc`, `.slnx` and the
+//! MQL extensions (`.mq4`, `.mq5`, `.mqh`) map to JSON, XML and C++.
 
 pub mod asciiarmor;
 pub mod clike;
@@ -194,6 +197,29 @@ pub fn mime_for_extension(ext: &str) -> Option<&'static str> {
         ".dart" => "application/dart",
         ".zig" => "text/x-zig",
         ".cmake" => "text/x-cmake",
+        _ => return extra_mime_for_extension(ext),
+    })
+}
+
+/// Corvene `764-more-highlight-extensions`: extensions GHD's map lacks.
+static EXTRA_EXTENSIONS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// `764-more-highlight-extensions`: map [`extra_mime_for_extension`]'s
+/// extensions too (set by the app from the flag).
+pub fn set_extra_extensions(on: bool) {
+    EXTRA_EXTENSIONS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// JSON with comments, the XML solution format and MetaQuotes' C++-like
+/// MQL sources (desktop/desktop#22663, #20861).
+fn extra_mime_for_extension(ext: &str) -> Option<&'static str> {
+    if !EXTRA_EXTENSIONS.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    Some(match ext {
+        ".jsonc" => "application/json",
+        ".slnx" => "text/xml",
+        ".mq4" | ".mq5" | ".mqh" => "text/x-c++src",
         _ => return None,
     })
 }
@@ -527,4 +553,21 @@ pub fn rust() -> Arc<dyn Mode> {
         ))
     })
     .clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extra_extensions_map_to_existing_modes() {
+        // on by default (the app sets it from `764-more-highlight-extensions`)
+        assert_eq!(mime_for_extension(".jsonc"), Some("application/json"));
+        assert_eq!(mime_for_extension(".slnx"), Some("text/xml"));
+        assert_eq!(mime_for_extension(".mq5"), Some("text/x-c++src"));
+        assert_eq!(mime_for_extension(".nope"), None);
+        for mime in ["application/json", "text/xml", "text/x-c++src"] {
+            assert!(mode_for_mime(mime).is_some(), "{mime}");
+        }
+    }
 }

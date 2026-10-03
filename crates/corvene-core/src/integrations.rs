@@ -110,21 +110,35 @@ pub fn encode_component(s: &str) -> String {
 
 /// GHD `_openCreatePullRequestInBrowser`: `${htmlURL}/pull/new/[base...]compare`;
 /// a fork contributing to its parent prefixes both refs with `owner:name:`.
+///
+/// Deviation (`372-fork-own-pr-target`, `own_fork_targets_itself`): a fork
+/// set up for its own work names itself on both sides and falls back to its
+/// own default branch as the base. GHD leaves the refs bare, and GitHub's
+/// `pull/new` page on a fork then proposes merging into the parent.
 pub fn pull_request_url(
     gh: &GitHubRepository,
     compare: &str,
     base: Option<&str>,
     contributing_to_parent: bool,
+    own_fork_targets_itself: bool,
 ) -> String {
+    let own_fork = own_fork_targets_itself && !contributing_to_parent && gh.parent.is_some();
+    let self_prefix = format!("{}:{}:", gh.owner, gh.name);
     let base_prefix = match (&gh.parent, contributing_to_parent) {
         (Some(parent), true) => format!("{}:{}:", parent.owner, parent.name),
+        _ if own_fork => self_prefix.clone(),
         _ => String::new(),
+    };
+    let base = if own_fork {
+        base.or(gh.default_branch.as_deref())
+    } else {
+        base
     };
     let encoded_base = base
         .map(|b| format!("{base_prefix}{}...", encode_component(b)))
         .unwrap_or_default();
-    let compare_prefix = if contributing_to_parent {
-        format!("{}:{}:", gh.owner, gh.name)
+    let compare_prefix = if contributing_to_parent || own_fork {
+        self_prefix
     } else {
         String::new()
     };
@@ -162,11 +176,12 @@ impl Dispatcher {
     pub fn detect_integrations(cx: &mut App) {
         let flags = &Self::state(cx).read(cx).flags;
         let extras = flags.bool(crate::flags::ids::EXTRA_EDITORS);
+        let jetbrains_64bit_hive = flags.bool(crate::flags::ids::JETBRAINS_64BIT_HIVE);
         let with_icons = flags.bool(crate::flags::ids::INTEGRATION_APP_ICONS);
         spawn_bg(
             cx,
             move || {
-                let editors = editors::available_editors(extras);
+                let editors = editors::available_editors(extras, jetbrains_64bit_hive);
                 let shells = shells::available_shells();
                 let icons = if with_icons {
                     app_icons(
@@ -231,7 +246,7 @@ impl Dispatcher {
     /// (the diff's "Open in <Editor> at Line N", flag
     /// `diff-open-in-editor-at-line`); a custom editor opens the file.
     pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut App) {
-        let (editors, selected, custom, workspace_file) = {
+        let (editors, selected, custom, workspace_file, folder_as_workspace) = {
             let s = Self::state(cx).read(cx);
             (
                 s.editors.clone(),
@@ -241,6 +256,7 @@ impl Dispatcher {
                     .then(|| s.settings.custom_editor.clone())
                     .flatten(),
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
+                s.flags.bool(crate::flags::ids::NOTEPADPP_FOLDER_WORKSPACE),
             )
         };
         if let Some(custom) = custom {
@@ -294,7 +310,7 @@ impl Dispatcher {
                         .then(|| editors::code_workspace_file(&editor, &path))
                         .flatten()
                         .unwrap_or(path);
-                    editors::launch(&editor, &target)
+                    editors::launch(&editor, &target, folder_as_workspace)
                 }
             },
             |result, cx| {
@@ -705,10 +721,14 @@ impl Dispatcher {
         let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) else {
             return;
         };
-        let contributing_to_parent = Self::state(cx)
-            .read(cx)
-            .repository(id)
-            .is_some_and(|r| r.is_fork_contributing_to_parent());
+        let (contributing_to_parent, own_fork_targets_itself) = {
+            let s = Self::state(cx).read(cx);
+            (
+                s.repository(id)
+                    .is_some_and(|r| r.is_fork_contributing_to_parent()),
+                s.flags.bool(crate::flags::ids::FORK_OWN_PR_TARGET),
+            )
+        };
         // the base is a remote branch name in the dialog; GitHub wants it bare
         let base = base.map(|b| {
             b.split_once('/')
@@ -716,7 +736,13 @@ impl Dispatcher {
                 .unwrap_or(b)
         });
         Self::open_url(
-            &pull_request_url(&gh, &branch, base.as_deref(), contributing_to_parent),
+            &pull_request_url(
+                &gh,
+                &branch,
+                base.as_deref(),
+                contributing_to_parent,
+                own_fork_targets_itself,
+            ),
             cx,
         );
     }
@@ -1297,24 +1323,42 @@ mod tests {
     #[test]
     fn pull_request_urls() {
         assert_eq!(
-            pull_request_url(&gh(false), "feat/one", None, false),
+            pull_request_url(&gh(false), "feat/one", None, false, false),
             "https://github.com/octocat/hello/pull/new/feat%2Fone"
         );
         assert_eq!(
-            pull_request_url(&gh(false), "feat", Some("develop"), false),
+            pull_request_url(&gh(false), "feat", Some("develop"), false, false),
             "https://github.com/octocat/hello/pull/new/develop...feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, true),
+            pull_request_url(&gh(true), "feat", None, true, false),
             "https://github.com/me/hello/pull/new/me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", Some("main"), true),
+            pull_request_url(&gh(true), "feat", Some("main"), true, false),
             "https://github.com/me/hello/pull/new/octocat:hello:main...me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, false),
+            pull_request_url(&gh(true), "feat", None, false, false),
             "https://github.com/me/hello/pull/new/feat"
+        );
+        // `372`: a fork for its own work targets itself
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", None, false, true),
+            "https://github.com/me/hello/pull/new/me:hello:main...me:hello:feat"
+        );
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", Some("dev"), false, true),
+            "https://github.com/me/hello/pull/new/me:hello:dev...me:hello:feat"
+        );
+        // contributing to the parent and non-forks are unchanged by the flag
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", None, true, true),
+            "https://github.com/me/hello/pull/new/me:hello:feat"
+        );
+        assert_eq!(
+            pull_request_url(&gh(false), "feat", None, false, true),
+            "https://github.com/octocat/hello/pull/new/feat"
         );
     }
 }

@@ -3,6 +3,10 @@
 //! `styles/ui/_account-picker.scss`), shared by Clone a Repository's account
 //! tabs and the signed-in blank slate (`no-repositories-view.tsx`).
 //!
+//! Deviation (`277-consistent-filter-highlight`): the filter's matched
+//! characters can be bold like in the branch and repository lists instead of
+//! GHD's black-on-yellow `<mark>`.
+//!
 //! Deviation (`227-clone-filter-accepts-urls`): a repository URL pasted
 //! into the filter (`https://github.com/owner/name`, `git@host:owner/name.git`,
 //! a browser URL deeper into the repository) filters as `owner/name`; GHD
@@ -308,6 +312,12 @@ pub fn repository_list(
     on_select: OnRepository,
 ) -> AnyElement {
     uniform_list(id, rows.len(), move |range, _window, cx| {
+        // `277-consistent-filter-highlight`
+        let bold_matches = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+            s.read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::CONSISTENT_FILTER_HIGHLIGHT)
+        });
         with_zoom(style.zoom, || {
             let t = cx.ghd();
             range
@@ -367,13 +377,11 @@ pub fn repository_list(
                                 icon,
                                 if is_selected { selected_fg } else { t.text },
                             ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .child(highlighted(&text, positions)),
-                            )
+                            .child(div().flex_1().min_w_0().truncate().child(if bold_matches {
+                                crate::autocompletion::highlighted(&text, positions)
+                            } else {
+                                highlighted(&text, positions)
+                            }))
                             .when(repo.archived, |d| {
                                 // `.archived` badge
                                 d.child(

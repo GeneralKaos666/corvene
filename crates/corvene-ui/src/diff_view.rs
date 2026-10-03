@@ -15,7 +15,8 @@
 //! Deviation (flag `diff-open-in-editor-at-line`): a working-directory diff's
 //! text context menu offers "Open in <Editor> at Line N" for the clicked
 //! row's new-file line when the editor can jump to a line (GHD
-//! `onContextMenuText` has Copy, Select All and the expansion item only).
+//! `onContextMenuText` has Copy, Select All and the expansion item only);
+//! ⌥-clicking a line's text opens it there directly.
 //!
 //! Deviation (`742-file-mode-change-message`): a mode-only change says "The
 //! file mode changed from … to …" instead of GHD's "No content changes found".
@@ -25,6 +26,25 @@
 //!
 //! Deviation (`751-diff-font-size`): the rows' font size can be set (9–16 px
 //! in the 20 px rows); GHD's is fixed at 11 px.
+//!
+//! Deviation (`758-wide-hunk-handle`): in the unified diff the whole
+//! old-line-number column can act as the hunk handle (GHD: only the 16 px
+//! strip; the new-number column keeps selecting single lines).
+//!
+//! Deviation (`759-discard-from-text-menu`): right-clicking a changed line's
+//! text in the Changes tab adds the gutter's "Discard … Line" items (for the
+//! line and for its block).
+//!
+//! Deviation (`761-too-large-diff-escape-hatch`): a working-directory diff
+//! too large to show offers "Open in external diff tool" (with `diff.tool`
+//! configured) and "Open file in <Editor>" (GHD `ui/diff/index.tsx` only says
+//! it is too large).
+//!
+//! Deviation (`762-diff-header-mtime`): the Changes diff header can show
+//! when the working file was last modified (GHD's has the path only).
+//!
+//! Deviation (`757-diff-line-height`): the rows' height can be set (14–32
+//! px); GHD's is fixed at 20 px.
 //!
 //! Deviation (`746-intra-line-graphemes`): intra-line ranges cover whole
 //! grapheme clusters, so a combining mark stays with its base character.
@@ -40,6 +60,11 @@
 //!
 //! Deviation (`750-diff-expand-whole-file`): diffs can open with the whole
 //! file expanded (files up to 20 000 lines).
+//!
+//! Deviation (`756-typechange-diff`): a type change (e.g. a file replaced by
+//! a symbolic link) says so above the rows, and its lines can neither be
+//! selected nor expanded, since no partial patch can describe its two file
+//! sections (GHD `lib/diff-parser.ts` fails on them and keeps loading).
 //!
 //! Deviation (`740-diff-loading-indicator`): while a working-directory diff
 //! takes longer than [`LOADING_INDICATOR_DELAY`] to compute, a spinner covers
@@ -57,7 +82,7 @@ use gpui_kit::component::input::{Escape, InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::widgets::IconButtonA11y;
+use crate::widgets::{GhdTooltip, IconButtonA11y};
 
 use crate::actions::{Copy, Find, SelectAll};
 use crate::context_menu::{ContextMenu, IS_MAC, MenuItem, mac_or};
@@ -83,9 +108,35 @@ use crate::widgets::{
 /// `750-diff-expand-whole-file` leaves longer files collapsed.
 const MAX_AUTO_EXPAND_LINES: usize = 20_000;
 
+thread_local! {
+    /// `757-diff-line-height`: the rows' height in CSS px (GHD: 20), set by
+    /// the diff views as they render.
+    static LINE_HEIGHT: Cell<f32> = const { Cell::new(20.) };
+}
+
 #[allow(non_snake_case)]
 pub fn DIFF_LINE_HEIGHT() -> Pixels {
-    zpx(20.)
+    zpx(LINE_HEIGHT.with(Cell::get))
+}
+
+/// `757-diff-line-height` in CSS px: 0 keeps GHD's 20 px.
+pub fn diff_line_height_setting(cx: &App) -> Option<f32> {
+    let height = AppState::try_global(cx)?
+        .read(cx)
+        .flags
+        .number(corvene_core::flags::ids::DIFF_LINE_HEIGHT);
+    (height > 0).then(|| height.clamp(14, 32) as f32)
+}
+
+/// `756-typechange-diff`: what a git file mode stands for.
+fn file_type_name(mode: &str) -> String {
+    match mode {
+        "100644" => "a regular file".to_string(),
+        "100755" => "an executable file".to_string(),
+        "120000" => "a symbolic link".to_string(),
+        "160000" => "a submodule".to_string(),
+        other => format!("mode {other}"),
+    }
 }
 
 /// Octicon + colour for a file status (`ui/octicons/status.ts`).
@@ -103,9 +154,12 @@ pub fn status_icon(kind: FileStatusKind, t: &GhdTheme) -> (Octicon, Hsla) {
 
 /// `.diff-header`: path (directory dimmed), the Diff Settings gear and the
 /// status icon, 29 px. The gear toggles the popover owned by `view`.
+/// `modified` (`762-diff-header-mtime`) adds the working file's modification
+/// time before the gear.
 pub fn diff_header(
     path: &str,
     kind: FileStatusKind,
+    modified: Option<std::time::SystemTime>,
     view: &Entity<DiffView>,
     cx: &App,
 ) -> impl IntoElement {
@@ -146,6 +200,16 @@ pub fn diff_header(
                         .child(div().child(file_name.to_string())),
                 ),
         )
+        .children(modified.map(|at| {
+            div()
+                .id("diff-header-modified")
+                .flex_none()
+                .ml(SPACING())
+                .text_size(FONT_SIZE_SM())
+                .text_color(t.text_secondary)
+                .child(format!("Modified {}", crate::relative_time::relative(at)))
+                .ghd_tooltip(crate::format::format_date_time(at))
+        }))
         // `.path-label-component { margin-right: 5px }`,
         // `.diff-options-component { margin-right: 5px }`
         .child(
@@ -291,6 +355,8 @@ pub struct DiffView {
     text_bounds: TextBounds,
     /// The zoom factor the list's row heights were measured at.
     zoom_seen: f32,
+    /// `757-diff-line-height` as last rendered.
+    line_height_seen: f32,
     /// The rows' font size (`751-diff-font-size`; GHD's 11 px otherwise).
     text_size: Pixels,
     list_state: ListState,
@@ -361,6 +427,7 @@ impl DiffView {
             text_selection: None,
             text_bounds: Rc::new(RefCell::new(HashMap::new())),
             zoom_seen: crate::theme::sizes::zoom_factor(),
+            line_height_seen: 20.,
             text_size: FONT_SIZE_SM(),
             list_state: ListState::new(0, ListAlignment::Top, zpx(200.)),
             rows: Rc::new(Vec::new()),
@@ -747,8 +814,11 @@ impl DiffView {
         self.expanded = false;
         self.show_large = false;
         self.whitespace_hint = None;
-        self.contents = snap.contents.clone();
-        self.old_contents = snap.old_contents.clone();
+        // `756-typechange-diff`: the two sides are different kinds of file,
+        // nothing to expand from (rows are highlighted on their own)
+        let whole_files = !self.locked_type_change(&snap.diff, cx);
+        self.contents = snap.contents.clone().filter(|_| whole_files);
+        self.old_contents = snap.old_contents.clone().filter(|_| whole_files);
         self.hunks = Rc::new(match snap.diff.hunks() {
             Some(hunks) => from_hunks(hunks, self.contents.as_ref().map(|c| c.len())),
             None => Vec::new(),
@@ -1058,6 +1128,17 @@ impl DiffView {
         }
     }
 
+    /// `756-typechange-diff`: a type change whose lines are not selectable
+    /// or expandable.
+    fn locked_type_change(&self, diff: &Diff, cx: &App) -> bool {
+        diff.warnings().is_some_and(|w| w.type_change.is_some())
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::TYPECHANGE_DIFF)
+    }
+
     // ---- expansion ----
 
     fn can_expand(&self) -> bool {
@@ -1169,10 +1250,14 @@ impl DiffView {
     /// expansion item. `line` is the clicked row's new-file line number;
     /// with `diff-open-in-editor-at-line` a working-directory diff adds
     /// "Open in <Editor> at Line N" when the editor can jump to a line.
+    /// `discard` is a changed row's selection index and block
+    /// ([`Row::discard_target`](crate::diff_view_rows::Row::discard_target)):
+    /// with `759-discard-from-text-menu` the gutter's discard items follow.
     pub fn text_menu(
         &mut self,
         position: Point<Pixels>,
         line: Option<u32>,
+        discard: Option<(u32, (u32, u32), RangeType)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1196,6 +1281,21 @@ impl DiffView {
             items.push(MenuItem::separator());
             items.push(item);
         }
+        // `759-discard-from-text-menu`: the line, then its block
+        if let Some((original, (start, len), kind)) = discard
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::DISCARD_FROM_TEXT_MENU)
+            && let Some(line_item) = self.discard_item(original, 1, kind, cx)
+        {
+            items.push(MenuItem::separator());
+            items.push(line_item);
+            if len > 1 {
+                items.extend(self.discard_item(start, len, kind, cx));
+            }
+        }
         if let Some(item) = self.expand_menu_item(cx) {
             items.push(MenuItem::separator());
             items.push(item);
@@ -1205,6 +1305,34 @@ impl DiffView {
 
     /// "Open in <Editor> at Line N" (not in GHD, desktop/desktop#14476).
     fn open_at_line_menu_item(&self, line: Option<u32>, cx: &Context<Self>) -> Option<MenuItem> {
+        let (full, line, editor) = self.open_at_line_target(line, cx)?;
+        let label = if IS_MAC {
+            format!("Open in {editor} at Line {line}")
+        } else {
+            format!("Open in {editor} at line {line}")
+        };
+        Some(MenuItem::new(label, move |_, cx| {
+            Dispatcher::open_in_editor_at(full.clone(), Some(line), cx)
+        }))
+    }
+
+    /// `741-diff-open-in-editor-at-line`: ⌥-click on a line's text opens the
+    /// editor there (desktop/desktop#20254). False when it does not apply,
+    /// so the click selects text as usual.
+    pub fn open_at_line(&self, line: Option<u32>, cx: &mut Context<Self>) -> bool {
+        let Some((full, line, _)) = self.open_at_line_target(line, cx) else {
+            return false;
+        };
+        Dispatcher::open_in_editor_at(full, Some(line), cx);
+        true
+    }
+
+    /// The file, line and editor name for "Open in <Editor> at Line N".
+    fn open_at_line_target(
+        &self,
+        line: Option<u32>,
+        cx: &App,
+    ) -> Option<(std::path::PathBuf, u32, String)> {
         let line = line?;
         if self.source != DiffSource::WorkingDirectory {
             return None;
@@ -1219,15 +1347,7 @@ impl DiffView {
         {
             return None;
         }
-        let label = if IS_MAC {
-            format!("Open in {} at Line {line}", s.editor_label())
-        } else {
-            format!("Open in {} at line {line}", s.editor_label())
-        };
-        let full = snap.repo_path.join(&snap.path);
-        Some(MenuItem::new(label, move |_, cx| {
-            Dispatcher::open_in_editor_at(full.clone(), Some(line), cx)
-        }))
+        Some((snap.repo_path.join(&snap.path), line, s.editor_label()))
     }
 
     /// `onContextMenuLine`: discard one changed line.
@@ -1264,22 +1384,36 @@ impl DiffView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(snap) = self.snapshot(cx) else {
-            return;
-        };
+        if let Some(item) = self.discard_item(start, len, kind, cx) {
+            self.open_menu(vec![item], position, window, cx);
+        }
+    }
+
+    /// "Discard Added Line…" for `len` selection lines from `start`; none
+    /// outside the Changes tab, for conflicts or with whitespace hidden.
+    fn discard_item(
+        &self,
+        start: u32,
+        len: u32,
+        kind: RangeType,
+        cx: &Context<Self>,
+    ) -> Option<MenuItem> {
+        let snap = self.snapshot(cx)?;
         if self.source != DiffSource::WorkingDirectory
             || snap.kind == FileStatusKind::Conflicted
             || snap.hide_whitespace
+            // the rows were not selectable (`text_diff`'s `canSelect`)
+            || snap.as_text
+            || self.locked_type_change(&snap.diff, cx)
         {
-            return;
+            return None;
         }
         let label = kind.discard_label(len, snap.confirm_discard);
         let (repo, path) = (snap.repo, snap.path.clone());
-        let item = MenuItem::new(label, move |_, cx| {
+        Some(MenuItem::new(label, move |_, cx| {
             let selection = DiffSelection::none().with_range(start, len, true);
             Dispatcher::request_discard_selection(repo, path.clone(), selection, cx);
-        });
-        self.open_menu(vec![item], position, window, cx);
+        }))
     }
 
     // ---- search ----
@@ -1650,6 +1784,61 @@ impl DiffView {
                 ),
             )
             .children(as_text)
+            .into_any_element()
+    }
+
+    /// GHD `renderDiff` for an unrenderable diff. With
+    /// `761-too-large-diff-escape-hatch` a working-directory file offers its
+    /// configured `diff.tool` and the external editor.
+    fn too_large_panel(&self, snap: &Snapshot, cx: &Context<Self>) -> AnyElement {
+        const MESSAGE: &str = "The diff is too large to be displayed.";
+        let s = self.state.read(cx);
+        if self.source != DiffSource::WorkingDirectory
+            || !s
+                .flags
+                .bool(corvene_core::flags::ids::TOO_LARGE_DIFF_ESCAPE_HATCH)
+        {
+            return self.panel(MESSAGE, cx);
+        }
+        let t = cx.ghd();
+        let repo = snap.repo;
+        let diff_tool = s
+            .repo_states
+            .get(&repo)
+            .and_then(|rs| rs.diff_tool.clone())
+            .map(|tool| {
+                div().py(SPACING_HALF()).child(
+                    link_button(
+                        "too-large-diff-tool",
+                        format!("Open in external diff tool ({tool})."),
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| Dispatcher::open_in_diff_tool(repo, cx)),
+                )
+            });
+        let editor = (snap.kind != FileStatusKind::Deleted).then(|| {
+            let full_path = snap.repo_path.join(&snap.path);
+            div().py(SPACING_HALF()).child(
+                link_button(
+                    "too-large-editor",
+                    format!("Open file in {}.", s.editor_label()),
+                    cx,
+                )
+                .on_click(move |_, _, cx| Dispatcher::open_in_editor(full_path.clone(), cx)),
+            )
+        });
+        div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .p(SPACING_DOUBLE())
+            .text_size(FONT_SIZE())
+            .text_color(t.text_secondary)
+            .child(div().py(SPACING_HALF()).child(MESSAGE))
+            .children(diff_tool)
+            .children(editor)
             .into_any_element()
     }
 
@@ -2202,9 +2391,16 @@ impl Render for DiffView {
             0 => FONT_SIZE_SM(),
             size => zpx(size.clamp(9, 16) as f32),
         };
-        if self.zoom_seen != zoom || self.text_size != text_size {
+        // … and `757-diff-line-height`
+        let line_height = diff_line_height_setting(cx).unwrap_or(20.);
+        LINE_HEIGHT.with(|h| h.set(line_height));
+        if self.zoom_seen != zoom
+            || self.text_size != text_size
+            || self.line_height_seen != line_height
+        {
             self.zoom_seen = zoom;
             self.text_size = text_size;
+            self.line_height_seen = line_height;
             self.list_state.remeasure();
         }
         let loading = self.loading_overlay(cx);
@@ -2268,7 +2464,7 @@ impl Render for DiffView {
                 Some(image) => image.into_any_element(),
                 None => self.panel("This binary file has changed.", cx),
             },
-            Diff::TooLarge => self.panel("The diff is too large to be displayed.", cx),
+            Diff::TooLarge => self.too_large_panel(&snap, cx),
             Diff::Submodule(sub) => self.submodule_panel(sub, cx),
         };
         div()
@@ -2354,6 +2550,22 @@ impl DiffView {
                 .into_any_element(),
             );
         }
+        // `756-typechange-diff`
+        if let Some((old, new)) = &warnings.type_change
+            && self.locked_type_change(&snap.diff, cx)
+        {
+            items.push(
+                paragraph(vec![
+                    format!(
+                        "This file changed from {} to {}. Its lines cannot be selected one by one.",
+                        file_type_name(old),
+                        file_type_name(new)
+                    )
+                    .into(),
+                ])
+                .into_any_element(),
+            );
+        }
         if let Some(change) = &warnings.line_endings {
             items.push(
                 paragraph(vec![
@@ -2424,7 +2636,8 @@ impl DiffView {
         // (`749-binary-diff-as-text`: the partial patch is taken without `--text`)
         let selectable = self.source == DiffSource::WorkingDirectory
             && snap.kind != FileStatusKind::Conflicted
-            && !snap.as_text;
+            && !snap.as_text
+            && !self.locked_type_change(&snap.diff, cx);
         let mut groups: BTreeMap<u32, DiffSelectionType> = BTreeMap::new();
         for row in self.rows.iter() {
             if let Some((start, len)) = row.group {
@@ -2459,6 +2672,11 @@ impl DiffView {
                 s.read(cx)
                     .flags
                     .bool(corvene_core::flags::ids::DIFF_SHOW_WHITESPACE)
+            }),
+            wide_hunk_handle: AppState::try_global(cx).is_some_and(|s| {
+                s.read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::WIDE_HUNK_HANDLE)
             }),
         });
         let rows = self.rows.clone();
