@@ -10,8 +10,9 @@ use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 
 use crate::runtime::Services;
 use crate::vm::{
-    BranchesVm, ChangesVm, CommitDetailVm, DiffHeaderVm, DiffRowVm, HistoryVm, RepoListVm,
-    branches, changes, commit_detail, diff_header, diff_rows, history, repo_list,
+    BannerVm, BranchesVm, ChangesVm, CommitDetailVm, DiffHeaderVm, DiffRowVm, HistoryVm, PopupVm,
+    RepoListVm, banner, branches, changes, commit_detail, diff_header, diff_rows, history, popup,
+    repo_list,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -329,5 +330,20 @@ impl Corvene {
         self.loop_
             .query(move |host| branches(host.state_ref(), repo))
             .await
+    }
+
+    // ---- dialogs and banners ----
+
+    /// Dismisses the open dialog (Escape / Cancel).
+    pub fn close_popup(&self) {
+        self.loop_.post(|host| Dispatcher::close_popup(host));
+    }
+
+    pub async fn popup(&self) -> Option<PopupVm> {
+        self.loop_.query(|host| popup(host.state_ref())).await
+    }
+
+    pub async fn banner(&self) -> Option<BannerVm> {
+        self.loop_.query(|host| banner(host.state_ref())).await
     }
 }
