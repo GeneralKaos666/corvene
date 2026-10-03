@@ -266,6 +266,17 @@ impl ExtensionsState {
         (!self.prefs.dismissed_suffixes.contains(&suffix)).then_some(suffix)
     }
 
+    /// Whether `language` of extension `id` wins over the built-in
+    /// highlighting: its own switch, else the extension's default.
+    pub fn language_preferred(&self, id: &str, language: &str) -> bool {
+        if let Some(switches) = self.prefs.switches.get(id)
+            && let Some(answer) = switches.languages.get(language)
+        {
+            return *answer;
+        }
+        self.get(id).is_some_and(|i| i.metadata.prefer_over_builtin)
+    }
+
     /// Apply the stored switches to freshly read metadata (the store wins).
     fn apply_switches(&mut self) {
         for installed in &mut self.installed {
@@ -381,6 +392,7 @@ impl Dispatcher {
     pub fn rebuild_user_syntaxes(cx: &mut App) {
         let state = Self::state(cx);
         let enabled: Vec<Installed> = state.read(cx).extensions.enabled().cloned().collect();
+        let switches = state.read(cx).extensions.prefs.switches.clone();
         let previously = state.update(cx, |s, cx| {
             s.extensions.rebuilding = true;
             cx.notify();
@@ -389,7 +401,7 @@ impl Dispatcher {
         let dir = extensions_dir();
         spawn_bg(
             cx,
-            move || rebuild(&enabled, &dir),
+            move || rebuild(&enabled, &dir, &switches),
             move |rebuilt, cx| {
                 for id in &previously {
                     treesitter::unregister_user(id);
@@ -1069,19 +1081,23 @@ impl Dispatcher {
     }
 
     /// Whether an extension's grammars win over the built-in highlighting
-    /// for the files they claim.
+    /// for the files they claim: the default for every language of the
+    /// extension (per-language answers are cleared).
     pub fn set_extension_preferred(id: &str, preferred: bool, cx: &mut App) {
-        Self::update_switches(id, cx, |switches| switches.prefer_over_builtin = preferred);
-        user::set_owner_preference(id, preferred);
-        if Self::state(cx)
-            .read(cx)
-            .extensions
-            .registered_tree_sitter
-            .contains(id)
-        {
-            // re-rank: the registration carries the preference
-            Self::rebuild_user_syntaxes(cx);
-        }
+        Self::update_switches(id, cx, |switches| {
+            switches.prefer_over_builtin = preferred;
+            switches.languages.clear();
+        });
+        Self::rebuild_user_syntaxes(cx);
+    }
+
+    /// One language's own answer.
+    pub fn set_language_preferred(id: &str, language: &str, preferred: bool, cx: &mut App) {
+        let language = language.to_string();
+        Self::update_switches(id, cx, |switches| {
+            switches.languages.insert(language, preferred);
+        });
+        Self::rebuild_user_syntaxes(cx);
     }
 
     fn update_switches(id: &str, cx: &mut App, change: impl FnOnce(&mut ExtensionSwitches)) {
@@ -1091,10 +1107,17 @@ impl Dispatcher {
                 .installed
                 .iter_mut()
                 .find(|i| i.metadata.id == id)?;
-            let mut switches = ExtensionSwitches {
-                enabled: installed.metadata.enabled,
-                prefer_over_builtin: installed.metadata.prefer_over_builtin,
-            };
+            let mut switches =
+                s.extensions
+                    .prefs
+                    .switches
+                    .get(id)
+                    .cloned()
+                    .unwrap_or(ExtensionSwitches {
+                        enabled: installed.metadata.enabled,
+                        prefer_over_builtin: installed.metadata.prefer_over_builtin,
+                        languages: HashMap::new(),
+                    });
             change(&mut switches);
             installed.metadata.enabled = switches.enabled;
             installed.metadata.prefer_over_builtin = switches.prefer_over_builtin;
@@ -1419,7 +1442,11 @@ fn install_from(
 /// the enabled extensions' sublime-syntax files into one set (from the
 /// cached dump when its key matches), and collect their tree-sitter
 /// grammars.
-fn rebuild(enabled: &[Installed], extensions_dir: &Path) -> Rebuilt {
+fn rebuild(
+    enabled: &[Installed],
+    extensions_dir: &Path,
+    switches: &HashMap<String, ExtensionSwitches>,
+) -> Rebuilt {
     use corvene_extensions::cache;
     use corvene_extensions::tm::compile::compile;
     let mut errors = Vec::new();
@@ -1428,7 +1455,27 @@ fn rebuild(enabled: &[Installed], extensions_dir: &Path) -> Rebuilt {
     let mut tree_sitter = Vec::new();
     for installed in enabled {
         let md = &installed.metadata;
-        let mut grammars = Vec::new();
+        // a grammar is preferred when any language it highlights is
+        let language_preferred = |language: &corvene_extensions::manifest::Language| {
+            switches
+                .get(&md.id)
+                .and_then(|sw| sw.languages.get(&language.id).copied())
+                .unwrap_or(md.prefer_over_builtin)
+        };
+        let grammar_preferred = |name: &str| {
+            let mut languages = md
+                .languages
+                .iter()
+                .filter(|l| l.grammar.as_deref() == Some(name))
+                .peekable();
+            if languages.peek().is_none() {
+                md.prefer_over_builtin
+            } else {
+                languages.any(language_preferred)
+            }
+        };
+        let mut grammars_preferred = Vec::new();
+        let mut grammars_fallback = Vec::new();
         for grammar in &md.grammars {
             match grammar.kind {
                 GrammarKind::TextMate | GrammarKind::Sublime => {
@@ -1454,7 +1501,7 @@ fn rebuild(enabled: &[Installed], extensions_dir: &Path) -> Rebuilt {
                         ));
                         sources.push((
                             md.id.clone(),
-                            md.prefer_over_builtin,
+                            grammar_preferred(&grammar.name),
                             path,
                             grammar.name.clone(),
                         ));
@@ -1488,7 +1535,12 @@ fn rebuild(enabled: &[Installed], extensions_dir: &Path) -> Rebuilt {
                         .iter()
                         .find_map(|l| l.first_line.as_deref())
                         .and_then(|re| regex::Regex::new(re).ok());
-                    grammars.push(UserGrammar {
+                    let bucket = if grammar_preferred(&grammar.name) {
+                        &mut grammars_preferred
+                    } else {
+                        &mut grammars_fallback
+                    };
+                    bucket.push(UserGrammar {
                         name: format!("{}/{}", md.id, grammar.name),
                         extensions: languages.iter().flat_map(|l| l.suffixes.clone()).collect(),
                         filenames: languages.iter().flat_map(|l| l.filenames.clone()).collect(),
@@ -1502,8 +1554,11 @@ fn rebuild(enabled: &[Installed], extensions_dir: &Path) -> Rebuilt {
                 }
             }
         }
-        if !grammars.is_empty() {
-            tree_sitter.push((md.id.clone(), md.prefer_over_builtin, grammars));
+        if !grammars_preferred.is_empty() {
+            tree_sitter.push((md.id.clone(), true, grammars_preferred));
+        }
+        if !grammars_fallback.is_empty() {
+            tree_sitter.push((md.id.clone(), false, grammars_fallback));
         }
     }
     if sources.is_empty() {

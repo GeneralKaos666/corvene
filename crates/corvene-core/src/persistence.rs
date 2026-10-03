@@ -344,10 +344,14 @@ pub struct LanguageExtensionsPrefs {
     pub build_consents: BTreeSet<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtensionSwitches {
     pub enabled: bool,
+    /// the default for the extension's languages
     pub prefer_over_builtin: bool,
+    /// language id → its own answer, where it differs from the default
+    #[serde(default)]
+    pub languages: HashMap<String, bool>,
 }
 
 /// Keys are namespaced strings; values JSON. Add a key here, never ad hoc.

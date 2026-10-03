@@ -695,16 +695,46 @@ impl LanguageExtensionsDialog {
         if md.languages.is_empty() {
             panel = panel.child(line("None declared.".to_string()).text_color(t.text_secondary));
         }
+        if !md.languages.is_empty() {
+            panel = panel.child(
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .whitespace_normal()
+                    .child("Ticked languages win over the built-in highlighting for their files."),
+            );
+        }
         for language in &md.languages {
             let mut types: Vec<String> =
                 language.suffixes.iter().map(|s| format!(".{s}")).collect();
             types.extend(language.filenames.iter().cloned());
             let name = language.name.clone().unwrap_or_else(|| language.id.clone());
-            panel = panel.child(line(if types.is_empty() {
-                name
-            } else {
-                format!("{name}: {}", types.join(", "))
-            }));
+            let preferred = extensions.language_preferred(&md.id, &language.id);
+            let (ext_id, lang_id) = (md.id.clone(), language.id.clone());
+            let slug = format!("{}-{}", install::slug(&md.id), install::slug(&language.id));
+            panel = panel.child(
+                div()
+                    .id(SharedString::from(format!("lang-ext-lang-{slug}")))
+                    .flex()
+                    .flex_row()
+                    .items_start()
+                    .gap(SPACING_HALF())
+                    .cursor_pointer()
+                    .child(div().pt(zpx(1.)).child(checkbox(
+                        SharedString::from(format!("lang-ext-lang-box-{slug}")),
+                        preferred,
+                        false,
+                        cx,
+                    )))
+                    .child(line(if types.is_empty() {
+                        name
+                    } else {
+                        format!("{name}: {}", types.join(", "))
+                    }))
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::set_language_preferred(&ext_id, &lang_id, !preferred, cx)
+                    }),
+            );
         }
         panel = panel.child(heading("Grammars"));
         for grammar in &md.grammars {
@@ -950,16 +980,24 @@ impl LanguageExtensionsDialog {
                 group_thousands(candidate.downloads)
             ));
         }
-        if !candidate.suffixes.is_empty() {
-            meta.push(
-                candidate
-                    .suffixes
-                    .iter()
-                    .map(|s| format!(".{s}"))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            );
-        }
+        let files = if candidate.suffixes.is_empty() {
+            "File types: not listed by the registry (known once installed)".to_string()
+        } else {
+            let mut shown: Vec<String> = candidate
+                .suffixes
+                .iter()
+                .map(|s| {
+                    if s.contains('.') || s.chars().any(|c| c.is_ascii_uppercase()) {
+                        s.clone()
+                    } else {
+                        format!(".{s}")
+                    }
+                })
+                .collect();
+            shown.sort();
+            shown.dedup();
+            format!("File types: {}", shown.join(" "))
+        };
         let note = match candidate.grammar {
             GrammarHint::TreeSitter => Some(
                 "tree-sitter grammar: works with a grammar Corvene bundles, else needs a build from source",
@@ -1047,6 +1085,13 @@ impl LanguageExtensionsDialog {
                     .min_w_0()
                     .truncate()
                     .child(meta.join("  ·  ")),
+            )
+            .child(
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .min_w_0()
+                    .whitespace_normal()
+                    .child(files),
             )
             .children(note.map(|n| {
                 div()
