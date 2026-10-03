@@ -30,6 +30,10 @@
 //! (`260-force-push-after-outside-rewrite`).
 //! A fetch or pull blocked by a stale remote-tracking ref prunes the remote
 //! and retries once (`252-prune-stale-refs-and-retry`).
+//! Between the hourly background fetches the selected GitHub repository is
+//! fetched as soon as the API's `pushed_at` is newer than its last fetch
+//! (`294-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
+//! hourly schedule, so a push made elsewhere shows up to an hour late).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,7 +42,7 @@ use std::time::{Duration, Instant, SystemTime};
 use corvene_git::{AskpassEnv, RemoteFailure};
 use corvene_models::{Account, AheadBehind, Remote, Tip};
 use gpui_kit::{App, AsyncApp};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::dispatcher::Dispatcher;
 use crate::persistence::StoreExt;
@@ -1613,10 +1617,16 @@ impl Dispatcher {
     /// Fetch the selected GitHub repository (see `244-background-fetch`) when
     /// its last fetch is older than the interval (`shouldBackgroundFetch`).
     fn background_fetch_tick(cx: &mut App) {
-        let (id, last_fetched, busy) = {
+        let (id, last_fetched, busy, known_push) = {
             let s = Self::state(cx).read(cx);
             let Some(id) = s.selected else { return };
             let Some(repo) = s.repository(id) else { return };
+            // `294-fetch-on-known-push`: between the hourly fetches, ask the
+            // API whether the repository was pushed to since the last one
+            let known_push = repo
+                .github
+                .clone()
+                .filter(|_| s.flags.bool(crate::flags::ids::FETCH_ON_KNOWN_PUSH));
             // GHD fetches GitHub repositories only; `244-background-fetch`
             // can also turn it off or extend it to any remote
             let fetch = match s.flags.text(crate::flags::ids::BACKGROUND_FETCH) {
@@ -1632,6 +1642,7 @@ impl Dispatcher {
                 id,
                 rs.and_then(|r| r.last_fetched),
                 rs.is_some_and(|r| r.push_pull_in_progress || r.mco.is_some()),
+                known_push,
             )
         };
         if busy {
@@ -1647,7 +1658,43 @@ impl Dispatcher {
         if due {
             info!(id, "background fetch");
             Self::fetch(id, true, cx);
+            return;
         }
+        let (Some(github), Some(last_fetched)) = (known_push, last_fetched) else {
+            return;
+        };
+        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || {
+                corvene_github::Client::new(endpoint, token)
+                    .pushed_at(&github.owner, &github.name)
+                    .map_err(|err| err.to_string())
+            },
+            move |result, cx| {
+                let pushed_at = match result {
+                    Ok(pushed_at) => pushed_at.as_deref().and_then(corvene_models::parse_iso8601),
+                    Err(err) => {
+                        debug!(id, %err, "could not read when the repository was pushed to");
+                        return;
+                    }
+                };
+                // still selected, not fetched meanwhile, and nothing running
+                let still_stale = {
+                    let s = Self::state(cx).read(cx);
+                    let rs = s.repo_states.get(&id);
+                    s.selected == Some(id)
+                        && rs.and_then(|r| r.last_fetched) == Some(last_fetched)
+                        && !rs.is_some_and(|r| r.push_pull_in_progress || r.mco.is_some())
+                };
+                if still_stale && pushed_after_fetch(pushed_at, last_fetched) {
+                    info!(id, "background fetch after a push seen on GitHub");
+                    Self::fetch(id, true, cx);
+                }
+            },
+        );
     }
 
     /// [`Self::refresh_indicators`] unless indicators were refreshed less
@@ -1822,9 +1869,30 @@ pub fn host_of(url: &str) -> String {
         .to_lowercase()
 }
 
+/// `294-fetch-on-known-push`: GitHub saw a push after the last fetch
+/// (`pushed_at` has a one-second resolution, so the same second counts).
+fn pushed_after_fetch(pushed_at: Option<SystemTime>, last_fetched: SystemTime) -> bool {
+    pushed_at.is_some_and(|pushed| pushed + Duration::from_secs(1) > last_fetched)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn known_pushes_after_the_last_fetch() {
+        let fetched = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        assert!(!pushed_after_fetch(None, fetched));
+        assert!(!pushed_after_fetch(
+            Some(fetched - Duration::from_secs(60)),
+            fetched
+        ));
+        assert!(pushed_after_fetch(Some(fetched), fetched));
+        assert!(pushed_after_fetch(
+            Some(fetched + Duration::from_secs(60)),
+            fetched
+        ));
+    }
 
     #[test]
     fn host_of_urls() {

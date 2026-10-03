@@ -822,6 +822,13 @@ impl Client {
         Ok(self.convert(repo))
     }
 
+    /// `fetchPushedAt`: when anything was last pushed to `owner/name`
+    /// (`pushed_at`, ISO 8601), `None` when GitHub does not say.
+    pub fn pushed_at(&self, owner: &str, name: &str) -> Result<Option<String>> {
+        let repo: ApiRepository = self.get_json(&format!("repos/{owner}/{name}"))?;
+        Ok(repo.pushed_at)
+    }
+
     /// `fetchRepositoryCloneInfo`: the clone URL (SSH when `ssh`) and default
     /// branch of `owner/name`, `None` when the repository is not found (404,
     /// which GitHub also answers for private repositories the token can't see).

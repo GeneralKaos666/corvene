@@ -1418,6 +1418,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/index_lock.rs", "crates/corvene-ui/src/dialogs/simple.rs"],
     },
 
+    /// The background fetch also runs when GitHub saw a push.
+    FETCH_ON_KNOWN_PUSH = 294 "fetch-on-known-push" {
+        title: "Fetch when GitHub reports a push",
+        summary: "Between the hourly background fetches, the selected GitHub repository is \
+                  checked every five minutes and fetched as soon as GitHub says it was pushed \
+                  to after the last fetch, so ahead/behind counts and the pull button catch up \
+                  quickly.",
+        ghd_behaviour: "Waits for the next hourly background fetch.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(22217)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-github/src/api.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
