@@ -562,6 +562,10 @@ pub struct GlobalGitConfig {
     pub name: Option<String>,
     pub email: Option<String>,
     pub default_branch: String,
+    /// `548-path-git-settings`: `core.quotepath` (git's default: on).
+    pub quotepath: bool,
+    /// `548-path-git-settings`: `core.longpaths` (Git for Windows; off).
+    pub longpaths: bool,
 }
 
 /// Everything the Repository Settings dialog needs, loaded when it opens.

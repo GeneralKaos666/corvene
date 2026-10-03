@@ -2501,6 +2501,21 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/detect.rs"],
     },
 
+    /// Settings › Git path options.
+    PATH_GIT_SETTINGS = 548 "path-git-settings" {
+        title: "Settings › Git: path options",
+        summary: "Settings › Git › Default branch also offers the global core.quotepath (show \
+                  non-ASCII file names as they are in git's own output) and, on Windows, \
+                  core.longpaths (paths over 260 characters).",
+        ghd_behaviour: "Only through the global Git config file.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21157)],
+        code: &["crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/integrations.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

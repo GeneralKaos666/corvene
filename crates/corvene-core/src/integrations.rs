@@ -32,6 +32,10 @@ pub struct PreferencesSave {
     pub name: String,
     pub email: String,
     pub default_branch: String,
+    /// `548-path-git-settings`: global `core.quotepath` / `core.longpaths`
+    /// to write; `None` leaves them alone.
+    pub quotepath: Option<bool>,
+    pub longpaths: Option<bool>,
 }
 
 /// What Repository Settings › Save applies (`repository-settings.tsx#onSubmit`).
@@ -775,9 +779,15 @@ impl Dispatcher {
             cx,
             move || {
                 let identity = corvene_git::global_identity(git.clone());
+                let flag = |key: &str, default: bool| {
+                    corvene_git::global_config_value(git.clone(), key)
+                        .map_or(default, |v| config_bool(&v, default))
+                };
                 GlobalGitConfig {
                     name: identity.name,
                     email: identity.email,
+                    quotepath: flag("core.quotepath", true),
+                    longpaths: flag("core.longpaths", false),
                     default_branch: corvene_git::configured_default_branch(git),
                 }
             },
@@ -798,6 +808,8 @@ impl Dispatcher {
             name,
             email,
             default_branch,
+            quotepath,
+            longpaths,
         } = save;
         let (git, previous) = {
             let s = Self::state(cx).read(cx);
@@ -812,7 +824,12 @@ impl Dispatcher {
         let email_changed = email.trim() != previous.email.clone().unwrap_or_default().trim();
         let branch_changed =
             !default_branch.trim().is_empty() && default_branch.trim() != previous.default_branch;
-        if !(name_changed || email_changed || branch_changed) {
+        let quotepath = quotepath.filter(|v| *v != previous.quotepath);
+        let longpaths = longpaths.filter(|v| *v != previous.longpaths);
+        if !(name_changed || email_changed || branch_changed)
+            && quotepath.is_none()
+            && longpaths.is_none()
+        {
             return;
         }
         let selected = Self::state(cx).read(cx).selected;
@@ -824,6 +841,20 @@ impl Dispatcher {
                 }
                 if email_changed {
                     corvene_git::set_global_config_value(git.clone(), "user.email", email.trim())?;
+                }
+                if let Some(on) = quotepath {
+                    corvene_git::set_global_config_value(
+                        git.clone(),
+                        "core.quotepath",
+                        if on { "true" } else { "false" },
+                    )?;
+                }
+                if let Some(on) = longpaths {
+                    corvene_git::set_global_config_value(
+                        git.clone(),
+                        "core.longpaths",
+                        if on { "true" } else { "false" },
+                    )?;
                 }
                 if branch_changed {
                     corvene_git::set_default_branch(git, default_branch.trim())?;
@@ -1089,6 +1120,16 @@ fn global_git_config_path(
     dot
 }
 
+/// A git config boolean (`git-config` "Values": true / yes / on / 1 and
+/// false / no / off / 0 / empty); `default` for anything else.
+fn config_bool(value: &str, default: bool) -> bool {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => true,
+        "false" | "no" | "off" | "0" | "" => false,
+        _ => default,
+    }
+}
+
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
@@ -1131,6 +1172,13 @@ fn write_read_only(file: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_git_config_booleans() {
+        assert!(config_bool("Yes", false));
+        assert!(!config_bool("off", true));
+        assert!(config_bool("maybe", true));
+    }
 
     #[test]
     fn global_config_falls_back_to_the_xdg_file() {

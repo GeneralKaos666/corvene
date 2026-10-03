@@ -121,6 +121,9 @@ pub struct PreferencesDialog {
     email_choice: Option<String>,
     /// The git config arrived and the fields were filled from it.
     git_loaded: bool,
+    /// `548-path-git-settings`: global `core.quotepath` / `core.longpaths`.
+    quotepath: bool,
+    longpaths: bool,
     /// GHD `Notifications` state: `getNotificationsPermission()` result.
     notification_permission: Option<NotificationPermission>,
     /// `CustomIntegrationForm` inputs (Integrations tab).
@@ -222,6 +225,8 @@ impl PreferencesDialog {
             default_branch,
             email_choice: None,
             git_loaded: false,
+            quotepath: true,
+            longpaths: false,
             notification_permission: None,
             custom_editor_path,
             custom_editor_args,
@@ -293,6 +298,8 @@ impl PreferencesDialog {
             return;
         };
         self.git_loaded = true;
+        self.quotepath = config.quotepath;
+        self.longpaths = config.longpaths;
         let name = config.name.unwrap_or_default();
         let email = config.email.unwrap_or_default();
         self.name.update(cx, |s, cx| s.set_value(name, window, cx));
@@ -326,12 +333,20 @@ impl PreferencesDialog {
     }
 
     fn save(&self, cx: &mut App) {
+        let path_settings = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::PATH_GIT_SETTINGS);
         Dispatcher::save_preferences(
             PreferencesSave {
                 settings: self.draft.clone(),
                 name: self.name.read(cx).value().to_string(),
                 email: self.email.read(cx).value().to_string(),
                 default_branch: self.default_branch.read(cx).value().to_string(),
+                quotepath: (self.git_loaded && path_settings).then_some(self.quotepath),
+                longpaths: (self.git_loaded && path_settings && cfg!(windows))
+                    .then_some(self.longpaths),
             },
             cx,
         );
@@ -938,6 +953,11 @@ impl PreferencesDialog {
                     .read(cx)
                     .flags
                     .bool(corvene_core::flags::ids::BRANCH_NAME_TRAILING_SLASH_QUIET);
+                let path_settings = self
+                    .state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::PATH_GIT_SETTINGS);
                 let warning =
                     crate::dialogs::branch_dialogs::ref_name_warning(&value, &sanitized, quiet)
                         .then(|| format!("Will be saved as {sanitized}."));
@@ -973,6 +993,7 @@ impl PreferencesDialog {
                         .text_size(FONT_SIZE_SM())
                         .text_color(t.text_secondary),
                     )
+                    .when(path_settings, |d| d.child(self.path_settings(cx)))
                     .child(edit_config(cx))
                     .into_any_element()
             }
@@ -1753,6 +1774,44 @@ impl PreferencesDialog {
             .when(!offered_packs.is_empty(), |d| {
                 d.child(div().mt(SPACING()).child(section_heading("Optional components", cx)))
                     .children(offered_packs.iter().map(|kind| self.pack_row(*kind, cx)))
+            })
+            .into_any_element()
+    }
+
+    /// `548-path-git-settings`: global `core.quotepath` (all platforms) and
+    /// `core.longpaths` (Windows) under the default branch name.
+    fn path_settings(&self, cx: &Context<Self>) -> AnyElement {
+        let weak = cx.weak_entity();
+        let set = move |apply: fn(&mut Self, bool)| {
+            let weak = weak.clone();
+            move |value: bool, _: &mut Window, cx: &mut App| {
+                weak.update(cx, |this, cx| {
+                    apply(this, value);
+                    cx.notify();
+                })
+                .ok();
+            }
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .child(div().mt(SPACING()).child(section_heading("Paths", cx)))
+            .child(checkbox_row(
+                "prefs-git-quotepath",
+                !self.quotepath,
+                "Show non-ASCII file names as they are (core.quotepath off)",
+                set(|this, v| this.quotepath = !v),
+                cx,
+            ))
+            .when(cfg!(windows), |d| {
+                d.child(checkbox_row(
+                    "prefs-git-longpaths",
+                    self.longpaths,
+                    "Allow paths longer than 260 characters (core.longpaths)",
+                    set(|this, v| this.longpaths = v),
+                    cx,
+                ))
             })
             .into_any_element()
     }
