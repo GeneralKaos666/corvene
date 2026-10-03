@@ -616,4 +616,30 @@ mod tests {
             shas.len()
         );
     }
+
+    /// `CORVENE_BENCH_REPO=<repo> cargo test --profile profiling -p corvene-git
+    /// bench_changed_files -- --ignored --nocapture`: the last 50 commits.
+    #[test]
+    #[ignore]
+    fn bench_changed_files() {
+        let Some(repo) = std::env::var_os("CORVENE_BENCH_REPO") else {
+            return;
+        };
+        let repo = std::path::PathBuf::from(repo);
+        let shas: Vec<String> = run(&repo, &["rev-list", "--max-count=50", "HEAD"])
+            .lines()
+            .map(str::to_string)
+            .collect();
+        let git = Arc::new(crate::find_git().unwrap());
+        for in_process in [false, true, false, true] {
+            let started = std::time::Instant::now();
+            for sha in &shas {
+                crate::log::get_changed_files(git.clone(), &repo, sha, in_process).unwrap();
+            }
+            eprintln!(
+                "in_process={in_process}: {} µs per commit",
+                started.elapsed().as_micros() / shas.len() as u128
+            );
+        }
+    }
 }
