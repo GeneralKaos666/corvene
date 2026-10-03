@@ -4190,6 +4190,20 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
     },
 
+    /// Rename Branch opens with the name box focused.
+    RENAME_BRANCH_FOCUSES_NAME = 872 "rename-branch-focuses-name" {
+        title: "Rename Branch focuses the name",
+        summary: "The Rename Branch dialog opens with the focus in the name box and the current \
+                  name selected, so typing replaces it at once (as in Create a Branch).",
+        ghd_behaviour: "Focuses the dialog's close button; the name box needs a click or Tab.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17661)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

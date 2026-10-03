@@ -12,6 +12,8 @@
 //! remote" checkbox and hides it for the remote's default branch
 //! (`870-delete-remote-names-upstream`).
 //! Create and Rename refuse `head` in any case (`846-reject-head-branch-name`).
+//! Rename Branch focuses the name box, not the close button
+//! (`872-rename-branch-focuses-name`).
 //! Create a Branch can prefill a name prefix (`845-branch-name-prefix`).
 //! `ConfirmSwitchBranchDialog` is a Corvene addition (`864-confirm-branch-switch`).
 //! Switch Branch can discard the changes instead (`865-switch-branch-discard`).
@@ -532,12 +534,24 @@ impl RenameBranchDialog {
         let name = cx.new(|cx| InputState::new(window, cx));
         name.update(cx, |s, cx| s.set_value(branch.clone(), window, cx));
         cx.observe(&name, |_, _, cx| cx.notify()).detach();
+        // `872-rename-branch-focuses-name`: the name box takes the focus with
+        // the name selected (GHD `focusCloseButtonOnOpen` focuses the close
+        // button)
+        let focus_name = state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::RENAME_BRANCH_FOCUSES_NAME);
+        if focus_name {
+            let handle = name.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+            name.update(cx, |input, cx| input.select_all(window, cx));
+        }
         Self {
             state,
             repo,
             branch,
             name,
-            close_focus_visible: true,
+            close_focus_visible: !focus_name,
         }
     }
 }
