@@ -1,6 +1,8 @@
 //! Settings › Appearance › Formatting (GHD `models/formatting-preferences.ts`,
 //! `lib/format-date.ts`, `lib/format-number.ts`): the date-fns patterns GHD
-//! offers, rendered in local time, plus the number separators.
+//! offers, rendered in local time, plus the number separators, GHD's
+//! `formatNumber` / `formatCompactNumber` and `formatBytes`
+//! (`ui/lib/bytes.ts`).
 
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,10 +42,23 @@ fn prefs() -> Prefs {
         .unwrap_or_else(|| Prefs {
             date_format: corvene_core::DEFAULT_DATE_FORMAT.into(),
             time_format: corvene_core::DEFAULT_TIME_FORMAT.into(),
-            thousands: ",".into(),
+            // Before the first `sync` (tests): GHD `defaultNumberFormat`
+            // without a locale country, no grouping and a decimal point.
+            thousands: String::new(),
             decimal: ".".into(),
             prefer_absolute_dates: false,
         })
+}
+
+/// GHD `getNumberFormatPreference`: the number format of Settings ›
+/// Appearance › Formatting.
+pub fn number_format() -> NumberFormat {
+    let p = prefs();
+    NumberFormat {
+        thousands_separator: p.thousands,
+        decimal_separator: p.decimal,
+        maximum_fraction_digits: None,
+    }
 }
 
 /// `preferAbsoluteDates`
@@ -184,26 +199,86 @@ pub fn format_date_time(at: SystemTime) -> String {
 
 /// Integer with the user's thousands separator.
 pub fn format_count(value: u64) -> String {
-    let p = prefs();
-    format_number_with(value as f64, &p.thousands, &p.decimal)
+    format_number(value as f64, &number_format())
 }
 
-/// GHD `formatNumber`: plain decimal expansion with configurable separators.
-pub fn format_number_with(value: f64, thousands: &str, decimal: &str) -> String {
+/// GHD `INumberFormat` (`models/formatting-preferences.ts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NumberFormat {
+    pub thousands_separator: String,
+    pub decimal_separator: String,
+    /// `maximumFractionDigits`: decimal digits past this many are cut off
+    /// (not rounded); with none left the decimal separator goes too.
+    pub maximum_fraction_digits: Option<usize>,
+}
+
+impl NumberFormat {
+    pub fn new(thousands: &str, decimal: &str) -> Self {
+        Self {
+            thousands_separator: thousands.to_string(),
+            decimal_separator: decimal.to_string(),
+            maximum_fraction_digits: None,
+        }
+    }
+}
+
+/// `String(value)` / `${value}` of a number JavaScript cannot write out as
+/// digits: `NaN`, `Infinity`, `-Infinity`.
+fn js_non_finite(value: f64) -> String {
+    if value.is_nan() {
+        "NaN".into()
+    } else if value > 0. {
+        "Infinity".into()
+    } else {
+        "-Infinity".into()
+    }
+}
+
+/// JavaScript's `Number.prototype.toString()` of a finite, non-negative
+/// number: the shortest round-trip digits, in exponent form (`1e+21`,
+/// `1.5e-7`) from 1e21 up and below 1e-6.
+fn js_number_string(value: f64) -> String {
+    if value != 0. && !(1e-6..1e21).contains(&value) {
+        let exp = format!("{value:e}");
+        if let Some((mantissa, e)) = exp.split_once('e') {
+            return match e.strip_prefix('-') {
+                Some(e) => format!("{mantissa}e-{e}"),
+                None => format!("{mantissa}e+{e}"),
+            };
+        }
+    }
+    format!("{value}")
+}
+
+/// GHD `formatNumber(value, fmt)`: plain decimal expansion (JavaScript's
+/// `toString`) with configurable separators, decimals cut to
+/// `maximumFractionDigits`.
+pub fn format_number(value: f64, fmt: &NumberFormat) -> String {
     if !value.is_finite() {
-        return value.to_string();
+        return js_non_finite(value);
     }
     let negative = value < 0.;
-    let text = format!("{}", value.abs());
+    let text = js_number_string(value.abs());
     let (int_part, dec_part) = match text.split_once('.') {
         Some((i, d)) => (i.to_string(), Some(d.to_string())),
         None => (text, None),
     };
+    let dec_part = match (dec_part, fmt.maximum_fraction_digits) {
+        (Some(d), Some(max)) => {
+            Some(d.chars().take(max).collect::<String>()).filter(|d| !d.is_empty())
+        }
+        (d, _) => d,
+    };
+    // `\B(?=(\d{3})+(?!\d))`: before every group of three digits that
+    // ends a run of digits (so `1e+21` is left alone)
+    let chars: Vec<char> = int_part.chars().collect();
     let mut grouped = String::new();
-    let digits: Vec<char> = int_part.chars().collect();
-    for (i, c) in digits.iter().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            grouped.push_str(thousands);
+    for (i, c) in chars.iter().enumerate() {
+        if i > 0 && chars[i - 1].is_ascii_digit() {
+            let run = chars[i..].iter().take_while(|c| c.is_ascii_digit()).count();
+            if run > 0 && run.is_multiple_of(3) {
+                grouped.push_str(&fmt.thousands_separator);
+            }
         }
         grouped.push(*c);
     }
@@ -213,10 +288,77 @@ pub fn format_number_with(value: f64, thousands: &str, decimal: &str) -> String 
     }
     out.push_str(&grouped);
     if let Some(d) = dec_part {
-        out.push_str(decimal);
+        out.push_str(&fmt.decimal_separator);
         out.push_str(&d);
     }
     out
+}
+
+/// [`format_number`] with just the two separators.
+pub fn format_number_with(value: f64, thousands: &str, decimal: &str) -> String {
+    format_number(value, &NumberFormat::new(thousands, decimal))
+}
+
+/// GHD `defaultDecimalUnits`.
+pub const DEFAULT_DECIMAL_UNITS: [&str; 5] = ["", "k", "m", "b", "t"];
+
+/// GHD `ICompactFormatOptions` (`lib/format-number.ts`); `None` is GHD's
+/// default for each.
+#[derive(Clone, Debug, Default)]
+pub struct CompactFormatOptions<'a> {
+    /// Decimal places: one below 10 of a unit, none from 10 up by default.
+    pub decimals: Option<u32>,
+    /// 1000 (`k`, `m`, `b`, `t`, the default) or 1024 (`KiB`, `MiB`, …).
+    pub base: Option<u32>,
+    /// Unit suffixes from the base unit up, [`DEFAULT_DECIMAL_UNITS`] by
+    /// default.
+    pub units: Option<&'a [&'a str]>,
+    /// Between the number and the unit, nothing by default.
+    pub unit_separator: Option<&'a str>,
+    /// The user's [`number_format`] by default.
+    pub number_format: Option<NumberFormat>,
+}
+
+/// GHD `formatCompactNumber(value, fmt)`: `999`, `1.2k`, `12k`, `1.5m`,
+/// `1,000t` (scaled to the largest unit at most, rounded half up with
+/// GHD `round`, then [`format_number`]).
+pub fn format_compact_number(value: f64, opts: &CompactFormatOptions) -> String {
+    if !value.is_finite() {
+        return js_non_finite(value);
+    }
+    let abs = value.abs();
+    let base = f64::from(opts.base.unwrap_or(1000));
+    let units = opts.units.unwrap_or(&DEFAULT_DECIMAL_UNITS);
+    let separator = opts.unit_separator.unwrap_or("");
+    let fmt = opts.number_format.clone().unwrap_or_else(number_format);
+    if abs < base {
+        let result = format_number(value, &fmt);
+        // byte formatting shows the unit even for small values
+        return match units.first() {
+            Some(unit) if !unit.is_empty() => format!("{result}{separator}{unit}"),
+            _ => result,
+        };
+    }
+    let unit_ix = ((abs.ln() / base.ln()).floor() as usize).min(units.len().saturating_sub(1));
+    let scaled = value / base.powi(unit_ix as i32);
+    let decimals = match opts.decimals {
+        Some(d) => i32::try_from(d).unwrap_or(i32::MAX),
+        None if scaled.abs() < 10. => 1,
+        None => 0,
+    };
+    let result = corvene_core::round::round(scaled, decimals);
+    format!(
+        "{}{separator}{}",
+        format_number(result, &fmt),
+        units.get(unit_ix).copied().unwrap_or("")
+    )
+}
+
+/// The `.counter` text of GHD `FilesChangedBadge`
+/// (`ui/changes/files-changed-badge.tsx`), the Changes tab's count:
+/// `formatCompactNumber(filesChangedCount)`, so 3000 reads `3k`.
+pub fn files_changed_badge(files_changed_count: usize) -> String {
+    format_compact_number(files_changed_count as f64, &CompactFormatOptions::default())
 }
 
 const MONTHS: [&str; 12] = [
@@ -340,29 +482,50 @@ mod tests {
     }
 }
 
-/// GHD `formatBytes(bytes, decimals, fixed = true)`: `1.50 KiB`.
+/// GHD `formatBytes(bytes, decimals)` (`ui/lib/bytes.ts`):
+/// [`format_compact_number`] in base 1024 with IEC units and a space, so
+/// `1023 B`, `1.5 KiB` (trailing zeros dropped), `1.3 GiB` (halves round
+/// up), in the user's number format.
 pub fn format_bytes(bytes: i64, decimals: usize) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let magnitude = bytes.unsigned_abs() as f64;
-    let unit = if magnitude < 1. {
-        0
-    } else {
-        (magnitude.log2() / 10.).floor().min(4.) as usize
-    };
-    let value = bytes as f64 / 1024f64.powi(unit as i32);
-    format!("{value:.decimals$} {}", UNITS[unit])
+    const UNITS: [&str; 9] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"];
+    format_compact_number(
+        bytes as f64,
+        &CompactFormatOptions {
+            decimals: Some(u32::try_from(decimals).unwrap_or(u32::MAX)),
+            base: Some(1024),
+            units: Some(&UNITS),
+            unit_separator: Some(" "),
+            number_format: None,
+        },
+    )
 }
 
 #[cfg(test)]
 mod byte_tests {
-    use super::format_bytes;
+    use super::*;
 
     #[test]
     fn formats_like_ghd() {
         assert_eq!(format_bytes(0, 0), "0 B");
         assert_eq!(format_bytes(1023, 0), "1023 B");
-        assert_eq!(format_bytes(1536, 2), "1.50 KiB");
-        assert_eq!(format_bytes(-2048, 1), "-2.0 KiB");
-        assert_eq!(format_bytes(5 * 1024 * 1024, 2), "5.00 MiB");
+        assert_eq!(format_bytes(1536, 2), "1.5 KiB");
+        assert_eq!(format_bytes(-2048, 1), "-2 KiB");
+        assert_eq!(format_bytes(5 * 1024 * 1024, 2), "5 MiB");
+        assert_eq!(format_bytes(1 << 50, 0), "1 PiB");
+    }
+
+    #[test]
+    fn compact_numbers_and_badges() {
+        assert_eq!(files_changed_badge(301), "301");
+        assert_eq!(files_changed_badge(3000), "3k");
+        assert_eq!(format_number(1e21, &NumberFormat::new(",", ".")), "1e+21");
+        assert_eq!(
+            format_number(1.5e-7, &NumberFormat::new(",", ".")),
+            "1.5e-7"
+        );
+        assert_eq!(
+            format_number(f64::INFINITY, &NumberFormat::new(",", ".")),
+            "Infinity"
+        );
     }
 }

@@ -1,7 +1,11 @@
 //! Branch dialogs: `ui/create-branch/create-branch-dialog.tsx`,
 //! `ui/rename-branch/rename-branch-dialog.tsx`, `ui/delete-branch/delete-branch-dialog.tsx`,
 //! `ui/stash-changes/{stash-and-switch-branch,overwrite-stashed-changes}-dialog.tsx`
-//! and the merge `ChooseBranch` step (`merge-choose-branch-dialog.tsx`).
+//! and the merge `ChooseBranch` step (`merge-choose-branch-dialog.tsx`), with
+//! the helpers they share: `lib/sanitize-ref-name.ts` and
+//! `ui/lib/ref-name-text-box.tsx` (`sanitize_ref_name`, `ref_name_notice`),
+//! `lib/create-branch.ts` (`get_start_point`) and
+//! `ui/lib/branch-name-warnings.tsx`.
 //!
 //! Deviations: Create a Branch can start from any branch through an "Other
 //! branch…" choice (`843-create-branch-from-any-branch`) and preselects the
@@ -16,7 +20,7 @@
 //! Squash and merge has commit message fields (flag `837`).
 
 use corvene_core::{
-    AppState, BranchKind, Dispatcher, Mergeability, Tip, UncommittedChangesStrategy,
+    AppState, Branch, BranchKind, Dispatcher, Mergeability, Tip, UncommittedChangesStrategy,
 };
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -36,25 +40,98 @@ use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{Inline, checkbox, paragraph, segmented_option, text_box};
 
-/// `sanitizedRefName`: what GHD's `RefNameTextBox` turns the input into.
+/// GHD `sanitizedRefName` (`lib/sanitize-ref-name.ts`), what its
+/// `RefNameTextBox` turns the input into: each run of control characters,
+/// spaces and `~ ^ : ? * [ \ | " < >`, each `@{`, each run of two or more
+/// dots, a leading or trailing dot, a trailing `.lock` and a trailing `/`
+/// becomes `-` (`git check-ref-format`, plus what Windows refuses); then
+/// leading `-` and `+` go.
 pub fn sanitize_ref_name(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let invalid = |c: char| {
+        c <= '\u{20}'
+            || c == '\u{7f}'
+            || matches!(
+                c,
+                '~' | '^' | ':' | '?' | '*' | '[' | '\\' | '|' | '"' | '<' | '>'
+            )
+    };
     let mut out = String::new();
-    for c in input.trim().chars() {
-        if c.is_whitespace() {
+    let mut i = 0;
+    while i < chars.len() {
+        let rest = &chars[i..];
+        let at_end = rest.len() == 1;
+        let run = if invalid(rest[0]) {
+            rest.iter().take_while(|c| invalid(**c)).count()
+        } else if rest.starts_with(&['@', '{']) {
+            2
+        } else if rest.starts_with(&['.', '.']) {
+            rest.iter().take_while(|c| **c == '.').count()
+        } else if rest[0] == '.' && (i == 0 || at_end) {
+            1
+        } else if rest == ['.', 'l', 'o', 'c', 'k'] {
+            5
+        } else if rest[0] == '/' && at_end {
+            1
+        } else {
+            0
+        };
+        if run == 0 {
+            out.push(rest[0]);
+            i += 1;
+        } else {
             out.push('-');
-        } else if !matches!(c, '~' | '^' | ':' | '?' | '*' | '[' | '\\' | '"' | '\'')
-            && !c.is_control()
-        {
-            out.push(c);
+            i += run;
         }
     }
-    while out.starts_with('.') || out.starts_with('/') || out.starts_with('-') {
-        out.remove(0);
+    out.trim_start_matches(['-', '+']).to_string()
+}
+
+/// GHD `RefNameTextBox.renderRefValueWarningError`: under a ref name box
+/// whose input [`sanitize_ref_name`] changed, "Will be `verb` as <name>."
+/// (`InputWarning`), or "<input> is not a valid name." (`InputError`) when
+/// nothing is left.
+pub(crate) fn ref_name_notice(proposed: &str, verb: &'static str, cx: &App) -> Option<AnyElement> {
+    let sanitized = sanitize_ref_name(proposed);
+    if sanitized == proposed {
+        return None;
     }
-    while out.ends_with('/') || out.ends_with('.') {
-        out.pop();
-    }
-    out.replace("..", "-").replace("@{", "-").replace("//", "/")
+    let t = cx.ghd();
+    let (icon, icon_color, text_color, parts): (_, _, _, Vec<Inline>) = if sanitized.is_empty() {
+        (
+            Octicon::Stop,
+            t.input_error_text,
+            t.input_error_text,
+            vec![
+                ref_chip(proposed.to_string(), cx).into_any_element().into(),
+                " is not a valid name.".into(),
+            ],
+        )
+    } else {
+        (
+            Octicon::Alert,
+            t.dialog_warning,
+            t.text_secondary,
+            vec![
+                format!("Will be {verb} as ").into(),
+                ref_chip(sanitized, cx).into_any_element().into(),
+                ".".into(),
+            ],
+        )
+    };
+    // `.input-description`: small text, the octicon half a spacing before
+    Some(
+        div()
+            .flex()
+            .flex_row()
+            .items_start()
+            .text_size(FONT_SIZE_SM())
+            .line_height(zpx(16.5))
+            .text_color(text_color)
+            .child(octicon(icon, icon_color).flex_none().mr(SPACING_HALF()))
+            .child(paragraph(parts).flex_1().min_w_0())
+            .into_any_element(),
+    )
 }
 
 /// Flag `846-reject-head-branch-name`: `head` in any case names `HEAD`
@@ -76,12 +153,120 @@ pub(crate) fn ref_chip(name: impl Into<SharedString>, cx: &App) -> Div {
     crate::widgets::code_ref(name, cx)
 }
 
+/// A warning of GHD `ui/lib/branch-name-warnings.tsx`: its text around a
+/// `<Ref>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchNameWarning {
+    pub before: &'static str,
+    pub reference: String,
+    pub after: &'static str,
+}
+
+impl BranchNameWarning {
+    /// The warning's text.
+    pub fn text(&self) -> String {
+        format!("{}{}{}", self.before, self.reference, self.after)
+    }
+}
+
+/// GHD `renderBranchHasRemoteWarning(branch)` (Rename Branch): renaming a
+/// branch that tracks an upstream leaves the remote branch's name alone.
+pub fn render_branch_has_remote_warning(branch: &Branch) -> Option<BranchNameWarning> {
+    branch.upstream_short().map(|upstream| BranchNameWarning {
+        before: "This branch is tracking ",
+        reference: upstream.to_string(),
+        after: " and renaming this branch will not change the branch name on the remote.",
+    })
+}
+
+/// GHD `renderBranchNameExistsOnRemoteWarning(sanitizedName, branches)`
+/// (Create Branch): a remote branch of `branches` has the name.
+pub fn render_branch_name_exists_on_remote_warning(
+    sanitized_name: &str,
+    branches: &[Branch],
+) -> Option<BranchNameWarning> {
+    branches
+        .iter()
+        .any(|b| b.kind == BranchKind::Remote && b.name_without_remote() == sanitized_name)
+        .then(|| BranchNameWarning {
+            before: "A branch named ",
+            reference: sanitized_name.to_string(),
+            after: " already exists on the remote.",
+        })
+}
+
+/// `<Row className="warning-helper-text">`: the alert octicon and the
+/// warning, its reference as a `<Ref>`.
+fn branch_name_warning(warning: BranchNameWarning, cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_row()
+        .items_start()
+        .gap(SPACING_HALF())
+        .child(octicon(Octicon::Alert, cx.ghd().dialog_warning))
+        .child(
+            paragraph(vec![
+                warning.before.into(),
+                ref_chip(warning.reference, cx).into_any_element().into(),
+                warning.after.into(),
+            ])
+            .flex_1()
+            .min_w_0(),
+        )
+}
+
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StartPoint {
-    DefaultBranch,
+/// GHD `StartPoint` (`models/branch.ts`): what Create a Branch bases the
+/// new branch on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StartPoint {
     CurrentBranch,
+    DefaultBranch,
+    Head,
+    UpstreamDefaultBranch,
+}
+
+/// GHD `getStartPoint(props, preferred)` (`lib/create-branch.ts`): a
+/// detached HEAD always gives `Head`; otherwise `preferred` when it is
+/// available, else the upstream default branch, the default branch, the
+/// current branch or `Head`, the first that is.
+pub fn get_start_point(
+    tip: &Tip,
+    default_branch: Option<&Branch>,
+    upstream_default_branch: Option<&Branch>,
+    preferred: StartPoint,
+) -> StartPoint {
+    if matches!(tip, Tip::Detached { .. }) {
+        return StartPoint::Head;
+    }
+    let valid = matches!(tip, Tip::Valid { .. });
+    let available = |point| match point {
+        StartPoint::UpstreamDefaultBranch => upstream_default_branch.is_some(),
+        StartPoint::DefaultBranch => default_branch.is_some(),
+        StartPoint::CurrentBranch => valid,
+        StartPoint::Head => true,
+    };
+    if available(preferred) {
+        return preferred;
+    }
+    [
+        StartPoint::UpstreamDefaultBranch,
+        StartPoint::DefaultBranch,
+        StartPoint::CurrentBranch,
+    ]
+    .into_iter()
+    .find(|point| available(*point))
+    .unwrap_or(StartPoint::Head)
+}
+
+/// The dialog's "Create branch based on…" choice.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Base {
+    /// GHD's preferred start point, resolved with [`get_start_point`]
+    /// against the current tip and branches on every render (GHD
+    /// `componentWillReceiveProps`).
+    Start(StartPoint),
     /// `843-create-branch-from-any-branch`: a branch picked from a list.
     Other,
 }
@@ -91,7 +276,7 @@ pub struct CreateBranchDialog {
     repo: u64,
     target_sha: Option<String>,
     name: Entity<InputState>,
-    start_point: StartPoint,
+    start_point: Base,
     /// `843-create-branch-from-any-branch`: the "Other branch…" picker.
     other_filter: Entity<InputState>,
     other_focus: FocusHandle,
@@ -144,9 +329,10 @@ impl CreateBranchDialog {
                 && s.flags
                     .bool(corvene_core::flags::ids::CREATE_BRANCH_WITH_CHANGES_FROM_CURRENT)
             {
-                StartPoint::CurrentBranch
+                Base::Start(StartPoint::CurrentBranch)
             } else {
-                StartPoint::DefaultBranch
+                // GHD's constructor: `getStartPoint(props, UpstreamDefaultBranch)`
+                Base::Start(StartPoint::UpstreamDefaultBranch)
             }
         };
         Self {
@@ -189,28 +375,44 @@ impl Render for CreateBranchDialog {
         };
         let raw = self.name.read(cx).value().to_string();
         let name = sanitize_ref_name(&raw);
-        let (tip, default_branch, existing, target_commit) = {
+        let (tip, default_branch, default_branch_ref, existing, target_commit, remote_warning) = {
             let s = self.state.read(cx);
             let rs = s.repo_states.get(&self.repo);
             let info = rs.and_then(|r| r.info.as_ref());
-            let existing: Vec<String> = info
-                .map(|i| {
-                    i.branches
-                        .iter()
-                        .filter(|b| b.kind == BranchKind::Local)
-                        .map(|b| b.name.clone())
-                        .collect()
-                })
+            // GHD's `allBranches`: tracked remote branches merged into their
+            // local branch
+            let all_branches = info
+                .map(|i| crate::branch_list::merge_remote_and_local_branches(&i.branches))
                 .unwrap_or_default();
+            let remote_warning = render_branch_name_exists_on_remote_warning(&name, &all_branches);
+            // `updateBranchName`: any of `allBranches`, remote names included
+            let existing: Vec<String> = all_branches.into_iter().map(|b| b.name).collect();
             let target = self.target_sha.as_ref().and_then(|sha| {
                 rs.and_then(|r| r.commits.iter().find(|c| &c.sha == sha))
                     .map(|c| (c.summary.clone(), c.short_sha().to_string()))
             });
+            let default_branch = rs.and_then(|r| r.default_branch.clone());
+            // GHD `findDefaultBranch`: the local branch, else the remote one
+            let default_branch_ref = default_branch.as_deref().and_then(|d| {
+                info.and_then(|i| {
+                    i.branches
+                        .iter()
+                        .find(|b| b.kind == BranchKind::Local && b.name == d)
+                        .or_else(|| {
+                            i.branches.iter().find(|b| {
+                                b.kind == BranchKind::Remote && b.name_without_remote() == d
+                            })
+                        })
+                        .cloned()
+                })
+            });
             (
                 info.map(|i| i.tip.clone()).unwrap_or(Tip::Unknown),
-                rs.and_then(|r| r.default_branch.clone()),
+                default_branch,
+                default_branch_ref,
                 existing,
                 target,
+                remote_warning,
             )
         };
         let exists = existing.contains(&name);
@@ -256,53 +458,62 @@ impl Render for CreateBranchDialog {
                     let other_default =
                         default_branch.clone().filter(|d| *d != current_name);
                     if other_default.is_some() || from_any {
-                        // without a separate default branch, "default"
-                        // means the current one
+                        // `selectedValue`: the default branch when that is
+                        // the start point and not the current branch, else
+                        // the current branch
                         let selected = match self.start_point {
-                            StartPoint::DefaultBranch if other_default.is_none() => {
-                                StartPoint::CurrentBranch
-                            }
-                            s => s,
+                            Base::Other => Base::Other,
+                            Base::Start(preferred) => match get_start_point(
+                                &tip,
+                                default_branch_ref.as_ref(),
+                                None,
+                                preferred,
+                            ) {
+                                StartPoint::DefaultBranch if other_default.is_some() => {
+                                    Base::Start(StartPoint::DefaultBranch)
+                                }
+                                _ => Base::Start(StartPoint::CurrentBranch),
+                            },
                         };
                         start_point = match selected {
-                            StartPoint::DefaultBranch => other_default.clone(),
-                            StartPoint::CurrentBranch => Some(current_name.clone()),
-                            StartPoint::Other => {
+                            Base::Start(StartPoint::DefaultBranch) => other_default.clone(),
+                            Base::Start(_) => Some(current_name.clone()),
+                            Base::Other => {
                                 needs_pick = self.other_branch.is_none();
                                 self.other_branch.clone()
                             }
                         };
-                        let mut options: Vec<(&'static str, String, &'static str, StartPoint)> =
+                        let mut options: Vec<(&'static str, String, &'static str, Base)> =
                             Vec::new();
                         if let Some(default) = &other_default {
                             options.push((
                                 "start-default",
                                 default.clone(),
                                 "The default branch in your repository. Pick this to start on something new that's not dependent on your current branch.",
-                                StartPoint::DefaultBranch,
+                                Base::Start(StartPoint::DefaultBranch),
                             ));
                         }
                         options.push((
                             "start-current",
                             current_name.clone(),
                             "The currently checked out branch. Pick this if you need to build on work done on this branch.",
-                            StartPoint::CurrentBranch,
+                            Base::Start(StartPoint::CurrentBranch),
                         ));
                         if from_any {
                             options.push((
                                 "start-other",
                                 match (&self.other_branch, selected) {
-                                    (Some(other), StartPoint::Other) => {
+                                    (Some(other), Base::Other) => {
                                         format!("Other branch: {other}")
                                     }
                                     _ => "Other branch…".to_string(),
                                 },
                                 "Any local or remote branch, picked from the list below.",
-                                StartPoint::Other,
+                                Base::Other,
                             ));
                         }
                         let last = options.len() - 1;
-                        let picker = (selected == StartPoint::Other).then(|| {
+                        let picker = (selected == Base::Other).then(|| {
                             let groups = {
                                 let s = self.state.read(cx);
                                 let query = self.other_filter.read(cx).value().trim().to_string();
@@ -421,7 +632,8 @@ crate::branch_list::sort_by_date(cx),
                     .flex_col()
                     .gap(SPACING_THIRD())
                     .child("Name")
-                    .child(text_box("branch-name", &self.name, None, window, cx)),
+                    .child(text_box("branch-name", &self.name, None, window, cx))
+                    .children(ref_name_notice(&raw, "created", cx)),
             )
             .when(exists, |d| {
                 d.child(crate::widgets::input_error(
@@ -434,6 +646,9 @@ crate::branch_list::sort_by_date(cx),
                     reserved_head_message(&name),
                     cx,
                 ))
+            })
+            .when_some(remote_warning, |d, warning| {
+                d.child(branch_name_warning(warning, cx))
             })
             .children(description);
         let name_for_ok = name.clone();
@@ -533,13 +748,14 @@ impl Render for RenameBranchDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let t = cx.ghd();
-        let new_name = sanitize_ref_name(&self.name.read(cx).value());
-        let (upstream, existing) = {
+        let raw = self.name.read(cx).value().to_string();
+        let new_name = sanitize_ref_name(&raw);
+        let (remote_warning, existing) = {
             let s = self.state.read(cx);
             let info = s.repo_states.get(&self.repo).and_then(|r| r.info.as_ref());
             let branch = info.and_then(|i| i.branches.iter().find(|b| b.name == self.branch));
             (
-                branch.and_then(|b| b.upstream_short().map(|u| u.to_string())),
+                branch.and_then(render_branch_has_remote_warning),
                 info.map(|i| {
                     i.branches
                         .iter()
@@ -569,24 +785,8 @@ impl Render for RenameBranchDialog {
             .flex()
             .flex_col()
             .gap(SPACING())
-            .when_some(upstream, |d, upstream| {
-                d.child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_start()
-                        .gap(SPACING_HALF())
-                        .child(octicon(Octicon::Alert, t.dialog_warning))
-                        .child(
-                            paragraph(vec![
-                                "This branch is tracking ".into(),
-                                ref_chip(upstream, cx).into_any_element().into(),
-                                " and renaming this branch will not change the branch name on the remote.".into(),
-                            ])
-                            .flex_1()
-                            .min_w_0(),
-                        ),
-                )
+            .when_some(remote_warning, |d, warning| {
+                d.child(branch_name_warning(warning, cx))
             })
             .child(
                 // `.ref-name-text-box`: label, 3.33 px, the box; 10 px below
@@ -597,7 +797,8 @@ impl Render for RenameBranchDialog {
                     .flex_col()
                     .gap(SPACING_THIRD())
                     .child("Name")
-                    .child(text_box("rename-branch-name", &self.name, None, window, cx)),
+                    .child(text_box("rename-branch-name", &self.name, None, window, cx))
+                    .children(ref_name_notice(&raw, "created", cx)),
             )
             .when(exists, |d| {
                 d.child(
@@ -1216,11 +1417,9 @@ impl Render for MergeBranchDialog {
             } else {
                 "Merge into\u{a0}"
             })
-            .child(
-                div()
-                    .font_weight(FontWeight::NORMAL)
-                    .child(truncate_with_ellipsis(&current, 40)),
-            );
+            .child(div().font_weight(FontWeight::NORMAL).child(
+                corvene_core::notifications::truncate_with_ellipsis(&current, 40),
+            ));
         let on_select = cx.listener(move |this, name: &String, _, cx| {
             this.selected = Some(name.clone());
             Dispatcher::preview_merge(repo, name.clone(), cx);
@@ -1585,15 +1784,6 @@ pub fn branch_picker(
                 )),
         )
         .child(list)
-}
-
-/// GHD `truncateWithEllipsis`.
-fn truncate_with_ellipsis(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        format!("{}…", text.chars().take(max).collect::<String>())
-    }
 }
 
 /// `DropdownSelectButton`: a 30 px primary invoke button beside a 28 px

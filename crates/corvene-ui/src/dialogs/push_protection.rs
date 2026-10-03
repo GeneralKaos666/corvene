@@ -2,14 +2,17 @@
 //! bypass-push-protection-dialog,push-protection-error-location}.tsx`
 //! (`styles/ui/dialogs/_push-protection.scss`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use corvene_core::{BypassReason, Dispatcher, Popup, SecretLocation, SecretScanResult};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
+use crate::copy_button::{COPIED_DURATION, CopyButton, copy_button_element};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind,
+};
 use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
@@ -24,6 +27,8 @@ pub struct PushProtectionErrorDialog {
     bypassed: Vec<String>,
     /// `showMoreLocations` per secret id.
     expanded: HashSet<String>,
+    /// The location `CopyButton`s' copied state, by commit SHA.
+    copy_buttons: HashMap<String, CopyButton>,
 }
 
 impl PushProtectionErrorDialog {
@@ -33,6 +38,7 @@ impl PushProtectionErrorDialog {
             secrets,
             bypassed,
             expanded: HashSet::new(),
+            copy_buttons: HashMap::new(),
         }
     }
 
@@ -60,19 +66,37 @@ impl PushProtectionErrorDialog {
                             .font_family(mono_font())
                             .child(location.commit_sha.chars().take(7).collect::<String>()),
                     )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!(
-                                "copy-sha-{}",
-                                location.commit_sha
-                            )))
-                            .cursor_pointer()
-                            .ghd_tooltip("Copy the full SHA")
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(sha.clone()))
-                            })
-                            .child(octicon(Octicon::Copy, t.text_secondary)),
-                    ),
+                    .child({
+                        // GHD `CopyButton`
+                        let button =
+                            self.copy_buttons.get(&sha).cloned().unwrap_or_else(|| {
+                                CopyButton::new(sha.clone(), "Copy the full SHA")
+                            });
+                        let entity = cx.entity().downgrade();
+                        let clicked = button.clone();
+                        copy_button_element(
+                            SharedString::from(format!("copy-sha-{sha}")),
+                            &button,
+                            zpx(16.),
+                            t.text_secondary,
+                            move |_, _, cx| {
+                                let mut button = clicked.clone();
+                                let text = button.click(std::time::Instant::now());
+                                cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                                entity
+                                    .update(cx, |this, cx| {
+                                        this.copy_buttons.insert(text, button);
+                                        cx.notify();
+                                        cx.spawn(async move |this, cx| {
+                                            cx.background_executor().timer(COPIED_DURATION).await;
+                                            this.update(cx, |_, cx| cx.notify()).ok();
+                                        })
+                                        .detach();
+                                    })
+                                    .ok();
+                            },
+                        )
+                    }),
             )
             .child(div().flex_1().min_w_0().truncate().child(format!(
                 "{} at line {}",
@@ -376,18 +400,17 @@ impl Render for BypassPushProtectionDialog {
             "bypass-push-protection",
             mac_or("Bypass Push Detection", "Bypass push detection"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "bypass-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "bypass-ok",
                     label: "Allow me to expose this secret".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::bypass_push_protection(
@@ -400,7 +423,8 @@ impl Render for BypassPushProtectionDialog {
                         );
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

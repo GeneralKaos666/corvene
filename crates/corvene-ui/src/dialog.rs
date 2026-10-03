@@ -117,6 +117,178 @@ pub struct DialogButton {
     pub on_click: ClickHandler,
 }
 
+/// A group button's `type`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonType {
+    /// `type="submit"`: the default button, taken when the form is submitted
+    /// with the keyboard (`DialogButton::primary`).
+    Submit,
+    /// `type="reset"`
+    Reset,
+    /// `type="button"`
+    Button,
+}
+
+/// What a click on a group button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupEvent {
+    /// `onOkButtonClick`
+    OkButtonClick,
+    /// `onCancelButtonClick`
+    CancelButtonClick,
+    /// The dialog's form gets `submit` (its affirmative action).
+    Submit,
+    /// The dialog's form gets `reset` (it is dismissed).
+    Reset,
+}
+
+/// Which of the group's buttons a [`GroupButton`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupButtonRole {
+    Ok,
+    Cancel,
+}
+
+/// One button of an `OkCancelButtonGroup`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupButton {
+    pub label: String,
+    pub role: GroupButtonRole,
+    pub button_type: ButtonType,
+    /// `aria-describedby`
+    pub aria_described_by: Option<String>,
+}
+
+/// GHD `IOkCancelButtonGroupProps` (the click callbacks are the
+/// [`GroupEvent`]s).
+pub struct OkCancelButtonGroupProps<'a> {
+    pub destructive: bool,
+    pub ok_button_text: &'a str,
+    pub cancel_button_text: &'a str,
+    pub ok_button_aria_described_by: Option<&'a str>,
+    /// The text of each child.
+    pub children: Vec<&'a str>,
+}
+
+/// What GHD `OkCancelButtonGroup` renders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OkCancelButtonGroupContent {
+    /// The `destructive` class.
+    pub destructive: bool,
+    /// In the order they are drawn.
+    pub buttons: Vec<GroupButton>,
+    /// The children's text, after the buttons.
+    pub children: Vec<String>,
+}
+
+impl OkCancelButtonGroupContent {
+    /// A click on the button labelled `label`: what it sends. OK calls
+    /// `onOkButtonClick` and submits the form, Cancel calls
+    /// `onCancelButtonClick` and resets it; a destructive group flips its
+    /// buttons' types (`onOkButtonClick` / `onCancelButtonClick` dispatch the
+    /// flipped event), so the outcome is the same. Nothing for no such
+    /// button.
+    pub fn click(&self, label: &str) -> Vec<GroupEvent> {
+        self.buttons
+            .iter()
+            .filter(|b| b.label == label)
+            .flat_map(|b| match b.role {
+                GroupButtonRole::Ok => [GroupEvent::OkButtonClick, GroupEvent::Submit],
+                GroupButtonRole::Cancel => [GroupEvent::CancelButtonClick, GroupEvent::Reset],
+            })
+            .collect()
+    }
+}
+
+/// GHD `OkCancelButtonGroup` (`ui/dialog/ok-cancel-button-group.tsx`): OK is
+/// the `submit` button and Cancel `reset`, unless the group is destructive,
+/// when Cancel is the `submit` (default) button and OK a plain button, so
+/// that submitting with the keyboard takes the safe choice; Cancel then OK
+/// on macOS, OK then Cancel elsewhere (`renderButtons`).
+pub fn ok_cancel_button_group(props: OkCancelButtonGroupProps<'_>) -> OkCancelButtonGroupContent {
+    let ok = GroupButton {
+        label: props.ok_button_text.to_string(),
+        role: GroupButtonRole::Ok,
+        button_type: if props.destructive {
+            ButtonType::Button
+        } else {
+            ButtonType::Submit
+        },
+        aria_described_by: props.ok_button_aria_described_by.map(str::to_string),
+    };
+    let cancel = GroupButton {
+        label: props.cancel_button_text.to_string(),
+        role: GroupButtonRole::Cancel,
+        button_type: if props.destructive {
+            ButtonType::Submit
+        } else {
+            ButtonType::Reset
+        },
+        aria_described_by: None,
+    };
+    OkCancelButtonGroupContent {
+        destructive: props.destructive,
+        buttons: ok_cancel_order(vec![cancel, ok]),
+        children: props.children.into_iter().map(str::to_string).collect(),
+    }
+}
+
+/// One footer button of an [`OkCancelButtonGroup`].
+pub struct GroupButtonSpec {
+    pub id: &'static str,
+    pub label: SharedString,
+    pub disabled: bool,
+    pub on_click: ClickHandler,
+}
+
+/// GHD `OkCancelButtonGroup` as a dialog's footer buttons: the default
+/// (`submit`) button of [`ok_cancel_button_group`] is the primary one (Cancel
+/// for a destructive group).
+pub struct OkCancelButtonGroup {
+    pub destructive: bool,
+    pub cancel: GroupButtonSpec,
+    pub ok: GroupButtonSpec,
+}
+
+impl OkCancelButtonGroup {
+    /// The buttons, Cancel then OK (the dialog puts them in the platform's
+    /// order).
+    pub fn into_buttons(self) -> Vec<DialogButton> {
+        let OkCancelButtonGroup {
+            destructive,
+            cancel,
+            ok,
+        } = self;
+        let content = ok_cancel_button_group(OkCancelButtonGroupProps {
+            destructive,
+            ok_button_text: &ok.label,
+            cancel_button_text: &cancel.label,
+            ok_button_aria_described_by: None,
+            children: Vec::new(),
+        });
+        let primary = |role: GroupButtonRole| {
+            content
+                .buttons
+                .iter()
+                .any(|b| b.role == role && b.button_type == ButtonType::Submit)
+        };
+        let (cancel_primary, ok_primary) = (
+            primary(GroupButtonRole::Cancel),
+            primary(GroupButtonRole::Ok),
+        );
+        [(cancel, cancel_primary), (ok, ok_primary)]
+            .into_iter()
+            .map(|(b, primary)| DialogButton {
+                id: b.id,
+                label: b.label,
+                primary,
+                disabled: b.disabled,
+                on_click: b.on_click,
+            })
+            .collect()
+    }
+}
+
 /// GHD's per-dialog `width` rules (`dialog#<id> { width }` in the
 /// stylesheets), by Corvene dialog id; other dialogs size to their content
 /// between 400 and 600 px.

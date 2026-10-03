@@ -8,9 +8,8 @@
 //!   `corvene_ui::format::display_path(…::directory())`; [`extract`] calls
 //!   those on a file change with that path.
 //! - `truncateMid` / `truncatePath` shorten the path to a number of
-//!   characters, keeping the file name. Corvene has no such function: its
-//!   rows let GPUI end-truncate the directory part (`.truncate()`). Those
-//!   cases call stand-ins and are ignored.
+//!   characters, keeping the file name: `corvene_ui::path_text::truncate_mid`
+//!   and `truncate_path`, which the rows' `PathText` uses.
 //!
 //! `PathText` normalizes git's `/`-separated path (`Path.normalize`, `\` on
 //! Windows) before `extract`, so the Windows cases pass `\`-separated paths.
@@ -23,20 +22,7 @@ use corvene_core::{
     DiffSelection, FileStatus, FileStatusKind, GitStatusEntry, WorkingDirectoryFileChange,
 };
 use corvene_ui::format::display_path;
-
-/// Stand-in for GitHub Desktop's `truncateMid(value, length)`
-/// (`ui/lib/path-text.tsx`). Replace it with a Corvene function once there
-/// is one and remove the `#[ignore]`s.
-fn truncate_mid(_value: &str, _length: isize) -> String {
-    unimplemented!("Corvene has no truncateMid (ui/lib/path-text.tsx)")
-}
-
-/// Stand-in for GitHub Desktop's `truncatePath(path, length)`
-/// (`ui/lib/path-text.tsx`). Replace it with a Corvene function once there
-/// is one and remove the `#[ignore]`s.
-fn truncate_path(_path: &str, _length: isize) -> String {
-    unimplemented!("Corvene has no truncatePath (ui/lib/path-text.tsx)")
-}
+use corvene_ui::path_text::{truncate_mid, truncate_path};
 
 /// The result of GitHub Desktop's `extract`.
 struct Extracted {
@@ -76,7 +62,6 @@ fn extract(normalized_path: &str) -> Extracted {
 
 // GHD: unit/path-text-test.ts › PathText › truncateMid › doesn't truncate if the string already fits
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncateMid, rows end-truncate with GPUI (ui/lib/path-text.tsx truncateMid)"]
 fn truncate_mid_doesnt_truncate_if_the_string_already_fits() {
     assert_eq!(truncate_mid("foo", 3), "foo");
     assert_eq!(truncate_mid("foo", 10), "foo");
@@ -84,7 +69,6 @@ fn truncate_mid_doesnt_truncate_if_the_string_already_fits() {
 
 // GHD: unit/path-text-test.ts › PathText › truncateMid › returns an empty string if length is zero or less
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncateMid, rows end-truncate with GPUI (ui/lib/path-text.tsx truncateMid)"]
 fn truncate_mid_returns_an_empty_string_if_length_is_zero_or_less() {
     assert_eq!(truncate_mid("foo", 0), "");
     assert_eq!(truncate_mid("foo", -10), "");
@@ -92,14 +76,12 @@ fn truncate_mid_returns_an_empty_string_if_length_is_zero_or_less() {
 
 // GHD: unit/path-text-test.ts › PathText › truncateMid › returns an ellipsis if length is one
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncateMid, rows end-truncate with GPUI (ui/lib/path-text.tsx truncateMid)"]
 fn truncate_mid_returns_an_ellipsis_if_length_is_one() {
     assert_eq!(truncate_mid("foo", 1), "…");
 }
 
 // GHD: unit/path-text-test.ts › PathText › truncateMid › truncates to the exact length given
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncateMid, rows end-truncate with GPUI (ui/lib/path-text.tsx truncateMid)"]
 fn truncate_mid_truncates_to_the_exact_length_given() {
     assert_eq!(truncate_mid("foo bar", 6), "fo…bar");
     assert_eq!(truncate_mid("foo bar", 5), "fo…ar");
@@ -108,7 +90,6 @@ fn truncate_mid_truncates_to_the_exact_length_given() {
 
 // GHD: unit/path-text-test.ts › PathText › truncatePath › doesn't truncate if the string already fits
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncatePath, rows end-truncate the directory with GPUI (ui/lib/path-text.tsx truncatePath)"]
 fn truncate_path_doesnt_truncate_if_the_string_already_fits() {
     assert_eq!(truncate_path("foo", 3), "foo");
     assert_eq!(truncate_path("foo", 10), "foo");
@@ -116,7 +97,6 @@ fn truncate_path_doesnt_truncate_if_the_string_already_fits() {
 
 // GHD: unit/path-text-test.ts › PathText › truncatePath › returns an empty string if length is zero or less
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncatePath, rows end-truncate the directory with GPUI (ui/lib/path-text.tsx truncatePath)"]
 fn truncate_path_returns_an_empty_string_if_length_is_zero_or_less() {
     assert_eq!(truncate_path("foo", 0), "");
     assert_eq!(truncate_path("foo", -10), "");
@@ -124,14 +104,12 @@ fn truncate_path_returns_an_empty_string_if_length_is_zero_or_less() {
 
 // GHD: unit/path-text-test.ts › PathText › truncatePath › returns an ellipsis if length is one
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncatePath, rows end-truncate the directory with GPUI (ui/lib/path-text.tsx truncatePath)"]
 fn truncate_path_returns_an_ellipsis_if_length_is_one() {
     assert_eq!(truncate_path("foo", 1), "…");
 }
 
 // GHD: unit/path-text-test.ts › PathText › truncatePath › truncates to the exact length given
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncatePath, rows end-truncate the directory with GPUI (ui/lib/path-text.tsx truncatePath)"]
 fn truncate_path_truncates_to_the_exact_length_given() {
     assert_eq!(truncate_path("foo bar", 6), "fo…bar");
     assert_eq!(truncate_path("foo bar", 5), "fo…ar");
@@ -148,7 +126,6 @@ fn truncate_path_truncates_to_the_exact_length_given() {
 
 // GHD: unit/path-text-test.ts › PathText › truncatePath › favors truncation of directory components over file names
 #[test]
-#[ignore = "ghd: missing: Corvene has no truncatePath, rows end-truncate the directory with GPUI (ui/lib/path-text.tsx truncatePath)"]
 fn favors_truncation_of_directory_components_over_file_names() {
     if cfg!(windows) {
         assert_eq!(
@@ -181,7 +158,6 @@ fn favors_truncation_of_directory_components_over_file_names() {
 
 // GHD: unit/path-text-test.ts › PathText › extract › converts untracked submodule correctly
 #[test]
-#[ignore = "ghd: bug: WorkingDirectoryFileChange::file_name / directory of some/submodule/path/ give \"\" and some/submodule/path/, GHD drops the trailing separator: path and some/submodule/"]
 fn converts_untracked_submodule_correctly() {
     let Extracted {
         normalized_file_name,

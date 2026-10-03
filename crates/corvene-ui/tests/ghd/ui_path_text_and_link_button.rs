@@ -16,12 +16,9 @@
 //!   displayed directory.
 //! - `PathText`'s `.dirname` / `.filename` spans are that directory and
 //!   file name (the row's two text elements).
-//! - `truncateMid(value, length)` and `truncatePath(path, length)` have no
-//!   Corvene equivalent: Corvene's rows truncate the directory element with
-//!   GPUI's end ellipsis at layout time, by width, not by a character
-//!   count. [`truncate_mid`] and [`truncate_path`] are stand-ins, so the
-//!   first case is split into an ignored truncation test and a ported
-//!   `extract` test.
+//! - `truncateMid(value, length)` and `truncatePath(path, length)` are
+//!   `corvene_ui::path_text::truncate_mid` and `truncate_path`. The first
+//!   case is split into a truncation test and an `extract` test.
 //!
 //! Not ported (React DOM only): "without a tooltip" (`[role="tooltip"]`
 //! absent when the path fits; Corvene's rows have no truncation tooltip
@@ -31,20 +28,7 @@
 use corvene_core::{DiffSelection, FileStatusKind, GitStatusEntry, WorkingDirectoryFileChange};
 use corvene_test_support::working_directory_file_change;
 use corvene_ui::format::display_path;
-
-/// Stand-in for GitHub Desktop's `truncateMid(value, length)`
-/// (`ui/lib/path-text.tsx`). Replace it with the Corvene function once
-/// there is one and remove the `#[ignore]`.
-fn truncate_mid(_value: &str, _length: usize) -> String {
-    unimplemented!("Corvene has no truncateMid (rows truncate by width with GPUI's end ellipsis)")
-}
-
-/// Stand-in for GitHub Desktop's `truncatePath(path, length)`
-/// (`ui/lib/path-text.tsx`). Replace it with the Corvene function once
-/// there is one and remove the `#[ignore]`.
-fn truncate_path(_path: &str, _length: usize) -> String {
-    unimplemented!("Corvene has no truncatePath (rows truncate by width with GPUI's end ellipsis)")
-}
+use corvene_ui::path_text::{truncate_mid, truncate_path};
 
 /// A changed file at `path` (the changes list row's model), status
 /// Modified with nothing else set.
@@ -65,7 +49,6 @@ fn extract(path: &str) -> (String, String) {
 
 // GHD: unit/ui/path-text-and-link-button-test.tsx › path text and link button surfaces › truncates text and paths using the exported helpers
 #[test]
-#[ignore = "ghd: missing: no truncateMid / truncatePath (ui/lib/path-text.tsx); Corvene rows truncate by width with GPUI's end ellipsis"]
 fn truncates_text_and_paths_using_the_exported_helpers() {
     assert_eq!(truncate_mid("abcdef", 4), "a…ef");
     assert_eq!(truncate_mid("abcdef", 1), "…");

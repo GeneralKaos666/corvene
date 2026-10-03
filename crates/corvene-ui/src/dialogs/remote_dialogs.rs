@@ -10,7 +10,9 @@ use gpui_kit::*;
 
 use crate::context_menu::MenuItem;
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind,
+};
 use crate::icons::{Octicon, octicon};
 use crate::tab_bar::{TabModel, tab_bar};
 use crate::theme::ActiveGhdTheme;
@@ -402,25 +404,25 @@ impl Render for PushNeedsPullDialog {
             div().w(crate::theme::fit_width(450.)).child(
                 "Corvene is unable to push commits to this branch because there are commits on the remote that are not present on your local branch. Fetch these new commits before pushing in order to reconcile them with your local commits.",
             ),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "needs-pull-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "needs-pull-fetch",
                     label: "Fetch".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::fetch(repo, false, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -480,18 +482,17 @@ impl Render for ConfirmForcePushDialog {
             DialogKind::Warning,
             "Are you sure you want to force push?",
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "force-push-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "force-push-ok",
                     label: "I'm sure".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_ask {
@@ -501,7 +502,8 @@ impl Render for ConfirmForcePushDialog {
                         Dispatcher::push(repo, true, None, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -537,7 +539,8 @@ impl GenericGitAuthDialog {
         if let Some(u) = &username {
             username_state.update(cx, |s, cx| s.set_value(u.clone(), window, cx));
         }
-        let password = cx.new(|cx| InputState::new(window, cx));
+        // GHD `PasswordTextBox` (`type="password"`)
+        let password = cx.new(|cx| InputState::new(window, cx).masked(true));
         cx.observe(&username_state, |_, _, cx| cx.notify()).detach();
         cx.observe(&password, |_, _, cx| cx.notify()).detach();
         Self {
@@ -632,18 +635,17 @@ impl Render for GenericGitAuthDialog {
             "dialog-generic-git-auth",
             mac_or("Authentication Failed", "Authentication failed"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "auth-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "auth-save",
                     label: "Save and Retry".into(),
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if disabled {
@@ -659,7 +661,8 @@ impl Render for GenericGitAuthDialog {
                         );
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

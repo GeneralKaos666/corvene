@@ -6,12 +6,12 @@
 //!
 //! - `CommitAttribution` (`ui/lib/commit-attribution.tsx`, the History
 //!   rows and the selected commit's summary) names one or two authors
-//!   ("Mona", "Mona, Hubot") or counts them ("3 people"). Corvene has no
-//!   counterpart: the History row's byline (`history.rs`, "<author> •
-//!   <time>") and the selected commit's meta row (`selected_commit.rs`)
-//!   show the commit's author alone, without co-authors, and Corvene has no
-//!   `IAvatarUser`. [`AvatarUser`] is GitHub Desktop's type and
-//!   [`commit_attribution`] a stand-in.
+//!   ("Mona", "Mona, Hubot") or counts them ("3 people"). Corvene's
+//!   counterpart is `corvene_ui::history::commit_attribution(avatar_users)`,
+//!   the text of the History row's byline (`history.rs`) and of the selected
+//!   commit's meta row (`selected_commit.rs`); GitHub Desktop's `IAvatarUser`
+//!   is `corvene_core::AvatarUser` (`getAvatarUsersForCommit`:
+//!   `corvene_core::get_avatar_users_for_commit`).
 //! - `AccessText` (`ui/lib/access-text.tsx`) splits a label at its access
 //!   key (`&`, `&&` a literal ampersand) into the text and the key.
 //!   Corvene's counterpart is `corvene_ui::views_menu::parse_mnemonic`, the
@@ -30,16 +30,9 @@
 
 use std::ops::Range;
 
+use corvene_core::AvatarUser;
+use corvene_ui::history::commit_attribution;
 use corvene_ui::repository_list::bold_ranges;
-
-/// GitHub Desktop's `IAvatarUser` (`models/avatar.ts`).
-#[allow(dead_code)] // read by the real CommitAttribution
-struct AvatarUser {
-    name: String,
-    email: String,
-    avatar_url: Option<String>,
-    endpoint: Option<String>,
-}
 
 /// GitHub Desktop's `createAvatarUser(name)`.
 fn create_avatar_user(name: &str) -> AvatarUser {
@@ -49,23 +42,6 @@ fn create_avatar_user(name: &str) -> AvatarUser {
         avatar_url: None,
         endpoint: None,
     }
-}
-
-/// What GitHub Desktop's `CommitAttribution` renders.
-#[allow(dead_code)] // filled by the real CommitAttribution
-struct CommitAttribution {
-    /// The `.commit-attribution-component` text.
-    text: String,
-    /// The `.author` spans' texts (none for "N people").
-    authors: Vec<String>,
-}
-
-/// Stand-in for GitHub Desktop's `CommitAttribution`. Replace it with the
-/// Corvene function once there is one and remove the `#[ignore]`.
-fn commit_attribution(_avatar_users: &[&AvatarUser]) -> CommitAttribution {
-    unimplemented!(
-        "Corvene has no CommitAttribution: the History byline and the commit summary show the author alone"
-    )
 }
 
 /// The `<span>` runs `HighlightText` renders around the marked `ranges`
@@ -87,7 +63,6 @@ fn unmarked_runs(text: &str, ranges: &[Range<usize>]) -> Vec<String> {
 
 // GHD: unit/ui/structural-and-text-components-test.tsx › structural and text components › renders commit attribution for one, two, and many authors
 #[test]
-#[ignore = "ghd: missing: no CommitAttribution (ui/lib/commit-attribution.tsx); the History byline and commit summary show only commit.author, no co-authors"]
 fn renders_commit_attribution_for_one_two_and_many_authors() {
     let mona = create_avatar_user("Mona");
     let hubot = create_avatar_user("Hubot");

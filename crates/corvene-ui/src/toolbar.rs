@@ -211,15 +211,9 @@ pub fn toolbar_models(
             && state
                 .flags
                 .bool(corvene_core::flags::ids::ALIAS_ITALIC_IN_TOOLBAR),
-        // GHD `iconForRepository`
-        icon: match repo.and_then(|r| r.github.as_ref()) {
-            _ if repo.is_some_and(|r| r.missing) => Octicon::Alert,
-            Some(gh) if gh.private => Octicon::Lock,
-            Some(gh) if gh.fork => Octicon::RepoForked,
-            Some(_) => Octicon::Repo,
-            None if repo.is_some() => Octicon::DeviceDesktop,
-            None => Octicon::Repo,
-        },
+        icon: repo.map_or(Octicon::Repo, |r| {
+            crate::icons::icon_for_repository(crate::icons::RepositoryOrCloning::Repository(r))
+        }),
         // Corvene (`409-owner-in-repository-button`): a GitHub repository's
         // owner in place of "Current Repository"
         description: match repo.and_then(|r| r.github.as_ref()) {
@@ -767,13 +761,20 @@ pub fn toolbar_button(
                     .bg(t.toolbar_badge_background)
                     .text_size(FONT_SIZE_XS())
                     .line_height(zpx(11.))
+                    // GHD `formatCompactNumber` (1.2k)
                     .when(ab.ahead > 0, |d| {
-                        d.child(format!("{}", ab.ahead))
-                            .child(octicon(Octicon::ArrowUp, text).size(zpx(9.)))
+                        d.child(crate::format::format_compact_number(
+                            f64::from(ab.ahead),
+                            &Default::default(),
+                        ))
+                        .child(octicon(Octicon::ArrowUp, text).size(zpx(9.)))
                     })
                     .when(ab.behind > 0, |d| {
-                        d.child(format!("{}", ab.behind))
-                            .child(octicon(Octicon::ArrowDown, text).size(zpx(9.)))
+                        d.child(crate::format::format_compact_number(
+                            f64::from(ab.behind),
+                            &Default::default(),
+                        ))
+                        .child(octicon(Octicon::ArrowDown, text).size(zpx(9.)))
                     }),
             )
         })

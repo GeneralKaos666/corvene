@@ -10,7 +10,7 @@ use gpui_kit::*;
 
 use corvene_core::Dispatcher;
 
-use crate::dialog::{DialogButton, dialog};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::text_box;
@@ -74,18 +74,17 @@ impl Render for SshKeyPassphraseDialog {
             "ssh-key-passphrase",
             "SSH key passphrase",
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "ssh-key-passphrase-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(|_, cx| Dispatcher::close_popup(cx)),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "ssh-key-passphrase-ok",
                     label: "Import".into(),
-                    primary: true,
                     disabled: value.is_empty(),
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
@@ -95,7 +94,8 @@ impl Render for SshKeyPassphraseDialog {
                         let _ = (&path, &value);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

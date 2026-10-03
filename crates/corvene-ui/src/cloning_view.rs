@@ -46,7 +46,8 @@ pub fn cloning_view(clone: &CloneState, cancellable: bool, cx: &App) -> impl Int
                                 .text_size(zpx(32.))
                                 .font_weight(FontWeight::LIGHT)
                                 .truncate()
-                                .child(format!("Cloning {}", clone.path.display())),
+                                // GHD `Cloning {repository.name}`
+                                .child(format!("Cloning {}", clone.name())),
                         ),
                 )
                 .child(

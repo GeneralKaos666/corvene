@@ -9,79 +9,17 @@
 //! readers. Whether it matches is `isAttributableEmailFor` over the accounts
 //! (Corvene: `corvene_core::Account::is_attributable_email`).
 //!
-//! Corvene draws the warning inline in two GPUI views and has no function
-//! returning its content, so [`git_email_not_found_warning`] is a stand-in:
-//!
-//! - `welcome.rs` `email_not_found_warning(account, email, cx)` (Welcome ›
-//!   Configure Git): one account only, GitHub Desktop's copy and link, no
-//!   screen-reader live text;
-//! - `dialogs/preferences.rs` Git tab (`warn`): "This email address doesn't
-//!   match your GitHub account, so your commits will be wrongly attributed."
-//!   with a "Learn more" link to `…/setting-your-commit-email-address`, a
-//!   case-insensitive comparison with the account emails only (no stealth
-//!   addresses), and nothing when the email matches.
-//!
-//! Replace the stand-in with the Corvene function once there is one and
-//! remove the `#[ignore]`s.
+//! Corvene's counterpart is
+//! `corvene_ui::git_email_not_found_warning::git_email_not_found_warning(
+//! accounts, email)`, the content Welcome › Configure Git (`welcome.rs`,
+//! the first account) and Settings › Git's "Other email" field
+//! (`dialogs/preferences.rs`, every account) draw.
 
 use corvene_core::Account;
+use corvene_ui::git_email_not_found_warning::{Indicator, git_email_not_found_warning};
 
 /// GitHub Desktop's `getDotComAPIEndpoint()`.
 const DOTCOM_API_ENDPOINT: &str = "https://api.github.com";
-
-/// The indicator before the message.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `Warning`: built by the real GitEmailNotFoundWarning content
-enum Indicator {
-    /// `<span className="warning-icon">⚠️</span>`
-    Warning,
-    /// `.green-circle` with a `.check-icon` octicon
-    Check,
-}
-
-/// The "Learn more." `LinkButton`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct LearnMore {
-    text: String,
-    aria_label: String,
-    uri: String,
-}
-
-/// What GitHub Desktop's `GitEmailNotFoundWarning` renders.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct GitEmailNotFoundWarningContent {
-    indicator: Indicator,
-    /// `buildScreenReaderMessage(isAttributableEmail)`, shown in the warning
-    message: String,
-    learn_more: Option<LearnMore>,
-    /// The text of the `#git-email-not-found-warning-for-screen-readers`
-    /// polite live region (the message, plus `AriaLiveContainer`'s suffix)
-    screen_reader_message: String,
-}
-
-impl GitEmailNotFoundWarningContent {
-    /// `.git-email-not-found-warning`'s `textContent`: the indicator, the
-    /// message and the link's text.
-    fn text_content(&self) -> String {
-        let indicator = match self.indicator {
-            Indicator::Warning => "⚠️",
-            Indicator::Check => "",
-        };
-        let link = self.learn_more.as_ref().map_or("", |l| l.text.as_str());
-        format!("{indicator}{}{link}", self.message)
-    }
-}
-
-/// Stand-in for GitHub Desktop's `GitEmailNotFoundWarning` rendered with
-/// `accounts` and `email`: `None` when it renders nothing.
-fn git_email_not_found_warning(
-    _accounts: &[Account],
-    _email: &str,
-) -> Option<GitEmailNotFoundWarningContent> {
-    unimplemented!(
-        "Corvene has no GitEmailNotFoundWarning content: welcome.rs and preferences.rs draw it inline (GPUI)"
-    )
-}
 
 /// GitHub Desktop's `createAccount(email)`: `new Account('mona',
 /// getDotComAPIEndpoint(), '', [createEmail(email)], '', 1, 'Mona')`, the
@@ -102,7 +40,6 @@ fn create_account(email: &str) -> Account {
 
 // GHD: unit/ui/email-attribution-warning-test.tsx › GitEmailNotFoundWarning › renders nothing when there are no accounts or the email is blank
 #[test]
-#[ignore = "ghd: missing: no GitEmailNotFoundWarning content fn (ui/lib/git-email-not-found-warning.tsx); welcome.rs (one account) and preferences.rs decide it inline in GPUI"]
 fn renders_nothing_when_there_are_no_accounts_or_the_email_is_blank() {
     let no_accounts = git_email_not_found_warning(&[], "person@example.com");
     let blank_email = git_email_not_found_warning(&[create_account("mona@example.com")], " ");
@@ -114,7 +51,6 @@ fn renders_nothing_when_there_are_no_accounts_or_the_email_is_blank() {
 
 // GHD: unit/ui/email-attribution-warning-test.tsx › GitEmailNotFoundWarning › renders a mismatch warning, learn-more link, and screen-reader message
 #[test]
-#[ignore = "ghd: missing: no GitEmailNotFoundWarning content fn (ui/lib/git-email-not-found-warning.tsx); welcome.rs has GHD's copy, preferences.rs says 'doesn't match your GitHub account, so…' and links setting-your-commit-email-address"]
 fn renders_a_mismatch_warning_learn_more_link_and_screen_reader_message() {
     let warning =
         git_email_not_found_warning(&[create_account("mona@example.com")], "other@example.com")
@@ -143,7 +79,6 @@ fn renders_a_mismatch_warning_learn_more_link_and_screen_reader_message() {
 
 // GHD: unit/ui/email-attribution-warning-test.tsx › GitEmailNotFoundWarning › renders a success indicator without the learn-more link when the email matches
 #[test]
-#[ignore = "ghd: missing: no GitEmailNotFoundWarning content fn (ui/lib/git-email-not-found-warning.tsx); welcome.rs draws the check inline in GPUI, preferences.rs shows nothing on a match"]
 fn renders_a_success_indicator_without_the_learn_more_link_when_the_email_matches() {
     let warning =
         git_email_not_found_warning(&[create_account("mona@example.com")], "mona@example.com")

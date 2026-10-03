@@ -9,7 +9,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, dialog};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::text_box;
@@ -48,7 +48,14 @@ impl Render for ChangeRepositoryAliasDialog {
             .state
             .read(cx)
             .repository(self.repo)
-            .map(|r| (r.name(), r.alias.is_some(), r.github.is_some()))
+            // `nameOf(repository)`: owner/name or the folder, not the alias
+            .map(|r| {
+                (
+                    corvene_core::name_of(r),
+                    r.alias.is_some(),
+                    r.github.is_some(),
+                )
+            })
             .unwrap_or_default();
         let verb = if has_alias { "Change" } else { "Create" };
         let value = self.alias.read(cx).value().to_string();
@@ -73,18 +80,17 @@ impl Render for ChangeRepositoryAliasDialog {
             "dialog-change-repository-alias",
             format!("{verb} {}", mac_or("Repository Alias", "repository alias")),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "alias-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "alias-ok",
                     label: format!("{verb} {}", mac_or("Alias", "alias")).into(),
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if disabled {
@@ -94,7 +100,8 @@ impl Render for ChangeRepositoryAliasDialog {
                         Dispatcher::change_repository_alias(repo, Some(value.clone()), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

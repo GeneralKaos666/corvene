@@ -1,17 +1,11 @@
 //! Port of GitHub Desktop's `app/test/unit/repositories-list-grouping-test.ts`.
 //!
 //! GitHub Desktop's `groupRepositories(repositories, localRepositoryStateLookup,
-//! recentRepositories)` (`ui/repositories-list/group-repositories.ts`) has no
-//! callable Corvene equivalent: the repository foldout groups inside
-//! `RepositoryFoldout::groups` (`crates/corvene-ui/src/repository_list.rs`),
-//! a private method of the gpui view that reads the app state, the filter
-//! box and the flags through a gpui `App`, and returns titled groups without
-//! GitHub Desktop's group kinds or per-item `needsDisambiguation` (Corvene's
-//! duplicate-name detail is `duplicate_name_paths`, flag
-//! `213-duplicate-names-show-path`). It also groups GitHub Enterprise
-//! repositories by owner, where GitHub Desktop puts them in one
-//! `enterprise` group per host. The cases call a stand-in and are ignored
-//! until a pure grouping function exists.
+//! recentRepositories)` (`ui/repositories-list/group-repositories.ts`) is
+//! `corvene_ui::repository_list::group_repositories`, which the repository
+//! foldout groups with (`RepositoryFoldout::groups`) before filtering.
+//! [`group_repositories`] maps its groups onto the GitHub Desktop shapes
+//! below (a change of representation only).
 //!
 //! Types: GitHub Desktop's `Repository` is `corvene_models::Repository`
 //! (`Repository::new(id, path)`, `github` for the `GitHubRepository`);
@@ -76,17 +70,39 @@ struct RepositoryGroup {
     items: Vec<RepositoryListItem>,
 }
 
-/// Stand-in for GitHub Desktop's `groupRepositories` (see the module doc).
-/// Replace it with the Corvene function once the foldout's grouping is one
-/// and remove the `#[ignore]`s.
+/// GitHub Desktop's `groupRepositories`: Corvene's, in GitHub Desktop's
+/// shapes.
 fn group_repositories(
-    _repositories: &[Repository],
-    _local_repository_state_lookup: &HashMap<u64, RepoIndicator>,
-    _recent_repositories: &[u64],
+    repositories: &[Repository],
+    local_repository_state_lookup: &HashMap<u64, RepoIndicator>,
+    recent_repositories: &[u64],
 ) -> Vec<RepositoryGroup> {
-    unimplemented!(
-        "the repository foldout's grouping is RepositoryFoldout::groups, which needs a gpui App"
+    use corvene_ui::repository_list::RepositoryListGroup as Group;
+    corvene_ui::repository_list::group_repositories(
+        repositories,
+        local_repository_state_lookup,
+        recent_repositories,
     )
+    .into_iter()
+    .map(|group| RepositoryGroup {
+        identifier: match group.identifier {
+            Group::Recent => RepositoryListGroup::Recent,
+            Group::Other => RepositoryListGroup::Other,
+            Group::Dotcom { owner } => RepositoryListGroup::Dotcom { owner },
+            Group::Enterprise { host } => RepositoryListGroup::Enterprise { host },
+        },
+        items: group
+            .items
+            .into_iter()
+            .map(|item| RepositoryListItem {
+                text: item.text,
+                id: item.id,
+                repository: item.repository,
+                needs_disambiguation: item.needs_disambiguation,
+            })
+            .collect(),
+    })
+    .collect()
 }
 
 /// The `repositories` of the test's `describe`.
@@ -117,7 +133,6 @@ fn repositories() -> Vec<Repository> {
 
 // GHD: unit/repositories-list-grouping-test.ts › repository list grouping › groups repositories by owners/Enterprise/Other
 #[test]
-#[ignore = "ghd: missing: groupRepositories (ui/repositories-list/group-repositories.ts) is inside RepositoryFoldout::groups (needs a gpui App, no group kinds); Corvene also groups GHES repositories by owner, not one enterprise group per host"]
 fn groups_repositories_by_owners_enterprise_other() {
     let repositories = repositories();
     let cache = HashMap::new();
@@ -147,7 +162,6 @@ fn groups_repositories_by_owners_enterprise_other() {
 
 // GHD: unit/repositories-list-grouping-test.ts › repository list grouping › sorts repositories alphabetically within each group
 #[test]
-#[ignore = "ghd: missing: groupRepositories (ui/repositories-list/group-repositories.ts) is inside RepositoryFoldout::groups, which needs a gpui App and returns no group kinds"]
 fn sorts_repositories_alphabetically_within_each_group() {
     let cache = HashMap::new();
     let repo_a = new_repository("a", 1, None);
@@ -194,7 +208,6 @@ fn sorts_repositories_alphabetically_within_each_group() {
 
 // GHD: unit/repositories-list-grouping-test.ts › repository list grouping › only disambiguates Enterprise repositories
 #[test]
-#[ignore = "ghd: missing: groupRepositories (ui/repositories-list/group-repositories.ts) is inside RepositoryFoldout::groups (needs a gpui App, no needsDisambiguation); Corvene also groups GHES repositories by owner, not one enterprise group per host"]
 fn only_disambiguates_enterprise_repositories() {
     let cache = HashMap::new();
     let repo_a = new_repository(

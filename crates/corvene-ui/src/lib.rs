@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod active_resizable;
+pub mod app_menu;
 pub mod autocompletion;
 pub mod banner;
 pub mod branch_list;
@@ -15,6 +16,7 @@ pub mod ci_status;
 pub mod cloneable_repositories;
 pub mod cloning_view;
 pub mod context_menu;
+pub mod copy_button;
 pub mod dialog;
 pub mod dialogs;
 pub mod diff_expansion;
@@ -23,6 +25,7 @@ pub mod diff_view_rows;
 pub mod filter_list;
 pub mod foldout;
 pub mod format;
+pub mod git_email_not_found_warning;
 pub mod history;
 pub mod icons;
 pub mod image_diff;
@@ -38,6 +41,8 @@ mod native_menu_common;
 pub mod native_window;
 pub mod no_changes;
 pub mod no_repositories;
+pub mod path_label;
+pub mod path_text;
 pub mod popover;
 pub mod pull_request_list;
 pub mod relative_time;
@@ -61,8 +66,10 @@ pub mod worktree_list;
 
 use gpui_kit::App;
 
-/// Install the theme global and keymap. Call once after `gpui_kit::init`.
+/// Install the theme global and keymap and start the relative times'
+/// refresh. Call once after `gpui_kit::init`.
 pub fn init(cx: &mut App, theme: theme::GhdTheme) {
     theme::init(cx, theme);
     keymap::install(cx);
+    relative_time::start_refresh(cx);
 }

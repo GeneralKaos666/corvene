@@ -9,51 +9,87 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind,
+};
 use crate::dialogs::branch_dialogs::ref_chip;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{Inline, link_button, paragraph, segmented_option};
 
-/// `ForkSettingsDescription`
+/// GHD `ForkSettingsDescription`
+/// (`ui/repository-settings/fork-contribution-target-description.tsx`): each
+/// list item as the text before the target repository's full name (bold),
+/// the name and the text after it. The target is the fork itself for
+/// `Own` (GHD `Self`) and its parent for `Parent`.
+pub fn fork_settings_description_parts(
+    github: &GitHubRepository,
+    target: ForkContributionTarget,
+) -> Vec<(&'static str, String, &'static str)> {
+    let name = match (target, &github.parent) {
+        (ForkContributionTarget::Parent, Some(parent)) => parent.full_name(),
+        _ => github.full_name(),
+    };
+    [
+        (
+            "Pull requests targeting ",
+            " will be shown in the pull request list.",
+        ),
+        ("Issues will be created in ", "."),
+        ("\"View on GitHub\" will open ", " in the browser."),
+        ("New branches will be based on ", "'s default branch."),
+        ("Autocompletion of user and issues will be based on ", "."),
+    ]
+    .into_iter()
+    .map(|(lead, tail)| (lead, name.clone(), tail))
+    .collect()
+}
+
+/// The text of each `ForkSettingsDescription` list item.
+pub fn fork_settings_description_items(
+    github: &GitHubRepository,
+    target: ForkContributionTarget,
+) -> Vec<String> {
+    fork_settings_description_parts(github, target)
+        .into_iter()
+        .map(|(lead, name, tail)| format!("{lead}{name}{tail}"))
+        .collect()
+}
+
+/// `ForkSettingsDescription`, drawn from [`fork_settings_description_parts`].
 pub fn fork_settings_description(
     github: &GitHubRepository,
     target: ForkContributionTarget,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
-    let name = match (target, &github.parent) {
-        (ForkContributionTarget::Parent, Some(parent)) => parent.full_name(),
-        _ => github.full_name(),
-    };
-    let item = |lead: &'static str, tail: &'static str| {
-        div()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .gap(zpx(3.))
-            .child("•")
-            .child(lead)
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(name.clone()))
-            .child(tail)
-    };
     div()
         .mt(SPACING())
         .flex()
         .flex_col()
         .text_size(FONT_SIZE_SM())
         .text_color(t.text_secondary)
-        .child(item(
-            "Pull requests targeting",
-            "will be shown in the pull request list.",
-        ))
-        .child(item("Issues will be created in", "."))
-        .child(item("\"View on GitHub\" will open", "in the browser."))
-        .child(item("New branches will be based on", "'s default branch."))
-        .child(item(
-            "Autocompletion of user and issues will be based on",
-            ".",
-        ))
+        .children(
+            fork_settings_description_parts(github, target)
+                .into_iter()
+                .map(|(lead, name, tail)| {
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap(zpx(3.))
+                        .child("•")
+                        .child(paragraph(vec![
+                            lead.into(),
+                            Inline::Element(
+                                div()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(name)
+                                    .into_any_element(),
+                            ),
+                            tail.into(),
+                        ]))
+                }),
+        )
         .into_any_element()
 }
 
@@ -185,24 +221,24 @@ impl Render for CreateForkDialog {
                 on_click: Box::new(close),
             }]
         } else {
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "create-fork-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: self.loading,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "create-fork-ok",
                     label: mac_or("Fork This Repository", "Fork this repository").into(),
-                    primary: true,
                     disabled: self.loading,
                     on_click: Box::new(move |_, cx| {
                         weak.update(cx, |this, cx| this.submit(cx)).ok();
                     }),
                 },
-            ]
+            }
+            .into_buttons()
         };
         if self.error.is_some() {
             dialog_with_kind(
@@ -316,25 +352,25 @@ impl Render for ChooseForkSettingsDialog {
             "fork-settings",
             "How are you planning to use this fork?",
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "fork-settings-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "fork-settings-ok",
                     label: "Continue".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::set_fork_contribution_target(repo, selected, cx);
                         Dispatcher::close_popup(cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

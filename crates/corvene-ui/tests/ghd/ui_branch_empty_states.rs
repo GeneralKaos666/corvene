@@ -14,105 +14,22 @@
 //!   "create a new branch" (on the default branch) / "create a pull request"
 //!   link button.
 //!
-//! Corvene draws the same copy inline in GPUI elements that need a window:
-//! `BranchFoldout::no_branches` (`corvene_ui::branch_list`, create variant
-//! only, and always with ⌘⇧N) and `corvene_ui::pull_request_list::
-//! no_pull_requests(id, repository_name, is_search, loading,
-//! on_default_branch, cx)`. Other lists draw their own no-create messages
-//! inline (the compare list, the Open Pull Request base list). There is no
-//! function returning the content, so [`no_branches`] and
-//! [`no_pull_requests`] are stand-ins returning what the components show;
-//! replace them with the Corvene functions once there are some and remove
-//! the `#[ignore]`s.
+//! `NoBranches` is `corvene_ui::branch_list::no_branches(can_create_new_branch,
+//! no_branches_message)`, the content `BranchFoldout::no_branches` and the
+//! compare list draw. `NoPullRequests` is
+//! `corvene_ui::pull_request_list::no_pull_requests_content(props)`, the
+//! content `pull_request_list::no_pull_requests` draws in the branch
+//! foldout's Pull Requests tab.
 //!
 //! A click on a button is GitHub Desktop's callback prop; here the content
-//! names the action the button runs ([`NoBranchesAction`],
-//! [`NoPullRequestsAction`]), which is what `fireEvent.click` then checks.
+//! names the action the button runs (`NoBranchesAction`,
+//! `NoPullRequestsAction`), which is what `fireEvent.click` then checks.
 
-/// What a `NoBranches` button does (`onCreateNewBranch`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NoBranchesAction {
-    CreateNewBranch,
-}
-
-/// What GitHub Desktop's `NoBranches` shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `CreateBranch`: built by the real NoBranches content
-enum NoBranchesContent {
-    /// `canCreateNewBranch`: whether the blank-slate image is drawn,
-    /// `.title`, `.subtitle`, the create button (its label and action) and
-    /// the `.protip` text (`textContent`, the shortcut's keys included).
-    CreateBranch {
-        blankslate_image: bool,
-        title: String,
-        subtitle: String,
-        button: (String, NoBranchesAction),
-        protip: String,
-    },
-    /// Otherwise: `noBranchesMessage`, or "Sorry, I can't find that branch".
-    Message(String),
-}
-
-/// Stand-in for GitHub Desktop's `NoBranches` (`ui/branches/no-branches.tsx`)
-/// rendered with `canCreateNewBranch` and `noBranchesMessage`.
-fn no_branches(
-    _can_create_new_branch: bool,
-    _no_branches_message: Option<&str>,
-) -> NoBranchesContent {
-    unimplemented!(
-        "Corvene has no NoBranches content: BranchFoldout::no_branches draws it inline (GPUI)"
-    )
-}
-
-/// What a `NoPullRequests` link button does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NoPullRequestsAction {
-    /// `onCreateBranch`
-    CreateBranch,
-    /// `onCreatePullRequest`
-    CreatePullRequest,
-}
-
-/// `NoPullRequests.renderCallToAction`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // `Link`: built by the real NoPullRequests content
-enum NoPullRequestsCallToAction {
-    /// The `.call-to-action` text alone.
-    Text(String),
-    /// "Would you like to <link button> …": the link button's label and what
-    /// it does.
-    Link(String, NoPullRequestsAction),
-}
-
-/// What GitHub Desktop's `NoPullRequests` shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct NoPullRequestsContent {
-    /// Whether the `.blankslate-image` is drawn.
-    blankslate_image: bool,
-    /// `.title`
-    title: String,
-    /// `.no-prs`: its text and the repository name (`<Ref>`), when neither
-    /// searching nor loading.
-    no_prs: Option<(String, String)>,
-    call_to_action: NoPullRequestsCallToAction,
-}
-
-/// GitHub Desktop's `INoPullRequestsProps` (the callbacks are the actions).
-#[allow(dead_code)] // read by the real NoPullRequests content
-struct NoPullRequestsProps<'a> {
-    repository_name: &'a str,
-    is_on_default_branch: bool,
-    is_search: bool,
-    is_loading_pull_requests: bool,
-}
-
-/// Stand-in for GitHub Desktop's `NoPullRequests`
-/// (`ui/branches/no-pull-requests.tsx`).
-fn no_pull_requests(_props: NoPullRequestsProps<'_>) -> NoPullRequestsContent {
-    unimplemented!(
-        "Corvene has no NoPullRequests content: pull_request_list::no_pull_requests draws it inline (GPUI)"
-    )
-}
+use corvene_ui::branch_list::{NoBranchesAction, NoBranchesContent, no_branches};
+use corvene_ui::pull_request_list::{
+    NoPullRequestsAction, NoPullRequestsCallToAction, NoPullRequestsProps,
+    no_pull_requests_content as no_pull_requests,
+};
 
 /// GitHub Desktop's `renderNoBranches(props)`: `canCreateNewBranch` true
 /// unless overridden.
@@ -133,7 +50,6 @@ fn create_new_branch_label() -> &'static str {
 
 // GHD: unit/ui/branch-empty-states-test.tsx › branch empty states › renders the create-branch empty state and invokes the create callback
 #[test]
-#[ignore = "ghd: missing: no NoBranches content fn (ui/branches/no-branches.tsx); BranchFoldout::no_branches draws it inline in GPUI, with ⌘⇧N on every platform (GHD: Ctrl+Shift+N off macOS)"]
 fn renders_the_create_branch_empty_state_and_invokes_the_create_callback() {
     let content = render_no_branches(None, None);
 
@@ -165,7 +81,6 @@ fn renders_the_create_branch_empty_state_and_invokes_the_create_callback() {
 
 // GHD: unit/ui/branch-empty-states-test.tsx › branch empty states › renders the no-create fallback message when branch creation is unavailable
 #[test]
-#[ignore = "ghd: missing: no NoBranches content fn (ui/branches/no-branches.tsx); Corvene has no no-create variant, each list draws its own empty message inline in GPUI"]
 fn renders_the_no_create_fallback_message_when_branch_creation_is_unavailable() {
     let content = render_no_branches(Some(false), Some("No matching branches were found."));
 
@@ -179,7 +94,6 @@ fn renders_the_no_create_fallback_message_when_branch_creation_is_unavailable() 
 
 // GHD: unit/ui/branch-empty-states-test.tsx › branch empty states › renders the search and loading pull-request placeholders
 #[test]
-#[ignore = "ghd: missing: no NoPullRequests content fn (ui/branches/no-pull-requests.tsx); pull_request_list::no_pull_requests chooses the copy inline in a GPUI element"]
 fn renders_the_search_and_loading_pull_request_placeholders() {
     let view = no_pull_requests(NoPullRequestsProps {
         repository_name: "desktop",
@@ -207,7 +121,6 @@ fn renders_the_search_and_loading_pull_request_placeholders() {
 
 // GHD: unit/ui/branch-empty-states-test.tsx › branch empty states › renders default-branch and feature-branch calls to action and invokes their callbacks
 #[test]
-#[ignore = "ghd: missing: no NoPullRequests content fn (ui/branches/no-pull-requests.tsx); pull_request_list::no_pull_requests chooses the copy inline in a GPUI element"]
 fn renders_default_branch_and_feature_branch_calls_to_action_and_invokes_their_callbacks() {
     let view = no_pull_requests(NoPullRequestsProps {
         repository_name: "desktop",

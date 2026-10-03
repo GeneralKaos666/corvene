@@ -455,7 +455,7 @@ impl OpenPullRequestDialog {
                                 format!(
                                     "{}, {}",
                                     file.path,
-                                    crate::widgets::status_label(file.status.kind)
+                                    crate::widgets::status_label(&file.status)
                                 ),
                                 is_selected,
                             )

@@ -6,7 +6,7 @@ use corvene_core::Dispatcher;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::dialog::{DialogButton, dialog};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 
@@ -72,25 +72,25 @@ impl Render for ImportGitConfigDialog {
             "import-git-config",
             "Import Git settings",
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "import-git-config-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(|_, cx| Dispatcher::close_popup(cx)),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "import-git-config-ok",
                     label: "Import".into(),
-                    primary: true,
                     disabled: self.settings.is_empty(),
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::import_git_config(settings.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

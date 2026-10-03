@@ -23,7 +23,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, dialog_with_footer_message};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog_with_footer_message};
 use crate::icons::{Octicon, octicon};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
@@ -267,7 +267,7 @@ impl Render for CreateRepositoryDialog {
         let full = self.full_path(cx);
         let exists_as_repo = full
             .as_ref()
-            .map(|p| corvene_git::path_status(p) == corvene_git::PathStatus::Repository)
+            .map(|p| corvene_git::root_path_status(p) == corvene_git::PathStatus::Repository)
             .unwrap_or(false);
         let can_create = full.is_some() && !exists_as_repo;
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
@@ -443,18 +443,17 @@ impl Render for CreateRepositoryDialog {
                 ))
                 .child(labeled("License", self.license_select(cx), cx)),
             path_message,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "create-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "create-ok",
                     label: mac_or("Create Repository", "Create repository").into(),
-                    primary: true,
                     // `fullPath === null || creating || isRepository`
                     disabled: !can_create,
                     on_click: Box::new(move |_, cx| {
@@ -463,7 +462,8 @@ impl Render for CreateRepositoryDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

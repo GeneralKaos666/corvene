@@ -7,19 +7,16 @@
 //!
 //! - `renderBranchHasRemoteWarning(branch)` (Rename Branch): "This branch
 //!   is tracking <upstream> and renaming this branch will not change the
-//!   branch name on the remote." when the branch has an upstream. Corvene
-//!   draws the same warning inline in `RenameBranchDialog::render`
-//!   (`crates/corvene-ui/src/dialogs/branch_dialogs.rs`, from
-//!   `Branch::upstream_short`).
+//!   branch name on the remote." when the branch has an upstream.
 //! - `renderBranchNameExistsOnRemoteWarning(sanitizedName, branches)`
 //!   (Create Branch): "A branch named <name> already exists on the remote."
-//!   when a remote branch has that name without its remote. Corvene's
-//!   Create Branch dialog has no such warning (only the local "A branch
-//!   named … already exists." error).
+//!   when a remote branch has that name without its remote.
 //!
-//! [`render_branch_has_remote_warning`] and
-//! [`render_branch_name_exists_on_remote_warning`] are stand-ins returning
-//! the warning's text, `None` when GitHub Desktop renders nothing.
+//! Corvene's are `corvene_ui::dialogs::render_branch_has_remote_warning`
+//! and `render_branch_name_exists_on_remote_warning` (the Rename and Create
+//! Branch dialogs draw them); [`render_branch_has_remote_warning`] and
+//! [`render_branch_name_exists_on_remote_warning`] return the warning's
+//! text, `None` when GitHub Desktop renders nothing.
 //!
 //! Types: GitHub Desktop's `Branch(name, upstream, tip, type, ref)` is
 //! `corvene_core::Branch`, whose `upstream` is the full ref
@@ -45,27 +42,24 @@ fn create_branch(name: &str, upstream: Option<&str>, kind: BranchKind, full_name
     }
 }
 
-/// Stand-in for GitHub Desktop's `renderBranchHasRemoteWarning(branch)`:
-/// the warning's text, `None` when nothing is rendered. Replace it with the
-/// Corvene function once there is one and remove the `#[ignore]`s.
-fn render_branch_has_remote_warning(_branch: &Branch) -> Option<String> {
-    unimplemented!("RenameBranchDialog::render draws the tracking warning inline")
+/// GitHub Desktop's `renderBranchHasRemoteWarning(branch)`: the warning's
+/// text, `None` when nothing is rendered.
+fn render_branch_has_remote_warning(branch: &Branch) -> Option<String> {
+    corvene_ui::dialogs::render_branch_has_remote_warning(branch).map(|w| w.text())
 }
 
-/// Stand-in for GitHub Desktop's
-/// `renderBranchNameExistsOnRemoteWarning(sanitizedName, branches)`: the
-/// warning's text, `None` when nothing is rendered. Replace it with the
-/// Corvene function once there is one and remove the `#[ignore]`s.
+/// GitHub Desktop's `renderBranchNameExistsOnRemoteWarning(sanitizedName,
+/// branches)`: the warning's text, `None` when nothing is rendered.
 fn render_branch_name_exists_on_remote_warning(
-    _sanitized_name: &str,
-    _branches: &[Branch],
+    sanitized_name: &str,
+    branches: &[Branch],
 ) -> Option<String> {
-    unimplemented!("Corvene's Create Branch dialog has no \"already exists on the remote\" warning")
+    corvene_ui::dialogs::render_branch_name_exists_on_remote_warning(sanitized_name, branches)
+        .map(|w| w.text())
 }
 
 // GHD: unit/ui/visual-helper-surfaces-test.tsx › visual helper surfaces › renders remote-tracking and duplicate-name branch warnings when applicable
 #[test]
-#[ignore = "ghd: missing: no renderBranchHasRemoteWarning / renderBranchNameExistsOnRemoteWarning (branch-name-warnings.tsx); Rename Branch draws the first inline, Create Branch lacks the second"]
 fn renders_remote_tracking_and_duplicate_name_branch_warnings_when_applicable() {
     let remote_tracking_branch = create_branch(
         "main",
@@ -95,7 +89,6 @@ fn renders_remote_tracking_and_duplicate_name_branch_warnings_when_applicable() 
 
 // GHD: unit/ui/visual-helper-surfaces-test.tsx › visual helper surfaces › returns no branch warning markup when warning conditions are absent
 #[test]
-#[ignore = "ghd: missing: no renderBranchHasRemoteWarning / renderBranchNameExistsOnRemoteWarning (branch-name-warnings.tsx); Rename Branch draws the first inline, Create Branch lacks the second"]
 fn returns_no_branch_warning_markup_when_warning_conditions_are_absent() {
     let local_branch = create_branch("topic", None, BranchKind::Local, "refs/heads/topic");
     let remote_branch = create_branch(

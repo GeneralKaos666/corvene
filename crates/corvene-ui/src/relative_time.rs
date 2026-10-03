@@ -1,45 +1,155 @@
-//! GHD `RelativeTime`: "just now", "5 minutes ago", "2 hours ago", "3 days ago"…
+//! GHD `RelativeTime` (`ui/relative-time.tsx`): "just now", "5 minutes
+//! ago", "2 hours ago", "3 days ago"…, from
+//! `getRelativeTimeInfoFromDate` ([`relative_time_info`]). Like GHD's
+//! component, which re-renders itself when its text is due to change, a
+//! rendered relative time registers that moment and [`start_refresh`]
+//! re-renders the windows then.
 //!
 //! Deviation (`106-calendar-relative-dates`): past a week, ages are counted
 //! in weeks until two calendar months have passed, then in calendar months
 //! and years (GHD `formatRelative` divides days by 30, so a commit on the 1st
 //! is "last month" on the 31st).
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
+
+use gpui_kit::App;
 
 use crate::format::LocalTime;
 
 static CALENDAR_DATES: AtomicBool = AtomicBool::new(false);
+
+/// The earliest moment a relative time drawn since the last refresh is due
+/// to change.
+static NEXT_REFRESH: Mutex<Option<SystemTime>> = Mutex::new(None);
 
 /// Mirror `106-calendar-relative-dates` (called whenever the flags change).
 pub fn set_calendar_dates(on: bool) {
     CALENDAR_DATES.store(on, Ordering::Relaxed);
 }
 
-pub fn relative(from: SystemTime) -> String {
-    // Settings › Appearance › "Prefer absolute dates over relative".
-    if crate::format::prefer_absolute_dates() {
-        return crate::format::format_date(from);
-    }
-    let now = SystemTime::now();
-    let past_ms = match now.duration_since(from) {
-        Ok(d) => d.as_millis() as f64,
-        // `getRelativeTimeInfoFromDate`: more than a minute ahead shows the date
-        Err(e) if e.duration().as_secs() > 60 => return crate::format::format_date(from),
-        Err(_) => 0.0,
+const MINUTE: Duration = Duration::from_secs(60);
+const HOUR: Duration = Duration::from_secs(60 * 60);
+const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// GHD `RelativeTimeInfo`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelativeTimeInfo {
+    /// The tooltip text: the date and time in the user's formats.
+    pub absolute_text: String,
+    pub relative_text: String,
+    /// When `relative_text` is due to change (GHD `duration`, the
+    /// component's refresh timeout); `None` for an absolute date.
+    pub duration: Option<Duration>,
+}
+
+/// GHD `getRelativeTimeInfoFromDate(then, onlyRelative)` with the clock's
+/// `now` passed in. Without `only_relative` a date over a week old is
+/// shown as the date alone.
+pub fn relative_time_info(
+    then: SystemTime,
+    now: SystemTime,
+    only_relative: bool,
+) -> RelativeTimeInfo {
+    // `formatDate(then, { dateStyle, timeStyle })`: the styles only apply
+    // without formatting preferences, so the date and time formats
+    let absolute_text = crate::format::format_date_time(then);
+    let (future, duration) = match then.duration_since(now) {
+        Ok(ahead) => (true, ahead),
+        Err(e) => (false, e.duration()),
     };
-    if past_ms < 60_000.0 {
-        return "just now".to_string();
+    let info = |relative_text: String, duration: Option<Duration>| RelativeTimeInfo {
+        absolute_text: absolute_text.clone(),
+        relative_text,
+        duration,
+    };
+    // more than a minute ahead: the date and time, rescheduled
+    if future && duration > MINUTE {
+        return info(absolute_text.clone(), Some(duration));
     }
+    if duration < MINUTE {
+        return info("just now".into(), Some(MINUTE - duration));
+    }
+    let relative_text = || format_relative(then, now, duration);
+    if duration < HOUR {
+        info(relative_text(), Some(MINUTE))
+    } else if duration < DAY {
+        info(relative_text(), Some(HOUR))
+    } else if duration < 7 * DAY || only_relative {
+        info(relative_text(), Some(6 * HOUR))
+    } else {
+        // more than a week ago, the date will suffice
+        info(crate::format::format_date(then), None)
+    }
+}
+
+/// GHD `formatRelative` of a past `age`, or the calendar wording of
+/// `106-calendar-relative-dates`.
+fn format_relative(then: SystemTime, now: SystemTime, age: Duration) -> String {
+    let past_ms = age.as_millis() as f64;
     if CALENDAR_DATES.load(Ordering::Relaxed) {
         let (then, now) = (
-            crate::format::local_time(from),
+            crate::format::local_time(then),
             crate::format::local_time(now),
         );
         return format_relative_calendar(past_ms, &then, &now);
     }
     format_relative_past(past_ms)
+}
+
+/// `RelativeTime` (`onlyRelative`) of `from` now.
+pub fn relative(from: SystemTime) -> String {
+    relative_at(from, SystemTime::now())
+}
+
+/// [`relative`] with the clock's `now` passed in. Registers when the text is
+/// due to change for [`start_refresh`].
+pub fn relative_at(from: SystemTime, now: SystemTime) -> String {
+    // Settings › Appearance › "Prefer absolute dates over relative".
+    if crate::format::prefer_absolute_dates() {
+        return crate::format::format_date(from);
+    }
+    let info = relative_time_info(from, now, true);
+    if let Some(duration) = info.duration
+        && let Ok(mut next) = NEXT_REFRESH.lock()
+    {
+        let due = now + duration;
+        if next.is_none_or(|n| due < n) {
+            *next = Some(due);
+        }
+    }
+    info.relative_text
+}
+
+/// How often [`start_refresh`] looks for a newly registered refresh.
+const REFRESH_POLL: Duration = Duration::from_secs(15);
+
+/// GHD `RelativeTime`'s timer for every relative time on screen: re-render
+/// the windows once the earliest text drawn since the last refresh is due
+/// to change. Call once at startup.
+pub fn start_refresh(cx: &mut App) {
+    cx.spawn(async move |cx| {
+        loop {
+            let now = SystemTime::now();
+            let next = NEXT_REFRESH.lock().ok().and_then(|n| *n);
+            match next {
+                Some(due) if due <= now => {
+                    if let Ok(mut n) = NEXT_REFRESH.lock() {
+                        *n = None;
+                    }
+                    // the re-render registers the next change
+                    cx.update(|cx| cx.refresh_windows());
+                }
+                Some(due) => {
+                    let wait = due.duration_since(now).unwrap_or_default();
+                    cx.background_executor().timer(wait.min(REFRESH_POLL)).await;
+                }
+                None => cx.background_executor().timer(REFRESH_POLL).await,
+            }
+        }
+    })
+    .detach();
 }
 
 /// `format_relative_past` up to a week; then weeks until two calendar months
@@ -107,6 +217,21 @@ fn format_relative_past(ms: f64) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn info_schedules_the_next_change() {
+        let now = SystemTime::now();
+        let info = relative_time_info(now - Duration::from_secs(44), now, true);
+        assert_eq!(info.relative_text, "just now");
+        assert_eq!(info.duration, Some(Duration::from_secs(16)));
+        let info = relative_time_info(now - Duration::from_secs(3 * 3600), now, true);
+        assert_eq!(info.relative_text, "3 hours ago");
+        assert_eq!(info.duration, Some(HOUR));
+        let old = now - 8 * DAY;
+        let info = relative_time_info(old, now, false);
+        assert_eq!(info.relative_text, crate::format::format_date(old));
+        assert_eq!(info.duration, None);
+    }
 
     #[test]
     fn buckets() {

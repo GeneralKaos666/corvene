@@ -4,11 +4,10 @@
 //! - `CICheckRunNoStepItem` (`ui/check-runs/ci-check-run-no-steps.tsx`):
 //!   "There are no steps to display for this check.", a "View check
 //!   details" button calling `onViewCheckExternally` and a decorative
-//!   paper-stack image (`alt=""`). Corvene draws the same pane inline in
-//!   the check run list of `crates/corvene-ui/src/ci_check_popover.rs` (a
-//!   GPUI element; the button opens the check's URL with
-//!   `Dispatcher::open_url`), so [`ci_check_run_no_step_item`] is a
-//!   stand-in returning the pane's content.
+//!   paper-stack image (`alt=""`). Corvene's counterpart is
+//!   `corvene_ui::ci_check_popover::ci_check_run_no_step_item()`, the
+//!   content the check run list of `crates/corvene-ui/src/ci_check_popover.rs`
+//!   draws (the button opens the check's URL with `Dispatcher::open_url`).
 //! - `CLIInstalled` (`ui/cli-installed/cli-installed.tsx`): the title
 //!   ("Command Line Tool Installed" / "Command line tool installed"), "The
 //!   command line tool has been installed at `InstalledCLIPath`." and an Ok
@@ -21,8 +20,9 @@
 //!   ignored as the documented `corvene` rename (`.docs/deviations.md` ›
 //!   Window / menus › Install Command Line Tool…; Linux's
 //!   `~/.local/bin/corvene` is flag `414-linux-install-cli`'s Corvene
-//!   addition), and the title and button, for which [`cli_installed`] is a
-//!   stand-in.
+//!   addition), and the title and button, read from
+//!   `corvene_ui::dialogs::cli_installed(path)`, the content `SimpleDialog`
+//!   draws.
 //!
 //! A click on a button is GitHub Desktop's callback prop; here the content
 //! names the action the button runs, which is what `fireEvent.click` then
@@ -33,64 +33,11 @@
 use std::path::Path;
 
 use corvene_platform::cli::install_path;
-
-/// What a button of `CICheckRunNoStepItem` does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // built by the real CICheckRunNoStepItem content
-enum CheckRunNoStepAction {
-    /// `onViewCheckExternally`
-    ViewCheckExternally,
-}
-
-/// What GitHub Desktop's `CICheckRunNoStepItem` shows.
-#[allow(dead_code)] // filled by the real CICheckRunNoStepItem content
-struct CheckRunNoStepContent {
-    /// The paragraph's text (the button's label excluded).
-    text: String,
-    /// The button: its label and what it does.
-    button: (String, CheckRunNoStepAction),
-    /// The paper-stack image's alternative text (`Some("")`: decorative),
-    /// `None` when there is no image.
-    image_alt: Option<String>,
-}
-
-/// Stand-in for GitHub Desktop's `CICheckRunNoStepItem`
-/// (`ui/check-runs/ci-check-run-no-steps.tsx`). Replace it with the
-/// Corvene function once there is one and remove the `#[ignore]`.
-fn ci_check_run_no_step_item() -> CheckRunNoStepContent {
-    unimplemented!(
-        "Corvene has no CICheckRunNoStepItem content: ci_check_popover.rs draws the no-steps pane inline (GPUI)"
-    )
-}
-
-/// What a button of `CLIInstalled` does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // built by the real CLIInstalled content
-enum CliInstalledAction {
-    /// `onDismissed`
-    Dismiss,
-}
-
-/// What GitHub Desktop's `CLIInstalled` dialog shows.
-#[allow(dead_code)] // filled by the real CLIInstalled content
-struct CliInstalledContent {
-    title: String,
-    /// The footer's buttons: label and what each does.
-    buttons: Vec<(String, CliInstalledAction)>,
-}
-
-/// Stand-in for GitHub Desktop's `CLIInstalled`
-/// (`ui/cli-installed/cli-installed.tsx`) showing `path`. Replace it with
-/// the Corvene function once there is one and remove the `#[ignore]`.
-fn cli_installed(_path: &Path) -> CliInstalledContent {
-    unimplemented!(
-        "Corvene has no CLIInstalled content: SimpleDialog draws Popup::CLIInstalled inline (GPUI)"
-    )
-}
+use corvene_ui::ci_check_popover::{CheckRunNoStepAction, ci_check_run_no_step_item};
+use corvene_ui::dialogs::{CliInstalledAction, cli_installed};
 
 // GHD: unit/ui/small-action-and-dialog-surfaces-test.tsx › small action and dialog surfaces › renders the no-step check-run state and invokes the external-view callback
 #[test]
-#[ignore = "ghd: missing: no CICheckRunNoStepItem content (ci-check-run-no-steps.tsx); ci_check_popover.rs draws the no-steps pane inline as a GPUI element"]
 fn renders_the_no_step_check_run_state_and_invokes_the_external_view_callback() {
     let view = ci_check_run_no_step_item();
 
@@ -122,7 +69,6 @@ fn renders_the_cli_installed_dialog_and_dismisses_through_the_default_button() {
 
 // GHD: unit/ui/small-action-and-dialog-surfaces-test.tsx › small action and dialog surfaces › renders the cli-installed dialog and dismisses through the default button
 #[test]
-#[ignore = "ghd: missing: no CLIInstalled content (cli-installed.tsx); SimpleDialog draws Popup::CLIInstalled's title, text and Ok button inline as GPUI elements"]
 fn renders_the_cli_installed_dialog_and_dismisses_through_the_default_button_content() {
     let dialog = cli_installed(&install_path());
 

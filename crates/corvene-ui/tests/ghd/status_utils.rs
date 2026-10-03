@@ -2,13 +2,12 @@
 //!
 //! Corvene equivalents of GitHub Desktop's `lib/status.ts`:
 //!
-//! - `mapStatus(status)` is `corvene_ui::widgets::status_label(status.kind)`
-//!   (the status text the file lists give VoiceOver). It takes the kind
-//!   alone, which is all these cases vary.
+//! - `mapStatus(status)` is `corvene_ui::widgets::status_label(status)`
+//!   (the status text the file lists give VoiceOver).
 //! - `hasConflictedFiles(workingDirectoryStatus)` is
 //!   `WorkingDirectoryStatus::has_conflicts`.
-//! - `isConflictedFile(status)` has no Corvene function (callers compare
-//!   `status.kind` inline), so [`is_conflicted_file`] is a stand-in.
+//! - `isConflictedFile(status)` is `FileStatus::is_conflicted`
+//!   ([`is_conflicted_file`]).
 //! - `WorkingDirectoryStatus.fromFiles(files)` is a `WorkingDirectoryStatus`
 //!   holding `files`; `makeFile(path, kind)` is [`make_file`].
 //! - GitHub Desktop's status objects carry only the keys the tests set.
@@ -27,14 +26,12 @@ use corvene_ui::widgets::status_label;
 
 /// GitHub Desktop's `mapStatus(status)`.
 fn map_status(status: &FileStatus) -> &'static str {
-    status_label(status.kind)
+    status_label(status)
 }
 
-/// Stand-in for GitHub Desktop's `isConflictedFile(file)`
-/// (`lib/status.ts`). Replace it with the Corvene function once there is
-/// one and remove the `#[ignore]`s.
-fn is_conflicted_file(_file: &FileStatus) -> bool {
-    unimplemented!("Corvene has no isConflictedFile (callers compare status.kind inline)")
+/// GitHub Desktop's `isConflictedFile(file)` (`lib/status.ts`).
+fn is_conflicted_file(file: &FileStatus) -> bool {
+    file.is_conflicted()
 }
 
 /// A status object with only `kind` set (`{ kind }`).
@@ -141,7 +138,6 @@ fn returns_copied_for_copied_files() {
 
 // GHD: unit/status-utils-test.ts › lib/status › isConflictedFile › returns true for conflicted files
 #[test]
-#[ignore = "ghd: missing: Corvene has no isConflictedFile (lib/status.ts); callers compare status.kind inline"]
 fn returns_true_for_conflicted_files() {
     let status = conflicted_status();
     assert!(is_conflicted_file(&status));
@@ -149,7 +145,6 @@ fn returns_true_for_conflicted_files() {
 
 // GHD: unit/status-utils-test.ts › lib/status › isConflictedFile › returns false for non-conflicted files
 #[test]
-#[ignore = "ghd: missing: Corvene has no isConflictedFile (lib/status.ts); callers compare status.kind inline"]
 fn returns_false_for_non_conflicted_files() {
     assert!(!is_conflicted_file(&plain_status(FileStatusKind::Modified)));
     assert!(!is_conflicted_file(&plain_status(FileStatusKind::New)));

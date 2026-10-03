@@ -7,7 +7,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, dialog, dialog_loading};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_loading};
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, mono_font};
 use crate::widgets::{Inline, code_ref, link_button, paragraph};
@@ -104,24 +104,24 @@ impl Render for CreateTutorialRepositoryDialog {
             "Start tutorial",
             loading,
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "tutorial-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: loading,
                     on_click: Box::new(|_, cx| Dispatcher::close_popup(cx)),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "tutorial-continue",
                     label: "Continue".into(),
-                    primary: true,
                     disabled: loading,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::create_tutorial_repository(account.clone(), cx)
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -142,18 +142,17 @@ impl Render for ConfirmExitTutorialDialog {
                 "Are you sure you want to leave the tutorial? This will bring you back to the \
                  home screen.",
             ),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "exit-tutorial-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(|_, cx| Dispatcher::close_popup(cx)),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "exit-tutorial-ok",
                     label: mac_or("Exit Tutorial", "Exit tutorial").into(),
-                    primary: true,
                     disabled: false,
                     // `onExitTutorialToHomeScreen` → `pauseTutorial`
                     on_click: Box::new(|_, cx| {
@@ -161,7 +160,8 @@ impl Render for ConfirmExitTutorialDialog {
                         Dispatcher::pause_tutorial(cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

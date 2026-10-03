@@ -8,7 +8,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind,
+};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{ListRowA11y, link_button};
@@ -354,18 +356,17 @@ impl Render for ConfirmRemoveRepositoryDialog {
             DialogKind::Warning,
             mac_or("Remove Repository", "Remove repository"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "remove-repo-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "remove-repo-ok",
                     label: "Remove".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
@@ -376,7 +377,8 @@ impl Render for ConfirmRemoveRepositoryDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -434,7 +436,9 @@ impl Render for IntegrationErrorDialog {
                         label: mac_or("Open Settings", "Open options").into(),
                         primary: false,
                         disabled: false,
+                        // GHD `onShowPreferencesDialog`: the error closes first
                         on_click: Box::new(|_, cx| {
+                            Dispatcher::close_popup(cx);
                             Dispatcher::open_preferences(PreferencesTab::Integrations, cx)
                         }),
                     })
@@ -461,6 +465,7 @@ impl Render for IntegrationErrorDialog {
                     primary: false,
                     disabled: false,
                     on_click: Box::new(|_, cx| {
+                        Dispatcher::close_popup(cx);
                         Dispatcher::open_preferences(PreferencesTab::Integrations, cx)
                     }),
                 }),

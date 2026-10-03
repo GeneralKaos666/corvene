@@ -15,7 +15,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogFrame, DialogKind, dialog_with_kind_framed};
+use crate::dialog::{
+    DialogFrame, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind_framed,
+};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::mono_font;
@@ -201,18 +203,17 @@ impl Render for DiscardChangesDialog {
             DialogKind::Warning,
             title,
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "discard-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "discard-ok",
                     label: ok_label.into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
@@ -224,7 +225,8 @@ impl Render for DiscardChangesDialog {
                         Dispatcher::close_popup(cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             DialogFrame {
                 focus_primary: all,
                 ..DialogFrame::default()

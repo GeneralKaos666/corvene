@@ -2,8 +2,9 @@
 //! `commit-list-item.tsx` (`styles/ui/history/_history.scss`,
 //! `_commit-list.scss`, `drag-elements/_commit-drag-element.scss`):
 //! "Select Branch to Compare…" box, then 50 px commit rows (bold summary;
-//! avatar + "author • time" byline; tag badges). The list is virtualized and
-//! pages in `COMMIT_BATCH_SIZE` commits as it scrolls. Commits multi-select
+//! avatar + "authors • time" byline, `CommitAttribution`; tag badges). The
+//! list is virtualized and pages in `COMMIT_BATCH_SIZE` commits as it
+//! scrolls. Commits multi-select
 //! with ⌘/⇧-click, drag to squash onto another commit, to reorder (drop
 //! between rows) or to cherry-pick onto a branch in the branch foldout, and
 //! "Reorder Commit" starts the keyboard insertion mode (↑/↓, ⏎, Esc).
@@ -31,7 +32,7 @@ use corvene_core::{
     AppState, Commit, ComparisonMode, Dispatcher, DropTarget, Mergeability,
     MultiCommitOperationKind, Popup,
 };
-use gpui_kit::component::input::InputState;
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -283,6 +284,30 @@ impl HistorySidebar {
                 "Select branch to compare…",
             ))
         });
+        // GHD `compareState.filterText`: the box edits the repository's
+        // filter text, and shows it when it changes elsewhere (a
+        // comparison, back to the history, another repository)
+        cx.subscribe(&compare, |this: &mut Self, input, ev: &InputEvent, cx| {
+            if matches!(ev, InputEvent::Change)
+                && let Some(id) = this.state.read(cx).selected
+            {
+                let text = input.read(cx).value().to_string();
+                Dispatcher::set_compare_filter_text(id, text, cx);
+            }
+        })
+        .detach();
+        cx.observe_in(&state, window, |this, state, window, cx| {
+            let filter_text = state
+                .read(cx)
+                .selected_state()
+                .map(|rs| rs.compare.filter_text.clone())
+                .unwrap_or_default();
+            if this.compare.read(cx).value() != filter_text.as_str() {
+                this.compare
+                    .update(cx, |input, cx| input.set_value(filter_text, window, cx));
+            }
+        })
+        .detach();
         Self {
             state,
             compare,
@@ -490,7 +515,12 @@ impl HistorySidebar {
                 .justify_center()
                 .text_size(FONT_SIZE())
                 .text_color(t.text_secondary)
-                .child("No branches to compare")
+                // GHD `NoBranches` without `canCreateNewBranch`
+                .child(
+                    crate::branch_list::no_branches(false, None)
+                        .title()
+                        .to_string(),
+                )
                 .into_any_element();
         }
         let focused = self.focused_branch.clone();
@@ -1309,10 +1339,11 @@ impl HistorySidebar {
         if copy_items {
             // `809`: the title, the full message and the GitHub URL
             let title = commit.summary.clone();
-            let message = if commit.body.is_empty() {
+            // the body is git's `%b`, ending in a newline
+            let message = if commit.body.trim().is_empty() {
                 commit.summary.clone()
             } else {
-                format!("{}\n\n{}", commit.summary, commit.body)
+                format!("{}\n\n{}", commit.summary, commit.body.trim_end())
             };
             items.push(MenuItem::new(
                 mac_or("Copy Commit Title", "Copy commit title"),
@@ -1746,6 +1777,45 @@ impl HistorySidebar {
     }
 }
 
+/// What GHD `CommitAttribution` (`ui/lib/commit-attribution.tsx`) renders.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitAttribution {
+    /// The `.commit-attribution-component` text.
+    pub text: String,
+    /// The `.author` spans' texts (none for "N people").
+    pub authors: Vec<String>,
+}
+
+/// GHD `CommitAttribution`: one or two authors by name ("Mona", "Mona,
+/// Hubot"), more counted ("3 people").
+pub fn commit_attribution(avatar_users: &[&corvene_core::AvatarUser]) -> CommitAttribution {
+    match avatar_users {
+        [one] => CommitAttribution {
+            text: one.name.clone(),
+            authors: vec![one.name.clone()],
+        },
+        [first, second] => CommitAttribution {
+            text: format!("{}, {}", first.name, second.name),
+            authors: vec![first.name.clone(), second.name.clone()],
+        },
+        users => CommitAttribution {
+            text: format!("{} people", users.len()),
+            authors: Vec::new(),
+        },
+    }
+}
+
+/// `CommitAttribution` of `commit` in the selected repository
+/// (`getAvatarUsersForCommit` with its GitHub repository).
+pub(crate) fn commit_attribution_for(commit: &Commit, cx: &App) -> CommitAttribution {
+    let github = AppState::try_global(cx).and_then(|s| {
+        let s = s.read(cx);
+        s.selected_repository().and_then(|r| r.github.clone())
+    });
+    let users = corvene_core::get_avatar_users_for_commit(github.as_ref(), commit);
+    commit_attribution(&users.iter().collect::<Vec<_>>())
+}
+
 #[derive(Clone, Copy, Default)]
 struct RowHint {
     squash_target: bool,
@@ -1781,9 +1851,10 @@ pub(crate) fn commit_row_contents(
                 .bool(corvene_core::flags::ids::COMMIT_BODY_INDICATOR)
         });
     let compact = compact_rows(cx);
+    // `.byline`: `CommitAttribution`, then the relative time
     let byline = format!(
         "{} • {}",
-        commit.author.name,
+        commit_attribution_for(commit, cx).text,
         relative(commit.author.date())
     );
     div()
@@ -2034,7 +2105,8 @@ fn commit_row(
                 } else {
                     commit.summary.as_str()
                 },
-                commit.author.name,
+                // the byline's `CommitAttribution`
+                commit_attribution_for(commit, cx).text,
                 relative(commit.author.date())
             ),
             is_selected,

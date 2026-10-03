@@ -70,6 +70,8 @@ pub struct SelectedCommitView {
     file_scroll: UniformListScrollHandle,
     /// Corvene (`801-history-review-mode`): the file list is hidden.
     file_list_hidden: bool,
+    /// GHD `CopyButton` of the commit's SHA (its copied state).
+    copy_sha: Option<crate::copy_button::CopyButton>,
 }
 
 /// How a click in the commit file list changes the selection.
@@ -103,6 +105,7 @@ impl SelectedCommitView {
             file_list_width,
             file_list_focus: cx.focus_handle(),
             file_list_focused: false,
+            copy_sha: None,
             multi_files: None,
             multi_end: None,
             file_scroll: UniformListScrollHandle::new(),
@@ -524,18 +527,15 @@ impl SelectedCommitView {
             .then(|| s.repository(id).and_then(|r| r.github.as_ref()))
             .flatten()
             .map(|g| g.html_url.clone());
-        let message = |id: &'static str, text: &str, cx: &App| {
-            crate::markdown::rich_text(
-                id,
-                &corvene_core::markdown::commit_message_rich_text(
-                    text,
-                    token_repository.as_ref(),
-                    rich_extras,
-                    commit_base.as_deref(),
-                ),
-                cx,
-            )
-        };
+        // GHD `wrapRichTextCommitMessage`: a summary past 72 characters
+        // continues at the start of the description
+        let (title_text, description_text) = corvene_core::markdown::commit_summary_rich_text(
+            &commit.summary,
+            &commit.body,
+            token_repository.as_ref(),
+            rich_extras,
+            commit_base.as_deref(),
+        );
         let empty = commit.summary.is_empty();
         let title = if empty {
             "Empty commit message".to_string()
@@ -575,7 +575,7 @@ impl SelectedCommitView {
                         .child(div().min_w_0().child(if empty {
                             title.into_any_element()
                         } else {
-                            message("commit-title", &title, cx)
+                            crate::markdown::rich_text("commit-title", &title_text, cx)
                         }))
                         .child(
                             div()
@@ -618,7 +618,7 @@ impl SelectedCommitView {
                         .flex()
                         .flex_col()
                         .when(expanded, |d| d.max_h(zpx(400.)))
-                        .when(!commit.body.is_empty(), |d| {
+                        .when(!description_text.is_empty(), |d| {
                             // `.ecs-description-text`: a 5 px padded box in
                             // `--box-alt-background-color`, 5 px above the meta row
                             d.child(div().pb(SPACING_HALF()).child({
@@ -628,7 +628,11 @@ impl SelectedCommitView {
                                     .font_family(mono_font())
                                     .text_size(FONT_SIZE_SM())
                                     .line_height(zpx(16.5))
-                                    .child(message("commit-description", &commit.body, cx));
+                                    .child(crate::markdown::rich_text(
+                                        "commit-description",
+                                        &description_text,
+                                        cx,
+                                    ));
                                 if expanded {
                                     // `.beneath-summary` scrolls the whole body
                                     text.into_any_element()
@@ -662,7 +666,11 @@ impl SelectedCommitView {
                                             zpx(16.),
                                             cx,
                                         ))
-                                        .child(commit.author.name.clone()),
+                                        // `CommitAttribution`
+                                        .child(
+                                            crate::history::commit_attribution_for(&commit, cx)
+                                                .text,
+                                        ),
                                 )
                                 .when(extras, |d| {
                                     let date = commit.author.date();
@@ -700,14 +708,56 @@ impl SelectedCommitView {
                                             }
                                         })
                                         .child({
-                                            let sha = commit.sha.clone();
+                                            // GHD `CopyButton`, its copied state
+                                            // kept while the commit stays selected
+                                            let button = self
+                                                .copy_sha
+                                                .clone()
+                                                .filter(|b| b.copy_content() == commit.sha)
+                                                .unwrap_or_else(|| {
+                                                    crate::copy_button::CopyButton::new(
+                                                        commit.sha.clone(),
+                                                        "Copy the full SHA",
+                                                    )
+                                                });
+                                            let entity = cx.entity().downgrade();
+                                            let clicked = button.clone();
                                             // `.copy-button`: 16 px wide with a 12 px
                                             // icon, a `<button>` at `line-height:
                                             // normal` (14 px with SF; with a wider
                                             // UI font, 17 px, which sets the row's)
-                                            div()
-                                                .id("copy-sha")
-                                                .icon_button_label("Copy the full SHA")
+                                            crate::copy_button::copy_button_element(
+                                                "copy-sha",
+                                                &button,
+                                                zpx(12.),
+                                                t.text,
+                                                move |_, _, cx| {
+                                                    let mut button = clicked.clone();
+                                                    let text =
+                                                        button.click(std::time::Instant::now());
+                                                    cx.write_to_clipboard(
+                                                        ClipboardItem::new_string(text),
+                                                    );
+                                                    entity
+                                                        .update(cx, |this, cx| {
+                                                            this.copy_sha = Some(button);
+                                                            cx.notify();
+                                                            cx.spawn(async |this, cx| {
+                                                                cx.background_executor()
+                                                                    .timer(
+                                                                        crate::copy_button::COPIED_DURATION,
+                                                                    )
+                                                                    .await;
+                                                                this.update(cx, |_, cx| {
+                                                                    cx.notify()
+                                                                })
+                                                                .ok();
+                                                            })
+                                                            .detach();
+                                                        })
+                                                        .ok();
+                                                },
+                                            )
                                                 .ml(SPACING_HALF())
                                                 .w(zpx(16.))
                                                 .h(if cfg!(target_os = "macos") {
@@ -721,15 +771,6 @@ impl SelectedCommitView {
                                                 .flex()
                                                 .items_center()
                                                 .justify_center()
-                                                .cursor_pointer()
-                                                .on_click(move |_, _, cx| {
-                                                    cx.write_to_clipboard(
-                                                        ClipboardItem::new_string(sha.clone()),
-                                                    )
-                                                })
-                                                .child(
-                                                    octicon(Octicon::Copy, t.text).size(zpx(12.)),
-                                                )
                                         }),
                                 )
                                 .when(added > 0 || deleted > 0, |d| {
@@ -1161,7 +1202,7 @@ fn commit_file_row(
             format!(
                 "{}, {}",
                 file.path,
-                crate::widgets::status_label(file.status.kind)
+                crate::widgets::status_label(&file.status)
             ),
             is_selected,
         )
@@ -1198,35 +1239,27 @@ fn commit_file_row(
                     .ok();
             }
         })
-        .child(
-            // GHD `PathText` keeps the file name visible and truncates the
-            // directory part when the row is too narrow.
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_row()
-                .text_size(FONT_SIZE())
-                .child(
-                    div()
-                        .min_w_0()
-                        .truncate()
-                        // `.list-item.selected .dirname` inherits the row colour
-                        .text_color(match (is_selected, list_focused) {
-                            (true, true) => t.box_selected_active_text,
-                            (true, false) => t.box_selected_text,
-                            _ => t.text_secondary,
-                        })
-                        .child(crate::format::display_path(file.directory())),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .max_w_full()
-                        .truncate()
-                        .child(file.file_name().to_string()),
+        .child({
+            // GHD `PathLabel`: `PathText` keeps the file name and shortens
+            // the directory from its middle when the row is too narrow;
+            // `.list-item.selected .dirname` inherits the row colour
+            let (directory_color, arrow_color) = match (is_selected, list_focused) {
+                (true, true) => (t.box_selected_active_text, t.box_selected_active_text),
+                (true, false) => (t.box_selected_text, t.box_selected_text),
+                _ => (t.text_secondary, t.text),
+            };
+            crate::path_label::path_label_element(
+                crate::path_label::path_label(
+                    &file.path,
+                    file.status.kind,
+                    file.old_path.as_deref(),
                 ),
-        )
+                Vec::new(),
+                directory_color,
+                arrow_color,
+            )
+            .text_size(FONT_SIZE())
+        })
         .child(octicon(icon, color))
         .into_any_element()
 }
@@ -1260,7 +1293,7 @@ impl Render for SelectedCommitView {
                         .files
                         .iter()
                         .find(|f| &f.path == path)
-                        .map(|f| (f.path.clone(), f.status.kind))
+                        .map(|f| (f.path.clone(), f.status.kind, f.old_path.clone()))
                 }),
                 rs.is_some_and(|r| r.selected_commits.len() > 1 && !r.commits_contiguous),
             )
@@ -1314,8 +1347,14 @@ impl Render for SelectedCommitView {
             .flex()
             .flex_col()
             .min_h_0()
-            .when_some(selected_file, |d, (path, kind)| {
-                d.child(diff_header(&path, kind, &self.diff, cx))
+            .when_some(selected_file, |d, (path, kind, old_path)| {
+                d.child(diff_header(
+                    &path,
+                    kind,
+                    old_path.as_deref(),
+                    &self.diff,
+                    cx,
+                ))
             })
             .child(DiffView::embed(&self.diff));
         // Corvene (`801-history-review-mode`): the diff alone, full width

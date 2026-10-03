@@ -8,7 +8,7 @@ use gpui_kit::*;
 
 use crate::ci_status::ci_status;
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, dialog};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
@@ -235,24 +235,24 @@ impl Render for CiCheckRunRerunDialog {
             "rerun-check-runs",
             self.title(true),
             div().w(crate::theme::fit_width(460.)).child(content),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "rerun-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "rerun-ok",
                     label: self.title(false).into(),
-                    primary: true,
                     disabled: self.rerunnable.is_empty() || loading,
                     on_click: Box::new(move |_, cx| {
                         weak.update(cx, |this, cx| this.submit(cx)).ok();
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

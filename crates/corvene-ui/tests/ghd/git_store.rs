@@ -21,12 +21,12 @@
 //!   (`helpers/test-app-shell.ts`) replaces with `unlink`; Corvene's
 //!   `move_to_trash: false` deletes instead of trashing, which is what the
 //!   test shell does (and keeps the user's Trash out of the tests).
-//! - `undoCommit(commit)`: `Dispatcher::undo_commit` calls
-//!   `corvene_git::undo_last_commit(git, path)`, which undoes `HEAD` (every
-//!   case undoes the `HEAD` commit). Corvene keeps the commit message in the
-//!   commit form (`corvene-ui`), not in a store, and `undo_commit` does not
-//!   give the undone commit's message to it, so `commitMessage` is the
-//!   stand-in [`GitStore::commit_message`].
+//! - `undoCommit(commit)` / `commitMessage`: `Dispatcher::undo_commit`
+//!   calls `corvene_core::git_store::undo_commit(git, path, commit)`, which
+//!   undoes `HEAD` (every case undoes the `HEAD` commit) and returns the
+//!   message the commit form gets back (`RepositoryState::commit_message`);
+//!   [`GitStore::commit_message`] is that message as (summary,
+//!   description).
 //! - `loadLocalCommits(branch)` / `localCommitSHAs`: the refresh calls
 //!   `corvene_git::most_recent_local_commit(path, branch, upstream)` for the
 //!   current branch (none when there is no current branch); Corvene keeps
@@ -58,6 +58,7 @@ use corvene_ui::branch_list::group_branches;
 /// part (see the module docs).
 struct GitStore {
     path: PathBuf,
+    commit_message: Option<(String, String)>,
     tip: Tip,
     all_branches: Vec<Branch>,
     local_commit_shas: Vec<String>,
@@ -68,6 +69,7 @@ impl GitStore {
     fn new(repository: &TestRepo) -> Self {
         Self {
             path: repository.path().to_path_buf(),
+            commit_message: None,
             tip: Tip::Unknown,
             all_branches: Vec::new(),
             local_commit_shas: Vec::new(),
@@ -107,18 +109,20 @@ impl GitStore {
 
     /// `undoCommit(commit)`: like `discardChanges`, an error is reported
     /// and swallowed (`performFailableOperation`, `Dispatcher::undo_commit`).
-    fn undo_commit(&mut self, _commit: &Commit) {
-        if let Err(err) = corvene_git::undo_last_commit(git(), &self.path) {
-            eprintln!("undo commit failed (performFailableOperation): {err}");
+    fn undo_commit(&mut self, commit: &Commit) {
+        match corvene_core::git_store::undo_commit(git(), &self.path, commit) {
+            Ok(message) => {
+                self.commit_message =
+                    Some((message.summary, message.description.unwrap_or_default()));
+            }
+            Err(err) => eprintln!("undo commit failed (performFailableOperation): {err}"),
         }
     }
 
-    /// Stand-in for `commitMessage` after `undoCommit`: the (summary,
-    /// description) the commit form gets back from the undone commit.
-    /// Corvene's `Dispatcher::undo_commit` restores no message; replace
-    /// this once it does and remove the `#[ignore]`.
+    /// `commitMessage`: the (summary, description) the commit form got back
+    /// from the last undone commit.
     fn commit_message(&self) -> Option<(String, String)> {
-        unimplemented!("Dispatcher::undo_commit gives the undone commit's message to nothing")
+        self.commit_message.clone()
     }
 
     /// `loadLocalCommits(branch)`.
@@ -163,7 +167,6 @@ fn includes_head_when_loading_commits() {
 
 // GHD: unit/git-store-test.ts › GitStore › can discard changes from a repository
 #[test]
-#[ignore = "ghd: bug: corvene_git::get_status sorts files by lowercased path (LICENSE.md, README.md); GHD getStatus keeps git's order (tracked README.md before untracked LICENSE.md), so files[0] is LICENSE.md"]
 fn can_discard_changes_from_a_repository() {
     let repo = setup_empty_repository();
     let mut git_store = GitStore::new(&repo);
@@ -204,7 +207,6 @@ fn can_discard_changes_from_a_repository() {
 
 // GHD: unit/git-store-test.ts › GitStore › can discard a renamed file
 #[test]
-#[ignore = "ghd: bug: corvene_git::discard_changes of a staged rename leaves NEW-README.md untracked (1 file, expected 0) and errs (checkout-index exits 1 for NEW-README.md, gone from the index after the reset); GHD trashes every non-deleted path, checks out only the old path and accepts exit 1"]
 fn can_discard_a_renamed_file() {
     let repo = setup_empty_repository();
     let git_store = GitStore::new(&repo);
@@ -276,7 +278,6 @@ fn reports_the_repository_is_unborn() {
 
 // GHD: unit/git-store-test.ts › GitStore › undo first commit › pre-fills the commit message
 #[test]
-#[ignore = "ghd: missing: no commit message after Undo; Dispatcher::undo_commit restores nothing to the commit form (GHD GitStore.undoCommit sets commitMessage to the undone commit's summary and body)"]
 fn pre_fills_the_commit_message() {
     let (repository, first_commit) = setup_repo();
 

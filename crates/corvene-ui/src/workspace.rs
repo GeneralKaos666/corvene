@@ -14,7 +14,7 @@ use gpui_kit::component::resizable::{
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::banner::{banner_bar, update_banner};
+use crate::banner::{BannerView, update_banner};
 use crate::branch_list::BranchFoldout;
 use crate::changes::ChangesSidebar;
 use crate::ci_check_popover::CiCheckPopover;
@@ -86,6 +86,8 @@ pub struct Workspace {
     dialogs: Entity<DialogHost>,
     diff_view: Entity<DiffView>,
     welcome: Option<Entity<WelcomeView>>,
+    /// GHD `Banner`: the app's banner, its focus and dismissal.
+    banner_view: Entity<BannerView>,
     no_repositories: Entity<NoRepositoriesView>,
     /// The branch button's PR badge rectangle (anchor of the CI popover).
     pr_badge_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -144,10 +146,10 @@ impl Workspace {
         // in the focus path).
         cx.observe_in(&state, window, |this, state, window, cx| {
             let s = state.read(cx);
-            let overlay_open = s.popup.is_some() || s.foldout.is_some();
+            let overlay_open = s.popup().is_some() || s.foldout.is_some();
             let foldout = s.foldout;
-            let popup_closed = this.popup_was_open && s.popup.is_none();
-            this.popup_was_open = s.popup.is_some();
+            let popup_closed = this.popup_was_open && s.popup().is_none();
+            this.popup_was_open = s.popup().is_some();
             // A closing dialog's focused field is still in the last frame, so
             // `contains_focused` says yes; once it is gone nothing would have
             // focus and no shortcut would match (`keymap::MENU` needs the
@@ -204,6 +206,7 @@ impl Workspace {
         let welcome = (!state.read(cx).settings.welcome_completed)
             .then(|| cx.new(|cx| WelcomeView::new(state.clone(), window, cx)));
         let no_repositories = cx.new(|cx| NoRepositoriesView::new(state.clone(), window, cx));
+        let banner_view = cx.new(|cx| BannerView::new(state.clone(), window, cx));
         window.focus(&focus_handle, cx);
         let sidebar_min = sidebar_min_width(state.read(cx));
 
@@ -238,6 +241,7 @@ impl Workspace {
             dialogs,
             diff_view,
             welcome,
+            banner_view,
             no_repositories,
         }
     }
@@ -383,7 +387,7 @@ impl Workspace {
                 // no repository at launch: nothing to wait for
                 s.selected.is_none() || rs.is_some_and(|rs| rs.status.is_some()),
                 rs.is_some_and(|rs| rs.changed_files() > 0),
-                s.popup.is_none() && s.foldout.is_none() && s.settings.welcome_completed,
+                s.popup().is_none() && s.foldout.is_none() && s.settings.welcome_completed,
             )
         };
         if !loaded {
@@ -450,7 +454,8 @@ impl Workspace {
                             .read(cx)
                             .selected_state()
                             .map(|rs| rs.changed_files())
-                            .filter(|n| *n > 0),
+                            .filter(|n| *n > 0)
+                            .map(|n| crate::format::files_changed_badge(n).into()),
                     },
                     TabModel {
                         dot: false,
@@ -523,6 +528,7 @@ impl Workspace {
                     .child(diff_header(
                         &file.path,
                         file.status.kind,
+                        file.old_path.as_deref(),
                         &self.diff_view,
                         cx,
                     ))
@@ -600,7 +606,7 @@ impl Workspace {
                     id: "suggested-finder",
                     on_click: std::rc::Rc::new({
                         let path = path.clone();
-                        move |_, cx| Dispatcher::show_in_finder(&path, cx)
+                        move |_, cx| Dispatcher::show_repository(&path, cx)
                     }),
                     // `getPlatformFileManagerName` and the menu item's label
                     title: if cfg!(windows) {
@@ -1056,9 +1062,9 @@ impl Render for Workspace {
             (
                 toolbar_models(state, self.sidebar_width, widths, &self.pr_badge_bounds),
                 state.foldout,
-                state.popup.is_some(),
+                state.popup().is_some(),
                 !state.repositories.is_empty(),
-                state.cloning.clone(),
+                state.cloning.latest().cloned(),
                 state.banner.clone(),
                 worktree_button_visible(state),
                 state.show_ci_status_popover
@@ -1093,7 +1099,7 @@ impl Render for Workspace {
         // dialog is open
         let mut key_context = KeyContext::default();
         key_context.add("Workspace");
-        if self.state.read(cx).popup.is_some() {
+        if self.state.read(cx).popup().is_some() {
             key_context.add("Popup");
         }
         div()
@@ -1118,7 +1124,7 @@ impl Render for Workspace {
                 d.child(toolbar(buttons, &self.toolbar_resize, cx))
             })
             .when(self.welcome.is_none(), |d| {
-                d.when_some(banner.as_ref(), |d, banner| d.child(banner_bar(banner, cx)))
+                d.when(banner.is_some(), |d| d.child(self.banner_view.clone()))
             })
             // GHD shows the update banner only while no other banner is up
             .when(self.welcome.is_none() && banner.is_none(), |d| {

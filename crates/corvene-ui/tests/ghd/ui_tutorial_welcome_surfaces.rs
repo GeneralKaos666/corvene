@@ -2,35 +2,33 @@
 //! `app/test/unit/ui/tutorial-welcome-surfaces-test.tsx`.
 //!
 //! The onboarding tutorial's pages are GPUI elements in Corvene
-//! (`crates/corvene-ui/src/tutorial_panel.rs`), drawn from the app state
-//! with nothing to read back, so each case calls a stand-in returning what
-//! the GitHub Desktop component shows:
+//! (`crates/corvene-ui/src/tutorial_panel.rs`), drawn from content
+//! functions this port reads:
 //!
 //! - `TutorialWelcome` (`ui/tutorial/welcome.tsx`): "Welcome to GitHub
 //!   Desktop", the subtitle, three definitions with illustrations and their
-//!   alternative texts. Corvene: `tutorial_panel::tutorial_welcome(cx)`,
-//!   whose images have no alternative text. The product name is flag
-//!   `103-product-name`, so [`tutorial_welcome`] takes it and the case
-//!   passes the GitHub Desktop preset's value (read from the flag
-//!   registry).
+//!   alternative texts. Corvene: `tutorial_panel::tutorial_welcome_content(
+//!   product_name)`, which `tutorial_panel::tutorial_welcome(cx)` draws. The
+//!   product name is flag `103-product-name`, so the case passes the GitHub
+//!   Desktop preset's value (read from the flag registry).
 //! - `TutorialStepInstructions` (`ui/tutorial/tutorial-step-instruction.tsx`):
 //!   a step's `<details>` is open when it is the open section; a completed
 //!   step shows a green check, the next step to do its number
 //!   (`orderedTutorialSteps` index + 1) in a blue circle, any other its
 //!   number in an empty circle; the Skip link shows on the open next step.
-//!   Corvene: `TutorialPanel::step` (private, inside the view) computes the
-//!   same from `TutorialStep::completes` and the current step.
-//!   [`tutorial_step_instructions`] takes GitHub Desktop's props
-//!   (`isComplete` / `isNextStepTodo` as closures).
+//!   Corvene: `tutorial_panel::tutorial_step_instructions`, which
+//!   `TutorialPanel::step` draws, takes GitHub Desktop's props
+//!   (`isComplete` / `isNextStepTodo` as closures, `skipLinkButton` as
+//!   whether there is one).
 //! - `TutorialDone` (`ui/tutorial/done.tsx`): "You're done!", the "Hands
 //!   clapping" image and three suggested actions (Open in Browser →
-//!   `showGitHubExplore(repository)`, Create Repository / Add Repository →
-//!   the popups). Corvene: `tutorial_panel::tutorial_done(cx)`, whose Open in
-//!   Browser opens `https://github.com/explore` (GitHub Desktop opens
-//!   `/explore` on the repository's host) and whose image has no
-//!   alternative text. GitHub Desktop's `PopupType.CreateRepository` /
-//!   `AddRepository` are `corvene_core::Popup::CreateRepository` /
-//!   `AddExistingRepository` without a path.
+//!   `showGitHubExplore(repository)`, `Dispatcher::show_github_explore`;
+//!   Create Repository / Add Repository → the popups). Corvene:
+//!   `tutorial_panel::tutorial_done_content(repository)`, which
+//!   `tutorial_panel::tutorial_done(cx)` draws. GitHub Desktop's
+//!   `PopupType.CreateRepository` / `AddRepository` are
+//!   `corvene_core::Popup::CreateRepository` / `AddExistingRepository`
+//!   without a path.
 //!
 //! A click on a button is GitHub Desktop's callback prop; here the content
 //! names the action the button runs, which is what the click then checks.
@@ -50,6 +48,10 @@
 use corvene_core::flags::{Preset, def, ids};
 use corvene_core::tutorial::TutorialStep;
 use corvene_core::{GitHubRepository, Popup, Repository};
+use corvene_ui::tutorial_panel::{
+    TutorialDoneAction, TutorialStepIcon, tutorial_done_content as tutorial_done,
+    tutorial_step_instructions, tutorial_welcome_content as tutorial_welcome,
+};
 
 /// Flag `103-product-name` at its GitHub Desktop preset value.
 fn ghd_product_name() -> String {
@@ -58,100 +60,6 @@ fn ghd_product_name() -> String {
         .as_text()
         .expect("103-product-name is a text flag")
         .to_string()
-}
-
-/// What GitHub Desktop's `TutorialWelcome` shows.
-#[allow(dead_code)] // filled by the real TutorialWelcome content
-struct TutorialWelcomeContent {
-    /// The `<h1>`.
-    title: String,
-    /// The `<p>` under it.
-    text: String,
-    /// The definitions' texts, in order.
-    definitions: Vec<String>,
-    /// The illustrations' alternative texts, in order.
-    image_alts: Vec<String>,
-}
-
-/// Stand-in for GitHub Desktop's `TutorialWelcome`
-/// (`ui/tutorial/welcome.tsx`) naming the app `product_name` (flag
-/// `103-product-name`). Replace it with the Corvene function once there is
-/// one and remove the `#[ignore]`.
-fn tutorial_welcome(_product_name: &str) -> TutorialWelcomeContent {
-    unimplemented!(
-        "Corvene has no TutorialWelcome content: tutorial_panel::tutorial_welcome returns a GPUI element"
-    )
-}
-
-/// The circle a tutorial step shows before its summary.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // built by the real TutorialStepInstructions content
-enum TutorialStepIcon {
-    /// `.green-circle` with the check octicon: a completed step.
-    GreenCheck,
-    /// `.blue-circle` with the step's number: the next step to do.
-    Blue(String),
-    /// `.empty-circle` with the step's number.
-    Empty(String),
-}
-
-/// What GitHub Desktop's `TutorialStepInstructions` shows.
-#[allow(dead_code)] // filled by the real TutorialStepInstructions content
-struct TutorialStepInstructionsContent {
-    /// The `<details>` is open.
-    open: bool,
-    icon: TutorialStepIcon,
-    summary_text: String,
-    /// The Skip link is shown (otherwise the chevron).
-    skip_link: bool,
-}
-
-/// Stand-in for GitHub Desktop's `TutorialStepInstructions`
-/// (`ui/tutorial/tutorial-step-instruction.tsx`); `skip_link`: a
-/// `skipLinkButton` was given. Replace it with the Corvene function once
-/// there is one and remove the `#[ignore]`.
-fn tutorial_step_instructions(
-    _summary_text: &str,
-    _is_complete: &dyn Fn(TutorialStep) -> bool,
-    _section_id: TutorialStep,
-    _is_next_step_todo: &dyn Fn(TutorialStep) -> bool,
-    _currently_open_section_id: TutorialStep,
-    _skip_link: bool,
-) -> TutorialStepInstructionsContent {
-    unimplemented!(
-        "Corvene has no TutorialStepInstructions content: TutorialPanel::step computes it inside the GPUI view"
-    )
-}
-
-/// What a suggested action of `TutorialDone` does.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // built by the real TutorialDone content
-#[allow(clippy::large_enum_variant)] // a few values per test, compared whole
-enum TutorialDoneAction {
-    /// `dispatcher.showGitHubExplore(repository)` (the repository's id).
-    ShowGitHubExplore(u64),
-    /// `dispatcher.showPopup(popup)`
-    ShowPopup(Popup),
-}
-
-/// What GitHub Desktop's `TutorialDone` shows.
-#[allow(dead_code)] // filled by the real TutorialDone content
-struct TutorialDoneContent {
-    /// The `<h1>`.
-    heading: String,
-    /// The illustration's alternative text, `None` without one.
-    image_alt: Option<String>,
-    /// The suggested actions' buttons: label and what each does.
-    actions: Vec<(String, TutorialDoneAction)>,
-}
-
-/// Stand-in for GitHub Desktop's `TutorialDone` (`ui/tutorial/done.tsx`)
-/// for the tutorial `repository`. Replace it with the Corvene function once
-/// there is one and remove the `#[ignore]`.
-fn tutorial_done(_repository: &Repository) -> TutorialDoneContent {
-    unimplemented!(
-        "Corvene has no TutorialDone content: tutorial_panel::tutorial_done returns a GPUI element"
-    )
 }
 
 /// GitHub Desktop's `createRepository()`: `octocat/desktop` on github.com
@@ -177,7 +85,6 @@ fn create_repository() -> Repository {
 
 // GHD: unit/ui/tutorial-welcome-surfaces-test.tsx › tutorial welcome surfaces › renders the tutorial welcome definitions and images
 #[test]
-#[ignore = "ghd: missing: no TutorialWelcome content (tutorial/welcome.tsx); tutorial_panel::tutorial_welcome draws it as a GPUI element whose images have no alternative text"]
 fn renders_the_tutorial_welcome_definitions_and_images() {
     let view = tutorial_welcome(&ghd_product_name());
 
@@ -199,7 +106,6 @@ fn renders_the_tutorial_welcome_definitions_and_images() {
 
 // GHD: unit/ui/tutorial-welcome-surfaces-test.tsx › tutorial welcome surfaces › renders tutorial step instructions with step state, skip content, and toggle callbacks
 #[test]
-#[ignore = "ghd: missing: no TutorialStepInstructions content (tutorial-step-instruction.tsx); TutorialPanel::step computes the open state, circle and Skip link inside the GPUI view"]
 fn renders_tutorial_step_instructions_with_step_state_skip_content_and_toggle_callbacks() {
     let is_complete = |step: TutorialStep| step == TutorialStep::PickEditor;
     let is_next_step_todo = |step: TutorialStep| step == TutorialStep::CreateBranch;
@@ -234,7 +140,6 @@ fn renders_tutorial_step_instructions_with_step_state_skip_content_and_toggle_ca
 
 // GHD: unit/ui/tutorial-welcome-surfaces-test.tsx › tutorial welcome surfaces › focuses tutorial completion once and routes suggested actions through the dispatcher
 #[test]
-#[ignore = "ghd: missing: no TutorialDone content (tutorial/done.tsx); tutorial_panel::tutorial_done draws it as a GPUI element (no image alternative text, Open in Browser opens github.com/explore directly)"]
 fn focuses_tutorial_completion_once_and_routes_suggested_actions_through_the_dispatcher() {
     let repository = create_repository();
 

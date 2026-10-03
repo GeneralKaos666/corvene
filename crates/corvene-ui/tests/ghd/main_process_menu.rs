@@ -13,56 +13,21 @@
 //!   [`get_access_key`] is GitHub Desktop's regular expression ported as it
 //!   is. `findDuplicateAccessKeys` (also the test file's) is ported as it
 //!   is, on top of [`get_access_key`].
-//! - `buildDefaultMenuTemplate(labels)` is Corvene's `menus::install(cx,
-//!   options)` (`crates/corvene/src/menus.rs`, the same items with `&`
-//!   mnemonics off macOS). It lives in the binary crate, which integration
-//!   tests cannot reach, and builds GPUI menus inside an `App`;
-//!   [`build_default_menu_template`] is a stand-in returning the template as
-//!   GitHub Desktop's `MenuItemConstructorOptions` ([`MenuItem`]), and
-//!   [`MenuLabelsEvent`] stands for GitHub Desktop's `MenuLabelsEvent`
-//!   (Corvene's `menus::MenuOptions` holds the editor and shell labels and
-//!   flags instead).
+//! - `buildDefaultMenuTemplate(labels)` is
+//!   `corvene_ui::app_menu::build_default_menu_template(labels)` (the
+//!   template `crates/corvene/src/menus.rs` installs, with `&` access keys
+//!   off macOS), returning `MenuItemConstructorOptions` (imported as
+//!   `MenuItem`) for GitHub Desktop's `MenuLabelsEvent`
+//!   (`app_menu::MenuLabelsEvent`, whose Corvene-only `extras` default to the
+//!   github-desktop preset: none of Corvene's added items).
 //! - `ensureItemIds` gives Electron menu items without an id one made from
 //!   their labels; Corvene's menu items are GPUI actions and the fixed
 //!   `corvene_core::menu_state::MenuId`s, so those cases are skipped
 //!   (`tools/ghd-tests/skips/platform.tsv`).
 
-/// GitHub Desktop's `Electron.MenuItemConstructorOptions`, the fields the
-/// test reads.
-#[derive(Clone, Debug, Default)]
-#[allow(dead_code)] // built by the real buildDefaultMenuTemplate
-struct MenuItem {
-    label: Option<String>,
-    /// `type: 'separator'`
-    separator: bool,
-    /// `visible` (`undefined` is visible)
-    visible: Option<bool>,
-    submenu: Option<Vec<MenuItem>>,
-}
-
-/// GitHub Desktop's `MenuLabelsEvent` (`models/menu-labels.ts`).
-#[derive(Clone, Debug, Default)]
-#[allow(dead_code)] // read by the real buildDefaultMenuTemplate
-struct MenuLabelsEvent {
-    selected_shell: Option<String>,
-    selected_external_editor: Option<String>,
-    ask_for_confirmation_on_force_push: bool,
-    ask_for_confirmation_on_repository_removal: bool,
-    is_stashed_changes_visible: bool,
-    is_changes_filter_visible: bool,
-    has_current_pull_request: bool,
-    ask_for_confirmation_when_stashing_all_changes: bool,
-    is_force_push_for_current_repository: bool,
-}
-
-/// Stand-in for GitHub Desktop's `buildDefaultMenuTemplate(labels)`
-/// (`main-process/menu/build-default-menu.ts`). Replace it with the Corvene
-/// function once one is reachable and remove the `#[ignore]`.
-fn build_default_menu_template(_params: &MenuLabelsEvent) -> Vec<MenuItem> {
-    unimplemented!(
-        "buildDefaultMenuTemplate's counterpart (menus::install) is in the binary crate corvene"
-    )
-}
+use corvene_ui::app_menu::{
+    MenuItemConstructorOptions as MenuItem, MenuLabelsEvent, build_default_menu_template,
+};
 
 /// Extract the Windows-style access key from a menu item label, if any
 /// (GitHub Desktop's `/(?<!&)&([^&])/`, lower-cased), through Corvene's
@@ -174,7 +139,6 @@ fn extracts_normal_access_key_correctly() {
 
 // GHD: unit/main-process/menu-test.ts › main-process menu › buildDefaultMenuTemplate › has no duplicate access keys for any combination of label-affecting parameters
 #[test]
-#[ignore = "ghd: missing: buildDefaultMenuTemplate's counterpart menus::install is in the binary crate (crates/corvene/src/menus.rs), unreachable"]
 fn has_no_duplicate_access_keys_for_any_combination_of_label_affecting_parameters() {
     // The boolean parameters that affect which labels (and therefore access
     // keys) appear in the menu. We generate all 2^N combinations to ensure no

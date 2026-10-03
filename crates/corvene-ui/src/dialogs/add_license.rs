@@ -10,7 +10,7 @@ use corvene_core::templates::License;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::dialog::{DialogButton, dialog};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{SelectHandler, SelectItem, labeled, select_button_items};
@@ -90,18 +90,17 @@ impl Render for AddLicenseDialog {
                              never replaced.",
                         ),
                 ),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "add-license-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "add-license-ok",
                     label: "Add License".into(),
-                    primary: true,
                     disabled: picked.is_none(),
                     on_click: Box::new(move |_, cx| {
                         if let Some(name) = picked.clone() {
@@ -109,7 +108,8 @@ impl Render for AddLicenseDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

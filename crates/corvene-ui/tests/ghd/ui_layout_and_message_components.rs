@@ -14,21 +14,10 @@
 //! with `widgets::platform_key` (⌘ → Ctrl, ⇧ → Shift …), so the case's
 //! `keys` are what `platform_key` derives from its `darwinKeys`. The caps'
 //! texts are ported to `platform_key`; the shortcut's text (`textContent`,
-//! the caps plus the `+` separators) is drawn by `kbd_group_sized` as GPUI
-//! children with no text to read, so [`keyboard_shortcut_text`] is a
-//! stand-in and that half of the case is a second, ignored test.
+//! the caps plus the `+` separators) is `widgets::keyboard_shortcut_text`,
+//! the second half of the case.
 
-use corvene_ui::widgets::platform_key;
-
-/// Stand-in for the text GitHub Desktop's `KeyboardShortcut` renders
-/// (`textContent`: the keys, joined by `+` off macOS) for the macOS keys
-/// `darwin_keys`. Replace it with the Corvene function once there is one
-/// and remove the `#[ignore]`.
-fn keyboard_shortcut_text(_darwin_keys: &[&'static str]) -> String {
-    unimplemented!(
-        "Corvene has no text form of KeyboardShortcut (widgets::kbd_group_sized draws the caps and `+` as GPUI children)"
-    )
-}
+use corvene_ui::widgets::{keyboard_shortcut_text, platform_key};
 
 // GHD: unit/ui/layout-and-message-components-test.tsx › layout and message components › renders platform-specific keyboard shortcuts
 #[test]
@@ -51,7 +40,6 @@ fn renders_platform_specific_keyboard_shortcuts() {
 
 // GHD: unit/ui/layout-and-message-components-test.tsx › layout and message components › renders platform-specific keyboard shortcuts
 #[test]
-#[ignore = "ghd: missing: no text form of KeyboardShortcut (keyboard-shortcut.tsx); widgets::kbd_group_sized draws the caps and the + separators as GPUI children"]
 fn renders_platform_specific_keyboard_shortcuts_text() {
     let darwin_keys = ["⌘", "⇧", "N"];
 

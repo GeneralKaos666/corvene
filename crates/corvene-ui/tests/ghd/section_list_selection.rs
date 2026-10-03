@@ -13,11 +13,11 @@
 //! representation only), and `InvalidRowIndexPath` (the filter text box) is
 //! `current: None`.
 //!
-//! `step` takes no `canSelectRow`: Corvene keeps group headers out of the
-//! row index (`filter_list::row_top`), so no row is unselectable. The
-//! header case calls a stand-in and is ignored.
+//! Corvene keeps group headers out of the row index (`filter_list::row_top`);
+//! `canSelectRow` is `filter_list::step_selectable`'s predicate, which
+//! `step` calls with every row selectable.
 
-use corvene_ui::filter_list::step;
+use corvene_ui::filter_list::{step, step_selectable};
 
 use crate::lists_support::{INVALID_ROW_INDEX_PATH, RowIndexPath, row_index_path_equals};
 
@@ -76,16 +76,25 @@ fn filter_list_step(row_count: &[usize], action: SelectRowAction) -> Option<RowI
     .map(|index| row_index_path(index, row_count))
 }
 
-/// Stand-in for GitHub Desktop's `findNextSelectableRow` with a
-/// `canSelectRow` predicate (`ui/lib/list/section-list-selection.ts`).
-/// Replace it with `filter_list::step` once that takes one and remove the
-/// `#[ignore]`.
+/// GitHub Desktop's `findNextSelectableRow` with a `canSelectRow` predicate
+/// (`ui/lib/list/section-list-selection.ts`) through Corvene's
+/// `filter_list::step_selectable`.
 fn find_next_selectable_row(
-    _row_count: &[usize],
-    _action: SelectRowAction,
-    _can_select_row: impl Fn(RowIndexPath) -> bool,
+    row_count: &[usize],
+    action: SelectRowAction,
+    can_select_row: impl Fn(RowIndexPath) -> bool,
 ) -> Option<RowIndexPath> {
-    unimplemented!("corvene_ui::filter_list::step takes no canSelectRow predicate")
+    let delta = match action.direction {
+        SelectionDirection::Up => -1,
+        SelectionDirection::Down => 1,
+    };
+    step_selectable(
+        highlighted_index(action.row, row_count),
+        delta,
+        row_count.iter().sum(),
+        |index| can_select_row(row_index_path(index, row_count)),
+    )
+    .map(|index| row_index_path(index, row_count))
 }
 
 // GHD: unit/section-list-selection-test.ts › section-list-selection › findNextSelectableRow › returns first row when selecting down outside list (filter text)
@@ -103,7 +112,6 @@ fn returns_first_row_when_selecting_down_outside_list_filter_text() {
 
 // GHD: unit/section-list-selection-test.ts › section-list-selection › findNextSelectableRow › returns first selectable row when header is first
 #[test]
-#[ignore = "ghd: missing: corvene_ui::filter_list::step has no canSelectRow predicate (ui/lib/list/section-list-selection.ts findNextSelectableRow)"]
 fn returns_first_selectable_row_when_header_is_first() {
     let selected_row = find_next_selectable_row(
         &ROW_COUNT,

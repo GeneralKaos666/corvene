@@ -17,7 +17,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::{IS_MAC, mac_or};
-use crate::dialog::DialogButton;
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup};
 use crate::icons::Octicon;
 use crate::tab_bar::VerticalTab;
 use crate::theme::ActiveGhdTheme;
@@ -33,6 +33,42 @@ const TABS: [RepositorySettingsTab; 4] = [
     RepositorySettingsTab::GitConfig,
     RepositorySettingsTab::ForkSettings,
 ];
+
+/// GHD `NoRemote`'s `HelpURL` (`ui/repository-settings/no-remote.tsx`).
+const NO_REMOTE_HELP_URL: &str = "https://help.github.com/articles/about-remote-repositories/";
+
+/// What a button of `NoRemote` does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoRemoteAction {
+    /// `onPublish`: the Publish Repository dialog.
+    Publish,
+}
+
+/// What GHD `NoRemote` (`ui/repository-settings/no-remote.tsx`), the Remote
+/// tab without a remote, shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoRemoteContent {
+    /// The call to action's text, the link's label included.
+    pub message: String,
+    /// The text before the help link.
+    pub lead: String,
+    /// The help link: its label and the URL it opens.
+    pub help_link: (String, String),
+    /// The call to action's button: its label and what it does.
+    pub action: (String, NoRemoteAction),
+}
+
+/// GHD `NoRemote`.
+pub fn no_remote() -> NoRemoteContent {
+    let lead = "Publish your repository to GitHub. Need help? ";
+    let label = "Learn more about remote repositories.";
+    NoRemoteContent {
+        message: format!("{lead}{label}"),
+        lead: lead.into(),
+        help_link: (label.into(), NO_REMOTE_HELP_URL.into()),
+        action: ("Publish".into(), NoRemoteAction::Publish),
+    }
+}
 
 pub struct RepositorySettingsDialog {
     state: Entity<AppState>,
@@ -335,25 +371,22 @@ impl RepositorySettingsDialog {
             }
             None => {
                 let repo = self.repo;
+                let NoRemoteContent {
+                    lead,
+                    help_link: (help_label, help_url),
+                    action: (action_title, NoRemoteAction::Publish),
+                    ..
+                } = no_remote();
                 call_to_action(
                     "repo-settings-publish",
                     paragraph(vec![
-                        "Publish your repository to GitHub. Need help? ".into(),
-                        link_button(
-                            "repo-settings-remote-help",
-                            "Learn more about remote repositories.",
-                            cx,
-                        )
-                        .on_click(|_, _, cx| {
-                            Dispatcher::open_url(
-                                "https://docs.github.com/en/get-started/getting-started-with-git/managing-remote-repositories",
-                                cx,
-                            )
-                        })
-                        .into_any_element()
-                        .into(),
+                        lead.into(),
+                        link_button("repo-settings-remote-help", help_label, cx)
+                            .on_click(move |_, _, cx| Dispatcher::open_url(&help_url, cx))
+                            .into_any_element()
+                            .into(),
                     ]),
-                    "Publish",
+                    action_title,
                     move |_, cx| Dispatcher::show_popup(Popup::PublishRepository { repo }, cx),
                     cx,
                 )
@@ -796,18 +829,17 @@ impl Render for RepositorySettingsDialog {
             "dialog-repository-settings",
             mac_or("Repository Settings", "Repository settings"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "repo-settings-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "repo-settings-save",
                     label: "Save".into(),
-                    primary: true,
                     disabled: !loaded,
                     on_click: Box::new(move |_, cx| {
                         if !loaded {
@@ -816,7 +848,8 @@ impl Render for RepositorySettingsDialog {
                         weak.update(cx, |this, cx| this.save(cx)).ok();
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             crate::dialog::DialogFrame {
                 focus_primary: focus_save,
                 ..Default::default()

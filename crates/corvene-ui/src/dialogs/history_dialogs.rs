@@ -14,7 +14,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind,
+};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
@@ -44,25 +46,25 @@ impl Render for ResetToCommitDialog {
                 "You have changes in progress. Resetting to a previous commit might result in \
                  some of these changes being lost. Do you want to continue anyway?",
             ),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "reset-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "reset-continue",
                     label: "Continue".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::reset_to_commit(repo, sha.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -119,25 +121,25 @@ impl Render for ResetToRemoteDialog {
             DialogKind::Warning,
             format!("Reset to {}", self.upstream),
             div().child(text),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "reset-remote-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "reset-remote-continue",
                     label: "Reset".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::reset_to_remote(repo, upstream.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -198,18 +200,17 @@ impl Render for CheckoutCommitDialog {
             DialogKind::Warning,
             mac_or("Checkout Commit?", "Checkout commit?"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "checkout-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "checkout-ok",
                     label: "Checkout".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
@@ -219,7 +220,8 @@ impl Render for CheckoutCommitDialog {
                         Dispatcher::checkout_commit(repo, sha.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -283,7 +285,8 @@ impl CreateTagDialog {
 
     /// The trimmed name and its error (`getCurrentError`).
     fn name_and_error(&self, cx: &App) -> (String, Option<String>) {
-        let name = self.name.read(cx).value().trim().to_string();
+        // GHD `RefNameTextBox` hands on `sanitizedRefName` of the input
+        let name = crate::dialogs::branch_dialogs::sanitize_ref_name(&self.name.read(cx).value());
         let error = (name.len() > MAX_TAG_NAME_LENGTH).then(|| {
             format!("The tag name cannot be longer than {MAX_TAG_NAME_LENGTH} characters")
         });
@@ -340,6 +343,11 @@ impl Render for CreateTagDialog {
             })
             .child(div().child("Name"))
             .child(text_box("tag-name", &self.name, None, window, cx))
+            .children(crate::dialogs::branch_dialogs::ref_name_notice(
+                &self.name.read(cx).value(),
+                "created",
+                cx,
+            ))
             .when(with_message, |d| {
                 d.child(div().mt(SPACING_HALF()).child("Message (optional)"))
                     .child(
@@ -356,18 +364,17 @@ impl Render for CreateTagDialog {
             "dialog-create-tag",
             mac_or("Create a Tag", "Create a tag"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "tag-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "tag-create",
                     label: mac_or("Create Tag", "Create tag").into(),
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if !disabled {
@@ -375,7 +382,8 @@ impl Render for CreateTagDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -434,18 +442,17 @@ impl Render for WarnLocalChangesBeforeUndoDialog {
             DialogKind::Warning,
             mac_or("Undo Commit", "Undo commit"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "undo-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "undo-continue",
                     label: "Continue".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
@@ -455,7 +462,8 @@ impl Render for WarnLocalChangesBeforeUndoDialog {
                         Dispatcher::undo_commit(repo, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -504,18 +512,17 @@ impl Render for WarnTaggedCommitBeforeUndoDialog {
             DialogKind::Warning,
             mac_or("Undo Commit", "Undo commit"),
             div().child(text),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "undo-tagged-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "undo-tagged-continue",
                     label: "Continue".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
@@ -526,7 +533,8 @@ impl Render for WarnTaggedCommitBeforeUndoDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -594,25 +602,25 @@ impl Render for ConfirmDeletePushedTagDialog {
             DialogKind::Warning,
             mac_or("Delete Tag", "Delete tag"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "delete-tag-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "delete-tag-confirm",
                     label: "Delete".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::delete_pushed_tag(repo, tag.clone(), remote.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -672,18 +680,17 @@ impl Render for ConfirmDiscardStashDialog {
             DialogKind::Warning,
             mac_or("Discard Stash?", "Discard stash?"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "discard-stash-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "discard-stash-ok",
                     label: "Discard".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
@@ -693,7 +700,8 @@ impl Render for ConfirmDiscardStashDialog {
                         Dispatcher::drop_stash(repo, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

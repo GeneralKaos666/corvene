@@ -106,16 +106,12 @@ pub fn status_icon(kind: FileStatusKind, t: &GhdTheme) -> (Octicon, Hsla) {
 pub fn diff_header(
     path: &str,
     kind: FileStatusKind,
+    old_path: Option<&str>,
     view: &Entity<DiffView>,
     cx: &App,
 ) -> impl IntoElement {
     let t = cx.ghd();
     let (icon, color) = status_icon(kind, t);
-    let (directory, file_name) = match path.rfind('/') {
-        Some(i) => (&path[..=i], &path[i + 1..]),
-        None => ("", path),
-    };
-    let directory = crate::format::display_path(directory);
     // `.diff-container .header`: 5 px / 10 px padding around the 19 px
     // options button, `--diff-border-color` underneath (30 px in all)
     div()
@@ -128,23 +124,15 @@ pub fn diff_header(
         .bg(t.box_alt_background)
         .border_b_1()
         .border_color(t.diff_border)
+        // GHD `ChangedFileDetails`' `PathLabel`: a rename's old path too
         .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(FONT_SIZE())
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .child(
-                            div()
-                                .text_color(t.text_secondary)
-                                .child(directory.to_string()),
-                        )
-                        .child(div().child(file_name.to_string())),
-                ),
+            crate::path_label::path_label_element(
+                crate::path_label::path_label(path, kind, old_path),
+                Vec::new(),
+                t.text_secondary,
+                t.text,
+            )
+            .text_size(FONT_SIZE()),
         )
         // `.path-label-component { margin-right: 5px }`,
         // `.diff-options-component { margin-right: 5px }`
@@ -227,6 +215,8 @@ struct Snapshot {
     repo_path: std::path::PathBuf,
     path: String,
     kind: FileStatusKind,
+    /// GHD `renameIncludesModifications` of a renamed file.
+    rename_includes_modifications: bool,
     selection: DiffSelection,
     diff: Arc<Diff>,
     contents: Option<Arc<Vec<String>>>,
@@ -438,81 +428,100 @@ impl DiffView {
         let id = s.selected?;
         let rs = s.repo_states.get(&id)?;
         let repo_path = s.repository(id)?.path.clone();
-        let (path, kind, selection, diff, generation, (contents, old_contents), hide_whitespace) =
-            match self.source {
-                DiffSource::WorkingDirectory => {
-                    let file = rs.selected_file.as_ref().and_then(|p| {
-                        rs.status
-                            .as_ref()
-                            .and_then(|st| st.files.iter().find(|f| &f.path == p))
-                    })?;
+        let (
+            path,
+            (kind, rename_includes_modifications),
+            selection,
+            diff,
+            generation,
+            (contents, old_contents),
+            hide_whitespace,
+        ) = match self.source {
+            DiffSource::WorkingDirectory => {
+                let file = rs.selected_file.as_ref().and_then(|p| {
+                    rs.status
+                        .as_ref()
+                        .and_then(|st| st.files.iter().find(|f| &f.path == p))
+                })?;
+                (
+                    file.path.clone(),
                     (
-                        file.path.clone(),
                         file.status.kind,
-                        file.selection.clone(),
-                        rs.diff.clone()?,
-                        rs.diff_generation,
-                        (rs.diff_contents.clone(), rs.diff_old_contents.clone()),
-                        s.settings.hide_whitespace_in_changes_diff,
-                    )
-                }
-                DiffSource::Commit => {
-                    let file = rs.commit_selected_file.as_ref().and_then(|p| {
-                        rs.changeset
-                            .as_ref()
-                            .and_then(|c| c.files.iter().find(|f| &f.path == p))
-                    })?;
+                        file.status.rename_includes_modifications(),
+                    ),
+                    file.selection.clone(),
+                    rs.diff.clone()?,
+                    rs.diff_generation,
+                    (rs.diff_contents.clone(), rs.diff_old_contents.clone()),
+                    s.settings.hide_whitespace_in_changes_diff,
+                )
+            }
+            DiffSource::Commit => {
+                let file = rs.commit_selected_file.as_ref().and_then(|p| {
+                    rs.changeset
+                        .as_ref()
+                        .and_then(|c| c.files.iter().find(|f| &f.path == p))
+                })?;
+                (
+                    file.path.clone(),
                     (
-                        file.path.clone(),
                         file.status.kind,
-                        DiffSelection::all(),
-                        rs.commit_diff.clone()?,
-                        rs.commit_diff_generation,
-                        (
-                            rs.commit_diff_contents.clone(),
-                            rs.commit_diff_old_contents.clone(),
-                        ),
-                        s.settings.hide_whitespace_in_history_diff,
-                    )
-                }
-                DiffSource::Stash => {
-                    let file = rs.stash_selected_file.as_ref().and_then(|p| {
-                        rs.stash_files
-                            .as_ref()
-                            .and_then(|files| files.iter().find(|f| &f.path == p))
-                    })?;
+                        file.status.rename_includes_modifications(),
+                    ),
+                    DiffSelection::all(),
+                    rs.commit_diff.clone()?,
+                    rs.commit_diff_generation,
                     (
-                        file.path.clone(),
-                        file.status.kind,
-                        DiffSelection::all(),
-                        rs.stash_diff.clone()?,
-                        rs.stash_diff_generation,
-                        (
-                            rs.stash_diff_contents.clone(),
-                            rs.stash_diff_old_contents.clone(),
-                        ),
-                        s.settings.hide_whitespace_in_history_diff,
-                    )
-                }
-                DiffSource::PullRequest => {
-                    let preview = rs.pull_request_preview.as_ref()?;
-                    let file = preview.file.as_ref().and_then(|p| {
-                        preview
-                            .changeset
-                            .as_ref()
-                            .and_then(|c| c.files.iter().find(|f| &f.path == p))
-                    })?;
+                        rs.commit_diff_contents.clone(),
+                        rs.commit_diff_old_contents.clone(),
+                    ),
+                    s.settings.hide_whitespace_in_history_diff,
+                )
+            }
+            DiffSource::Stash => {
+                let file = rs.stash_selected_file.as_ref().and_then(|p| {
+                    rs.stash_files
+                        .as_ref()
+                        .and_then(|files| files.iter().find(|f| &f.path == p))
+                })?;
+                (
+                    file.path.clone(),
                     (
-                        file.path.clone(),
                         file.status.kind,
-                        DiffSelection::all(),
-                        preview.diff.clone()?,
-                        preview.diff_generation,
-                        (preview.diff_contents.clone(), None),
-                        s.settings.hide_whitespace_in_pull_request_diff,
-                    )
-                }
-            };
+                        file.status.rename_includes_modifications(),
+                    ),
+                    DiffSelection::all(),
+                    rs.stash_diff.clone()?,
+                    rs.stash_diff_generation,
+                    (
+                        rs.stash_diff_contents.clone(),
+                        rs.stash_diff_old_contents.clone(),
+                    ),
+                    s.settings.hide_whitespace_in_history_diff,
+                )
+            }
+            DiffSource::PullRequest => {
+                let preview = rs.pull_request_preview.as_ref()?;
+                let file = preview.file.as_ref().and_then(|p| {
+                    preview
+                        .changeset
+                        .as_ref()
+                        .and_then(|c| c.files.iter().find(|f| &f.path == p))
+                })?;
+                (
+                    file.path.clone(),
+                    (
+                        file.status.kind,
+                        file.status.rename_includes_modifications(),
+                    ),
+                    DiffSelection::all(),
+                    preview.diff.clone()?,
+                    preview.diff_generation,
+                    (preview.diff_contents.clone(), None),
+                    s.settings.hide_whitespace_in_pull_request_diff,
+                )
+            }
+        };
         let as_text = self.source == DiffSource::WorkingDirectory
             && rs.diff_as_text.as_deref() == Some(path.as_str());
         Some(Snapshot {
@@ -521,6 +530,7 @@ impl DiffView {
             key: (id, path.clone(), generation),
             path,
             kind,
+            rename_includes_modifications,
             selection,
             diff,
             contents,
@@ -1599,6 +1609,22 @@ impl DiffView {
         {
             return self.panel(format!("The file mode changed from {old} to {new}"), cx);
         }
+        if snap.kind == FileStatusKind::Renamed && snap.rename_includes_modifications {
+            // `.panel.renamed` with the alert octicon
+            let t = cx.ghd();
+            return div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(SPACING_HALF())
+                .p(SPACING_DOUBLE())
+                .text_size(FONT_SIZE())
+                .text_color(t.text_secondary)
+                .child(octicon(Octicon::Alert, t.text_secondary))
+                .child("The file was renamed and includes changes.")
+                .into_any_element();
+        }
         let message = match snap.kind {
             FileStatusKind::New | FileStatusKind::Untracked => "The file is empty",
             FileStatusKind::Renamed => "The file was renamed but not changed",
@@ -1721,7 +1747,8 @@ impl DiffView {
         let mut items: Vec<AnyElement> = Vec::new();
         // repository link
         if let Some(url) = diff.url.as_deref()
-            && let Some(gh) = corvene_core::github_from_remote(url, &[])
+            && let Some(gh) =
+                corvene_core::github_from_remote(url, &corvene_core::github_hosts(&[], true))
         {
             let html_url = gh.html_url.clone();
             let host = html_url

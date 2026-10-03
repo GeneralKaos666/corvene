@@ -26,7 +26,8 @@ use gpui_kit::*;
 use crate::branch_list::{group_branches, remote_counterparts};
 use crate::context_menu::{IS_MAC, MenuItem, labels, mac_or};
 use crate::dialog::{
-    DialogButton, DialogFrame, DialogKind, dialog, dialog_framed, dialog_with_kind,
+    DialogButton, DialogFrame, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog,
+    dialog_framed, dialog_with_kind,
 };
 use crate::dialogs::branch_dialogs::{CreateBranchDialog, branch_picker, split_button};
 use crate::icons::{Octicon, octicon};
@@ -460,24 +461,24 @@ impl McoDialog {
                 format!("{label} will require force push")
             },
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "force-push-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "force-push-begin",
                     label: format!("Begin {label}").into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::begin_after_force_push_warning(repo, !dont_ask, cx)
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -826,15 +827,15 @@ impl McoDialog {
                 format!("Confirm abort {}", kind.label().to_lowercase())
             },
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "abort-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "abort-ok",
                     label: if IS_MAC {
                         format!("Abort {}", kind.label())
@@ -842,11 +843,11 @@ impl McoDialog {
                         format!("Abort {}", kind.label().to_lowercase())
                     }
                     .into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| Dispatcher::abort_mco(repo, cx)),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -1445,18 +1446,17 @@ impl Render for SquashCommitMessageDialog {
             "dialog-squash-message",
             title.clone(),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "squash-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "squash-ok",
                     label: title.into(),
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if disabled {
@@ -1474,7 +1474,8 @@ impl Render for SquashCommitMessageDialog {
                         );
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

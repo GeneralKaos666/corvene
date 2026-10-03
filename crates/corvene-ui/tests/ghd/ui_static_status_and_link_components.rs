@@ -4,24 +4,24 @@
 //! `SegmentedItem` are skipped in `tools/ghd-tests/skips/ui2.tsv`).
 //!
 //! - `RepoRulesetLink` (`ui/repository-rules/repo-ruleset-link.tsx`) links
-//!   to `<htmlURL>/rules/<rulesetId>`. Corvene builds that URL inline for
-//!   each failed rule of the commit form's rule-failure warning
-//!   (`crates/corvene-ui/src/changes.rs`, `format!("{html_url}/rules/{}",
-//!   f.ruleset_id)`), so [`repo_ruleset_link`] is a stand-in.
+//!   to `<htmlURL>/rules/<rulesetId>`: Corvene's
+//!   `corvene_ui::changes::repo_ruleset_link(repository, ruleset_id)`, the
+//!   URL each failed rule of the commit form's rule-failure warning links.
 //! - `ForkSettingsDescription`
 //!   (`ui/repository-settings/fork-contribution-target-description.tsx`)
 //!   lists five effects of the Fork Behavior choice, each naming the
 //!   target repository (the fork itself for `Self`, its parent for
 //!   `Parent`). Corvene's counterpart is
-//!   `corvene_ui::dialogs::fork_settings_description(github, target, cx)`,
-//!   which picks the name inline and returns a GPUI element, so
-//!   [`fork_settings_description`] is a stand-in returning the items'
-//!   texts. GitHub Desktop's `ForkContributionTarget.Self` is
+//!   `corvene_ui::dialogs::fork_settings_description_items(github, target)`,
+//!   the items' texts `dialogs::fork_settings_description(github, target,
+//!   cx)` draws. GitHub Desktop's `ForkContributionTarget.Self` is
 //!   `ForkContributionTarget::Own`.
 //!
 //! Not ported (React DOM only): the `.repo-ruleset-link` class.
 
 use corvene_core::{ForkContributionTarget, GitHubRepository, Repository};
+use corvene_ui::changes::repo_ruleset_link;
+use corvene_ui::dialogs::fork_settings_description_items as fork_settings_description;
 
 fn github_repository(
     owner: &str,
@@ -60,28 +60,8 @@ fn create_fork_repository() -> Repository {
     repository
 }
 
-/// Stand-in for GitHub Desktop's `RepoRulesetLink`: the link's URL.
-/// Replace it with the Corvene function once there is one and remove the
-/// `#[ignore]`.
-fn repo_ruleset_link(_repository: &GitHubRepository, _ruleset_id: u64) -> String {
-    unimplemented!("changes.rs builds the /rules/<id> URL inline for each failed rule")
-}
-
-/// Stand-in for GitHub Desktop's `ForkSettingsDescription`: the text of
-/// each list item. Replace it with the Corvene function once there is one
-/// and remove the `#[ignore]`.
-fn fork_settings_description(
-    _github: &GitHubRepository,
-    _fork_contribution_target: ForkContributionTarget,
-) -> Vec<String> {
-    unimplemented!(
-        "dialogs::fork_settings_description picks the target repository inline and returns a GPUI element"
-    )
-}
-
 // GHD: unit/ui/static-status-and-link-components-test.tsx › static status and link components › renders repo ruleset links with the expected ruleset url
 #[test]
-#[ignore = "ghd: missing: no RepoRulesetLink (repo-ruleset-link.tsx); changes.rs builds the /rules/<id> URL inline"]
 fn renders_repo_ruleset_links_with_the_expected_ruleset_url() {
     let repository = github_repository("desktop", "https://github.com/desktop/desktop", None);
 
@@ -92,7 +72,6 @@ fn renders_repo_ruleset_links_with_the_expected_ruleset_url() {
 
 // GHD: unit/ui/static-status-and-link-components-test.tsx › static status and link components › renders fork settings descriptions for self and parent contribution targets
 #[test]
-#[ignore = "ghd: missing: no ForkSettingsDescription text (fork-contribution-target-description.tsx); dialogs::fork_settings_description returns a GPUI element"]
 fn renders_fork_settings_descriptions_for_self_and_parent_contribution_targets() {
     let repository = create_fork_repository();
 

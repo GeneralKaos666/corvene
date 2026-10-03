@@ -22,7 +22,7 @@
 //! with a sign-in link and the refresh button is disabled (GHD shows "You're
 //! all set!" and a refresh button that does nothing).
 
-use corvene_core::filter::fuzzy_score;
+use corvene_core::filter::match_keys;
 use corvene_core::{Dispatcher, Popup, PullRequest, parse_iso8601};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -67,11 +67,10 @@ pub fn subtitle(pr: &PullRequest) -> String {
     }
 }
 
-/// The filter list matches the title or the subtitle.
+/// The filter list matches the title or the subtitle (GHD `match` over
+/// `text: [pr.title, getSubtitle(pr)]`).
 pub fn matches_filter(pr: &PullRequest, query: &str) -> bool {
-    query.is_empty()
-        || fuzzy_score(query, &pr.title).is_some()
-        || fuzzy_score(query, &subtitle(pr)).is_some()
+    query.is_empty() || match_keys(query, &[pr.title.clone(), subtitle(pr)]).is_some()
 }
 
 /// A pull request's CI status, as `ci_status` draws it.
@@ -554,7 +553,93 @@ pub fn signed_out_pull_requests(repository_name: String, endpoint: String, cx: &
         .into_any_element()
 }
 
-/// `NoPullRequests`
+/// What a `NoPullRequests` link button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoPullRequestsAction {
+    /// `onCreateBranch`
+    CreateBranch,
+    /// `onCreatePullRequest`
+    CreatePullRequest,
+}
+
+impl NoPullRequestsAction {
+    /// The text around the link button: "Would you like to <link> …".
+    pub fn sentence(self) -> (&'static str, &'static str) {
+        match self {
+            Self::CreateBranch => ("Would you like to ", " and get going on your next project?"),
+            Self::CreatePullRequest => ("Would you like to ", " from the current branch?"),
+        }
+    }
+}
+
+/// GHD `NoPullRequests.renderCallToAction`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoPullRequestsCallToAction {
+    /// The `.call-to-action` text alone.
+    Text(String),
+    /// "Would you like to <link button> …": the link button's label and what
+    /// it does (the surrounding text is [`NoPullRequestsAction::sentence`]).
+    Link(String, NoPullRequestsAction),
+}
+
+/// What GHD `NoPullRequests` (`ui/branches/no-pull-requests.tsx`) shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoPullRequestsContent {
+    /// Whether the `.blankslate-image` (`alt=""`) is drawn.
+    pub blankslate_image: bool,
+    /// `.title`
+    pub title: String,
+    /// `.no-prs`: its text and the repository name (`<Ref>`), when neither
+    /// searching nor loading.
+    pub no_prs: Option<(String, String)>,
+    pub call_to_action: NoPullRequestsCallToAction,
+}
+
+/// GHD `INoPullRequestsProps` (the callbacks are [`NoPullRequestsAction`]s).
+pub struct NoPullRequestsProps<'a> {
+    pub repository_name: &'a str,
+    pub is_on_default_branch: bool,
+    pub is_search: bool,
+    pub is_loading_pull_requests: bool,
+}
+
+/// GHD `NoPullRequests` (`renderTitle`, `renderCallToAction`).
+pub fn no_pull_requests_content(props: NoPullRequestsProps<'_>) -> NoPullRequestsContent {
+    let (title, no_prs) = if props.is_search {
+        ("Sorry, I can't find that pull request!", None)
+    } else if props.is_loading_pull_requests {
+        ("Hang tight", None)
+    } else {
+        (
+            "You're all set!",
+            Some((
+                "No open pull requests in".to_string(),
+                props.repository_name.to_string(),
+            )),
+        )
+    };
+    let call_to_action = if props.is_loading_pull_requests {
+        NoPullRequestsCallToAction::Text("Loading pull requests as fast as I can!".into())
+    } else if props.is_on_default_branch {
+        NoPullRequestsCallToAction::Link(
+            "create a new branch".into(),
+            NoPullRequestsAction::CreateBranch,
+        )
+    } else {
+        NoPullRequestsCallToAction::Link(
+            "create a pull request".into(),
+            NoPullRequestsAction::CreatePullRequest,
+        )
+    };
+    NoPullRequestsContent {
+        blankslate_image: true,
+        title: title.into(),
+        no_prs,
+        call_to_action,
+    }
+}
+
+/// `NoPullRequests`, drawn from [`no_pull_requests_content`].
 pub fn no_pull_requests(
     id: u64,
     repository_name: String,
@@ -564,57 +649,52 @@ pub fn no_pull_requests(
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
-    let title: &'static str = if is_search {
-        "Sorry, I can't find that pull request!"
-    } else if loading {
-        "Hang tight"
-    } else {
-        "You're all set!"
-    };
-    let link = |id_str: &'static str, label: &'static str, cx: &App| {
-        crate::widgets::link_button(id_str, label, cx)
-    };
-    let call_to_action: AnyElement = if loading {
-        div()
-            .child("Loading pull requests as fast as I can!")
+    let NoPullRequestsContent {
+        blankslate_image,
+        title,
+        no_prs,
+        call_to_action,
+    } = no_pull_requests_content(NoPullRequestsProps {
+        repository_name: &repository_name,
+        is_on_default_branch: on_default_branch,
+        is_search,
+        is_loading_pull_requests: loading,
+    });
+    let call_to_action: AnyElement = match call_to_action {
+        NoPullRequestsCallToAction::Text(text) => div().child(text).into_any_element(),
+        NoPullRequestsCallToAction::Link(label, action) => {
+            let (lead, tail) = action.sentence();
+            let link_id = match action {
+                NoPullRequestsAction::CreateBranch => "no-prs-create-branch",
+                NoPullRequestsAction::CreatePullRequest => "no-prs-create-pr",
+            };
+            crate::widgets::paragraph(vec![
+                lead.into(),
+                crate::widgets::Inline::Element(
+                    crate::widgets::link_button(link_id, label, cx)
+                        .on_click(move |_, _, cx| {
+                            Dispatcher::close_foldout(cx);
+                            match action {
+                                NoPullRequestsAction::CreateBranch => Dispatcher::show_popup(
+                                    Popup::CreateBranch {
+                                        repo: id,
+                                        target_sha: None,
+                                        initial_name: String::new(),
+                                    },
+                                    cx,
+                                ),
+                                NoPullRequestsAction::CreatePullRequest => {
+                                    Dispatcher::create_pull_request(id, cx)
+                                }
+                            }
+                        })
+                        .into_any_element(),
+                ),
+                tail.into(),
+            ])
+            .justify_center()
             .into_any_element()
-    } else if on_default_branch {
-        crate::widgets::paragraph(vec![
-            "Would you like to ".into(),
-            crate::widgets::Inline::Element(
-                link("no-prs-create-branch", "create a new branch", cx)
-                    .on_click(move |_, _, cx| {
-                        Dispatcher::close_foldout(cx);
-                        Dispatcher::show_popup(
-                            Popup::CreateBranch {
-                                repo: id,
-                                target_sha: None,
-                                initial_name: String::new(),
-                            },
-                            cx,
-                        )
-                    })
-                    .into_any_element(),
-            ),
-            " and get going on your next project?".into(),
-        ])
-        .justify_center()
-        .into_any_element()
-    } else {
-        crate::widgets::paragraph(vec![
-            "Would you like to ".into(),
-            crate::widgets::Inline::Element(
-                link("no-prs-create-pr", "create a pull request", cx)
-                    .on_click(move |_, _, cx| {
-                        Dispatcher::close_foldout(cx);
-                        Dispatcher::create_pull_request(id, cx)
-                    })
-                    .into_any_element(),
-            ),
-            " from the current branch?".into(),
-        ])
-        .justify_center()
-        .into_any_element()
+        }
     };
     div()
         .id("no-pull-requests")
@@ -625,13 +705,15 @@ pub fn no_pull_requests(
         .text_center()
         .p(SPACING())
         .text_size(FONT_SIZE())
-        .child(
-            crate::widgets::blankslate_image("empty-no-pull-requests.svg", cx)
-                .w(zpx(200.))
-                .mb(SPACING()),
-        )
+        .when(blankslate_image, |d| {
+            d.child(
+                crate::widgets::blankslate_image("empty-no-pull-requests.svg", cx)
+                    .w(zpx(200.))
+                    .mb(SPACING()),
+            )
+        })
         .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
-        .when(!is_search && !loading, |d| {
+        .when_some(no_prs, |d, (text, repository_name)| {
             d.child(
                 div()
                     .pb(SPACING())
@@ -641,7 +723,7 @@ pub fn no_pull_requests(
                     .items_center()
                     .justify_center()
                     .gap(zpx(3.))
-                    .child("No open pull requests in")
+                    .child(text)
                     .child(code_ref(repository_name, cx)),
             )
         })

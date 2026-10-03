@@ -147,6 +147,9 @@ pub struct ChangesSidebar {
     /// (`738-clear-message-after-outside-commit`).
     seen_head: (Option<u64>, Option<String>),
     seen_amend_nonce: u64,
+    /// Repository and `commit_message_nonce` last seen: a new message from
+    /// the dispatcher (Undo Commit) goes into the form.
+    seen_commit_message: (Option<u64>, u64),
     /// Repository and `commit.template` text the form was last prefilled for.
     seen_template: (Option<u64>, Option<String>),
     context_menu: Option<Entity<ContextMenu>>,
@@ -190,10 +193,32 @@ pub struct ChangesSidebar {
     recalled: Option<usize>,
 }
 
+/// GHD `RepoRulesetsForBranchLink`
+/// (`ui/repository-rules/repo-rulesets-for-branch-link.tsx`): the rulesets
+/// page for `branch`, `None` (the children without a link) when the
+/// repository or the branch is missing.
+pub fn repo_rulesets_for_branch_link(
+    repository: Option<&corvene_core::GitHubRepository>,
+    branch: Option<&str>,
+) -> Option<String> {
+    let (repository, branch) = (repository?, branch.filter(|b| !b.is_empty())?);
+    Some(format!(
+        "{}/rules/?ref={}",
+        repository.html_url,
+        corvene_core::integrations::encode_component(&format!("refs/heads/{branch}"))
+    ))
+}
+
+/// GHD `RepoRulesetLink` (`ui/repository-rules/repo-ruleset-link.tsx`): the
+/// page of the ruleset `ruleset_id`.
+pub fn repo_ruleset_link(repository: &corvene_core::GitHubRepository, ruleset_id: u64) -> String {
+    format!("{}/rules/{ruleset_id}", repository.html_url)
+}
+
 /// What the repository rules say about the commit being written
 /// (`renderBranchProtectionsRepoRulesCommitWarning` inputs).
 struct RulesSnapshot {
-    html_url: String,
+    github: corvene_core::GitHubRepository,
     branch: Option<String>,
     /// `aheadBehind === null`: the branch is unpublished.
     unpublished: bool,
@@ -293,6 +318,30 @@ impl ChangesSidebar {
                     cx.notify();
                 }
             }
+            // GHD `commitMessage` (after `undoCommit`): load it into the form
+            let (repo, message_nonce, message) = {
+                let s = state.read(cx);
+                let rs = s.selected_state();
+                (
+                    s.selected,
+                    rs.map_or(0, |rs| rs.commit_message_nonce),
+                    rs.map(|rs| rs.commit_message.clone()),
+                )
+            };
+            let seen = std::mem::replace(&mut this.seen_commit_message, (repo, message_nonce));
+            if seen.0 == repo
+                && seen.1 != message_nonce
+                && let Some(message) = message
+            {
+                this.summary
+                    .update(cx, |s, cx| s.set_value(message.summary, window, cx));
+                this.description.update(cx, |s, cx| {
+                    s.set_value(message.description.unwrap_or_default(), window, cx)
+                });
+                this.refresh_spelling(CommitField::Summary, cx);
+                this.refresh_spelling(CommitField::Description, cx);
+                cx.notify();
+            }
         })
         .detach();
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
@@ -368,6 +417,7 @@ impl ChangesSidebar {
             tag,
             pending_tag: None,
             seen_amend_nonce: 0,
+            seen_commit_message: (None, 0),
             seen_template: (None, None),
             context_menu: None,
             filter_popover_open: false,
@@ -1515,10 +1565,18 @@ impl ChangesSidebar {
         let files = sorted.as_deref().unwrap_or(&status.files);
         // `704-changes-filter-match`
         let mode = s.flags.text(corvene_core::flags::ids::CHANGES_FILTER_MATCH);
-        let visible = filtered_files(files, &text, &rs.file_list_filter, &hide, mode)
-            .into_iter()
-            .cloned()
-            .collect();
+        // GHD `applyFilters`: a hidden changes filter filters nothing
+        let visible = filtered_files(
+            files,
+            &text,
+            self.filter_visible,
+            &rs.file_list_filter,
+            &hide,
+            mode,
+        )
+        .into_iter()
+        .cloned()
+        .collect();
         (visible, status.files.len())
     }
 
@@ -1546,14 +1604,12 @@ impl ChangesSidebar {
     /// is active, not every file is listed, and a file included in the
     /// commit is among the hidden ones. Returns the included count.
     fn committing_hidden_files(&self, cx: &App) -> Option<usize> {
-        let text_active = !self.filter.read(cx).value().trim().is_empty();
-        if !text_active && self.filter_options(cx).count_active() == 0 {
+        let text = self.filter.read(cx).value().to_string();
+        let filter = self.filter_options(cx);
+        if !corvene_core::filter::has_active_filters(&text, &filter) {
             return None;
         }
         let (visible, total) = self.visible_files(cx);
-        if visible.len() == total {
-            return None;
-        }
         let s = self.state.read(cx);
         let status = s.selected_state()?.status.as_ref()?;
         let included: Vec<&str> = status
@@ -1562,11 +1618,12 @@ impl ChangesSidebar {
             .filter(|f| f.selection.kind() != DiffSelectionType::None)
             .map(|f| f.path.as_str())
             .collect();
-        let hidden = included.len() > visible.len()
-            || included
-                .iter()
-                .any(|p| !visible.iter().any(|f| f.path == *p));
-        hidden.then_some(included.len())
+        let filtered: std::collections::HashMap<String, ()> =
+            visible.into_iter().map(|f| (f.path, ())).collect();
+        corvene_core::filter::is_committing_file_hidden_by_filter(
+            &included, &filtered, total, &text, &filter,
+        )
+        .then_some(included.len())
     }
 
     /// `.hidden-changes-warning` between the list and the commit form.
@@ -1641,8 +1698,8 @@ impl ChangesSidebar {
             .map(|st| st.files.clone())
             .unwrap_or_default();
         let filter = self.filter_options(cx);
-        let text_active = !self.filter.read(cx).value().trim().is_empty();
-        let active = filter.count_active() > 0 || text_active;
+        let active =
+            corvene_core::filter::has_active_filters(&self.filter.read(cx).value(), &filter);
         // `705-renamed-files-filter` (kept while active, to be cleared)
         let renamed_option =
             s.flags.bool(corvene_core::flags::ids::RENAMED_FILES_FILTER) || filter.renamed;
@@ -2753,7 +2810,7 @@ impl ChangesSidebar {
             .map(|b| failed_rules(&info.branch_name_patterns, b))
             .unwrap_or_default();
         Some(RulesSnapshot {
-            html_url: github.html_url.clone(),
+            github: github.clone(),
             branch,
             unpublished: rs.ahead_behind.is_none(),
             protected: rs.current_branch_protected,
@@ -3013,11 +3070,8 @@ impl ChangesSidebar {
                 .into_any_element()
         };
         let rulesets_link = |label: &'static str| {
-            let url = format!(
-                "{}/rules/?ref={}",
-                rules.html_url,
-                corvene_core::integrations::encode_component(&format!("refs/heads/{branch}"))
-            );
+            let url = repo_rulesets_for_branch_link(Some(&rules.github), Some(&branch))
+                .unwrap_or_default();
             crate::widgets::link_button("commit-warning-rulesets", label, cx)
                 .on_click(move |_, _, cx| corvene_core::Dispatcher::open_url(&url, cx))
                 .into_any_element()
@@ -3221,12 +3275,9 @@ impl ChangesSidebar {
         } else {
             ".".to_string()
         };
-        let all_url = format!(
-            "{}/rules/?ref={}",
-            rules.html_url,
-            corvene_core::integrations::encode_component(&format!("refs/heads/{branch}"))
-        );
-        let html_url = rules.html_url.clone();
+        let all_url =
+            repo_rulesets_for_branch_link(Some(&rules.github), Some(&branch)).unwrap_or_default();
+        let github = rules.github.clone();
         let list = |label: &'static str, items: &[corvene_core::RepoRulesMetadataFailure]| {
             if items.is_empty() {
                 return None;
@@ -3241,7 +3292,7 @@ impl ChangesSidebar {
                             .child(format!("{label} {}:", mac_or("Rules", "rules"))),
                     )
                     .children(items.iter().enumerate().map(|(ix, f)| {
-                        let url = format!("{html_url}/rules/{}", f.ruleset_id);
+                        let url = repo_ruleset_link(&github, f.ruleset_id);
                         div()
                             .flex()
                             .flex_row()
@@ -4233,7 +4284,6 @@ fn file_row(
         .map(|(_, hits)| hits)
         .unwrap_or_default();
     let dir_len = directory.chars().count();
-    let dir_hits: Vec<usize> = hits.iter().copied().filter(|&h| h < dir_len).collect();
     let name_hits: Vec<usize> = hits
         .iter()
         .filter(|&&h| h >= dir_len)
@@ -4245,7 +4295,7 @@ fn file_row(
             format!(
                 "{}, {}{}",
                 file.path,
-                crate::widgets::status_label(file.status.kind),
+                crate::widgets::status_label(&file.status),
                 match include_value {
                     Some(true) => "",
                     Some(false) => ", not included",
@@ -4352,37 +4402,34 @@ fn file_row(
                 }),
             ),
         )
-        .child(
-            // GHD `PathText` keeps the file name visible and truncates the
-            // directory part when the row is too narrow.
+        .child(if names_only {
             div()
                 .flex_1()
                 .min_w_0()
-                .flex()
-                .flex_row()
                 .text_size(FONT_SIZE())
-                .when(!names_only, |d| {
-                    d.child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            // `.list-item.selected .dirname` inherits the row colour
-                            .text_color(match (is_selected, list_focused) {
-                                (true, true) => t.box_selected_active_text,
-                                (true, false) => t.box_selected_text,
-                                _ => t.text_secondary,
-                            })
-                            .child(crate::autocompletion::highlighted(&directory, &dir_hits)),
-                    )
-                })
-                .child(
-                    div()
-                        .flex_none()
-                        .max_w_full()
-                        .truncate()
-                        .child(crate::autocompletion::highlighted(&file_name, &name_hits)),
+                .truncate()
+                .child(crate::autocompletion::highlighted(&file_name, &name_hits))
+        } else {
+            // GHD `PathLabel`: `PathText` keeps the file name and shortens
+            // the directory from its middle when the row is too narrow;
+            // `.list-item.selected .dirname` inherits the row colour
+            let (directory_color, arrow_color) = match (is_selected, list_focused) {
+                (true, true) => (t.box_selected_active_text, t.box_selected_active_text),
+                (true, false) => (t.box_selected_text, t.box_selected_text),
+                _ => (t.text_secondary, t.text),
+            };
+            crate::path_label::path_label_element(
+                crate::path_label::path_label(
+                    &file.path,
+                    file.status.kind,
+                    file.old_path.as_deref(),
                 ),
-        )
+                hits,
+                directory_color,
+                arrow_color,
+            )
+            .text_size(FONT_SIZE())
+        })
         .when_some(line_stats, |d, stats| {
             let colours = (is_selected && list_focused).then_some(t.box_selected_active_text);
             d.child(line_stats_label(stats, colours, t))

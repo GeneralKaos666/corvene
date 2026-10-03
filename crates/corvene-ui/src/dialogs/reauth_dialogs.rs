@@ -13,7 +13,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind,
+};
 use crate::widgets::{Inline, code_ref, paragraph};
 
 pub struct InvalidatedTokenDialog {
@@ -107,18 +109,17 @@ impl Render for WorkflowPushRejectedDialog {
             DialogKind::Error,
             mac_or("Push Rejected", "Push rejected"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "workflow-push-rejected-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "workflow-push-rejected-ok",
                     label: mac_or("Continue in Browser", "Continue in browser").into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
@@ -135,7 +136,8 @@ impl Render for WorkflowPushRejectedDialog {
                         );
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -193,18 +195,17 @@ impl Render for SamlReauthRequiredDialog {
             DialogKind::Error,
             mac_or("Re-authorization Required", "Re-authorization required"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "saml-reauth-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "saml-reauth-ok",
                     label: mac_or("Continue in Browser", "Continue in browser").into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
@@ -212,7 +213,8 @@ impl Render for SamlReauthRequiredDialog {
                         Dispatcher::sign_in_then_retry(enterprise, repo, retry.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
