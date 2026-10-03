@@ -684,7 +684,7 @@ impl Dispatcher {
                 }
                 Err(err) => {
                     Self::end_mco(id, cx);
-                    Self::show_error("Could not stash changes", err.to_string(), cx);
+                    Self::show_error("Could not stash changes", &err, cx);
                 }
             },
         );
@@ -1286,7 +1286,7 @@ impl Dispatcher {
             move || corvene_git::open_merge_tool(git, &workdir, &path),
             move |result, cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not open the merge tool", err.to_string(), cx);
+                    Self::show_error("Could not open the merge tool", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -1410,7 +1410,7 @@ impl Dispatcher {
             },
             move |result, cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not abort", err.to_string(), cx);
+                    Self::show_error("Could not abort", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -1463,7 +1463,7 @@ impl Dispatcher {
                                 );
                                 let _ = squash;
                             }
-                            Err(err) => Self::show_error("Could not merge", err.to_string(), cx),
+                            Err(err) => Self::show_error("Could not merge", &err, cx),
                         }
                         Self::end_mco(id, cx);
                         Self::show_section(id, Section::Changes, cx);
@@ -1632,7 +1632,7 @@ impl Dispatcher {
             },
             move |(result, status, submodule_error), cx| {
                 if let Some(err) = submodule_error {
-                    Self::show_error("Could not update submodules", err.to_string(), cx);
+                    Self::show_error("Could not update submodules", &err, cx);
                 }
                 if let Some(status) = status {
                     Self::state(cx).update(cx, |s, cx| {
@@ -1670,7 +1670,7 @@ impl Dispatcher {
                     }
                     Err(err) => {
                         Self::end_mco(id, cx);
-                        Self::show_error("Could not merge", err.to_string(), cx);
+                        Self::show_error("Could not merge", &err, cx);
                     }
                 }
                 Self::show_section(id, Section::Changes, cx);
@@ -1772,7 +1772,7 @@ impl Dispatcher {
                 }
                 Err(err) => {
                     Self::end_mco(id, cx);
-                    Self::show_error("Could not create branch", err.to_string(), cx);
+                    Self::show_error("Could not create branch", &err, cx);
                 }
             },
         );
@@ -2416,7 +2416,7 @@ impl Dispatcher {
                         Self::set_banner(banner, cx);
                         Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).mco_undo = None);
                     }
-                    Err(err) => Self::show_error("Could not undo", err.to_string(), cx),
+                    Err(err) => Self::show_error("Could not undo", &err, cx),
                 }
                 Self::refresh_repository(id, cx);
             },

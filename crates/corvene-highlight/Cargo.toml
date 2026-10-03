@@ -30,6 +30,8 @@ two-face.workspace = true
 
 [dev-dependencies]
 corvene-grammars = { workspace = true, features = ["all"] }
+# tests build small user grammar sets from sublime-syntax text
+syntect = { workspace = true, features = ["yaml-load"] }
 
 [[example]]
 name = "list-syntaxes"

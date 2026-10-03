@@ -1,0 +1,5 @@
+name = "Foo"
+grammar = "foo"
+path_suffixes = ["foo", "Foofile"]
+first_line_pattern = "^#!.*\\bfoo\\b"
+line_comments = ["// "]

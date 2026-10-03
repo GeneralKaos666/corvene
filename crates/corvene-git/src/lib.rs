@@ -8,12 +8,14 @@ pub mod config;
 pub mod detect;
 pub mod diff;
 pub mod error;
+pub mod git_errors;
 pub mod handle;
 pub mod history_ops;
 pub mod hook_env;
 pub mod ignore;
 pub mod index_lock;
 pub mod log;
+mod log_gix;
 pub mod ops;
 pub mod patch;
 pub mod paths;
@@ -29,6 +31,7 @@ pub mod repo;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;
 pub mod status;
+mod status_gix;
 pub mod worktree;
 
 pub use branch_ops::{
@@ -60,6 +63,10 @@ pub use diff::{
     submodule_diff, working_directory_diff, working_directory_patch, working_file_lines,
 };
 pub use error::{GitError, bad_config_line, dubious_ownership_path, explain_bad_config};
+pub use git_errors::{
+    GitErrorDetails, GitFailure, KnownGitError, display_command, files_that_would_be_overwritten,
+    git_error_details, known_git_error,
+};
 pub use history_ops::{
     ResetMode, checkout_commit, cherry_pick_no_commit, create_tag, delete_tag, format_patches,
     reset_to, revert_commit, revert_commits_no_commit, revert_file_in_commit,

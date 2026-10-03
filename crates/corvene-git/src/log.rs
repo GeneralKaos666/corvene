@@ -269,7 +269,18 @@ pub fn get_commits_in_range(
 }
 
 /// `getChangedFiles`: `log <sha> -C -M -m -1 --first-parent --raw --numstat -z`.
-pub fn get_changed_files(git: Arc<GitBinary>, workdir: &Path, sha: &str) -> Result<ChangesetData> {
+///
+/// `in_process` reads them with gitoxide (`log_gix.rs`), git only when that
+/// fails. Flag `907-in-process-commit-files`.
+pub fn get_changed_files(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    sha: &str,
+    in_process: bool,
+) -> Result<ChangesetData> {
+    if in_process && let Some(data) = crate::log_gix::changed_files(workdir, sha, sha) {
+        return Ok(data);
+    }
     let out = GitCommand::new(git)
         .args([
             "log",
@@ -317,42 +328,15 @@ pub fn parse_raw_log_with_numstat(stdout: &[u8], sha: &str) -> ChangesetData {
             } else {
                 (first, None)
             };
-            let kind = match letter {
-                "A" => FileStatusKind::New,
-                "D" => FileStatusKind::Deleted,
-                "R" => FileStatusKind::Renamed,
-                "C" => FileStatusKind::Copied,
-                "U" => FileStatusKind::Conflicted,
-                _ => FileStatusKind::Modified,
-            };
-            let entry = match kind {
-                FileStatusKind::New => GitStatusEntry::Added,
-                FileStatusKind::Deleted => GitStatusEntry::Deleted,
-                FileStatusKind::Renamed => GitStatusEntry::Renamed,
-                FileStatusKind::Copied => GitStatusEntry::Copied,
-                FileStatusKind::Conflicted => GitStatusEntry::Unmerged,
-                _ => GitStatusEntry::Modified,
-            };
             let is_submodule = raw.starts_with("160000") || raw.split(' ').nth(1) == Some("160000");
-            data.files.push(CommittedFileChange {
+            data.files.push(committed_file(
+                letter,
+                score,
                 path,
                 old_path,
-                status: FileStatus {
-                    kind,
-                    index: entry,
-                    working_tree: GitStatusEntry::Unchanged,
-                    score,
-                    code: letter.to_string(),
-                    submodule: is_submodule,
-                    // committed submodule entries only ever record a commit change
-                    submodule_status: is_submodule.then_some(corvene_models::SubmoduleStatus {
-                        commit_changed: true,
-                        ..Default::default()
-                    }),
-                    conflict_markers: None,
-                },
-                commitish: sha.to_string(),
-            });
+                is_submodule,
+                sha,
+            ));
         } else {
             // numstat: "added\tdeleted\tpath" - "-" for binary files
             let mut parts = field.splitn(3, '\t');
@@ -371,6 +355,53 @@ pub fn parse_raw_log_with_numstat(stdout: &[u8], sha: &str) -> ChangesetData {
     data
 }
 
+/// One `--raw` record as a file change: `letter` is git's status letter
+/// (`A`, `D`, `M`, `T`, `R`, `C`, `U`).
+pub(crate) fn committed_file(
+    letter: &str,
+    score: Option<u8>,
+    path: String,
+    old_path: Option<String>,
+    is_submodule: bool,
+    sha: &str,
+) -> CommittedFileChange {
+    let kind = match letter {
+        "A" => FileStatusKind::New,
+        "D" => FileStatusKind::Deleted,
+        "R" => FileStatusKind::Renamed,
+        "C" => FileStatusKind::Copied,
+        "U" => FileStatusKind::Conflicted,
+        _ => FileStatusKind::Modified,
+    };
+    let entry = match kind {
+        FileStatusKind::New => GitStatusEntry::Added,
+        FileStatusKind::Deleted => GitStatusEntry::Deleted,
+        FileStatusKind::Renamed => GitStatusEntry::Renamed,
+        FileStatusKind::Copied => GitStatusEntry::Copied,
+        FileStatusKind::Conflicted => GitStatusEntry::Unmerged,
+        _ => GitStatusEntry::Modified,
+    };
+    CommittedFileChange {
+        path,
+        old_path,
+        status: FileStatus {
+            kind,
+            index: entry,
+            working_tree: GitStatusEntry::Unchanged,
+            score,
+            code: letter.to_string(),
+            submodule: is_submodule,
+            // committed submodule entries only ever record a commit change
+            submodule_status: is_submodule.then_some(corvene_models::SubmoduleStatus {
+                commit_changed: true,
+                ..Default::default()
+            }),
+            conflict_markers: None,
+        },
+        commitish: sha.to_string(),
+    }
+}
+
 /// The empty tree, used as the parent of a root commit (GHD `NullTreeSHA`).
 pub const NULL_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
@@ -381,15 +412,19 @@ pub(crate) fn is_bad_revision(err: &crate::error::GitError) -> bool {
 
 /// `getCommitRangeChangedFiles`: files changed between `shas[0]^` and the
 /// newest sha (`shas` oldest first). Falls back to the empty tree when the
-/// oldest commit is a root commit.
+/// oldest commit is a root commit. `in_process`: see [`get_changed_files`].
 pub fn get_commit_range_changed_files(
     git: Arc<GitBinary>,
     workdir: &Path,
     shas: &[String],
+    in_process: bool,
 ) -> Result<ChangesetData> {
     let (Some(oldest), Some(newest)) = (shas.first(), shas.last()) else {
         return Ok(ChangesetData::default());
     };
+    if in_process && let Some(data) = crate::log_gix::changed_files(workdir, oldest, newest) {
+        return Ok(data);
+    }
     let run = |base: &str| {
         GitCommand::new(git.clone())
             .args([
@@ -762,7 +797,7 @@ mod tests {
     fn changed_files_and_diff() {
         let (dir, git) = repo();
         let head = get_commits(dir.path(), "HEAD", 0, 1).unwrap().remove(0);
-        let data = get_changed_files(git.clone(), dir.path(), &head.sha).unwrap();
+        let data = get_changed_files(git.clone(), dir.path(), &head.sha, false).unwrap();
         let paths: Vec<_> = data.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["a.txt", "b.txt"]);
         assert_eq!(data.files[1].status.kind, FileStatusKind::New);

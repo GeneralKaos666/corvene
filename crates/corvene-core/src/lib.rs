@@ -15,6 +15,7 @@ pub mod diff_cache;
 pub mod dispatcher;
 pub mod drafts;
 pub mod emoji;
+pub mod extensions;
 pub mod filter;
 pub mod flags;
 pub mod forks;

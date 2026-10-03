@@ -58,6 +58,19 @@ fn android_built_in() -> Availability {
     }
 }
 
+/// The wgpu renderer's switches: macOS and Windows draw with another one.
+fn wgpu_renderer_only() -> Availability {
+    if cfg!(any(
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "android"
+    )) {
+        Availability::Available
+    } else {
+        Availability::BuiltIn("Only the Linux and Android renderer has this.")
+    }
+}
+
 fn product_name(s: &str) -> Result<(), &'static str> {
     let s = s.trim();
     if s.is_empty() {
@@ -470,6 +483,23 @@ registry! {
         restart: false, visible: false, availability: available,
         upstream: &[],
         code: &["crates/corvene-ui/src/widgets.rs", "vendor/gpui-pre/src/window.rs", "vendor/gpui-pre/src/elements/div.rs"],
+    },
+
+    /// Settings › Appearance › Language extensions…
+    LANGUAGE_EXTENSIONS = 111 "language-extensions" {
+        title: "Language extensions",
+        summary: "Settings › Appearance offers Language extensions…: grammars from VS Code, Zed, \
+                  Pulsar / Atom, Sublime Text and TextMate packages add highlighting for languages \
+                  Corvene does not know, from a file, a folder, a URL, a GitHub repository, the \
+                  Open VSX, Zed and Pulsar registries, or the editors installed on this machine. \
+                  An extension's grammar wins over the built-in one for its files unless told not to.",
+        ghd_behaviour: "A fixed set of CodeMirror 5 modes; no way to add a language.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22015)],
+        code: &["crates/corvene-extensions", "crates/corvene-core/src/extensions.rs", "crates/corvene-highlight/src/user.rs", "crates/corvene-ui/src/dialogs/language_extensions.rs"],
     },
 
     /// Initials instead of the grey placeholder avatar.
@@ -2354,6 +2384,25 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-platform/src/cli.rs"],
     },
 
+    /// Git error dialogs show the command, its exit code and output.
+    GIT_ERROR_DIALOG = 415 "git-error-dialog" {
+        title: "Structured git error dialogs",
+        summary: "When a git command fails, the error dialog leads with a plain sentence (GitHub \
+                  Desktop's description where it has one, else git's first error line), lists \
+                  what git named (files that would be overwritten or conflict, rejected refs, \
+                  the server's messages, hints, the path or URL at fault), and keeps git's raw \
+                  output in a monospace box under the command that ran (without the -c options \
+                  Corvene adds) and its exit code, collapsed while the details stand in for it.",
+        ghd_behaviour: "Shows its description alone for the errors it recognises; otherwise \
+                        git's raw output in monospace, with no command or exit code.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/dialogs/simple.rs", "crates/corvene-git/src/git_errors.rs"],
+    },
+
     /// Open-repository URLs and the CLI can leave Corvene in the background.
     URL_BACKGROUND_OPEN = 416 "url-background-open" {
         title: "Open repositories in the background",
@@ -3920,6 +3969,22 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(21970)],
         code: &["crates/corvene-ui/src/image_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
+    /// A hint above a diff nothing highlights.
+    MISSING_HIGHLIGHTING_HINT = 756 "missing-highlighting-hint" {
+        title: "Hint for files without syntax highlighting",
+        summary: "A diff of a file no grammar covers gets one line above it: \"No syntax \
+                  highlighting for .foo\" with Find an extension…, which opens Language \
+                  extensions with the registries' candidates for that suffix. A × dismisses the \
+                  hint for that suffix.",
+        ghd_behaviour: "Such a diff is shown without colours and without comment.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-core/src/extensions.rs"],
     },
 
     /// Type changes (file to symbolic link) are parsed as two sections.
@@ -5514,7 +5579,92 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// The working directory status read by gitoxide in-process.
+    IN_PROCESS_STATUS = 906 "in-process-status" {
+        title: "In-process status",
+        summary: "The changes list is read by gitoxide inside Corvene instead of by a git status \
+                  process: the same files, codes, upstream and ahead/behind counts, without \
+                  starting git on every refresh (about a third faster on a typical repository, \
+                  the same on a 50,000-file one). Corvene runs git as before whenever gitoxide \
+                  cannot read the repository.",
+        ghd_behaviour: "Runs `git status --porcelain=2` on every refresh.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/status_gix.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// A commit's changed files read by gitoxide in-process.
+    IN_PROCESS_COMMIT_FILES = 907 "in-process-commit-files" {
+        title: "In-process commit files",
+        summary: "The changed files and line counts of a selected commit (or range of commits) \
+                  are read by gitoxide inside Corvene instead of by a git log process, with git's \
+                  rename and copy detection. Corvene runs git as before whenever gitoxide cannot \
+                  read them.",
+        ghd_behaviour: "Runs `git log --raw --numstat` (or `git diff` for a range) for every \
+                        selected commit.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/log_gix.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// The wgpu renderer draws opaque quads first with a depth test.
+    OPAQUE_DEPTH_PASS = 908 "opaque-depth-pass" {
+        title: "Renderer: opaque depth pass",
+        summary: "Linux and Android: the solid insides of opaque panels, rows and lines are drawn \
+                  first, front to back, with a depth buffer, so everything they cover is skipped \
+                  by the GPU instead of being shaded and blended underneath. The picture is the \
+                  same pixel for pixel; mobile GPUs spend most of a frame on that overdraw. \
+                  Not yet tried on a phone.",
+        ghd_behaviour: "Chromium's compositor; Corvene's renderer otherwise blends every quad \
+                        over the previous one.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: wgpu_renderer_only,
+        upstream: &[],
+        code: &["vendor/gpui-pre-wgpu/src/wgpu_renderer.rs", "crates/corvene/src/main.rs"],
+    },
+
+    /// The wgpu renderer redraws only what changed since the last frame.
+    DAMAGE_SCISSOR = 909 "damage-scissor" {
+        title: "Renderer: redraw only what changed",
+        summary: "Linux and Android: a frame that differs from the last one in a small area (a \
+                  blinking caret, a hovered row) redraws only that area into a kept copy of \
+                  the window and copies it to the screen. Not yet tried on a phone.",
+        ghd_behaviour: "Chromium's compositor; Corvene's renderer otherwise redraws the whole \
+                        window every frame.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: wgpu_renderer_only,
+        upstream: &[],
+        code: &["vendor/gpui-pre-wgpu/src/wgpu_renderer.rs", "crates/corvene/src/main.rs"],
+    },
+
     // ---- 1000 Experimental ----
+
+    /// Compile tree-sitter grammars an extension names but Corvene lacks.
+    BUILD_GRAMMARS_FROM_SOURCE = 1001 "build-grammars-from-source" {
+        title: "Build tree-sitter grammars from source",
+        summary: "A Zed or Pulsar extension whose tree-sitter grammar Corvene does not bundle \
+                  offers Build grammar…: after a consent sheet naming the repository, the commit \
+                  and the compiler, Corvene downloads the grammar's source and compiles its parser \
+                  with the system C compiler (the Xcode Command Line Tools) into a library it \
+                  then loads. A grammar's code runs inside Corvene; only sources you trust.",
+        ghd_behaviour: "No tree-sitter.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-extensions/src/tsbuild", "crates/corvene-core/src/extensions.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

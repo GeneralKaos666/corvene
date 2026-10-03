@@ -29,7 +29,9 @@ fn vs_subpixel_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_i
     let sprite = b_subpixel_sprites[instance_id];
 
     var out = SubpixelSpriteOutput();
-    out.position = to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation);
+    out.position = with_order_depth(
+        to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation),
+        sprite.order);
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.color = hsla_to_rgba(sprite.color);
     out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask, sprite.transformation);

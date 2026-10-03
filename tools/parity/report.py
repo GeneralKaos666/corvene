@@ -91,6 +91,11 @@ def write(out: Path, results: list[dict], defaults: dict):
             if s.get("ghd_only"):
                 body.append(f'<div class="card"><h3>{_e(s["name"])}</h3><img loading="lazy" style="max-width:100%" src="{base + s["ghd"]}"></div>')
                 continue
+            if s.get("corvene_only"):
+                note = f' <span class="muted">{_e(s["note"])}</span>' if s.get("note") else ""
+                body.append(f'<div class="card"><div class="snaphead"><h3>{_e(s["name"])}</h3><span class="b warn">Corvene only</span>{note}</div>'
+                            f'<img loading="lazy" style="max-width:100%" src="{base + s["corvene"]}"></div>')
+                continue
             badge = (f'<span class="b {"ok" if s["pass"] else "bad"}">{s["percent"]:.3f}% px / ≤{s["threshold"]}%</span>'
                      f'<span class="muted">{s.get("coverage", 0):.1f}% of 4pt blocks differ</span>')
             g, c, d = base + s["ghd"], base + s["corvene"], base + s["diff"]

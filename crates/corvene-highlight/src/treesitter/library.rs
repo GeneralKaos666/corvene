@@ -157,9 +157,40 @@ impl Entry {
 /// Grammars that load together: one library of a pack (a grammar package
 /// such as `typescript` with `typescript` and `tsx`), or a whole table.
 struct Unit {
-    /// `None`: `loaded` was filled at registration
+    /// `None`: `loaded` was filled at registration, or `user` says where
+    /// the grammar comes from
     file: Option<UnitFile>,
+    /// a user extension's grammar (its queries and detection, and where
+    /// its parser comes from)
+    user: Option<UserGrammar>,
     loaded: OnceLock<HashMap<String, Arc<Grammar>>>,
+}
+
+/// Where a user grammar's parser comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UserLanguage {
+    /// a library built from source, exporting the `corvene_grammars_v1`
+    /// table with one grammar of this name
+    Library(PathBuf),
+    /// one of Corvene's own grammars (compiled in or in a pack), loaded
+    /// when first needed
+    Derived { base: String },
+}
+
+/// A grammar an extension registers: its own queries and file
+/// associations over a parser Corvene has or built.
+#[derive(Clone, Debug)]
+pub struct UserGrammar {
+    pub name: String,
+    pub extensions: Vec<String>,
+    pub filenames: Vec<String>,
+    pub first_line: Option<Regex>,
+    pub aliases: Vec<String>,
+    /// empty: keep the base grammar's
+    pub highlights: String,
+    pub injections: String,
+    pub locals: String,
+    pub language: UserLanguage,
 }
 
 /// A pack's compressed library and where it is unpacked to.
@@ -176,6 +207,7 @@ impl Unit {
             .collect();
         let unit = Unit {
             file: None,
+            user: None,
             loaded: OnceLock::new(),
         };
         let _ = unit.loaded.set(map);
@@ -184,6 +216,15 @@ impl Unit {
 
     fn load(&self) -> &HashMap<String, Arc<Grammar>> {
         self.loaded.get_or_init(|| {
+            if let Some(user) = &self.user {
+                return match load_user(user) {
+                    Ok(grammar) => HashMap::from([(grammar.name.clone(), Arc::new(grammar))]),
+                    Err(err) => {
+                        tracing::warn!("user tree-sitter grammar {}: {err}", user.name);
+                        HashMap::new()
+                    }
+                };
+            }
             let Some(file) = &self.file else {
                 return HashMap::new();
             };
@@ -241,15 +282,28 @@ struct Source {
 /// Source name of the compiled-in table.
 pub const BUNDLED: &str = "bundled";
 
-/// Sources in lookup order: the compiled-in table, then the packs (the
-/// `tree-sitter-all` pack before `tree-sitter-rest`, which it contains).
+/// Source name prefix of a user extension's grammars that win over the
+/// built-in ones for the files they claim.
+pub const USER_PREFERRED: &str = "user+:";
+/// Source name prefix of a user extension's grammars that only fill gaps.
+pub const USER_FALLBACK: &str = "user-:";
+
+/// Sources in lookup order: preferred user grammars, the compiled-in table,
+/// then the packs (the `tree-sitter-all` pack before `tree-sitter-rest`,
+/// which it contains), then the user grammars that only fill gaps.
 fn rank(name: &str) -> u8 {
     match name {
-        BUNDLED => 0,
-        "tree-sitter-all" => 1,
-        "tree-sitter-rest" => 2,
-        _ => 3,
+        _ if name.starts_with(USER_PREFERRED) => 0,
+        BUNDLED => 1,
+        "tree-sitter-all" => 2,
+        "tree-sitter-rest" => 3,
+        _ if name.starts_with(USER_FALLBACK) => 5,
+        _ => 4,
     }
+}
+
+fn is_user_source(name: &str) -> bool {
+    name.starts_with(USER_PREFERRED) || name.starts_with(USER_FALLBACK)
 }
 
 fn sources() -> &'static RwLock<Vec<Source>> {
@@ -361,6 +415,18 @@ fn open_library(path: &Path) -> Result<Vec<Arc<Grammar>>, String> {
     Ok(grammars)
 }
 
+/// Open a library and read its table without registering it: the
+/// `corvene --verify-grammar` helper runs this in its own process so a
+/// library that crashes on load never takes the app down. Returns the
+/// grammar names.
+pub fn verify_library(path: &Path) -> Result<Vec<String>, String> {
+    let grammars = open_library(path)?;
+    if grammars.is_empty() {
+        return Err("the library holds no usable grammar".to_string());
+    }
+    Ok(grammars.iter().map(|g| g.name.clone()).collect())
+}
+
 /// Use one grammar library (every grammar in it, loaded now) under `name`.
 /// Returns how many grammars it holds.
 pub fn load_library(name: &str, path: &Path) -> Result<usize, String> {
@@ -428,6 +494,7 @@ pub fn load_pack(name: &str, index: &Path, cache_dir: &Path) -> Result<usize, St
                 gz: base.join(&unit.file),
                 cache: cache_dir.join(stem),
             }),
+            user: None,
             loaded: OnceLock::new(),
         });
         for g in unit.grammars {
@@ -480,6 +547,146 @@ pub fn unload_library(name: &str) {
         }
     }
     GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// A user grammar's `Grammar`: the parser from its library or base grammar,
+/// the queries and detection from the extension (empty queries keep the
+/// base's).
+fn load_user(user: &UserGrammar) -> Result<Grammar, String> {
+    let base = match &user.language {
+        UserLanguage::Library(path) => {
+            let grammars = open_library(path)?;
+            grammars
+                .into_iter()
+                .find(|g| g.name == user.name)
+                .or_else(|| None)
+                .ok_or_else(|| format!("{} holds no grammar named {}", path.display(), user.name))?
+        }
+        UserLanguage::Derived { base } => base_grammar(base).ok_or_else(|| {
+            format!("Corvene has no grammar named {base} (is its pack installed?)")
+        })?,
+    };
+    let pick = |own: &str, inherited: &str| {
+        if own.trim().is_empty() {
+            inherited.to_string()
+        } else {
+            own.to_string()
+        }
+    };
+    Ok(Grammar {
+        name: user.name.clone(),
+        language: base.language.clone(),
+        highlights: pick(&user.highlights, &base.highlights),
+        injections: pick(&user.injections, &base.injections),
+        locals: pick(&user.locals, &base.locals),
+        extensions: user.extensions.clone(),
+        filenames: user.filenames.clone(),
+        first_line: user.first_line.clone(),
+        aliases: user.aliases.clone(),
+        injects: base.injects.clone(),
+    })
+}
+
+/// A built-in grammar by name (never a user one), loaded.
+fn base_grammar(name: &str) -> Option<Arc<Grammar>> {
+    let entry = {
+        let sources = sources().read().ok()?;
+        sources
+            .iter()
+            .filter(|s| !is_user_source(&s.name))
+            .flat_map(|s| s.entries.iter())
+            .find(|e| e.name == name)
+            .cloned()
+    };
+    entry?.grammar()
+}
+
+/// Whether Corvene knows a grammar `name` (compiled in or in a loaded
+/// pack; nothing is loaded).
+pub fn knows_grammar(name: &str) -> bool {
+    sources().read().is_ok_and(|sources| {
+        sources
+            .iter()
+            .filter(|s| !is_user_source(&s.name))
+            .any(|s| s.entries.iter().any(|e| e.name == name))
+    })
+}
+
+/// Register an extension's grammars under its id. `preferred` ranks them
+/// before the built-in grammars for the files they claim. Replaces an
+/// earlier registration of the same extension.
+pub fn register_user(extension: &str, preferred: bool, grammars: Vec<UserGrammar>) {
+    unregister_user_quiet(extension);
+    let lower = |v: &[String]| v.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
+    let entries = grammars
+        .into_iter()
+        .map(|g| {
+            let entry = Entry {
+                name: g.name.clone(),
+                extensions: lower(&g.extensions),
+                filenames: lower(&g.filenames),
+                first_line: g.first_line.clone(),
+                aliases: lower(&g.aliases),
+                injects: Vec::new(),
+                unit: Arc::new(Unit {
+                    file: None,
+                    user: Some(g),
+                    loaded: OnceLock::new(),
+                }),
+            };
+            Arc::new(entry)
+        })
+        .collect();
+    let prefix = if preferred {
+        USER_PREFERRED
+    } else {
+        USER_FALLBACK
+    };
+    insert(&format!("{prefix}{extension}"), entries);
+}
+
+/// Drop an extension's grammars.
+pub fn unregister_user(extension: &str) {
+    if unregister_user_quiet(extension) {
+        GENERATION.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+fn unregister_user_quiet(extension: &str) -> bool {
+    let Ok(mut sources) = sources().write() else {
+        return false;
+    };
+    let before = sources.len();
+    sources.retain(|s| {
+        !(s.name == format!("{USER_PREFERRED}{extension}")
+            || s.name == format!("{USER_FALLBACK}{extension}"))
+    });
+    sources.len() != before
+}
+
+/// Whether any user grammar is registered.
+pub fn has_user_grammars() -> bool {
+    sources()
+        .read()
+        .is_ok_and(|s| s.iter().any(|source| is_user_source(&source.name)))
+}
+
+/// The user grammar claiming `path`, with its extension id and whether it
+/// is preferred over the built-ins. Preferred sources are searched first.
+pub fn user_entry_for(path: &str, first_line: &str) -> Option<(Arc<Entry>, String, bool)> {
+    let sources = sources().read().ok()?;
+    for source in sources.iter().filter(|s| is_user_source(&s.name)) {
+        if let Some(entry) = super::detect::for_path(&source.entries, path, first_line) {
+            let preferred = source.name.starts_with(USER_PREFERRED);
+            let extension = source
+                .name
+                .trim_start_matches(USER_PREFERRED)
+                .trim_start_matches(USER_FALLBACK)
+                .to_string();
+            return Some((entry, extension, preferred));
+        }
+    }
+    None
 }
 
 /// Register a grammar table directly (tests, examples).

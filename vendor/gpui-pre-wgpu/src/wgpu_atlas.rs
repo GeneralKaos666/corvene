@@ -36,6 +36,10 @@ struct WgpuAtlasTextures {
     storage: WgpuAtlasStorage,
     pending_uploads: Vec<PendingUpload>,
     next_texture_generation: u64,
+    /// Corvene patch: counts the changes to the tiles (insertions, removals,
+    /// clears), so that the damage scissor (`set_damage_scissor`) can tell
+    /// that a sprite unchanged in the scene may still show other texels.
+    version: u64,
 }
 
 pub struct WgpuTextureInfo {
@@ -59,6 +63,7 @@ impl WgpuAtlas {
             storage: WgpuAtlasStorage::default(),
             pending_uploads: Vec::new(),
             next_texture_generation: 0,
+            version: 0,
         })))
     }
 
@@ -88,12 +93,19 @@ impl WgpuAtlas {
         })
     }
 
+    /// Corvene patch: see `WgpuAtlasTextures::version`.
+    pub(crate) fn version(&self) -> u64 {
+        self.0.lock().backend.version
+    }
+
     /// Clears all cached textures and tiles, forcing them to be recreated.
     /// Use this for incremental recovery when the device is still valid.
     pub fn clear(&self) {
         self.0.lock().clear(|textures| {
             textures.storage = WgpuAtlasStorage::default();
             textures.pending_uploads.clear();
+            // Corvene patch: see `WgpuAtlasTextures::version`
+            textures.version = textures.version.wrapping_add(1);
         });
     }
 
@@ -106,6 +118,8 @@ impl WgpuAtlas {
             textures.color_texture_format = context.color_texture_format();
             textures.storage = WgpuAtlasStorage::default();
             textures.pending_uploads.clear();
+            // Corvene patch: see `WgpuAtlasTextures::version`
+            textures.version = textures.version.wrapping_add(1);
         });
     }
 }
@@ -133,10 +147,14 @@ impl AtlasBackend for WgpuAtlasTextures {
     ) -> Result<AtlasTile> {
         let tile = self.allocate(size, kind).context("failed to allocate")?;
         self.upload_texture(tile.texture_id, tile.bounds, bytes);
+        // Corvene patch: see `WgpuAtlasTextures::version`
+        self.version = self.version.wrapping_add(1);
         Ok(tile)
     }
 
     fn remove(&mut self, tile: AtlasTile) {
+        // Corvene patch: see `WgpuAtlasTextures::version`
+        self.version = self.version.wrapping_add(1);
         let id = tile.texture_id;
         let Some(texture_slot) = self.storage[id.kind].textures.get_mut(id.index as usize) else {
             return;

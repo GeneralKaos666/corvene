@@ -215,6 +215,13 @@ impl Dispatcher {
         {
             Self::load_tree_sitter_packs(cx);
         }
+        if now.bool(ids::LANGUAGE_EXTENSIONS) != previous.bool(ids::LANGUAGE_EXTENSIONS) {
+            if now.bool(ids::LANGUAGE_EXTENSIONS) {
+                Self::load_language_extensions(cx);
+            } else {
+                Self::unload_language_extensions(cx);
+            }
+        }
         for id in now.restart_pending(&Self::state(cx).read(cx).flags_at_launch) {
             warn!(flag = %id, "flag takes effect at the next launch");
         }

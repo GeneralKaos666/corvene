@@ -77,6 +77,16 @@ pub fn open(path: &Path) -> gix::Result<gix::Repository> {
     Ok(repo)
 }
 
+/// [`open`], for answers that must equal git's: `None` unless gitoxide
+/// trusts the repository fully. One git calls unsafe (owned by another
+/// user, not in `safe.directory`) is refused by git but opened by gitoxide
+/// without its repository configuration, so the two would disagree.
+pub fn open_trusted(path: &Path) -> Option<gix::Repository> {
+    open(path)
+        .ok()
+        .filter(|repo| repo.git_dir_trust() == gix::sec::Trust::Full)
+}
+
 /// The raw bytes of `<rev>:<path>` read in-process (what `git show
 /// <rev>:<path>` prints for a blob); `None` when gitoxide cannot resolve it.
 pub fn blob_bytes(workdir: &Path, rev: &str, path: &str) -> Option<Vec<u8>> {

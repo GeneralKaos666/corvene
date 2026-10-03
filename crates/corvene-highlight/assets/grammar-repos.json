@@ -1,0 +1,927 @@
+{
+ "briot/tree-sitter-ada": [
+  "ada"
+ ],
+ "tree-sitter/tree-sitter-agda": [
+  "agda"
+ ],
+ "dlvandenberg/tree-sitter-angular": [
+  "angular"
+ ],
+ "aheber/tree-sitter-sfapex": [
+  "apex",
+  "sflog",
+  "soql",
+  "sosl"
+ ],
+ "tree-sitter-grammars/tree-sitter-arduino": [
+  "arduino"
+ ],
+ "cathaysia/tree-sitter-asciidoc": [
+  "asciidoc"
+ ],
+ "rubixdev/tree-sitter-asm": [
+  "asm"
+ ],
+ "virchau13/tree-sitter-astro": [
+  "astro"
+ ],
+ "mleonidas/tree-sitter-authzed": [
+  "authzed"
+ ],
+ "beaglefoot/tree-sitter-awk": [
+  "awk"
+ ],
+ "tree-sitter/tree-sitter-bash": [
+  "bash"
+ ],
+ "vito/tree-sitter-bass": [
+  "bass"
+ ],
+ "polarmutex/tree-sitter-beancount": [
+  "beancount"
+ ],
+ "latex-lsp/tree-sitter-bibtex": [
+  "bibtex"
+ ],
+ "tree-sitter-grammars/tree-sitter-bicep": [
+  "bicep"
+ ],
+ "tree-sitter-grammars/tree-sitter-bitbake": [
+  "bitbake"
+ ],
+ "emranmr/tree-sitter-blade": [
+  "blade"
+ ],
+ "ambroisie/tree-sitter-bp": [
+  "bp"
+ ],
+ "sgruszka/tree-sitter-bpftrace": [
+  "bpftrace"
+ ],
+ "ajdelcimmuto/tree-sitter-brightscript": [
+  "brightscript"
+ ],
+ "tree-sitter/tree-sitter-c": [
+  "c"
+ ],
+ "c3lang/tree-sitter-c3": [
+  "c3"
+ ],
+ "tree-sitter/tree-sitter-c-sharp": [
+  "c_sharp"
+ ],
+ "tree-sitter-grammars/tree-sitter-cairo": [
+  "cairo"
+ ],
+ "tree-sitter-grammars/tree-sitter-capnp": [
+  "capnp"
+ ],
+ "tree-sitter-grammars/tree-sitter-chatito": [
+  "chatito"
+ ],
+ "decurity/tree-sitter-circom": [
+  "circom"
+ ],
+ "sogaiu/tree-sitter-clojure": [
+  "clojure"
+ ],
+ "uyha/tree-sitter-cmake": [
+  "cmake"
+ ],
+ "stsewd/tree-sitter-comment": [
+  "comment"
+ ],
+ "thehamsta/tree-sitter-commonlisp": [
+  "commonlisp"
+ ],
+ "addcninblue/tree-sitter-cooklang": [
+  "cooklang"
+ ],
+ "jakestanger/tree-sitter-corn": [
+  "corn"
+ ],
+ "tree-sitter-grammars/tree-sitter-cpon": [
+  "cpon"
+ ],
+ "tree-sitter/tree-sitter-cpp": [
+  "cpp"
+ ],
+ "tree-sitter/tree-sitter-css": [
+  "css"
+ ],
+ "tree-sitter-grammars/tree-sitter-csv": [
+  "csv",
+  "psv",
+  "tsv"
+ ],
+ "tree-sitter-grammars/tree-sitter-cuda": [
+  "cuda"
+ ],
+ "eonpatapon/tree-sitter-cue": [
+  "cue"
+ ],
+ "elliotfontaine/tree-sitter-cylc": [
+  "cylc"
+ ],
+ "gdamore/tree-sitter-d": [
+  "d"
+ ],
+ "nielsenko/tree-sitter-dart": [
+  "dart"
+ ],
+ "valdezfomar/tree-sitter-desktop": [
+  "desktop"
+ ],
+ "joelspadin/tree-sitter-devicetree": [
+  "devicetree"
+ ],
+ "jbellerb/tree-sitter-dhall": [
+  "dhall"
+ ],
+ "tree-sitter/tree-sitter-diff": [
+  "diff"
+ ],
+ "treeman/tree-sitter-djot": [
+  "djot"
+ ],
+ "camdencheek/tree-sitter-dockerfile": [
+  "dockerfile"
+ ],
+ "rydesun/tree-sitter-dot": [
+  "dot"
+ ],
+ "tree-sitter-grammars/tree-sitter-doxygen": [
+  "doxygen"
+ ],
+ "tree-sitter-grammars/tree-sitter-xml": [
+  "dtd",
+  "xml"
+ ],
+ "glehmann/tree-sitter-earthfile": [
+  "earthfile"
+ ],
+ "valdezfomar/tree-sitter-editorconfig": [
+  "editorconfig"
+ ],
+ "uyha/tree-sitter-eds": [
+  "eds"
+ ],
+ "connorlay/tree-sitter-eex": [
+  "eex"
+ ],
+ "wilfred/tree-sitter-elisp": [
+  "elisp"
+ ],
+ "elixir-lang/tree-sitter-elixir": [
+  "elixir"
+ ],
+ "elm-tooling/tree-sitter-elm": [
+  "elm"
+ ],
+ "glapa-grossklag/tree-sitter-elsa": [
+  "elsa"
+ ],
+ "elves/tree-sitter-elvish": [
+  "elvish"
+ ],
+ "tree-sitter/tree-sitter-embedded-template": [
+  "embedded_template"
+ ],
+ "simonvic/tree-sitter-enforce": [
+  "enforce"
+ ],
+ "whatsapp/tree-sitter-erlang": [
+  "erlang"
+ ],
+ "facilityapi/tree-sitter-facility": [
+  "facility"
+ ],
+ "khiner/tree-sitter-faust": [
+  "faust"
+ ],
+ "alexmozaidze/tree-sitter-fennel": [
+  "fennel"
+ ],
+ "google/tree-sitter-fidl": [
+  "fidl"
+ ],
+ "tree-sitter-grammars/tree-sitter-firrtl": [
+  "firrtl"
+ ],
+ "ram02z/tree-sitter-fish": [
+  "fish"
+ ],
+ "foamscience/tree-sitter-foam": [
+  "foam"
+ ],
+ "alexanderbrevig/tree-sitter-forth": [
+  "forth"
+ ],
+ "stadelmanma/tree-sitter-fortran": [
+  "fortran"
+ ],
+ "mgramigna/tree-sitter-fsh": [
+  "fsh"
+ ],
+ "ionide/tree-sitter-fsharp": [
+  "fsharp"
+ ],
+ "tree-sitter-grammars/tree-sitter-func": [
+  "func"
+ ],
+ "gap-system/tree-sitter-gap": [
+  "gap"
+ ],
+ "gap-system/tree-sitter-gaptst": [
+  "gaptst"
+ ],
+ "prestonknopp/tree-sitter-gdscript": [
+  "gdscript"
+ ],
+ "airblast-dev/tree-sitter-gdshader": [
+  "gdshader"
+ ],
+ "the-mikedavis/tree-sitter-git-config": [
+  "git_config"
+ ],
+ "the-mikedavis/tree-sitter-git-rebase": [
+  "git_rebase"
+ ],
+ "tree-sitter-grammars/tree-sitter-gitattributes": [
+  "gitattributes"
+ ],
+ "gbprod/tree-sitter-gitcommit": [
+  "gitcommit"
+ ],
+ "shunsambongi/tree-sitter-gitignore": [
+  "gitignore"
+ ],
+ "tree-sitter/tree-sitter-gleam": [
+  "gleam"
+ ],
+ "ember-tooling/tree-sitter-glimmer": [
+  "glimmer"
+ ],
+ "nullvoxpopuli/tree-sitter-glimmer-javascript": [
+  "glimmer_javascript"
+ ],
+ "nullvoxpopuli/tree-sitter-glimmer-typescript": [
+  "glimmer_typescript"
+ ],
+ "thehamsta/tree-sitter-glsl": [
+  "glsl"
+ ],
+ "tree-sitter-grammars/tree-sitter-gn": [
+  "gn"
+ ],
+ "dpezto/tree-sitter-gnuplot": [
+  "gnuplot"
+ ],
+ "tree-sitter/tree-sitter-go": [
+  "go"
+ ],
+ "chaozwn/tree-sitter-goctl": [
+  "goctl"
+ ],
+ "prestonknopp/tree-sitter-godot-resource": [
+  "godot_resource"
+ ],
+ "camdencheek/tree-sitter-go-mod": [
+  "gomod"
+ ],
+ "tree-sitter-grammars/tree-sitter-go-sum": [
+  "gosum"
+ ],
+ "ngalaiko/tree-sitter-go-template": [
+  "gotmpl",
+  "helm"
+ ],
+ "omertuc/tree-sitter-go-work": [
+  "gowork"
+ ],
+ "tree-sitter-grammars/tree-sitter-gpg-config": [
+  "gpg"
+ ],
+ "joowani/tree-sitter-graphql": [
+  "graphql"
+ ],
+ "maebrooks/tree-sitter-gren": [
+  "gren"
+ ],
+ "murtaza64/tree-sitter-groovy": [
+  "groovy"
+ ],
+ "ajrussellaudio/tree-sitter-groq": [
+  "groq"
+ ],
+ "tree-sitter-grammars/tree-sitter-gstlaunch": [
+  "gstlaunch"
+ ],
+ "slackhq/tree-sitter-hack": [
+  "hack"
+ ],
+ "bennypowers/tree-sitter-handlebars": [
+  "handlebars"
+ ],
+ "tree-sitter-grammars/tree-sitter-hare": [
+  "hare"
+ ],
+ "tree-sitter/tree-sitter-haskell": [
+  "haskell"
+ ],
+ "mercurytechnologies/tree-sitter-haskell-persistent": [
+  "haskell_persistent"
+ ],
+ "tree-sitter-grammars/tree-sitter-hcl": [
+  "hcl"
+ ],
+ "phoenixframework/tree-sitter-heex": [
+  "heex"
+ ],
+ "winston0410/tree-sitter-hjson": [
+  "hjson"
+ ],
+ "thehamsta/tree-sitter-hlsl": [
+  "hlsl"
+ ],
+ "antosha417/tree-sitter-hocon": [
+  "hocon"
+ ],
+ "urbit-pilled/tree-sitter-hoon": [
+  "hoon"
+ ],
+ "tree-sitter/tree-sitter-html": [
+  "html"
+ ],
+ "interdependence/tree-sitter-htmldjango": [
+  "htmldjango"
+ ],
+ "rest-nvim/tree-sitter-http": [
+  "http"
+ ],
+ "pfeiferj/tree-sitter-hurl": [
+  "hurl"
+ ],
+ "tree-sitter-grammars/tree-sitter-hyprlang": [
+  "hyprlang"
+ ],
+ "cathaysia/tree-sitter-idl": [
+  "idl"
+ ],
+ "kayhide/tree-sitter-idris": [
+  "idris"
+ ],
+ "justinmk/tree-sitter-ini": [
+  "ini"
+ ],
+ "inko-lang/tree-sitter-inko": [
+  "inko"
+ ],
+ "tree-sitter-grammars/tree-sitter-ispc": [
+  "ispc"
+ ],
+ "sogaiu/tree-sitter-janet-simple": [
+  "janet_simple"
+ ],
+ "tree-sitter/tree-sitter-java": [
+  "java"
+ ],
+ "rmuir/tree-sitter-javadoc": [
+  "javadoc"
+ ],
+ "tree-sitter/tree-sitter-javascript": [
+  "javascript"
+ ],
+ "uros-5/tree-sitter-jinja2": [
+  "jinja"
+ ],
+ "cathaysia/tree-sitter-jinja": [
+  "jinja_inline"
+ ],
+ "ribru17/tree-sitter-jjdescription": [
+  "jjdescription"
+ ],
+ "flurie/tree-sitter-jq": [
+  "jq"
+ ],
+ "tree-sitter/tree-sitter-jsdoc": [
+  "jsdoc"
+ ],
+ "tree-sitter/tree-sitter-json": [
+  "json"
+ ],
+ "joakker/tree-sitter-json5": [
+  "json5"
+ ],
+ "deltarocks/tree-sitter-jrsonnet": [
+  "jsonnet"
+ ],
+ "tree-sitter/tree-sitter-julia": [
+  "julia"
+ ],
+ "indianboy42/tree-sitter-just": [
+  "just"
+ ],
+ "kcl-lang/tree-sitter-kcl": [
+  "kcl"
+ ],
+ "tree-sitter-grammars/tree-sitter-kconfig": [
+  "kconfig"
+ ],
+ "amaanq/tree-sitter-kdl": [
+  "kdl"
+ ],
+ "oxy2dev/tree-sitter-kitty": [
+  "kitty"
+ ],
+ "kos-lang/tree-sitter-kos": [
+  "kos"
+ ],
+ "tree-sitter-grammars/tree-sitter-kotlin": [
+  "kotlin"
+ ],
+ "koto-lang/tree-sitter-koto": [
+  "koto"
+ ],
+ "willem-j-an/tree-sitter-kusto": [
+  "kusto"
+ ],
+ "traxys/tree-sitter-lalrpop": [
+  "lalrpop"
+ ],
+ "latex-lsp/tree-sitter-latex": [
+  "latex"
+ ],
+ "cbarrete/tree-sitter-ledger": [
+  "ledger"
+ ],
+ "r001/tree-sitter-leo": [
+  "leo"
+ ],
+ "jimliang/tree-sitter-less": [
+  "less"
+ ],
+ "tree-sitter-grammars/tree-sitter-linkerscript": [
+  "linkerscript"
+ ],
+ "hankthetank27/tree-sitter-liquid": [
+  "liquid"
+ ],
+ "savonet/tree-sitter-liquidsoap": [
+  "liquidsoap"
+ ],
+ "tree-sitter/tree-sitter-llvm": [
+  "llvm"
+ ],
+ "tree-sitter-grammars/tree-sitter-lua": [
+  "lua"
+ ],
+ "tree-sitter-grammars/tree-sitter-luadoc": [
+  "luadoc"
+ ],
+ "tree-sitter-grammars/tree-sitter-luap": [
+  "luap"
+ ],
+ "tree-sitter-grammars/tree-sitter-luau": [
+  "luau"
+ ],
+ "grahambates/tree-sitter-m68k": [
+  "m68k"
+ ],
+ "tree-sitter-grammars/tree-sitter-make": [
+  "make"
+ ],
+ "tree-sitter-grammars/tree-sitter-markdown": [
+  "markdown",
+  "markdown_inline"
+ ],
+ "acristoffers/tree-sitter-matlab": [
+  "matlab"
+ ],
+ "kerl13/tree-sitter-menhir": [
+  "menhir"
+ ],
+ "monaqa/tree-sitter-mermaid": [
+  "mermaid"
+ ],
+ "tree-sitter-grammars/tree-sitter-meson": [
+  "meson"
+ ],
+ "artagnon/tree-sitter-mlir": [
+  "mlir"
+ ],
+ "naclsn/tree-sitter-nasm": [
+  "nasm"
+ ],
+ "opa-oz/tree-sitter-nginx": [
+  "nginx"
+ ],
+ "nickel-lang/tree-sitter-nickel": [
+  "nickel"
+ ],
+ "alaviss/tree-sitter-nim": [
+  "nim"
+ ],
+ "amopel/tree-sitter-nim-format-string": [
+  "nim_format_string"
+ ],
+ "alemuller/tree-sitter-ninja": [
+  "ninja"
+ ],
+ "nix-community/tree-sitter-nix": [
+  "nix"
+ ],
+ "tree-sitter-grammars/tree-sitter-nqc": [
+  "nqc"
+ ],
+ "nushell/tree-sitter-nu": [
+  "nu"
+ ],
+ "tree-sitter-grammars/tree-sitter-objc": [
+  "objc"
+ ],
+ "tree-sitter/tree-sitter-ocaml": [
+  "ocaml",
+  "ocaml_interface",
+  "ocaml_type"
+ ],
+ "atom-ocaml/tree-sitter-ocamllex": [
+  "ocamllex"
+ ],
+ "tree-sitter-grammars/tree-sitter-odin": [
+  "odin"
+ ],
+ "isopod/tree-sitter-pascal": [
+  "pascal"
+ ],
+ "ath3/tree-sitter-passwd": [
+  "passwd"
+ ],
+ "tree-sitter-grammars/tree-sitter-pem": [
+  "pem"
+ ],
+ "tree-sitter-perl/tree-sitter-perl": [
+  "perl"
+ ],
+ "tree-sitter/tree-sitter-php": [
+  "php",
+  "php_only"
+ ],
+ "claytonrcarter/tree-sitter-phpdoc": [
+  "phpdoc"
+ ],
+ "leo60228/tree-sitter-pioasm": [
+  "pioasm"
+ ],
+ "apple/tree-sitter-pkl": [
+  "pkl"
+ ],
+ "tree-sitter-grammars/tree-sitter-po": [
+  "po"
+ ],
+ "tree-sitter-perl/tree-sitter-pod": [
+  "pod"
+ ],
+ "tree-sitter-grammars/tree-sitter-poe-filter": [
+  "poe_filter"
+ ],
+ "tree-sitter-grammars/tree-sitter-pony": [
+  "pony"
+ ],
+ "airbus-cert/tree-sitter-powershell": [
+  "powershell"
+ ],
+ "tree-sitter-grammars/tree-sitter-printf": [
+  "printf"
+ ],
+ "victorhqc/tree-sitter-prisma": [
+  "prisma"
+ ],
+ "michahoffmann/tree-sitter-promql": [
+  "promql"
+ ],
+ "tree-sitter-grammars/tree-sitter-properties": [
+  "properties"
+ ],
+ "coder3101/tree-sitter-proto": [
+  "proto"
+ ],
+ "prql/tree-sitter-prql": [
+  "prql"
+ ],
+ "zealot128/tree-sitter-pug": [
+  "pug"
+ ],
+ "tree-sitter-grammars/tree-sitter-puppet": [
+  "puppet"
+ ],
+ "postsolar/tree-sitter-purescript": [
+  "purescript"
+ ],
+ "tree-sitter-grammars/tree-sitter-pymanifest": [
+  "pymanifest"
+ ],
+ "tree-sitter/tree-sitter-python": [
+  "python"
+ ],
+ "tree-sitter/tree-sitter-ql": [
+  "ql"
+ ],
+ "tree-sitter-grammars/tree-sitter-qmldir": [
+  "qmldir"
+ ],
+ "yuja/tree-sitter-qmljs": [
+  "qmljs"
+ ],
+ "tree-sitter-grammars/tree-sitter-query": [
+  "query"
+ ],
+ "r-lib/tree-sitter-r": [
+  "r"
+ ],
+ "6cdh/tree-sitter-racket": [
+  "racket"
+ ],
+ "fymyte/tree-sitter-rasi": [
+  "rasi"
+ ],
+ "tris203/tree-sitter-razor": [
+  "razor"
+ ],
+ "joker1007/tree-sitter-rbs": [
+  "rbs"
+ ],
+ "tree-sitter-grammars/tree-sitter-re2c": [
+  "re2c"
+ ],
+ "tree-sitter-grammars/tree-sitter-readline": [
+  "readline"
+ ],
+ "tree-sitter/tree-sitter-regex": [
+  "regex"
+ ],
+ "fallenangel97/tree-sitter-rego": [
+  "rego"
+ ],
+ "tree-sitter-grammars/tree-sitter-requirements": [
+  "requirements"
+ ],
+ "rescript-lang/tree-sitter-rescript": [
+  "rescript"
+ ],
+ "purarue/tree-sitter-rifleconf": [
+  "rifleconf"
+ ],
+ "hubro/tree-sitter-robot": [
+  "robot"
+ ],
+ "opa-oz/tree-sitter-robots-txt": [
+  "robots_txt"
+ ],
+ "faldor20/tree-sitter-roc": [
+  "roc"
+ ],
+ "tree-sitter-grammars/tree-sitter-ron": [
+  "ron"
+ ],
+ "stsewd/tree-sitter-rst": [
+  "rst"
+ ],
+ "tree-sitter/tree-sitter-ruby": [
+  "ruby"
+ ],
+ "2004scape/tree-sitter-runescript": [
+  "runescript"
+ ],
+ "tree-sitter/tree-sitter-rust": [
+  "rust"
+ ],
+ "tree-sitter/tree-sitter-scala": [
+  "scala"
+ ],
+ "rockorager/tree-sitter-scfg": [
+  "scfg"
+ ],
+ "6cdh/tree-sitter-scheme": [
+  "scheme"
+ ],
+ "tree-sitter-grammars/tree-sitter-scss": [
+  "scss"
+ ],
+ "tree-sitter-grammars/tree-sitter-slang": [
+  "slang"
+ ],
+ "theoo/tree-sitter-slim": [
+  "slim"
+ ],
+ "slint-ui/tree-sitter-slint": [
+  "slint"
+ ],
+ "tree-sitter-grammars/tree-sitter-smali": [
+  "smali"
+ ],
+ "indoorvivants/tree-sitter-smithy": [
+  "smithy"
+ ],
+ "osthomas/tree-sitter-snakemake": [
+  "snakemake"
+ ],
+ "minijackson/tree-sitter-snl": [
+  "snl"
+ ],
+ "joranhonig/tree-sitter-solidity": [
+  "solidity"
+ ],
+ "nilshelmig/tree-sitter-sourcepawn": [
+  "sourcepawn"
+ ],
+ "gordiandziwis/tree-sitter-sparql": [
+  "sparql"
+ ],
+ "hanxi/tree-sitter-sproto": [
+  "sproto"
+ ],
+ "derekstride/tree-sitter-sql": [
+  "sql"
+ ],
+ "tree-sitter-grammars/tree-sitter-squirrel": [
+  "squirrel"
+ ],
+ "tree-sitter-grammars/tree-sitter-ssh-config": [
+  "ssh_config"
+ ],
+ "tree-sitter-grammars/tree-sitter-starlark": [
+  "starlark"
+ ],
+ "sigmasd/tree-sitter-strace": [
+  "strace"
+ ],
+ "mskelton/tree-sitter-styled": [
+  "styled"
+ ],
+ "madskjeldgaard/tree-sitter-supercollider": [
+  "supercollider"
+ ],
+ "kristoff-it/superhtml": [
+  "superhtml"
+ ],
+ "connorlay/tree-sitter-surface": [
+  "surface"
+ ],
+ "tree-sitter-grammars/tree-sitter-svelte": [
+  "svelte"
+ ],
+ "alex-pinkus/tree-sitter-swift": [
+  "swift"
+ ],
+ "raafatturki/tree-sitter-sxhkdrc": [
+  "sxhkdrc"
+ ],
+ "ok-ryoko/tree-sitter-systemtap": [
+  "systemtap"
+ ],
+ "gmlarumbe/tree-sitter-systemverilog": [
+  "systemverilog"
+ ],
+ "xasc/tree-sitter-t32": [
+  "t32"
+ ],
+ "tree-sitter-grammars/tree-sitter-tablegen": [
+  "tablegen"
+ ],
+ "tact-lang/tree-sitter-tact": [
+  "tact"
+ ],
+ "tree-sitter-grammars/tree-sitter-tcl": [
+  "tcl"
+ ],
+ "euclidianace/tree-sitter-teal": [
+  "teal"
+ ],
+ "vrischmann/tree-sitter-templ": [
+  "templ"
+ ],
+ "uncenter/tree-sitter-tera": [
+  "tera"
+ ],
+ "michahoffmann/tree-sitter-hcl": [
+  "terraform"
+ ],
+ "porteratgoogle/tree-sitter-textproto": [
+  "textproto"
+ ],
+ "tree-sitter-grammars/tree-sitter-thrift": [
+  "thrift"
+ ],
+ "ambroisie/tree-sitter-tiger": [
+  "tiger"
+ ],
+ "tlaplus-community/tree-sitter-tlaplus": [
+  "tlaplus"
+ ],
+ "arnarg/tree-sitter-todotxt": [
+  "todotxt"
+ ],
+ "tree-sitter-grammars/tree-sitter-toml": [
+  "toml"
+ ],
+ "tree-sitter/tree-sitter-typescript": [
+  "tsx",
+  "typescript"
+ ],
+ "gordiandziwis/tree-sitter-turtle": [
+  "turtle"
+ ],
+ "gbprod/tree-sitter-twig": [
+  "twig"
+ ],
+ "happenslol/tree-sitter-typespec": [
+  "typespec"
+ ],
+ "teddytrombone/tree-sitter-typoscript": [
+  "typoscript"
+ ],
+ "uben0/tree-sitter-typst": [
+  "typst"
+ ],
+ "tree-sitter-grammars/tree-sitter-udev": [
+  "udev"
+ ],
+ "tree-sitter-grammars/tree-sitter-ungrammar": [
+  "ungrammar"
+ ],
+ "kylegoetz/tree-sitter-unison": [
+  "unison"
+ ],
+ "tree-sitter-grammars/tree-sitter-uxntal": [
+  "uxntal"
+ ],
+ "vlang/v-analyzer": [
+  "v"
+ ],
+ "ventojs/tree-sitter-vento": [
+  "vento"
+ ],
+ "tree-sitter/tree-sitter-verilog": [
+  "verilog"
+ ],
+ "jpt13653903/tree-sitter-vhdl": [
+  "vhdl"
+ ],
+ "charmbracelet/tree-sitter-vhs": [
+  "vhs"
+ ],
+ "tree-sitter-grammars/tree-sitter-vim": [
+  "vim"
+ ],
+ "neovim/tree-sitter-vimdoc": [
+  "vimdoc"
+ ],
+ "belltoy/tree-sitter-vrl": [
+  "vrl"
+ ],
+ "tree-sitter-grammars/tree-sitter-vue": [
+  "vue"
+ ],
+ "szebniok/tree-sitter-wgsl": [
+  "wgsl"
+ ],
+ "tree-sitter-grammars/tree-sitter-wgsl-bevy": [
+  "wgsl_bevy"
+ ],
+ "winglang/tree-sitter-wing": [
+  "wing"
+ ],
+ "michael-f-bryan/wit-lsp": [
+  "wit"
+ ],
+ "blocklune/tree-sitter-wxml": [
+  "wxml"
+ ],
+ "tree-sitter-grammars/tree-sitter-xcompose": [
+  "xcompose"
+ ],
+ "valdezfomar/tree-sitter-xresources": [
+  "xresources"
+ ],
+ "tree-sitter-grammars/tree-sitter-yaml": [
+  "yaml"
+ ],
+ "hubro/tree-sitter-yang": [
+  "yang"
+ ],
+ "tree-sitter-grammars/tree-sitter-yuck": [
+  "yuck"
+ ],
+ "tree-sitter-grammars/tree-sitter-zig": [
+  "zig"
+ ],
+ "kristoff-it/ziggy": [
+  "ziggy",
+  "ziggy_schema"
+ ],
+ "georgeharker/tree-sitter-zsh": [
+  "zsh"
+ ]
+}

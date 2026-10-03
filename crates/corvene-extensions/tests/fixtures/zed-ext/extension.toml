@@ -1,0 +1,12 @@
+id = "foo-zed"
+name = "Foo for Zed"
+version = "0.1.0"
+schema_version = 1
+description = "Foo support."
+repository = "https://github.com/example/zed-foo"
+authors = ["Someone <someone@example.com>"]
+languages = ["languages/foo"]
+
+[grammars.foo]
+repository = "https://github.com/example/tree-sitter-foo"
+rev = "0123456789abcdef0123456789abcdef01234567"

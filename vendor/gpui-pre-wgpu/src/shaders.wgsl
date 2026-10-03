@@ -80,7 +80,8 @@ fn apply_contrast_and_gamma_correction3(sample: vec3<f32>, color: vec3<f32>, enh
 struct GlobalParams {
     viewport_size: vec2<f32>,
     premultiplied_alpha: u32,
-    pad: u32,
+    // Corvene patch: see `with_order_depth` (was padding, always 0)
+    order_is_depth: u32,
 }
 
 struct GammaParams {
@@ -170,6 +171,16 @@ struct TransformationMatrix {
 fn to_device_position_impl(position: vec2<f32>) -> vec4<f32> {
     let device_position = position / globals.viewport_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0);
     return vec4<f32>(device_position, 0.0, 1.0);
+}
+
+// Corvene patch: with the opaque depth pass on (`set_opaque_depth_pass`),
+// the renderer uploads each primitive with its depth (its place in the paint
+// order, later nearer) in place of its `order`, so that a tile-based mobile
+// GPU drops the fragments a later opaque quad hides before shading them. Off,
+// the position is left as it was (z = 0).
+fn with_order_depth(position: vec4<f32>, order: u32) -> vec4<f32> {
+    let depth = select(position.z, bitcast<f32>(order), globals.order_is_depth != 0u);
+    return vec4<f32>(position.xy, depth, position.w);
 }
 
 fn to_device_position(unit_vertex: vec2<f32>, bounds: Bounds) -> vec4<f32> {
@@ -551,7 +562,7 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     let quad = load_quad(instance_id);
 
     var out = QuadVarying();
-    out.position = to_device_position(unit_vertex, quad.bounds);
+    out.position = with_order_depth(to_device_position(unit_vertex, quad.bounds), quad.order);
 
     let gradient = prepare_gradient_color(
         quad.background.tag,
@@ -1017,7 +1028,7 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) ins
     }
 
     var out = ShadowVarying();
-    out.position = to_device_position(unit_vertex, geometry);
+    out.position = with_order_depth(to_device_position(unit_vertex, geometry), shadow.order);
     out.color = hsla_to_rgba(shadow.color);
     out.shadow_id = instance_id;
     out.clip_distances = distance_from_clip_rect(unit_vertex, geometry, shadow.content_mask);
@@ -1199,7 +1210,7 @@ fn vs_underline(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) 
     let underline = load_underline(instance_id);
 
     var out = UnderlineVarying();
-    out.position = to_device_position(unit_vertex, underline.bounds);
+    out.position = with_order_depth(to_device_position(unit_vertex, underline.bounds), underline.order);
     out.color = hsla_to_rgba(underline.color);
     out.underline_id = instance_id;
     out.clip_distances = distance_from_clip_rect(unit_vertex, underline.bounds, underline.content_mask);
@@ -1264,7 +1275,9 @@ fn vs_mono_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     let sprite = load_mono_sprite(instance_id);
 
     var out = MonoSpriteVarying();
-    out.position = to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation);
+    out.position = with_order_depth(
+        to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation),
+        sprite.order);
 
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.color = hsla_to_rgba(sprite.color);
@@ -1312,7 +1325,7 @@ fn vs_poly_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     let sprite = load_poly_sprite(instance_id);
 
     var out = PolySpriteVarying();
-    out.position = to_device_position(unit_vertex, sprite.bounds);
+    out.position = with_order_depth(to_device_position(unit_vertex, sprite.bounds), sprite.order);
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.sprite_id = instance_id;
     out.clip_distances = distance_from_clip_rect(unit_vertex, sprite.bounds, sprite.content_mask);

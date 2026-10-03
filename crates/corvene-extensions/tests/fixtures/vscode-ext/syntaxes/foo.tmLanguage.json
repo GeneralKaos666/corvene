@@ -1,0 +1,18 @@
+{
+  "scopeName": "source.foo",
+  "name": "Foo",
+  "patterns": [
+    { "include": "#keywords" },
+    { "include": "#strings" },
+    { "match": "//.*$", "name": "comment.line.double-slash.foo" },
+    { "match": "\\b\\d+\\b", "name": "constant.numeric.foo" }
+  ],
+  "repository": {
+    "keywords": { "match": "\\b(if|else|while|return)\\b", "name": "keyword.control.foo" },
+    "strings": {
+      "begin": "\"", "end": "\"", "name": "string.quoted.double.foo",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.foo" } },
+      "patterns": [ { "match": "\\\\.", "name": "constant.character.escape.foo" } ]
+    }
+  }
+}

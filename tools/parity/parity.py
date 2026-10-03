@@ -341,6 +341,14 @@ class Run:
                                     "ghd": pg.name, "corvene": "", "diff": "", "regions": []})
             print(f"    snap {name}", flush=True)
             return
+        if spec.get("corvene_only"):
+            # a Corvene-only surface (a dialog GHD lacks): recorded, not compared
+            self.stable_snap(cv, pc)
+            result["snaps"].append({"name": name, "stem": stem, "note": spec.get("note", ""), "corvene_only": True,
+                                    "percent": 0.0, "coverage": 0.0, "threshold": 0, "pass": True, "size_mismatch": "",
+                                    "ghd": "", "corvene": pc.name, "diff": "", "regions": []})
+            print(f"    snap {name} (Corvene only)", flush=True)
+            return
         both(lambda: self.stable_snap(ghd, pg), lambda: self.stable_snap(cv, pc))
         threshold = spec.get("threshold", cfg["threshold"])
         res = imgdiff.compare(

@@ -51,6 +51,7 @@ gpui-pre = { version = "=0.3.7", optional = true }
 serde_json = { workspace = true, optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 corvene-core.workspace = true
+corvene-git.workspace = true
 corvene-github.workspace = true
 corvene-highlight.workspace = true
 corvene-platform.workspace = true
@@ -69,6 +70,10 @@ gpui-pre-macos = { version = "=0.3.7", optional = true }
 [target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
 # `snapshots`: offscreen frames (`render_to_image`) on Linux
 gpui-pre-linux = { version = "=0.3.7", optional = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))'.dependencies]
+# the renderer's overdraw switches (flags `908`, `909`)
+gpui-pre-wgpu = "=0.3.7"
 
 [target.'cfg(windows)'.dependencies]
 # `snapshots`: offscreen frames (`render_to_image`) on Windows

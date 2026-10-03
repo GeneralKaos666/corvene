@@ -30,6 +30,9 @@ pub struct StatusOptions {
     /// `--ignore-submodules=<when>`; GHD passes nothing, so only
     /// `submodule.<name>.ignore` applies. Flag `ignore-submodules`.
     pub ignore_submodules: IgnoreSubmodules,
+    /// Read the status in-process with gitoxide (`status_gix.rs`), git
+    /// only when that fails. Flag `906-in-process-status`.
+    pub in_process: bool,
 }
 
 /// What `git status` leaves out about submodules.
@@ -69,23 +72,32 @@ pub fn get_status_with(
                     "no" | "false" | "off" | "0"
                 )
             });
-    let untracked = if hide_untracked {
-        "--untracked-files=no"
-    } else {
-        "--untracked-files=all"
+    let in_process = options
+        .in_process
+        .then(|| crate::status_gix::status(workdir, options, hide_untracked))
+        .flatten();
+    let mut status = match in_process {
+        Some(status) => status,
+        None => {
+            let untracked = if hide_untracked {
+                "--untracked-files=no"
+            } else {
+                "--untracked-files=all"
+            };
+            let mut args = vec!["status", untracked];
+            match options.ignore_submodules {
+                IgnoreSubmodules::AsConfigured => {}
+                IgnoreSubmodules::Dirty => args.push("--ignore-submodules=dirty"),
+                IgnoreSubmodules::All => args.push("--ignore-submodules=all"),
+            }
+            args.extend(["--branch", "--porcelain=2", "-z"]);
+            let out = GitCommand::new(git.clone())
+                .args(args)
+                .current_dir(workdir)
+                .run()?;
+            parse_porcelain_v2(&out.stdout)
+        }
     };
-    let mut args = vec!["status", untracked];
-    match options.ignore_submodules {
-        IgnoreSubmodules::AsConfigured => {}
-        IgnoreSubmodules::Dirty => args.push("--ignore-submodules=dirty"),
-        IgnoreSubmodules::All => args.push("--ignore-submodules=all"),
-    }
-    args.extend(["--branch", "--porcelain=2", "-z"]);
-    let out = GitCommand::new(git.clone())
-        .args(args)
-        .current_dir(workdir)
-        .run()?;
-    let mut status = parse_porcelain_v2(&out.stdout);
     let git_dir = crate::paths::git_dir(workdir);
     status.merge_head_found = git_dir.join("MERGE_HEAD").exists();
     status.rebase_in_progress =
@@ -325,7 +337,7 @@ fn parse_header(rest: &str, status: &mut WorkingDirectoryStatus) {
     }
 }
 
-fn push_file(
+pub(crate) fn push_file(
     status: &mut WorkingDirectoryStatus,
     path: &str,
     old_path: Option<String>,

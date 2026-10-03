@@ -1,5 +1,6 @@
 //! Typed accessors over the generic `corvene_store::Store`.
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use corvene_store::{Result, Store};
@@ -330,10 +331,39 @@ impl Default for Settings {
     }
 }
 
+/// The user's switches for language extensions (`crate::extensions`),
+/// kept apart from the extension folders so a reinstall keeps them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LanguageExtensionsPrefs {
+    /// extension id → its switches
+    #[serde(default)]
+    pub switches: HashMap<String, ExtensionSwitches>,
+    /// file suffixes whose "no syntax highlighting" hint was dismissed
+    #[serde(default)]
+    pub dismissed_suffixes: BTreeSet<String>,
+    /// when the offline extension index was last refreshed (unix seconds)
+    #[serde(default)]
+    pub index_refreshed_at: Option<u64>,
+    /// grammar builds the user agreed to, as `repository@rev`
+    #[serde(default)]
+    pub build_consents: BTreeSet<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExtensionSwitches {
+    pub enabled: bool,
+    pub prefer_over_builtin: bool,
+}
+
 /// Keys are namespaced strings; values JSON. Add a key here, never ad hoc.
 pub trait StoreExt {
     fn settings(&self) -> Result<Settings>;
     fn save_settings(&self, settings: &Settings) -> Result<()>;
+
+    /// Language extensions: enabled / preferred per extension, dismissed
+    /// hints (`crate::extensions`).
+    fn language_extensions(&self) -> Result<LanguageExtensionsPrefs>;
+    fn save_language_extensions(&self, prefs: &LanguageExtensionsPrefs) -> Result<()>;
 
     /// The flags' preset + overrides (`corvene_core::flags`).
     fn flags(&self) -> Result<crate::flags::FlagOverrides>;
@@ -393,6 +423,14 @@ impl StoreExt for Store {
 
     fn save_settings(&self, settings: &Settings) -> Result<()> {
         self.set("settings", settings)
+    }
+
+    fn language_extensions(&self) -> Result<LanguageExtensionsPrefs> {
+        Ok(self.get("language_extensions")?.unwrap_or_default())
+    }
+
+    fn save_language_extensions(&self, prefs: &LanguageExtensionsPrefs) -> Result<()> {
+        self.set("language_extensions", prefs)
     }
 
     fn flags(&self) -> Result<crate::flags::FlagOverrides> {

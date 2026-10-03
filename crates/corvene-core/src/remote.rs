@@ -46,7 +46,7 @@ use tracing::{debug, info, warn};
 
 use crate::dispatcher::Dispatcher;
 use crate::persistence::StoreExt;
-use crate::state::{Popup, RetryAction};
+use crate::state::{ErrorMessage, Popup, RetryAction};
 
 /// GHD `app-store.ts` progress title after a fetch/pull/push
 /// (`Refreshing ${__DARWIN__ ? 'Repository' : 'repository'}`).
@@ -232,7 +232,7 @@ impl Dispatcher {
             },
             move |result, cx| match result {
                 Ok(()) => Self::delete_tag(id, tag, cx),
-                Err(err) => Self::show_error("Could not delete tag", err.to_string(), cx),
+                Err(err) => Self::show_error("Could not delete tag", &err, cx),
             },
         );
     }
@@ -384,6 +384,21 @@ impl Dispatcher {
             .read(cx)
             .repository(id)
             .and_then(|r| r.github.clone());
+        // `localChangesOverwrittenHandler`: a pull that would clobber
+        // uncommitted changes offers to stash them and pull again
+        if matches!(retry, RetryAction::Pull)
+            && err.known().is_some_and(|k| k.is_blocked_by_local_changes())
+        {
+            Self::show_popup(
+                Popup::LocalChangesOverwritten {
+                    repo: id,
+                    retry,
+                    files: corvene_git::files_that_would_be_overwritten(&stderr),
+                },
+                cx,
+            );
+            return;
+        }
         match corvene_git::remote_failure(&err) {
             RemoteFailure::PushNotFastForward => {
                 Self::show_popup(Popup::PushNeedsPull { repo: id }, cx);
@@ -394,7 +409,7 @@ impl Dispatcher {
                     &crate::push_errors::remote_message(&stderr),
                 );
                 if secrets.is_empty() {
-                    Self::show_error(title, err.to_string(), cx);
+                    Self::show_error(title, &err, cx);
                 } else {
                     Self::show_popup(
                         Popup::PushProtectionError {
@@ -416,7 +431,7 @@ impl Dispatcher {
                         },
                         cx,
                     ),
-                    None => Self::show_error(title, err.to_string(), cx),
+                    None => Self::show_error(title, &err, cx),
                 }
             }
             // `samlReauthRequired`
@@ -434,7 +449,7 @@ impl Dispatcher {
                         },
                         cx,
                     ),
-                    _ => Self::show_error(title, err.to_string(), cx),
+                    _ => Self::show_error(title, &err, cx),
                 }
             }
             // `insufficientGitHubRepoPermissions`: offer a fork. With
@@ -502,7 +517,7 @@ impl Dispatcher {
                         })
                     })
                     .flatten();
-                Self::show_error(title, plain.unwrap_or_else(|| err.to_string()), cx)
+                Self::show_error(title, ErrorMessage::explained(&err, plain), cx)
             }
         }
     }

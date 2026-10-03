@@ -1,0 +1,2 @@
+{ "scopeName": "inject.foo", "injectionSelector": "L:source.foo -comment",
+  "patterns": [ { "match": "\\b(TODO|FIXME)\\b", "name": "keyword.other.todo" } ] }

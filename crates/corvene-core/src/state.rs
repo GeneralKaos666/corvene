@@ -27,6 +27,82 @@ pub enum Foldout {
     Worktree,
 }
 
+/// What `Dispatcher::show_error` is given: plain text, or a failed git
+/// command (`git`) with an optional lead sentence in `text` (Corvene's
+/// plain-language explanation; empty when the dialog should find its own).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ErrorMessage {
+    pub text: String,
+    pub git: Option<corvene_git::GitFailure>,
+}
+
+impl ErrorMessage {
+    /// A git failure with Corvene's explanation in front; `text` alone for
+    /// errors git did not produce.
+    pub fn explained(err: &corvene_git::GitError, explanation: Option<String>) -> Self {
+        let mut message = Self::from(err);
+        if let Some(explanation) = explanation {
+            message.text = match message.git {
+                Some(_) => explanation,
+                None => format!("{explanation}\n\n{}", message.text),
+            };
+        }
+        message
+    }
+
+    /// Everything in one string: the lead, then the command and its output
+    /// (what the clipboard and the lock-file dialog get).
+    pub fn full_text(&self) -> String {
+        match &self.git {
+            Some(git) => {
+                let failed = git.summary();
+                if self.text.is_empty() {
+                    failed
+                } else {
+                    format!("{}\n\n{failed}", self.text)
+                }
+            }
+            None => self.text.clone(),
+        }
+    }
+}
+
+impl From<String> for ErrorMessage {
+    fn from(text: String) -> Self {
+        Self { text, git: None }
+    }
+}
+
+impl From<&String> for ErrorMessage {
+    fn from(text: &String) -> Self {
+        text.clone().into()
+    }
+}
+
+impl From<&str> for ErrorMessage {
+    fn from(text: &str) -> Self {
+        text.to_string().into()
+    }
+}
+
+impl From<&corvene_git::GitError> for ErrorMessage {
+    fn from(err: &corvene_git::GitError) -> Self {
+        match err.failure() {
+            Some(git) => Self {
+                text: String::new(),
+                git: Some(git),
+            },
+            None => err.to_string().into(),
+        }
+    }
+}
+
+impl From<corvene_git::GitError> for ErrorMessage {
+    fn from(err: corvene_git::GitError) -> Self {
+        (&err).into()
+    }
+}
+
 /// Modal dialogs (`PopupType`, the subset Corvene has so far).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Popup {
@@ -36,6 +112,9 @@ pub enum Popup {
     Error {
         title: String,
         message: String,
+        /// The failed git command when the error is one (`git` ran and
+        /// exited non-zero); `message` then holds its full text.
+        git: Option<corvene_git::GitFailure>,
     },
     /// `265-remove-stale-index-lock`: an error caused by a left-over
     /// `index.lock`, with a button to remove it.
@@ -424,6 +503,13 @@ pub enum Popup {
     /// Corvene › Flags… (no GHD equivalent), optionally pre-filtered.
     Flags {
         query: Option<String>,
+    },
+    /// Settings › Appearance › Language extensions… (no GHD equivalent;
+    /// flag `111-language-extensions`). `return_to` reopens Settings on
+    /// that tab when the dialog closes.
+    LanguageExtensions {
+        focus: Option<crate::extensions::ExtensionsFocus>,
+        return_to: Option<PreferencesTab>,
     },
     /// `RepositorySettings`
     RepositorySettings {
@@ -1101,6 +1187,9 @@ pub struct AppState {
     pub update: crate::updater::UpdateState,
     /// On-demand packs.
     pub packs: crate::packs::PacksState,
+    /// Language extensions (`crate::extensions`): installed grammars, the
+    /// manager dialog's search and progress.
+    pub extensions: crate::extensions::ExtensionsState,
     /// Alive subscriptions (`AliveStore`) and notification dedup state.
     pub alive: crate::alive::AliveState,
     /// `766-persist-commit-drafts`: each repository's unfinished commit

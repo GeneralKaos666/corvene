@@ -13,8 +13,8 @@ use tracing::{error, info, warn};
 
 use crate::persistence::{Settings, StoreExt, UncommittedChangesStrategy};
 use crate::state::{
-    AppState, CloneState, Foldout, LastCommit, Popup, RepositoryState, RetryAction, SignInState,
-    SignInStep,
+    AppState, CloneState, ErrorMessage, Foldout, LastCommit, Popup, RepositoryState, RetryAction,
+    SignInState, SignInStep,
 };
 use corvene_models::{
     Account, DiffSelectionType, Repository, Section, WorkingDirectoryFileChange, github_from_remote,
@@ -162,6 +162,7 @@ impl Dispatcher {
             pending_open_in_desktop: None,
             update: crate::updater::UpdateState::default(),
             packs: crate::packs::PacksState::default(),
+            extensions: crate::extensions::ExtensionsState::default(),
             alive: crate::alive::AliveState::default(),
             commit_drafts,
             commit_drafts_nonce: 0,
@@ -368,7 +369,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not remove the lock file", err.to_string(), cx);
+                    Self::show_error("Could not remove the lock file", &err, cx);
                 }
                 if let Some(id) = selected {
                     Self::refresh_repository(id, cx);
@@ -398,11 +399,12 @@ impl Dispatcher {
         });
     }
 
-    pub fn show_error(title: impl Into<String>, message: impl Into<String>, cx: &mut App) {
+    pub fn show_error(title: impl Into<String>, message: impl Into<ErrorMessage>, cx: &mut App) {
         let message = message.into();
+        let full = message.full_text();
         // any git call refused for an unsafe repository switches that
         // repository to the "Trust Repository" view instead
-        if let Some(path) = corvene_git::dubious_ownership_path(&message)
+        if let Some(path) = corvene_git::dubious_ownership_path(&full)
             && Self::mark_unsafe_repository(path, cx)
         {
             return;
@@ -413,22 +415,24 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::REMOVE_STALE_INDEX_LOCK)
-            && let Some(lock) = corvene_git::index_lock_path(&message)
+            && let Some(lock) = corvene_git::index_lock_path(&full)
         {
             Self::show_popup(
                 Popup::IndexLockExists {
                     title: title.into(),
-                    message,
+                    message: full,
                     lock,
                 },
                 cx,
             );
             return;
         }
+        let ErrorMessage { text: message, git } = message;
         Self::show_popup(
             Popup::Error {
                 title: title.into(),
                 message,
+                git,
             },
             cx,
         );
@@ -502,9 +506,7 @@ impl Dispatcher {
                     cx.notify();
                 });
                 match result {
-                    Err(err) => {
-                        Self::show_error("Could not trust the repository", err.to_string(), cx)
-                    }
+                    Err(err) => Self::show_error("Could not trust the repository", &err, cx),
                     Ok(Some((path, suggested))) => Self::show_error(
                         "Could not trust the repository",
                         trust_failure_message(&path, suggested.as_deref()),
@@ -698,7 +700,7 @@ impl Dispatcher {
                     ),
                     cx,
                 ),
-                Err(err) => Self::show_error("Could not add repository", err.to_string(), cx),
+                Err(err) => Self::show_error("Could not add repository", &err, cx),
             });
         })
         .detach();
@@ -817,6 +819,7 @@ impl Dispatcher {
                         "all" => corvene_git::IgnoreSubmodules::All,
                         _ => corvene_git::IgnoreSubmodules::AsConfigured,
                     },
+                    in_process: s.flags.bool(crate::flags::ids::IN_PROCESS_STATUS),
                 },
                 // GHD `RecentBranchesLimit` is 5
                 usize::try_from(s.flags.number(crate::flags::ids::RECENT_BRANCHES_COUNT))
@@ -1972,6 +1975,10 @@ impl Dispatcher {
             };
             (Self::ordered_selection(rs), rs.commits_contiguous)
         };
+        let in_process = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
         if ordered.is_empty() || (ordered.len() > 1 && !contiguous) {
             return;
         }
@@ -1982,7 +1989,7 @@ impl Dispatcher {
         }
         let key = ordered.clone();
         let task = cx.background_executor().spawn(async move {
-            let data = compute_changeset(git, &workdir, &ordered)?;
+            let data = compute_changeset(git, &workdir, &ordered, in_process)?;
             crate::diff_cache::store_changeset(&workdir, &ordered, data.clone());
             Ok(data)
         });
@@ -2131,6 +2138,7 @@ impl Dispatcher {
             return;
         }
         let hide_whitespace = s.settings.hide_whitespace_in_history_diff;
+        let in_process = s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
         let (Some(git), Some(rs)) = (s.git.clone(), s.repo_states.get(&id)) else {
             return;
         };
@@ -2162,7 +2170,9 @@ impl Dispatcher {
                     let data = match crate::diff_cache::changeset(&workdir, &shas) {
                         Some(data) => data,
                         None => {
-                            let Ok(data) = compute_changeset(git.clone(), &workdir, &shas) else {
+                            let Ok(data) =
+                                compute_changeset(git.clone(), &workdir, &shas, in_process)
+                            else {
                                 continue;
                             };
                             crate::diff_cache::store_changeset(&workdir, &shas, data.clone());
@@ -2236,7 +2246,7 @@ impl Dispatcher {
             cx.update(|cx| {
                 let ok = result.is_ok();
                 if let Err(err) = result {
-                    Self::show_error(error_title, err.to_string(), cx);
+                    Self::show_error(error_title, &err, cx);
                 }
                 Self::refresh_repository(id, cx);
                 if ok {
@@ -2386,7 +2396,7 @@ impl Dispatcher {
                         cx.reveal_path(first);
                     }
                 }
-                Err(err) => Self::show_error("Could not create patch files", err.to_string(), cx),
+                Err(err) => Self::show_error("Could not create patch files", &err, cx),
             });
         })
         .detach();
@@ -2499,7 +2509,7 @@ impl Dispatcher {
                             tags.push(tag);
                         }
                     }),
-                    Err(err) => Self::show_error("Could not create tag", err.to_string(), cx),
+                    Err(err) => Self::show_error("Could not create tag", &err, cx),
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -2641,11 +2651,12 @@ impl Dispatcher {
 
     /// The local-changes half of [`Self::request_undo_commit`].
     pub fn request_undo_commit_after_tags(id: u64, cx: &mut App) {
-        let (confirm, overlap_only) = {
+        let (confirm, overlap_only, in_process) = {
             let s = Self::state(cx).read(cx);
             (
                 s.settings.confirm_undo_commit,
                 s.flags.bool(crate::flags::ids::UNDO_WARNS_ONLY_ON_OVERLAP),
+                s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES),
             )
         };
         if !(confirm && Self::working_directory_dirty(id, cx)) {
@@ -2668,9 +2679,9 @@ impl Dispatcher {
                     .collect()
             })
             .unwrap_or_default();
-        let task = cx
-            .background_executor()
-            .spawn(async move { corvene_git::get_changed_files(git, &workdir, "HEAD") });
+        let task = cx.background_executor().spawn(async move {
+            corvene_git::get_changed_files(git, &workdir, "HEAD", in_process)
+        });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let changed = task.await;
             cx.update(|cx| {
@@ -2808,7 +2819,7 @@ impl Dispatcher {
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
                 if let Err(err) = result {
-                    Self::show_error("Could not create branch", err.to_string(), cx);
+                    Self::show_error("Could not create branch", &err, cx);
                 }
                 Self::show_section(id, Section::Changes, cx);
                 Self::refresh_repository(id, cx);
@@ -3008,13 +3019,13 @@ impl Dispatcher {
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
                 if let Err(err) = result {
-                    Self::show_error("Could not switch branch", err.to_string(), cx);
+                    Self::show_error("Could not switch branch", &err, cx);
                 }
                 if let Some(err) = submodule_error {
-                    Self::show_error("Could not update submodules", err.to_string(), cx);
+                    Self::show_error("Could not update submodules", &err, cx);
                 }
                 if let Some(err) = pop_error {
-                    Self::show_error("Could not restore stash", err.to_string(), cx);
+                    Self::show_error("Could not restore stash", &err, cx);
                 }
                 Self::show_section(id, Section::Changes, cx);
                 Self::refresh_repository(id, cx);
@@ -3923,7 +3934,7 @@ impl Dispatcher {
                 Ok(path) => Self::add_repository(path, cx),
                 Err(err) => {
                     Self::take_pending_alias(&failed_path, cx);
-                    Self::show_error("Could not create repository", err.to_string(), cx)
+                    Self::show_error("Could not create repository", &err, cx)
                 }
             });
         })
@@ -4044,16 +4055,23 @@ impl Dispatcher {
                     Err(err) => {
                         let flags = &Self::state(cx).read(cx).flags;
                         // `255-plain-language-remote-errors`
-                        let error = flags
+                        let explanation = flags
                             .bool(crate::flags::ids::PLAIN_LANGUAGE_REMOTE_ERRORS)
                             .then(|| crate::push_errors::plain_clone_error(&err, &path))
-                            .flatten()
-                            .unwrap_or_else(|| err.to_string());
+                            .flatten();
                         // `235-clone-failure-keeps-input`: back to the dialog
                         if flags.bool(crate::flags::ids::CLONE_FAILURE_KEEPS_INPUT) {
+                            let error = match explanation {
+                                Some(explanation) => format!("{explanation}\n\n{err}"),
+                                None => err.to_string(),
+                            };
                             Self::show_popup(Popup::CloneRepositoryRetry { url, path, error }, cx)
                         } else {
-                            Self::show_error("Clone failed", error, cx)
+                            Self::show_error(
+                                "Clone failed",
+                                ErrorMessage::explained(&err, explanation),
+                                cx,
+                            )
                         }
                     }
                 }
@@ -4299,7 +4317,7 @@ impl Dispatcher {
                 });
                 let committed = result.is_ok();
                 if let Err(err) = result {
-                    Self::show_error("Could not commit", err.to_string(), cx);
+                    Self::show_error("Could not commit", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
                 if committed && push_after {
@@ -4340,7 +4358,7 @@ impl Dispatcher {
                     cx.notify();
                 });
                 if let Err(err) = result {
-                    Self::show_error("Could not undo commit", err.to_string(), cx);
+                    Self::show_error("Could not undo commit", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4428,7 +4446,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not delete files", err.to_string(), cx);
+                    Self::show_error("Could not delete files", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4476,7 +4494,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| match result {
                 Err(err) => {
-                    Self::show_error("Could not discard changes", err.to_string(), cx);
+                    Self::show_error("Could not discard changes", &err, cx);
                     Self::refresh_repository(id, cx);
                 }
                 // `DiscardChangesRetry`: files are left, so no checkout yet
@@ -4703,7 +4721,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| match result {
                 Ok(patch) => cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(patch)),
-                Err(err) => Self::show_error("Could not copy the diff", err.to_string(), cx),
+                Err(err) => Self::show_error("Could not copy the diff", &err, cx),
             });
         })
         .detach();
@@ -4726,7 +4744,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not update the index", err.to_string(), cx);
+                    Self::show_error("Could not update the index", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4750,7 +4768,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not update .gitignore", err.to_string(), cx);
+                    Self::show_error("Could not update .gitignore", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4776,7 +4794,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not update the ignore file", err.to_string(), cx);
+                    Self::show_error("Could not update the ignore file", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -5212,9 +5230,7 @@ impl Dispatcher {
             .spawn(async move { corvene_git::set_global_identity(git, &name, &email) });
         cx.spawn(async move |cx: &mut AsyncApp| {
             if let Err(err) = task.await {
-                cx.update(|cx| {
-                    Self::show_error("Could not save Git identity", err.to_string(), cx)
-                });
+                cx.update(|cx| Self::show_error("Could not save Git identity", &err, cx));
             }
         })
         .detach();
@@ -5410,15 +5426,17 @@ fn compute_working_diff(
 const UNPUBLISHED_COMMITS_LIMIT: usize = 10_000;
 
 /// The changed files of one commit or of a contiguous range (oldest first).
+/// `in_process`: flag `907-in-process-commit-files`.
 fn compute_changeset(
     git: Arc<corvene_git::GitBinary>,
     workdir: &Path,
     ordered: &[String],
+    in_process: bool,
 ) -> corvene_git::error::Result<Arc<corvene_models::ChangesetData>> {
     if ordered.len() > 1 {
-        corvene_git::get_commit_range_changed_files(git, workdir, ordered)
+        corvene_git::get_commit_range_changed_files(git, workdir, ordered, in_process)
     } else {
-        corvene_git::get_changed_files(git, workdir, &ordered[0])
+        corvene_git::get_changed_files(git, workdir, &ordered[0], in_process)
     }
     .map(Arc::new)
 }

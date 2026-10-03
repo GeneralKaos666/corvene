@@ -7,6 +7,7 @@ description = "Corvene application state, models and dispatcher"
 
 [dependencies]
 corvene-git.workspace = true
+corvene-extensions.workspace = true
 corvene-highlight.workspace = true
 corvene-packs.workspace = true
 corvene-github.workspace = true

@@ -5,6 +5,7 @@
 #
 #   packaging/bundle.sh            # debug build  -> target/bundle/Corvene.app
 #   packaging/bundle.sh release    # release build -> target/bundle/Corvene.app
+#   packaging/bundle.sh release-fast  # any other profile's binary likewise
 #   OPEN=1 packaging/bundle.sh     # also launch it
 #   CORVENE_SIGN_IDENTITY=- …      # ad-hoc even when the certificate is there
 set -euo pipefail
@@ -18,7 +19,7 @@ VERSION="$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
 BUILD="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
 
 if [[ ! -x "$BIN" ]]; then
-  echo "binary not found: $BIN (run cargo build${PROFILE:+ --$PROFILE} first)" >&2
+  echo "binary not found: $BIN (run cargo build --profile ${PROFILE/#debug/dev} first)" >&2
   exit 1
 fi
 
