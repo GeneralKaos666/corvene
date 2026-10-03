@@ -4175,6 +4175,21 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
     },
 
+    /// No "Will be saved as" for a name still being typed.
+    BRANCH_NAME_TRAILING_SLASH_QUIET = 871 "branch-name-trailing-slash-quiet" {
+        title: "Quiet branch name warning while typing a slash",
+        summary: "A branch name box does not warn that the name will be changed while the only \
+                  difference is a trailing / or . (as in feature/ on the way to feature/x).",
+        ghd_behaviour: "Flashes \"Will be created as feature\" after each / typed, which reads \
+                        as if slashes were not allowed.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12275)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

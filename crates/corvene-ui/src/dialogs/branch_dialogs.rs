@@ -59,6 +59,17 @@ pub fn sanitize_ref_name(input: &str) -> String {
     out.replace("..", "-").replace("@{", "-").replace("//", "/")
 }
 
+/// Whether a ref name box shows "Will be … as <sanitized>" for `raw`.
+/// `quiet_trailing` (`871-branch-name-trailing-slash-quiet`) keeps it hidden
+/// while the only difference is a trailing `/` or `.`, typed on the way to
+/// `feature/x` (GHD flashes "Will be created as feature").
+pub fn ref_name_warning(raw: &str, sanitized: &str, quiet_trailing: bool) -> bool {
+    let raw = raw.trim();
+    !raw.is_empty()
+        && sanitized != raw
+        && !(quiet_trailing && raw.trim_end_matches(['/', '.']) == sanitized)
+}
+
 /// Flag `846-reject-head-branch-name`: `head` in any case names `HEAD`
 /// on a case-insensitive file system, so the new branch detaches HEAD.
 fn reserved_head_name(name: &str, cx: &App) -> bool {
@@ -1685,4 +1696,21 @@ pub fn split_button(
                 .bg(bg)
                 .child(octicon(Octicon::TriangleDown, text)),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn trailing_separator_alone_does_not_warn() {
+        let check = |raw: &str, quiet| ref_name_warning(raw, &sanitize_ref_name(raw), quiet);
+        assert!(check("feature/", false));
+        assert!(!check("feature/", true));
+        assert!(!check("v1.", true));
+        assert!(!check("feature/x", true));
+        assert!(check("my branch/", true));
+        assert!(check("a..b", true));
+        assert!(!check("", true));
+    }
 }
