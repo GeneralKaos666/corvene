@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 use corvene_core::Dispatcher;
 use corvene_core::host::{Host, LoopHandle, spawn_loop};
-use corvene_core::persistence::StoreExt;
+use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 
 use crate::runtime::Services;
 use crate::vm::{
-    ChangesVm, DiffHeaderVm, DiffRowVm, RepoListVm, changes, diff_header, diff_rows, repo_list,
+    BranchesVm, ChangesVm, CommitDetailVm, DiffHeaderVm, DiffRowVm, HistoryVm, RepoListVm,
+    branches, changes, commit_detail, diff_header, diff_rows, history, repo_list,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -244,6 +245,89 @@ impl Corvene {
     ) -> Vec<DiffRowVm> {
         self.loop_
             .query(move |host| diff_rows(host.state_ref(), repo, generation, start, count))
+            .await
+    }
+
+    // ---- the History tab ----
+
+    pub fn load_more_commits(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::load_commits(repo, true, host));
+    }
+
+    pub fn select_commit(&self, repo: u64, sha: String) {
+        self.loop_
+            .post(move |host| Dispatcher::select_commit(repo, sha, host));
+    }
+
+    pub fn select_commits(&self, repo: u64, shas: Vec<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::select_commits(repo, shas, host));
+    }
+
+    pub fn select_commit_file(&self, repo: u64, path: String) {
+        self.loop_
+            .post(move |host| Dispatcher::select_commit_file(repo, path, host));
+    }
+
+    pub async fn history(&self, repo: u64, start: u32, count: u32) -> Option<HistoryVm> {
+        self.loop_
+            .query(move |host| history(host.state_ref(), repo, start, count))
+            .await
+    }
+
+    pub async fn commit_detail(&self, repo: u64) -> Option<CommitDetailVm> {
+        self.loop_
+            .query(move |host| commit_detail(host.state_ref(), repo))
+            .await
+    }
+
+    // ---- branches and the sync button ----
+
+    /// `strategy`: `None` asks when there are uncommitted changes (GHD's
+    /// dialog), `"stash"` or `"move"` decides.
+    pub fn checkout_branch(&self, repo: u64, name: String, strategy: Option<String>) {
+        let explicit = match strategy.as_deref() {
+            Some("stash") => Some(UncommittedChangesStrategy::StashOnCurrentBranch),
+            Some("move") => Some(UncommittedChangesStrategy::MoveToNewBranch),
+            _ => None,
+        };
+        self.loop_
+            .post(move |host| Dispatcher::checkout_branch(repo, name, explicit, host));
+    }
+
+    pub fn create_branch(&self, repo: u64, name: String, start_point: Option<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::create_branch(repo, name, start_point, false, host));
+    }
+
+    pub fn rename_branch(&self, repo: u64, old: String, new: String) {
+        self.loop_
+            .post(move |host| Dispatcher::rename_branch(repo, old, new, host));
+    }
+
+    pub fn delete_branch(&self, repo: u64, name: String, include_remote: bool) {
+        self.loop_
+            .post(move |host| Dispatcher::delete_branch(repo, name, include_remote, host));
+    }
+
+    pub fn fetch(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::fetch(repo, false, host));
+    }
+
+    pub fn pull(&self, repo: u64) {
+        self.loop_.post(move |host| Dispatcher::pull(repo, host));
+    }
+
+    pub fn push(&self, repo: u64, force_with_lease: bool) {
+        self.loop_
+            .post(move |host| Dispatcher::push(repo, force_with_lease, None, host));
+    }
+
+    pub async fn branches(&self, repo: u64) -> Option<BranchesVm> {
+        self.loop_
+            .query(move |host| branches(host.state_ref(), repo))
             .await
     }
 }
