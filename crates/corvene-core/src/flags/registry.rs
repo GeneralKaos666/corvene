@@ -1728,6 +1728,22 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
+    /// A fork for its own work opens pull requests against itself.
+    FORK_OWN_PR_TARGET = 372 "fork-own-pr-target" {
+        title: "Own-purpose forks open pull requests on themselves",
+        summary: "Create Pull Request in a fork set up \"for my own purposes\" opens GitHub's \
+                  compare page with the fork's default branch (or the chosen base) as the base \
+                  and the fork as both repositories.",
+        ghd_behaviour: "Opens the fork's pull/new page with bare branch names, and GitHub \
+                        proposes merging into the parent repository.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(15489)],
+        code: &["crates/corvene-core/src/integrations.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
