@@ -1553,6 +1553,21 @@ registry! {
         code: &["crates/corvene-ui/src/toolbar.rs"],
     },
 
+    /// A friendlier branch button on a detached HEAD.
+    DETACHED_HEAD_FRIENDLY = 275 "detached-head-friendly" {
+        title: "Friendlier detached HEAD",
+        summary: "On a detached HEAD the branch button names the tag HEAD is at (\"On v1.2.0\") \
+                  instead of the short SHA when there is one, and its tooltip explains that \
+                  no branch is checked out and new commits need a branch to be kept.",
+        ghd_behaviour: "Shows \"On <short SHA>\" with the tooltip \"Currently on a detached HEAD\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10857)],
+        code: &["crates/corvene-ui/src/toolbar.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

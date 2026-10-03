@@ -267,6 +267,21 @@ pub fn toolbar_models(
         status: state.commit_status_summary(pr),
         bounds: pr_badge_bounds.clone(),
     });
+    // Corvene (`275-detached-head-friendly`): the tag HEAD sits on, from the
+    // loaded history
+    let detached_friendly = state
+        .flags
+        .bool(corvene_core::flags::ids::DETACHED_HEAD_FRIENDLY);
+    let head_tag = |sha: &str| -> Option<String> {
+        if !detached_friendly {
+            return None;
+        }
+        repo_state?
+            .commits
+            .iter()
+            .find(|c| c.sha == sha)
+            .and_then(|c| c.tags.first().cloned())
+    };
     let (branch_icon, branch_desc, branch_title): (Octicon, &str, SharedString) =
         match info.map(|i| &i.tip) {
             Some(Tip::Valid { branch }) => (
@@ -286,7 +301,11 @@ pub fn toolbar_models(
             Some(Tip::Detached { sha }) => (
                 Octicon::GitCommit,
                 "Detached HEAD",
-                format!("On {}", sha.chars().take(7).collect::<String>()).into(),
+                format!(
+                    "On {}",
+                    head_tag(sha).unwrap_or_else(|| sha.chars().take(7).collect())
+                )
+                .into(),
             ),
             _ => (
                 Octicon::GitBranch,
@@ -342,6 +361,14 @@ pub fn toolbar_models(
         ),
         (None, Some(Tip::Valid { branch })) => Some(branch.name.clone().into()),
         (None, Some(Tip::Unborn { name })) => Some(format!("Current branch is {name}").into()),
+        (None, Some(Tip::Detached { .. })) if detached_friendly => Some(
+            format!(
+                "Currently on a detached HEAD at {}\nNot on any branch. Create a branch to keep \
+                 new commits.",
+                branch_title.trim_start_matches("On ")
+            )
+            .into(),
+        ),
         (None, Some(Tip::Detached { .. })) => Some("Currently on a detached HEAD".into()),
         _ => None,
     };
