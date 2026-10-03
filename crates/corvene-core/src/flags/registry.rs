@@ -4159,6 +4159,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/branch_ops.rs"],
     },
 
+    /// Delete Branch names the remote branch it would delete.
+    DELETE_REMOTE_NAMES_UPSTREAM = 870 "delete-remote-names-upstream" {
+        title: "Delete Branch names the remote branch",
+        summary: "The Delete Branch dialog's \"delete on the remote\" checkbox names the remote \
+                  branch it would delete (for example origin/feature), and is not offered when \
+                  that branch is the remote's default branch.",
+        ghd_behaviour: "Says \"delete this branch on the remote\" and deletes the upstream, \
+                        whatever its name: a local branch tracking origin/main deletes origin/main.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20638)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

@@ -8,7 +8,9 @@
 //! current branch while there are uncommitted changes
 //! (`844-create-branch-with-changes-from-current`).
 //! Delete Branch warns about unmerged commits and a stash on the branch
-//! (`860-delete-branch-warnings`).
+//! (`860-delete-branch-warnings`), names the upstream in its "delete on the
+//! remote" checkbox and hides it for the remote's default branch
+//! (`870-delete-remote-names-upstream`).
 //! Create and Rename refuse `head` in any case (`846-reject-head-branch-name`).
 //! Create a Branch can prefill a name prefix (`845-branch-name-prefix`).
 //! `ConfirmSwitchBranchDialog` is a Corvene addition (`864-confirm-branch-switch`).
@@ -728,19 +730,48 @@ impl Render for DeleteBranchDialog {
                 })
                 .unwrap_or_default()
         };
-        let exists_on_remote = {
+        // `870-delete-remote-names-upstream`: the checkbox names the
+        // upstream, and is not offered for the remote's default branch (a
+        // local branch tracking origin/main would delete origin/main)
+        let names_upstream = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::DELETE_REMOTE_NAMES_UPSTREAM);
+        let remote_upstream = {
             let s = self.state.read(cx);
-            let info = s.repo_states.get(&self.repo).and_then(|r| r.info.as_ref());
-            info.and_then(|i| i.branches.iter().find(|b| b.name == self.branch))
+            let rs = s.repo_states.get(&self.repo);
+            let info = rs.and_then(|r| r.info.as_ref());
+            let upstream = info
+                .and_then(|i| i.branches.iter().find(|b| b.name == self.branch))
                 .and_then(|b| b.upstream_short().map(|u| u.to_string()))
-                .map(|u| {
+                .filter(|u| {
                     info.is_some_and(|i| {
                         i.branches
                             .iter()
-                            .any(|b| b.kind == BranchKind::Remote && b.name == u)
+                            .any(|b| b.kind == BranchKind::Remote && &b.name == u)
                     })
-                })
-                .unwrap_or(false)
+                });
+            let is_remote_default = |u: &str| {
+                let Some(default) = rs.and_then(|r| r.default_branch.as_deref()) else {
+                    return false;
+                };
+                let default_upstream = info
+                    .and_then(|i| {
+                        i.branches
+                            .iter()
+                            .find(|b| b.name == default && b.kind == BranchKind::Local)
+                    })
+                    .and_then(|b| b.upstream_short());
+                default_upstream == Some(u)
+                    || u.split_once('/').is_some_and(|(_, name)| name == default)
+            };
+            upstream.filter(|u| !(names_upstream && is_remote_default(u)))
+        };
+        let exists_on_remote = remote_upstream.is_some();
+        let remote_label = match remote_upstream.as_deref().filter(|_| names_upstream) {
+            Some(upstream) => format!("Yes, delete {upstream} on the remote"),
+            None => "Yes, delete this branch on the remote".to_string(),
         };
         let (repo, name, include_remote) = (self.repo, self.branch.clone(), self.include_remote);
         let content = div()
@@ -795,7 +826,7 @@ impl Render for DeleteBranchDialog {
                             false,
                             cx,
                         ))
-                        .child("Yes, delete this branch on the remote"),
+                        .child(remote_label),
                 )
             });
         // destructive: Cancel is the submit button, which gets the focus
