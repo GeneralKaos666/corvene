@@ -2182,14 +2182,15 @@ registry! {
     EXTRA_EDITORS = 507 "extra-editors" {
         title: "Detect more external editors",
         summary: "Settings › Integrations and Open in … also find editors GitHub Desktop 3.6.6 \
-                  does not know: Antigravity.",
+                  does not know: Antigravity (and on Linux Cursor and Windsurf; on Windows \
+                  Microsoft Edit, opened in a console window, and gVim).",
         ghd_behaviour: "Only its own editor table.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(22922)],
-        code: &["crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/flags/dispatch.rs"],
+        upstream: &[Upstream::issue(22922), Upstream::issue(22638), Upstream::issue(12317)],
+        code: &["crates/corvene-platform/src/editors.rs", "crates/corvene-platform/src/editors_windows.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/flags/dispatch.rs"],
     },
 
     /// A name for the custom editor.

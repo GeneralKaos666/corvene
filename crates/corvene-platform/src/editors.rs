@@ -488,11 +488,10 @@ pub fn available_editors(extras: bool) -> Vec<FoundEditor> {
         return editors;
     }
     // Windows: GHD's registry lookups, whose table already has the editors
-    // `extras` adds elsewhere
+    // `extras` adds elsewhere; `extras` adds Microsoft Edit and gVim there
     #[cfg(windows)]
     if cfg!(windows) {
-        let _ = extras;
-        return windows_editors::available();
+        return windows_editors::available(extras);
     }
     let extra: &[(&str, &[&str])] = if extras { EXTRA_EDITORS } else { &[] };
     #[cfg(target_os = "macos")]
@@ -570,8 +569,15 @@ pub fn launch(editor: &FoundEditor, target: &Path) -> Result<(), EditorError> {
     }
     #[cfg(target_os = "macos")]
     let launched = apps::open_with_app(&editor.path, target);
-    #[cfg(not(any(target_os = "macos", target_os = "android")))]
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     let launched = apps::spawn_detached(&editor.path, &[&target.to_string_lossy()]);
+    // `extra-editors`: Microsoft Edit needs a console window
+    #[cfg(windows)]
+    let launched = if windows_editors::needs_console(editor) {
+        windows_editors::spawn_in_console(&editor.path, &[&target.to_string_lossy()])
+    } else {
+        apps::spawn_detached(&editor.path, &[&target.to_string_lossy()])
+    };
     #[cfg(target_os = "android")]
     return launch_android(editor, target, None);
     #[cfg(not(target_os = "android"))]

@@ -3,6 +3,10 @@
 //! verbatim). An editor is installed when one of its uninstall keys exists
 //! with the expected display name and publisher, and the executable the key
 //! leads to is there.
+//!
+//! Flag `extra-editors` adds editors without uninstall keys GHD knows:
+//! Microsoft Edit (`edit.exe` on the PATH, started in a console of its own)
+//! and gVim (`gvim.exe` on the PATH or in `%ProgramFiles%\Vim\vim*`).
 
 use std::path::{Path, PathBuf};
 
@@ -473,9 +477,71 @@ fn toolbox_editors() -> Vec<FoundEditor> {
     out
 }
 
+/// Flag `extra-editors`: Microsoft Edit, a console program.
+const MICROSOFT_EDIT: &str = "Microsoft Edit";
+
+/// The first `exe` in the PATH's folders (like `findGitOnPath`).
+fn on_path(exe: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(exe))
+        .find(|candidate| candidate.is_file())
+}
+
+/// gVim's installer puts it in `%ProgramFiles%\Vim\vim<version>`; the
+/// newest version wins.
+fn gvim() -> Option<PathBuf> {
+    on_path("gvim.exe").or_else(|| {
+        let vim = PathBuf::from(std::env::var_os("ProgramFiles")?).join("Vim");
+        let mut found: Vec<PathBuf> = std::fs::read_dir(vim)
+            .ok()?
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|dir| {
+                dir.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("vim"))
+            })
+            .map(|dir| dir.join("gvim.exe"))
+            .filter(|exe| exe.is_file())
+            .collect();
+        found.sort();
+        found.pop()
+    })
+}
+
+/// Flag `extra-editors`: the editors found outside the uninstall keys.
+fn extra_editors() -> Vec<FoundEditor> {
+    [(MICROSOFT_EDIT, on_path("edit.exe")), ("gVim", gvim())]
+        .into_iter()
+        .filter_map(|(name, path)| {
+            Some(FoundEditor {
+                name: name.to_string(),
+                bundle_id: String::new(),
+                path: path?,
+            })
+        })
+        .collect()
+}
+
+/// Whether `editor` is a console program that needs a console window of its
+/// own (Microsoft Edit).
+pub fn needs_console(editor: &FoundEditor) -> bool {
+    editor.name == MICROSOFT_EDIT
+}
+
+/// Start a console editor in a new console window. Its standard handles
+/// are left alone so that it attaches to that console.
+pub fn spawn_in_console(program: &Path, args: &[&str]) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new(program)
+        .args(args)
+        .creation_flags(crate::windows::CREATE_NEW_CONSOLE)
+        .spawn()
+        .map(drop)
+}
+
 /// GHD `getAvailableEditors`: the table's installed editors, then the
-/// JetBrains Toolbox ones.
-pub fn available() -> Vec<FoundEditor> {
+/// JetBrains Toolbox ones (then, with `extras`, Microsoft Edit and gVim).
+pub fn available(extras: bool) -> Vec<FoundEditor> {
     let year = this_year();
     let mut out: Vec<FoundEditor> = TABLE
         .iter()
@@ -488,6 +554,9 @@ pub fn available() -> Vec<FoundEditor> {
         })
         .collect();
     out.extend(toolbox_editors());
+    if extras {
+        out.extend(extra_editors());
+    }
     out
 }
 
