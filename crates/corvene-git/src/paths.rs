@@ -19,3 +19,20 @@ pub fn git_dir(workdir: &Path) -> PathBuf {
     }
     dot_git
 }
+
+/// The repository's common directory: for a linked worktree the main
+/// `.git` named by `<gitdir>/commondir`, else [`git_dir`] itself.
+pub fn common_dir(workdir: &Path) -> PathBuf {
+    let dir = git_dir(workdir);
+    match std::fs::read_to_string(dir.join("commondir")) {
+        Ok(text) if !text.trim().is_empty() => {
+            let target = Path::new(text.trim());
+            if target.is_absolute() {
+                target.to_path_buf()
+            } else {
+                dir.join(target)
+            }
+        }
+        _ => dir,
+    }
+}

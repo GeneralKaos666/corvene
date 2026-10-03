@@ -697,6 +697,7 @@ impl Dispatcher {
             clone_counts_as_fetch,
             detect_rewrite,
             refresh_stale_index,
+            shared_fetch_head,
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -727,6 +728,8 @@ impl Dispatcher {
                 s.flags
                     .bool(crate::flags::ids::FORCE_PUSH_AFTER_OUTSIDE_REWRITE),
                 s.flags.bool(crate::flags::ids::REFRESH_STALE_INDEX),
+                s.flags
+                    .bool(crate::flags::ids::WORKTREE_SHARED_LAST_FETCHED),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -939,11 +942,14 @@ impl Dispatcher {
                         // `253-clone-counts-as-fetch`: a clone writes no
                         // FETCH_HEAD, so GHD says "never fetched" until the
                         // first fetch
-                        last_fetched: corvene_git::last_fetched(&info.workdir).or_else(|| {
-                            clone_counts_as_fetch
-                                .then(|| corvene_git::cloned_at(&info.workdir))
-                                .flatten()
-                        }),
+                        // `874-worktree-shared-last-fetched`: a linked
+                        // worktree also counts the main FETCH_HEAD
+                        last_fetched: corvene_git::last_fetched(&info.workdir, shared_fetch_head)
+                            .or_else(|| {
+                                clone_counts_as_fetch
+                                    .then(|| corvene_git::cloned_at(&info.workdir))
+                                    .flatten()
+                            }),
                         pull_with_rebase: join(pull_with_rebase),
                         worktrees: join(worktrees),
                         upstream_rewritten,

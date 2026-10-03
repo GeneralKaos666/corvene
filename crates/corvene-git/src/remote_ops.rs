@@ -8,7 +8,7 @@
 //! simpler and keeps tokens out of the environment. SSH remotes are left to
 //! the user's ssh-agent, as in GHD.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -739,10 +739,24 @@ pub fn upstream_tip_in_reflog(
         .is_some_and(|log| !tip.is_empty() && log.lines().any(|l| l.trim() == tip))
 }
 
-/// GHD `updateLastFetched`: mtime of a non-empty `FETCH_HEAD`.
-pub fn last_fetched(workdir: &Path) -> Option<SystemTime> {
-    let meta = std::fs::metadata(git_dir(workdir).join("FETCH_HEAD")).ok()?;
-    (meta.len() > 0).then(|| meta.modified().ok()).flatten()
+/// GHD `updateLastFetched`: mtime of a non-empty `FETCH_HEAD`. A linked
+/// worktree has its own `FETCH_HEAD`, so a fetch made from another worktree
+/// leaves it "never fetched"; with `shared` (flag `874`) the main
+/// repository's `FETCH_HEAD` counts too and the newer one wins.
+pub fn last_fetched(workdir: &Path, shared: bool) -> Option<SystemTime> {
+    let mtime = |dir: PathBuf| {
+        let meta = std::fs::metadata(dir.join("FETCH_HEAD")).ok()?;
+        (meta.len() > 0).then(|| meta.modified().ok()).flatten()
+    };
+    let own = mtime(git_dir(workdir));
+    if !shared {
+        return own;
+    }
+    let common = crate::paths::common_dir(workdir);
+    if common == git_dir(workdir) {
+        return own;
+    }
+    own.max(mtime(common))
 }
 
 /// When the repository was cloned: the time of `HEAD`'s first reflog entry
@@ -1036,6 +1050,39 @@ mod tests {
     }
 
     #[test]
+    fn linked_worktree_counts_the_main_fetch_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        let linked = dir.path().join("linked");
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", main.to_str().unwrap()],
+        );
+        run(&main, &["config", "commit.gpgsign", "false"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        run(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "side",
+                linked.to_str().unwrap(),
+            ],
+        );
+        assert_ne!(crate::git_dir(&linked), crate::paths::common_dir(&linked));
+        assert_eq!(
+            crate::paths::common_dir(&linked).canonicalize().unwrap(),
+            main.join(".git").canonicalize().unwrap()
+        );
+        std::fs::write(main.join(".git/FETCH_HEAD"), "abc\t\tbranch 'main'\n").unwrap();
+        assert!(last_fetched(&linked, false).is_none());
+        assert!(last_fetched(&linked, true).is_some());
+        assert_eq!(last_fetched(&main, true), last_fetched(&main, false));
+    }
+
+    #[test]
     fn qualified_refspecs_push_a_branch_shadowed_by_a_tag() {
         let git = Arc::new(crate::find_git().unwrap());
         let dir = tempfile::tempdir().unwrap();
@@ -1177,7 +1224,7 @@ mod tests {
             dir.path(),
             &["clone", "-q", src.to_str().unwrap(), copy.to_str().unwrap()],
         );
-        assert!(last_fetched(&copy).is_none());
+        assert!(last_fetched(&copy, false).is_none());
         let git = Arc::new(crate::find_git().unwrap());
         assert!(remote_head_resolves(git.clone(), &copy, "origin"));
         assert!(!remote_head_resolves(git.clone(), &src, "origin"));
@@ -1271,7 +1318,7 @@ mod tests {
         fetch_with(git.clone(), &work, "origin", graph, None, &mut |_, _| {}).unwrap();
         let objects = git_dir(&work).join("objects").join("info");
         assert!(objects.join("commit-graph").exists() || objects.join("commit-graphs").exists());
-        assert!(last_fetched(&work).is_some());
+        assert!(last_fetched(&work, false).is_some());
         let ab = crate::symmetric_ahead_behind(git.clone(), &work, "main", "origin/main")
             .unwrap()
             .unwrap();

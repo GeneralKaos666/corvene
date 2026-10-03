@@ -4232,6 +4232,22 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/worktree_dialogs.rs"],
     },
 
+    /// A linked worktree's "Last fetched" counts the main repository's fetches.
+    WORKTREE_SHARED_LAST_FETCHED = 874 "worktree-shared-last-fetched" {
+        title: "Worktrees share the last fetch time",
+        summary: "In a linked worktree, the Fetch button's \"Last fetched\" time also counts \
+                  fetches made from the main worktree (they update the same remote branches), \
+                  so it does not say \"Never fetched\" right after a fetch elsewhere.",
+        ghd_behaviour: "Reads only the worktree's own FETCH_HEAD, so a linked worktree shows \
+                        \"Never fetched\" until it fetches itself.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22520)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/paths.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
