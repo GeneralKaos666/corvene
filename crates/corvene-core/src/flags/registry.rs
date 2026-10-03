@@ -4127,6 +4127,22 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Restore checks the stash still belongs to the checked-out branch.
+    STASH_RESTORE_CHECKS_BRANCH = 868 "stash-restore-checks-branch" {
+        title: "Restore stash checks the branch",
+        summary: "Restore picks the stash by its commit and only while the branch it was made \
+                  on is checked out; clicked during a branch switch, it stops with an error \
+                  instead of applying the changes to the other branch.",
+        ghd_behaviour: "Pops the stash entry as listed at the last refresh, even when a branch \
+                        switch has just changed what is checked out.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10651)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

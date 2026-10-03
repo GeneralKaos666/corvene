@@ -514,6 +514,42 @@ pub fn pop_stash(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> 
     Ok(())
 }
 
+/// Corvene addition (flag `868`): pop the stash entry `sha` only while
+/// `branch` is checked out, so a Restore clicked during a branch switch
+/// does not land the stash on the other branch (GHD pops `stash@{n}` as
+/// it was when the stash was listed).
+pub fn pop_stash_on_branch(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    sha: &str,
+    branch: &str,
+) -> Result<()> {
+    let head = GitCommand::new(git.clone())
+        .args(["symbolic-ref", "--short", "-q", "HEAD"])
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .run()?
+        .stdout_string()?;
+    let head = head.trim();
+    if head != branch {
+        let now = match head {
+            "" => "a detached HEAD is".to_string(),
+            head => format!("\"{head}\" is"),
+        };
+        return Err(GitError::Gix(format!(
+            "The stash was made on \"{branch}\", but {now} checked out now. Switch back to \
+             \"{branch}\" to restore it."
+        )));
+    }
+    let (stashes, _) = get_stashes(git.clone(), workdir)?;
+    let Some(entry) = stashes.iter().find(|s| s.sha == sha) else {
+        return Err(GitError::Gix(
+            "The stash is no longer there; it may have been restored or discarded already.".into(),
+        ));
+    };
+    pop_stash(git, workdir, &entry.name)
+}
+
 /// `dropDesktopStashEntry`: `git stash drop <name>`.
 pub fn drop_stash(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
     GitCommand::new(git)
@@ -768,5 +804,30 @@ eeee commit: something\n";
         pop_stash(git.clone(), path, &stash.name).unwrap();
         assert_eq!(get_stashes(git, path).unwrap().1, 0);
         assert!(path.join("new.txt").exists());
+    }
+
+    #[test]
+    fn stash_pops_only_on_its_branch() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "changed\n").unwrap();
+        create_desktop_stash(git.clone(), path, "main").unwrap();
+        let (stashes, _) = get_stashes(git.clone(), path).unwrap();
+        let sha = stashes[0].sha.clone();
+        checkout_new_branch(git.clone(), path, "other").unwrap();
+        let err = pop_stash_on_branch(git.clone(), path, &sha, "main").unwrap_err();
+        assert!(
+            err.to_string().contains("\"other\" is checked out"),
+            "{err}"
+        );
+        assert_eq!(get_stashes(git.clone(), path).unwrap().1, 1);
+        crate::GitCommand::new(git.clone())
+            .args(["checkout", "-q", "main"])
+            .current_dir(path)
+            .run()
+            .unwrap();
+        pop_stash_on_branch(git.clone(), path, &sha, "main").unwrap();
+        assert_eq!(get_stashes(git.clone(), path).unwrap().1, 0);
+        assert!(pop_stash_on_branch(git, path, &sha, "main").is_err());
     }
 }

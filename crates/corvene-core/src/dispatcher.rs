@@ -3277,19 +3277,28 @@ impl Dispatcher {
 
     /// Restore: `git stash pop`, then the files show up in Changes.
     pub fn pop_stash(id: u64, cx: &mut App) {
-        let Some(name) = Self::state(cx)
-            .read(cx)
+        let s = Self::state(cx).read(cx);
+        let Some(stash) = s
             .repo_states
             .get(&id)
             .and_then(|r| r.stash.as_ref())
-            .map(|s| s.name.clone())
+            .cloned()
         else {
             return;
         };
+        // Corvene (`868-stash-restore-checks-branch`): the stash is popped by
+        // its commit and only while its branch is still checked out (GHD pops
+        // `stash@{n}` from the last refresh, which may be another branch's)
+        let check_branch = s.flags.bool(crate::flags::ids::STASH_RESTORE_CHECKS_BRANCH);
         Self::run_history_op(
             id,
             "Could not restore stash",
-            move |git, workdir| corvene_git::pop_stash(git, &workdir, &name),
+            move |git, workdir| match (check_branch, stash.branch.as_deref()) {
+                (true, Some(branch)) => {
+                    corvene_git::pop_stash_on_branch(git, &workdir, &stash.sha, branch)
+                }
+                _ => corvene_git::pop_stash(git, &workdir, &stash.name),
+            },
             cx,
         );
     }
