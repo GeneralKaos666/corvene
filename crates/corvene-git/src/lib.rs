@@ -72,9 +72,9 @@ pub use log::{
     parse_raw_log_with_numstat, tag_names,
 };
 pub use ops::{
-    CloneProgress, InitOptions, PathStatus, clone, explain_open_failure, global_identity,
-    init_repository, normalize_clone_url, parse_clone_progress, path_status, readme_exists,
-    repository_name_from_url, set_global_identity,
+    CloneProgress, InitOptions, PathStatus, clone, explain_open_failure, explain_stale_worktree,
+    global_identity, init_repository, normalize_clone_url, parse_clone_progress, path_status,
+    readme_exists, repository_name_from_url, set_global_identity,
 };
 pub use patch::{
     apply_patch_to_index, discard_changes_from_selection, format_patch,

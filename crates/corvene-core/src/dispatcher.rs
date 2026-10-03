@@ -591,6 +591,13 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::EXPLAIN_BAD_CONFIG);
+        // Corvene (`296-stale-core-worktree-hint`): a `core.worktree` that
+        // points at a folder that is gone is named instead of adding a
+        // repository that shows up missing
+        let stale_worktree_hint = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STALE_CORE_WORKTREE_HINT);
         let probe = cx.background_executor().spawn(async move {
             #[cfg(target_os = "android")]
             if let Some(git) = git.clone() {
@@ -608,7 +615,14 @@ impl Dispatcher {
                         err
                     }
                 })
-                .map(|info| (path, info))
+                .and_then(|info| {
+                    match corvene_git::explain_stale_worktree(&path, &info.workdir)
+                        .filter(|_| stale_worktree_hint)
+                    {
+                        Some(text) => Err(GitError::Gix(text)),
+                        None => Ok((path, info)),
+                    }
+                })
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = probe.await;

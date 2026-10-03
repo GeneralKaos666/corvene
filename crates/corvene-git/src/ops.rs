@@ -51,6 +51,25 @@ pub fn explain_open_failure(git: Arc<GitBinary>, path: &Path) -> Option<String> 
     crate::explain_bad_config(&out.stderr)
 }
 
+/// Flag `stale-core-worktree-hint`: when the repository found at `picked`
+/// resolves to a working directory `workdir` that does not exist while
+/// `picked` has its own `.git` (a `core.worktree` left over from a move),
+/// what to tell the user.
+pub fn explain_stale_worktree(picked: &Path, workdir: &Path) -> Option<String> {
+    if workdir.is_dir() || !picked.join(".git").exists() {
+        return None;
+    }
+    Some(format!(
+        "The repository's core.worktree setting points to {}, which does not exist, so Git \
+         does not use {} as its working directory.\n\nIf this folder is the working \
+         directory, remove the setting and add it again:\n\n\
+         git -C '{}' config --unset core.worktree",
+        workdir.display(),
+        picked.display(),
+        picked.display()
+    ))
+}
+
 /// Whether `dir` already has a `README.md` that "Initialize this repository
 /// with a README" would replace (GHD `readMeExists`).
 pub fn readme_exists(dir: &Path) -> bool {
@@ -312,6 +331,29 @@ pub fn clone(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explains_a_stale_core_worktree() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        GitCommand::new(git.clone())
+            .args(["init", "-q"])
+            .current_dir(dir.path())
+            .run()
+            .unwrap();
+        let info = crate::open_repository(dir.path()).unwrap();
+        assert_eq!(explain_stale_worktree(dir.path(), &info.workdir), None);
+        let gone = dir.path().join("moved-away");
+        GitCommand::new(git)
+            .args(["config", "core.worktree"])
+            .arg(gone.to_string_lossy().as_ref())
+            .current_dir(dir.path())
+            .run()
+            .unwrap();
+        let info = crate::open_repository(dir.path()).unwrap();
+        let text = explain_stale_worktree(dir.path(), &info.workdir).unwrap();
+        assert!(text.contains("config --unset core.worktree"), "{text}");
+    }
 
     #[test]
     fn explains_a_broken_repository_config() {

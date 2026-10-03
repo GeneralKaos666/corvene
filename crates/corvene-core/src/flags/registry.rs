@@ -1450,6 +1450,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/config.rs"],
     },
 
+    /// Adding a repository names a stale core.worktree.
+    STALE_CORE_WORKTREE_HINT = 296 "stale-core-worktree-hint" {
+        title: "Name a stale core.worktree when adding",
+        summary: "Adding a folder whose repository's core.worktree setting points to a folder \
+                  that no longer exists stops with an explanation and the \
+                  `git config --unset core.worktree` command that fixes it.",
+        ghd_behaviour: "Fails to add the repository (or adds one that shows up missing) without \
+                        saying why.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(13654)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
