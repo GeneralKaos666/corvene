@@ -36,3 +36,18 @@ Kotlin does meanwhile.
    change indicators until `refresh_indicators()` is called (GHD's
    `RepositoryIndicatorUpdater` runs right away and then periodically).
    MainActivity calls `refreshIndicators()` once per process start meanwhile.
+
+## Provided by the FFI (2026-10-04, 79678bd4)
+
+- `com.wasimaster.corvene.ffi.NativeContext` must exist in `:core:ffi` as
+  `object NativeContext { external fun attach(context: android.content.Context) }`
+  (JNI name `Java_com_wasimaster_corvene_ffi_NativeContext_attach`) and be
+  called with the application context before `Corvene(...)` or
+  `headlessFetch(...)`: it hands the JVM and context to `ndk_context` for the
+  Keystore-backed token store. Without it sign-in tokens cannot be saved.
+- `headlessFetch(filesDir): HeadlessOutcome` (Fetched | Skipped | Failed) and
+  `endHeadless()` for `CorveneFetchWorker` when no `Corvene` is alive.
+- `toggleFilterOption`, `clearFilterOptions`, `stashAllChanges`, `popStash`,
+  `dropStash`, `ignoreFiles`, `startAmending`, `stopAmending`,
+  `setHideWhitespaceInDiff`, `RepoListVm.groups`, `RepoVm.owner/fork/private/alias`,
+  `appVisible`, `ready`, start-up background tasks (886e67b8, 5cabc4ef).
