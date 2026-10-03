@@ -4832,6 +4832,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// Closing the conflicts dialog asks to abort or keep the operation.
+    CONFLICTS_DIALOG_CLOSE_GUARD = 881 "conflicts-dialog-close-guard" {
+        title: "Ask before closing the conflicts dialog",
+        summary: "The conflicts dialog of a merge, rebase or cherry-pick says that closing it \
+                  keeps the operation in progress (resumed from the banner), and closing it asks \
+                  whether to abort the operation or keep it in progress.",
+        ghd_behaviour: "Closing the dialog silently leaves the operation in progress behind a \
+                        banner.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16957)],
+        code: &["crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

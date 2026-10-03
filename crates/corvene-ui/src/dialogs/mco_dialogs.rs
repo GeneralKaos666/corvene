@@ -13,7 +13,9 @@
 //! the stopped commit above the conflicts list (flag `841`); the rebase list
 //! preselects the default branch (flag `831`); the squash message popup can
 //! go back to the target commit's message (flag `827`); Open in Merge Tool in
-//! a conflicted file's menu (flag `842`).
+//! a conflicted file's menu (flag `842`); closing the conflicts step asks
+//! whether to abort the operation or keep it in progress, and a line says it
+//! stays in progress (flag `881`).
 
 use corvene_core::{
     AppState, Dispatcher, ManualConflictResolution, McoStep, MultiCommitOperationKind, RetryAction,
@@ -48,6 +50,9 @@ pub struct McoDialog {
     dont_ask_force_push: bool,
     /// Cherry-pick › New Branch sub-dialog.
     create_branch: Option<Entity<CreateBranchDialog>>,
+    /// `881-conflicts-dialog-close-guard`: closing the conflicts step asked
+    /// whether to abort the operation or keep it in progress.
+    confirm_close: bool,
 }
 
 impl McoDialog {
@@ -107,6 +112,7 @@ impl McoDialog {
             selected_branch,
             dont_ask_force_push: false,
             create_branch: None,
+            confirm_close: false,
         }
     }
 
@@ -580,7 +586,24 @@ impl McoDialog {
             unmerged_files(&status).into_iter().cloned().collect();
         let conflicted_count = conflicted_files(&status, &resolutions).len();
         let resolved_count = resolved_files(&status, &resolutions).len();
-        let close = move |_: &mut Window, cx: &mut App| Dispatcher::hide_conflicts(repo, cx);
+        // Corvene (`881-conflicts-dialog-close-guard`): closing asks first
+        let close_guard = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CONFLICTS_DIALOG_CLOSE_GUARD);
+        let weak = cx.weak_entity();
+        let close = move |_: &mut Window, cx: &mut App| {
+            if close_guard {
+                weak.update(cx, |this, cx| {
+                    this.confirm_close = true;
+                    cx.notify();
+                })
+                .ok();
+            } else {
+                Dispatcher::hide_conflicts(repo, cx);
+            }
+        };
 
         let mut content = div().w(crate::theme::fit_width(460.)).flex().flex_col();
         // flag `841`: which commit stopped (the progress step's details)
@@ -767,6 +790,17 @@ impl McoDialog {
                         .child("\u{a0}your tool of choice, or close to resolve manually."),
                 );
         }
+        if close_guard {
+            content = content.child(
+                div()
+                    .mt(SPACING())
+                    .text_color(cx.ghd().text_secondary)
+                    .child(format!(
+                        "Closing this dialog keeps the {} in progress: resume it from the banner.",
+                        kind.lower()
+                    )),
+            );
+        }
         let can_continue = conflicted_count == 0;
         dialog(
             "dialog-conflicts",
@@ -793,6 +827,72 @@ impl McoDialog {
                 },
             ],
             close,
+            window,
+            cx,
+        )
+        .into_any_element()
+    }
+
+    /// `881-conflicts-dialog-close-guard`: the conflicts dialog was closed;
+    /// abort the operation or keep it in progress (Esc goes back).
+    fn confirm_close(
+        &mut self,
+        kind: MultiCommitOperationKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let repo = self.repo;
+        let weak = cx.weak_entity();
+        let back = move |_: &mut Window, cx: &mut App| {
+            weak.update(cx, |this, cx| {
+                this.confirm_close = false;
+                cx.notify();
+            })
+            .ok();
+        };
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .child(format!(
+                "Do you want to keep this {} in progress? You can resolve the conflicts in \
+                 your own tools and continue from the banner.",
+                kind.lower()
+            ))
+            .child(
+                "Aborting takes you back to the original branch state and discards the conflicts you have already resolved.",
+            );
+        let label = kind.label();
+        dialog(
+            "dialog-confirm-close-conflicts",
+            if IS_MAC {
+                format!("Keep {label} in Progress?")
+            } else {
+                format!("Keep {} in progress?", label.to_lowercase())
+            },
+            content,
+            vec![
+                DialogButton {
+                    id: "close-conflicts-abort",
+                    label: if IS_MAC {
+                        format!("Abort {label}")
+                    } else {
+                        format!("Abort {}", label.to_lowercase())
+                    }
+                    .into(),
+                    primary: false,
+                    disabled: false,
+                    on_click: Box::new(move |_, cx| Dispatcher::abort_mco(repo, cx)),
+                },
+                DialogButton {
+                    id: "close-conflicts-keep",
+                    label: mac_or("Keep in Progress", "Keep in progress").into(),
+                    primary: true,
+                    disabled: false,
+                    on_click: Box::new(move |_, cx| Dispatcher::hide_conflicts(repo, cx)),
+                },
+            ],
+            back,
             window,
             cx,
         )
@@ -1198,6 +1298,9 @@ impl Render for McoDialog {
         let Some(mco) = mco else {
             return div().into_any_element();
         };
+        if mco.step != McoStep::ShowConflicts {
+            self.confirm_close = false;
+        }
         match mco.step.clone() {
             McoStep::ChooseBranch => match mco.detail {
                 corvene_core::McoDetail::CherryPick { commits, .. } => {
@@ -1225,6 +1328,9 @@ impl Render for McoDialog {
             }
             McoStep::WarnForcePush => self.warn_force_push(mco.kind(), window, cx),
             McoStep::ShowProgress => self.progress(window, cx),
+            McoStep::ShowConflicts if self.confirm_close => {
+                self.confirm_close(mco.kind(), window, cx)
+            }
             McoStep::ShowConflicts => self.conflicts(window, cx),
             McoStep::ConfirmAbort => self.confirm_abort(mco.kind(), window, cx),
             McoStep::HideConflicts => div().into_any_element(),
