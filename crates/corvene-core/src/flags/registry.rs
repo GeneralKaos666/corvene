@@ -2376,6 +2376,21 @@ registry! {
         code: &["crates/corvene-platform/src/app_icons.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/native_menu.rs"],
     },
 
+    /// An external editor per repository.
+    PER_REPO_EDITOR = 554 "per-repo-editor" {
+        title: "Editor per repository",
+        summary: "Repository Settings has an Editor tab to pick the external editor this \
+                  repository opens in (Open in External Editor, opening its files and the menus' \
+                  \"Open in …\" labels); \"Use my default editor\" keeps the one in Settings.",
+        ghd_behaviour: "One editor for every repository.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12195)],
+        code: &["crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/state.rs"],
+    },
+
     /// Files open in their repository's editor window.
     OPEN_FILE_IN_REPOSITORY_WINDOW = 555 "open-file-in-repository-window" {
         title: "Open files in the repository's editor window",
@@ -2390,21 +2405,6 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(22278)],
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-platform/src/editors.rs"],
-    },
-
-    /// An external editor per repository.
-    PER_REPO_EDITOR = 554 "per-repo-editor" {
-        title: "Editor per repository",
-        summary: "Repository Settings has an Editor tab to pick the external editor this \
-                  repository opens in (Open in External Editor, opening its files and the menus' \
-                  \"Open in …\" labels); \"Use my default editor\" keeps the one in Settings.",
-        ghd_behaviour: "One editor for every repository.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(12195)],
-        code: &["crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/state.rs"],
     },
 
     // ---- 600 Keyboard & accessibility ----
@@ -2617,21 +2617,6 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs"],
     },
 
-    /// → accepts the generated commit summary placeholder.
-    ACCEPT_SUMMARY_PLACEHOLDER = 654 "accept-summary-placeholder" {
-        title: "→ accepts the summary placeholder",
-        summary: "With one file included, the empty commit summary shows a generated summary \
-                  (\"Update README.md\"); pressing → there types it into the field, caret at the \
-                  end, to extend it instead of retyping it.",
-        ghd_behaviour: "The placeholder is only used as is when committing with an empty summary.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(20563)],
-        code: &["crates/corvene-ui/src/changes.rs"],
-    },
-
     /// Typing in the changes list goes to the commit summary.
     TYPE_TO_COMMIT_SUMMARY = 653 "type-to-commit-summary" {
         title: "Type in the changes list to write the summary",
@@ -2644,6 +2629,21 @@ registry! {
         corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(15350)],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
+    /// → accepts the generated commit summary placeholder.
+    ACCEPT_SUMMARY_PLACEHOLDER = 654 "accept-summary-placeholder" {
+        title: "→ accepts the summary placeholder",
+        summary: "With one file included, the empty commit summary shows a generated summary \
+                  (\"Update README.md\"); pressing → there types it into the field, caret at the \
+                  end, to extend it instead of retyping it.",
+        ghd_behaviour: "The placeholder is only used as is when committing with an empty summary.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20563)],
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
@@ -3651,18 +3651,35 @@ registry! {
         code: &["crates/corvene-highlight/src/cm/modes/mod.rs", "crates/corvene/src/main.rs", "crates/corvene-grammars/src/grammars.rs"],
     },
 
-    /// The no-changes Pull card names a rebasing pull like the toolbar does.
-    BLANK_SLATE_PULL_SAYS_REBASE = 781 "blank-slate-pull-says-rebase" {
-        title: "\"Pull with rebase\" on the no-changes card",
-        summary: "When `pull.rebase` is set, the \"Pull origin\" button of the no-changes view \
-                  says \"Pull origin with rebase\", as the toolbar's pull button already does.",
-        ghd_behaviour: "The card's button says \"Pull origin\" whatever the pull does.",
-        nature: Nature::BugFix,
+    /// Commit messages survive switching repositories and restarts.
+    PERSIST_COMMIT_DRAFTS = 776 "persist-commit-drafts" {
+        title: "Keep commit message drafts",
+        summary: "Each repository keeps its own unfinished commit summary and description: \
+                  switching to another repository and back, or quitting and reopening Corvene, \
+                  brings it back. A commit clears it.",
+        ghd_behaviour: "Drafts are kept per repository in memory only and are gone after a \
+                        restart.",
+        nature: Nature::Feature,
         kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(7101)],
-        code: &["crates/corvene-ui/src/no_changes.rs"],
+        upstream: &[Upstream::issue(3664)],
+        code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
+    /// Unticked files stay unticked after a restart.
+    PERSIST_FILE_SELECTION = 777 "persist-file-selection" {
+        title: "Remember unticked files",
+        summary: "Files unticked in a repository's changes list are still unticked after \
+                  quitting and reopening Corvene (whole files only; a partly selected file comes \
+                  back fully ticked).",
+        ghd_behaviour: "After a restart every changed file is ticked again.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5870), Upstream::issue(17788)],
+        code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
     /// "Ignore with Pattern…" in the changes file menu.
@@ -3696,37 +3713,6 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
-    /// Commit messages survive switching repositories and restarts.
-    PERSIST_COMMIT_DRAFTS = 776 "persist-commit-drafts" {
-        title: "Keep commit message drafts",
-        summary: "Each repository keeps its own unfinished commit summary and description: \
-                  switching to another repository and back, or quitting and reopening Corvene, \
-                  brings it back. A commit clears it.",
-        ghd_behaviour: "Drafts are kept per repository in memory only and are gone after a \
-                        restart.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(3664)],
-        code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-ui/src/changes.rs"],
-    },
-
-    /// Unticked files stay unticked after a restart.
-    PERSIST_FILE_SELECTION = 777 "persist-file-selection" {
-        title: "Remember unticked files",
-        summary: "Files unticked in a repository's changes list are still unticked after \
-                  quitting and reopening Corvene (whole files only; a partly selected file comes \
-                  back fully ticked).",
-        ghd_behaviour: "After a restart every changed file is ticked again.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(5870), Upstream::issue(17788)],
-        code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-core/src/dispatcher.rs"],
-    },
-
     /// Co-author suggestions from the repository's commit authors.
     CO_AUTHORS_FROM_HISTORY = 780 "co-authors-from-history" {
         title: "Suggest co-authors from history",
@@ -3741,6 +3727,20 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(9468)],
         code: &["crates/corvene-core/src/autocomplete.rs", "crates/corvene-ui/src/autocompletion.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/log.rs"],
+    },
+
+    /// The no-changes Pull card names a rebasing pull like the toolbar does.
+    BLANK_SLATE_PULL_SAYS_REBASE = 781 "blank-slate-pull-says-rebase" {
+        title: "\"Pull with rebase\" on the no-changes card",
+        summary: "When `pull.rebase` is set, the \"Pull origin\" button of the no-changes view \
+                  says \"Pull origin with rebase\", as the toolbar's pull button already does.",
+        ghd_behaviour: "The card's button says \"Pull origin\" whatever the pull does.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7101)],
+        code: &["crates/corvene-ui/src/no_changes.rs"],
     },
 
     /// Pick the editor from the no-changes "Open in" card.
@@ -4898,6 +4898,37 @@ registry! {
         code: &["crates/corvene-git/src/process.rs", "crates/corvene-git/src/error.rs", "crates/corvene-core/src/flags/dispatch.rs"],
     },
 
+    /// Closing the conflicts dialog asks to abort or keep the operation.
+    CONFLICTS_DIALOG_CLOSE_GUARD = 881 "conflicts-dialog-close-guard" {
+        title: "Ask before closing the conflicts dialog",
+        summary: "The conflicts dialog of a merge, rebase or cherry-pick says that closing it \
+                  keeps the operation in progress (resumed from the banner), and closing it asks \
+                  whether to abort the operation or keep it in progress.",
+        ghd_behaviour: "Closing the dialog silently leaves the operation in progress behind a \
+                        banner.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16957)],
+        code: &["crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
+    },
+
+    /// Conflicts show the banner instead of opening the dialog.
+    CONFLICTS_OPEN_AS_BANNER = 882 "conflicts-open-as-banner" {
+        title: "Conflicts as a banner",
+        summary: "When a merge, rebase or cherry-pick stops on conflicts, the \"Resolve \
+                  conflicts\" banner shows instead of the conflicts dialog opening over the \
+                  window; the banner's View conflicts opens it.",
+        ghd_behaviour: "The conflicts dialog opens at once.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16702)],
+        code: &["crates/corvene-core/src/mco.rs"],
+    },
+
     /// Links in commit messages end where github.com ends them.
     LINKIFY_TRAILING_PUNCTUATION = 887 "linkify-trailing-punctuation" {
         title: "Links leave out trailing punctuation",
@@ -4974,37 +5005,6 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(1478)],
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/selected_commit.rs"],
-    },
-
-    /// Closing the conflicts dialog asks to abort or keep the operation.
-    CONFLICTS_DIALOG_CLOSE_GUARD = 881 "conflicts-dialog-close-guard" {
-        title: "Ask before closing the conflicts dialog",
-        summary: "The conflicts dialog of a merge, rebase or cherry-pick says that closing it \
-                  keeps the operation in progress (resumed from the banner), and closing it asks \
-                  whether to abort the operation or keep it in progress.",
-        ghd_behaviour: "Closing the dialog silently leaves the operation in progress behind a \
-                        banner.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
-        restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(16957)],
-        code: &["crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
-    },
-
-    /// Conflicts show the banner instead of opening the dialog.
-    CONFLICTS_OPEN_AS_BANNER = 882 "conflicts-open-as-banner" {
-        title: "Conflicts as a banner",
-        summary: "When a merge, rebase or cherry-pick stops on conflicts, the \"Resolve \
-                  conflicts\" banner shows instead of the conflicts dialog opening over the \
-                  window; the banner's View conflicts opens it.",
-        ghd_behaviour: "The conflicts dialog opens at once.",
-        nature: Nature::Feature,
-        kind: Kind::Bool,
-        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
-        restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(16702)],
-        code: &["crates/corvene-core/src/mco.rs"],
     },
 
     // ---- 900 Performance ----
