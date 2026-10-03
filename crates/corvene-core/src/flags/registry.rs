@@ -2597,6 +2597,21 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Typing in the changes list goes to the commit summary.
+    TYPE_TO_COMMIT_SUMMARY = 653 "type-to-commit-summary" {
+        title: "Type in the changes list to write the summary",
+        summary: "A letter, digit or other printable key pressed (without ⌘, ⌃ or ⌥) while the \
+                  changes list has focus moves focus to the commit summary and types the \
+                  character at its end. Space still ticks the selected files.",
+        ghd_behaviour: "Printable keys do nothing in the changes list.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15350)],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

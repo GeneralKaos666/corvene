@@ -44,6 +44,8 @@
 //! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
 //! - adding yourself or a second token for the same co-author is refused
 //!   with a hint under the co-authors box (`779-co-author-validation`).
+//! - typing a character in the file list types it into the summary
+//!   (`653-type-to-commit-summary`).
 //! - → in the empty summary types the generated placeholder
 //!   (`654-accept-summary-placeholder`).
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
@@ -3495,6 +3497,52 @@ impl ChangesSidebar {
         }
     }
 
+    /// Corvene (`653-type-to-commit-summary`): a printable key without
+    /// modifiers in the focused file list goes to the end of the commit
+    /// summary, which takes focus.
+    fn type_into_summary(
+        &mut self,
+        ev: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let m = &ev.keystroke.modifiers;
+        if m.control || m.alt || m.platform || m.function || !self.list_focus.is_focused(window) {
+            return false;
+        }
+        let Some(text) = ev.keystroke.key_char.clone() else {
+            return false;
+        };
+        if text.is_empty() || text.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return false;
+        }
+        {
+            let s = self.state.read(cx);
+            if !s
+                .flags
+                .bool(corvene_core::flags::ids::TYPE_TO_COMMIT_SUMMARY)
+            {
+                return false;
+            }
+            // the commit form is there (not committing, no rebase to continue)
+            let Some(rs) = s.selected_state() else {
+                return false;
+            };
+            if rs.committing || rs.conflict_state.is_some() {
+                return false;
+            }
+        }
+        self.summary.update(cx, |s, cx| {
+            let end = s.value().len();
+            s.set_selected_range(end..end, cx);
+            s.replace(text, window, cx);
+        });
+        let handle = self.summary_focus.clone();
+        window.focus(&handle, cx);
+        cx.notify();
+        true
+    }
+
     /// Corvene (`654-accept-summary-placeholder`): → in the empty summary
     /// types the generated placeholder, caret at the end.
     fn accept_summary_placeholder(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -4229,6 +4277,11 @@ impl Render for ChangesSidebar {
                     .id("changes-list-container")
                     .track_focus(&self.list_focus)
                     .key_context("ChangesList")
+                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                        if this.type_into_summary(ev, window, cx) {
+                            cx.stop_propagation();
+                        }
+                    }))
                     .on_action(
                         cx.listener(|this, _: &SelectNextFile, _, cx| this.select_relative(1, cx)),
                     )
