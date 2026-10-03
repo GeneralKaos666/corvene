@@ -15,6 +15,8 @@
 //! Rename Branch focuses the name box, not the close button
 //! (`872-rename-branch-focuses-name`).
 //! Create a Branch can prefill a name prefix (`845-branch-name-prefix`).
+//! Branch names can have more characters replaced with `-`
+//! (`873-branch-name-forbidden-chars`).
 //! `ConfirmSwitchBranchDialog` is a Corvene addition (`864-confirm-branch-switch`).
 //! Switch Branch can discard the changes instead (`865-switch-branch-discard`).
 //! Squash and merge has commit message fields (flag `837`).
@@ -59,6 +61,32 @@ pub fn sanitize_ref_name(input: &str) -> String {
         out.pop();
     }
     out.replace("..", "-").replace("@{", "-").replace("//", "/")
+}
+
+/// [`sanitize_ref_name`] after replacing each character of `forbidden`
+/// with `-` (`873-branch-name-forbidden-chars`).
+pub fn sanitize_ref_name_with(input: &str, forbidden: &str) -> String {
+    let replaced: String = input
+        .chars()
+        .map(|c| {
+            if !c.is_whitespace() && forbidden.contains(c) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    sanitize_ref_name(&replaced)
+}
+
+/// What a new branch name box turns its input into: [`sanitize_ref_name`]
+/// plus the characters the `873-branch-name-forbidden-chars` flag lists.
+pub fn sanitize_branch_name(input: &str, cx: &App) -> String {
+    let flags = &AppState::global(cx).read(cx).flags;
+    sanitize_ref_name_with(
+        input,
+        flags.text(corvene_core::flags::ids::BRANCH_NAME_FORBIDDEN_CHARS),
+    )
 }
 
 /// Whether a ref name box shows "Will be … as <sanitized>" for `raw`.
@@ -203,7 +231,7 @@ impl Render for CreateBranchDialog {
             }
         };
         let raw = self.name.read(cx).value().to_string();
-        let name = sanitize_ref_name(&raw);
+        let name = sanitize_branch_name(&raw, cx);
         let (tip, default_branch, existing, target_commit) = {
             let s = self.state.read(cx);
             let rs = s.repo_states.get(&self.repo);
@@ -560,7 +588,7 @@ impl Render for RenameBranchDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let t = cx.ghd();
-        let new_name = sanitize_ref_name(&self.name.read(cx).value());
+        let new_name = sanitize_branch_name(&self.name.read(cx).value(), cx);
         let (upstream, existing) = {
             let s = self.state.read(cx);
             let info = s.repo_states.get(&self.repo).and_then(|r| r.info.as_ref());
@@ -1726,5 +1754,16 @@ mod tests {
         assert!(check("my branch/", true));
         assert!(check("a..b", true));
         assert!(!check("", true));
+    }
+
+    #[::core::prelude::v1::test]
+    fn forbidden_characters_become_dashes() {
+        assert_eq!(
+            sanitize_ref_name_with("fix#12 & more", "#&"),
+            "fix-12---more"
+        );
+        assert_eq!(sanitize_ref_name_with("#lead/x", "#"), "lead/x");
+        assert_eq!(sanitize_ref_name_with("a b", " "), "a-b");
+        assert_eq!(sanitize_ref_name_with("plain", ""), "plain");
     }
 }

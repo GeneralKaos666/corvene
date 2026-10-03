@@ -100,6 +100,17 @@ fn branch_name_prefix(s: &str) -> Result<(), &'static str> {
     }
 }
 
+/// `873-branch-name-forbidden-chars`: the characters, written together.
+fn forbidden_branch_chars(s: &str) -> Result<(), &'static str> {
+    if s.chars().count() > 40 {
+        Err("At most 40 characters")
+    } else if s.contains(['\n', '\r']) {
+        Err("One line only")
+    } else {
+        Ok(())
+    }
+}
+
 /// `228-clone-default-account`: logins separated by commas or spaces.
 fn account_logins(s: &str) -> Result<(), &'static str> {
     if s.chars().count() > 200 {
@@ -4202,6 +4213,22 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(17661)],
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
+    /// More characters a branch name may not contain.
+    BRANCH_NAME_FORBIDDEN_CHARS = 873 "branch-name-forbidden-chars" {
+        title: "Forbidden branch name characters",
+        summary: "Characters (written together, for example #&%) that Create a Branch, Rename \
+                  Branch and the worktree dialogs replace with - in a branch name, along with \
+                  those Git forbids; empty for none.",
+        ghd_behaviour: "Only the characters Git forbids are replaced.",
+        nature: Nature::Feature,
+        kind: Kind::Text { placeholder: "#&%", validate: forbidden_branch_chars },
+        corvene: Value::text(""), ghd: Value::text(""),
+        familiar: Value::text(""), max: Value::text(""),
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22603)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/worktree_dialogs.rs"],
     },
 
     // ---- 900 Performance ----
