@@ -1262,15 +1262,19 @@ registry! {
     /// Plain-language text for two confusing git errors.
     PLAIN_LANGUAGE_REMOTE_ERRORS = 255 "plain-language-remote-errors" {
         title: "Plain-language remote errors",
-        summary: "A pull whose upstream branch was deleted on the remote, and a clone into a folder \
-                  you may not write to, explain what happened in a sentence before git's message.",
+        summary: "A pull whose upstream branch was deleted on the remote, a clone into a folder \
+                  you may not write to, a remote failure whose real cause (out of memory, a lost \
+                  connection) precedes \"Could not read from remote repository\", and a \
+                  non-origin remote whose repository is gone explain what happened in a \
+                  sentence before git's message.",
         ghd_behaviour: "Shows git's text only (\"Your configuration specifies to merge with the \
-                        ref …\", \"Permission denied\").",
+                        ref …\", \"Permission denied\"), and calls every \"Could not read from \
+                        remote repository\" an SSH permission problem.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(1325), Upstream::issue(13187)],
+        upstream: &[Upstream::issue(1325), Upstream::issue(13187), Upstream::issue(22413), Upstream::issue(3715)],
         code: &["crates/corvene-core/src/push_errors.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 

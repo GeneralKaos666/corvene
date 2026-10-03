@@ -454,14 +454,33 @@ impl Dispatcher {
                     cx,
                 );
             }
-            _ => {
+            failure => {
                 // `255-plain-language-remote-errors`: say what went wrong
                 // before git's message
-                let plain = Self::state(cx)
-                    .read(cx)
+                let s = Self::state(cx).read(cx);
+                let plain = s
                     .flags
                     .bool(crate::flags::ids::PLAIN_LANGUAGE_REMOTE_ERRORS)
-                    .then(|| crate::push_errors::plain_remote_error(&err))
+                    .then(|| {
+                        crate::push_errors::plain_remote_error(&err).or_else(|| {
+                            // a non-origin remote (a fork's parent) that is gone
+                            let remote = s
+                                .repo_states
+                                .get(&id)?
+                                .info
+                                .as_ref()?
+                                .remotes
+                                .iter()
+                                .find(|r| r.url == remote_url && r.name != "origin")?;
+                            (failure == RemoteFailure::RepositoryNotFound).then(|| {
+                                crate::push_errors::plain_missing_remote_repository(
+                                    &remote.name,
+                                    &remote.url,
+                                    &err,
+                                )
+                            })
+                        })
+                    })
                     .flatten();
                 Self::show_error(title, plain.unwrap_or_else(|| err.to_string()), cx)
             }

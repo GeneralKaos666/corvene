@@ -99,8 +99,8 @@ pub use remote_ops::{
     fetch_with_prune_tags, find_default_remote, get_remotes, install_lfs_hooks,
     is_stale_remote_ref_failure, is_using_lfs, is_using_lfs_by_attributes, last_fetched,
     lfs_available, lfs_hooks_installed, parse_progress_line, prune_remote, pull, pull_with_rebase,
-    push, remote_failure, remote_head_resolves, remove_remote, set_remote_url, update_remote_head,
-    update_submodules, upstream_tip_in_reflog,
+    push, remote_failure, remote_head_resolves, remote_read_failure_cause, remove_remote,
+    set_remote_url, update_remote_head, update_submodules, upstream_tip_in_reflog,
 };
 pub use repo::{
     ahead_behind, main_worktree_path, open_repository, symmetric_ahead_behind,

@@ -201,6 +201,32 @@ pub fn classify_remote_failure(stderr: &str) -> RemoteFailure {
     RemoteFailure::Other
 }
 
+/// The `fatal:` line that explains git's closing "Could not read from remote
+/// repository." when it is something else (out of memory, a broken pack, a
+/// lost connection): dugite, and so GHD, reads every such failure as an SSH
+/// permission problem (desktop#22413).
+pub fn remote_read_failure_cause(stderr: &str) -> Option<&str> {
+    let lines = stderr.lines().map(str::trim);
+    let at = lines
+        .clone()
+        .position(|l| l.ends_with("Could not read from remote repository."))?;
+    lines
+        .take(at)
+        .filter_map(|l| {
+            ["fatal: ", "error: ", "ssh: "]
+                .iter()
+                .find_map(|prefix| l.strip_prefix(prefix))
+        })
+        .map(str::trim)
+        .filter(|cause| {
+            !cause.is_empty()
+                && !cause.contains("Could not read from remote repository")
+                && !cause.contains("Permission denied")
+                && !cause.contains("Host key verification failed")
+        })
+        .last()
+}
+
 pub fn remote_failure(err: &GitError) -> RemoteFailure {
     match err {
         GitError::Failed { stderr, .. } => classify_remote_failure(stderr),
