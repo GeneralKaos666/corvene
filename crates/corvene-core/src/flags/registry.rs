@@ -1441,6 +1441,21 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// One alphabetical repository list instead of owner groups.
+    UNGROUPED_REPOSITORY_LIST = 268 "ungrouped-repository-list" {
+        title: "Ungrouped repository list",
+        summary: "Without filter text the repository list shows every repository in one \
+                  alphabetical Repositories group after Recent, instead of a group per GitHub \
+                  owner and Other. ⇧⌘] / ⇧⌘[ (612) follow the same order.",
+        ghd_behaviour: "Repositories are always grouped by GitHub owner, with the rest under Other.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11460)],
+        code: &["crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

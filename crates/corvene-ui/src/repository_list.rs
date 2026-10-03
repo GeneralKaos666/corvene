@@ -280,6 +280,23 @@ impl RepositoryFoldout {
             hits.into_iter().map(|(_, r, p)| (r, p)).collect()
         };
         owners.sort_by_key(|(o, _)| o.to_lowercase());
+        // Corvene (`268-ungrouped-repository-list`): without a typed filter,
+        // one alphabetical group instead of the owner groups and Other
+        if query.is_empty()
+            && state
+                .flags
+                .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST)
+        {
+            let mut all: Hits = owners.into_iter().flat_map(|(_, hits)| hits).collect();
+            all.extend(other);
+            all.sort_by_key(|(_, r, _)| r.name().to_lowercase());
+            if !all.is_empty() {
+                let k = key(":all".into());
+                groups.push(Group::new("Repositories", k, ranked(all)));
+            }
+            owners = Vec::new();
+            other = Vec::new();
+        }
         for (owner, hits) in owners {
             let k = key(format!("owner:{owner}"));
             groups.push(Group::new(owner, k, ranked(hits)));
@@ -1142,9 +1159,16 @@ fn duplicate_name_paths<'a>(
 
 /// Corvene (`612-navigation-shortcuts`): the repositories in the list's
 /// order without the Recent group (owner groups by owner, then Other; by
-/// name within a group), for ⇧⌘] / ⇧⌘[.
+/// name within a group; by name alone with `268-ungrouped-repository-list`),
+/// for ⇧⌘] / ⇧⌘[.
 pub fn list_order(state: &AppState) -> Vec<u64> {
     let mut repos = state.sorted_repositories();
+    if state
+        .flags
+        .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST)
+    {
+        return repos.iter().map(|r| r.id).collect();
+    }
     repos.sort_by_key(|r| match &r.github {
         Some(gh) => (0, gh.owner.to_lowercase()),
         None => (1, String::new()),
