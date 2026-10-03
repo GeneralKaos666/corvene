@@ -13,6 +13,10 @@
 //! `EXTRA_EDITORS` (flag `extra-editors`) adds editors GHD does not list.
 //! Deviation: [`code_workspace_file`] lets VS Code and its forks open a
 //! repository's only `*.code-workspace` file (`509-vscode-workspace-file`).
+//! Deviation (`565-notepadpp-folder-workspace`, [`leading_args`]): Notepad++
+//! gets a folder with `-openFoldersAsWorkspace`, which shows it in its
+//! Folder as Workspace panel; GHD's `launch.ts` passes the folder alone and
+//! Notepad++ opens every file in the repository.
 
 use std::path::{Path, PathBuf};
 
@@ -556,9 +560,29 @@ pub const SETTINGS_LABEL: &str = if cfg!(target_os = "macos") {
     "Options"
 };
 
+/// Corvene `565-notepadpp-folder-workspace`: the arguments that go before
+/// the target (Notepad++ given a folder, when `folder_as_workspace`).
+pub fn leading_args(
+    editor_name: &str,
+    target_is_dir: bool,
+    folder_as_workspace: bool,
+) -> &'static [&'static str] {
+    if folder_as_workspace && target_is_dir && editor_name == "Notepad++" {
+        &["-openFoldersAsWorkspace"]
+    } else {
+        &[]
+    }
+}
+
 /// GHD `launchExternalEditor`: `open -a <bundle> <path>` on macOS, the
-/// executable with the path elsewhere, detached.
-pub fn launch(editor: &FoundEditor, target: &Path) -> Result<(), EditorError> {
+/// executable with the path elsewhere, detached. `folder_as_workspace`:
+/// flag `565-notepadpp-folder-workspace` (Windows).
+pub fn launch(
+    editor: &FoundEditor,
+    target: &Path,
+    folder_as_workspace: bool,
+) -> Result<(), EditorError> {
+    let _ = folder_as_workspace;
     if !editor.path.exists() {
         return Err(EditorError {
             message: format!(
@@ -576,10 +600,16 @@ pub fn launch(editor: &FoundEditor, target: &Path) -> Result<(), EditorError> {
     let launched = apps::spawn_detached(&editor.path, &[&target.to_string_lossy()]);
     // `extra-editors`: Microsoft Edit needs a console window
     #[cfg(windows)]
-    let launched = if windows_editors::needs_console(editor) {
-        windows_editors::spawn_in_console(&editor.path, &[&target.to_string_lossy()])
-    } else {
-        apps::spawn_detached(&editor.path, &[&target.to_string_lossy()])
+    let launched = {
+        let target_arg = target.to_string_lossy();
+        let mut args: Vec<&str> =
+            leading_args(&editor.name, target.is_dir(), folder_as_workspace).to_vec();
+        args.push(target_arg.as_ref());
+        if windows_editors::needs_console(editor) {
+            windows_editors::spawn_in_console(&editor.path, &args)
+        } else {
+            apps::spawn_detached(&editor.path, &args)
+        }
     };
     #[cfg(target_os = "android")]
     return launch_android(editor, target, None);
@@ -752,9 +782,9 @@ pub fn launch_at_line(editor: &FoundEditor, target: &Path, line: u32) -> Result<
     return match line_command(editor, target, line) {
         Some((program, args)) => {
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
-            apps::spawn_detached(&program, &args).or_else(|_| launch(editor, target))
+            apps::spawn_detached(&program, &args).or_else(|_| launch(editor, target, false))
         }
-        None => launch(editor, target),
+        None => launch(editor, target, false),
     };
 }
 
@@ -786,6 +816,17 @@ mod tests {
                 path: "/Applications/Cursor.app".into(),
             },
         ]
+    }
+
+    #[test]
+    fn notepadpp_opens_folders_as_a_workspace() {
+        assert_eq!(
+            leading_args("Notepad++", true, true),
+            &["-openFoldersAsWorkspace"]
+        );
+        assert!(leading_args("Notepad++", false, true).is_empty());
+        assert!(leading_args("Notepad++", true, false).is_empty());
+        assert!(leading_args("Visual Studio Code", true, true).is_empty());
     }
 
     #[test]

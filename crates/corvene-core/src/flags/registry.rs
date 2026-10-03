@@ -2298,6 +2298,21 @@ registry! {
         code: &["crates/corvene-platform/src/editors_windows.rs", "crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
+    /// Notepad++ shows a repository as a folder workspace.
+    NOTEPADPP_FOLDER_WORKSPACE = 565 "notepadpp-folder-workspace" {
+        title: "Notepad++ opens a repository as a folder workspace",
+        summary: "Open in Notepad++ hands it the repository folder with \
+                  -openFoldersAsWorkspace, so the folder shows in its Folder as Workspace panel.",
+        ghd_behaviour: "Passes the folder alone, and Notepad++ opens every file in the \
+                        repository, which can exhaust its memory in a large one.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(18960)],
+        code: &["crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

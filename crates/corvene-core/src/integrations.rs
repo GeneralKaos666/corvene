@@ -242,7 +242,7 @@ impl Dispatcher {
     /// (the diff's "Open in <Editor> at Line N", flag
     /// `diff-open-in-editor-at-line`); a custom editor opens the file.
     pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut App) {
-        let (editors, selected, custom, workspace_file) = {
+        let (editors, selected, custom, workspace_file, folder_as_workspace) = {
             let s = Self::state(cx).read(cx);
             (
                 s.editors.clone(),
@@ -252,6 +252,7 @@ impl Dispatcher {
                     .then(|| s.settings.custom_editor.clone())
                     .flatten(),
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
+                s.flags.bool(crate::flags::ids::NOTEPADPP_FOLDER_WORKSPACE),
             )
         };
         if let Some(custom) = custom {
@@ -305,7 +306,7 @@ impl Dispatcher {
                         .then(|| editors::code_workspace_file(&editor, &path))
                         .flatten()
                         .unwrap_or(path);
-                    editors::launch(&editor, &target)
+                    editors::launch(&editor, &target, folder_as_workspace)
                 }
             },
             |result, cx| {
