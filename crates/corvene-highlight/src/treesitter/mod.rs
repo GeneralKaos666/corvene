@@ -37,8 +37,9 @@ use tree_sitter::{
 };
 
 pub use library::{
-    BUNDLED, Entry, Grammar, available, bundled, generation, is_loaded, load_library, load_pack,
-    register_table, unload_library,
+    BUNDLED, Entry, Grammar, USER_FALLBACK, USER_PREFERRED, UserGrammar, UserLanguage, available,
+    bundled, generation, has_user_grammars, is_loaded, knows_grammar, load_library, load_pack,
+    register_table, register_user, unload_library, unregister_user, user_entry_for,
 };
 
 use crate::{Span, TokenClass};
@@ -176,6 +177,84 @@ pub fn highlight(path: &str, lines: &[&str], budget: usize) -> Option<Vec<Vec<Sp
     run(root, &grammars, generation, lines, budget)
         .map_err(|err| tracing::debug!("tree-sitter highlighting {path}: {err}"))
         .ok()
+}
+
+/// The user extension claiming `path` and whether it is preferred.
+pub fn user_claim(path: &str, first_line: &str) -> Option<(String, bool)> {
+    library::user_entry_for(path, first_line).map(|(_, extension, preferred)| (extension, preferred))
+}
+
+/// Tokenize `lines` with the user grammar claiming `path`, if there is one
+/// (and it is preferred, when `preferred_only`). Injections resolve
+/// against every registered grammar.
+pub fn highlight_user(path: &str, lines: &[&str], budget: usize, preferred_only: bool) -> Option<Vec<Vec<Span>>> {
+    let generation = generation();
+    let (entry, _, preferred) = library::user_entry_for(path, lines.first().copied().unwrap_or(""))?;
+    if preferred_only && !preferred {
+        return None;
+    }
+    let grammar = entry.grammar()?;
+    let root = compiled(&grammar, generation)?;
+    run(root, &library::entries(), generation, lines, budget)
+        .map_err(|err| tracing::debug!("user tree-sitter grammar highlighting {path}: {err}"))
+        .ok()
+}
+
+/// Corvene's grammars by the GitHub repository they are generated from
+/// (`owner/repo`, lowercase) → grammar name; `tools/ts-queries/gen.py
+/// --repos` writes the table. A language extension that names the same
+/// repository reuses the compiled grammar instead of building it.
+pub fn bundled_grammar_repos() -> &'static HashMap<String, Vec<String>> {
+    static TABLE: OnceLock<HashMap<String, Vec<String>>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        serde_json::from_str(include_str!("../../assets/grammar-repos.json"))
+            .map_err(|err| tracing::warn!("grammar-repos.json: {err}"))
+            .unwrap_or_default()
+    })
+}
+
+/// `https://github.com/Owner/Repo.git` → `owner/repo`.
+pub fn normalize_repository(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .or_else(|| url.strip_prefix("git@github.com:"))
+        .or_else(|| url.strip_prefix("github:"))?;
+    let mut parts = rest.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some(format!("{}/{}", owner.to_lowercase(), repo.to_lowercase()))
+}
+
+/// The name of Corvene's grammar for an extension's tree-sitter grammar:
+/// the same repository (and, for a repository holding several grammars, a
+/// matching `path`, e.g. `typescript/tsx`), else the same name.
+pub fn resolve_bundled(name: &str, repository: Option<&str>, path: Option<&str>) -> Option<String> {
+    let table = bundled_grammar_repos();
+    if let Some(repo) = repository.and_then(normalize_repository)
+        && let Some(names) = table.get(&repo)
+    {
+        if names.len() == 1 {
+            return names.first().cloned();
+        }
+        let wanted = path
+            .map(|p| p.trim_matches('/').rsplit('/').next().unwrap_or(p).to_lowercase())
+            .unwrap_or_else(|| name.to_lowercase());
+        if let Some(found) = names.iter().find(|n| **n == wanted || **n == name.to_lowercase()) {
+            return Some(found.clone());
+        }
+        return names.first().cloned();
+    }
+    let lower = name.to_lowercase();
+    table
+        .values()
+        .flatten()
+        .any(|n| *n == lower)
+        .then_some(lower)
 }
 
 /// Highlight with `grammar`'s own queries, compiled afresh (the query tools
@@ -533,6 +612,81 @@ pub(crate) mod tests {
             let table = corvene_grammars::corvene_grammars_v1().cast::<ffi::Table>();
             unsafe { register_table("test", table) }.expect("register");
         });
+    }
+
+    #[test]
+    fn a_user_grammar_derives_from_a_bundled_one() {
+        with_grammars();
+        assert!(knows_grammar("rust"));
+        assert!(!knows_grammar("rusty"));
+        let before = generation();
+        register_user(
+            "local.rusty",
+            true,
+            vec![UserGrammar {
+                name: "rusty".into(),
+                extensions: vec!["rusty".into()],
+                filenames: Vec::new(),
+                first_line: None,
+                aliases: Vec::new(),
+                highlights: "(identifier) @comment\n\"fn\" @string".into(),
+                injections: String::new(),
+                locals: String::new(),
+                language: UserLanguage::Derived {
+                    base: "rust".into(),
+                },
+            }],
+        );
+        assert_ne!(generation(), before);
+        assert!(has_user_grammars());
+        assert_eq!(user_claim("x/a.rusty", ""), Some(("local.rusty".to_string(), true)));
+        let spans = highlight_user("a.rusty", &["fn main() {}"], crate::MAX_HIGHLIGHT_BYTES, true)
+            .expect("highlights");
+        let classes: Vec<(usize, TokenClass)> = spans[0].iter().map(|s| (s.range.start, s.class)).collect();
+        assert!(classes.contains(&(0, TokenClass::String)), "{classes:?}");
+        assert!(classes.contains(&(3, TokenClass::Comment)), "{classes:?}");
+        // a fallback registration loses to a built-in grammar for its files
+        register_user(
+            "local.rusty",
+            false,
+            vec![UserGrammar {
+                name: "rusty".into(),
+                extensions: vec!["rs".into()],
+                filenames: Vec::new(),
+                first_line: None,
+                aliases: Vec::new(),
+                highlights: "(identifier) @comment".into(),
+                injections: String::new(),
+                locals: String::new(),
+                language: UserLanguage::Derived {
+                    base: "rust".into(),
+                },
+            }],
+        );
+        assert!(highlight_user("a.rs", &["fn main() {}"], crate::MAX_HIGHLIGHT_BYTES, true).is_none());
+        assert!(highlight_user("a.rs", &["fn main() {}"], crate::MAX_HIGHLIGHT_BYTES, false).is_some());
+        unregister_user("local.rusty");
+        assert!(user_claim("a.rs", "").is_none());
+    }
+
+    #[test]
+    fn repositories_resolve_to_bundled_grammars() {
+        assert_eq!(
+            normalize_repository("https://github.com/Tree-Sitter/tree-sitter-rust.git"),
+            Some("tree-sitter/tree-sitter-rust".into())
+        );
+        assert_eq!(normalize_repository("git@github.com:a/b"), Some("a/b".into()));
+        assert_eq!(normalize_repository("https://gitlab.com/a/b"), None);
+        assert_eq!(
+            resolve_bundled("anything", Some("https://github.com/tree-sitter/tree-sitter-rust"), None),
+            Some("rust".into())
+        );
+        assert_eq!(
+            resolve_bundled("tsx", Some("https://github.com/tree-sitter/tree-sitter-typescript"), Some("tsx")),
+            Some("tsx".into())
+        );
+        assert_eq!(resolve_bundled("Rust", None, None), Some("rust".into()));
+        assert_eq!(resolve_bundled("no-such-grammar", Some("https://github.com/x/y"), None), None);
     }
 
     fn classes(path: &str, src: &str) -> Vec<Vec<(String, TokenClass)>> {
