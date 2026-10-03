@@ -506,6 +506,19 @@ pub(crate) fn main() {
                 Dispatcher::show_popup(Popup::AddLicense { repo: id }, cx);
             }
         });
+        // `451-undo-commit-menu-item`: the Undo bar's button
+        on_menu_action(cx, move |_: &UndoLastCommit, cx| {
+            let s = corvene_core::AppState::global(cx).read(cx);
+            let id = s.selected.filter(|_| {
+                s.flags
+                    .bool(corvene_core::flags::ids::UNDO_COMMIT_MENU_ITEM)
+                    && s.selected_state()
+                        .is_some_and(|rs| rs.last_commit.is_some())
+            });
+            if let Some(id) = id {
+                Dispatcher::request_undo_last_commit(id, cx);
+            }
+        });
         on_menu_action(cx, move |_: &RepositorySettings, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::open_repository_settings(

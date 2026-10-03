@@ -2234,6 +2234,20 @@ registry! {
         code: &["crates/corvene-ui/src/banner.rs", "crates/corvene-ui/src/workspace.rs"],
     },
 
+    /// Edit › Undo Last Commit.
+    UNDO_COMMIT_MENU_ITEM = 451 "undo-commit-menu-item" {
+        title: "Edit › Undo Last Commit",
+        summary: "The Edit menu has \"Undo Last Commit\", which does what the Undo button under \
+                  the commit form does and is available exactly while that button shows.",
+        ghd_behaviour: "Only the Undo button under the commit form and History's context menu.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5725)],
+        code: &["crates/corvene/src/menus.rs", "crates/corvene/src/main.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
