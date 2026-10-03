@@ -100,6 +100,16 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# release code in a fraction of the shipped build's time (thin LTO across
+# 16 codegen units instead of fat LTO in one) for trying a change at full
+# speed locally (`cargo build --profile release-fast -p corvene`); shipped
+# builds stay on `release`
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = false
+
 # release code with symbols and a fast link, for `sample`/Instruments and the
 # timings in .docs/perf.md (`cargo build --profile profiling -p corvene`)
 [profile.profiling]
