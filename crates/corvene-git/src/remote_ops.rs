@@ -527,10 +527,11 @@ pub fn pull_with_rebase(git: Arc<GitBinary>, workdir: &Path) -> bool {
 
 /// `git config --get <key>` inside `workdir`. Read in-process from the
 /// cached gitoxide handle (every configuration file, includes resolved, the
-/// last value wins as with git); git itself only when gitoxide cannot open
-/// the repository. Status asks on every refresh, before it can start.
+/// last value wins as with git); git itself when gitoxide cannot open the
+/// repository or does not fully trust it. Status asks on every refresh,
+/// before it can start.
 pub fn config_value(git: Arc<GitBinary>, workdir: &Path, key: &str) -> Option<String> {
-    if let Ok(repo) = crate::handle::open(workdir) {
+    if let Some(repo) = crate::handle::open_trusted(workdir) {
         return repo
             .config_snapshot()
             .string(key)

@@ -21,7 +21,7 @@ use gix::prelude::TreeDiffChangeExt;
 /// commit) to `newest`; for one commit both are its sha.
 pub(crate) fn changed_files(workdir: &Path, oldest: &str, newest: &str) -> Option<ChangesetData> {
     let started = std::time::Instant::now();
-    let repo = crate::handle::open(workdir).ok()?;
+    let repo = crate::handle::open_trusted(workdir)?;
     let commit = |rev: &str| {
         repo.rev_parse_single(rev)
             .ok()?

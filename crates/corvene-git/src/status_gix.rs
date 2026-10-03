@@ -39,9 +39,7 @@ pub(crate) fn status(
     options: StatusOptions,
     hide_untracked: bool,
 ) -> Option<WorkingDirectoryStatus> {
-    let repo = crate::handle::open(workdir)
-        .map_err(|err| tracing::debug!(?err, "in-process status: no repository"))
-        .ok()?;
+    let repo = crate::handle::open_trusted(workdir)?;
     let started = std::time::Instant::now();
     let untracked = if hide_untracked {
         gix::status::UntrackedFiles::None
