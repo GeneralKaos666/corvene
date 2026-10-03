@@ -11,8 +11,8 @@ use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 use crate::runtime::Services;
 use crate::vm::{
     BannerVm, BranchesVm, ChangesVm, CommitDetailVm, DesignStyleVm, DiffHeaderVm, DiffRowVm,
-    HistoryVm, PopupVm, RepoListVm, SettingsVm, ThemeVm, banner, branches, changes, commit_detail,
-    diff_header, diff_rows, history, popup, repo_list, settings,
+    HistoryVm, PopupVm, RepoListVm, SessionVm, SettingsVm, ThemeVm, banner, branches, changes,
+    commit_detail, diff_header, diff_rows, history, popup, repo_list, session, settings,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -460,5 +460,164 @@ impl Corvene {
     pub fn set_hide_whitespace_in_diff(&self, history: bool, hide: bool) {
         self.loop_
             .post(move |host| Dispatcher::set_hide_whitespace_in_diff(history, hide, host));
+    }
+
+    // ---- sign-in, clone, new and the welcome flow ----
+
+    /// Starts the sign-in the `307-sign-in-flow` flag picks (device code
+    /// or browser) for GitHub.com, or for the enterprise host given.
+    pub fn sign_in(&self, enterprise_host: Option<String>) {
+        self.loop_.post(move |host| {
+            let endpoint = match enterprise_host {
+                Some(input) => match corvene_github::Endpoint::enterprise(&input, false) {
+                    Some(endpoint) => endpoint,
+                    None => return,
+                },
+                None => corvene_github::Endpoint::github_com(),
+            };
+            Dispatcher::begin_sign_in(endpoint, host)
+        });
+    }
+
+    /// The device-code flow regardless of the flag.
+    pub fn sign_in_device_flow(&self, enterprise_host: Option<String>) {
+        self.loop_.post(move |host| {
+            let endpoint = match enterprise_host {
+                Some(input) => match corvene_github::Endpoint::enterprise(&input, false) {
+                    Some(endpoint) => endpoint,
+                    None => return,
+                },
+                None => corvene_github::Endpoint::github_com(),
+            };
+            Dispatcher::sign_in_device_flow(endpoint, host)
+        });
+    }
+
+    /// A personal access token (enterprise, or the fallback).
+    pub fn sign_in_with_token(&self, enterprise_host: Option<String>, token: String) {
+        self.loop_.post(move |host| {
+            let endpoint = match enterprise_host {
+                Some(input) => match corvene_github::Endpoint::enterprise(&input, false) {
+                    Some(endpoint) => endpoint,
+                    None => return,
+                },
+                None => corvene_github::Endpoint::github_com(),
+            };
+            Dispatcher::sign_in_with_token(endpoint, token, host)
+        });
+    }
+
+    pub fn cancel_sign_in(&self) {
+        self.loop_.post(|host| Dispatcher::cancel_sign_in(host));
+    }
+
+    pub fn sign_out(&self, endpoint: String) {
+        self.loop_
+            .post(move |host| Dispatcher::sign_out(endpoint, host));
+    }
+
+    pub fn complete_welcome(&self) {
+        self.loop_.post(|host| Dispatcher::complete_welcome(host));
+    }
+
+    /// Clones `url` into `path` (`depth` > 0 = shallow).
+    pub fn clone_repository(&self, url: String, path: String, depth: u32) {
+        self.loop_.post(move |host| {
+            Dispatcher::clone_repository_with(
+                url,
+                PathBuf::from(path),
+                None,
+                (depth > 0).then_some(depth),
+                host,
+            )
+        });
+    }
+
+    pub fn cancel_clone(&self) {
+        self.loop_.post(|host| Dispatcher::cancel_clone(host));
+    }
+
+    pub fn create_repository(
+        &self,
+        path: String,
+        name: String,
+        description: Option<String>,
+        readme: bool,
+        gitignore: Option<String>,
+        license: Option<String>,
+    ) {
+        self.loop_.post(move |host| {
+            Dispatcher::create_repository(
+                PathBuf::from(path),
+                name,
+                description,
+                readme,
+                gitignore,
+                license,
+                false,
+                host,
+            )
+        });
+    }
+
+    pub async fn session(&self) -> SessionVm {
+        self.loop_.query(|host| session(host.state_ref())).await
+    }
+
+    // ---- history actions and multi-commit operations ----
+
+    pub fn revert_commit(&self, repo: u64, sha: String) {
+        self.loop_
+            .post(move |host| Dispatcher::revert_commit(repo, sha, host));
+    }
+
+    pub fn reset_to_commit(&self, repo: u64, sha: String) {
+        self.loop_
+            .post(move |host| Dispatcher::reset_to_commit(repo, sha, host));
+    }
+
+    pub fn checkout_commit(&self, repo: u64, sha: String) {
+        self.loop_
+            .post(move |host| Dispatcher::checkout_commit(repo, sha, host));
+    }
+
+    pub fn create_tag(&self, repo: u64, name: String, sha: String, message: String) {
+        self.loop_
+            .post(move |host| Dispatcher::create_tag(repo, name, sha, message, host));
+    }
+
+    /// `mode`: "behind" (their commits) or "ahead" (ours); `None` ends the comparison.
+    pub fn compare_to_branch(&self, repo: u64, branch: Option<String>, mode: String) {
+        self.loop_.post(move |host| match branch {
+            Some(branch) => {
+                let mode = if mode == "ahead" {
+                    corvene_core::compare::ComparisonMode::Ahead
+                } else {
+                    corvene_core::compare::ComparisonMode::Behind
+                };
+                Dispatcher::compare_to_branch(repo, branch, mode, host)
+            }
+            None => Dispatcher::exit_compare(repo, host),
+        });
+    }
+
+    pub fn merge_branch(&self, repo: u64, branch: String, squash: bool) {
+        self.loop_
+            .post(move |host| Dispatcher::merge_branch(repo, branch, squash, host));
+    }
+
+    pub fn start_rebase(&self, repo: u64, base_branch: String) {
+        self.loop_
+            .post(move |host| Dispatcher::start_rebase(repo, base_branch, false, host));
+    }
+
+    pub fn abort_mco(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::abort_mco(repo, host));
+    }
+
+    pub fn reorder_commits(&self, repo: u64, to_move: Vec<String>, before: Option<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::reorder_commits(repo, to_move, before, false, host));
     }
 }
