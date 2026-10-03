@@ -121,7 +121,8 @@ debug = "line-tables-only"
 incremental = false
 
 # gpui-pre-macos: variable-font weights and glyph dilation like Chromium
-# (src/text_system.rs); gpui-pre: text paints from its unsnapped layout origin
+# (src/text_system.rs) and a display link that pauses while the window is
+# idle (src/window.rs); gpui-pre: text paints from its unsnapped layout origin
 # (src/elements/text.rs); gpui-pre-linux: anchored popups on X11 (the context
 # and menu bar menus; src/linux/x11) and offscreen frames; gpui-pre-wgpu:
 # rendering a window's scene to an image (src/wgpu_renderer.rs);
