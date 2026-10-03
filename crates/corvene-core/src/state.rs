@@ -1081,6 +1081,18 @@ impl AppState {
         self.flags.text(crate::flags::ids::PRODUCT_NAME)
     }
 
+    /// Where new repositories go: `Settings::clone_dir` (set in Settings ›
+    /// Advanced, `544-default-clone-location`), else GitHub Desktop's
+    /// default, outside OneDrive with `545-clone-dir-avoids-onedrive`.
+    pub fn clone_dir(&self) -> std::path::PathBuf {
+        self.settings.clone_dir.clone().unwrap_or_else(|| {
+            corvene_platform::paths::default_clone_dir_avoiding_onedrive(
+                self.flags
+                    .bool(crate::flags::ids::CLONE_DIR_AVOIDS_ONEDRIVE),
+            )
+        })
+    }
+
     /// `446-confirm-quit-while-busy`: the running operation quitting would
     /// cut short, if any.
     pub fn busy_for_quit(&self) -> Option<&'static str> {

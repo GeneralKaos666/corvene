@@ -1762,9 +1762,14 @@ impl PreferencesDialog {
     /// way back to GitHub Desktop's `~/Documents/GitHub`.
     fn clone_location_section(&self, cx: &Context<Self>) -> AnyElement {
         let chosen = self.draft.clone_dir.clone();
-        let shown = chosen
-            .clone()
-            .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+        let shown = chosen.clone().unwrap_or_else(|| {
+            corvene_platform::paths::default_clone_dir_avoiding_onedrive(
+                self.state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::CLONE_DIR_AVOIDS_ONEDRIVE),
+            )
+        });
         div()
             .flex()
             .flex_col()

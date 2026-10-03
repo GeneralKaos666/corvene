@@ -528,11 +528,7 @@ pub fn default_worktree_dir(state: &AppState, repo: u64) -> PathBuf {
     {
         return dir;
     }
-    let clone_dir = state
-        .settings
-        .clone_dir
-        .clone()
-        .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+    let clone_dir = state.clone_dir();
     let name = state
         .repository(repo)
         .map(|r| match &r.github {

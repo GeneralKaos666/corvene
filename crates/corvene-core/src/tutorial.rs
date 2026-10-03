@@ -243,12 +243,7 @@ impl Dispatcher {
             );
             return;
         };
-        let dir = Self::state(cx)
-            .read(cx)
-            .settings
-            .clone_dir
-            .clone()
-            .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+        let dir = Self::state(cx).read(cx).clone_dir();
         let path = dir.join(TUTORIAL_REPOSITORY_NAME);
         let askpass = Self::askpass_env(cx);
         let (tx, rx) = async_channel::unbounded::<(String, u8, Option<String>)>();

@@ -2456,6 +2456,21 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/preferences.rs"],
     },
 
+    /// The default clone folder stays out of OneDrive.
+    CLONE_DIR_AVOIDS_ONEDRIVE = 545 "clone-dir-avoids-onedrive" {
+        title: "Default clone folder outside OneDrive",
+        summary: "On Windows, when OneDrive syncs the Documents folder, repositories are cloned \
+                  to %USERPROFILE%\\GitHub instead of Documents\\GitHub (syncing a repository's \
+                  .git folder corrupts it and fills the OneDrive quota).",
+        ghd_behaviour: "Always Documents\\GitHub, inside OneDrive when it backs up Documents.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: cfg!(windows), availability: available,
+        upstream: &[Upstream::issue(13017)],
+        code: &["crates/corvene-platform/src/lib.rs", "crates/corvene-core/src/state.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

@@ -124,12 +124,7 @@ impl CloneRepositoryDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let clone_dir = state
-            .read(cx)
-            .settings
-            .clone_dir
-            .clone()
-            .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+        let clone_dir = state.read(cx).clone_dir();
         let url = cx.new(|cx| {
             let mut s = InputState::new(window, cx).placeholder("URL or username/repository");
             if let Some(u) = &initial_url {
@@ -335,13 +330,7 @@ impl CloneRepositoryDialog {
         if self.path_edited {
             return;
         }
-        let base = self
-            .state
-            .read(cx)
-            .settings
-            .clone_dir
-            .clone()
-            .unwrap_or_else(corvene_platform::paths::default_clone_dir);
+        let base = self.state.read(cx).clone_dir();
         let url = self.url.read(cx).value().to_string();
         let with_owner = self
             .state
