@@ -49,10 +49,12 @@ pub struct HostInfo {
     pub notifications_allowed: Option<bool>,
 }
 
+/// The field is `reason`, not `message`: UniFFI's Kotlin error classes
+/// already have a `message`.
 #[derive(uniffi::Error, thiserror::Error, Debug)]
 pub enum CoreError {
-    #[error("{message}")]
-    Failed { message: String },
+    #[error("{reason}")]
+    Failed { reason: String },
 }
 
 /// The engine. One per process.
@@ -104,7 +106,7 @@ impl Corvene {
         };
         let loop_ = spawn_loop("corvene-main", services.clone(), on_changed).map_err(|err| {
             CoreError::Failed {
-                message: err.to_string(),
+                reason: err.to_string(),
             }
         })?;
         let init = loop_.query_blocking(|host| -> Result<(), String> {
@@ -122,10 +124,10 @@ impl Corvene {
         });
         match init {
             Some(Ok(())) => {}
-            Some(Err(message)) => return Err(CoreError::Failed { message }),
+            Some(Err(reason)) => return Err(CoreError::Failed { reason }),
             None => {
                 return Err(CoreError::Failed {
-                    message: "the engine thread ended during start-up".into(),
+                    reason: "the engine thread ended during start-up".into(),
                 });
             }
         }
