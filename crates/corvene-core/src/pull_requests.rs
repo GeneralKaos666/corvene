@@ -696,8 +696,14 @@ impl Dispatcher {
                     return Ok(PullRequestBranch { branch: existing });
                 }
                 let name = format!("pr/{number}");
-                corvene_git::create_branch(git.clone(), &workdir, &name, Some(&existing.name), false)
-                    .map_err(|err| err.to_string())?;
+                corvene_git::create_branch(
+                    git.clone(),
+                    &workdir,
+                    &name,
+                    Some(&existing.name),
+                    false,
+                )
+                .map_err(|err| err.to_string())?;
                 let branch = corvene_git::open_repository(&workdir)
                     .ok()
                     .and_then(|info| {
@@ -951,7 +957,11 @@ mod tests {
             pr(1, "Feature/Login", gh("octocat", "hello")),
             pr(2, "feature/other", gh("octocat", "hello")),
         ];
-        let folded = branch("feature/login", Some("origin/feature/login"), BranchKind::Local);
+        let folded = branch(
+            "feature/login",
+            Some("origin/feature/login"),
+            BranchKind::Local,
+        );
         assert!(find_associated_pull_request(&folded, &prs, &remotes, false).is_none());
         assert_eq!(
             find_associated_pull_request(&folded, &prs, &remotes, true).map(|p| p.number),
@@ -962,7 +972,11 @@ mod tests {
             pr(3, "FEATURE/OTHER", gh("octocat", "hello")),
             pr(2, "feature/other", gh("octocat", "hello")),
         ];
-        let exact = branch("feature/other", Some("origin/feature/other"), BranchKind::Local);
+        let exact = branch(
+            "feature/other",
+            Some("origin/feature/other"),
+            BranchKind::Local,
+        );
         assert_eq!(
             find_associated_pull_request(&exact, &prs, &remotes, true).map(|p| p.number),
             Some(2)

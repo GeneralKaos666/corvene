@@ -1380,15 +1380,19 @@ impl Dispatcher {
             cx.notify();
         });
         let endpoint = corvene_github::Endpoint::from_api_base(&account.endpoint);
-        let error_details = Self::state(cx)
-            .read(cx)
-            .flags
-            .bool(crate::flags::ids::API_ERROR_DETAILS);
+        let (error_details, sso_hint) = {
+            let flags = &Self::state(cx).read(cx).flags;
+            (
+                flags.bool(crate::flags::ids::API_ERROR_DETAILS),
+                flags.bool(crate::flags::ids::API_SAML_SSO_HINT),
+            )
+        };
         spawn_bg(
             cx,
             move || {
-                let client =
-                    corvene_github::Client::new(endpoint, token).with_error_details(error_details);
+                let client = corvene_github::Client::new(endpoint, token)
+                    .with_error_details(error_details)
+                    .with_sso_hint(sso_hint);
                 let repo = client
                     .create_repository(org.as_deref(), &name, &description, private)
                     .map_err(|e| e.to_string())?;

@@ -1793,6 +1793,22 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/open_pull_request.rs"],
     },
 
+    /// API errors that need SAML SSO say where to re-authorize.
+    API_SAML_SSO_HINT = 376 "api-saml-sso-hint" {
+        title: "Say when GitHub wants SSO re-authorization",
+        summary: "When publishing a repository, creating a fork or creating the tutorial \
+                  repository fails because an organization's SAML single sign-on authorization \
+                  ran out, the error ends with \"Re-authorize SSO for <org>\" and the address \
+                  GitHub gives for it.",
+        ghd_behaviour: "Shows GitHub's message only, which does not say where to authorize.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(13668)],
+        code: &["crates/corvene-github/src/api.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-core/src/tutorial.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

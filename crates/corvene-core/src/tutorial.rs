@@ -257,13 +257,17 @@ impl Dispatcher {
         let work_path = path.clone();
         // `InitialReadmeContents` and the repository description with `103-product-name`
         let product_name = Self::state(cx).read(cx).product_name().to_string();
+        let sso_hint = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::API_SAML_SSO_HINT);
         let task = cx.background_executor().spawn(async move {
             let progress = |title: &str, value: f32, detail: Option<String>| {
                 let _ = tx.send_blocking((title.to_string(), (value * 100.) as u8, detail));
             };
             create_tutorial_repository(
                 &git,
-                Client::new(endpoint, token),
+                Client::new(endpoint, token).with_sso_hint(sso_hint),
                 &friendly,
                 &work_path,
                 &product_name,

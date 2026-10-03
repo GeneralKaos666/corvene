@@ -138,14 +138,17 @@ impl Dispatcher {
             return;
         };
         let original = github.clone();
-        let keep_ssh = Self::state(cx)
-            .read(cx)
-            .flags
-            .bool(crate::flags::ids::FORK_REMOTES_KEEP_SSH);
+        let (keep_ssh, sso_hint) = {
+            let flags = &Self::state(cx).read(cx).flags;
+            (
+                flags.bool(crate::flags::ids::FORK_REMOTES_KEEP_SSH),
+                flags.bool(crate::flags::ids::API_SAML_SSO_HINT),
+            )
+        };
         spawn_bg(
             cx,
             move || -> Result<GitHubRepository, String> {
-                let client = Client::new(endpoint, token);
+                let client = Client::new(endpoint, token).with_sso_hint(sso_hint);
                 let mut fork = client
                     .fork_repository(&original.owner, &original.name)
                     .map_err(|err| err.to_string())?;
