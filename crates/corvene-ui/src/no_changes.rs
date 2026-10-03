@@ -9,6 +9,9 @@
 //! Deviation (`726-restore-stash-suggestion`): with a stash on the branch the
 //! first card is "Restore your stashed changes" with a primary Restore button
 //! in place of GHD's "View your stashed changes" ([`primary_action`]).
+//! Deviation (`781-blank-slate-pull-says-rebase`): the Pull card's button
+//! says "Pull origin with rebase" when `pull.rebase` is set, like the
+//! toolbar button (GHD `renderPullBranchAction` always says "Pull origin").
 //! Not built yet: GHD's Create / Preview Pull Request dropdown card for a
 //! published branch, and the `Ref` styling of branch names in descriptions.
 
@@ -165,7 +168,16 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
             ),
             hint: "Always available in the toolbar when there are remote changes or".into(),
             keys: &["⌘", "⇧", "P"],
-            button_label: format!("Pull {remote}").into(),
+            // Corvene (`781-blank-slate-pull-says-rebase`): like the toolbar
+            button_label: if rs.pull_with_rebase
+                && state
+                    .flags
+                    .bool(corvene_core::flags::ids::BLANK_SLATE_PULL_SAYS_REBASE)
+            {
+                format!("Pull {remote} with rebase").into()
+            } else {
+                format!("Pull {remote}").into()
+            },
             primary: true,
         });
     }

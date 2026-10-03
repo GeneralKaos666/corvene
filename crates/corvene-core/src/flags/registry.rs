@@ -3554,6 +3554,20 @@ registry! {
         code: &["crates/corvene-highlight/src/cm/modes/mod.rs", "crates/corvene/src/main.rs", "crates/corvene-grammars/src/grammars.rs"],
     },
 
+    /// The no-changes Pull card names a rebasing pull like the toolbar does.
+    BLANK_SLATE_PULL_SAYS_REBASE = 781 "blank-slate-pull-says-rebase" {
+        title: "\"Pull with rebase\" on the no-changes card",
+        summary: "When `pull.rebase` is set, the \"Pull origin\" button of the no-changes view \
+                  says \"Pull origin with rebase\", as the toolbar's pull button already does.",
+        ghd_behaviour: "The card's button says \"Pull origin\" whatever the pull does.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7101)],
+        code: &["crates/corvene-ui/src/no_changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
