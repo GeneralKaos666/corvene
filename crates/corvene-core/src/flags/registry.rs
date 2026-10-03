@@ -1523,6 +1523,20 @@ registry! {
         code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// Forks name their parent in the repository tooltips.
+    FORK_PARENT_IN_TOOLTIP = 273 "fork-parent-in-tooltip" {
+        title: "Tooltips name a fork's parent",
+        summary: "For a forked GitHub repository, the Current Repository button's tooltip and the \
+                  repository list row's tooltip end with \"Fork of owner/name\".",
+        ghd_behaviour: "Only the fork icon tells a fork apart; its parent repository is not shown.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16568)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

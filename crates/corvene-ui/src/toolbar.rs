@@ -246,10 +246,17 @@ pub fn toolbar_models(
         spin: false,
         pr_badge: None,
         resize: None,
-        // `repository && !isOpen ? repository.path : undefined`
+        // `repository && !isOpen ? repository.path : undefined`; Corvene
+        // (`273-fork-parent-in-tooltip`) adds "Fork of owner/name"
         tooltip: repo
             .filter(|_| state.foldout != Some(Foldout::Repository))
-            .map(|r| r.path.to_string_lossy().into_owned().into()),
+            .map(|r| {
+                let mut text = r.path.to_string_lossy().into_owned();
+                if let Some(parent) = fork_parent(r, state) {
+                    text.push_str(&format!("\nFork of {parent}"));
+                }
+                text.into()
+            }),
         tooltip_fixed_width: false,
     };
 
@@ -522,6 +529,17 @@ pub fn toolbar_models(
 }
 
 /// Flag `257`: the Pull button's tooltip lists the incoming commits.
+/// Corvene (`273-fork-parent-in-tooltip`): the parent's `owner/name` of a
+/// forked GitHub repository, for the repository tooltips.
+pub(crate) fn fork_parent(repo: &corvene_core::Repository, state: &AppState) -> Option<String> {
+    let gh = repo.github.as_ref().filter(|gh| gh.fork)?;
+    let parent = gh.parent.as_ref()?;
+    state
+        .flags
+        .bool(corvene_core::flags::ids::FORK_PARENT_IN_TOOLTIP)
+        .then(|| parent.full_name())
+}
+
 /// An ahead / behind count: with the thousands separator under
 /// `272-grouped-ahead-behind-counts`, else GHD's plain digits.
 pub(crate) fn ahead_behind_count(n: u32, state: &AppState) -> String {

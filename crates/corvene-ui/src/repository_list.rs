@@ -474,6 +474,10 @@ impl RepositoryFoldout {
                 }
                 text.push('\n');
                 text.push_str(&repo.path.to_string_lossy());
+                // Corvene (`273-fork-parent-in-tooltip`)
+                if let Some(parent) = crate::toolbar::fork_parent(repo, self.state.read(cx)) {
+                    text.push_str(&format!("\nFork of {parent}"));
+                }
                 crate::widgets::rich_tooltip(text, bold)
             })
             .tooltip_show_delay(crate::widgets::TOOLTIP_DELAY)
