@@ -3583,6 +3583,22 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/dialogs/ignore_with_pattern.rs"],
     },
 
+    /// Refuse yourself and duplicates as co-authors.
+    CO_AUTHOR_VALIDATION = 779 "co-author-validation" {
+        title: "Check co-authors when adding them",
+        summary: "Adding yourself (your account's login or emails, or `user.email`) or someone \
+                  who is already a co-author removes what was typed and says why under the \
+                  co-authors box, instead of adding a token that does nothing.",
+        ghd_behaviour: "Your own handle is accepted (and ends up in a Co-authored-by trailer), \
+                        and a co-author can be typed again as a second token.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21736)],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

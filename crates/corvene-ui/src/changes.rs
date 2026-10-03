@@ -42,6 +42,8 @@
 //! - the "N changed files" row ends in a spinner while Discard Changes runs
 //!   or a status refresh is slow (`708-changes-busy-indicator`).
 //! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
+//! - adding yourself or a second token for the same co-author is refused
+//!   with a hint under the co-authors box (`779-co-author-validation`).
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
 //!   pattern before it is added to `.gitignore` (`778-ignore-custom-pattern`).
 
@@ -90,6 +92,9 @@ use crate::widgets::{
 
 /// `712-open-multiple-files`: the most files one "Open …" item launches.
 pub(crate) const MAX_BULK_OPEN: usize = 25;
+
+/// How long a `779-co-author-validation` hint stays.
+const CO_AUTHOR_HINT_DURATION: std::time::Duration = std::time::Duration::from_secs(4);
 
 /// GHD `MaxTagNameLength` (`737-commit-tag-field`).
 const MAX_TAG_NAME_LENGTH: usize = 245;
@@ -191,6 +196,9 @@ pub struct ChangesSidebar {
     /// `731-recall-commit-messages`: index into the recent messages the form
     /// shows; `None` once the user edits it.
     recalled: Option<usize>,
+    /// `779-co-author-validation`: why the last co-author was not added, and
+    /// when (shown under the co-authors box for a few seconds).
+    co_author_hint: Option<(SharedString, std::time::Instant)>,
 }
 
 /// What the repository rules say about the commit being written
@@ -393,6 +401,7 @@ impl ChangesSidebar {
             rule_failure_popover_open: false,
             rule_hint_bounds: Rc::new(Cell::new(Bounds::default())),
             recalled: None,
+            co_author_hint: None,
         }
     }
 
@@ -626,6 +635,32 @@ impl ChangesSidebar {
             .co_author_logins(cx)
             .iter()
             .any(|u| u.eq_ignore_ascii_case(&login));
+        // Corvene (`779-co-author-validation`): neither the commit's own
+        // author nor a second token for the same co-author; the typed text
+        // goes and a hint says why
+        if self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CO_AUTHOR_VALIDATION)
+        {
+            let hint = if self.is_own_author(&author, cx) {
+                Some("You are the author of this commit already".to_string())
+            } else if already {
+                Some(format!("{} is already a co-author", author.display_text()))
+            } else {
+                None
+            };
+            if let Some(hint) = hint {
+                self.co_authors.update(cx, |s, cx| {
+                    s.set_selected_range(range, cx);
+                    s.replace("", window, cx);
+                });
+                self.show_co_author_hint(hint, cx);
+                return;
+            }
+            self.co_author_hint = None;
+        }
         let token = InlineToken::new(login.clone(), author.display_text())
             .with_label(author.display_text());
         let ok = self
@@ -656,6 +691,55 @@ impl ChangesSidebar {
         }
         let handle = self.co_authors_focus.clone();
         window.focus(&handle, cx);
+        cx.notify();
+    }
+
+    /// `779-co-author-validation`: the author is the one committing: their
+    /// account (login or one of its emails) or `user.email`.
+    fn is_own_author(&self, author: &Author, cx: &App) -> bool {
+        let s = self.state.read(cx);
+        let identity_email = s
+            .selected_state()
+            .and_then(|rs| rs.info.as_ref())
+            .and_then(|i| i.identity.email.clone());
+        let account = s
+            .selected_repository()
+            .and_then(|r| r.github.as_ref())
+            .and_then(|gh| s.account_for(&gh.endpoint));
+        let login = author.username();
+        let email = match author {
+            Author::Known { email, .. } => Some(email.as_str()),
+            Author::Unknown { .. } => None,
+        };
+        let same_login =
+            login.is_some_and(|l| account.is_some_and(|a| a.login.eq_ignore_ascii_case(l)));
+        let same_email = email.is_some_and(|e| {
+            identity_email
+                .as_deref()
+                .is_some_and(|i| i.eq_ignore_ascii_case(e))
+                || account.is_some_and(|a| a.emails.iter().any(|m| m.eq_ignore_ascii_case(e)))
+        });
+        same_login || same_email
+    }
+
+    /// `779-co-author-validation`: show `hint` under the co-authors box for
+    /// a few seconds.
+    fn show_co_author_hint(&mut self, hint: String, cx: &mut Context<Self>) {
+        let at = std::time::Instant::now();
+        self.co_author_hint = Some((hint.into(), at));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(CO_AUTHOR_HINT_DURATION)
+                .await;
+            this.update(cx, |this, cx| {
+                if this.co_author_hint.as_ref().is_some_and(|(_, t)| *t == at) {
+                    this.co_author_hint = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 
@@ -3924,7 +4008,22 @@ impl ChangesSidebar {
                     ),
             )
             .when(co_authors_visible, |d| {
-                d.child(div().mb(SPACING()).child(self.co_author_input(window, cx)))
+                d.child(
+                    div()
+                        .mb(SPACING())
+                        .child(self.co_author_input(window, cx))
+                        // `779-co-author-validation`
+                        .when_some(self.co_author_hint.clone(), |d, (hint, _)| {
+                            d.child(
+                                div()
+                                    .id("co-author-hint")
+                                    .pt(zpx(2.))
+                                    .text_size(FONT_SIZE_SM())
+                                    .text_color(t.text_secondary)
+                                    .child(hint),
+                            )
+                        }),
+                )
             })
             .when(tag_field, |d| {
                 d.child(div().mb(SPACING()).child(crate::widgets::text_box(
