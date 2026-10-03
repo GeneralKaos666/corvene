@@ -6,21 +6,18 @@
 //!   `message` followed by its `errors[].message`s in parentheses (or
 //!   `API error <url>: <statusText> (<status>)` when the body could not be
 //!   parsed, `apiError === null`), and `apiError` is the parsed body.
-//!   Corvene builds that error inside `corvene_github::Client`
-//!   (`get_json_accept` / `post_json`) from the response it read: a
-//!   `GitHubError::Api { status, message }`, where `message` is the body's
-//!   `message` (`"request failed"` when there is none) and, with
-//!   `Client::with_error_details(true)`, the `errors[].message`s in
-//!   parentheses. So [`api_error`] serves the case's response from a local
-//!   HTTP server (`corvene_test_support::serve`; the body is the case's
-//!   `apiError` as JSON, or empty for `null`) to a real `Client` and returns
-//!   the error its request fails with. `responseStatus` is
-//!   `GitHubError::Api.status` and `message` is `GitHubError::Api.message`
-//!   (the `Display` of the error adds `GitHub returned <status>: ` in front
-//!   of it).
-//!   `with_error_details` is flag `311-api-error-details`, passed at its
-//!   GitHub Desktop value (off). `GitHubError` keeps no parsed body, so
-//!   `apiError` is a stand-in ([`api_error_body`]).
+//!   Corvene builds that error inside `corvene_github::Client` from the
+//!   response it read: a `GitHubError::Api`, whose `message` is built the
+//!   same way and whose `api_error` is the parsed body. So [`api_error`]
+//!   serves the case's response from a local HTTP server
+//!   (`corvene_test_support::serve`; the body is the case's `apiError` as
+//!   JSON, or empty for `null`) to a real `Client` and returns the error its
+//!   request fails with. `responseStatus` is `GitHubError::Api.status`,
+//!   `message` is `GitHubError::Api.message` (the `Display` of the error
+//!   adds `GitHub returned <status>: ` in front of it) and `apiError` is
+//!   `GitHubError::api_error()`.
+//!   `Client::with_error_details` is flag `311-api-error-details`, passed
+//!   at its GitHub Desktop value (off).
 //! - `getAbsoluteUrl(endpoint, path)` is
 //!   `Endpoint::from_api_base(endpoint).api(path)`
 //!   (`crate::api_support::get_absolute_url`), as in `http.rs`.
@@ -75,19 +72,11 @@ fn message(error: &GitHubError) -> &str {
     }
 }
 
-/// Stand-in for GitHub Desktop's `APIError.apiError` (`lib/http.ts`): the
-/// error body as the API sent it, if it could be parsed. Replace it with
-/// the `GitHubError` field once there is one.
-fn api_error_body(_error: &GitHubError) -> Option<Value> {
-    unimplemented!("corvene_github::GitHubError keeps no parsed API error (APIError.apiError)")
-}
-
 mod api_error {
     use super::*;
 
     // GHD: unit/api-error-handling-test.ts › http › APIError › creates an error with API message
     #[test]
-    #[ignore = "ghd: bug: with flag 311-api-error-details at its GHD value (off) the message is 'Validation Failed', GHD APIError appends errors[].message: 'Validation Failed (name already exists)'; GitHubError also has no apiError"]
     fn creates_an_error_with_api_message() {
         let api_error_value = json!({
             "message": "Validation Failed",
@@ -110,18 +99,17 @@ mod api_error {
         assert_eq!(response_status(&error), 422);
         assert!(message(&error).contains("Validation Failed"));
         assert!(message(&error).contains("name already exists"));
-        assert_ne!(api_error_body(&error), None);
+        assert_ne!(error.api_error(), None);
     }
 
     // GHD: unit/api-error-handling-test.ts › http › APIError › creates an error with fallback message when no API error
     #[test]
-    #[ignore = "ghd: bug: an unparsable error body gives the message 'request failed', GHD APIError falls back to 'API error <url>: Internal Server Error (500)'; GitHubError also has no apiError"]
     fn creates_an_error_with_fallback_message_when_no_api_error() {
         let error = api_error(500, "Internal Server Error", "repos/owner/repo", None);
 
         assert_eq!(response_status(&error), 500);
         assert!(message(&error).contains("500"));
-        assert_eq!(api_error_body(&error), None);
+        assert_eq!(error.api_error(), None);
     }
 
     // GHD: unit/api-error-handling-test.ts › http › APIError › handles API error without additional errors array
@@ -137,7 +125,6 @@ mod api_error {
 
     // GHD: unit/api-error-handling-test.ts › http › APIError › handles common HTTP status codes
     #[test]
-    #[ignore = "ghd: bug: a 401 answer becomes GitHubError::Auth('token rejected') without its status, GHD APIError keeps responseStatus 401"]
     fn handles_common_http_status_codes() {
         let status_codes = [
             (401, "Unauthorized"),
@@ -175,7 +162,6 @@ mod get_absolute_url {
 
     // GHD: unit/api-error-handling-test.ts › http › getAbsoluteUrl › handles endpoint with trailing slash
     #[test]
-    #[ignore = "ghd: bug: Endpoint::from_api_base keeps the endpoint's trailing slash, so api() gives https://api.github.com//repos/owner/repo, GHD getAbsoluteUrl https://api.github.com/repos/owner/repo"]
     fn handles_endpoint_with_trailing_slash() {
         let url = get_absolute_url("https://api.github.com/", "repos/owner/repo");
         assert_eq!(url, "https://api.github.com/repos/owner/repo");
@@ -183,7 +169,6 @@ mod get_absolute_url {
 
     // GHD: unit/api-error-handling-test.ts › http › getAbsoluteUrl › strips duplicate api/v3/ prefix from path
     #[test]
-    #[ignore = "ghd: bug: Endpoint::api keeps the endpoint's trailing slash and the path's api/v3/ (https://ghe.example.com/api/v3//api/v3/repos/owner/repo), GHD getAbsoluteUrl strips both"]
     fn strips_duplicate_api_v3_prefix_from_path() {
         let url = get_absolute_url("https://ghe.example.com/api/v3/", "api/v3/repos/owner/repo");
         assert_eq!(url, "https://ghe.example.com/api/v3/repos/owner/repo");

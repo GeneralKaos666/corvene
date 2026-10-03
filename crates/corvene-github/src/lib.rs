@@ -8,13 +8,14 @@ pub mod endpoint;
 pub mod error;
 
 pub use api::{
-    ApiCheckSuite, ApiIdentity, ApiIssue, ApiIssueComment, ApiMentionableUser, ApiPullRequest,
-    ApiPullRequestReview, ApiPullRequestReviewState, ApiPushControl, ApiRefCheckRun, ApiRefStatus,
-    ApiRelease, ApiRepoRule, ApiRepoRuleset, ApiWorkflowJob, ApiWorkflowRun, Client, IssueState,
-    RepositoryCloneInfo, encode_path_component,
+    ApiBranch, ApiCheckSuite, ApiIdentity, ApiIssue, ApiIssueComment, ApiMentionableUser,
+    ApiPullRequest, ApiPullRequestReview, ApiPullRequestReviewState, ApiPushControl,
+    ApiRefCheckRun, ApiRefStatus, ApiRelease, ApiRepoRule, ApiRepoRuleset, ApiWorkflowJob,
+    ApiWorkflowRun, Client, IssueState, RepositoryCloneInfo, encode_path_component,
+    get_next_page_path_from_link, get_next_page_path_with_increasing_page_size,
 };
-pub use endpoint::Endpoint;
-pub use error::{GitHubError, Result};
+pub use endpoint::{Endpoint, EnterpriseAddressError};
+pub use error::{ApiErrorBody, ApiErrorItem, GitHubError, Result};
 
 /// OAuth App "Corvene" (public identifier; device flow needs no secret).
 /// Override at build time with `CORVENE_GITHUB_CLIENT_ID`.
@@ -97,10 +98,7 @@ pub fn download(url: &str) -> Result<Vec<u8>> {
     let mut response = agent.get(url).call()?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
-        return Err(GitHubError::Api {
-            status,
-            message: url.to_string(),
-        });
+        return Err(GitHubError::api(status, url));
     }
     let bytes = response.body_mut().read_to_vec()?;
     Ok(bytes)
@@ -120,10 +118,7 @@ pub fn public_emojis(endpoint: &Endpoint) -> Result<std::collections::HashMap<St
         .call()?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
-        return Err(GitHubError::Api {
-            status,
-            message: url,
-        });
+        return Err(GitHubError::api(status, url));
     }
     Ok(response.body_mut().read_json()?)
 }

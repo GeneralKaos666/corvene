@@ -65,7 +65,6 @@ mod enterprise_endpoint {
 
     // GHD: unit/http-test.ts › getAbsoluteUrl › enterprise endpoint › handles next page resource which already contains prefix
     #[test]
-    #[ignore = "ghd: bug: Endpoint::api keeps a leading api/v3/ (.../api/v3/api/v3/user/repos?page=2), GHD getAbsoluteUrl strips it (.../api/v3/user/repos?page=2)"]
     fn handles_next_page_resource_which_already_contains_prefix() {
         let result = get_absolute_url(ENTERPRISE_ENDPOINT, "/api/v3/user/repos?page=2");
         assert_eq!(result, format!("{ENTERPRISE_ENDPOINT}/user/repos?page=2"));

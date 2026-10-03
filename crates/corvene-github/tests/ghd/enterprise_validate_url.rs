@@ -4,9 +4,10 @@
 //! checks the GitHub Enterprise address typed in the sign-in dialog and
 //! returns it (with `https://` prepended when it has no scheme) or throws.
 //! Corvene's counterpart is `corvene_github::Endpoint::enterprise(address,
-//! allow_http)`, which the sign-in dialog calls on the typed address
-//! (`SignInDialog::continue_endpoint`): it returns the endpoint, whose
-//! `web_base` is the validated URL, or `None` where `validateURL` throws.
+//! allow_http)`, `Endpoint::validate_enterprise(..).ok()` (the sign-in
+//! store's `set_endpoint` calls `validate_enterprise` on the typed address
+//! and shows its error): it returns the endpoint, whose `web_base` is the
+//! validated URL, or `None` where `validateURL` throws.
 //! `allow_http` is the value of `314-enterprise-plain-http` in the
 //! `github-desktop` preset (off; the flag is off in every preset).
 
@@ -38,7 +39,6 @@ fn prepends_https_if_no_protocol_is_provided() {
 
 // GHD: unit/enterprise-validate-url-test.ts › validateURL › throws if given an invalid protocol
 #[test]
-#[ignore = "ghd: bug: Endpoint::enterprise(ftp://ghe.io, false) accepts it as host ftp: (web_base https://ftp:); GHD validateURL throws invalid-protocol for any scheme but https"]
 fn throws_if_given_an_invalid_protocol() {
     assert_eq!(validate_url("ftp://ghe.io"), None);
 }

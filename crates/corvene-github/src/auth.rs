@@ -68,10 +68,7 @@ pub fn request_device_code(endpoint: &Endpoint, client_id: &str) -> Result<Devic
     let status = response.status().as_u16();
     if status != 200 {
         let body = response.body_mut().read_to_string().unwrap_or_default();
-        return Err(GitHubError::Api {
-            status,
-            message: body,
-        });
+        return Err(GitHubError::api(status, body));
     }
     let code: DeviceCode = response.body_mut().read_json()?;
     info!(user_code = %code.user_code, expires_in = code.expires_in, "device code issued");
@@ -110,10 +107,7 @@ pub fn poll_token(endpoint: &Endpoint, client_id: &str, device_code: &str) -> Re
         (None, Some(other)) => Err(GitHubError::Auth(
             body.error_description.unwrap_or_else(|| other.to_string()),
         )),
-        (None, None) => Err(GitHubError::Api {
-            status,
-            message: "no token in response".into(),
-        }),
+        (None, None) => Err(GitHubError::api(status, "no token in response")),
     }
 }
 

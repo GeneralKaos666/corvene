@@ -11,7 +11,11 @@ use tracing::debug;
 
 use crate::USER_AGENT;
 use crate::endpoint::Endpoint;
-use crate::error::{GitHubError, Result};
+use crate::error::{ApiErrorBody, GitHubError, Result};
+
+/// The response headers the paging helpers read (GHD `Response.headers`):
+/// `(name, value)` pairs, names matched without regard to case.
+pub type ResponseHeaders = [(String, String)];
 
 pub struct Client {
     agent: ureq::Agent,
@@ -522,48 +526,135 @@ pub fn encode_path_component(s: &str) -> String {
     out
 }
 
-#[derive(Debug, Deserialize)]
-struct ApiError {
-    message: Option<String>,
+/// GHD `IAPIBranch` (`GET repos/{owner}/{name}/branches`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ApiBranch {
+    /// The branch name on the remote (not a full ref).
+    pub name: String,
+    /// The branch has protection rules.
     #[serde(default)]
-    errors: Vec<ApiErrorItem>,
+    pub protected: bool,
 }
 
-/// One of an error body's `errors` (validation failures).
-#[derive(Debug, Deserialize)]
-struct ApiErrorItem {
-    #[serde(default)]
-    message: Option<String>,
-    #[serde(default)]
-    field: Option<String>,
-    #[serde(default)]
-    code: Option<String>,
+/// `headers.get(name)`: the first value of `name`, any case.
+fn header<'a>(headers: &'a ResponseHeaders, name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
 }
 
-impl ApiError {
-    /// The top-level `message`; with `details`, followed by the
-    /// `errors[].message`s (or `field code`) in parentheses, e.g.
-    /// "Repository creation failed. (description is too long (maximum is
-    /// 350 characters))" (desktop/desktop#19465).
-    fn into_message(self, details: bool) -> Option<String> {
-        let items: Vec<String> = if details {
-            self.errors
-                .into_iter()
-                .filter_map(|e| match (e.message, e.field, e.code) {
-                    (Some(message), _, _) if !message.is_empty() => Some(message),
-                    (_, Some(field), Some(code)) => Some(format!("{field} {code}")),
-                    _ => None,
-                })
-                .collect()
-        } else {
-            Vec::new()
+/// The headers of a response as [`ResponseHeaders`] pairs.
+fn header_pairs(headers: &ureq::http::HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| Some((name.to_string(), value.to_str().ok()?.to_string())))
+        .collect()
+}
+
+/// GHD `getNextPagePathFromLink`: the path (and query) of the `rel="next"`
+/// link in the `Link` header, `None` without one.
+pub fn get_next_page_path_from_link(headers: &ResponseHeaders) -> Option<String> {
+    let link = header(headers, "Link").filter(|l| !l.is_empty())?;
+    for part in link.split(',') {
+        // `<([^>]+)>; rel="([^"]+)"`
+        let Some((_, rest)) = part.split_once('<') else {
+            continue;
         };
-        match (self.message, items.is_empty()) {
-            (message, true) => message,
-            (Some(message), false) => Some(format!("{message} ({})", items.join(", "))),
-            (None, false) => Some(items.join(", ")),
+        let Some((url, rest)) = rest.split_once('>') else {
+            continue;
+        };
+        let Some(rel) = rest
+            .strip_prefix("; rel=\"")
+            .and_then(|r| r.split_once('"'))
+            .map(|(rel, _)| rel)
+        else {
+            continue;
+        };
+        if !url.is_empty() && rel == "next" {
+            return url_path(url);
         }
     }
+    None
+}
+
+/// Node's `URL.parse(url).path`: path and query, without scheme, host and
+/// fragment.
+fn url_path(url: &str) -> Option<String> {
+    let url = url.split('#').next().unwrap_or(url);
+    let path = match url.split_once("://") {
+        Some((_, rest)) => match rest.find(['/', '?']) {
+            Some(i) if rest[i..].starts_with('?') => format!("/{}", &rest[i..]),
+            Some(i) => rest[i..].to_string(),
+            None => "/".to_string(),
+        },
+        None => url.to_string(),
+    };
+    (!path.is_empty()).then_some(path)
+}
+
+/// JavaScript's `parseInt(value, 10)`: the leading integer, `None` for NaN.
+fn parse_int(value: &str) -> Option<i64> {
+    let value = value.trim_start();
+    let (sign, digits) = match value.as_bytes().first() {
+        Some(b'-') => (-1, &value[1..]),
+        Some(b'+') => (1, &value[1..]),
+        _ => (1, value),
+    };
+    let end = digits
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(digits.len());
+    digits[..end].parse::<i64>().ok().map(|n| sign * n)
+}
+
+/// GHD `getNextPagePathWithIncreasingPageSize`: the next link
+/// ([`get_next_page_path_from_link`]), with `per_page` doubled (at most
+/// 100) and `page` recomputed once the items received so far fill whole
+/// pages of the doubled size, so a long list is read in fewer requests.
+pub fn get_next_page_path_with_increasing_page_size(headers: &ResponseHeaders) -> Option<String> {
+    let next_path = get_next_page_path_from_link(headers)?;
+    let (pathname, query) = next_path.split_once('?').unwrap_or((&next_path, ""));
+    let mut pairs: Vec<(&str, &str)> = query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
+        .collect();
+    // `typeof per_page === 'string'`: exactly one value
+    let single = |key: &str| {
+        let mut values = pairs.iter().filter(|(k, _)| *k == key).map(|(_, v)| *v);
+        match (values.next(), values.next()) {
+            (Some(value), None) => parse_int(value),
+            _ => None,
+        }
+    };
+    let (Some(page_size), Some(page_number)) = (single("per_page"), single("page")) else {
+        return Some(next_path);
+    };
+    if page_size == 0 || page_number == 0 {
+        return Some(next_path);
+    }
+    // the next page's link: what came before it has been received
+    let (Some(received), Some(doubled)) = (
+        (page_number - 1).checked_mul(page_size),
+        page_size.checked_mul(2),
+    ) else {
+        return Some(next_path);
+    };
+    let next_page_size = doubled.min(100);
+    if page_size == next_page_size || received % next_page_size != 0 {
+        return Some(next_path);
+    }
+    let per_page = next_page_size.to_string();
+    let page = (received / next_page_size + 1).to_string();
+    for (key, value) in &mut pairs {
+        match *key {
+            "per_page" => *value = per_page.as_str(),
+            "page" => *value = page.as_str(),
+            _ => {}
+        }
+    }
+    let query: Vec<String> = pairs.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    Some(format!("{pathname}?{}", query.join("&")))
 }
 
 impl Client {
@@ -582,8 +673,10 @@ impl Client {
         }
     }
 
-    /// Error messages include the body's validation `errors` (flag
-    /// `api-error-details`; GHD shows the top-level message only).
+    /// Error messages show validation `errors` without a `message` as
+    /// `field code`, and publishing to an organization reports GitHub's
+    /// reasons (flag `api-error-details`; GHD drops those errors and
+    /// replaces an organization's error with a generic hint).
     pub fn with_error_details(mut self, on: bool) -> Self {
         self.error_details = on;
         self
@@ -597,12 +690,39 @@ impl Client {
         self.get_json_accept(path, "application/vnd.github+json")
     }
 
-    /// `GET` with a specific `Accept` header (the preview APIs).
-    fn get_json_accept<T: serde::de::DeserializeOwned>(
-        &self,
-        path: &str,
-        accept: &str,
-    ) -> Result<T> {
+    /// GHD `parsedResponse` for an error status: `APIError` with the parsed
+    /// body, its `message` (or `API error <url>: <statusText> (<status>)`
+    /// without one) and whether it means the token was revoked (GHD
+    /// `ghRequest`).
+    fn api_error(&self, url: &str, mut response: ureq::http::Response<ureq::Body>) -> GitHubError {
+        let status = response.status();
+        let headers = response.headers();
+        let token_invalidated = status == ureq::http::StatusCode::UNAUTHORIZED
+            && headers.contains_key("X-GitHub-Request-Id")
+            && !headers.contains_key("X-GitHub-OTP");
+        let body = response.body_mut().read_to_vec().unwrap_or_default();
+        let api_error = ApiErrorBody::parse(&body);
+        let message = api_error
+            .as_ref()
+            .and_then(|e| e.message(self.error_details))
+            .unwrap_or_else(|| {
+                format!(
+                    "API error {url}: {} ({})",
+                    status.canonical_reason().unwrap_or_default(),
+                    status.as_u16()
+                )
+            });
+        GitHubError::Api {
+            status: status.as_u16(),
+            message,
+            api_error,
+            token_invalidated,
+        }
+    }
+
+    /// `GET` with a specific `Accept` header (the preview APIs); an error
+    /// status is an `Err`.
+    fn get_response(&self, path: &str, accept: &str) -> Result<ureq::http::Response<ureq::Body>> {
         let url = self.endpoint.api(path);
         debug!(%url, "GET");
         let mut request = self
@@ -614,21 +734,47 @@ impl Client {
         if !self.token.is_empty() {
             request = request.header("Authorization", &format!("Bearer {}", self.token));
         }
-        let mut response = request.call()?;
-        let status = response.status().as_u16();
-        if status == 401 {
-            return Err(GitHubError::Auth("token rejected".into()));
+        let response = request.call()?;
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
         }
-        if !(200..300).contains(&status) {
-            let message = response
-                .body_mut()
-                .read_json::<ApiError>()
-                .ok()
-                .and_then(|e| e.into_message(self.error_details))
-                .unwrap_or_else(|| "request failed".into());
-            return Err(GitHubError::Api { status, message });
-        }
+        Ok(response)
+    }
+
+    /// `GET` with a specific `Accept` header (the preview APIs).
+    fn get_json_accept<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        accept: &str,
+    ) -> Result<T> {
+        let mut response = self.get_response(path, accept)?;
         Ok(response.body_mut().read_json()?)
+    }
+
+    /// GHD `fetchAll` (with `suppressErrors: false`): `path`, then each page
+    /// `next_page` finds in the previous response's headers, while
+    /// `keep_going(&items)` holds (asked only when there is a next page) and
+    /// at most `max_pages` pages. An error on any page fails the call.
+    fn fetch_all<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        max_pages: usize,
+        next_page: fn(&ResponseHeaders) -> Option<String>,
+        mut keep_going: impl FnMut(&[T]) -> bool,
+    ) -> Result<Vec<T>> {
+        let mut items: Vec<T> = Vec::new();
+        let mut next = Some(path.to_string());
+        let mut pages = 0;
+        while let Some(path) = next.take() {
+            let mut response = self.get_response(&path, "application/vnd.github+json")?;
+            let headers = header_pairs(response.headers());
+            if let Some(page) = response.body_mut().read_json::<Option<Vec<T>>>()? {
+                items.extend(page);
+            }
+            pages += 1;
+            next = next_page(&headers).filter(|_| pages < max_pages && keep_going(&items));
+        }
+        Ok(items)
     }
 
     /// `GET /user` (+ `/user/emails` when the scope allows) → `Account`.
@@ -662,8 +808,9 @@ impl Client {
         })
     }
 
-    /// `GET` whose non-2xx answers (other than 401) mean "not available"
-    /// rather than an error (`fetchCombinedRefStatus`, `fetchRefCheckRuns`…).
+    /// `GET` whose error answers mean "not available" rather than an error
+    /// (`fetchCombinedRefStatus`, `fetchRefCheckRuns`…), except a revoked
+    /// token, which the caller reports (GHD emits it from `ghRequest`).
     fn get_json_opt<T: serde::de::DeserializeOwned>(
         &self,
         path: &str,
@@ -671,7 +818,10 @@ impl Client {
     ) -> Result<Option<T>> {
         match self.get_json_accept::<T>(path, accept) {
             Ok(value) => Ok(Some(value)),
-            Err(GitHubError::Api { status, message }) => {
+            Err(err) if err.is_token_invalidated() => Err(err),
+            Err(GitHubError::Api {
+                status, message, ..
+            }) => {
                 debug!(status, %message, %path, "not available");
                 Ok(None)
             }
@@ -690,11 +840,10 @@ impl Client {
             .header("Authorization", &format!("Bearer {}", self.token))
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send_empty()?;
-        let status = response.status().as_u16();
-        if status == 401 {
-            return Err(GitHubError::Auth("token rejected".into()));
+        if response.status() == ureq::http::StatusCode::UNAUTHORIZED {
+            return Err(self.api_error(&url, response));
         }
-        Ok((200..300).contains(&status))
+        Ok(response.status().is_success())
     }
 
     fn post_json<T: serde::de::DeserializeOwned>(
@@ -711,18 +860,8 @@ impl Client {
             .header("Authorization", &format!("Bearer {}", self.token))
             .header("X-GitHub-Api-Version", "2022-11-28")
             .send_json(body)?;
-        let status = response.status().as_u16();
-        if status == 401 {
-            return Err(GitHubError::Auth("token rejected".into()));
-        }
-        if !(200..300).contains(&status) {
-            let message = response
-                .body_mut()
-                .read_json::<ApiError>()
-                .ok()
-                .and_then(|e| e.into_message(self.error_details))
-                .unwrap_or_else(|| "request failed".into());
-            return Err(GitHubError::Api { status, message });
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
         }
         Ok(response.body_mut().read_json()?)
     }
@@ -756,7 +895,30 @@ impl Client {
             "description": description,
             "private": private,
         });
-        let repo: ApiRepository = self.post_json(&path, &body)?;
+        let repo: ApiRepository = self
+            .post_json(&path, &body)
+            .map_err(|err| match (err, org) {
+                // GHD replaces an organization's API error with a hint
+                (
+                    GitHubError::Api {
+                        status,
+                        api_error,
+                        token_invalidated,
+                        ..
+                    },
+                    Some(org),
+                ) if !self.error_details => GitHubError::Api {
+                    status,
+                    message: format!(
+                        "Unable to create repository for organization '{org}'. Verify that the \
+                     repository does not already exist and that you have permission to create a \
+                     repository there."
+                    ),
+                    api_error,
+                    token_invalidated,
+                },
+                (err, _) => err,
+            })?;
         Ok(self.convert(repo))
     }
 
@@ -884,20 +1046,16 @@ impl Client {
         }
     }
 
-    /// `GET /user/repos` (all pages, newest pushed first) for the Clone dialog.
+    /// `GET /user/repos` (all pages, at most 20, newest pushed first) for
+    /// the Clone dialog.
     pub fn user_repositories(&self) -> Result<Vec<GitHubRepository>> {
-        let mut out = Vec::new();
-        for page in 1..=20u32 {
-            let batch: Vec<ApiRepository> = self.get_json(&format!(
-                "user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page={page}"
-            ))?;
-            let done = batch.len() < 100;
-            out.extend(batch.into_iter().map(|r| self.convert(r)));
-            if done {
-                break;
-            }
-        }
-        Ok(out)
+        let repos: Vec<ApiRepository> = self.fetch_all(
+            "user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member",
+            20,
+            get_next_page_path_from_link,
+            |_| true,
+        )?;
+        Ok(repos.into_iter().map(|r| self.convert(r)).collect())
     }
 
     /// `fetchIssues`: `GET /repos/{owner}/{name}/issues` (all pages). PRs are
@@ -912,24 +1070,20 @@ impl Client {
         state: IssueState,
         since: Option<&str>,
     ) -> Result<Vec<ApiIssue>> {
-        let mut out = Vec::new();
-        for page in 1..=20u32 {
-            let mut path = format!(
-                "repos/{owner}/{name}/issues?state={}&per_page=100&page={page}",
-                state.as_str()
-            );
-            if let Some(since) = since {
-                path.push_str("&since=");
-                path.push_str(since);
-            }
-            let batch: Vec<ApiIssue> = self.get_json(&path)?;
-            let done = batch.len() < 100;
-            out.extend(batch.into_iter().filter(|i| i.pull_request.is_none()));
-            if done {
-                break;
-            }
+        let mut path = format!(
+            "repos/{owner}/{name}/issues?state={}&per_page=100",
+            state.as_str()
+        );
+        if let Some(since) = since {
+            path.push_str("&since=");
+            path.push_str(since);
         }
-        Ok(out)
+        let issues: Vec<ApiIssue> =
+            self.fetch_all(&path, 20, get_next_page_path_from_link, |_| true)?;
+        Ok(issues
+            .into_iter()
+            .filter(|i| i.pull_request.is_none())
+            .collect())
     }
 
     /// `fetchUser`: `GET /users/{login}`; `None` when there is no such user.
@@ -955,20 +1109,10 @@ impl Client {
             .header("Accept", "application/vnd.github.jerry-maguire-preview")
             .header("Authorization", &format!("Bearer {}", self.token))
             .call()?;
-        let status = response.status().as_u16();
-        match status {
+        match response.status().as_u16() {
             404 => Ok(None),
-            401 => Err(GitHubError::Auth("token rejected".into())),
             200..=299 => Ok(Some(response.body_mut().read_json()?)),
-            _ => {
-                let message = response
-                    .body_mut()
-                    .read_json::<ApiError>()
-                    .ok()
-                    .and_then(|e| e.message)
-                    .unwrap_or_else(|| "request failed".into());
-                Err(GitHubError::Api { status, message })
-            }
+            _ => Err(self.api_error(&url, response)),
         }
     }
 
@@ -977,26 +1121,23 @@ impl Client {
         self.get_json(&format!("repos/{owner}/{name}/pulls/{number}"))
     }
 
-    /// `fetchAllOpenPullRequests`: every open pull request, newest page first.
+    /// `fetchAllOpenPullRequests`: every open pull request (at most 50
+    /// pages), newest page first.
     pub fn open_pull_requests(&self, owner: &str, name: &str) -> Result<Vec<ApiPullRequest>> {
-        let mut out = Vec::new();
-        for page in 1..=50u32 {
-            let batch: Vec<ApiPullRequest> = self.get_json(&format!(
-                "repos/{owner}/{name}/pulls?state=open&per_page=100&page={page}"
-            ))?;
-            let done = batch.len() < 100;
-            out.extend(batch);
-            if done {
-                break;
-            }
-        }
-        Ok(out)
+        self.fetch_all(
+            &format!("repos/{owner}/{name}/pulls?state=open&per_page=100"),
+            50,
+            get_next_page_path_from_link,
+            |_| true,
+        )
     }
 
     /// `fetchUpdatedPullRequests`: pull requests (open and closed) updated
-    /// after `since`, most recently updated first. `None` once more than
-    /// `max_results` came back (`MaxResultsError`): the caller refetches
-    /// the open list instead.
+    /// at or after `since` (ISO-8601), most recently updated first. Pages
+    /// start at 10 pull requests and grow
+    /// ([`get_next_page_path_with_increasing_page_size`]). `None` once
+    /// `max_results` came back with more to read (`MaxResultsError`): the
+    /// caller refetches the open list instead.
     pub fn pull_requests_updated_since(
         &self,
         owner: &str,
@@ -1004,28 +1145,47 @@ impl Client {
         since: &str,
         max_results: usize,
     ) -> Result<Option<Vec<ApiPullRequest>>> {
-        let mut out: Vec<ApiPullRequest> = Vec::new();
-        for page in 1..=50u32 {
-            let batch: Vec<ApiPullRequest> = self.get_json(&format!(
-                "repos/{owner}/{name}/pulls?state=all&sort=updated&direction=desc&per_page=100&page={page}"
-            ))?;
-            let done = batch.len() < 100
-                || batch
-                    .last()
-                    .is_some_and(|last| last.updated_at.as_str() <= since);
-            out.extend(
-                batch
-                    .into_iter()
-                    .filter(|pr| pr.updated_at.as_str() > since),
-            );
-            if out.len() >= max_results {
-                return Ok(None);
-            }
-            if done {
-                break;
+        let mut over_max = false;
+        let prs: Vec<ApiPullRequest> = self.fetch_all(
+            &format!(
+                "repos/{owner}/{name}/pulls?state=all&sort=updated&direction=desc&per_page=10"
+            ),
+            usize::MAX,
+            get_next_page_path_with_increasing_page_size,
+            |prs: &[ApiPullRequest]| {
+                if prs.len() >= max_results {
+                    over_max = true;
+                    return false;
+                }
+                // sorted by `updated_at`, newest first: a last one updated
+                // after `since` means there may be more
+                prs.last()
+                    .is_some_and(|last| last.updated_at.as_str() > since)
+            },
+        )?;
+        if over_max {
+            return Ok(None);
+        }
+        Ok(Some(
+            prs.into_iter()
+                .filter(|pr| pr.updated_at.as_str() >= since)
+                .collect(),
+        ))
+    }
+
+    /// GHD `fetchProtectedBranches`: `GET repos/{owner}/{name}/branches?protected=true`,
+    /// `None` when the request fails or the server answers with an error.
+    /// GHD feeds only a usage metric with it (`updateBranchProtectionsFromAPI`
+    /// for `commitsToRepositoryWithBranchProtections`), which Corvene does
+    /// not collect, so nothing calls it.
+    pub fn fetch_protected_branches(&self, owner: &str, name: &str) -> Option<Vec<ApiBranch>> {
+        match self.get_json(&format!("repos/{owner}/{name}/branches?protected=true")) {
+            Ok(branches) => Some(branches),
+            Err(err) => {
+                debug!(%err, "[fetchProtectedBranches] unable to list protected branches");
+                None
             }
         }
-        Ok(Some(out))
     }
 
     /// `fetchCombinedRefStatus`: `GET /repos/{o}/{n}/commits/{ref}/status`.
@@ -1250,20 +1410,66 @@ mod tests {
     #[test]
     fn error_details_follow_the_message() {
         let body = r#"{"message":"Repository creation failed.","errors":[{"resource":"Repository","code":"custom","field":"description","message":"description is too long (maximum is 350 characters)"},{"resource":"Repository","code":"invalid","field":"name"}]}"#;
-        let parse = || serde_json::from_str::<ApiError>(body).unwrap();
+        let parsed = ApiErrorBody::parse(body.as_bytes()).unwrap();
+        // GHD `APIError`: `errors.map(e => e.message).join(', ')`
         assert_eq!(
-            parse().into_message(false).as_deref(),
-            Some("Repository creation failed.")
+            parsed.message(false).as_deref(),
+            Some(
+                "Repository creation failed. (description is too long (maximum is 350 \
+                 characters), )"
+            )
         );
         assert_eq!(
-            parse().into_message(true).as_deref(),
+            parsed.message(true).as_deref(),
             Some(
                 "Repository creation failed. (description is too long (maximum is 350 \
                  characters), name invalid)"
             )
         );
-        let bare: ApiError = serde_json::from_str(r#"{"message":"Not Found"}"#).unwrap();
-        assert_eq!(bare.into_message(true).as_deref(), Some("Not Found"));
+        let bare = ApiErrorBody::parse(br#"{"message":"Not Found"}"#).unwrap();
+        assert_eq!(bare.message(true).as_deref(), Some("Not Found"));
+        assert_eq!(bare.message(false).as_deref(), Some("Not Found"));
+        let only_errors =
+            ApiErrorBody::parse(br#"{"errors":[{"field":"name","code":"missing"}]}"#).unwrap();
+        assert_eq!(only_errors.message(false), None);
+        assert_eq!(only_errors.message(true).as_deref(), Some("name missing"));
+        assert_eq!(ApiErrorBody::parse(b""), None);
+        assert_eq!(ApiErrorBody::parse(b"null"), None);
+        assert_eq!(
+            ApiErrorBody::parse(br#"{"message":"x","errors":"odd"}"#),
+            Some(ApiErrorBody {
+                message: Some("x".into()),
+                errors: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn next_page_links() {
+        let headers = |link: &str| vec![("link".to_string(), link.to_string())];
+        assert_eq!(
+            get_next_page_path_from_link(&headers(
+                "<https://api.github.com/repositories/1/pulls?per_page=10&page=2>; rel=\"next\", \
+                 <https://api.github.com/repositories/1/pulls?per_page=10&page=9>; rel=\"last\""
+            ))
+            .as_deref(),
+            Some("/repositories/1/pulls?per_page=10&page=2")
+        );
+        assert_eq!(
+            get_next_page_path_from_link(&headers(
+                "<https://ghe.corp/api/v3/user/repos?page=1>; rel=\"prev\""
+            )),
+            None
+        );
+        assert_eq!(
+            get_next_page_path_with_increasing_page_size(&headers(
+                "<https://ghe.corp/api/v3/repos/o/n/pulls?state=all&per_page=40&page=3>; rel=\"next\""
+            ))
+            .as_deref(),
+            Some("/api/v3/repos/o/n/pulls?state=all&per_page=80&page=2")
+        );
+        assert_eq!(parse_int(" 12abc"), Some(12));
+        assert_eq!(parse_int("x"), None);
     }
 
     #[test]
