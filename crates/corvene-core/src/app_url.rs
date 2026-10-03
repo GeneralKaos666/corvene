@@ -219,7 +219,8 @@ pub fn open_local_repo_url(path: &Path) -> String {
 
 /// GHD `resolveWithin`: `relative` inside `root`, symlinks resolved; `None`
 /// when it escapes the root or does not exist.
-fn resolve_within(root: &Path, relative: &str) -> Option<PathBuf> {
+#[doc(hidden)]
+pub fn resolve_within(root: &Path, relative: &str) -> Option<PathBuf> {
     let root = dunce::canonicalize(root).ok()?;
     let resolved = dunce::canonicalize(root.join(relative)).ok()?;
     resolved.starts_with(&root).then_some(resolved)

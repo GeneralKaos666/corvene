@@ -63,7 +63,8 @@ pub struct CustomEmoji {
     pub path: PathBuf,
 }
 
-static CUSTOM: RwLock<Vec<CustomEmoji>> = RwLock::new(Vec::new());
+#[doc(hidden)]
+pub static CUSTOM: RwLock<Vec<CustomEmoji>> = RwLock::new(Vec::new());
 
 /// The image-only emoji loaded so far (empty until [`Dispatcher::load_custom_emoji`] ran).
 pub fn custom() -> Vec<CustomEmoji> {

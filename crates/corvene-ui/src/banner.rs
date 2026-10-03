@@ -34,7 +34,8 @@ fn plural(count: usize) -> &'static str {
 }
 
 /// The message as text runs (`true` = bold, for branch names).
-fn parts(banner: &Banner) -> Vec<(String, bool)> {
+#[doc(hidden)]
+pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
     let t = |s: &str| (s.to_string(), false);
     let b = |s: &String| (s.clone(), true);
     match banner {

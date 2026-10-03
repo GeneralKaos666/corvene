@@ -1,0 +1,2 @@
+# lane status
+unit/git/diff-resolution-test.ts	*	omitted: getResolutionDiff (lib/git/diff.ts) only feeds the Copilot conflict-resolution dialog (copilot-conflicts-changes.tsx); Copilot is left out by design (.docs/TODO.md › Copilot) and Corvene has no diff of given content against a working file

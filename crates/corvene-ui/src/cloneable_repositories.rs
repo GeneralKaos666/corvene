@@ -32,7 +32,8 @@ use crate::widgets::{IconButtonA11y, avatar_image, avatar_lookup_url, button, li
 
 /// GHD `cloneable-repository-filter-list.tsx` group title for the
 /// signed-in user's own repositories.
-const YOUR_REPOSITORIES: &str = mac_or("Your Repositories", "Your repositories");
+#[doc(hidden)]
+pub const YOUR_REPOSITORIES: &str = mac_or("Your Repositories", "Your repositories");
 
 /// `RowHeight` of the cloneable repository list.
 #[allow(non_snake_case)]

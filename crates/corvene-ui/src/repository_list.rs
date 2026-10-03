@@ -967,7 +967,11 @@ impl Render for RepositoryFoldout {
 
 /// `HighlightText`'s bold ranges (bytes of `text`) for the matched char
 /// `positions`, as `crate::autocompletion::highlighted` draws them.
-fn bold_ranges(text: &str, positions: &[usize]) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
+#[doc(hidden)]
+pub fn bold_ranges(
+    text: &str,
+    positions: &[usize],
+) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
     let bold = HighlightStyle {
         font_weight: Some(FontWeight::BOLD),
         ..Default::default()

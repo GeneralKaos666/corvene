@@ -48,6 +48,8 @@ pub use branch_dialogs::{
     ConfirmOverwriteStashDialog, ConfirmSwitchBranchDialog, CreateBranchDialog, DeleteBranchDialog,
     MergeBranchDialog, RenameBranchDialog, StashAndSwitchBranchDialog,
 };
+#[doc(hidden)]
+pub use branch_dialogs::sanitize_ref_name;
 pub use ci_check_run_rerun::CiCheckRunRerunDialog;
 pub use clone_repository::CloneRepositoryDialog;
 pub use confirm_commit_to_default_branch::ConfirmCommitToDefaultBranchDialog;
@@ -76,6 +78,8 @@ pub use remote_dialogs::{
     ConfirmForcePushDialog, GenericGitAuthDialog, InitializeLfsDialog, PublishRepositoryDialog,
     PushNeedsPullDialog,
 };
+#[doc(hidden)]
+pub use remote_dialogs::sanitized_repository_name;
 pub use repository_settings::RepositorySettingsDialog;
 pub use sign_in::SignInDialog;
 pub use simple::SimpleDialog;

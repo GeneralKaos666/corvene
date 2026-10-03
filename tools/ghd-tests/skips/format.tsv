@@ -1,0 +1,3 @@
+# lane format
+unit/bytes-test.ts	formatBytes › doesn't attempt to format NaN	n/a: corvene_ui::format::format_bytes takes an i64 byte count, which cannot be NaN (a JS number is a float)
+unit/bytes-test.ts	formatBytes › doesn't attempt to format Infinity	n/a: corvene_ui::format::format_bytes takes an i64 byte count, which cannot be Infinity (a JS number is a float)

@@ -891,7 +891,8 @@ pub fn reorder_todo(
     Some(todo)
 }
 
-fn temp_file(prefix: &str, contents: &str) -> Result<PathBuf> {
+#[doc(hidden)]
+pub fn temp_file(prefix: &str, contents: &str) -> Result<PathBuf> {
     let path = std::env::temp_dir().join(format!(
         "corvene-{prefix}-{}-{}",
         std::process::id(),
