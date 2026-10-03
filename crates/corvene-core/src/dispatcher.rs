@@ -86,6 +86,10 @@ impl Dispatcher {
         } else {
             std::collections::HashMap::new()
         };
+        // `876-git-spawn-error-details`
+        corvene_git::set_explain_missing_workdir(
+            flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
+        );
         let state = cx.new(|_| AppState {
             store,
             settings,
@@ -565,14 +569,31 @@ impl Dispatcher {
             then(id, cx);
             return;
         }
-        #[cfg(target_os = "android")]
         let git = state.read(cx).git.clone();
+        // Corvene (`875-explain-bad-config`): a repository git cannot open
+        // because of a broken config file names the file and line
+        let explain = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::EXPLAIN_BAD_CONFIG);
         let probe = cx.background_executor().spawn(async move {
             #[cfg(target_os = "android")]
-            if let Some(git) = git {
+            if let Some(git) = git.clone() {
                 android_prepare_repository(git, &path);
             }
-            open_repository(&path).map(|info| (path, info))
+            open_repository(&path)
+                .map_err(|err| {
+                    if explain
+                        && !matches!(err, GitError::NotARepository(_))
+                        && let Some(text) =
+                            git.and_then(|git| corvene_git::explain_open_failure(git, &path))
+                    {
+                        GitError::Gix(text)
+                    } else {
+                        err
+                    }
+                })
+                .map(|info| (path, info))
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = probe.await;
@@ -708,6 +729,7 @@ impl Dispatcher {
             clone_counts_as_fetch,
             detect_rewrite,
             refresh_stale_index,
+            shared_fetch_head,
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -738,6 +760,8 @@ impl Dispatcher {
                 s.flags
                     .bool(crate::flags::ids::FORCE_PUSH_AFTER_OUTSIDE_REWRITE),
                 s.flags.bool(crate::flags::ids::REFRESH_STALE_INDEX),
+                s.flags
+                    .bool(crate::flags::ids::WORKTREE_SHARED_LAST_FETCHED),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -950,11 +974,14 @@ impl Dispatcher {
                         // `253-clone-counts-as-fetch`: a clone writes no
                         // FETCH_HEAD, so GHD says "never fetched" until the
                         // first fetch
-                        last_fetched: corvene_git::last_fetched(&info.workdir).or_else(|| {
-                            clone_counts_as_fetch
-                                .then(|| corvene_git::cloned_at(&info.workdir))
-                                .flatten()
-                        }),
+                        // `874-worktree-shared-last-fetched`: a linked
+                        // worktree also counts the main FETCH_HEAD
+                        last_fetched: corvene_git::last_fetched(&info.workdir, shared_fetch_head)
+                            .or_else(|| {
+                                clone_counts_as_fetch
+                                    .then(|| corvene_git::cloned_at(&info.workdir))
+                                    .flatten()
+                            }),
                         pull_with_rebase: join(pull_with_rebase),
                         worktrees: join(worktrees),
                         upstream_rewritten,
@@ -2434,6 +2461,30 @@ impl Dispatcher {
         .detach();
     }
 
+    /// Amend Commit…: warn about the commit's tags first (flag `819`; GHD
+    /// amends silently and the tags stay on the replaced commit).
+    pub fn request_start_amending(id: u64, sha: String, cx: &mut App) {
+        let tags = {
+            let s = Self::state(cx).read(cx);
+            s.flags
+                .bool(crate::flags::ids::WARN_UNDO_TAGGED_COMMIT)
+                .then(|| Self::commit_by_sha(id, &sha, cx).map(|c| c.tags))
+                .flatten()
+                .unwrap_or_default()
+        };
+        if tags.is_empty() {
+            return Self::start_amending(id, sha, cx);
+        }
+        Self::show_popup(
+            Popup::WarnTaggedCommitBeforeAmend {
+                repo: id,
+                sha,
+                tags,
+            },
+            cx,
+        );
+    }
+
     /// `_startAmendingRepository`: switch to Changes and load the message.
     pub fn start_amending(id: u64, sha: String, cx: &mut App) {
         let Some(commit) = Self::commit_by_sha(id, &sha, cx) else {
@@ -2541,9 +2592,24 @@ impl Dispatcher {
         explicit: Option<UncommittedChangesStrategy>,
         cx: &mut App,
     ) {
-        let Some(branch) = Self::branch_by_name(id, &name, cx) else {
+        let Some(mut branch) = Self::branch_by_name(id, &name, cx) else {
             return;
         };
+        let mut name = name;
+        // Corvene (`866-remote-checkout-uses-local`): a remote branch whose
+        // short name is already a local branch checks the local one out
+        // (GHD runs `checkout -b`, which fails with "already exists")
+        if branch.kind == corvene_models::BranchKind::Remote
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::REMOTE_CHECKOUT_USES_LOCAL)
+            && let Some(local) = Self::branch_by_name(id, branch.name_without_remote(), cx)
+                .filter(|b| b.kind == corvene_models::BranchKind::Local)
+        {
+            name = local.name.clone();
+            branch = local;
+        }
         let (has_changes, has_stash, tip_valid, current, setting) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
@@ -2599,6 +2665,12 @@ impl Dispatcher {
             .and_then(|r| r.desktop_stash())
             .map(|s| s.name.clone());
         let target = branch.name.clone();
+        // Corvene (`869-stash-protects-assume-unchanged`): no stash while it
+        // would reset assume-unchanged files with local changes
+        let guard = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED);
         let submodules = Self::submodule_update_plan(id, cx);
         let git_for_submodules = git.clone();
         let workdir_for_submodules = workdir.clone();
@@ -2619,11 +2691,17 @@ impl Dispatcher {
                     if let Some(current) = current.as_deref()
                         && has_changes
                     {
+                        if guard {
+                            corvene_git::ensure_no_modified_assume_unchanged(
+                                git.clone(),
+                                &workdir,
+                            )?;
+                        }
                         // `createStashAndDropPreviousEntry`
                         if let Some(old) = previous_stash {
                             let _ = corvene_git::drop_stash(git.clone(), &workdir, &old);
                         }
-                        corvene_git::create_desktop_stash(git.clone(), &workdir, current)?;
+                        corvene_git::create_desktop_stash(git.clone(), &workdir, current, false)?;
                     }
                     corvene_git::checkout_branch(git, &workdir, &branch)
                 }
@@ -2633,7 +2711,12 @@ impl Dispatcher {
                         Ok(()) => Ok(()),
                         Err(err) if corvene_git::is_local_changes_overwritten(&err) => {
                             let target = branch.name_without_remote().to_string();
-                            if !corvene_git::create_desktop_stash(git.clone(), &workdir, &target)? {
+                            if !corvene_git::create_desktop_stash(
+                                git.clone(),
+                                &workdir,
+                                &target,
+                                guard,
+                            )? {
                                 return Err(err);
                             }
                             corvene_git::checkout_branch(git.clone(), &workdir, &branch)?;
@@ -2777,12 +2860,19 @@ impl Dispatcher {
             branch: branch.name.clone(),
             sha,
         });
-        let (fetch_after, explain_worktrees) = {
+        let (fetch_after, explain_worktrees, qualified) = {
             let flags = &Self::state(cx).read(cx).flags;
             (
                 flags.bool(crate::flags::ids::FETCH_AFTER_DELETING_CURRENT_BRANCH),
                 flags.bool(crate::flags::ids::EXPLAIN_BRANCH_IN_OTHER_WORKTREE),
+                flags.bool(crate::flags::ids::QUALIFIED_PUSH_REFSPECS),
             )
+        };
+        // Corvene (`867-qualified-push-refspecs`): `:refs/heads/<name>`, so a
+        // remote tag of the same name does not make the deletion ambiguous
+        let remote_ref = move |name: &str| match qualified {
+            true => format!("refs/heads/{name}"),
+            false => name.to_string(),
         };
         // Corvene (`862-fetch-after-deleting-current-branch`): the default
         // branch this worktree switched to is brought up to date, so a merged
@@ -2839,7 +2929,7 @@ impl Dispatcher {
                                 git,
                                 &workdir,
                                 remote,
-                                remote_branch,
+                                &remote_ref(remote_branch),
                             )?;
                         }
                         Ok(())
@@ -2849,7 +2939,12 @@ impl Dispatcher {
                             .name
                             .split_once('/')
                             .unwrap_or(("origin", &branch.name));
-                        corvene_git::delete_remote_branch(git, &workdir, remote, remote_branch)
+                        corvene_git::delete_remote_branch(
+                            git,
+                            &workdir,
+                            remote,
+                            &remote_ref(remote_branch),
+                        )
                     }
                 }
             },
@@ -3078,14 +3173,21 @@ impl Dispatcher {
             .get(&id)
             .and_then(|r| r.desktop_stash())
             .map(|s| s.name.clone());
+        let guard = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED);
         Self::run_history_op(
             id,
             "Could not stash changes",
             move |git, workdir| {
+                if guard {
+                    corvene_git::ensure_no_modified_assume_unchanged(git.clone(), &workdir)?;
+                }
                 if let Some(old) = previous {
                     let _ = corvene_git::drop_stash(git.clone(), &workdir, &old);
                 }
-                corvene_git::create_desktop_stash(git, &workdir, &current).map(|_| ())
+                corvene_git::create_desktop_stash(git, &workdir, &current, false).map(|_| ())
             },
             cx,
         );
@@ -3272,19 +3374,28 @@ impl Dispatcher {
 
     /// Restore: `git stash pop`, then the files show up in Changes.
     pub fn pop_stash(id: u64, cx: &mut App) {
-        let Some(name) = Self::state(cx)
-            .read(cx)
+        let s = Self::state(cx).read(cx);
+        let Some(stash) = s
             .repo_states
             .get(&id)
             .and_then(|r| r.stash.as_ref())
-            .map(|s| s.name.clone())
+            .cloned()
         else {
             return;
         };
+        // Corvene (`868-stash-restore-checks-branch`): the stash is popped by
+        // its commit and only while its branch is still checked out (GHD pops
+        // `stash@{n}` from the last refresh, which may be another branch's)
+        let check_branch = s.flags.bool(crate::flags::ids::STASH_RESTORE_CHECKS_BRANCH);
         Self::run_history_op(
             id,
             "Could not restore stash",
-            move |git, workdir| corvene_git::pop_stash(git, &workdir, &name),
+            move |git, workdir| match (check_branch, stash.branch.as_deref()) {
+                (true, Some(branch)) => {
+                    corvene_git::pop_stash_on_branch(git, &workdir, &stash.sha, branch)
+                }
+                _ => corvene_git::pop_stash(git, &workdir, &stash.name),
+            },
             cx,
         );
     }

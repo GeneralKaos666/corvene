@@ -35,9 +35,10 @@ pub use branch_ops::{
     BranchTracking, DESKTOP_STASH_MARKER, MergeOutcome, abort_merge, branch_tracking,
     checkout_branch, checkout_new_branch, commits_ahead, commits_not_in, configured_default_branch,
     create_branch, create_desktop_stash, delete_local_branch, delete_remote_branch,
-    desktop_stash_message, drop_stash, find_default_branch, get_stashes,
-    is_local_changes_overwritten, merge_branch, merge_branch_with_message, parse_recent_branches,
-    pop_stash, recent_branches, remote_head, rename_branch, stashed_files,
+    desktop_stash_message, drop_stash, ensure_no_modified_assume_unchanged, find_default_branch,
+    get_stashes, is_local_changes_overwritten, merge_branch, merge_branch_with_message,
+    modified_assume_unchanged, parse_recent_branches, pop_stash, pop_stash_on_branch,
+    recent_branches, remote_head, rename_branch, stashed_files,
 };
 pub use commit::{
     CommitOptions, add_paths, assume_unchanged_paths, commit, discard_changes, format_message,
@@ -53,7 +54,7 @@ pub use diff::{
     parse_line_endings_warning, parse_raw_diff, parse_raw_diff_with_warnings, parse_unified,
     submodule_diff, working_directory_diff, working_directory_patch, working_file_lines,
 };
-pub use error::{GitError, dubious_ownership_path};
+pub use error::{GitError, bad_config_line, dubious_ownership_path, explain_bad_config};
 pub use history_ops::{
     ResetMode, checkout_commit, cherry_pick_no_commit, create_tag, delete_tag, format_patches,
     reset_to, revert_commit, revert_commits_no_commit, revert_file_in_commit,
@@ -70,8 +71,8 @@ pub use log::{
     parse_raw_log_with_numstat, tag_names,
 };
 pub use ops::{
-    CloneProgress, InitOptions, PathStatus, clone, global_identity, init_repository,
-    normalize_clone_url, parse_clone_progress, path_status, readme_exists,
+    CloneProgress, InitOptions, PathStatus, clone, explain_open_failure, global_identity,
+    init_repository, normalize_clone_url, parse_clone_progress, path_status, readme_exists,
     repository_name_from_url, set_global_identity,
 };
 pub use patch::{
@@ -80,7 +81,8 @@ pub use patch::{
 };
 pub use paths::git_dir;
 pub use process::{
-    CancelToken, GitCommand, GitOutput, set_credential_helper, set_network_stall_timeout,
+    CancelToken, GitCommand, GitOutput, set_credential_helper, set_explain_missing_workdir,
+    set_network_stall_timeout,
 };
 pub use rebase_ops::{
     CherryPickResult, CherryPickSnapshot, RebaseOptions, RebaseResult, RebaseSnapshot,
@@ -98,8 +100,8 @@ pub use remote_ops::{
     fetch_with_prune_tags, find_default_remote, get_remotes, install_lfs_hooks,
     is_stale_remote_ref_failure, is_using_lfs, is_using_lfs_by_attributes, last_fetched,
     lfs_available, lfs_hooks_installed, parse_progress_line, prune_remote, pull, pull_with_rebase,
-    push, remote_failure, remote_head_resolves, remove_remote, set_remote_url, update_remote_head,
-    update_submodules, upstream_tip_in_reflog,
+    push, remote_failure, remote_head_resolves, remote_read_failure_cause, remove_remote,
+    set_remote_url, update_remote_head, update_submodules, upstream_tip_in_reflog,
 };
 pub use repo::{
     ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,

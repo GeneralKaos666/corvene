@@ -69,14 +69,16 @@ pub fn background_fetch(store_dir: &Path) -> Result<Outcome, String> {
     let path = repository.path.clone();
     // the application may be opened while git runs: it needs the store
     drop(store);
-    fetch_if_due(&path, logins.join(";"))
+    let shared = flags.bool(crate::flags::ids::WORKTREE_SHARED_LAST_FETCHED);
+    fetch_if_due(&path, logins.join(";"), shared)
 }
 
-fn fetch_if_due(workdir: &Path, logins: String) -> Result<Outcome, String> {
+fn fetch_if_due(workdir: &Path, logins: String, shared: bool) -> Result<Outcome, String> {
     if !workdir.join(".git").exists() {
         return Ok(Outcome::Skipped("the repository is missing"));
     }
-    let last = corvene_git::last_fetched(workdir).or_else(|| corvene_git::cloned_at(workdir));
+    let last =
+        corvene_git::last_fetched(workdir, shared).or_else(|| corvene_git::cloned_at(workdir));
     let due = last.is_none_or(|at| {
         SystemTime::now()
             .duration_since(at)
@@ -128,11 +130,14 @@ mod tests {
             &["remote", "add", "origin", origin.to_str().unwrap()],
         );
 
-        assert_eq!(fetch_if_due(&work, String::new()), Ok(Outcome::Fetched));
+        assert_eq!(
+            fetch_if_due(&work, String::new(), true),
+            Ok(Outcome::Fetched)
+        );
         assert!(work.join(".git/refs/remotes/origin/main").exists());
         // FETCH_HEAD is fresh now
         assert_eq!(
-            fetch_if_due(&work, String::new()),
+            fetch_if_due(&work, String::new(), true),
             Ok(Outcome::Skipped("fetched less than an hour ago"))
         );
     }

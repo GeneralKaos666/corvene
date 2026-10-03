@@ -8,7 +8,7 @@
 //! simpler and keeps tokens out of the environment. SSH remotes are left to
 //! the user's ssh-agent, as in GHD.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -199,6 +199,32 @@ pub fn classify_remote_failure(stderr: &str) -> RemoteFailure {
         return RemoteFailure::PushNotFastForward;
     }
     RemoteFailure::Other
+}
+
+/// The `fatal:` line that explains git's closing "Could not read from remote
+/// repository." when it is something else (out of memory, a broken pack, a
+/// lost connection): dugite, and so GHD, reads every such failure as an SSH
+/// permission problem (desktop#22413).
+pub fn remote_read_failure_cause(stderr: &str) -> Option<&str> {
+    let lines = stderr.lines().map(str::trim);
+    let at = lines
+        .clone()
+        .position(|l| l.ends_with("Could not read from remote repository."))?;
+    lines
+        .take(at)
+        .filter_map(|l| {
+            ["fatal: ", "error: ", "ssh: "]
+                .iter()
+                .find_map(|prefix| l.strip_prefix(prefix))
+        })
+        .map(str::trim)
+        .filter(|cause| {
+            !cause.is_empty()
+                && !cause.contains("Could not read from remote repository")
+                && !cause.contains("Permission denied")
+                && !cause.contains("Host key verification failed")
+        })
+        .last()
 }
 
 pub fn remote_failure(err: &GitError) -> RemoteFailure {
@@ -442,6 +468,10 @@ pub struct FetchOptions {
     /// `--no-recurse-submodules` instead of `--recurse-submodules=on-demand`:
     /// submodules are left to the user (desktop#15758).
     pub skip_submodules: bool,
+    /// When git cannot read `.gitmodules` ("bad config line N in file
+    /// .gitmodules", e.g. a merge conflict in it), fetch again without
+    /// submodules instead of failing (flag `875`, desktop#6200).
+    pub retry_bad_gitmodules: bool,
 }
 
 /// [`fetch`] with [`FetchOptions`].
@@ -467,14 +497,38 @@ pub fn fetch_with(
         "--recurse-submodules=on-demand"
     });
     args.push(remote);
-    remote_command(git, workdir, askpass)
-        .args(args)
+    let result = remote_command(git.clone(), workdir, askpass)
+        .args(&args)
         .run_streaming(|line| {
             if let Some((percent, text)) = parser.parse(line) {
                 on_progress(percent, text);
             }
-        })?;
-    Ok(())
+        });
+    match result {
+        Err(GitError::Failed { stderr, .. })
+            if options.retry_bad_gitmodules
+                && !options.skip_submodules
+                && crate::bad_config_line(&stderr)
+                    .is_some_and(|(_, file)| file.ends_with(".gitmodules")) =>
+        {
+            tracing::warn!("fetching without submodules: {}", stderr.trim());
+            if let Some(arg) = args
+                .iter_mut()
+                .find(|a| a.starts_with("--recurse-submodules"))
+            {
+                *arg = "--no-recurse-submodules";
+            }
+            remote_command(git, workdir, askpass)
+                .args(&args)
+                .run_streaming(|line| {
+                    if let Some((percent, text)) = parser.parse(line) {
+                        on_progress(percent, text);
+                    }
+                })?;
+            Ok(())
+        }
+        result => result.map(|_| ()),
+    }
 }
 
 /// GHD `fetchRefspec`
@@ -739,10 +793,24 @@ pub fn upstream_tip_in_reflog(
         .is_some_and(|log| !tip.is_empty() && log.lines().any(|l| l.trim() == tip))
 }
 
-/// GHD `updateLastFetched`: mtime of a non-empty `FETCH_HEAD`.
-pub fn last_fetched(workdir: &Path) -> Option<SystemTime> {
-    let meta = std::fs::metadata(git_dir(workdir).join("FETCH_HEAD")).ok()?;
-    (meta.len() > 0).then(|| meta.modified().ok()).flatten()
+/// GHD `updateLastFetched`: mtime of a non-empty `FETCH_HEAD`. A linked
+/// worktree has its own `FETCH_HEAD`, so a fetch made from another worktree
+/// leaves it "never fetched"; with `shared` (flag `874`) the main
+/// repository's `FETCH_HEAD` counts too and the newer one wins.
+pub fn last_fetched(workdir: &Path, shared: bool) -> Option<SystemTime> {
+    let mtime = |dir: PathBuf| {
+        let meta = std::fs::metadata(dir.join("FETCH_HEAD")).ok()?;
+        (meta.len() > 0).then(|| meta.modified().ok()).flatten()
+    };
+    let own = mtime(git_dir(workdir));
+    if !shared {
+        return own;
+    }
+    let common = crate::paths::common_dir(workdir);
+    if common == git_dir(workdir) {
+        return own;
+    }
+    own.max(mtime(common))
 }
 
 /// When the repository was cloned: the time of `HEAD`'s first reflog entry
@@ -1036,6 +1104,117 @@ mod tests {
     }
 
     #[test]
+    fn fetch_skips_submodules_when_gitmodules_is_broken() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let up = dir.path().join("up");
+        let work = dir.path().join("work");
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", up.to_str().unwrap()],
+        );
+        run(&up, &["config", "commit.gpgsign", "false"]);
+        run(&up, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        run(
+            dir.path(),
+            &["clone", "-q", up.to_str().unwrap(), work.to_str().unwrap()],
+        );
+        std::fs::write(
+            work.join(".gitmodules"),
+            "[submodule \"x\"]\n<<<<<<< HEAD\n\tpath = x\n=======\n",
+        )
+        .unwrap();
+        let fetch = |retry| {
+            let options = FetchOptions {
+                retry_bad_gitmodules: retry,
+                ..FetchOptions::default()
+            };
+            fetch_with(git.clone(), &work, "origin", options, None, &mut |_, _| {})
+        };
+        assert!(fetch(false).is_err());
+        fetch(true).unwrap();
+    }
+
+    #[test]
+    fn linked_worktree_counts_the_main_fetch_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        let linked = dir.path().join("linked");
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", main.to_str().unwrap()],
+        );
+        run(&main, &["config", "commit.gpgsign", "false"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        run(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "side",
+                linked.to_str().unwrap(),
+            ],
+        );
+        assert_ne!(crate::git_dir(&linked), crate::paths::common_dir(&linked));
+        assert_eq!(
+            crate::paths::common_dir(&linked).canonicalize().unwrap(),
+            main.join(".git").canonicalize().unwrap()
+        );
+        std::fs::write(main.join(".git/FETCH_HEAD"), "abc\t\tbranch 'main'\n").unwrap();
+        assert!(last_fetched(&linked, false).is_none());
+        assert!(last_fetched(&linked, true).is_some());
+        assert_eq!(last_fetched(&main, true), last_fetched(&main, false));
+    }
+
+    #[test]
+    fn qualified_refspecs_push_a_branch_shadowed_by_a_tag() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("remote.git");
+        let work = dir.path().join("work");
+        run(
+            dir.path(),
+            &["init", "-q", "--bare", bare.to_str().unwrap()],
+        );
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", work.to_str().unwrap()],
+        );
+        run(&work, &["config", "commit.gpgsign", "false"]);
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        run(&work, &["tag", "main"]);
+        run(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        let push_as = |local: &str, remote: Option<&str>| {
+            push(
+                git.clone(),
+                &work,
+                "origin",
+                local,
+                remote,
+                &[],
+                false,
+                None,
+                &mut |_, _| {},
+            )
+        };
+        // `main` alone matches both refs/heads/main and refs/tags/main
+        assert!(push_as("main", None).is_err());
+        push_as("refs/heads/main", None).unwrap();
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "second"]);
+        assert!(push_as("main", Some("main")).is_err());
+        push_as("refs/heads/main", Some("refs/heads/main")).unwrap();
+        assert_eq!(
+            config_value(git.clone(), &work, "branch.main.merge").as_deref(),
+            Some("refs/heads/main")
+        );
+        run(&work, &["push", "-q", "origin", "refs/tags/main"]);
+        assert!(crate::delete_remote_branch(git.clone(), &work, "origin", "main").is_err());
+        crate::delete_remote_branch(git, &work, "origin", "refs/heads/main").unwrap();
+    }
+
+    #[test]
     fn push_error_includes_hook_stdout() {
         let git = Arc::new(crate::find_git().unwrap());
         let dir = tempfile::tempdir().unwrap();
@@ -1131,7 +1310,7 @@ mod tests {
             dir.path(),
             &["clone", "-q", src.to_str().unwrap(), copy.to_str().unwrap()],
         );
-        assert!(last_fetched(&copy).is_none());
+        assert!(last_fetched(&copy, false).is_none());
         let git = Arc::new(crate::find_git().unwrap());
         assert!(remote_head_resolves(git.clone(), &copy, "origin"));
         assert!(!remote_head_resolves(git.clone(), &src, "origin"));
@@ -1225,7 +1404,7 @@ mod tests {
         fetch_with(git.clone(), &work, "origin", graph, None, &mut |_, _| {}).unwrap();
         let objects = git_dir(&work).join("objects").join("info");
         assert!(objects.join("commit-graph").exists() || objects.join("commit-graphs").exists());
-        assert!(last_fetched(&work).is_some());
+        assert!(last_fetched(&work, false).is_some());
         let ab = crate::symmetric_ahead_behind(git.clone(), &work, "main", "origin/main")
             .unwrap()
             .unwrap();

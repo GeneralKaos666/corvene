@@ -38,6 +38,19 @@ pub fn path_status(path: &Path) -> PathStatus {
     PathStatus::NotARepository
 }
 
+/// Corvene addition (flag `875`): why git cannot open the repository at
+/// `path`, when the reason is an unreadable configuration file
+/// ([`crate::explain_bad_config`] of `git rev-parse --git-dir`).
+pub fn explain_open_failure(git: Arc<GitBinary>, path: &Path) -> Option<String> {
+    let out = GitCommand::new(git)
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(path)
+        .allow_exit_code(128)
+        .run()
+        .ok()?;
+    crate::explain_bad_config(&out.stderr)
+}
+
 /// Whether `dir` already has a `README.md` that "Initialize this repository
 /// with a README" would replace (GHD `readMeExists`).
 pub fn readme_exists(dir: &Path) -> bool {
@@ -299,6 +312,24 @@ pub fn clone(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explains_a_broken_repository_config() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        GitCommand::new(git.clone())
+            .args(["init", "-q"])
+            .current_dir(dir.path())
+            .run()
+            .unwrap();
+        assert_eq!(explain_open_failure(git.clone(), dir.path()), None);
+        let config = dir.path().join(".git").join("config");
+        let mut text = std::fs::read_to_string(&config).unwrap();
+        text.push_str("[core\n");
+        std::fs::write(&config, text).unwrap();
+        let explained = explain_open_failure(git, dir.path()).unwrap();
+        assert!(explained.contains(".git/config"), "{explained}");
+    }
 
     #[test]
     fn normalizes_clone_inputs() {

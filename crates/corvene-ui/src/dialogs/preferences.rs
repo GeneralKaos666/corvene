@@ -13,6 +13,9 @@
 //! in "Open in …" labels (GHD `CustomIntegrationForm` has path and arguments).
 //! With flag `513-integration-app-icons` the editor and shell menus show the
 //! applications' icons (GHD `integrations.tsx` lists plain `<option>`s).
+//! With flag `871-branch-name-trailing-slash-quiet` the default branch name
+//! box does not say "Will be saved as" for a lone trailing `/` or `.`
+//! (GHD `ref-name-text-box.tsx` does).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -927,8 +930,14 @@ impl PreferencesDialog {
             GitTab::DefaultBranch => {
                 let value = self.default_branch.read(cx).value().to_string();
                 let sanitized = crate::dialogs::branch_dialogs::sanitize_ref_name(value.trim());
-                let warning = (!value.trim().is_empty() && sanitized != value.trim())
-                    .then(|| format!("Will be saved as {sanitized}."));
+                let quiet = self
+                    .state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::BRANCH_NAME_TRAILING_SLASH_QUIET);
+                let warning =
+                    crate::dialogs::branch_dialogs::ref_name_warning(&value, &sanitized, quiet)
+                        .then(|| format!("Will be saved as {sanitized}."));
                 div()
                     .flex()
                     .flex_col()

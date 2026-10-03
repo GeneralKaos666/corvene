@@ -343,6 +343,9 @@ impl DialogHost {
             } => cx
                 .new(|_| WarnTaggedCommitBeforeUndoDialog::new(*repo, tags.clone(), *warn_local))
                 .into(),
+            Popup::WarnTaggedCommitBeforeAmend { repo, sha, tags } => cx
+                .new(|_| WarnTaggedCommitBeforeUndoDialog::amend(*repo, tags.clone(), sha.clone()))
+                .into(),
             Popup::CreateBranch {
                 repo,
                 target_sha,

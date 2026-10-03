@@ -463,12 +463,15 @@ impl Render for WarnLocalChangesBeforeUndoDialog {
     }
 }
 
-/// Flag `819`: the commit being undone carries tags, which would be left on
-/// a commit no branch contains (Corvene addition; GHD undoes silently).
+/// Flag `819`: the commit being undone or amended carries tags, which would
+/// be left on a commit no branch contains (Corvene addition; GHD undoes and
+/// amends silently).
 pub struct WarnTaggedCommitBeforeUndoDialog {
     repo: u64,
     tags: Vec<String>,
     warn_local: bool,
+    /// Amend Commit… on this commit instead of Undo.
+    amend: Option<String>,
 }
 
 impl WarnTaggedCommitBeforeUndoDialog {
@@ -477,6 +480,16 @@ impl WarnTaggedCommitBeforeUndoDialog {
             repo,
             tags,
             warn_local,
+            amend: None,
+        }
+    }
+
+    pub fn amend(repo: u64, tags: Vec<String>, sha: String) -> Self {
+        Self {
+            repo,
+            tags,
+            warn_local: false,
+            amend: Some(sha),
         }
     }
 }
@@ -484,25 +497,30 @@ impl WarnTaggedCommitBeforeUndoDialog {
 impl Render for WarnTaggedCommitBeforeUndoDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
-        let (repo, warn_local) = (self.repo, self.warn_local);
+        let (repo, warn_local, amend) = (self.repo, self.warn_local, self.amend.clone());
         let (noun, pronoun) = if self.tags.len() == 1 {
             ("tag", "It stays")
         } else {
             ("tags", "They stay")
         };
         let text = format!(
-            "This commit has the {noun} {}. {pronoun} on the commit after it is undone, and \
+            "This commit has the {noun} {}. {pronoun} on the commit after it is {}, and \
              that commit will no longer be on any branch. Do you want to continue anyway?",
             self.tags
                 .iter()
                 .map(|t| format!("\u{201c}{t}\u{201d}"))
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(", "),
+            if amend.is_some() { "amended" } else { "undone" },
         );
         dialog_with_kind(
             "dialog-warn-undo-tagged",
             DialogKind::Warning,
-            mac_or("Undo Commit", "Undo commit"),
+            if amend.is_some() {
+                mac_or("Amend Commit", "Amend commit")
+            } else {
+                mac_or("Undo Commit", "Undo commit")
+            },
             div().child(text),
             vec![
                 DialogButton {
@@ -519,7 +537,9 @@ impl Render for WarnTaggedCommitBeforeUndoDialog {
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
-                        if warn_local {
+                        if let Some(sha) = amend.clone() {
+                            Dispatcher::start_amending(repo, sha, cx);
+                        } else if warn_local {
                             Dispatcher::request_undo_commit_after_tags(repo, cx);
                         } else {
                             Dispatcher::undo_commit(repo, cx);

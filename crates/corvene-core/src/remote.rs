@@ -470,14 +470,33 @@ impl Dispatcher {
                     cx,
                 );
             }
-            _ => {
+            failure => {
                 // `255-plain-language-remote-errors`: say what went wrong
                 // before git's message
-                let plain = Self::state(cx)
-                    .read(cx)
+                let s = Self::state(cx).read(cx);
+                let plain = s
                     .flags
                     .bool(crate::flags::ids::PLAIN_LANGUAGE_REMOTE_ERRORS)
-                    .then(|| crate::push_errors::plain_remote_error(&err))
+                    .then(|| {
+                        crate::push_errors::plain_remote_error(&err).or_else(|| {
+                            // a non-origin remote (a fork's parent) that is gone
+                            let remote = s
+                                .repo_states
+                                .get(&id)?
+                                .info
+                                .as_ref()?
+                                .remotes
+                                .iter()
+                                .find(|r| r.url == remote_url && r.name != "origin")?;
+                            (failure == RemoteFailure::RepositoryNotFound).then(|| {
+                                crate::push_errors::plain_missing_remote_repository(
+                                    &remote.name,
+                                    &remote.url,
+                                    &err,
+                                )
+                            })
+                        })
+                    })
                     .flatten();
                 Self::show_error(title, plain.unwrap_or_else(|| err.to_string()), cx)
             }
@@ -520,6 +539,8 @@ impl Dispatcher {
             write_commit_graph: s.flags.bool(crate::flags::ids::FETCH_WRITES_COMMIT_GRAPH),
             // `250-sync-skips-submodules`
             skip_submodules: s.flags.bool(crate::flags::ids::SYNC_SKIPS_SUBMODULES),
+            // `875-explain-bad-config`
+            retry_bad_gitmodules: s.flags.bool(crate::flags::ids::EXPLAIN_BAD_CONFIG),
         }
     }
 
@@ -1153,13 +1174,23 @@ impl Dispatcher {
             }),
             cx,
         );
-        let local = up_to.clone().unwrap_or_else(|| branch.name.clone());
+        // Corvene (`867-qualified-push-refspecs`): full ref names, so a tag
+        // named like the branch does not make the refspec ambiguous (GHD
+        // pushes `name:name`)
+        let qualified = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::QUALIFIED_PUSH_REFSPECS);
+        let local = up_to.clone().unwrap_or_else(|| match qualified {
+            true => format!("refs/heads/{}", branch.name),
+            false => branch.name.clone(),
+        });
         let remote_branch = branch
             .upstream_short()
             .and_then(|u| u.split_once('/').map(|(_, b)| b.to_string()))
-            .map(|b| match up_to {
-                Some(_) => format!("refs/heads/{b}"),
-                None => b,
+            .map(|b| match up_to.is_some() || qualified {
+                true => format!("refs/heads/{b}"),
+                false => b,
             });
         let remote_url = remote.url.clone();
         // GHD `pushRepo(…, gitStore.tagsToPush)`: unpushed tags ride along

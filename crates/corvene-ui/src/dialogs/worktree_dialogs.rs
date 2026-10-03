@@ -16,7 +16,7 @@ use gpui_kit::*;
 use crate::autocompletion::{self, Autocompletion, PickHandler};
 use crate::context_menu::mac_or;
 use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
-use crate::dialogs::branch_dialogs::{ref_chip, sanitize_ref_name};
+use crate::dialogs::branch_dialogs::{ref_chip, sanitize_branch_name};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::mono_font;
@@ -181,7 +181,7 @@ impl AddWorktreeDialog {
         if !typed.is_empty() {
             return typed;
         }
-        sanitize_ref_name(self.name.read(cx).value().trim())
+        sanitize_branch_name(self.name.read(cx).value().trim(), cx)
     }
 
     fn choose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -226,7 +226,7 @@ impl Render for AddWorktreeDialog {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let full = self.full_path(cx);
         let effective = self.effective_branch(cx);
-        let branch_placeholder = sanitize_ref_name(self.name.read(cx).value().trim());
+        let branch_placeholder = sanitize_branch_name(self.name.read(cx).value().trim(), cx);
         // `renderBranchStatus`
         let existing = {
             let s = self.state.read(cx);

@@ -100,6 +100,17 @@ fn branch_name_prefix(s: &str) -> Result<(), &'static str> {
     }
 }
 
+/// `873-branch-name-forbidden-chars`: the characters, written together.
+fn forbidden_branch_chars(s: &str) -> Result<(), &'static str> {
+    if s.chars().count() > 40 {
+        Err("At most 40 characters")
+    } else if s.contains(['\n', '\r']) {
+        Err("One line only")
+    } else {
+        Ok(())
+    }
+}
+
 /// `228-clone-default-account`: logins separated by commas or spaces.
 fn account_logins(s: &str) -> Result<(), &'static str> {
     if s.chars().count() > 200 {
@@ -1251,15 +1262,19 @@ registry! {
     /// Plain-language text for two confusing git errors.
     PLAIN_LANGUAGE_REMOTE_ERRORS = 255 "plain-language-remote-errors" {
         title: "Plain-language remote errors",
-        summary: "A pull whose upstream branch was deleted on the remote, and a clone into a folder \
-                  you may not write to, explain what happened in a sentence before git's message.",
+        summary: "A pull whose upstream branch was deleted on the remote, a clone into a folder \
+                  you may not write to, a remote failure whose real cause (out of memory, a lost \
+                  connection) precedes \"Could not read from remote repository\", and a \
+                  non-origin remote whose repository is gone explain what happened in a \
+                  sentence before git's message.",
         ghd_behaviour: "Shows git's text only (\"Your configuration specifies to merge with the \
-                        ref …\", \"Permission denied\").",
+                        ref …\", \"Permission denied\"), and calls every \"Could not read from \
+                        remote repository\" an SSH permission problem.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(1325), Upstream::issue(13187)],
+        upstream: &[Upstream::issue(1325), Upstream::issue(13187), Upstream::issue(22413), Upstream::issue(3715)],
         code: &["crates/corvene-core/src/push_errors.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
@@ -3638,18 +3653,19 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs"],
     },
 
-    /// Undo Commit warns about the commit's tags.
+    /// Undo Commit and Amend Commit warn about the commit's tags.
     WARN_UNDO_TAGGED_COMMIT = 819 "warn-undo-tagged-commit" {
-        title: "Warn before undoing a tagged commit",
-        summary: "Undo Commit on a commit that has tags asks first: the tags would stay on a commit \
-                  that is no longer on any branch.",
-        ghd_behaviour: "Undoes silently; the tags keep pointing at the orphaned commit.",
+        title: "Warn before undoing or amending a tagged commit",
+        summary: "Undo Commit and Amend Commit on a commit that has tags ask first: the tags \
+                  would stay on a commit that is no longer on any branch.",
+        ghd_behaviour: "Undoes and amends silently; the tags keep pointing at the orphaned \
+                        commit.",
         nature: Nature::BugFix,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: ON, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(19844)],
-        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs", "crates/corvene-ui/src/changes.rs"],
+        upstream: &[Upstream::issue(19844), Upstream::issue(17737)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/history.rs"],
     },
 
     /// History › Cherry-pick Without Committing.
@@ -4333,6 +4349,178 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(11491)],
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Checking out a remote branch whose name is already a local branch.
+    REMOTE_CHECKOUT_USES_LOCAL = 866 "remote-checkout-uses-local" {
+        title: "Remote branches check out the local branch",
+        summary: "Choosing a remote branch such as origin/foo while a local branch foo exists \
+                  switches to the local foo (with the usual handling of uncommitted changes).",
+        ghd_behaviour: "Tries to create foo again and fails with \"a branch named 'foo' already \
+                        exists\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4527)],
+        code: &["crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Push and remote branch deletion name full refs.
+    QUALIFIED_PUSH_REFSPECS = 867 "qualified-push-refspecs" {
+        title: "Push branches by their full ref name",
+        summary: "Push, Publish branch and deleting a branch on the remote name the branch as \
+                  refs/heads/<name>, so a tag with the same name as the branch does not make \
+                  them fail.",
+        ghd_behaviour: "Pushes <name>:<name>; a tag called like the branch makes git stop with \
+                        \"src refspec <name> matches more than one\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7726)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Restore checks the stash still belongs to the checked-out branch.
+    STASH_RESTORE_CHECKS_BRANCH = 868 "stash-restore-checks-branch" {
+        title: "Restore stash checks the branch",
+        summary: "Restore picks the stash by its commit and only while the branch it was made \
+                  on is checked out; clicked during a branch switch, it stops with an error \
+                  instead of applying the changes to the other branch.",
+        ghd_behaviour: "Pops the stash entry as listed at the last refresh, even when a branch \
+                        switch has just changed what is checked out.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10651)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
+    /// Stashing stops when it would reset assume-unchanged files.
+    STASH_PROTECTS_ASSUME_UNCHANGED = 869 "stash-protects-assume-unchanged" {
+        title: "Protect assume-unchanged files from stashing",
+        summary: "Stashing (Stash All Changes, leaving changes on a branch, or Stash and \
+                  Continue) stops with an explanation when a file marked assume-unchanged has \
+                  local changes, because git would reset that file without saving it in the \
+                  stash.",
+        ghd_behaviour: "Stashes anyway; the assume-unchanged file's changes are lost.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20806)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
+    /// Delete Branch names the remote branch it would delete.
+    DELETE_REMOTE_NAMES_UPSTREAM = 870 "delete-remote-names-upstream" {
+        title: "Delete Branch names the remote branch",
+        summary: "The Delete Branch dialog's \"delete on the remote\" checkbox names the remote \
+                  branch it would delete (for example origin/feature), and is not offered when \
+                  that branch is the remote's default branch.",
+        ghd_behaviour: "Says \"delete this branch on the remote\" and deletes the upstream, \
+                        whatever its name: a local branch tracking origin/main deletes origin/main.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20638)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
+    /// No "Will be saved as" for a name still being typed.
+    BRANCH_NAME_TRAILING_SLASH_QUIET = 871 "branch-name-trailing-slash-quiet" {
+        title: "Quiet branch name warning while typing a slash",
+        summary: "A branch name box does not warn that the name will be changed while the only \
+                  difference is a trailing / or . (as in feature/ on the way to feature/x).",
+        ghd_behaviour: "Flashes \"Will be created as feature\" after each / typed, which reads \
+                        as if slashes were not allowed.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12275)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
+    /// Rename Branch opens with the name box focused.
+    RENAME_BRANCH_FOCUSES_NAME = 872 "rename-branch-focuses-name" {
+        title: "Rename Branch focuses the name",
+        summary: "The Rename Branch dialog opens with the focus in the name box and the current \
+                  name selected, so typing replaces it at once (as in Create a Branch).",
+        ghd_behaviour: "Focuses the dialog's close button; the name box needs a click or Tab.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17661)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
+    /// More characters a branch name may not contain.
+    BRANCH_NAME_FORBIDDEN_CHARS = 873 "branch-name-forbidden-chars" {
+        title: "Forbidden branch name characters",
+        summary: "Characters (written together, for example #&%) that Create a Branch, Rename \
+                  Branch and the worktree dialogs replace with - in a branch name, along with \
+                  those Git forbids; empty for none.",
+        ghd_behaviour: "Only the characters Git forbids are replaced.",
+        nature: Nature::Feature,
+        kind: Kind::Text { placeholder: "#&%", validate: forbidden_branch_chars },
+        corvene: Value::text(""), ghd: Value::text(""),
+        familiar: Value::text(""), max: Value::text(""),
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22603)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/worktree_dialogs.rs"],
+    },
+
+    /// A linked worktree's "Last fetched" counts the main repository's fetches.
+    WORKTREE_SHARED_LAST_FETCHED = 874 "worktree-shared-last-fetched" {
+        title: "Worktrees share the last fetch time",
+        summary: "In a linked worktree, the Fetch button's \"Last fetched\" time also counts \
+                  fetches made from the main worktree (they update the same remote branches), \
+                  so it does not say \"Never fetched\" right after a fetch elsewhere.",
+        ghd_behaviour: "Reads only the worktree's own FETCH_HEAD, so a linked worktree shows \
+                        \"Never fetched\" until it fetches itself.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22520)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/paths.rs"],
+    },
+
+    /// Broken config files are named, and a broken .gitmodules does not stop a fetch.
+    EXPLAIN_BAD_CONFIG = 875 "explain-bad-config" {
+        title: "Explain broken Git config files",
+        summary: "Adding a repository whose .git/config git cannot read says which file and line \
+                  to fix, and a fetch that fails because .gitmodules cannot be read (for example \
+                  a merge conflict in it) is retried without submodules.",
+        ghd_behaviour: "Says the folder is not a Git repository, and fetching fails with git's \
+                        \"bad config line\" error until .gitmodules is fixed.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6200), Upstream::issue(6534)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/error.rs"],
+    },
+
+    /// A missing repository folder is named instead of "Not a directory".
+    GIT_SPAWN_ERROR_DETAILS = 876 "git-spawn-error-details" {
+        title: "Name a missing repository folder",
+        summary: "When git cannot start because the repository's folder is gone or is a file, \
+                  the error says which folder is missing instead of \"could not run git: Not a \
+                  directory\".",
+        ghd_behaviour: "Shows \"spawn ENOTDIR\" or a similar system error that reads as if Git \
+                        were broken.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(9887)],
+        code: &["crates/corvene-git/src/process.rs", "crates/corvene-git/src/error.rs", "crates/corvene-core/src/flags/dispatch.rs"],
     },
 
     // ---- 900 Performance ----

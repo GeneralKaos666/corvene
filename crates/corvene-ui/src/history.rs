@@ -1112,7 +1112,7 @@ impl HistorySidebar {
                 mac_or("Amend Commit…", "Amend commit…"),
                 {
                     let sha = sha.clone();
-                    move |_, cx| Dispatcher::start_amending(id, sha.clone(), cx)
+                    move |_, cx| Dispatcher::request_start_amending(id, sha.clone(), cx)
                 },
             ));
             items.push(MenuItem::new(

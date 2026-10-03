@@ -276,6 +276,12 @@ pub enum Popup {
         /// the Changes view's Undo button undoes straight away.
         warn_local: bool,
     },
+    /// Flag `819`: the commit about to be amended carries tags.
+    WarnTaggedCommitBeforeAmend {
+        repo: u64,
+        sha: String,
+        tags: Vec<String>,
+    },
     /// `CreateBranch`; `target_sha` when created from a commit in History.
     CreateBranch {
         repo: u64,
