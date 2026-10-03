@@ -6,6 +6,9 @@
 #   corvene clone [-b branch] <url>    clone the repository by url or
 #                                      owner/name (ex torvalds/linux),
 #                                      optionally checking out the branch
+#   corvene -g|--background …          (before open or clone) leave Corvene
+#                                      in the background (flag
+#                                      277-url-background-open)
 # Each command becomes an x-corvene:// URL handed to the Corvene binary,
 # which passes it to the running Corvene (single instance) or starts one.
 # Installed as <prefix>/lib/corvene/bin/corvene next to the binary
@@ -30,6 +33,7 @@ Corvene CLI usage:
   corvene clone [-b branch] <url>    Clone the repository by url or name/owner
                                      (ex torvalds/linux), optionally checking out
                                      the branch
+  corvene -g|--background ...        Do it without bringing Corvene forward
 USAGE
   exit "$1"
 }
@@ -39,7 +43,21 @@ if [ -z "$CORVENE_BIN" ]; then
   CORVENE_BIN="$(dirname "$HERE")/corvene"
 fi
 
+BACKGROUND=""
+if [ "$1" = "-g" ] || [ "$1" = "--background" ]; then
+  BACKGROUND=1
+  shift
+fi
+
 send() {
+  TARGET="$1"
+  if [ -n "$BACKGROUND" ]; then
+    case "$TARGET" in
+      *\?*) TARGET="$TARGET&background=1" ;;
+      *) TARGET="$TARGET?background=1" ;;
+    esac
+  fi
+  set -- "$TARGET"
   if [ -n "$CORVENE_CLI_DRY_RUN" ]; then
     printf '%s\n' "$1"
     exit 0

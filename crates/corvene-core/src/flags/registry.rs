@@ -2098,6 +2098,22 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-platform/src/cli.rs"],
     },
 
+    /// Open-repository URLs and the CLI can leave Corvene in the background.
+    URL_BACKGROUND_OPEN = 416 "url-background-open" {
+        title: "Open repositories in the background",
+        summary: "An x-corvene://openRepo or openLocalRepo URL with ?background=1 (the command \
+                  line tool's corvene --background …) selects the repository without bringing \
+                  the window forward, so scripts and editor integrations can switch repositories \
+                  quietly.",
+        ghd_behaviour: "Every URL action and CLI command activates the app and shows its window.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(22150)],
+        code: &["crates/corvene-core/src/app_url.rs", "packaging/corvene.sh", "packaging/linux/corvene.sh"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

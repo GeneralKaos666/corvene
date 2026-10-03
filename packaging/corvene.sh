@@ -6,6 +6,9 @@
 #   corvene clone [-b branch] <url>    clone the repository by url or
 #                                      owner/name (ex torvalds/linux),
 #                                      optionally checking out the branch
+#   corvene -g|--background …          (before open or clone) leave Corvene
+#                                      in the background (flag
+#                                      277-url-background-open)
 # Each command becomes an x-corvene:// URL handed to Corvene.app, so a
 # running Corvene receives it instead of a second instance starting.
 # Installed by Corvene › Install Command Line Tool… as a symlink to
@@ -34,6 +37,7 @@ Corvene CLI usage:
   corvene clone [-b branch] <url>    Clone the repository by url or name/owner
                                      (ex torvalds/linux), optionally checking out
                                      the branch
+  corvene -g|--background ...        Do it without bringing Corvene forward
 EOF
   exit "$1"
 }
@@ -41,7 +45,19 @@ EOF
 CONTENTS="$(dirname "$(dirname "$(realpath "$0")")")"
 APP="$(dirname "$CONTENTS")"
 
+BACKGROUND=""
+if [ "$1" = "-g" ] || [ "$1" = "--background" ]; then
+  BACKGROUND=1
+  shift
+fi
+
 send() {
+  if [ -n "$BACKGROUND" ]; then
+    case "$1" in
+      *\?*) exec /usr/bin/open -g -a "$APP" "$1&background=1" ;;
+      *) exec /usr/bin/open -g -a "$APP" "$1?background=1" ;;
+    esac
+  fi
   exec /usr/bin/open -a "$APP" "$1"
 }
 
