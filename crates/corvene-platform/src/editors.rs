@@ -448,7 +448,10 @@ pub struct FoundEditor {
 /// Every known editor installed on this machine, in table order (then
 /// [`EXTRA_EDITORS`] when `extras`). Costs one LaunchServices lookup (or
 /// `stat`) per candidate; run it off the main thread.
-pub fn available_editors(extras: bool) -> Vec<FoundEditor> {
+/// `jetbrains_64bit_hive` (flag `jetbrains-64bit-hive`) only matters on
+/// Windows.
+pub fn available_editors(extras: bool, jetbrains_64bit_hive: bool) -> Vec<FoundEditor> {
+    let _ = jetbrains_64bit_hive;
     // Android has no editor executables to look for. The editors are the
     // applications that open a text file (`bundle_id` is the activity,
     // "package/class"), after one entry that leaves the choice to the
@@ -491,7 +494,7 @@ pub fn available_editors(extras: bool) -> Vec<FoundEditor> {
     // `extras` adds elsewhere; `extras` adds Microsoft Edit and gVim there
     #[cfg(windows)]
     if cfg!(windows) {
-        return windows_editors::available(extras);
+        return windows_editors::available(extras, jetbrains_64bit_hive);
     }
     let extra: &[(&str, &[&str])] = if extras { EXTRA_EDITORS } else { &[] };
     #[cfg(target_os = "macos")]

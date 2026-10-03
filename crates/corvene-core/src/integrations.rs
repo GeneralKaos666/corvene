@@ -172,11 +172,12 @@ impl Dispatcher {
     pub fn detect_integrations(cx: &mut App) {
         let flags = &Self::state(cx).read(cx).flags;
         let extras = flags.bool(crate::flags::ids::EXTRA_EDITORS);
+        let jetbrains_64bit_hive = flags.bool(crate::flags::ids::JETBRAINS_64BIT_HIVE);
         let with_icons = flags.bool(crate::flags::ids::INTEGRATION_APP_ICONS);
         spawn_bg(
             cx,
             move || {
-                let editors = editors::available_editors(extras);
+                let editors = editors::available_editors(extras, jetbrains_64bit_hive);
                 let shells = shells::available_shells();
                 let icons = if with_icons {
                     app_icons(

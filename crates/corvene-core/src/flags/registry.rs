@@ -2283,6 +2283,21 @@ registry! {
         code: &["crates/corvene-platform/src/app_icons.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/native_menu.rs"],
     },
 
+    /// JetBrains IDEs registered under the 64-bit machine key.
+    JETBRAINS_64BIT_HIVE = 564 "jetbrains-64bit-hive" {
+        title: "Find JetBrains IDEs in the 64-bit registry",
+        summary: "On Windows, JetBrains IDEs installed for all users are also looked for under \
+                  the 64-bit machine uninstall key, where current installers register them.",
+        ghd_behaviour: "Only checks the 32-bit machine key and the user key, so such IDEs are \
+                        not detected.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(21990)],
+        code: &["crates/corvene-platform/src/editors_windows.rs", "crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.
