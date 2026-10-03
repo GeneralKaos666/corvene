@@ -1295,6 +1295,11 @@ impl PreferencesDialog {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::TREE_SITTER_HIGHLIGHTING);
+        let language_extensions = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::LANGUAGE_EXTENSIONS);
         let weak = cx.weak_entity();
         let on_tab_size: SelectHandler = Rc::new(move |ix, _, cx| {
             if let Some(n) = TAB_SIZES.get(ix) {
@@ -1331,6 +1336,55 @@ impl PreferencesDialog {
             ))
             // Corvene addition: `105-tree-sitter-highlighting`
             .when(tree_sitter, |d| d.child(self.syntax_highlighter_field(cx)))
+            // Corvene addition: `111-language-extensions`
+            .when(language_extensions, |d| d.child(self.language_extensions_field(cx)))
+            .into_any_element()
+    }
+
+    /// Appearance › Diff › Language extensions: the manager's entry point
+    /// and how many extensions are installed.
+    fn language_extensions_field(&self, cx: &Context<Self>) -> AnyElement {
+        let t = cx.ghd();
+        let count = self.state.read(cx).extensions.installed.len();
+        let installed = match count {
+            0 => String::new(),
+            1 => "1 installed".to_string(),
+            n => format!("{n} installed"),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .mt(SPACING())
+            .child(div().font_weight(FontWeight::SEMIBOLD).child("Language extensions"))
+            .child(settings_description(cx).mt(zpx(2.)).child(
+                "Add highlighting for more languages with grammars from VS Code, Zed, Pulsar, \
+                 Sublime Text or TextMate extensions.",
+            ))
+            .child(
+                div()
+                    .mt(SPACING())
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING())
+                    .child(
+                        button("prefs-language-extensions", "Language extensions…", cx).on_click(
+                            |_, _, cx| {
+                                Dispatcher::open_language_extensions(
+                                    None,
+                                    Some(corvene_core::PreferencesTab::Appearance),
+                                    cx,
+                                )
+                            },
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_size(FONT_SIZE_SM())
+                            .text_color(t.text_secondary)
+                            .child(installed),
+                    ),
+            )
             .into_any_element()
     }
 

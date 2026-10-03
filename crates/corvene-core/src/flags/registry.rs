@@ -455,6 +455,23 @@ registry! {
         code: &["crates/corvene-ui/src/widgets.rs", "vendor/gpui-pre/src/window.rs", "vendor/gpui-pre/src/elements/div.rs"],
     },
 
+    /// Settings › Appearance › Language extensions…
+    LANGUAGE_EXTENSIONS = 111 "language-extensions" {
+        title: "Language extensions",
+        summary: "Settings › Appearance offers Language extensions…: grammars from VS Code, Zed, \
+                  Pulsar / Atom, Sublime Text and TextMate packages add highlighting for languages \
+                  Corvene does not know, from a file, a folder, a URL, a GitHub repository, the \
+                  Open VSX, Zed and Pulsar registries, or the editors installed on this machine. \
+                  An extension's grammar wins over the built-in one for its files unless told not to.",
+        ghd_behaviour: "A fixed set of CodeMirror 5 modes; no way to add a language.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22015)],
+        code: &["crates/corvene-extensions", "crates/corvene-core/src/extensions.rs", "crates/corvene-highlight/src/user.rs", "crates/corvene-ui/src/dialogs/language_extensions.rs"],
+    },
+
     // ---- 200 Repository ----
 
     /// `commit.template` prefills the commit description.
@@ -3161,6 +3178,22 @@ registry! {
         code: &["crates/corvene-ui/src/image_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// A hint above a diff nothing highlights.
+    MISSING_HIGHLIGHTING_HINT = 756 "missing-highlighting-hint" {
+        title: "Hint for files without syntax highlighting",
+        summary: "A diff of a file no grammar covers gets one line above it: \"No syntax \
+                  highlighting for .foo\" with Find an extension…, which opens Language \
+                  extensions with the registries' candidates for that suffix. A × dismisses the \
+                  hint for that suffix.",
+        ghd_behaviour: "Such a diff is shown without colours and without comment.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-core/src/extensions.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
@@ -4277,6 +4310,23 @@ registry! {
     },
 
     // ---- 1000 Experimental ----
+
+    /// Compile tree-sitter grammars an extension names but Corvene lacks.
+    BUILD_GRAMMARS_FROM_SOURCE = 1001 "build-grammars-from-source" {
+        title: "Build tree-sitter grammars from source",
+        summary: "A Zed or Pulsar extension whose tree-sitter grammar Corvene does not bundle \
+                  offers Build grammar…: after a consent sheet naming the repository, the commit \
+                  and the compiler, Corvene downloads the grammar's source and compiles its parser \
+                  with the system C compiler (the Xcode Command Line Tools) into a library it \
+                  then loads. A grammar's code runs inside Corvene; only sources you trust.",
+        ghd_behaviour: "No tree-sitter.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-extensions/src/tsbuild", "crates/corvene-core/src/extensions.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

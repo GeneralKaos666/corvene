@@ -1953,6 +1953,10 @@ fn remember_sides(sides: Vec<(SideKey, Arc<Option<Tokens>>)>) {
 /// grammar pack first (seconds for a pack's first unit).
 fn tokenizes_in_process(engine: corvene_highlight::Engine, path: &str, first_line: &str) -> bool {
     use corvene_highlight::Engine;
+    // a user tree-sitter grammar parses the whole file: no prefix
+    if let Some(claim) = corvene_highlight::user::claims(path, first_line) {
+        return claim.kind == corvene_highlight::user::ClaimKind::Syntect;
+    }
     match engine {
         Engine::GitHubDesktop => true,
         Engine::TreeSitterFallback => corvene_highlight::cm_covers(path, first_line),
@@ -2174,18 +2178,17 @@ fn highlight_engine(s: &AppState) -> (corvene_highlight::Engine, u64) {
     let allowed = s
         .flags
         .bool(corvene_core::flags::ids::TREE_SITTER_HIGHLIGHTING);
-    match corvene_core::flags::effective_syntax_highlighter(s.settings.syntax_highlighter, allowed)
-    {
-        SyntaxHighlighter::GitHubDesktop => (Engine::GitHubDesktop, 0),
-        SyntaxHighlighter::TreeSitterFallback => (
-            Engine::TreeSitterFallback,
-            corvene_highlight::treesitter::generation(),
-        ),
-        SyntaxHighlighter::TreeSitter => (
-            Engine::TreeSitter,
-            corvene_highlight::treesitter::generation(),
-        ),
-    }
+    let engine = match corvene_core::flags::effective_syntax_highlighter(
+        s.settings.syntax_highlighter,
+        allowed,
+    ) {
+        SyntaxHighlighter::GitHubDesktop => Engine::GitHubDesktop,
+        SyntaxHighlighter::TreeSitterFallback => Engine::TreeSitterFallback,
+        SyntaxHighlighter::TreeSitter => Engine::TreeSitter,
+    };
+    // the generation covers the tree-sitter packs and the user's language
+    // extensions: either changing re-highlights open diffs
+    (engine, corvene_highlight::generation())
 }
 
 impl Render for DiffView {

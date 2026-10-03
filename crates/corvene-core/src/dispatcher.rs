@@ -123,6 +123,7 @@ impl Dispatcher {
             pending_open_in_desktop: None,
             update: crate::updater::UpdateState::default(),
             packs: crate::packs::PacksState::default(),
+            extensions: crate::extensions::ExtensionsState::default(),
             alive: crate::alive::AliveState::default(),
         });
         AppState::install(state.clone(), cx);

@@ -14,6 +14,7 @@ pub mod crash_reports;
 pub mod diff_cache;
 pub mod dispatcher;
 pub mod emoji;
+pub mod extensions;
 pub mod filter;
 pub mod flags;
 pub mod forks;

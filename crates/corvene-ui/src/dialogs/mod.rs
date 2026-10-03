@@ -19,6 +19,7 @@ mod fork_dialogs;
 mod history_dialogs;
 mod import_git_config;
 mod import_github_desktop;
+mod language_extensions;
 mod mco_dialogs;
 mod move_to_applications_folder;
 mod open_pull_request;
@@ -514,6 +515,16 @@ impl DialogHost {
                 .into(),
             Popup::Flags { query } => cx
                 .new(|cx| FlagsDialog::new(state, query.clone(), window, cx))
+                .into(),
+            Popup::LanguageExtensions { focus, .. } => cx
+                .new(|cx| {
+                    language_extensions::LanguageExtensionsDialog::new(
+                        state,
+                        focus.clone(),
+                        window,
+                        cx,
+                    )
+                })
                 .into(),
             Popup::RepositorySettings { repo, tab } => cx
                 .new(|cx| RepositorySettingsDialog::new(state, *repo, *tab, window, cx))

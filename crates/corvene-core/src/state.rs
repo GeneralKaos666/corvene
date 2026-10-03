@@ -481,6 +481,13 @@ pub enum Popup {
     Flags {
         query: Option<String>,
     },
+    /// Settings › Appearance › Language extensions… (no GHD equivalent;
+    /// flag `111-language-extensions`). `return_to` reopens Settings on
+    /// that tab when the dialog closes.
+    LanguageExtensions {
+        focus: Option<crate::extensions::ExtensionsFocus>,
+        return_to: Option<PreferencesTab>,
+    },
     /// `RepositorySettings`
     RepositorySettings {
         repo: u64,
@@ -1126,6 +1133,9 @@ pub struct AppState {
     pub update: crate::updater::UpdateState,
     /// On-demand packs.
     pub packs: crate::packs::PacksState,
+    /// Language extensions (`crate::extensions`): installed grammars, the
+    /// manager dialog's search and progress.
+    pub extensions: crate::extensions::ExtensionsState,
     /// Alive subscriptions (`AliveStore`) and notification dedup state.
     pub alive: crate::alive::AliveState,
 }

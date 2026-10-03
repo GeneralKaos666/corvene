@@ -421,6 +421,8 @@ pub(crate) fn main() {
         //   ready / Homebrew / package manager state: the banner, plus About or
         //   the Release Notes with "Install and Restart")
         //   flags[:<search>] (Corvene › Flags…, with the search box prefilled)
+        //   language-extensions[:find|:find=<suffix>|:import] (Settings › Appearance ›
+        //   Language extensions…; flag 111)
         //   git-error[:raw|:known|:push|:plain] (the error dialog for a failed pull:
         //   a merge blocked by local changes, an output nobody has words for, a
         //   failure GHD describes, a push a protected branch rejected, or an error
@@ -983,6 +985,7 @@ pub(crate) fn main() {
         Dispatcher::start_update_checks(cx);
         // on-demand packs installed earlier (extended grammars)
         Dispatcher::load_installed_packs(cx);
+        Dispatcher::load_language_extensions(cx);
         on_menu_action(cx, move |_: &RebaseCurrentBranch, cx| {
             if let Some((id, _)) = current_branch(cx)
                 && !Dispatcher::refuse_merge_while_conflicted(id, cx)
@@ -1215,6 +1218,18 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         (other, _) if other == "flags" || other.starts_with("flags:") => {
             Dispatcher::open_flags(other.strip_prefix("flags:").map(str::to_string), cx)
+        }
+        (other, _) if other == "language-extensions" || other.starts_with("language-extensions:") => {
+            use corvene_core::extensions::ExtensionsFocus;
+            let focus = match other.strip_prefix("language-extensions:") {
+                Some("find") => Some(ExtensionsFocus::Find),
+                Some("import") => Some(ExtensionsFocus::Import),
+                Some(rest) => rest
+                    .strip_prefix("find=")
+                    .map(|suffix| ExtensionsFocus::Suffix(suffix.to_string())),
+                None => None,
+            };
+            Dispatcher::open_language_extensions(focus, None, cx)
         }
         (other, _) if other.starts_with("preferences") => {
             use corvene_core::PreferencesTab as Tab;
