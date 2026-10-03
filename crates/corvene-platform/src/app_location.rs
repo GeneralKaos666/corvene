@@ -195,9 +195,15 @@ pub fn relaunch_after_exit(executable: &Path, pid: u32) -> Result<(), String> {
     let quoted = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "''"));
     let mut script = format!("Wait-Process -Id {pid} -ErrorAction SilentlyContinue; ");
     if let Some(setup) = crate::updater::take_pending_setup() {
+        // Setup's log goes with Corvene's (a failed silent update leaves a
+        // trace); this script restarts Corvene itself, so Setup's Restart
+        // Manager must not. `Start-Process` passes each argument as is: one
+        // with spaces is quoted here.
+        let log = crate::paths::logs_dir().join("setup.log");
         script.push_str(&format!(
-            "Start-Process -Wait -FilePath {} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'; ",
-            quoted(&setup)
+            "Start-Process -Wait -FilePath {} -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NORESTARTAPPLICATIONS','/LOG=\"{}\"'; ",
+            quoted(&setup),
+            log.to_string_lossy().replace('\'', "''")
         ));
     }
     script.push_str(&format!("Start-Process -FilePath {}", quoted(executable)));

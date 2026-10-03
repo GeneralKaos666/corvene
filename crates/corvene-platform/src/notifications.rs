@@ -29,6 +29,13 @@
 //! as GHD's `supportsNotifications() === false` does; clicks on
 //! notifications of an earlier session are not delivered (the D-Bus
 //! connection that would receive them is gone).
+//!
+//! Windows: WinRT toasts under the AppUserModelID of the installer's Start
+//! menu shortcut, with a COM toast activator (`win` below) whose server is
+//! Corvene itself, so a click reaches the running Corvene or starts one,
+//! with the identifier and payload the toast carried; clicks on
+//! notifications of an earlier session are delivered like macOS's. Windows
+//! shows toasts without asking ([`NotificationPermission::Granted`]).
 #![allow(unexpected_cfgs)] // `objc` macros probe a `cargo-clippy` feature
 
 /// GHD `NotificationPermission`.
@@ -534,12 +541,230 @@ pub fn permission() -> NotificationPermission {
 #[cfg(windows)]
 pub fn request_permission() {}
 
-/// A toast under Corvene's AppUserModelID, which an installed Corvene has
-/// through its Start menu shortcut. A build that is not installed has no
-/// identity of its own, and Windows only shows toasts of a known one, so
-/// its toasts go out under the stand-in the toast library provides. A
-/// click starts the identity's program: for the installed Corvene that is
-/// a second launch, which hands over to the running window.
+// Windows: WinRT toasts (`ToastNotificationManager`) under Corvene's
+// AppUserModelID, which an installed Corvene has through its Start menu
+// shortcut (`packaging/windows/corvene.iss`). The shortcut also names a
+// toast activator CLSID whose COM server is this program: a click calls
+// `INotificationActivationCallback::Activate` in the running Corvene, or
+// starts one (with `-Embedding`) and calls it there, with the `launch`
+// argument the toast carried (identifier and payload), so clicks on
+// notifications of an earlier session open their dialog like macOS's. A
+// build that is not installed has no identity of its own, and Windows only
+// shows toasts of a known one, so its toasts go out under PowerShell's and
+// clicks reach it through the toast's in-process `Activated` event only
+// while it runs.
+#[cfg(windows)]
+mod win {
+    use std::ffi::c_void;
+    use std::sync::Mutex;
+
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Foundation::TypedEventHandler;
+    use windows::UI::Notifications::{
+        ToastActivatedEventArgs, ToastNotification, ToastNotificationManager,
+    };
+    use windows::Win32::Foundation::CLASS_E_NOAGGREGATION;
+    use windows::Win32::System::Com::{
+        CLSCTX_LOCAL_SERVER, COINIT_MULTITHREADED, CoInitializeEx, CoRegisterClassObject,
+        IClassFactory, IClassFactory_Impl, REGCLS_MULTIPLEUSE,
+    };
+    use windows::Win32::UI::Notifications::{
+        INotificationActivationCallback, INotificationActivationCallback_Impl,
+        NOTIFICATION_USER_INPUT_DATA,
+    };
+    use windows::core::{BOOL, GUID, HSTRING, IInspectable, IUnknown, Interface, PCWSTR, Ref};
+
+    use super::NotificationClick;
+
+    pub type ClickHandler = Box<dyn Fn(NotificationClick) + Send + Sync>;
+
+    /// The click handler, and the clicks that arrived before it was
+    /// installed (the click that started this process comes in while
+    /// Corvene is still launching).
+    pub static CLICKS: Mutex<(Option<ClickHandler>, Vec<NotificationClick>)> =
+        Mutex::new((None, Vec::new()));
+
+    /// The identity toasts of a build that is not installed go out under
+    /// (what the toast libraries use: Windows shows them under PowerShell).
+    pub const POWERSHELL_APP_ID: &str =
+        "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe";
+
+    /// Hand `click` to the handler, or keep it until there is one.
+    pub fn deliver(click: NotificationClick) {
+        let Ok(mut clicks) = CLICKS.lock() else {
+            return;
+        };
+        match &clicks.0 {
+            Some(handler) => handler(click),
+            None => clicks.1.push(click),
+        }
+    }
+
+    /// What the toast's `launch` argument carries.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Launch {
+        id: String,
+        payload: Option<String>,
+    }
+
+    pub fn encode_launch(identifier: &str, payload: Option<&str>) -> String {
+        serde_json::to_string(&Launch {
+            id: identifier.to_string(),
+            payload: payload.map(str::to_string),
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn decode_launch(arguments: &str) -> Option<NotificationClick> {
+        let launch: Launch = serde_json::from_str(arguments).ok()?;
+        Some(NotificationClick {
+            identifier: launch.id,
+            payload: launch.payload,
+        })
+    }
+
+    fn xml_escape(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            match c {
+                '&' => out.push_str("&amp;"),
+                '<' => out.push_str("&lt;"),
+                '>' => out.push_str("&gt;"),
+                '"' => out.push_str("&quot;"),
+                '\'' => out.push_str("&apos;"),
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
+    /// The `ToastGeneric` toast: title, body, and the click's argument.
+    pub fn toast_xml(title: &str, body: &str, launch: &str) -> String {
+        format!(
+            "<toast launch=\"{}\" activationType=\"foreground\"><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+            xml_escape(launch),
+            xml_escape(title),
+            xml_escape(body)
+        )
+    }
+
+    /// Post the toast under `app_id`. `in_process_clicks`: also take clicks
+    /// through the toast's own event (a build without an activator).
+    pub fn show(app_id: &str, xml: &str, in_process_clicks: bool) -> windows::core::Result<()> {
+        // SAFETY: COM initialisation of this thread; a thread already
+        // initialised answers RPC_E_CHANGED_MODE, which changes nothing here
+        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+        let document = XmlDocument::new()?;
+        document.LoadXml(&HSTRING::from(xml))?;
+        let toast = ToastNotification::CreateToastNotification(&document)?;
+        if in_process_clicks {
+            toast.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
+                |_, arguments: Ref<IInspectable>| {
+                    if let Some(click) = arguments
+                        .ok()
+                        .ok()
+                        .and_then(|args| args.cast::<ToastActivatedEventArgs>().ok())
+                        .and_then(|args| args.Arguments().ok())
+                        .and_then(|args| decode_launch(&args.to_string_lossy()))
+                    {
+                        deliver(click);
+                    }
+                    Ok(())
+                },
+            ))?;
+        }
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?.Show(&toast)
+    }
+
+    /// The COM object a click activates.
+    #[windows::core::implement(INotificationActivationCallback)]
+    struct Activator;
+
+    impl INotificationActivationCallback_Impl for Activator_Impl {
+        fn Activate(
+            &self,
+            _app_user_model_id: &PCWSTR,
+            invoked_arguments: &PCWSTR,
+            _data: *const NOTIFICATION_USER_INPUT_DATA,
+            _count: u32,
+        ) -> windows::core::Result<()> {
+            if invoked_arguments.is_null() {
+                return Ok(());
+            }
+            // SAFETY: COM hands a NUL-terminated string that lives for the call
+            let arguments = unsafe { invoked_arguments.to_string() }.unwrap_or_default();
+            match decode_launch(&arguments) {
+                Some(click) => deliver(click),
+                None => {
+                    tracing::debug!(%arguments, "toast activated without a Corvene argument")
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Makes [`Activator`]s for COM.
+    #[windows::core::implement(IClassFactory)]
+    struct ActivatorFactory;
+
+    impl IClassFactory_Impl for ActivatorFactory_Impl {
+        fn CreateInstance(
+            &self,
+            outer: Ref<IUnknown>,
+            iid: *const GUID,
+            object: *mut *mut c_void,
+        ) -> windows::core::Result<()> {
+            if !outer.is_null() {
+                return Err(CLASS_E_NOAGGREGATION.into());
+            }
+            let activator: INotificationActivationCallback = Activator.into();
+            // SAFETY: `iid` and `object` are the out-parameters COM passed
+            unsafe { activator.query(iid, object) }.ok()
+        }
+
+        fn LockServer(&self, _lock: BOOL) -> windows::core::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Register the activator's class object with COM on a thread of its
+    /// own (a multithreaded apartment: activations arrive on COM's threads)
+    /// and keep it registered for the life of the process.
+    pub fn serve() {
+        let spawned = std::thread::Builder::new()
+            .name("toast-activator".into())
+            .spawn(|| {
+                // SAFETY: a fresh thread, initialised once
+                if unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_err() {
+                    tracing::warn!("could not initialise COM for the toast activator");
+                    return;
+                }
+                let factory: IClassFactory = ActivatorFactory.into();
+                // SAFETY: `factory` outlives the registration (this thread never ends)
+                let registered = unsafe {
+                    CoRegisterClassObject(
+                        &crate::windows::TOAST_ACTIVATOR_CLSID,
+                        &factory,
+                        CLSCTX_LOCAL_SERVER,
+                        REGCLS_MULTIPLEUSE,
+                    )
+                };
+                match registered {
+                    Ok(_) => loop {
+                        std::thread::park();
+                    },
+                    Err(err) => tracing::warn!(%err, "could not register the toast activator"),
+                }
+            });
+        if let Err(err) = spawned {
+            tracing::warn!(%err, "could not start the toast activator thread");
+        }
+    }
+}
+
+/// A toast under Corvene's AppUserModelID (an installed Corvene) or
+/// PowerShell's (a build that is not installed), carrying the identifier and
+/// payload for a click.
 #[cfg(windows)]
 pub fn show(
     identifier: &str,
@@ -548,23 +773,18 @@ pub fn show(
     payload: Option<&str>,
     done: impl FnOnce(Result<(), NotificationError>) + Send + 'static,
 ) {
-    let _ = (identifier, payload);
-    let mut notification = notify_rust::Notification::new();
-    notification.summary(title).body(body);
-    let installed = std::env::current_exe()
-        .ok()
-        .and_then(|exe| Some(exe.parent()?.join("unins000.exe").is_file()))
-        .unwrap_or(false);
-    if installed {
-        notification.app_id(crate::windows::APP_USER_MODEL_ID);
-    }
+    let installed = crate::windows::installed();
+    let app_id = if installed {
+        crate::windows::APP_USER_MODEL_ID
+    } else {
+        win::POWERSHELL_APP_ID
+    };
+    let xml = win::toast_xml(title, body, &win::encode_launch(identifier, payload));
     let spawned = std::thread::Builder::new()
         .name("notification".into())
         .spawn(move || {
             done(
-                notification
-                    .show()
-                    .map(drop)
+                win::show(app_id, &xml, !installed)
                     .map_err(|err| NotificationError::Post(err.to_string())),
             )
         });
@@ -573,9 +793,31 @@ pub fn show(
     }
 }
 
-/// Clicks arrive as a second launch (see [`show`]), not here.
+/// Clicks come from the toast activator (see [`serve_activator`]) or, for a
+/// build that is not installed, from the toast's own event; the ones that
+/// arrived before `handler` was installed are delivered now.
 #[cfg(windows)]
-pub fn install_click_handler(_handler: impl Fn(NotificationClick) + Send + Sync + 'static) {}
+pub fn install_click_handler(handler: impl Fn(NotificationClick) + Send + Sync + 'static) {
+    let Ok(mut clicks) = win::CLICKS.lock() else {
+        return;
+    };
+    if clicks.0.is_some() {
+        return;
+    }
+    for click in clicks.1.drain(..) {
+        handler(click);
+    }
+    clicks.0 = Some(Box::new(handler));
+}
+
+/// Windows: serve the toast activator COM object (the installer registers
+/// this program as its local server) for the life of the process; a click
+/// on a toast of an exited Corvene starts this program with `-Embedding`
+/// and COM calls the activator here.
+#[cfg(windows)]
+pub fn serve_activator() {
+    win::serve();
+}
 
 /// GHD `getNotificationSettingsUrl`: System Settings › Notifications for this app.
 pub fn settings_url(bundle_id: &str) -> String {

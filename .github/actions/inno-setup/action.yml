@@ -1,0 +1,30 @@
+name: Inno Setup
+description: >
+  Installs the pinned Inno Setup (what packaging/windows/corvene.iss is
+  written for) from its GitHub release, checked against its sha256, and
+  points ISCC at its compiler. The runner image's own Inno Setup is not
+  used: its version moves with the image.
+
+runs:
+  using: composite
+  steps:
+    - name: Inno Setup
+      shell: pwsh
+      run: |
+        $version = "7.1.0"
+        $sha256 = "0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f"
+        $dir = Join-Path $env:RUNNER_TEMP "inno-setup"
+        $iscc = Join-Path $dir "ISCC.exe"
+        if (-not (Test-Path $iscc)) {
+          $tag = "is-" + $version.Replace(".", "_")
+          $url = "https://github.com/jrsoftware/issrc/releases/download/$tag/innosetup-$version-x64.exe"
+          $setup = Join-Path $env:RUNNER_TEMP "innosetup-$version.exe"
+          Invoke-WebRequest $url -OutFile $setup
+          $actual = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $sha256) { throw "innosetup-$version-x64.exe: sha256 $actual, expected $sha256" }
+          # Inno Setup's own installer: per user, no admin rights, into $dir
+          Start-Process -Wait -FilePath $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=`"$dir`""
+          if (-not (Test-Path $iscc)) { throw "Inno Setup did not install into $dir" }
+        }
+        "ISCC=$iscc" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+        "Inno Setup $((Get-Item $iscc).VersionInfo.ProductVersion) at $iscc"

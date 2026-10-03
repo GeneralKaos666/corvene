@@ -117,6 +117,18 @@ pub(crate) fn main() {
         // GHD `setAsDefaultProtocolClient` on every launch
         std::thread::spawn(corvene_platform::url_schemes::register);
     }
+    // Windows: what the installer relies on (packaging/windows/corvene.iss).
+    // The running mutex keeps the uninstaller from pulling files from under
+    // a running Corvene, the restart registration lets Setup start Corvene
+    // again after it closed it to replace its files, and the toast
+    // activator answers clicks on notifications, also ones that started
+    // this process (COM's `-Embedding`, no URL of ours).
+    #[cfg(windows)]
+    if std::env::var_os("CORVENE_DATA_DIR").is_none() {
+        corvene_platform::windows::hold_running_mutex();
+        corvene_platform::windows::register_application_restart();
+        corvene_platform::notifications::serve_activator();
+    }
     app.on_open_urls(move |urls| {
         for url in urls {
             url_sender.send(url);

@@ -99,9 +99,10 @@ fn handled_by_this_exe(scheme: &str) -> bool {
 
 /// Windows: the schemes are per-user registry keys, which the installer
 /// writes and every launch of an installed Corvene repairs (Electron's
-/// `setAsDefaultProtocolClient`). A build that is not installed (`cargo
-/// run`) only takes schemes nobody handles, so it does not take them from
-/// the installed one.
+/// `setAsDefaultProtocolClient`), as is the toast activator's
+/// `LocalServer32` (`windows::register_toast_activator`). A build that is
+/// not installed (`cargo run`) only takes schemes nobody handles, so it
+/// does not take them from the installed one.
 #[cfg(windows)]
 pub fn register() {
     // an instance with a data folder of its own (the parity harness) is not
@@ -112,9 +113,20 @@ pub fn register() {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    let installed = exe
-        .parent()
-        .is_some_and(|dir| dir.join("unins000.exe").is_file());
+    let installed = crate::windows::installed();
+    // the toast activator's server is repaired the same way (only an
+    // installed Corvene has one: the installer writes the key)
+    if installed {
+        let exe_text = exe.to_string_lossy().to_lowercase();
+        let current = crate::windows::toast_activator_server()
+            .is_some_and(|server| server.to_lowercase().contains(&exe_text));
+        if !current {
+            match crate::windows::register_toast_activator(&exe) {
+                Ok(()) => tracing::info!("registered as the toast activator"),
+                Err(err) => tracing::warn!(%err, "could not register the toast activator"),
+            }
+        }
+    }
     for scheme in crate::single_instance::SCHEMES {
         if handled_by_this_exe(scheme) {
             continue;

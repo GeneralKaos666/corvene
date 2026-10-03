@@ -160,14 +160,22 @@ fn command_line_tools_present() -> bool {
     true
 }
 
-/// Windows: `git.exe` on `%PATH%`, then where Git for Windows installs (for
-/// all users, for one user), whose installer only puts `cmd` on the path
-/// when asked to.
+/// Windows: `git.exe` on `%PATH%`, then the MinGit Corvene's installer
+/// offers when it finds none (`<app>\git\cmd\git.exe`,
+/// `packaging/windows/corvene.iss`), then where Git for Windows installs
+/// (for all users, for one user), whose installer only puts `cmd` on the
+/// path when asked to.
 #[cfg(windows)]
 fn windows_candidates() -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     if let Some(path) = std::env::var_os("PATH") {
         out.extend(std::env::split_paths(&path).map(|dir| dir.join("git.exe")));
+    }
+    if let Some(app) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    {
+        out.push(app.join("git").join("cmd").join("git.exe"));
     }
     let roots = [
         std::env::var_os("ProgramFiles").map(PathBuf::from),

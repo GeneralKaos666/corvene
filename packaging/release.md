@@ -356,14 +356,32 @@ build into `target\windows\`:
   grammar compiled in)
 
 for the architecture of the machine it runs on, or for `TARGET=<Rust
-target>`. It needs Inno Setup 6
-(`iscc.exe`; `ISCC` names it when it is not in its default folder). The
-installer (`packaging/windows/corvene.iss`) is per user and asks for no
+target>`. It needs Inno Setup 6.7 or 7 (`iscc.exe`; `ISCC` names it when it
+is not in its default folder; CI installs the pinned 7.1.0 with
+`.github/actions/inno-setup`). The installer
+(`packaging/windows/corvene.iss`) is per user and asks for no
 administrator rights: `%LOCALAPPDATA%\Programs\Corvene\corvene.exe`, the
-command line tool `bin\corvene.bat` with its folder on the user's `PATH`,
-a Start menu shortcut (whose AppUserModelID notifications are shown
-under), the `x-corvene` and `x-corvene-auth` URL schemes and an
-uninstaller.
+command line tool `bin\corvene.bat` with its folder on the user's `PATH`
+and in `App Paths` (so `corvene` works from Win+R), a Start menu shortcut
+(whose AppUserModelID notifications are shown under, and whose toast
+activator CLSID names `corvene.exe` as the COM server that gets their
+clicks, `corvene_platform::notifications`), the `x-corvene` and
+`x-corvene-auth` URL schemes and an uninstaller. The wizard follows the
+system's light or dark mode and language (Inno Setup's translations; the
+texts Corvene adds are English), needs Windows 10 1809, and offers two
+tasks: "Open in Corvene" in Explorer's folder menus (off by default) and,
+only when no `git.exe` is on the `PATH` or in Git for Windows' folders, a
+MinGit for Corvene (`packaging/windows/mingit.iss`: the release, size and
+sha256 of each architecture's zip, written by `packaging/windows/mingit.py`
+from Git for Windows' latest release; run it to move to a newer git).
+Setup downloads that zip from GitHub, checks it and unpacks it into
+`<app>\git`, where `corvene_git::detect` looks after the `PATH`.
+
+A running Corvene is closed by the Restart Manager before its files are
+replaced and started again afterwards (`RegisterApplicationRestart`,
+`corvene_platform::windows`); the uninstaller asks to close it (the
+`CorveneRunning` mutex) and leaves the settings in `%APPDATA%\Corvene`,
+removing only the app, its MinGit and `%LOCALAPPDATA%\Corvene\Cache`.
 
 A `v<version>` tag does this in release.yml's `windows` jobs, one per
 architecture and variant (x86_64 and aarch64 natively, i686 cross-compiled
@@ -373,7 +391,8 @@ the other platforms.
 
 The installers are Authenticode-signed only when there is a certificate:
 `SIGN_PFX=<file>` and `SIGN_PFX_PASSWORD` make `package.ps1` sign
-`corvene.exe` and the installer with `signtool`; in release.yml they come
+`corvene.exe` with `signtool` and hand the same command to Inno Setup as its
+Sign Tool for the installer and the uninstaller; in release.yml they come
 from the `WINDOWS_SIGNING_PFX_BASE64` (the `.pfx`, base64) and
 `WINDOWS_SIGNING_PFX_PASSWORD` repository secrets. Corvene has no
 certificate yet (one is bought from a certificate authority), so SmartScreen

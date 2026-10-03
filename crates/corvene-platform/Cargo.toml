@@ -20,14 +20,19 @@ ureq.workspace = true
 [target.'cfg(not(any(target_os = "macos", target_os = "android")))'.dependencies]
 trash = "5"
 
-# Windows: toasts through notify-rust's WinRT backend, everything else
+# Windows: toasts through WinRT (`UI_Notifications`) with a COM activator
+# for their clicks (`Win32_UI_Notifications`, `implement`), everything else
 # through the Win32 API
 [target.'cfg(windows)'.dependencies]
-notify-rust = "4"
 # Settings › Integrations' application icons
 png = "0.18"
 windows-registry = "0.6"
+# the `implement` macro's expansion names it
+windows-core = "0.62"
 windows = { version = "0.62", features = [
+    "Data_Xml_Dom",
+    "Foundation",
+    "UI_Notifications",
     "Win32_Foundation",
     "Win32_Globalization",
     "Win32_Graphics_Gdi",
@@ -36,7 +41,10 @@ windows = { version = "0.62", features = [
     "Win32_System_Com",
     "Win32_System_IO",
     "Win32_System_Pipes",
+    "Win32_System_Recovery",
+    "Win32_System_Threading",
     "Win32_UI_Accessibility",
+    "Win32_UI_Notifications",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",

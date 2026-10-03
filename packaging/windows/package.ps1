@@ -4,8 +4,8 @@
 #   target\windows\Corvene-<version>-windows-<arch>-portable.zip       no installer
 # and with FULL=1 the same as Corvene-Full-<version>-….
 #
-# Needs Inno Setup 6 (`iscc.exe` on the PATH, in its default folder, or
-# $env:ISCC) and WiX Toolset 5 (`wix` on the PATH:
+# Needs Inno Setup 6.7 or 7 (`iscc.exe` on the PATH, in its default folder,
+# or $env:ISCC) and WiX Toolset 5 (`wix` on the PATH:
 # `dotnet tool install --global wix --version 5.0.2`; without it there is no
 # .msi).
 #
@@ -19,9 +19,11 @@
 #   PACKAGE_BIN=<binary>  package that binary instead (CI's debug build)
 #   FORMATS="setup msi zip"  a subset of the packages
 #   SIGN_PFX=<file>, SIGN_PFX_PASSWORD
-#                         Authenticode-sign corvene.exe and the installers with
-#                         this certificate (signtool from the Windows SDK);
-#                         without it they are unsigned
+#                         Authenticode-sign corvene.exe, the installers and
+#                         the uninstaller with this certificate (signtool
+#                         from the Windows SDK; Inno Setup runs it as its
+#                         Sign Tool for the setup and the uninstaller);
+#                         without them they are unsigned
 #   SIGN_TIMESTAMP_URL    the timestamp server (default: DigiCert's)
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
@@ -59,19 +61,30 @@ $bin = if ($env:PACKAGE_BIN) {
 if (-not (Test-Path $bin)) { throw "no $bin" }
 
 # Authenticode: `signtool sign` from the newest Windows SDK
-function Sign-File([string]$file) {
-    if (-not $env:SIGN_PFX) { return }
+$signtool = $null
+$timestamp = if ($env:SIGN_TIMESTAMP_URL) { $env:SIGN_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
+if ($env:SIGN_PFX) {
     $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
     if (-not $signtool) {
         $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
             Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
     }
     if (-not $signtool) { throw "signtool.exe (Windows SDK) was not found" }
-    $timestamp = if ($env:SIGN_TIMESTAMP_URL) { $env:SIGN_TIMESTAMP_URL } else { "http://timestamp.digicert.com" }
+}
+function Sign-File([string]$file) {
+    if (-not $signtool) { return }
     $sign = @("sign", "/fd", "SHA256", "/f", $env:SIGN_PFX, "/tr", $timestamp, "/td", "SHA256", "/d", "Corvene")
     if ($env:SIGN_PFX_PASSWORD) { $sign += @("/p", $env:SIGN_PFX_PASSWORD) }
     & $signtool @sign $file
     if ($LASTEXITCODE -ne 0) { throw "signing $file failed" }
+}
+# the same as Inno Setup's `signtool` Sign Tool (corvene.iss: SignTool,
+# SignedUninstaller): `$q` is its quote, `$f` the file to sign
+$signArgs = @()
+if ($signtool) {
+    $command = "`$q$signtool`$q sign /fd SHA256 /f `$q$env:SIGN_PFX`$q /tr $timestamp /td SHA256 /d Corvene"
+    if ($env:SIGN_PFX_PASSWORD) { $command += " /p `$q$env:SIGN_PFX_PASSWORD`$q" }
+    $signArgs = @("/Ssigntool=$command `$f", "/DSign")
 }
 
 $stage = "$out\stage-$name-$arch"
@@ -127,17 +140,21 @@ if ("setup" -in $formats) {
     }
     if (-not $iscc) {
         $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 7\ISCC.exe",
             "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
             "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
             "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
         ) | Where-Object { Test-Path $_ } | Select-Object -First 1
     }
-    if (-not $iscc) { throw "Inno Setup 6 (iscc.exe) was not found; set ISCC to its path" }
+    if (-not $iscc) { throw "Inno Setup 6.7 or 7 (iscc.exe) was not found; set ISCC to its path" }
 
-    & $iscc /Qp "/DAppVersion=$version" "/DArch=$arch" "/DBaseName=$name" "/DStage=$stage" "/DOut=$out" packaging\windows\corvene.iss
+    # Inno Setup signs the setup and its uninstaller itself ($signArgs)
+    & $iscc /Qp "/DAppVersion=$version" "/DArch=$arch" "/DBaseName=$name" "/DStage=$stage" "/DOut=$out" @signArgs packaging\windows\corvene.iss
     if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
     $setup = "$out\$name-$version-$arch-setup.exe"
-    Sign-File $setup
+    if (-not (Test-Path $setup)) { throw "iscc wrote no $setup" }
     Get-Item $setup | Select-Object Name, Length
 }
 Remove-Item -Recurse -Force $stage

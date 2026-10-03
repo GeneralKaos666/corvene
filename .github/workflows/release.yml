@@ -452,13 +452,7 @@ jobs:
       # the full build links every grammar in
       - uses: ./.github/actions/grammar-sources
         if: matrix.variant == 'full'
-      - name: Inno Setup
-        shell: pwsh
-        run: |
-          if (-not (Get-Command iscc.exe -ErrorAction SilentlyContinue) -and
-              -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
-            choco install innosetup --no-progress -y
-          }
+      - uses: ./.github/actions/inno-setup
       # WiX 5 (MS-RL): 6 and later need the Open Source Maintenance Fee EULA
       - name: WiX Toolset
         shell: pwsh

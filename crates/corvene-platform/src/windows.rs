@@ -104,3 +104,79 @@ pub fn url_scheme_command(scheme: &str) -> Option<String> {
         .and_then(|key| key.get_string(""))
         .ok()
 }
+
+/// The CLSID of the toast activator (`notifications::serve_activator`), as
+/// the installer's Start menu shortcut carries it
+/// (`AppUserModelToastActivatorCLSID`) and `HKCU\Software\Classes\CLSID`
+/// names this program as its local server.
+pub const TOAST_ACTIVATOR_CLSID: windows::core::GUID =
+    windows::core::GUID::from_u128(0x3405A3D0_042A_4FAB_A267_FD8A6E9608CF);
+/// [`TOAST_ACTIVATOR_CLSID`] as the registry spells it.
+pub const TOAST_ACTIVATOR_CLSID_TEXT: &str = "{3405A3D0-042A-4FAB-A267-FD8A6E9608CF}";
+
+/// The mutex a running Corvene holds (`hold_running_mutex`); the uninstaller
+/// checks for it (`packaging/windows/corvene.iss`, `InitializeUninstall`).
+const RUNNING_MUTEX: windows::core::PCWSTR = windows::core::w!("CorveneRunning");
+
+/// Whether this program was put here by the installer: its uninstaller sits
+/// next to it (`packaging/windows/corvene.iss`).
+pub fn installed() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join("unins000.exe").is_file()))
+        .unwrap_or(false)
+}
+
+/// `HKCU\Software\Classes\CLSID\<activator>\LocalServer32` pointing at
+/// `exe`, as the installer writes it: a click on a toast once Corvene has
+/// exited starts this program (COM, with `-Embedding`), which answers it
+/// (`notifications::serve_activator`).
+pub fn register_toast_activator(exe: &Path) -> windows_registry::Result<()> {
+    let key = windows_registry::CURRENT_USER.create(format!(
+        "Software\\Classes\\CLSID\\{TOAST_ACTIVATOR_CLSID_TEXT}"
+    ))?;
+    key.set_string("", "Corvene notification activator")?;
+    key.create("LocalServer32")?
+        .set_string("", format!("\"{}\"", exe.display()))
+}
+
+/// The program registered as the toast activator's server, if any.
+pub fn toast_activator_server() -> Option<String> {
+    windows_registry::CURRENT_USER
+        .open(format!(
+            "Software\\Classes\\CLSID\\{TOAST_ACTIVATOR_CLSID_TEXT}\\LocalServer32"
+        ))
+        .and_then(|key| key.get_string(""))
+        .ok()
+}
+
+/// Restart Manager (`RegisterApplicationRestart`): when the installer
+/// closes a running Corvene to replace its files (`CloseApplications`), it
+/// starts it again afterwards (`RestartApplications`). Only for that: not
+/// after a crash, a hang or a reboot.
+pub fn register_application_restart() {
+    use windows::Win32::System::Recovery::{
+        RESTART_NO_CRASH, RESTART_NO_HANG, RESTART_NO_REBOOT, RegisterApplicationRestart,
+    };
+    // SAFETY: a null command line asks for a restart with no arguments
+    let registered = unsafe {
+        RegisterApplicationRestart(
+            windows::core::PCWSTR::null(),
+            RESTART_NO_CRASH | RESTART_NO_HANG | RESTART_NO_REBOOT,
+        )
+    };
+    if let Err(err) = registered {
+        tracing::warn!(%err, "could not register for a restart by the installer");
+    }
+}
+
+/// Hold the `CorveneRunning` mutex for the life of this process: the
+/// uninstaller refuses to run while it exists (its files would be in use).
+pub fn hold_running_mutex() {
+    // SAFETY: creating (or opening) a named mutex; the handle is never
+    // closed on purpose, so the mutex lives as long as the process
+    match unsafe { windows::Win32::System::Threading::CreateMutexW(None, false, RUNNING_MUTEX) } {
+        Ok(_handle) => {}
+        Err(err) => tracing::warn!(%err, "could not create the running mutex"),
+    }
+}

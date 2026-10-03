@@ -178,6 +178,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace --no-fail-fast
+      - uses: ./.github/actions/inno-setup
       # the installer, the .msi and the portable zip from a debug binary
       # (release.yml packages the release build), and the command line
       # tool's batch file
@@ -185,9 +186,6 @@ jobs:
         shell: pwsh
         run: |
           cargo build -p corvene
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
-            choco install innosetup --no-progress -y
-          }
           dotnet tool install --global wix --version 5.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
           $env:PACKAGE_BIN = "target\debug\corvene.exe"
