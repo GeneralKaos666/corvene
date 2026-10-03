@@ -91,6 +91,7 @@ pub struct ChangesVm {
     pub filter_new: bool,
     pub filter_modified: bool,
     pub filter_deleted: bool,
+    pub filter_renamed: bool,
 }
 
 pub fn changes(s: &AppState, repo: u64) -> Option<ChangesVm> {
@@ -155,6 +156,7 @@ pub fn changes(s: &AppState, repo: u64) -> Option<ChangesVm> {
         filter_new: rs.file_list_filter.new_files,
         filter_modified: rs.file_list_filter.modified,
         filter_deleted: rs.file_list_filter.deleted,
+        filter_renamed: rs.file_list_filter.renamed,
         files,
     })
 }

@@ -395,4 +395,67 @@ impl Corvene {
     pub async fn settings(&self) -> SettingsVm {
         self.loop_.query(|host| settings(host.state_ref())).await
     }
+
+    // ---- the Changes tab, continued ----
+
+    /// Toggles one of the file-list filter chips: `included`, `excluded`,
+    /// `new`, `modified`, `deleted`, `renamed`.
+    pub fn toggle_filter_option(&self, repo: u64, option: String) {
+        use corvene_core::state::FilterOption;
+        let option = match option.as_str() {
+            "included" => FilterOption::IncludedInCommit,
+            "excluded" => FilterOption::ExcludedFromCommit,
+            "new" => FilterOption::NewFiles,
+            "modified" => FilterOption::ModifiedFiles,
+            "deleted" => FilterOption::DeletedFiles,
+            "renamed" => FilterOption::RenamedFiles,
+            _ => return,
+        };
+        self.loop_
+            .post(move |host| Dispatcher::toggle_filter_option(repo, option, host));
+    }
+
+    pub fn clear_filter_options(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::clear_filter_options(repo, host));
+    }
+
+    pub fn stash_all_changes(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::stash_all_changes(repo, host));
+    }
+
+    /// Restores the branch's stash (GHD "Restore").
+    pub fn pop_stash(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::pop_stash(repo, host));
+    }
+
+    /// Drops the branch's stash (GHD "Discard").
+    pub fn drop_stash(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::drop_stash(repo, host));
+    }
+
+    pub fn ignore_files(&self, repo: u64, paths: Vec<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::ignore_files(repo, paths, host));
+    }
+
+    /// "Amend last commit": the form takes the commit's message.
+    pub fn start_amending(&self, repo: u64, sha: String) {
+        self.loop_
+            .post(move |host| Dispatcher::start_amending(repo, sha, host));
+    }
+
+    pub fn stop_amending(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::stop_amending(repo, host));
+    }
+
+    /// The diff gear menu's "Hide whitespace changes" (Changes or History).
+    pub fn set_hide_whitespace_in_diff(&self, history: bool, hide: bool) {
+        self.loop_
+            .post(move |host| Dispatcher::set_hide_whitespace_in_diff(history, hide, host));
+    }
 }
