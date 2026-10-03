@@ -8,6 +8,10 @@
 //! Deviation (`861-undo-delete-branch`): "Deleted branch" / "Restored
 //! branch" banners, with an Undo that recreates the deleted branch, are
 //! Corvene's (GHD deletes branches without a way back).
+//!
+//! Deviation (`450-banner-as-toast`): [`banner_toast_frame`] floats the
+//! banner over the bottom-right corner instead of pushing the views down
+//! (GHD `ui/app.tsx` `renderBanner` puts it in the layout flow).
 
 use corvene_core::{AvailableUpdate, Banner, Dispatcher, PackageManager};
 use gpui_kit::prelude::*;
@@ -276,6 +280,34 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
 /// install is told to `brew upgrade corvene` instead (Linux: any other
 /// package manager install is told to update with it). Always dismissable
 /// (Corvene has no prioritised updates).
+/// `450-banner-as-toast`: a banner as a card in the window's bottom-right
+/// corner, over the content. The banner's own bottom border is clipped (the
+/// card has a full border).
+pub fn banner_toast_frame(banner: impl IntoElement, cx: &App) -> impl IntoElement {
+    let t = cx.ghd();
+    div()
+        .id("banner-toast")
+        .occlude()
+        .absolute()
+        .right(SPACING_DOUBLE())
+        .bottom(SPACING_DOUBLE())
+        .w(zpx(480.))
+        .max_w(relative(0.9))
+        .rounded(BORDER_RADIUS())
+        .border_1()
+        .border_color(t.box_border)
+        .bg(t.background)
+        .overflow_hidden()
+        .shadow(vec![BoxShadow {
+            color: t.shadow,
+            offset: point(zpx(0.), zpx(2.)),
+            blur_radius: css_blur(7.),
+            spread_radius: zpx(0.),
+            inset: false,
+        }])
+        .child(div().mb(-zpx(1.)).child(banner))
+}
+
 pub fn update_banner(
     update: &AvailableUpdate,
     manager: Option<PackageManager>,

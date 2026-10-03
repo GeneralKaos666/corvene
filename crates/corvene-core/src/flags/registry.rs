@@ -2219,6 +2219,21 @@ registry! {
         ],
     },
 
+    /// Banners float over the content.
+    BANNER_AS_TOAST = 450 "banner-as-toast" {
+        title: "Banners as toasts",
+        summary: "Success, conflict and update banners appear as a card in the bottom-right \
+                  corner over the content instead of a strip under the toolbar, so the lists \
+                  and the diff don't move when one appears or goes away.",
+        ghd_behaviour: "A 30 px strip under the toolbar pushes everything down.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21433)],
+        code: &["crates/corvene-ui/src/banner.rs", "crates/corvene-ui/src/workspace.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

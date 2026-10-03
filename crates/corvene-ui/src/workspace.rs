@@ -16,7 +16,7 @@ use gpui_kit::component::resizable::{
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::banner::{banner_bar, update_banner};
+use crate::banner::{banner_bar, banner_toast_frame, update_banner};
 use crate::branch_list::BranchFoldout;
 use crate::changes::ChangesSidebar;
 use crate::ci_check_popover::CiCheckPopover;
@@ -1144,6 +1144,11 @@ impl Render for Workspace {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::EXTRA_ZOOM_INPUTS);
+        let banner_toast = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::BANNER_AS_TOAST);
         div()
             .id("workspace")
             .key_context(key_context)
@@ -1168,15 +1173,18 @@ impl Render for Workspace {
             .when(!bare, |d| {
                 d.child(toolbar(buttons, &self.toolbar_resize, cx))
             })
-            .when(self.welcome.is_none(), |d| {
+            .when(self.welcome.is_none() && !banner_toast, |d| {
                 d.when_some(banner.as_ref(), |d, banner| d.child(banner_bar(banner, cx)))
             })
             // GHD shows the update banner only while no other banner is up
-            .when(self.welcome.is_none() && banner.is_none(), |d| {
-                d.when_some(update_available.as_ref(), |d, (update, manager)| {
-                    d.child(update_banner(update, *manager, cx))
-                })
-            })
+            .when(
+                self.welcome.is_none() && banner.is_none() && !banner_toast,
+                |d| {
+                    d.when_some(update_available.as_ref(), |d, (update, manager)| {
+                        d.child(update_banner(update, *manager, cx))
+                    })
+                },
+            )
             .when(self.welcome.is_none(), |d| {
                 d.child(if let Some(clone) = cloning.as_ref() {
                     div()
@@ -1234,6 +1242,17 @@ impl Render for Workspace {
             })
             .when(bare && cfg!(target_os = "macos"), |d| {
                 d.child(light_title_bar())
+            })
+            // `450-banner-as-toast`: over the content, under the foldouts
+            .when(self.welcome.is_none() && banner_toast, |d| {
+                d.when_some(banner.as_ref(), |d, banner| {
+                    d.child(banner_toast_frame(banner_bar(banner, cx), cx))
+                })
+                .when(banner.is_none(), |d| {
+                    d.when_some(update_available.as_ref(), |d, (update, manager)| {
+                        d.child(banner_toast_frame(update_banner(update, *manager, cx), cx))
+                    })
+                })
             })
             .when_some(foldout, |d, foldout| {
                 // the worktree button sits between the repository and branch buttons
