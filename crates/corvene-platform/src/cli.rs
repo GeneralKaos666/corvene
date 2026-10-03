@@ -64,6 +64,48 @@ pub const NOT_PACKAGED: &str = if cfg!(target_os = "macos") {
     "The command line tool is only available when Corvene runs from its package (.deb or AppImage)."
 };
 
+/// The command line tool's `corvene add <path>` (Corvene, flag
+/// `417-cli-add-repository`) proves it came from this user's shell, not a
+/// web page: it writes `path` into a fresh `mktemp` file
+/// `$TMPDIR/corvene-add.<token>` and sends `<token>` in the URL. The file
+/// counts when it holds exactly `path`, is a regular file private to the
+/// user who owns the home folder (mode 0600), and is under five minutes old;
+/// it is removed either way. Windows has no such tool yet: never.
+pub fn take_add_token(token: &str, path: &Path) -> bool {
+    if token.is_empty() || !token.bytes().all(|b| b.is_ascii_alphanumeric()) {
+        return false;
+    }
+    let file = std::env::temp_dir().join(format!("corvene-add.{token}"));
+    let valid = add_token_valid(&file, path);
+    let _ = std::fs::remove_file(&file);
+    valid
+}
+
+#[cfg(unix)]
+fn add_token_valid(file: &Path, path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = std::fs::symlink_metadata(file) else {
+        return false;
+    };
+    let owner = dirs::home_dir().and_then(|home| std::fs::metadata(home).ok());
+    let fresh = meta
+        .modified()
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .is_some_and(|age| age < std::time::Duration::from_secs(5 * 60));
+    meta.file_type().is_file()
+        && owner.is_some_and(|home| home.uid() == meta.uid())
+        && meta.mode() & 0o077 == 0
+        && fresh
+        && std::fs::read_to_string(file)
+            .is_ok_and(|text| Path::new(text.trim_end_matches('\n')) == path)
+}
+
+#[cfg(not(unix))]
+fn add_token_valid(_file: &Path, _path: &Path) -> bool {
+    false
+}
+
 /// `installCLI`: nothing to do when the link already points at `packaged`.
 pub fn install(packaged: &Path, installed: &Path) -> Result<(), String> {
     if std::fs::read_link(installed).is_ok_and(|target| target == packaged) {
@@ -144,6 +186,28 @@ fn symlink_as_admin(packaged: &Path, installed: &Path) -> Result<(), String> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn add_tokens_need_the_private_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = Path::new("/some/repo");
+        let token = format!("t{}x", std::process::id());
+        let file = std::env::temp_dir().join(format!("corvene-add.{token}"));
+        std::fs::write(&file, "/some/repo").expect("token file");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("mode");
+        assert!(take_add_token(&token, path));
+        // used up
+        assert!(!take_add_token(&token, path));
+        // another path, a readable file, a malformed token
+        std::fs::write(&file, "/other").expect("token file");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("mode");
+        assert!(!take_add_token(&token, path));
+        std::fs::write(&file, "/some/repo").expect("token file");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("mode");
+        assert!(!take_add_token(&token, path));
+        assert!(!take_add_token("../x", path));
+        assert!(!take_add_token("", path));
+    }
 
     #[test]
     #[cfg(unix)]

@@ -2114,6 +2114,28 @@ registry! {
         code: &["crates/corvene-core/src/app_url.rs", "packaging/corvene.sh", "packaging/linux/corvene.sh"],
     },
 
+    /// The command line tool adds a repository without the dialog.
+    CLI_ADD_REPOSITORY = 417 "cli-add-repository" {
+        title: "Add repositories from the command line",
+        summary: "corvene add [path] (macOS and Linux command line tool) adds the repository \
+                  containing the path without the Add Local Repository dialog, or says it is not \
+                  a Git repository. The request carries a token only the user's own shell can \
+                  create, so x-corvene:// links from elsewhere still ask first.",
+        ghd_behaviour: "The command line tool can only open a path; one Corvene doesn't list yet \
+                        shows the Add Local Repository dialog.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(21260)],
+        code: &[
+            "crates/corvene-core/src/app_url.rs",
+            "crates/corvene-platform/src/cli.rs",
+            "packaging/corvene.sh",
+            "packaging/linux/corvene.sh",
+        ],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

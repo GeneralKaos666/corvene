@@ -6,6 +6,9 @@
 #   corvene clone [-b branch] <url>    clone the repository by url or
 #                                      owner/name (ex torvalds/linux),
 #                                      optionally checking out the branch
+#   corvene add [path]                 add the repository at the path
+#                                      without the Add Local Repository
+#                                      dialog (flag 417-cli-add-repository)
 #   corvene -g|--background …          (before open or clone) leave Corvene
 #                                      in the background (flag
 #                                      277-url-background-open)
@@ -33,6 +36,7 @@ Corvene CLI usage:
   corvene clone [-b branch] <url>    Clone the repository by url or name/owner
                                      (ex torvalds/linux), optionally checking out
                                      the branch
+  corvene add [path]                 Add the repository at the path without asking
   corvene -g|--background ...        Do it without bringing Corvene forward
 USAGE
   exit "$1"
@@ -106,6 +110,19 @@ case "$1" in
       TARGET="$TARGET?branch=$(urlencode "$BRANCH")"
     fi
     send "$TARGET"
+    ;;
+  add|--add)
+    shift
+    DIR="${1:-.}"
+    if ! DIR="$(cd "$DIR" 2>/dev/null && pwd -P)"; then
+      echo "corvene: $1: no such directory" >&2
+      exit 1
+    fi
+    # a private file only this user's shell can write proves the request
+    # did not come from a web page (Corvene removes it)
+    TOKEN_FILE="$(mktemp "${TMPDIR:-/tmp}/corvene-add.XXXXXXXX")" || exit 1
+    printf '%s' "$DIR" > "$TOKEN_FILE"
+    send "x-corvene://openLocalRepo$(urlencode "$DIR")?add=${TOKEN_FILE##*/corvene-add.}"
     ;;
   *)
     if [ "$1" = "open" ]; then
