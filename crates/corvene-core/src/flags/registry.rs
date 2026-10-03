@@ -3197,6 +3197,21 @@ registry! {
         code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
     },
 
+    /// Small images are enlarged with sharp pixels.
+    PIXELATED_SMALL_IMAGES = 760 "pixelated-small-images" {
+        title: "Enlarge small images in image diffs",
+        summary: "Images under 64 pixels (pixel art, icons) are shown at a whole multiple of \
+                  their size, up to 16× and about 256 px, with sharp nearest-neighbour pixels \
+                  (still shrunk to fit the pane). The footer keeps the real size.",
+        ghd_behaviour: "Small images are drawn at their natural size, a few pixels across.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21531)],
+        code: &["crates/corvene-ui/src/image_diff.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
