@@ -41,6 +41,11 @@
 //! Deviation (`750-diff-expand-whole-file`): diffs can open with the whole
 //! file expanded (files up to 20 000 lines).
 //!
+//! Deviation (`756-typechange-diff`): a type change (e.g. a file replaced by
+//! a symbolic link) says so above the rows, and its lines can neither be
+//! selected nor expanded, since no partial patch can describe its two file
+//! sections (GHD `lib/diff-parser.ts` fails on them and keeps loading).
+//!
 //! Deviation (`740-diff-loading-indicator`): while a working-directory diff
 //! takes longer than [`LOADING_INDICATOR_DELAY`] to compute, a spinner covers
 //! the pane (GHD keeps showing the previous diff, or nothing).
@@ -86,6 +91,17 @@ const MAX_AUTO_EXPAND_LINES: usize = 20_000;
 #[allow(non_snake_case)]
 pub fn DIFF_LINE_HEIGHT() -> Pixels {
     zpx(20.)
+}
+
+/// `756-typechange-diff`: what a git file mode stands for.
+fn file_type_name(mode: &str) -> String {
+    match mode {
+        "100644" => "a regular file".to_string(),
+        "100755" => "an executable file".to_string(),
+        "120000" => "a symbolic link".to_string(),
+        "160000" => "a submodule".to_string(),
+        other => format!("mode {other}"),
+    }
 }
 
 /// Octicon + colour for a file status (`ui/octicons/status.ts`).
@@ -747,8 +763,11 @@ impl DiffView {
         self.expanded = false;
         self.show_large = false;
         self.whitespace_hint = None;
-        self.contents = snap.contents.clone();
-        self.old_contents = snap.old_contents.clone();
+        // `756-typechange-diff`: the two sides are different kinds of file,
+        // nothing to expand from (rows are highlighted on their own)
+        let whole_files = !self.locked_type_change(&snap.diff, cx);
+        self.contents = snap.contents.clone().filter(|_| whole_files);
+        self.old_contents = snap.old_contents.clone().filter(|_| whole_files);
         self.hunks = Rc::new(match snap.diff.hunks() {
             Some(hunks) => from_hunks(hunks, self.contents.as_ref().map(|c| c.len())),
             None => Vec::new(),
@@ -1056,6 +1075,17 @@ impl DiffView {
             }
             None => false,
         }
+    }
+
+    /// `756-typechange-diff`: a type change whose lines are not selectable
+    /// or expandable.
+    fn locked_type_change(&self, diff: &Diff, cx: &App) -> bool {
+        diff.warnings().is_some_and(|w| w.type_change.is_some())
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::TYPECHANGE_DIFF)
     }
 
     // ---- expansion ----
@@ -2354,6 +2384,22 @@ impl DiffView {
                 .into_any_element(),
             );
         }
+        // `756-typechange-diff`
+        if let Some((old, new)) = &warnings.type_change
+            && self.locked_type_change(&snap.diff, cx)
+        {
+            items.push(
+                paragraph(vec![
+                    format!(
+                        "This file changed from {} to {}. Its lines cannot be selected one by one.",
+                        file_type_name(old),
+                        file_type_name(new)
+                    )
+                    .into(),
+                ])
+                .into_any_element(),
+            );
+        }
         if let Some(change) = &warnings.line_endings {
             items.push(
                 paragraph(vec![
@@ -2424,7 +2470,8 @@ impl DiffView {
         // (`749-binary-diff-as-text`: the partial patch is taken without `--text`)
         let selectable = self.source == DiffSource::WorkingDirectory
             && snap.kind != FileStatusKind::Conflicted
-            && !snap.as_text;
+            && !snap.as_text
+            && !self.locked_type_change(&snap.diff, cx);
         let mut groups: BTreeMap<u32, DiffSelectionType> = BTreeMap::new();
         for row in self.rows.iter() {
             if let Some((start, len)) = row.group {

@@ -394,10 +394,20 @@ pub fn parse_unified(patch: &str) -> Diff {
     let mut total_lines = 0usize;
     let mut truncated = false;
     let (mut old_mode, mut new_mode) = (None, None);
+    // a type change prints two file sections: the deletion, then the addition
+    let (mut sections, mut deleted_mode, mut added_mode) = (0usize, None, None);
 
     for line in patch.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.starts_with("diff --git ") {
+            // the next section's headers (`--- /dev/null`) are not content
+            sections += 1;
+            if let Some(h) = current.take() {
+                hunks.push(h);
+            }
+            continue;
+        }
         if let Some((os, ol, ns, nl)) = parse_hunk_header(line) {
             if let Some(h) = current.take() {
                 hunks.push(h);
@@ -427,6 +437,10 @@ pub fn parse_unified(patch: &str) -> Diff {
                 old_mode = Some(mode.to_string());
             } else if let Some(mode) = line.strip_prefix("new mode ") {
                 new_mode = Some(mode.to_string());
+            } else if let Some(mode) = line.strip_prefix("deleted file mode ") {
+                deleted_mode = Some(mode.to_string());
+            } else if let Some(mode) = line.strip_prefix("new file mode ") {
+                added_mode = Some(mode.to_string());
             }
             continue;
         };
@@ -478,6 +492,11 @@ pub fn parse_unified(patch: &str) -> Diff {
         hunks.push(h);
     }
     let mode_change = old_mode.zip(new_mode);
+    let type_change = if sections >= 2 {
+        deleted_mode.zip(added_mode)
+    } else {
+        None
+    };
     if hunks.is_empty() && mode_change.is_none() {
         return Diff::Empty;
     }
@@ -488,6 +507,7 @@ pub fn parse_unified(patch: &str) -> Diff {
             .any(|l| has_hidden_bidi_chars(&l.text)),
         line_endings: None,
         mode_change,
+        type_change,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }
@@ -648,6 +668,41 @@ mod tests {
         };
         assert_eq!(hunks.len(), 1);
         assert!(warnings.mode_change.is_some());
+    }
+
+    #[test]
+    fn type_change_sections_are_not_content() {
+        let patch = "diff --git a/l b/l\ndeleted file mode 100644\nindex 1..0\n--- a/l\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-one\n-two\ndiff --git a/l b/l\nnew file mode 120000\nindex 0..2\n--- /dev/null\n+++ b/l\n@@ -0,0 +1 @@\n+target\n\\ No newline at end of file\n";
+        let Diff::Text { hunks, warnings } = parse_unified(patch) else {
+            panic!("text diff expected")
+        };
+        assert_eq!(hunks.len(), 2);
+        let texts: Vec<_> = hunks
+            .iter()
+            .flat_map(|h| &h.lines[1..])
+            .map(|l| (l.kind, l.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (DiffLineKind::Delete, "one"),
+                (DiffLineKind::Delete, "two"),
+                (DiffLineKind::Add, "target"),
+            ]
+        );
+        assert_eq!(hunks[1].unified_diff_start, 3);
+        assert_eq!(hunks[1].lines[1].new_line, Some(1));
+        assert_eq!(
+            warnings.type_change,
+            Some(("100644".to_string(), "120000".to_string()))
+        );
+        // one section: a plain new file is no type change
+        let Diff::Text { warnings, .. } = parse_unified(
+            "diff --git a/n b/n\nnew file mode 100644\n--- /dev/null\n+++ b/n\n@@ -0,0 +1 @@\n+a\n",
+        ) else {
+            panic!("text diff expected")
+        };
+        assert_eq!(warnings.type_change, None);
     }
 
     #[test]

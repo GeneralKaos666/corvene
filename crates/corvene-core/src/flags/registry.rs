@@ -3129,6 +3129,23 @@ registry! {
         code: &["crates/corvene-ui/src/image_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// Type changes (file to symbolic link) are parsed as two sections.
+    TYPECHANGE_DIFF = 756 "typechange-diff" {
+        title: "Type changes in the diff",
+        summary: "When a file becomes a symbolic link (or the other way round), the diff says \
+                  so above the rows and its lines can be neither selected nor expanded, since \
+                  no partial commit can describe half of such a change. (The second file \
+                  section's `---` / `+++` headers are never shown as content, flag or not.)",
+        ghd_behaviour: "The diff parser fails on the second `diff --git` line and the diff keeps \
+                        loading forever.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21975), Upstream::issue(12142)],
+        code: &["crates/corvene-git/src/diff.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

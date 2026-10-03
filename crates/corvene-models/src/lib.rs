@@ -1400,6 +1400,11 @@ pub struct DiffWarnings {
     /// `Text` diff without hunks that carries this.
     #[serde(default)]
     pub mode_change: Option<(String, String)>,
+    /// A type change (`T` in git's status, e.g. a file replaced by a symbolic
+    /// link): git prints a deletion and an addition as two `diff --git`
+    /// sections. Holds the old and new modes (`100644`, `120000`, ...).
+    #[serde(default)]
+    pub type_change: Option<(String, String)>,
 }
 
 /// GHD `IDiff` (`DiffType`).
