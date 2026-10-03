@@ -13,11 +13,14 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+use corvene_extensions::github::RepoRef;
+use corvene_extensions::importer::ImportCandidate;
 use corvene_extensions::install::{self, GrammarKind, Installed, Metadata, Resolution, Source, SourceKind, Status};
 use corvene_extensions::manifest::GrammarRef;
+use corvene_extensions::registry::{self, Candidate, Registry};
 use corvene_highlight::treesitter::{self, UserGrammar, UserLanguage};
 use corvene_highlight::user;
-use gpui_kit::App;
+use gpui_kit::{App, AsyncApp};
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -83,10 +86,77 @@ pub fn human_bytes(n: u64) -> String {
 }
 
 /// Where an extension to install comes from.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum InstallSource {
     /// a file (archive or grammar) or folder on this machine
     LocalPath(PathBuf),
+    /// an archive or grammar file at an `https://` address
+    Url(String),
+    /// a GitHub repository (optionally a folder in it)
+    GitHub(RepoRef),
+    /// a registry's extension
+    Registry(Candidate),
+    /// an extension of an editor installed on this machine
+    Import(ImportCandidate),
+}
+
+impl InstallSource {
+    /// The progress / error key before the extension id is known.
+    pub fn key(&self) -> String {
+        match self {
+            InstallSource::LocalPath(path) => format!("pending:{}", path.display()),
+            InstallSource::Url(url) => format!("pending:{url}"),
+            InstallSource::GitHub(repo) => format!("pending:{}", repo.url()),
+            InstallSource::Registry(candidate) => format!("pending:{}", registry::extension_id(candidate)),
+            InstallSource::Import(candidate) => format!("pending:{}", candidate.path.display()),
+        }
+    }
+
+    /// What the pending row calls it.
+    pub fn label(&self) -> String {
+        match self {
+            InstallSource::LocalPath(path) => path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string()),
+            InstallSource::Url(url) => url
+                .rsplit('/')
+                .next()
+                .filter(|n| !n.is_empty())
+                .unwrap_or(url)
+                .to_string(),
+            InstallSource::GitHub(repo) => format!("{}/{}", repo.owner, repo.repo),
+            InstallSource::Registry(candidate) => candidate.display_name.clone(),
+            InstallSource::Import(candidate) => candidate.display_name.clone(),
+        }
+    }
+
+    /// Whether this source is downloaded.
+    pub fn is_remote(&self) -> bool {
+        matches!(self, InstallSource::Url(_) | InstallSource::GitHub(_) | InstallSource::Registry(_))
+    }
+}
+
+/// The Find tab.
+#[derive(Clone, Debug, Default)]
+pub struct SearchState {
+    pub query: String,
+    /// results of the latest search, sorted by registry then downloads
+    pub results: Vec<Candidate>,
+    pub in_flight: BTreeSet<Registry>,
+    pub errors: HashMap<Registry, String>,
+    /// bumped per search so late answers to an earlier one are dropped
+    pub generation: u64,
+    /// the search was a suffix lookup (`.foo`) rather than free text
+    pub suffix: Option<String>,
+}
+
+/// What a suffix lookup (the diff hint) found.
+#[derive(Clone, Debug, Default)]
+pub struct HintResult {
+    pub candidates: Vec<Candidate>,
+    pub in_flight: bool,
+    pub error: Option<String>,
 }
 
 /// `AppState::extensions`.
@@ -109,6 +179,15 @@ pub struct ExtensionsState {
     pub selected: Option<String>,
     /// Extension ids whose tree-sitter grammars are registered.
     pub registered_tree_sitter: BTreeSet<String>,
+    pub search: SearchState,
+    /// Import from editors: `None` until scanned.
+    pub import_candidates: Option<Vec<ImportCandidate>>,
+    pub import_scanning: bool,
+    /// Suffix → the registries' candidates (the diff hint, the Find tab).
+    pub hint_lookup: HashMap<String, HintResult>,
+    /// Extension id → the newer version a registry has.
+    pub updates: HashMap<String, Candidate>,
+    pub checking_updates: bool,
 }
 
 impl ExtensionsState {
@@ -264,23 +343,43 @@ impl Dispatcher {
         );
     }
 
-    /// Install an extension from `source`: unpack, read, convert, then
-    /// rebuild the user grammars.
+    /// Install an extension from `source`: download or copy, unpack, read,
+    /// convert, then rebuild the user grammars.
     pub fn install_extension(source: InstallSource, cx: &mut App) {
-        let key = match &source {
-            InstallSource::LocalPath(path) => format!("pending:{}", path.display()),
-        };
+        let key = source.key();
         let state = Self::state(cx);
         if state.read(cx).extensions.progress.contains_key(&key) {
             return;
         }
+        let first = if source.is_remote() {
+            ExtensionProgress::Downloading {
+                received: 0,
+                total: None,
+            }
+        } else {
+            ExtensionProgress::Unpacking
+        };
         state.update(cx, |s, cx| {
             s.extensions.errors.remove(&key);
-            s.extensions
-                .progress
-                .insert(key.clone(), ExtensionProgress::Unpacking);
+            s.extensions.progress.insert(key.clone(), first);
             cx.notify();
         });
+        let (tx, rx) = async_channel::unbounded::<ExtensionProgress>();
+        cx.spawn({
+            let state = state.clone();
+            let key = key.clone();
+            async move |cx: &mut AsyncApp| {
+                while let Ok(progress) = rx.recv().await {
+                    state.update(cx, |s, cx| {
+                        if let Some(slot) = s.extensions.progress.get_mut(&key) {
+                            *slot = progress;
+                            cx.notify();
+                        }
+                    });
+                }
+            }
+        })
+        .detach();
         let dir = extensions_dir();
         let staging = extensions_cache_dir()
             .join("downloads")
@@ -289,7 +388,10 @@ impl Dispatcher {
         spawn_bg(
             cx,
             move || {
-                let result = install_from(&for_bg, &dir, &staging);
+                let mut report = |progress: ExtensionProgress| {
+                    let _ = tx.try_send(progress);
+                };
+                let result = install_from(&for_bg, &dir, &staging, &mut report);
                 let _ = std::fs::remove_dir_all(&staging);
                 result
             },
@@ -300,6 +402,7 @@ impl Dispatcher {
                         Ok(installed) => {
                             let id = installed.metadata.id.clone();
                             s.extensions.errors.remove(&id);
+                            s.extensions.updates.remove(&id);
                             s.extensions.upsert(installed.clone());
                             // a reinstall keeps the user's switches
                             s.extensions.apply_switches();
@@ -315,6 +418,211 @@ impl Dispatcher {
                 if result.is_ok() {
                     Self::rebuild_user_syntaxes(cx);
                 }
+            },
+        );
+    }
+
+    /// Search the registries (the Find tab). Each registry answers on its
+    /// own; a later search drops the earlier one's late answers.
+    pub fn search_extensions(query: String, cx: &mut App) {
+        let query = query.trim().to_string();
+        let suffix = query
+            .strip_prefix('.')
+            .filter(|s| !s.is_empty() && !s.contains(char::is_whitespace))
+            .map(str::to_ascii_lowercase);
+        let generation = Self::state(cx).update(cx, |s, cx| {
+            s.extensions.search.generation += 1;
+            s.extensions.search.query = query.clone();
+            s.extensions.search.suffix = suffix.clone();
+            s.extensions.search.results.clear();
+            s.extensions.search.errors.clear();
+            s.extensions.search.in_flight = if query.is_empty() {
+                BTreeSet::new()
+            } else {
+                Registry::ALL.into_iter().collect()
+            };
+            cx.notify();
+            s.extensions.search.generation
+        });
+        if query.is_empty() {
+            return;
+        }
+        for registry in Registry::ALL {
+            let (query, suffix) = (query.clone(), suffix.clone());
+            spawn_bg(
+                cx,
+                move || match &suffix {
+                    Some(suffix) => registry.for_suffix(suffix),
+                    None => registry.search(&query),
+                },
+                move |result, cx| {
+                    Self::state(cx).update(cx, |s, cx| {
+                        let search = &mut s.extensions.search;
+                        if search.generation != generation {
+                            return;
+                        }
+                        search.in_flight.remove(&registry);
+                        match result {
+                            Ok(found) => {
+                                search.results.extend(found);
+                                search.results.sort_by(|a, b| {
+                                    a.registry
+                                        .cmp(&b.registry)
+                                        .then(b.downloads.cmp(&a.downloads))
+                                        .then(a.display_name.cmp(&b.display_name))
+                                });
+                            }
+                            Err(err) => {
+                                search.errors.insert(registry, err.to_string());
+                            }
+                        }
+                        cx.notify();
+                    });
+                },
+            );
+        }
+    }
+
+    /// The registries' extensions for files with `suffix` (the diff hint).
+    /// Zed's suggestion table answers at once; the others are asked.
+    pub fn lookup_extensions_for_suffix(suffix: &str, cx: &mut App) {
+        let suffix = suffix.trim_start_matches('.').to_ascii_lowercase();
+        let state = Self::state(cx);
+        if state
+            .read(cx)
+            .extensions
+            .hint_lookup
+            .get(&suffix)
+            .is_some_and(|h| h.in_flight || !h.candidates.is_empty())
+        {
+            return;
+        }
+        state.update(cx, |s, cx| {
+            s.extensions.hint_lookup.insert(
+                suffix.clone(),
+                HintResult {
+                    in_flight: true,
+                    ..Default::default()
+                },
+            );
+            cx.notify();
+        });
+        let wanted = suffix.clone();
+        spawn_bg(
+            cx,
+            move || {
+                let mut candidates = Vec::new();
+                let mut errors = Vec::new();
+                for registry in Registry::ALL {
+                    match registry.for_suffix(&wanted) {
+                        Ok(found) => candidates.extend(found),
+                        Err(err) => errors.push(format!("{}: {err}", registry.title())),
+                    }
+                }
+                candidates.sort_by(|a, b| b.downloads.cmp(&a.downloads));
+                (candidates, errors)
+            },
+            move |(candidates, errors), cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.extensions.hint_lookup.insert(
+                        suffix,
+                        HintResult {
+                            candidates,
+                            in_flight: false,
+                            error: (!errors.is_empty()).then(|| errors.join("; ")),
+                        },
+                    );
+                    cx.notify();
+                });
+            },
+        );
+    }
+
+    /// Scan the editors installed on this machine for grammar extensions
+    /// (the Import tab).
+    pub fn scan_installed_editors(cx: &mut App) {
+        let state = Self::state(cx);
+        if state.read(cx).extensions.import_scanning {
+            return;
+        }
+        state.update(cx, |s, cx| {
+            s.extensions.import_scanning = true;
+            cx.notify();
+        });
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        spawn_bg(
+            cx,
+            move || corvene_extensions::importer::scan(&home),
+            |found, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.extensions.import_scanning = false;
+                    s.extensions.import_candidates = Some(found);
+                    cx.notify();
+                });
+            },
+        );
+    }
+
+    /// Ask each registry-installed extension's registry for a newer version.
+    pub fn check_extension_updates(cx: &mut App) {
+        let state = Self::state(cx);
+        if state.read(cx).extensions.checking_updates {
+            return;
+        }
+        let targets: Vec<(String, Registry, String, Option<String>)> = state
+            .read(cx)
+            .extensions
+            .installed
+            .iter()
+            .filter_map(|i| {
+                let md = &i.metadata;
+                let registry = match md.source.kind {
+                    SourceKind::OpenVsx => Registry::OpenVsx,
+                    SourceKind::Zed => Registry::Zed,
+                    SourceKind::Pulsar => Registry::Pulsar,
+                    _ => return None,
+                };
+                let registry_id = md.source.registry_id.clone()?;
+                Some((md.id.clone(), registry, registry_id, md.version.clone()))
+            })
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        state.update(cx, |s, cx| {
+            s.extensions.checking_updates = true;
+            cx.notify();
+        });
+        spawn_bg(
+            cx,
+            move || {
+                let mut newer = Vec::new();
+                for (id, registry, registry_id, version) in targets {
+                    let latest = match registry {
+                        Registry::OpenVsx => registry::openvsx::latest(&registry_id),
+                        Registry::Zed => registry::zed::latest(&registry_id),
+                        Registry::Pulsar => registry::pulsar::latest(&registry_id),
+                    };
+                    match latest {
+                        Ok(Some(candidate)) if candidate.version.is_some() && candidate.version != version => {
+                            newer.push((id, candidate));
+                        }
+                        Ok(_) => {}
+                        Err(err) => warn!(%err, id, "could not check the extension for updates"),
+                    }
+                }
+                newer
+            },
+            |newer, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.extensions.checking_updates = false;
+                    for (id, candidate) in newer {
+                        s.extensions.updates.insert(id, candidate);
+                    }
+                    cx.notify();
+                });
             },
         );
     }
@@ -480,11 +788,23 @@ fn install_from(
     source: &InstallSource,
     extensions_dir: &Path,
     staging: &Path,
+    report: &mut dyn FnMut(ExtensionProgress),
 ) -> Result<Installed, corvene_extensions::ExtensionError> {
+    use corvene_extensions::{http, scan};
     std::fs::create_dir_all(staging)?;
-    let (scanned, record) = match source {
+    let limits = corvene_extensions::archive::Limits::default();
+    let mut download = |url: &str, name: &str, extra_host: Option<&str>| {
+        let dest = staging.join(name);
+        let mut progress = |received, total| {
+            report(ExtensionProgress::Downloading { received, total });
+        };
+        let downloaded = http::download(url, &dest, http::MAX_ARCHIVE_BYTES, extra_host, &mut progress)?;
+        report(ExtensionProgress::Unpacking);
+        Ok::<_, corvene_extensions::ExtensionError>((dest, downloaded))
+    };
+    let (scanned, record, id) = match source {
         InstallSource::LocalPath(path) => {
-            let scanned = corvene_extensions::scan::scan(path, staging, &Default::default())?;
+            let scanned = scan::scan(path, staging, &limits)?;
             let kind = if path.is_dir() {
                 SourceKind::LocalFolder
             } else {
@@ -498,11 +818,105 @@ fn install_from(
                 editor: None,
                 registry_id: None,
             };
-            (scanned, record)
+            let id = install::extension_id(kind, scanned.manifest.publisher.as_deref(), &scanned.manifest.name);
+            (scanned, record, id)
+        }
+        InstallSource::Url(url) => {
+            let name = url
+                .rsplit('/')
+                .next()
+                .filter(|n| !n.is_empty() && !n.contains('?'))
+                .unwrap_or("download.bin");
+            let (file, downloaded) = download(url, name, http::host_of(url).as_deref())?;
+            let scanned = scan::scan(&file, staging, &limits)?;
+            let record = Source {
+                kind: SourceKind::Url,
+                url: Some(url.clone()),
+                path: None,
+                sha256: Some(downloaded.sha256),
+                editor: None,
+                registry_id: None,
+            };
+            let id = install::extension_id(SourceKind::Url, scanned.manifest.publisher.as_deref(), &scanned.manifest.name);
+            (scanned, record, id)
+        }
+        InstallSource::GitHub(repo) => {
+            let (file, downloaded) = download(&repo.tarball_url(), "repository.tar.gz", None)?;
+            let unpacked = staging.join("unpacked");
+            corvene_extensions::archive::extract(&file, &unpacked, &limits)?;
+            // codeload wraps the tree in `<repo>-<ref>/`
+            let top = std::fs::read_dir(&unpacked)?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .find(|p| p.is_dir())
+                .unwrap_or(unpacked);
+            let root = match &repo.path {
+                Some(path) => top.join(path),
+                None => top,
+            };
+            if !root.is_dir() {
+                return Err(corvene_extensions::ExtensionError::NotAnExtension(format!(
+                    "{} has no folder {}",
+                    repo.url(),
+                    repo.path.as_deref().unwrap_or("")
+                )));
+            }
+            let mut scanned = scan::scan_dir(&root)?;
+            if scanned.root == root && scanned.manifest.name == root.file_name().and_then(|n| n.to_str()).unwrap_or("") {
+                scanned.manifest.name = repo.id_parts().1;
+            }
+            if scanned.manifest.repository.is_none() {
+                scanned.manifest.repository = Some(repo.url());
+            }
+            let record = Source {
+                kind: SourceKind::GitHub,
+                url: Some(repo.url()),
+                path: repo.path.clone(),
+                sha256: Some(downloaded.sha256),
+                editor: None,
+                registry_id: Some(format!("{}/{}@{}", repo.owner, repo.repo, repo.reference)),
+            };
+            let (owner, name) = repo.id_parts();
+            let id = install::extension_id(SourceKind::GitHub, Some(&owner), &name);
+            (scanned, record, id)
+        }
+        InstallSource::Registry(candidate) => {
+            let (file, downloaded) = download(&candidate.download_url, "extension.archive", None)?;
+            let mut scanned = scan::scan(&file, staging, &limits)?;
+            if scanned.manifest.version.is_none() {
+                scanned.manifest.version = candidate.version.clone();
+            }
+            if scanned.manifest.repository.is_none() {
+                scanned.manifest.repository = candidate.repository.clone();
+            }
+            if scanned.manifest.display_name.is_none() {
+                scanned.manifest.display_name = Some(candidate.display_name.clone());
+            }
+            let record = Source {
+                kind: candidate.registry.source_kind(),
+                url: Some(downloaded.url),
+                path: None,
+                sha256: Some(downloaded.sha256),
+                editor: None,
+                registry_id: Some(candidate.id.clone()),
+            };
+            (scanned, record, registry::extension_id(candidate))
+        }
+        InstallSource::Import(candidate) => {
+            let scanned = scan::scan(&candidate.path, staging, &limits)?;
+            let record = Source {
+                kind: SourceKind::Imported,
+                url: None,
+                path: Some(candidate.path.to_string_lossy().into_owned()),
+                sha256: None,
+                editor: Some(candidate.editor.title().to_string()),
+                registry_id: None,
+            };
+            let editor = install::slug(candidate.editor.title());
+            let id = install::extension_id(SourceKind::Imported, Some(&editor), &scanned.manifest.name);
+            (scanned, record, id)
         }
     };
-    let namespace = scanned.manifest.publisher.clone();
-    let id = install::extension_id(record.kind, namespace.as_deref(), &scanned.manifest.name);
+    report(ExtensionProgress::Converting);
     let out = extensions_dir.join(&id);
     let prepared = install::prepare::prepare(&scanned, &id, record, &out, &resolve_grammar)?;
     info!(id, grammars = prepared.metadata.grammars.len(), "language extension installed");
