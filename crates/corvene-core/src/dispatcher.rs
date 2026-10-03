@@ -2412,6 +2412,30 @@ impl Dispatcher {
         .detach();
     }
 
+    /// Amend Commit…: warn about the commit's tags first (flag `819`; GHD
+    /// amends silently and the tags stay on the replaced commit).
+    pub fn request_start_amending(id: u64, sha: String, cx: &mut App) {
+        let tags = {
+            let s = Self::state(cx).read(cx);
+            s.flags
+                .bool(crate::flags::ids::WARN_UNDO_TAGGED_COMMIT)
+                .then(|| Self::commit_by_sha(id, &sha, cx).map(|c| c.tags))
+                .flatten()
+                .unwrap_or_default()
+        };
+        if tags.is_empty() {
+            return Self::start_amending(id, sha, cx);
+        }
+        Self::show_popup(
+            Popup::WarnTaggedCommitBeforeAmend {
+                repo: id,
+                sha,
+                tags,
+            },
+            cx,
+        );
+    }
+
     /// `_startAmendingRepository`: switch to Changes and load the message.
     pub fn start_amending(id: u64, sha: String, cx: &mut App) {
         let Some(commit) = Self::commit_by_sha(id, &sha, cx) else {

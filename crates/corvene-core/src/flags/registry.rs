@@ -3410,18 +3410,19 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs"],
     },
 
-    /// Undo Commit warns about the commit's tags.
+    /// Undo Commit and Amend Commit warn about the commit's tags.
     WARN_UNDO_TAGGED_COMMIT = 819 "warn-undo-tagged-commit" {
-        title: "Warn before undoing a tagged commit",
-        summary: "Undo Commit on a commit that has tags asks first: the tags would stay on a commit \
-                  that is no longer on any branch.",
-        ghd_behaviour: "Undoes silently; the tags keep pointing at the orphaned commit.",
+        title: "Warn before undoing or amending a tagged commit",
+        summary: "Undo Commit and Amend Commit on a commit that has tags ask first: the tags \
+                  would stay on a commit that is no longer on any branch.",
+        ghd_behaviour: "Undoes and amends silently; the tags keep pointing at the orphaned \
+                        commit.",
         nature: Nature::BugFix,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: ON, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(19844)],
-        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs", "crates/corvene-ui/src/changes.rs"],
+        upstream: &[Upstream::issue(19844), Upstream::issue(17737)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/history.rs"],
     },
 
     /// History › Cherry-pick Without Committing.
