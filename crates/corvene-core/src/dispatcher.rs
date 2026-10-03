@@ -2519,6 +2519,18 @@ impl Dispatcher {
         });
     }
 
+    /// `554-per-repo-editor`: the repository's own external editor (`None`:
+    /// the one in Settings).
+    pub fn set_repository_editor(id: u64, editor: Option<String>, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
+                repo.editor = editor;
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
     /// Edit the repository's persisted `tagsToPush` (`storeTagsToPush`).
     pub(crate) fn update_tags_to_push(id: u64, cx: &mut App, edit: impl FnOnce(&mut Vec<String>)) {
         Self::state(cx).update(cx, |s, cx| {

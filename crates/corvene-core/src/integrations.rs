@@ -7,6 +7,8 @@
 //! Deviation: View on GitHub also opens a non-GitHub repository's default
 //! remote as a web page (`remote_web_url`, `262-view-on-remote`); GHD
 //! disables it.
+//! Deviation: `554-per-repo-editor` opens a repository and its files in
+//! the editor its Repository Settings name, over the one in Settings.
 //! Deviation: `555-open-file-in-repository-window` opens a file inside a
 //! repository through the editor's command line tool with the repository
 //! folder, in that folder's window (GHD `launchExternalEditor` opens the
@@ -233,6 +235,9 @@ impl Dispatcher {
     pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut App) {
         let (editors, selected, custom, workspace_file, folder) = {
             let s = Self::state(cx).read(cx);
+            // `554-per-repo-editor`: the repository's own editor wins over
+            // Settings (also over a custom editor)
+            let repo_editor = s.repository_editor(&path);
             // `555-open-file-in-repository-window`: the repository holding a
             // file (the innermost one)
             let folder = s
@@ -249,11 +254,14 @@ impl Dispatcher {
                 .flatten();
             (
                 s.editors.clone(),
-                s.settings.external_editor.clone(),
+                repo_editor
+                    .clone()
+                    .or_else(|| s.settings.external_editor.clone()),
                 s.settings
                     .use_custom_editor
                     .then(|| s.settings.custom_editor.clone())
-                    .flatten(),
+                    .flatten()
+                    .filter(|_| repo_editor.is_none()),
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
                 folder,
             )

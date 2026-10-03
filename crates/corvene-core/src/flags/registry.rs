@@ -2392,6 +2392,21 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-platform/src/editors.rs"],
     },
 
+    /// An external editor per repository.
+    PER_REPO_EDITOR = 554 "per-repo-editor" {
+        title: "Editor per repository",
+        summary: "Repository Settings has an Editor tab to pick the external editor this \
+                  repository opens in (Open in External Editor, opening its files and the menus' \
+                  \"Open in …\" labels); \"Use my default editor\" keeps the one in Settings.",
+        ghd_behaviour: "One editor for every repository.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12195)],
+        code: &["crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/state.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

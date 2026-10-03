@@ -6,6 +6,8 @@
 //! global excludes file, opened in the external editor.
 //! Deviation (flag `239-line-endings-setting`): Git Config ends in a "Line
 //! endings (core.autocrlf)" select stored in the repository's own config.
+//! Deviation (flag `554-per-repo-editor`): an Editor tab picks the external
+//! editor this repository opens in.
 
 use std::rc::Rc;
 
@@ -27,13 +29,6 @@ use crate::widgets::{
     section_heading, select_button, text_box,
 };
 
-const TABS: [RepositorySettingsTab; 4] = [
-    RepositorySettingsTab::Remote,
-    RepositorySettingsTab::IgnoredFiles,
-    RepositorySettingsTab::GitConfig,
-    RepositorySettingsTab::ForkSettings,
-];
-
 pub struct RepositorySettingsDialog {
     state: Entity<AppState>,
     repo: u64,
@@ -53,6 +48,9 @@ pub struct RepositorySettingsDialog {
     /// `239-line-endings-setting`: the chosen `--local` `core.autocrlf`
     /// (`None`: the global config's).
     autocrlf: Option<&'static str>,
+    /// `554-per-repo-editor`: the editor picked on the Editor tab (`None`:
+    /// the one in Settings).
+    editor: Option<String>,
     /// `focusFirstSuitableChild`: with nothing to type into on the first tab
     /// (no remote), Save holds focus until a mouse press moves it.
     default_focus: bool,
@@ -128,6 +126,10 @@ impl RepositorySettingsDialog {
                 .map(|r| r.fork_contribution_target())
                 .unwrap_or_default(),
             autocrlf: None,
+            editor: state
+                .read(cx)
+                .repository(repo)
+                .and_then(|r| r.editor.clone()),
             default_focus: true,
         };
         this.fill(&state, window, cx);
@@ -244,6 +246,14 @@ impl RepositorySettingsDialog {
             .map(|r| r.fork_contribution_target());
         if stored_target.is_some_and(|t| t != self.fork_target) {
             Dispatcher::set_fork_contribution_target(self.repo, self.fork_target, cx);
+        }
+        let stored_editor = self
+            .state
+            .read(cx)
+            .repository(self.repo)
+            .map(|r| r.editor.clone());
+        if stored_editor.is_some_and(|e| e != self.editor) {
+            Dispatcher::set_repository_editor(self.repo, self.editor.clone(), cx);
         }
         if let Some(remote) = data.as_ref().and_then(|d| d.remote.clone()) {
             let url = self.remote_url.read(cx).value().trim().to_string();
@@ -616,6 +626,75 @@ impl RepositorySettingsDialog {
             .into_any_element()
     }
 
+    /// `554-per-repo-editor`: which external editor opens this repository.
+    fn editor_tab(&self, cx: &Context<Self>) -> AnyElement {
+        let names: Vec<String> = self
+            .state
+            .read(cx)
+            .editors
+            .iter()
+            .map(|e| e.name.clone())
+            .collect();
+        let default = {
+            let s = self.state.read(cx);
+            s.settings
+                .external_editor
+                .clone()
+                .or_else(|| s.editors.first().map(|e| e.name.clone()))
+        };
+        let mut options: Vec<SharedString> = vec![match &default {
+            Some(name) => format!("Use my default editor ({name})").into(),
+            None => "Use my default editor".into(),
+        }];
+        options.extend(names.iter().cloned().map(SharedString::from));
+        let selected = match &self.editor {
+            None => Some(0),
+            Some(name) => names.iter().position(|n| n == name).map(|i| i + 1),
+        };
+        let value = match selected {
+            Some(ix) => options[ix].clone(),
+            // chosen before, not installed now
+            None => format!("{} (not found)", self.editor.clone().unwrap_or_default()).into(),
+        };
+        let weak = cx.weak_entity();
+        let on_select: SelectHandler = Rc::new(move |ix, _, cx| {
+            let choice = ix.checked_sub(1).and_then(|i| names.get(i).cloned());
+            weak.update(cx, |this, cx| {
+                this.editor = choice;
+                cx.notify();
+            })
+            .ok();
+        });
+        div()
+            .child(labeled(
+                "External editor",
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(SPACING_HALF())
+                    .child(select_button(
+                        "repo-settings-editor",
+                        value,
+                        options,
+                        selected,
+                        false,
+                        on_select,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .text_size(FONT_SIZE_SM())
+                            .text_color(cx.ghd().text_secondary)
+                            .child(
+                                "Open in External Editor and opening this repository's files \
+                                 use this editor.",
+                            ),
+                    ),
+                cx,
+            ))
+            .into_any_element()
+    }
+
     /// `239-line-endings-setting`: the repository's `core.autocrlf`.
     fn line_endings_field(&self, cx: &Context<Self>) -> impl IntoElement {
         let selected = AUTOCRLF_CHOICES
@@ -692,10 +771,25 @@ impl Render for RepositorySettingsDialog {
             .repository(self.repo)
             .and_then(|r| r.github.as_ref())
             .is_some_and(|gh| gh.parent.is_some());
-        if self.tab == RepositorySettingsTab::ForkSettings && !is_fork {
+        // Corvene (`554-per-repo-editor`): an Editor tab last
+        let editor_tab = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::PER_REPO_EDITOR);
+        let tabs: Vec<RepositorySettingsTab> = [
+            RepositorySettingsTab::Remote,
+            RepositorySettingsTab::IgnoredFiles,
+            RepositorySettingsTab::GitConfig,
+        ]
+        .into_iter()
+        .chain(is_fork.then_some(RepositorySettingsTab::ForkSettings))
+        .chain(editor_tab.then_some(RepositorySettingsTab::Editor))
+        .collect();
+        if !tabs.contains(&self.tab) {
             self.tab = RepositorySettingsTab::Remote;
         }
-        let selected = TABS.iter().position(|t| *t == self.tab).unwrap_or(0);
+        let selected = tabs.iter().position(|t| *t == self.tab).unwrap_or(0);
         let weak = cx.weak_entity();
         let compact = crate::theme::compact(window);
         let nav = crate::tab_bar::vertical_tab_bar_sized(
@@ -722,15 +816,22 @@ impl Render for RepositorySettingsDialog {
                 label: mac_or("Fork Behavior", "Fork behavior").into(),
                 icon: Octicon::RepoForked,
             }))
+            .chain(editor_tab.then_some(VerticalTab {
+                id: "repo-settings-tab-editor",
+                label: "Editor".into(),
+                icon: Octicon::FileCode,
+            }))
             .collect(),
             selected,
             compact,
             move |ix, _, cx| {
-                weak.update(cx, |this, cx| {
-                    this.tab = TABS[ix];
-                    cx.notify();
-                })
-                .ok();
+                if let Some(tab) = tabs.get(ix).copied() {
+                    weak.update(cx, |this, cx| {
+                        this.tab = tab;
+                        cx.notify();
+                    })
+                    .ok();
+                }
             },
             cx,
         );
@@ -739,6 +840,7 @@ impl Render for RepositorySettingsDialog {
             RepositorySettingsTab::IgnoredFiles => self.ignored_files_tab(cx),
             RepositorySettingsTab::GitConfig => self.git_config_tab(window, cx),
             RepositorySettingsTab::ForkSettings => self.fork_settings_tab(cx),
+            RepositorySettingsTab::Editor => self.editor_tab(cx),
         };
         // `#repository-settings { width: 600px; .dialog-content { min-height: 305px } }`
         let content = div()

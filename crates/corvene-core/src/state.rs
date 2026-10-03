@@ -552,6 +552,8 @@ pub enum RepositorySettingsTab {
     GitConfig,
     /// "Fork Behavior" (forks with a known parent only).
     ForkSettings,
+    /// Corvene (`554-per-repo-editor`): the repository's external editor.
+    Editor,
 }
 
 /// GHD `GitConfigLocation`.
@@ -1135,6 +1137,14 @@ impl AppState {
     /// first installed one, else GHD's generic "External Editor" (lower
     /// case off macOS, as GHD's non-darwin labels).
     pub fn editor_label(&self) -> String {
+        // `554-per-repo-editor`: the selected repository's own editor
+        if let Some(name) = self
+            .selected
+            .and_then(|id| self.repository(id))
+            .and_then(|r| self.repository_editor(&r.path))
+        {
+            return name;
+        }
         if self.settings.use_custom_editor
             && let Some(custom) = &self.settings.custom_editor
         {
@@ -1182,6 +1192,22 @@ impl AppState {
             .shell
             .clone()
             .unwrap_or_else(|| corvene_platform::shells::DEFAULT_SHELL.label().to_string())
+    }
+
+    /// `554-per-repo-editor`: the installed editor chosen for the repository
+    /// holding `path` (the innermost one), if any.
+    pub fn repository_editor(&self, path: &std::path::Path) -> Option<String> {
+        if !self.flags.bool(crate::flags::ids::PER_REPO_EDITOR) {
+            return None;
+        }
+        let name = self
+            .repositories
+            .iter()
+            .filter(|r| path.starts_with(&r.path))
+            .max_by_key(|r| r.path.components().count())?
+            .editor
+            .clone()?;
+        self.editors.iter().any(|e| e.name == name).then_some(name)
     }
 
     pub fn account_for(&self, endpoint: &str) -> Option<&Account> {
