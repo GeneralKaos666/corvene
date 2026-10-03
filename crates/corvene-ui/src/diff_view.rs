@@ -26,6 +26,9 @@
 //! Deviation (`751-diff-font-size`): the rows' font size can be set (9–16 px
 //! in the 20 px rows); GHD's is fixed at 11 px.
 //!
+//! Deviation (`757-diff-line-height`): the rows' height can be set (14–32
+//! px); GHD's is fixed at 20 px.
+//!
 //! Deviation (`746-intra-line-graphemes`): intra-line ranges cover whole
 //! grapheme clusters, so a combining mark stays with its base character.
 //!
@@ -88,9 +91,24 @@ use crate::widgets::{
 /// `750-diff-expand-whole-file` leaves longer files collapsed.
 const MAX_AUTO_EXPAND_LINES: usize = 20_000;
 
+thread_local! {
+    /// `757-diff-line-height`: the rows' height in CSS px (GHD: 20), set by
+    /// the diff views as they render.
+    static LINE_HEIGHT: Cell<f32> = const { Cell::new(20.) };
+}
+
 #[allow(non_snake_case)]
 pub fn DIFF_LINE_HEIGHT() -> Pixels {
-    zpx(20.)
+    zpx(LINE_HEIGHT.with(Cell::get))
+}
+
+/// `757-diff-line-height` in CSS px: 0 keeps GHD's 20 px.
+pub fn diff_line_height_setting(cx: &App) -> Option<f32> {
+    let height = AppState::try_global(cx)?
+        .read(cx)
+        .flags
+        .number(corvene_core::flags::ids::DIFF_LINE_HEIGHT);
+    (height > 0).then(|| height.clamp(14, 32) as f32)
 }
 
 /// `756-typechange-diff`: what a git file mode stands for.
@@ -307,6 +325,8 @@ pub struct DiffView {
     text_bounds: TextBounds,
     /// The zoom factor the list's row heights were measured at.
     zoom_seen: f32,
+    /// `757-diff-line-height` as last rendered.
+    line_height_seen: f32,
     /// The rows' font size (`751-diff-font-size`; GHD's 11 px otherwise).
     text_size: Pixels,
     list_state: ListState,
@@ -377,6 +397,7 @@ impl DiffView {
             text_selection: None,
             text_bounds: Rc::new(RefCell::new(HashMap::new())),
             zoom_seen: crate::theme::sizes::zoom_factor(),
+            line_height_seen: 20.,
             text_size: FONT_SIZE_SM(),
             list_state: ListState::new(0, ListAlignment::Top, zpx(200.)),
             rows: Rc::new(Vec::new()),
@@ -2232,9 +2253,16 @@ impl Render for DiffView {
             0 => FONT_SIZE_SM(),
             size => zpx(size.clamp(9, 16) as f32),
         };
-        if self.zoom_seen != zoom || self.text_size != text_size {
+        // … and `757-diff-line-height`
+        let line_height = diff_line_height_setting(cx).unwrap_or(20.);
+        LINE_HEIGHT.with(|h| h.set(line_height));
+        if self.zoom_seen != zoom
+            || self.text_size != text_size
+            || self.line_height_seen != line_height
+        {
             self.zoom_seen = zoom;
             self.text_size = text_size;
+            self.line_height_seen = line_height;
             self.list_state.remeasure();
         }
         let loading = self.loading_overlay(cx);

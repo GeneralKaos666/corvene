@@ -3146,6 +3146,23 @@ registry! {
         code: &["crates/corvene-git/src/diff.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// The diff's row height (and the changes list's with it).
+    DIFF_LINE_HEIGHT = 757 "diff-line-height" {
+        title: "Diff line height",
+        summary: "The height of the diff's rows, 14 to 32 pixels at 100 % zoom (0 keeps \
+                  20 px), for a denser or roomier diff. The changes list's rows follow, 9 px \
+                  taller (29 px with the default).",
+        ghd_behaviour: "20 px diff rows and 29 px changes rows, changed only by zooming the \
+                        whole window.",
+        nature: Nature::Feature,
+        kind: Kind::Number { min: 0, max: 32, unit: Some("px") },
+        corvene: Value::Number(0), ghd: Value::Number(0),
+        familiar: Value::Number(0), max: Value::Number(0),
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19361), Upstream::issue(20480)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
