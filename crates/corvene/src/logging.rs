@@ -1,5 +1,8 @@
-//! tracing setup: stderr in debug builds (Android: logcat, always), daily-rolled
-//! file in ~/Library/Logs/Corvene.
+//! tracing setup: stderr in debug builds (Android: logcat, always), and GHD's
+//! daily log file in ~/Library/Logs/Corvene
+//! (`corvene_platform::desktop_file_transport`, GHD
+//! `main-process/desktop-file-transport.ts`: `<UTC date>.desktop.<channel>.log`,
+//! the newest 14 kept).
 
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -19,8 +22,9 @@ pub fn init() -> Option<WorkerGuard> {
 
     let logs_dir = corvene_platform::paths::logs_dir();
     let file_layer = std::fs::create_dir_all(&logs_dir).ok().map(|_| {
-        let appender = tracing_appender::rolling::daily(&logs_dir, "corvene.log");
-        let (writer, guard) = tracing_appender::non_blocking(appender);
+        let transport =
+            corvene_platform::desktop_file_transport::DesktopFileTransport::new(&logs_dir);
+        let (writer, guard) = tracing_appender::non_blocking(transport);
         (fmt::layer().with_ansi(false).with_writer(writer), guard)
     });
 

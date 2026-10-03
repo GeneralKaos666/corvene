@@ -4,41 +4,29 @@
 //! GitHub Desktop's `DesktopFileTransport({ logDirectory })` writes each log
 //! message to `<logDirectory>/<UTC date>.desktop.<channel>.log`, opening a
 //! new file when the date changes and keeping the newest 14
-//! (`MaxRetainedLogFiles`). Corvene's log file is set up in
-//! `crates/corvene/src/logging.rs` (`tracing_appender::rolling::daily` in
-//! `corvene_platform::paths::logs_dir()`): it lives in the binary crate,
-//! which integration tests cannot reach, and takes neither a directory nor
-//! a clock. [`DesktopFileTransport`] is a stand-in; its `info` takes the
-//! instant GitHub Desktop's cases set with `t.mock.timers`.
+//! (`MaxRetainedLogFiles`). Corvene's is
+//! `corvene_platform::desktop_file_transport::DesktopFileTransport` (the
+//! writer behind `crates/corvene/src/logging.rs`); a debug build's channel
+//! is `development`, as in GitHub Desktop's tests. The test file's
+//! `info(transport, message)` is [`Info::info`], which takes the instant
+//! GitHub Desktop's cases set with `t.mock.timers`.
 
 use std::path::Path;
 use std::time::SystemTime;
 
+use corvene_platform::desktop_file_transport::DesktopFileTransport;
 use corvene_test_support::{create_temp_directory, date_parse};
 
-/// Stand-in for GitHub Desktop's `DesktopFileTransport`
-/// (`main-process/desktop-file-transport.ts`). Replace it with the Corvene
-/// type once there is one and remove the `#[ignore]`s.
-struct DesktopFileTransport;
+/// The test file's `info(transport, message)`: log `message` at `now`
+/// (GitHub Desktop's `Date`).
+trait Info {
+    fn info(&mut self, message: &str, now: SystemTime);
+}
 
-impl DesktopFileTransport {
-    /// `new DesktopFileTransport({ logDirectory })`
-    fn new(_log_directory: &Path) -> Self {
-        unimplemented!(
-            "Corvene has no DesktopFileTransport (main-process/desktop-file-transport.ts)"
-        )
+impl Info for DesktopFileTransport {
+    fn info(&mut self, message: &str, now: SystemTime) {
+        self.log(message, now);
     }
-
-    /// The test file's `info(transport, message)`, written at `now` (GitHub
-    /// Desktop's `Date`).
-    fn info(&mut self, _message: &str, _now: SystemTime) {
-        unimplemented!(
-            "Corvene has no DesktopFileTransport (main-process/desktop-file-transport.ts)"
-        )
-    }
-
-    /// `transport.close()`
-    fn close(self) {}
 }
 
 fn read_dir_names(dir: &Path) -> Vec<String> {
@@ -53,7 +41,6 @@ const EOL: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
 // GHD: unit/desktop-file-transport-test.ts › DesktopFileTransport › creates a file on demand
 #[test]
-#[ignore = "ghd: missing: no DesktopFileTransport (main-process/desktop-file-transport.ts); logging.rs is in the binary crate and takes no directory"]
 fn creates_a_file_on_demand() {
     let d = create_temp_directory();
     let mut transport = DesktopFileTransport::new(d.path());
@@ -72,7 +59,6 @@ fn creates_a_file_on_demand() {
 
 // GHD: unit/desktop-file-transport-test.ts › DesktopFileTransport › creates a file for each day
 #[test]
-#[ignore = "ghd: missing: no DesktopFileTransport (main-process/desktop-file-transport.ts); logging.rs is in the binary crate, no injectable clock"]
 fn creates_a_file_for_each_day() {
     let d = create_temp_directory();
     let mut transport = DesktopFileTransport::new(d.path());
@@ -90,7 +76,6 @@ fn creates_a_file_for_each_day() {
 
 // GHD: unit/desktop-file-transport-test.ts › DesktopFileTransport › retains a maximum of 14 log files
 #[test]
-#[ignore = "ghd: missing: no DesktopFileTransport (main-process/desktop-file-transport.ts); logging.rs keeps every daily file, no injectable clock"]
 fn retains_a_maximum_of_14_log_files() {
     let d = create_temp_directory();
     let mut transport = DesktopFileTransport::new(d.path());

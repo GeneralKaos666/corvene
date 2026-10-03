@@ -495,7 +495,7 @@ pub(crate) fn main() {
         });
         on_menu_action(cx, move |_: &ShowInFinder, cx| {
             if let Some((_, path)) = selected_path(cx) {
-                Dispatcher::show_in_finder(&path, cx);
+                Dispatcher::show_repository(&path, cx);
             }
         });
         on_menu_action(cx, move |_: &OpenWith, cx| {
@@ -951,9 +951,17 @@ pub(crate) fn main() {
                 );
             }
         });
+        // GHD's push item emits `force-push` (and reads Force Push) whenever
+        // a force push is possible (`build-default-menu.ts`, `app.tsx#push`)
         on_menu_action(cx, move |_: &Push, cx| {
             if let Some(id) = selected(cx) {
-                Dispatcher::push(id, false, None, cx);
+                if Dispatcher::force_push_state(id, cx)
+                    != corvene_core::ForcePushState::NotAvailable
+                {
+                    Dispatcher::confirm_or_force_push(id, cx);
+                } else {
+                    Dispatcher::push(id, false, None, cx);
+                }
             }
         });
         on_menu_action(cx, move |_: &Pull, cx| {
@@ -1125,7 +1133,11 @@ fn resolve_theme_with(
 /// field in the dialog keeps the key (⌘⌫ deletes to the line start).
 fn on_menu_action<A: Action>(cx: &mut App, f: impl Fn(&A, &mut App) + 'static) {
     cx.on_action(move |action: &A, cx| {
-        if corvene_core::AppState::global(cx).read(cx).popup.is_none() {
+        if corvene_core::AppState::global(cx)
+            .read(cx)
+            .popup()
+            .is_none()
+        {
             f(action, cx)
         }
     });

@@ -15,10 +15,13 @@ pub mod apps;
 pub mod cli;
 pub mod crash_reports;
 pub mod custom_integration;
+pub mod desktop_file_transport;
 // freedesktop `.desktop` entries
 #[cfg(not(windows))]
 pub mod desktop_entry;
 pub mod editors;
+pub mod file_hash;
+pub mod file_url;
 pub mod ghd_import;
 pub mod keychain;
 pub mod locale;
