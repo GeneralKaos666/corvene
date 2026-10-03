@@ -3256,6 +3256,21 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-git/src/process.rs"],
     },
 
+    /// Highlighting for .jsonc, .slnx and MQL files.
+    MORE_HIGHLIGHT_EXTENSIONS = 764 "more-highlight-extensions" {
+        title: "Highlight more file types",
+        summary: "GitHub Desktop's highlighter also colours `.jsonc` as JSON, `.slnx` (Visual \
+                  Studio solutions) as XML and MetaQuotes `.mq4` / `.mq5` / `.mqh` sources as \
+                  C++. (The tree-sitter grammars know these extensions either way.)",
+        ghd_behaviour: "These files are not highlighted.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22663), Upstream::issue(20861)],
+        code: &["crates/corvene-highlight/src/cm/modes/mod.rs", "crates/corvene/src/main.rs", "crates/corvene-grammars/src/grammars.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

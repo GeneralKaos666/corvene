@@ -242,7 +242,7 @@ grammars! {
         aliases: [],
         injects: ["comment"];
     "cpp" ("lang-cpp") => tree_sitter_cpp::LANGUAGE,
-        extensions: ["cc", "cpp", "cxx", "c++", "hpp", "hxx", "hh", "h++", "ipp", "tpp", "inl"],
+        extensions: ["cc", "cpp", "cxx", "c++", "hpp", "hxx", "hh", "h++", "ipp", "tpp", "inl", "mq4", "mq5", "mqh"],
         filenames: [],
         first_line: "",
         aliases: ["c++"],
@@ -2073,7 +2073,7 @@ grammars! {
         aliases: [],
         injects: ["comment"];
     "xml" ("lang-xml") => tree_sitter_xml::LANGUAGE_XML,
-        extensions: ["xml", "svg", "xsd", "xslt", "xsl", "rng", "plist", "xaml", "csproj", "fsproj", "vbproj", "vcxproj", "props", "targets", "resx", "nuspec", "wsdl", "kml", "gpx", "storyboard", "xib", "entitlements"],
+        extensions: ["xml", "svg", "xsd", "xslt", "xsl", "rng", "plist", "xaml", "csproj", "fsproj", "vbproj", "vcxproj", "props", "targets", "resx", "nuspec", "wsdl", "kml", "gpx", "storyboard", "xib", "entitlements", "slnx"],
         filenames: [],
         first_line: r"^<\?xml",
         aliases: [],
