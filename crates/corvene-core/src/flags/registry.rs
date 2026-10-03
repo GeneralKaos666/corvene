@@ -3568,6 +3568,21 @@ registry! {
         code: &["crates/corvene-ui/src/no_changes.rs"],
     },
 
+    /// "Ignore with Pattern…" in the changes file menu.
+    IGNORE_CUSTOM_PATTERN = 778 "ignore-custom-pattern" {
+        title: "Ignore with a pattern",
+        summary: "A changed file's context menu has \"Ignore with Pattern…\": a small dialog \
+                  prefilled with the file's path where the pattern can be edited (`build/*.log`, \
+                  `**/tmp/`) before it is added to the repository's .gitignore.",
+        ghd_behaviour: "Only fixed choices: the file, one of its folders or its extension.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10017)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/dialogs/ignore_with_pattern.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

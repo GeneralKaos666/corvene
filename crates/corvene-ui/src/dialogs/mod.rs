@@ -17,6 +17,7 @@ mod discard_selection;
 mod flags;
 mod fork_dialogs;
 mod history_dialogs;
+mod ignore_with_pattern;
 mod import_git_config;
 mod import_github_desktop;
 mod mco_dialogs;
@@ -538,6 +539,16 @@ impl DialogHost {
             Popup::RemoveRepositories { ticked } => cx
                 .new(|cx| {
                     remove_repositories::RemoveRepositoriesDialog::new(state, *ticked, window, cx)
+                })
+                .into(),
+            Popup::IgnoreWithPattern { repo, pattern } => cx
+                .new(|cx| {
+                    ignore_with_pattern::IgnoreWithPatternDialog::new(
+                        *repo,
+                        pattern.clone(),
+                        window,
+                        cx,
+                    )
                 })
                 .into(),
             Popup::AddLicense { repo } => {

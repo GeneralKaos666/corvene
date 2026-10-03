@@ -103,6 +103,12 @@ pub enum Popup {
     AddLicense {
         repo: u64,
     },
+    /// Corvene addition (flag 778): the changes file menu's "Ignore with
+    /// Pattern…", prefilled with `pattern`.
+    IgnoreWithPattern {
+        repo: u64,
+        pattern: String,
+    },
     /// Corvene addition: crash reports left by the previous session (newest
     /// first), with "Save crash reports locally" on.
     CrashReportFound {

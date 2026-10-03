@@ -42,6 +42,8 @@
 //! - the "N changed files" row ends in a spinner while Discard Changes runs
 //!   or a status refresh is slow (`708-changes-busy-indicator`).
 //! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
+//! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
+//!   pattern before it is added to `.gitignore` (`778-ignore-custom-pattern`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -2046,6 +2048,30 @@ impl ChangesSidebar {
                 items.push(
                     MenuItem::submenu(mac_or("Ignore File In", "Ignore file in"), entries)
                         .enabled(!is_gitignore),
+                );
+            }
+            // Corvene (`778-ignore-custom-pattern`): edit the pattern first
+            if self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::IGNORE_CUSTOM_PATTERN)
+            {
+                let pattern = corvene_git::escape_gitignore_pattern(&path);
+                items.push(
+                    MenuItem::new(
+                        mac_or("Ignore with Pattern…", "Ignore with pattern…"),
+                        move |_, cx| {
+                            Dispatcher::show_popup(
+                                Popup::IgnoreWithPattern {
+                                    repo: id,
+                                    pattern: pattern.clone(),
+                                },
+                                cx,
+                            )
+                        },
+                    )
+                    .enabled(!is_gitignore),
                 );
             }
         } else {
