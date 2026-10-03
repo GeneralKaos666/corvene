@@ -8,6 +8,9 @@
 //! Deviation: while the repository is still conflicted, a new merge, rebase
 //! or update from the default branch is refused with an explanation (GHD
 //! starts it and shows git's error; `838-no-merge-while-conflicted`).
+//! Deviation: with `882-conflicts-open-as-banner`, conflicts found by an
+//! operation show the conflicts banner instead of opening the conflicts
+//! dialog (GHD `startMultiCommitOperationConflictFlow` opens the dialog).
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -805,8 +808,23 @@ impl Dispatcher {
                 their_branch: their,
             };
         });
-        Self::show_mco_popup(id, cx);
+        Self::reveal_conflicts(id, cx);
         Self::refresh_repository(id, cx);
+    }
+
+    /// Show the conflicts step of `id`'s operation: the dialog, or with
+    /// `882-conflicts-open-as-banner` the conflicts banner (as if the dialog
+    /// had been closed).
+    fn reveal_conflicts(id: u64, cx: &mut App) {
+        if Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CONFLICTS_OPEN_AS_BANNER)
+        {
+            Self::hide_conflicts(id, cx);
+        } else {
+            Self::show_mco_popup(id, cx);
+        }
     }
 
     /// `processMultiCommitOperationRebaseResult`
@@ -2503,7 +2521,7 @@ impl Dispatcher {
                 };
             });
             if !popup_open {
-                Self::show_mco_popup(id, cx);
+                Self::reveal_conflicts(id, cx);
             }
             return;
         }
@@ -2514,7 +2532,7 @@ impl Dispatcher {
             && !banner_is_conflicts
         {
             Self::set_mco_step(id, McoStep::ShowConflicts, cx);
-            Self::show_mco_popup(id, cx);
+            Self::reveal_conflicts(id, cx);
         }
     }
 }

@@ -4848,6 +4848,21 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
     },
 
+    /// Conflicts show the banner instead of opening the dialog.
+    CONFLICTS_OPEN_AS_BANNER = 882 "conflicts-open-as-banner" {
+        title: "Conflicts as a banner",
+        summary: "When a merge, rebase or cherry-pick stops on conflicts, the \"Resolve \
+                  conflicts\" banner shows instead of the conflicts dialog opening over the \
+                  window; the banner's View conflicts opens it.",
+        ghd_behaviour: "The conflicts dialog opens at once.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16702)],
+        code: &["crates/corvene-core/src/mco.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
