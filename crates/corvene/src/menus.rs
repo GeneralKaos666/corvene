@@ -30,7 +30,7 @@ pub struct MenuOptions {
     pub fetch_all: bool,
     /// Flag `414-linux-install-cli` (the item is always there on macOS).
     pub install_cli: bool,
-    /// Flag `451-undo-commit-menu-item`: Edit › Undo Last Commit, enabled
+    /// Flag `423-undo-commit-menu-item`: Edit › Undo Last Commit, enabled
     /// while the Changes tab's Undo bar shows.
     pub undo_last_commit: Option<bool>,
     /// Flags that add key bindings and their View menu items

@@ -32,7 +32,7 @@
 //! and retries once (`252-prune-stale-refs-and-retry`).
 //! Between the hourly background fetches the selected GitHub repository is
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
-//! (`294-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
+//! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
 
 use std::collections::HashMap;
@@ -1372,7 +1372,7 @@ impl Dispatcher {
     // ---- publish ----
 
     /// `_publishRepository`: create the GitHub repository, add `origin`, push.
-    /// `team_id`: flag `378-publish-team`.
+    /// `team_id`: flag `329-publish-team`.
     #[allow(clippy::too_many_arguments)]
     pub fn publish_repository(
         id: u64,
@@ -1640,7 +1640,7 @@ impl Dispatcher {
             let s = Self::state(cx).read(cx);
             let Some(id) = s.selected else { return };
             let Some(repo) = s.repository(id) else { return };
-            // `294-fetch-on-known-push`: between the hourly fetches, ask the
+            // `278-fetch-on-known-push`: between the hourly fetches, ask the
             // API whether the repository was pushed to since the last one
             let known_push = repo
                 .github
@@ -1893,7 +1893,7 @@ pub fn host_of(url: &str) -> String {
         .to_lowercase()
 }
 
-/// `294-fetch-on-known-push`: GitHub saw a push after the last fetch
+/// `278-fetch-on-known-push`: GitHub saw a push after the last fetch
 /// (`pushed_at` has a one-second resolution, so the same second counts).
 fn pushed_after_fetch(pushed_at: Option<SystemTime>, last_fetched: SystemTime) -> bool {
     pushed_at.is_some_and(|pushed| pushed + Duration::from_secs(1) > last_fetched)

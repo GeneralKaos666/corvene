@@ -18,7 +18,7 @@
 //! changes from the commit (flag `814`).
 //! A file's context menu adds "Open All Files of Commit in <editor>"
 //! (`712-open-multiple-files`). The author's name can link to their GitHub
-//! profile (`890-commit-author-links`).
+//! profile (`882-commit-author-links`).
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher, Popup, UnreachableCommitsTab};
 use gpui_kit::component::resizable::{
@@ -509,7 +509,7 @@ impl SelectedCommitView {
         let extras = s
             .flags
             .bool(corvene_core::flags::ids::COMMIT_DETAILS_EXTRAS);
-        // `891-unpublished-commit-links`: not for a commit no remote has
+        // `883-unpublished-commit-links`: not for a commit no remote has
         let unpublished = rs
             .unpublished_commits
             .as_ref()
@@ -539,7 +539,7 @@ impl SelectedCommitView {
                 .flags
                 .bool(corvene_core::flags::ids::CROSS_REPOSITORY_ISSUE_LINKS),
         };
-        // `890-commit-author-links`: the author's GitHub profile, when known
+        // `882-commit-author-links`: the author's GitHub profile, when known
         let author_url = s
             .flags
             .bool(corvene_core::flags::ids::COMMIT_AUTHOR_LINKS)
@@ -554,7 +554,7 @@ impl SelectedCommitView {
                 )?;
                 Some(corvene_github::Endpoint::from_api_base(&gh.endpoint).web(&login))
             });
-        // `889-issue-title-tooltips`
+        // `881-issue-title-tooltips`
         let issue_titles = s
             .flags
             .bool(corvene_core::flags::ids::ISSUE_TITLE_TOOLTIPS)

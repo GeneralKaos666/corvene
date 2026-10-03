@@ -4,7 +4,7 @@
 //! `org.freedesktop.appearance` `contrast` setting (GNOME's Accessibility ›
 //! High Contrast, KDE's high-contrast colour schemes).
 //!
-//! [`reduce_motion`] (`643-system-reduce-motion`) reads the system's Reduce
+//! [`reduce_motion`] (`614-system-reduce-motion`) reads the system's Reduce
 //! Motion / animation setting; Electron leaves it to the page's
 //! `prefers-reduced-motion`, which GHD's stylesheets don't use.
 #![allow(unexpected_cfgs)] // `objc` macros probe a `cargo-clippy` feature

@@ -113,7 +113,7 @@ impl Row {
         }
     }
 
-    /// `759-discard-from-text-menu`: a changed row's selection index, its
+    /// `760-discard-from-text-menu`: a changed row's selection index, its
     /// block of changes and what the block contains.
     pub fn discard_target(&self) -> Option<(u32, (u32, u32), RangeType)> {
         if !matches!(self.kind, DiffLineKind::Add | DiffLineKind::Delete) {
@@ -174,7 +174,7 @@ pub struct RowContext {
     pub text_bounds: TextBounds,
     /// `748-diff-show-whitespace`: marks spaces and tabs in the text.
     pub show_whitespace: bool,
-    /// `758-wide-hunk-handle`: the old-number column toggles the group.
+    /// `759-wide-hunk-handle`: the old-number column toggles the group.
     pub wide_hunk_handle: bool,
 }
 
@@ -1068,7 +1068,7 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         })
         .child({
             let old_number = number(row.old).border_r_1().border_color(num_border);
-            // `758-wide-hunk-handle`: the old-number column toggles the
+            // `759-wide-hunk-handle`: the old-number column toggles the
             // whole group, like the 16 px handle strip
             match row
                 .group

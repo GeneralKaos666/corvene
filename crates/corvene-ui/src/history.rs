@@ -1061,7 +1061,7 @@ impl HistorySidebar {
         let (html_url, is_head, busy, copy_items, revert_no_commit, unpushed, checkout_head) = {
             let s = self.state.read(cx);
             let rs = s.repo_states.get(&id);
-            // `891-unpublished-commit-links`: no remote has the commit, so
+            // `883-unpublished-commit-links`: no remote has the commit, so
             // there is nothing to view on GitHub
             let unpublished = rs
                 .and_then(|r| r.unpublished_commits.as_ref())

@@ -1,8 +1,8 @@
 //! Corvene additions that keep the Changes tab's work across restarts (GHD
 //! keeps it in memory only, `RepositoryStateCache`):
-//! - `776-persist-commit-drafts`: each repository's commit summary and
+//! - `766-persist-commit-drafts`: each repository's commit summary and
 //!   description, saved a moment after the last edit and cleared by a commit.
-//! - `777-persist-file-selection`: each repository's unticked files (whole
+//! - `767-persist-file-selection`: each repository's unticked files (whole
 //!   files only), unticked again by the repository's first status of the
 //!   next session.
 
@@ -69,7 +69,7 @@ pub fn apply_excluded(status: &mut WorkingDirectoryStatus, excluded: &[String]) 
     }
 }
 
-/// `777-persist-file-selection`: record `id`'s unticked files and save them
+/// `767-persist-file-selection`: record `id`'s unticked files and save them
 /// when they changed. Call after anything that ticks or unticks files.
 pub(crate) fn note_excluded(s: &mut AppState, id: u64, cx: &mut App) {
     if !s.flags.bool(crate::flags::ids::PERSIST_FILE_SELECTION) {
@@ -103,7 +103,7 @@ pub(crate) fn note_excluded(s: &mut AppState, id: u64, cx: &mut App) {
 }
 
 impl Dispatcher {
-    /// `776-persist-commit-drafts`: the commit form of `id` now holds
+    /// `766-persist-commit-drafts`: the commit form of `id` now holds
     /// `draft` (`None`: nothing typed); written after [`DRAFT_SAVE_DELAY`]
     /// without further edits.
     pub fn set_commit_draft(id: u64, draft: Option<CommitDraft>, cx: &mut App) {

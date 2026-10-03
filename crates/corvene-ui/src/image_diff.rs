@@ -18,7 +18,7 @@
 //! Deviation (`754-image-diff-alignment`): images of different sizes can
 //! share the top left corner instead of the centre.
 //!
-//! Deviation (`760-pixelated-small-images`): images under 64 px are enlarged
+//! Deviation (`761-pixelated-small-images`): images under 64 px are enlarged
 //! by a whole factor with nearest-neighbour sampling, so pixel art and icons
 //! show their pixels (GHD draws them at their natural size, tiny).
 
@@ -54,18 +54,18 @@ struct Side {
     image: Arc<Image>,
     bytes: usize,
     /// Size of `image` in pixels (`None` when the format could not be
-    /// decoded): the natural size unless `760-pixelated-small-images`
+    /// decoded): the natural size unless `761-pixelated-small-images`
     /// enlarged it.
     size: Option<(u32, u32)>,
     /// The file's own size in pixels, for the footer.
     natural: Option<(u32, u32)>,
 }
 
-/// `760-pixelated-small-images`: images whose longer side is under this are
+/// `761-pixelated-small-images`: images whose longer side is under this are
 /// enlarged.
 const SMALL_IMAGE: u32 = 64;
 
-/// `760-pixelated-small-images`: the whole factor that brings a small image's
+/// `761-pixelated-small-images`: the whole factor that brings a small image's
 /// longer side close to 256 px (at most 16×); 1 for larger images.
 fn upscale_factor((w, h): (u32, u32)) -> u32 {
     let longest = w.max(h);
@@ -100,7 +100,7 @@ impl Side {
         }
     }
 
-    /// `760-pixelated-small-images`: a small still image re-encoded at a
+    /// `761-pixelated-small-images`: a small still image re-encoded at a
     /// whole multiple of its size with nearest-neighbour sampling (GPUI
     /// would blur it when drawing it larger). GIFs keep their animation.
     fn pixelated(mut self) -> Self {

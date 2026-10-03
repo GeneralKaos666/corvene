@@ -7,9 +7,9 @@
 //! Deviation: View on GitHub also opens a non-GitHub repository's default
 //! remote as a web page (`remote_web_url`, `262-view-on-remote`); GHD
 //! disables it.
-//! Deviation: `554-per-repo-editor` opens a repository and its files in
+//! Deviation: `518-per-repo-editor` opens a repository and its files in
 //! the editor its Repository Settings name, over the one in Settings.
-//! Deviation: `555-open-file-in-repository-window` opens a file inside a
+//! Deviation: `519-open-file-in-repository-window` opens a file inside a
 //! repository through the editor's command line tool with the repository
 //! folder, in that folder's window (GHD `launchExternalEditor` opens the
 //! file alone).
@@ -38,7 +38,7 @@ pub struct PreferencesSave {
     pub name: String,
     pub email: String,
     pub default_branch: String,
-    /// `548-path-git-settings`: global `core.quotepath` / `core.longpaths`
+    /// `517-path-git-settings`: global `core.quotepath` / `core.longpaths`
     /// to write; `None` leaves them alone.
     pub quotepath: Option<bool>,
     pub longpaths: Option<bool>,
@@ -117,7 +117,7 @@ pub fn encode_component(s: &str) -> String {
 /// GHD `_openCreatePullRequestInBrowser`: `${htmlURL}/pull/new/[base...]compare`;
 /// a fork contributing to its parent prefixes both refs with `owner:name:`.
 ///
-/// Deviation (`372-fork-own-pr-target`, `own_fork_targets_itself`): a fork
+/// Deviation (`323-fork-own-pr-target`, `own_fork_targets_itself`): a fork
 /// set up for its own work names itself on both sides and falls back to its
 /// own default branch as the base. GHD leaves the refs bare, and GitHub's
 /// `pull/new` page on a fork then proposes merging into the parent.
@@ -254,10 +254,10 @@ impl Dispatcher {
     pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut App) {
         let (editors, selected, custom, workspace_file, folder, folder_as_workspace) = {
             let s = Self::state(cx).read(cx);
-            // `554-per-repo-editor`: the repository's own editor wins over
+            // `518-per-repo-editor`: the repository's own editor wins over
             // Settings (also over a custom editor)
             let repo_editor = s.repository_editor(&path);
-            // `555-open-file-in-repository-window`: the repository holding a
+            // `519-open-file-in-repository-window`: the repository holding a
             // file (the innermost one)
             let folder = s
                 .flags

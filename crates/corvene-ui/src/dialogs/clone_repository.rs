@@ -36,7 +36,7 @@
 //! Deviation (`226-clone-prefers-ssh`): repositories picked from the list
 //! and `owner/name` shorthands can clone over SSH.
 //!
-//! Deviation (`379-clone-path-validation`): the local path expands a leading
+//! Deviation (`330-clone-path-validation`): the local path expands a leading
 //! `~/`, must be absolute, and a missing folder must be creatable (its
 //! nearest existing parent is a writable folder); GHD only checks that the
 //! path is not a non-empty folder, so `~/x` clones into a folder named `~`
@@ -429,7 +429,7 @@ impl CloneRepositoryDialog {
         if path.is_empty() {
             return None;
         }
-        // `379-clone-path-validation`: `~/` means the home folder
+        // `330-clone-path-validation`: `~/` means the home folder
         if self
             .state
             .read(cx)
@@ -884,7 +884,7 @@ fn validate_empty_folder(path: &Path) -> Option<&'static str> {
     }
 }
 
-/// `379-clone-path-validation`: a leading `~` or `~/` is the home folder.
+/// `330-clone-path-validation`: a leading `~` or `~/` is the home folder.
 fn expand_home(raw: &str, home: &Path) -> PathBuf {
     let rest = raw
         .strip_prefix("~/")
@@ -896,7 +896,7 @@ fn expand_home(raw: &str, home: &Path) -> PathBuf {
     }
 }
 
-/// `379-clone-path-validation`: the expanded path and what is wrong with it:
+/// `330-clone-path-validation`: the expanded path and what is wrong with it:
 /// relative, a non-empty folder or a file (`validateEmptyFolder`), or a
 /// missing folder whose nearest existing parent is a file or not writable.
 fn validate_clone_path(raw: &str, home: &Path) -> (PathBuf, Option<&'static str>) {

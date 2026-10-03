@@ -22,7 +22,7 @@
 //! sends that URL so an already running Corvene receives it. With flag
 //! `exact-repository-url-first`, `openRepo` prefers the repository that is
 //! the URL over a fork matching through its parent (`doesRepositoryMatchUrl`
-//! callers take the first match). With `277-url-background-open`, an
+//! callers take the first match). With `416-url-background-open`, an
 //! `openRepo` / `openLocalRepo` URL carrying `background=1` (the CLI's
 //! `--background`) does not bring the window forward.
 
@@ -216,7 +216,7 @@ pub fn parse_app_url(url: &str) -> UrlAction {
     }
 }
 
-/// Corvene (`277-url-background-open`): an `openRepo` / `openLocalRepo` URL
+/// Corvene (`416-url-background-open`): an `openRepo` / `openLocalRepo` URL
 /// asking to stay in the background (`?background=1` or `true`).
 pub fn opens_in_background(url: &str) -> bool {
     let Some((_, rest)) = url.split_once("://") else {
@@ -297,7 +297,7 @@ impl AppUrlInbox {
 impl Dispatcher {
     /// Handle every URL queued in `inbox` (`app.on('open-url')`);
     /// `focus_window` shows the (possibly hidden) window first, unless the
-    /// URL opens in the background (`277-url-background-open`).
+    /// URL opens in the background (`416-url-background-open`).
     pub fn listen_for_app_urls(
         inbox: AppUrlInbox,
         focus_window: impl Fn(&mut App) + 'static,

@@ -27,23 +27,23 @@
 //! Deviation (`751-diff-font-size`): the rows' font size can be set (9–16 px
 //! in the 20 px rows); GHD's is fixed at 11 px.
 //!
-//! Deviation (`758-wide-hunk-handle`): in the unified diff the whole
+//! Deviation (`759-wide-hunk-handle`): in the unified diff the whole
 //! old-line-number column can act as the hunk handle (GHD: only the 16 px
 //! strip; the new-number column keeps selecting single lines).
 //!
-//! Deviation (`759-discard-from-text-menu`): right-clicking a changed line's
+//! Deviation (`760-discard-from-text-menu`): right-clicking a changed line's
 //! text in the Changes tab adds the gutter's "Discard … Line" items (for the
 //! line and for its block).
 //!
-//! Deviation (`761-too-large-diff-escape-hatch`): a working-directory diff
+//! Deviation (`762-too-large-diff-escape-hatch`): a working-directory diff
 //! too large to show offers "Open in external diff tool" (with `diff.tool`
 //! configured) and "Open file in <Editor>" (GHD `ui/diff/index.tsx` only says
 //! it is too large).
 //!
-//! Deviation (`762-diff-header-mtime`): the Changes diff header can show
+//! Deviation (`763-diff-header-mtime`): the Changes diff header can show
 //! when the working file was last modified (GHD's has the path only).
 //!
-//! Deviation (`757-diff-line-height`): the rows' height can be set (14–32
+//! Deviation (`758-diff-line-height`): the rows' height can be set (14–32
 //! px); GHD's is fixed at 20 px.
 //!
 //! Deviation (`746-intra-line-graphemes`): intra-line ranges cover whole
@@ -61,7 +61,7 @@
 //! Deviation (`750-diff-expand-whole-file`): diffs can open with the whole
 //! file expanded (files up to 20 000 lines).
 //!
-//! Deviation (`756-typechange-diff`): a type change (e.g. a file replaced by
+//! Deviation (`757-typechange-diff`): a type change (e.g. a file replaced by
 //! a symbolic link) says so above the rows, and its lines can neither be
 //! selected nor expanded, since no partial patch can describe its two file
 //! sections (GHD `lib/diff-parser.ts` fails on them and keeps loading).
@@ -109,7 +109,7 @@ use crate::widgets::{
 const MAX_AUTO_EXPAND_LINES: usize = 20_000;
 
 thread_local! {
-    /// `757-diff-line-height`: the rows' height in CSS px (GHD: 20), set by
+    /// `758-diff-line-height`: the rows' height in CSS px (GHD: 20), set by
     /// the diff views as they render.
     static LINE_HEIGHT: Cell<f32> = const { Cell::new(20.) };
 }
@@ -119,7 +119,7 @@ pub fn DIFF_LINE_HEIGHT() -> Pixels {
     zpx(LINE_HEIGHT.with(Cell::get))
 }
 
-/// `757-diff-line-height` in CSS px: 0 keeps GHD's 20 px.
+/// `758-diff-line-height` in CSS px: 0 keeps GHD's 20 px.
 pub fn diff_line_height_setting(cx: &App) -> Option<f32> {
     let height = AppState::try_global(cx)?
         .read(cx)
@@ -128,7 +128,7 @@ pub fn diff_line_height_setting(cx: &App) -> Option<f32> {
     (height > 0).then(|| height.clamp(14, 32) as f32)
 }
 
-/// `756-typechange-diff`: what a git file mode stands for.
+/// `757-typechange-diff`: what a git file mode stands for.
 fn file_type_name(mode: &str) -> String {
     match mode {
         "100644" => "a regular file".to_string(),
@@ -154,7 +154,7 @@ pub fn status_icon(kind: FileStatusKind, t: &GhdTheme) -> (Octicon, Hsla) {
 
 /// `.diff-header`: path (directory dimmed), the Diff Settings gear and the
 /// status icon, 29 px. The gear toggles the popover owned by `view`.
-/// `modified` (`762-diff-header-mtime`) adds the working file's modification
+/// `modified` (`763-diff-header-mtime`) adds the working file's modification
 /// time before the gear.
 pub fn diff_header(
     path: &str,
@@ -355,7 +355,7 @@ pub struct DiffView {
     text_bounds: TextBounds,
     /// The zoom factor the list's row heights were measured at.
     zoom_seen: f32,
-    /// `757-diff-line-height` as last rendered.
+    /// `758-diff-line-height` as last rendered.
     line_height_seen: f32,
     /// The rows' font size (`751-diff-font-size`; GHD's 11 px otherwise).
     text_size: Pixels,
@@ -814,7 +814,7 @@ impl DiffView {
         self.expanded = false;
         self.show_large = false;
         self.whitespace_hint = None;
-        // `756-typechange-diff`: the two sides are different kinds of file,
+        // `757-typechange-diff`: the two sides are different kinds of file,
         // nothing to expand from (rows are highlighted on their own)
         let whole_files = !self.locked_type_change(&snap.diff, cx);
         self.contents = snap.contents.clone().filter(|_| whole_files);
@@ -1128,7 +1128,7 @@ impl DiffView {
         }
     }
 
-    /// `756-typechange-diff`: a type change whose lines are not selectable
+    /// `757-typechange-diff`: a type change whose lines are not selectable
     /// or expandable.
     fn locked_type_change(&self, diff: &Diff, cx: &App) -> bool {
         diff.warnings().is_some_and(|w| w.type_change.is_some())
@@ -1252,7 +1252,7 @@ impl DiffView {
     /// "Open in <Editor> at Line N" when the editor can jump to a line.
     /// `discard` is a changed row's selection index and block
     /// ([`Row::discard_target`](crate::diff_view_rows::Row::discard_target)):
-    /// with `759-discard-from-text-menu` the gutter's discard items follow.
+    /// with `760-discard-from-text-menu` the gutter's discard items follow.
     pub fn text_menu(
         &mut self,
         position: Point<Pixels>,
@@ -1281,7 +1281,7 @@ impl DiffView {
             items.push(MenuItem::separator());
             items.push(item);
         }
-        // `759-discard-from-text-menu`: the line, then its block
+        // `760-discard-from-text-menu`: the line, then its block
         if let Some((original, (start, len), kind)) = discard
             && self
                 .state
@@ -1788,7 +1788,7 @@ impl DiffView {
     }
 
     /// GHD `renderDiff` for an unrenderable diff. With
-    /// `761-too-large-diff-escape-hatch` a working-directory file offers its
+    /// `762-too-large-diff-escape-hatch` a working-directory file offers its
     /// configured `diff.tool` and the external editor.
     fn too_large_panel(&self, snap: &Snapshot, cx: &Context<Self>) -> AnyElement {
         const MESSAGE: &str = "The diff is too large to be displayed.";
@@ -2392,7 +2392,7 @@ impl Render for DiffView {
             0 => FONT_SIZE_SM(),
             size => zpx(size.clamp(9, 16) as f32),
         };
-        // … and `757-diff-line-height`
+        // … and `758-diff-line-height`
         let line_height = diff_line_height_setting(cx).unwrap_or(20.);
         LINE_HEIGHT.with(|h| h.set(line_height));
         if self.zoom_seen != zoom
@@ -2551,7 +2551,7 @@ impl DiffView {
                 .into_any_element(),
             );
         }
-        // `756-typechange-diff`
+        // `757-typechange-diff`
         if let Some((old, new)) = &warnings.type_change
             && self.locked_type_change(&snap.diff, cx)
         {

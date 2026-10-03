@@ -167,10 +167,10 @@ fn ghd_dialog_width(id: &str) -> Option<f32> {
     })
 }
 
-/// `449-larger-dialogs`: the dialogs whose lists grow with the window.
+/// `421-larger-dialogs`: the dialogs whose lists grow with the window.
 const LARGER_DIALOGS: &[&str] = &["dialog-conflicts"];
 
-/// `449-larger-dialogs` is on.
+/// `421-larger-dialogs` is on.
 pub fn larger_dialogs(cx: &App) -> bool {
     corvene_core::AppState::try_global(cx).is_some_and(|s| {
         s.read(cx)
@@ -179,7 +179,7 @@ pub fn larger_dialogs(cx: &App) -> bool {
     })
 }
 
-/// `449-larger-dialogs`: 80 % of the window, at most 960 px.
+/// `421-larger-dialogs`: 80 % of the window, at most 960 px.
 pub fn larger_dialog_width(viewport: Size<Pixels>) -> Pixels {
     (viewport.width * 0.8).min(zpx(960.))
 }

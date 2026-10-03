@@ -109,7 +109,7 @@ pub enum Popup {
         repo: u64,
         paths: Vec<String>,
     },
-    /// Corvene addition (flag 778): the changes file menu's "Ignore with
+    /// Corvene addition (`768-ignore-custom-pattern`): the changes file menu's "Ignore with
     /// Pattern…", prefilled with `pattern`.
     IgnoreWithPattern {
         repo: u64,
@@ -453,7 +453,7 @@ pub enum Popup {
         repo: u64,
         tab: UnreachableCommitsTab,
     },
-    /// Corvene (`446-confirm-quit-while-busy`): Quit while a clone, push,
+    /// Corvene (`418-confirm-quit-while-busy`): Quit while a clone, push,
     /// pull, fetch or update is running; `busy` says which and Cancel
     /// brings back the dialog it covered (`previous`).
     ConfirmQuit {
@@ -559,7 +559,7 @@ pub enum RepositorySettingsTab {
     GitConfig,
     /// "Fork Behavior" (forks with a known parent only).
     ForkSettings,
-    /// Corvene (`554-per-repo-editor`): the repository's external editor.
+    /// Corvene (`518-per-repo-editor`): the repository's external editor.
     Editor,
 }
 
@@ -578,9 +578,9 @@ pub struct GlobalGitConfig {
     pub name: Option<String>,
     pub email: Option<String>,
     pub default_branch: String,
-    /// `548-path-git-settings`: `core.quotepath` (git's default: on).
+    /// `517-path-git-settings`: `core.quotepath` (git's default: on).
     pub quotepath: bool,
-    /// `548-path-git-settings`: `core.longpaths` (Git for Windows; off).
+    /// `517-path-git-settings`: `core.longpaths` (Git for Windows; off).
     pub longpaths: bool,
 }
 
@@ -765,13 +765,13 @@ pub struct RepositoryState {
     /// The old side (`HEAD:<old path>`), for syntax highlighting like GHD
     /// (`fileContents.oldContents`); `None` for new files.
     pub diff_old_contents: Option<Arc<Vec<String>>>,
-    /// `761-too-large-diff-escape-hatch`: the repository's `diff.tool`, read
+    /// `762-too-large-diff-escape-hatch`: the repository's `diff.tool`, read
     /// when a diff turned out too large to show.
     pub diff_tool: Option<String>,
-    /// `762-diff-header-mtime`: the selected working-directory file's path
+    /// `763-diff-header-mtime`: the selected working-directory file's path
     /// and modification time.
     pub diff_file_modified: Option<(String, std::time::SystemTime)>,
-    /// `763-cancel-stale-diffs`: stops the working-directory diff still
+    /// `764-cancel-stale-diffs`: stops the working-directory diff still
     /// being computed when another one is asked for.
     pub diff_cancel: Option<corvene_git::CancelToken>,
     /// Most recent commit made from Corvene in this session (`UndoCommit` bar).
@@ -780,7 +780,7 @@ pub struct RepositoryState {
     /// (`HEAD..upstream`, newest first, at most [`INCOMING_COMMITS_LIMIT`]),
     /// for the Pull button's tooltip (flag `257`).
     pub incoming_commits: Vec<String>,
-    /// `891-unpublished-commit-links`: HEAD's commits no remote-tracking
+    /// `883-unpublished-commit-links`: HEAD's commits no remote-tracking
     /// branch contains (`None`: not known, or the flag is off).
     pub unpublished_commits: Option<std::collections::HashSet<String>>,
     /// Incremented after every successful commit so the form can clear itself.
@@ -889,7 +889,7 @@ pub struct RepositoryState {
     pub rewritten_selection: Vec<(String, Option<i64>)>,
     /// `changesState.conflictState`
     pub conflict_state: Option<crate::mco::ConflictState>,
-    /// `780-co-authors-from-history`: the distinct authors (name, email) of
+    /// `770-co-authors-from-history`: the distinct authors (name, email) of
     /// the newest commits, read once per session; whether that read runs.
     pub recent_authors: Option<std::sync::Arc<Vec<(String, String)>>>,
     pub recent_authors_loading: bool,
@@ -1103,11 +1103,11 @@ pub struct AppState {
     pub packs: crate::packs::PacksState,
     /// Alive subscriptions (`AliveStore`) and notification dedup state.
     pub alive: crate::alive::AliveState,
-    /// `776-persist-commit-drafts`: each repository's unfinished commit
+    /// `766-persist-commit-drafts`: each repository's unfinished commit
     /// message, and a counter that debounces writing them.
     pub commit_drafts: HashMap<u64, crate::drafts::CommitDraft>,
     pub commit_drafts_nonce: u64,
-    /// `777-persist-file-selection`: each repository's unticked files as
+    /// `767-persist-file-selection`: each repository's unticked files as
     /// saved, and the repositories whose first status already got them.
     pub excluded_files: HashMap<u64, Vec<String>>,
     pub excluded_files_restored: std::collections::HashSet<u64>,
@@ -1126,8 +1126,8 @@ impl AppState {
     }
 
     /// Where new repositories go: `Settings::clone_dir` (set in Settings ›
-    /// Advanced, `544-default-clone-location`), else GitHub Desktop's
-    /// default, outside OneDrive with `545-clone-dir-avoids-onedrive`.
+    /// Advanced, `514-default-clone-location`), else GitHub Desktop's
+    /// default, outside OneDrive with `515-clone-dir-avoids-onedrive`.
     pub fn clone_dir(&self) -> std::path::PathBuf {
         self.settings.clone_dir.clone().unwrap_or_else(|| {
             corvene_platform::paths::default_clone_dir_avoiding_onedrive(
@@ -1137,7 +1137,7 @@ impl AppState {
         })
     }
 
-    /// `446-confirm-quit-while-busy`: the running operation quitting would
+    /// `418-confirm-quit-while-busy`: the running operation quitting would
     /// cut short, if any.
     pub fn busy_for_quit(&self) -> Option<&'static str> {
         let network = self
@@ -1192,7 +1192,7 @@ impl AppState {
     /// first installed one, else GHD's generic "External Editor" (lower
     /// case off macOS, as GHD's non-darwin labels).
     pub fn editor_label(&self) -> String {
-        // `554-per-repo-editor`: the selected repository's own editor
+        // `518-per-repo-editor`: the selected repository's own editor
         if let Some(name) = self
             .selected
             .and_then(|id| self.repository(id))
@@ -1249,7 +1249,7 @@ impl AppState {
             .unwrap_or_else(|| corvene_platform::shells::DEFAULT_SHELL.label().to_string())
     }
 
-    /// `554-per-repo-editor`: the installed editor chosen for the repository
+    /// `518-per-repo-editor`: the installed editor chosen for the repository
     /// holding `path` (the innermost one), if any.
     pub fn repository_editor(&self, path: &std::path::Path) -> Option<String> {
         if !self.flags.bool(crate::flags::ids::PER_REPO_EDITOR) {

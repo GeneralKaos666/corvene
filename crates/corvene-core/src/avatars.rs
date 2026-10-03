@@ -176,7 +176,7 @@ impl Dispatcher {
     }
 }
 
-/// Corvene `121-initials-avatars`: up to two upper-case initials of an
+/// Corvene `112-initials-avatars`: up to two upper-case initials of an
 /// author name (first and last word), else of the e-mail's local part.
 pub fn initials(name: &str, email: &str) -> String {
     let words: Vec<&str> = name
@@ -206,7 +206,7 @@ pub fn initials(name: &str, email: &str) -> String {
     }
 }
 
-/// Corvene `121-initials-avatars`: a stable hue (0–359) for an e-mail.
+/// Corvene `112-initials-avatars`: a stable hue (0–359) for an e-mail.
 pub fn initials_hue(email: &str) -> u16 {
     let mut hash: u32 = 0x811c_9dc5;
     for b in email.trim().to_lowercase().bytes() {

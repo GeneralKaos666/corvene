@@ -35,7 +35,7 @@ pub struct KeymapFlags {
     pub navigation_shortcuts: bool,
     /// `801-history-review-mode`: ⌃⌘S hides History's lists.
     pub history_review_mode: bool,
-    /// `447-extra-zoom-inputs`: ⌘+ / ⇧⌘= (and the keypad's +) zoom in too.
+    /// `419-extra-zoom-inputs`: ⌘+ / ⇧⌘= (and the keypad's +) zoom in too.
     pub extra_zoom_inputs: bool,
 }
 

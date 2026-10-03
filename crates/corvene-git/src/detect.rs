@@ -83,7 +83,7 @@ pub fn find_git_prefetched() -> Result<GitBinary> {
 }
 
 /// [`find_git_prefetched`], trying `preferred` first: the git chosen with
-/// `547-git-executable`. One that is missing, can't be run or is too old is
+/// `516-git-executable`. One that is missing, can't be run or is too old is
 /// logged and skipped.
 pub fn find_git_prefetched_preferring(preferred: Option<&Path>) -> Result<GitBinary> {
     if let Some(path) = preferred {

@@ -6,7 +6,7 @@
 //! global excludes file, opened in the external editor.
 //! Deviation (flag `239-line-endings-setting`): Git Config ends in a "Line
 //! endings (core.autocrlf)" select stored in the repository's own config.
-//! Deviation (flag `554-per-repo-editor`): an Editor tab picks the external
+//! Deviation (flag `518-per-repo-editor`): an Editor tab picks the external
 //! editor this repository opens in.
 
 use std::rc::Rc;
@@ -48,7 +48,7 @@ pub struct RepositorySettingsDialog {
     /// `239-line-endings-setting`: the chosen `--local` `core.autocrlf`
     /// (`None`: the global config's).
     autocrlf: Option<&'static str>,
-    /// `554-per-repo-editor`: the editor picked on the Editor tab (`None`:
+    /// `518-per-repo-editor`: the editor picked on the Editor tab (`None`:
     /// the one in Settings).
     editor: Option<String>,
     /// `focusFirstSuitableChild`: with nothing to type into on the first tab
@@ -626,7 +626,7 @@ impl RepositorySettingsDialog {
             .into_any_element()
     }
 
-    /// `554-per-repo-editor`: which external editor opens this repository.
+    /// `518-per-repo-editor`: which external editor opens this repository.
     fn editor_tab(&self, cx: &Context<Self>) -> AnyElement {
         let names: Vec<String> = self
             .state
@@ -771,7 +771,7 @@ impl Render for RepositorySettingsDialog {
             .repository(self.repo)
             .and_then(|r| r.github.as_ref())
             .is_some_and(|gh| gh.parent.is_some());
-        // Corvene (`554-per-repo-editor`): an Editor tab last
+        // Corvene (`518-per-repo-editor`): an Editor tab last
         let editor_tab = self
             .state
             .read(cx)

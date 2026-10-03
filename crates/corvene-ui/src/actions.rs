@@ -110,7 +110,7 @@ gpui_kit::actions!(
         CreateIssue,
         AddLicense,
         RepositorySettings,
-        // Edit › Undo Last Commit (`451-undo-commit-menu-item`)
+        // Edit › Undo Last Commit (`423-undo-commit-menu-item`)
         UndoLastCommit,
         // Branch
         NewBranch,

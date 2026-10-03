@@ -16,7 +16,7 @@
 //! With flag `871-branch-name-trailing-slash-quiet` the default branch name
 //! box does not say "Will be saved as" for a lone trailing `/` or `.`
 //! (GHD `ref-name-text-box.tsx` does).
-//! With flag `544-default-clone-location` Advanced has a "Clone location"
+//! With flag `514-default-clone-location` Advanced has a "Clone location"
 //! folder picker (GHD has no setting; it remembers the last clone's parent
 //! folder, `ui/lib/default-dir.ts`).
 
@@ -121,7 +121,7 @@ pub struct PreferencesDialog {
     email_choice: Option<String>,
     /// The git config arrived and the fields were filled from it.
     git_loaded: bool,
-    /// `548-path-git-settings`: global `core.quotepath` / `core.longpaths`.
+    /// `517-path-git-settings`: global `core.quotepath` / `core.longpaths`.
     quotepath: bool,
     longpaths: bool,
     /// GHD `Notifications` state: `getNotificationsPermission()` result.
@@ -1752,7 +1752,7 @@ impl PreferencesDialog {
                 .text_size(FONT_SIZE_SM())
                 .text_color(t.text_secondary),
             )
-            // Corvene addition: `544-default-clone-location`
+            // Corvene addition: `514-default-clone-location`
             .when(clone_location, |d| d.child(self.clone_location_section(cx)))
             // Corvene addition in place of GHD's Usage section (no telemetry);
             // `501-crash-reports`
@@ -1778,7 +1778,7 @@ impl PreferencesDialog {
             .into_any_element()
     }
 
-    /// `548-path-git-settings`: global `core.quotepath` (all platforms) and
+    /// `517-path-git-settings`: global `core.quotepath` (all platforms) and
     /// `core.longpaths` (Windows) under the default branch name.
     fn path_settings(&self, cx: &Context<Self>) -> AnyElement {
         let weak = cx.weak_entity();
@@ -1816,7 +1816,7 @@ impl PreferencesDialog {
             .into_any_element()
     }
 
-    /// `544-default-clone-location`: where Clone, New Repository and the
+    /// `514-default-clone-location`: where Clone, New Repository and the
     /// tutorial put repositories (`Settings::clone_dir`), with Choose… and a
     /// way back to GitHub Desktop's `~/Documents/GitHub`.
     fn clone_location_section(&self, cx: &Context<Self>) -> AnyElement {

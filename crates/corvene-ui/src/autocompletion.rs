@@ -44,7 +44,7 @@ pub enum Hit {
     /// GHD `unknown-user`: a handle nobody in the mentionables matched
     /// (co-author input only; looked up on the API once added).
     UnknownUser(String),
-    /// Corvene (`780-co-authors-from-history`): an author of a recent
+    /// Corvene (`770-co-authors-from-history`): an author of a recent
     /// commit, offered as a co-author without a GitHub account.
     Author {
         name: String,
@@ -103,7 +103,7 @@ pub fn co_author_hits(
         .filter(|u| !exclude.iter().any(|e| e.eq_ignore_ascii_case(&u.login)))
         .map(Hit::User)
         .collect();
-    // Corvene (`780-co-authors-from-history`)
+    // Corvene (`770-co-authors-from-history`)
     let user_emails: Vec<String> = hits
         .iter()
         .filter_map(|h| match h {
@@ -125,7 +125,7 @@ pub fn co_author_hits(
     hits
 }
 
-/// Corvene (`780-co-authors-from-history`): authors of the selected
+/// Corvene (`770-co-authors-from-history`): authors of the selected
 /// repository's recent commits matching `filter`, leaving out co-author ids
 /// in `exclude` (free-form co-authors are their email), `also_exclude` and
 /// the committer (`user.email`). Starts reading the authors the first time.

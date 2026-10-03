@@ -1,4 +1,4 @@
-//! Corvene addition (flag `778-ignore-custom-pattern`, no GHD counterpart):
+//! Corvene addition (flag `768-ignore-custom-pattern`, no GHD counterpart):
 //! the changes file menu's "Ignore with Pattern…" opens this dialog,
 //! prefilled with the file's escaped path, and appends the edited pattern to
 //! the root `.gitignore` like the other Ignore items

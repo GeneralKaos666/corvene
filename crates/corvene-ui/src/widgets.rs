@@ -1189,7 +1189,7 @@ pub fn avatar_image(path: Option<std::path::PathBuf>, size: Pixels, cx: &App) ->
 }
 
 /// A commit author's avatar: the cached image, else (with
-/// `121-initials-avatars`) their initials on a colour derived from the
+/// `112-initials-avatars`) their initials on a colour derived from the
 /// e-mail, else GHD's placeholder.
 pub fn author_avatar(name: &str, email: &str, size: Pixels, cx: &App) -> AnyElement {
     let path = avatar_lookup(email, cx);

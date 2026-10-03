@@ -143,7 +143,7 @@ fn app_name(s: &str) -> Result<(), &'static str> {
     }
 }
 
-/// `547-git-executable`: empty, or an absolute or `~/` path on one line.
+/// `516-git-executable`: empty, or an absolute or `~/` path on one line.
 fn git_path(s: &str) -> Result<(), &'static str> {
     let s = s.trim();
     if s.contains(['\n', '\r']) {
@@ -473,7 +473,7 @@ registry! {
     },
 
     /// Initials instead of the grey placeholder avatar.
-    INITIALS_AVATARS = 121 "initials-avatars" {
+    INITIALS_AVATARS = 112 "initials-avatars" {
         title: "Initials for authors without an avatar",
         summary: "A commit author whose avatar is not (yet) loaded, offline for example, shows \
                   their initials on a colour that stays the same for their e-mail, in the \
@@ -1651,7 +1651,7 @@ registry! {
     },
 
     /// The background fetch also runs when GitHub saw a push.
-    FETCH_ON_KNOWN_PUSH = 294 "fetch-on-known-push" {
+    FETCH_ON_KNOWN_PUSH = 278 "fetch-on-known-push" {
         title: "Fetch when GitHub reports a push",
         summary: "Between the hourly background fetches, the selected GitHub repository is \
                   checked every five minutes and fetched as soon as GitHub says it was pushed \
@@ -1667,7 +1667,7 @@ registry! {
     },
 
     /// Trust Repository explains when git still refuses the folder.
-    EXPLAIN_TRUST_FAILURE = 295 "explain-trust-failure" {
+    EXPLAIN_TRUST_FAILURE = 279 "explain-trust-failure" {
         title: "Explain when Trust Repository does not help",
         summary: "When Trust Repository added the folder to safe.directory but Git still refuses \
                   it (network shares, WSL and UNC paths), an error explains why and shows the \
@@ -1683,7 +1683,7 @@ registry! {
     },
 
     /// Adding a repository names a stale core.worktree.
-    STALE_CORE_WORKTREE_HINT = 296 "stale-core-worktree-hint" {
+    STALE_CORE_WORKTREE_HINT = 280 "stale-core-worktree-hint" {
         title: "Name a stale core.worktree when adding",
         summary: "Adding a folder whose repository's core.worktree setting points to a folder \
                   that no longer exists stops with an explanation and the \
@@ -2009,7 +2009,7 @@ registry! {
     },
 
     /// After sign-in, say when the Git email won't link commits.
-    GIT_EMAIL_MISMATCH_BANNER = 352 "git-email-mismatch-banner" {
+    GIT_EMAIL_MISMATCH_BANNER = 322 "git-email-mismatch-banner" {
         title: "Git email check after signing in",
         summary: "Signing in to an account (outside the Welcome flow) checks the global Git \
                   email: when none is set, or it is not one of the account's addresses, a banner \
@@ -2026,7 +2026,7 @@ registry! {
     },
 
     /// A fork for its own work opens pull requests against itself.
-    FORK_OWN_PR_TARGET = 372 "fork-own-pr-target" {
+    FORK_OWN_PR_TARGET = 323 "fork-own-pr-target" {
         title: "Own-purpose forks open pull requests on themselves",
         summary: "Create Pull Request in a fork set up \"for my own purposes\" opens GitHub's \
                   compare page with the fork's default branch (or the chosen base) as the base \
@@ -2042,7 +2042,7 @@ registry! {
     },
 
     /// Full refresh of the pull request cache.
-    PULL_REQUESTS_FULL_REFRESH_HOURS = 373 "pull-requests-full-refresh-hours" {
+    PULL_REQUESTS_FULL_REFRESH_HOURS = 324 "pull-requests-full-refresh-hours" {
         title: "Pull requests: full refresh interval",
         summary: "Every this many hours, and whenever the Pull Requests list's refresh button is \
                   clicked, all open pull requests are fetched again and replace the cached list, \
@@ -2060,7 +2060,7 @@ registry! {
     },
 
     /// Pull request and branch names match ignoring case as a fallback.
-    PR_BRANCH_CASE_INSENSITIVE = 374 "pr-branch-case-insensitive" {
+    PR_BRANCH_CASE_INSENSITIVE = 325 "pr-branch-case-insensitive" {
         title: "Match pull request branches ignoring case",
         summary: "When no branch matches a pull request's head branch exactly, a branch whose \
                   name differs only in case is used, so clicking the pull request switches to it \
@@ -2077,7 +2077,7 @@ registry! {
     },
 
     /// Preview Pull Request explains commits without file changes.
-    PR_PREVIEW_EMPTY_FILES_MESSAGE = 375 "pr-preview-empty-files-message" {
+    PR_PREVIEW_EMPTY_FILES_MESSAGE = 326 "pr-preview-empty-files-message" {
         title: "Preview Pull Request says when there are no file changes",
         summary: "When the branch's commits add up to no file changes against the base branch, \
                   Preview Pull Request says \"No file changes between <base> and <branch>.\"",
@@ -2091,7 +2091,7 @@ registry! {
     },
 
     /// API errors that need SAML SSO say where to re-authorize.
-    API_SAML_SSO_HINT = 376 "api-saml-sso-hint" {
+    API_SAML_SSO_HINT = 327 "api-saml-sso-hint" {
         title: "Say when GitHub wants SSO re-authorization",
         summary: "When publishing a repository, creating a fork or creating the tutorial \
                   repository fails because an organization's SAML single sign-on authorization \
@@ -2107,7 +2107,7 @@ registry! {
     },
 
     /// A repository GitHub no longer knows loses its GitHub association.
-    CLEAR_LOST_GITHUB_ASSOCIATION = 377 "clear-lost-github-association" {
+    CLEAR_LOST_GITHUB_ASSOCIATION = 328 "clear-lost-github-association" {
         title: "Forget GitHub repositories that are gone",
         summary: "When GitHub answers \"not found\" for a repository's details (it was deleted, \
                   or the account lost access), Corvene forgets that it is a GitHub repository and \
@@ -2124,7 +2124,7 @@ registry! {
     },
 
     /// Publish to an organization can grant a team access.
-    PUBLISH_TEAM = 378 "publish-team" {
+    PUBLISH_TEAM = 329 "publish-team" {
         title: "Publish: Team picker",
         summary: "Publishing a repository to an organization offers an optional Team picker \
                   listing the organization's teams; the picked team gets access to the new \
@@ -2139,7 +2139,7 @@ registry! {
     },
 
     /// Clone checks the local path before git runs.
-    CLONE_PATH_VALIDATION = 379 "clone-path-validation" {
+    CLONE_PATH_VALIDATION = 330 "clone-path-validation" {
         title: "Clone checks the local path",
         summary: "The Clone dialog's local path expands a leading ~/ to the home folder, must be \
                   a full path, and a folder that does not exist yet must be creatable: Clone \
@@ -2393,7 +2393,7 @@ registry! {
     },
 
     /// Quit asks first while work is running.
-    CONFIRM_QUIT_WHILE_BUSY = 446 "confirm-quit-while-busy" {
+    CONFIRM_QUIT_WHILE_BUSY = 418 "confirm-quit-while-busy" {
         title: "Confirm quitting while busy",
         summary: "Quit (⌘Q or the menu) while a repository is being cloned, a push, pull or \
                   fetch runs, or an update downloads or installs asks \"Quit anyway?\" first. \
@@ -2412,7 +2412,7 @@ registry! {
     },
 
     /// More ways to zoom.
-    EXTRA_ZOOM_INPUTS = 447 "extra-zoom-inputs" {
+    EXTRA_ZOOM_INPUTS = 419 "extra-zoom-inputs" {
         title: "More zoom shortcuts",
         summary: "⌘+ (⇧⌘=) and the keypad's + zoom in as ⌘= does, and ⌘ + mouse wheel (Ctrl \
                   on Windows and Linux) zooms in and out.",
@@ -2426,7 +2426,7 @@ registry! {
     },
 
     /// The minimum window size never exceeds the screen.
-    MIN_SIZE_FITS_DISPLAY = 448 "min-size-fits-display" {
+    MIN_SIZE_FITS_DISPLAY = 420 "min-size-fits-display" {
         title: "Minimum window size fits the screen",
         summary: "On a display smaller than the minimum window size the minimum shrinks to the \
                   screen's usable area, so the window can still be resized and moved.",
@@ -2441,7 +2441,7 @@ registry! {
     },
 
     /// The release notes and conflicts dialogs grow with the window.
-    LARGER_DIALOGS = 449 "larger-dialogs" {
+    LARGER_DIALOGS = 421 "larger-dialogs" {
         title: "Larger release notes and conflicts dialogs",
         summary: "The release notes and \"Resolve conflicts\" dialogs take up to 80 % of the \
                   window (at most 960 px wide), so long notes and many conflicted files need \
@@ -2461,7 +2461,7 @@ registry! {
     },
 
     /// Banners float over the content.
-    BANNER_AS_TOAST = 450 "banner-as-toast" {
+    BANNER_AS_TOAST = 422 "banner-as-toast" {
         title: "Banners as toasts",
         summary: "Success, conflict and update banners appear as a card in the bottom-right \
                   corner over the content instead of a strip under the toolbar, so the lists \
@@ -2476,7 +2476,7 @@ registry! {
     },
 
     /// Edit › Undo Last Commit.
-    UNDO_COMMIT_MENU_ITEM = 451 "undo-commit-menu-item" {
+    UNDO_COMMIT_MENU_ITEM = 423 "undo-commit-menu-item" {
         title: "Edit › Undo Last Commit",
         summary: "The Edit menu has \"Undo Last Commit\", which does what the Undo button under \
                   the commit form does and is available exactly while that button shows.",
@@ -2490,7 +2490,7 @@ registry! {
     },
 
     /// Open items stay enabled under the merge-conflicts dialog.
-    CONFLICTS_DIALOG_KEEPS_OPEN_ITEMS = 456 "conflicts-dialog-keeps-open-items" {
+    CONFLICTS_DIALOG_KEEPS_OPEN_ITEMS = 424 "conflicts-dialog-keeps-open-items" {
         title: "Open items while resolving conflicts",
         summary: "While the merge-conflicts dialog is open, Show in Finder, Open in External \
                   Editor, Open in Terminal and View on GitHub stay enabled in the menus, to look \
@@ -2684,7 +2684,7 @@ registry! {
     },
 
     /// Settings › Advanced › Clone location.
-    DEFAULT_CLONE_LOCATION = 544 "default-clone-location" {
+    DEFAULT_CLONE_LOCATION = 514 "default-clone-location" {
         title: "Default clone location setting",
         summary: "Settings › Advanced › Clone location picks the folder Clone, New Repository \
                   and the tutorial suggest for new repositories (default ~/Documents/GitHub).",
@@ -2698,7 +2698,7 @@ registry! {
     },
 
     /// The default clone folder stays out of OneDrive.
-    CLONE_DIR_AVOIDS_ONEDRIVE = 545 "clone-dir-avoids-onedrive" {
+    CLONE_DIR_AVOIDS_ONEDRIVE = 515 "clone-dir-avoids-onedrive" {
         title: "Default clone folder outside OneDrive",
         summary: "On Windows, when OneDrive syncs the Documents folder, repositories are cloned \
                   to %USERPROFILE%\\GitHub instead of Documents\\GitHub (syncing a repository's \
@@ -2713,7 +2713,7 @@ registry! {
     },
 
     /// Which git to use.
-    GIT_EXECUTABLE = 547 "git-executable" {
+    GIT_EXECUTABLE = 516 "git-executable" {
         title: "Git executable",
         summary: "Full path of the git Corvene runs (e.g. /opt/homebrew/bin/git or ~/bin/git), \
                   tried before CORVENE_GIT, PATH and the usual install locations. Empty finds \
@@ -2729,7 +2729,7 @@ registry! {
     },
 
     /// Settings › Git path options.
-    PATH_GIT_SETTINGS = 548 "path-git-settings" {
+    PATH_GIT_SETTINGS = 517 "path-git-settings" {
         title: "Settings › Git: path options",
         summary: "Settings › Git › Default branch also offers the global core.quotepath (show \
                   non-ASCII file names as they are in git's own output) and, on Windows, \
@@ -2744,7 +2744,7 @@ registry! {
     },
 
     /// An external editor per repository.
-    PER_REPO_EDITOR = 554 "per-repo-editor" {
+    PER_REPO_EDITOR = 518 "per-repo-editor" {
         title: "Editor per repository",
         summary: "Repository Settings has an Editor tab to pick the external editor this \
                   repository opens in (Open in External Editor, opening its files and the menus' \
@@ -2759,7 +2759,7 @@ registry! {
     },
 
     /// Files open in their repository's editor window.
-    OPEN_FILE_IN_REPOSITORY_WINDOW = 555 "open-file-in-repository-window" {
+    OPEN_FILE_IN_REPOSITORY_WINDOW = 519 "open-file-in-repository-window" {
         title: "Open files in the repository's editor window",
         summary: "Opening a changed or committed file in VS Code (and its forks), Cursor, \
                   Windsurf, Zed or Sublime Text passes the repository folder along (`code <repo> \
@@ -2775,7 +2775,7 @@ registry! {
     },
 
     /// JetBrains IDEs registered under the 64-bit machine key.
-    JETBRAINS_64BIT_HIVE = 564 "jetbrains-64bit-hive" {
+    JETBRAINS_64BIT_HIVE = 520 "jetbrains-64bit-hive" {
         title: "Find JetBrains IDEs in the 64-bit registry",
         summary: "On Windows, JetBrains IDEs installed for all users are also looked for under \
                   the 64-bit machine uninstall key, where current installers register them.",
@@ -2790,7 +2790,7 @@ registry! {
     },
 
     /// Notepad++ shows a repository as a folder workspace.
-    NOTEPADPP_FOLDER_WORKSPACE = 565 "notepadpp-folder-workspace" {
+    NOTEPADPP_FOLDER_WORKSPACE = 521 "notepadpp-folder-workspace" {
         title: "Notepad++ opens a repository as a folder workspace",
         summary: "Open in Notepad++ hands it the repository folder with \
                   -openFoldersAsWorkspace, so the folder shows in its Folder as Workspace panel.",
@@ -3015,7 +3015,7 @@ registry! {
     },
 
     /// Honour the system's Reduce Motion setting.
-    SYSTEM_REDUCE_MOTION = 643 "system-reduce-motion" {
+    SYSTEM_REDUCE_MOTION = 614 "system-reduce-motion" {
         title: "Follow the system's Reduce Motion",
         summary: "With Reduce Motion on (macOS Accessibility › Display, Windows' Animation \
                   effects off, GNOME's Reduce Animation), spinners stand still and the mouse \
@@ -3030,7 +3030,7 @@ registry! {
     },
 
     /// Typing in the changes list goes to the commit summary.
-    TYPE_TO_COMMIT_SUMMARY = 653 "type-to-commit-summary" {
+    TYPE_TO_COMMIT_SUMMARY = 615 "type-to-commit-summary" {
         title: "Type in the changes list to write the summary",
         summary: "A letter, digit or other printable key pressed (without ⌘, ⌃ or ⌥) while the \
                   changes list has focus moves focus to the commit summary and types the \
@@ -3045,7 +3045,7 @@ registry! {
     },
 
     /// → accepts the generated commit summary placeholder.
-    ACCEPT_SUMMARY_PLACEHOLDER = 654 "accept-summary-placeholder" {
+    ACCEPT_SUMMARY_PLACEHOLDER = 616 "accept-summary-placeholder" {
         title: "→ accepts the summary placeholder",
         summary: "With one file included, the empty commit summary shows a generated summary \
                   (\"Update README.md\"); pressing → there types it into the field, caret at the \
@@ -3060,7 +3060,7 @@ registry! {
     },
 
     /// Back on Changes, the commit field that had focus gets it again.
-    SECTION_SWITCH_RESTORES_COMMIT_FOCUS = 655 "section-switch-restores-commit-focus" {
+    SECTION_SWITCH_RESTORES_COMMIT_FOCUS = 617 "section-switch-restores-commit-focus" {
         title: "Return to the commit message after History",
         summary: "Leaving the Changes tab while typing the commit summary or description (for \
                   History, with a tab, ⌘2 or ⌃Tab) and coming back puts the caret back in that \
@@ -3923,7 +3923,7 @@ registry! {
     },
 
     /// Type changes (file to symbolic link) are parsed as two sections.
-    TYPECHANGE_DIFF = 756 "typechange-diff" {
+    TYPECHANGE_DIFF = 757 "typechange-diff" {
         title: "Type changes in the diff",
         summary: "When a file becomes a symbolic link (or the other way round), the diff says \
                   so above the rows and its lines can be neither selected nor expanded, since \
@@ -3940,7 +3940,7 @@ registry! {
     },
 
     /// The diff's row height (and the changes list's with it).
-    DIFF_LINE_HEIGHT = 757 "diff-line-height" {
+    DIFF_LINE_HEIGHT = 758 "diff-line-height" {
         title: "Diff line height",
         summary: "The height of the diff's rows, 14 to 32 pixels at 100 % zoom (0 keeps \
                   20 px), for a denser or roomier diff. The changes list's rows follow, 9 px \
@@ -3957,7 +3957,7 @@ registry! {
     },
 
     /// The old-line-number column selects the whole hunk.
-    WIDE_HUNK_HANDLE = 758 "wide-hunk-handle" {
+    WIDE_HUNK_HANDLE = 759 "wide-hunk-handle" {
         title: "Wide hunk handle",
         summary: "In the unified diff of the Changes tab, clicking the old line number column \
                   ticks or unticks the whole block of changes, like the thin handle strip to its \
@@ -3974,7 +3974,7 @@ registry! {
     },
 
     /// Discard items in the diff text's context menu.
-    DISCARD_FROM_TEXT_MENU = 759 "discard-from-text-menu" {
+    DISCARD_FROM_TEXT_MENU = 760 "discard-from-text-menu" {
         title: "Discard lines from the text menu",
         summary: "Right-clicking the text of an added or removed line in the Changes tab's diff \
                   offers \"Discard Added Line\" (and \"Discard Added Lines\" for its whole block), \
@@ -3990,7 +3990,7 @@ registry! {
     },
 
     /// Small images are enlarged with sharp pixels.
-    PIXELATED_SMALL_IMAGES = 760 "pixelated-small-images" {
+    PIXELATED_SMALL_IMAGES = 761 "pixelated-small-images" {
         title: "Enlarge small images in image diffs",
         summary: "Images under 64 pixels (pixel art, icons) are shown at a whole multiple of \
                   their size, up to 16× and about 256 px, with sharp nearest-neighbour pixels \
@@ -4005,7 +4005,7 @@ registry! {
     },
 
     /// A way out of "The diff is too large to be displayed".
-    TOO_LARGE_DIFF_ESCAPE_HATCH = 761 "too-large-diff-escape-hatch" {
+    TOO_LARGE_DIFF_ESCAPE_HATCH = 762 "too-large-diff-escape-hatch" {
         title: "Open diffs too large to show elsewhere",
         summary: "When a changed file's diff is too large to be displayed (over 70 MB), the \
                   pane offers \"Open in external diff tool\" (git difftool, when diff.tool is set \
@@ -4020,7 +4020,7 @@ registry! {
     },
 
     /// The working file's modification time in the Changes diff header.
-    DIFF_HEADER_MTIME = 762 "diff-header-mtime" {
+    DIFF_HEADER_MTIME = 763 "diff-header-mtime" {
         title: "Modification time in the diff header",
         summary: "The Changes tab's diff header shows when the selected file was last modified \
                   (\"Modified 5 minutes ago\", the date and time in its tooltip).",
@@ -4034,7 +4034,7 @@ registry! {
     },
 
     /// Stop computing a diff nobody will see.
-    CANCEL_STALE_DIFFS = 763 "cancel-stale-diffs" {
+    CANCEL_STALE_DIFFS = 764 "cancel-stale-diffs" {
         title: "Stop stale diffs",
         summary: "Selecting another changed file (or a refresh) stops the git diff still running \
                   for the previous selection, so moving quickly through large files does not \
@@ -4049,7 +4049,7 @@ registry! {
     },
 
     /// Highlighting for .jsonc, .slnx and MQL files.
-    MORE_HIGHLIGHT_EXTENSIONS = 764 "more-highlight-extensions" {
+    MORE_HIGHLIGHT_EXTENSIONS = 765 "more-highlight-extensions" {
         title: "Highlight more file types",
         summary: "GitHub Desktop's highlighter also colours `.jsonc` as JSON, `.slnx` (Visual \
                   Studio solutions) as XML and MetaQuotes `.mq4` / `.mq5` / `.mqh` sources as \
@@ -4064,7 +4064,7 @@ registry! {
     },
 
     /// Commit messages survive switching repositories and restarts.
-    PERSIST_COMMIT_DRAFTS = 776 "persist-commit-drafts" {
+    PERSIST_COMMIT_DRAFTS = 766 "persist-commit-drafts" {
         title: "Keep commit message drafts",
         summary: "Each repository keeps its own unfinished commit summary and description: \
                   switching to another repository and back, or quitting and reopening Corvene, \
@@ -4080,7 +4080,7 @@ registry! {
     },
 
     /// Unticked files stay unticked after a restart.
-    PERSIST_FILE_SELECTION = 777 "persist-file-selection" {
+    PERSIST_FILE_SELECTION = 767 "persist-file-selection" {
         title: "Remember unticked files",
         summary: "Files unticked in a repository's changes list are still unticked after \
                   quitting and reopening Corvene (whole files only; a partly selected file comes \
@@ -4095,7 +4095,7 @@ registry! {
     },
 
     /// "Ignore with Pattern…" in the changes file menu.
-    IGNORE_CUSTOM_PATTERN = 778 "ignore-custom-pattern" {
+    IGNORE_CUSTOM_PATTERN = 768 "ignore-custom-pattern" {
         title: "Ignore with a pattern",
         summary: "A changed file's context menu has \"Ignore with Pattern…\": a small dialog \
                   prefilled with the file's path where the pattern can be edited (`build/*.log`, \
@@ -4110,7 +4110,7 @@ registry! {
     },
 
     /// Refuse yourself and duplicates as co-authors.
-    CO_AUTHOR_VALIDATION = 779 "co-author-validation" {
+    CO_AUTHOR_VALIDATION = 769 "co-author-validation" {
         title: "Check co-authors when adding them",
         summary: "Adding yourself (your account's login or emails, or `user.email`) or someone \
                   who is already a co-author removes what was typed and says why under the \
@@ -4126,7 +4126,7 @@ registry! {
     },
 
     /// Co-author suggestions from the repository's commit authors.
-    CO_AUTHORS_FROM_HISTORY = 780 "co-authors-from-history" {
+    CO_AUTHORS_FROM_HISTORY = 770 "co-authors-from-history" {
         title: "Suggest co-authors from history",
         summary: "The co-authors box also suggests the authors of the repository's last 500 \
                   commits (name and email, read once per session), for people without a GitHub \
@@ -4142,7 +4142,7 @@ registry! {
     },
 
     /// The no-changes Pull card names a rebasing pull like the toolbar does.
-    BLANK_SLATE_PULL_SAYS_REBASE = 781 "blank-slate-pull-says-rebase" {
+    BLANK_SLATE_PULL_SAYS_REBASE = 771 "blank-slate-pull-says-rebase" {
         title: "\"Pull with rebase\" on the no-changes card",
         summary: "When `pull.rebase` is set, the \"Pull origin\" button of the no-changes view \
                   says \"Pull origin with rebase\", as the toolbar's pull button already does.",
@@ -4156,7 +4156,7 @@ registry! {
     },
 
     /// Pick the editor from the no-changes "Open in" card.
-    EDITOR_PICKER_DROPDOWN = 782 "editor-picker-dropdown" {
+    EDITOR_PICKER_DROPDOWN = 772 "editor-picker-dropdown" {
         title: "Editor menu on the no-changes card",
         summary: "With more than one editor installed, a ▾ next to the no-changes view's \"Open \
                   in <editor>\" button lists them; picking one makes it the external editor (the \
@@ -5311,7 +5311,7 @@ registry! {
     },
 
     /// Closing the conflicts dialog asks to abort or keep the operation.
-    CONFLICTS_DIALOG_CLOSE_GUARD = 881 "conflicts-dialog-close-guard" {
+    CONFLICTS_DIALOG_CLOSE_GUARD = 877 "conflicts-dialog-close-guard" {
         title: "Ask before closing the conflicts dialog",
         summary: "The conflicts dialog of a merge, rebase or cherry-pick says that closing it \
                   keeps the operation in progress (resumed from the banner), and closing it asks \
@@ -5327,7 +5327,7 @@ registry! {
     },
 
     /// Conflicts show the banner instead of opening the dialog.
-    CONFLICTS_OPEN_AS_BANNER = 882 "conflicts-open-as-banner" {
+    CONFLICTS_OPEN_AS_BANNER = 878 "conflicts-open-as-banner" {
         title: "Conflicts as a banner",
         summary: "When a merge, rebase or cherry-pick stops on conflicts, the \"Resolve \
                   conflicts\" banner shows instead of the conflicts dialog opening over the \
@@ -5342,7 +5342,7 @@ registry! {
     },
 
     /// Links in commit messages end where github.com ends them.
-    LINKIFY_TRAILING_PUNCTUATION = 887 "linkify-trailing-punctuation" {
+    LINKIFY_TRAILING_PUNCTUATION = 879 "linkify-trailing-punctuation" {
         title: "Links leave out trailing punctuation",
         summary: "In commit messages a URL stops before trailing punctuation (`.` `,` `:` `!` \
                   `?` quotes) and closing brackets it did not open, and may follow an opening \
@@ -5359,7 +5359,7 @@ registry! {
     },
 
     /// `owner/repo#123` and `owner/repo@sha` in commit messages.
-    CROSS_REPOSITORY_ISSUE_LINKS = 888 "cross-repository-issue-links" {
+    CROSS_REPOSITORY_ISSUE_LINKS = 880 "cross-repository-issue-links" {
         title: "Links to other repositories in commit messages",
         summary: "In a GitHub repository's commit messages `owner/repo#123` is one link to issue \
                   123 of that repository and `owner/repo@<sha>` one link to that commit, as \
@@ -5375,7 +5375,7 @@ registry! {
     },
 
     /// Issue titles in the tooltips of `#123` links.
-    ISSUE_TITLE_TOOLTIPS = 889 "issue-title-tooltips" {
+    ISSUE_TITLE_TOOLTIPS = 881 "issue-title-tooltips" {
         title: "Issue titles on #123 links",
         summary: "Hovering a `#123` link in the selected commit's message shows \"#123 <issue \
                   title>\" for an open issue in the issue cache the commit box's # suggestions \
@@ -5390,7 +5390,7 @@ registry! {
     },
 
     /// The commit author's name links to their GitHub profile.
-    COMMIT_AUTHOR_LINKS = 890 "commit-author-links" {
+    COMMIT_AUTHOR_LINKS = 882 "commit-author-links" {
         title: "Link commit authors to their profiles",
         summary: "In a GitHub repository the selected commit's author name opens their GitHub \
                   profile when the login is known: a no-reply address, a signed-in account with \
@@ -5405,7 +5405,7 @@ registry! {
     },
 
     /// No GitHub links for commits that are not on any remote.
-    UNPUBLISHED_COMMIT_LINKS = 891 "unpublished-commit-links" {
+    UNPUBLISHED_COMMIT_LINKS = 883 "unpublished-commit-links" {
         title: "No GitHub links for unpublished commits",
         summary: "\"View on GitHub\" (and Copy Commit URL and the commit details' SHA link) are \
                   disabled for a commit that no remote-tracking branch contains, such as one \
@@ -5420,7 +5420,7 @@ registry! {
     },
 
     /// Create a Tag says when the tag cannot be pushed.
-    TAG_PUSH_PERMISSION_NOTE = 898 "tag-push-permission-note" {
+    TAG_PUSH_PERMISSION_NOTE = 884 "tag-push-permission-note" {
         title: "Create a Tag notes a read-only repository",
         summary: "When GitHub says the account can only read the repository, Create a Tag adds \
                   \"You can't push this tag to <owner/name>\": the tag can be created but only \

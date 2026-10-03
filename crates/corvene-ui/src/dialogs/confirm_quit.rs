@@ -1,4 +1,4 @@
-//! `ConfirmQuit` - Corvene (`446-confirm-quit-while-busy`): Quit while a
+//! `ConfirmQuit` - Corvene (`418-confirm-quit-while-busy`): Quit while a
 //! clone, push, pull, fetch or update runs asks first. GHD quits at once
 //! (`app/src/main-process/app-window.ts` has no quit guard).
 

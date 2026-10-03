@@ -4,7 +4,7 @@
 //! To port a mode: add `<name>.rs` exposing a constructor, list its MIME
 //! types in [`mode_for_mime`] and add golden fixtures (`tools/cm-oracle`).
 //!
-//! Deviation (`764-more-highlight-extensions`): `.jsonc`, `.slnx` and the
+//! Deviation (`765-more-highlight-extensions`): `.jsonc`, `.slnx` and the
 //! MQL extensions (`.mq4`, `.mq5`, `.mqh`) map to JSON, XML and C++.
 
 pub mod asciiarmor;
@@ -201,10 +201,10 @@ pub fn mime_for_extension(ext: &str) -> Option<&'static str> {
     })
 }
 
-/// Corvene `764-more-highlight-extensions`: extensions GHD's map lacks.
+/// Corvene `765-more-highlight-extensions`: extensions GHD's map lacks.
 static EXTRA_EXTENSIONS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
-/// `764-more-highlight-extensions`: map [`extra_mime_for_extension`]'s
+/// `765-more-highlight-extensions`: map [`extra_mime_for_extension`]'s
 /// extensions too (set by the app from the flag).
 pub fn set_extra_extensions(on: bool) {
     EXTRA_EXTENSIONS.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn extra_extensions_map_to_existing_modes() {
-        // on by default (the app sets it from `764-more-highlight-extensions`)
+        // on by default (the app sets it from `765-more-highlight-extensions`)
         assert_eq!(mime_for_extension(".jsonc"), Some("application/json"));
         assert_eq!(mime_for_extension(".slnx"), Some("text/xml"));
         assert_eq!(mime_for_extension(".mq5"), Some("text/x-c++src"));

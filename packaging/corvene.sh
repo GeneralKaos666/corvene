@@ -11,7 +11,7 @@
 #                                      dialog (flag 417-cli-add-repository)
 #   corvene -g|--background …          (before open or clone) leave Corvene
 #                                      in the background (flag
-#                                      277-url-background-open)
+#                                      416-url-background-open)
 # Each command becomes an x-corvene:// URL handed to Corvene.app, so a
 # running Corvene receives it instead of a second instance starting.
 # Installed by Corvene › Install Command Line Tool… as a symlink to

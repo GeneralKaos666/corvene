@@ -2,11 +2,11 @@
 //!
 //! Deviation: `407-smaller-minimum-sizes` lowers the sidebar minimum from
 //! GHD's 220 px (`ui/app.tsx` `sidebarWidth`) to 120 px.
-//! Deviation: `655-section-switch-restores-commit-focus` gives the commit
+//! Deviation: `617-section-switch-restores-commit-focus` gives the commit
 //! summary or description back its focus when Changes is shown again after
 //! another section (GHD `ui/repository.tsx` unmounts the commit form with
 //! the tab, so its focus is lost).
-//! `447-extra-zoom-inputs`: ⌘ / Ctrl + mouse wheel zooms; GHD only zooms
+//! `419-extra-zoom-inputs`: ⌘ / Ctrl + mouse wheel zooms; GHD only zooms
 //! from the View menu's shortcuts (`main-process/menu/build-default-menu.ts`).
 
 use std::cell::Cell;
@@ -112,7 +112,7 @@ pub struct Workspace {
     /// History shows the diff alone (`801-history-review-mode`).
     review_mode: bool,
     /// The section as of the last render, and the commit field that had
-    /// focus when Changes was left (`655-section-switch-restores-commit-focus`).
+    /// focus when Changes was left (`617-section-switch-restores-commit-focus`).
     rendered_section: Section,
     left_commit_field: Option<FocusHandle>,
 }
@@ -535,7 +535,7 @@ impl Workspace {
                     .child(diff_header(
                         &file.path,
                         file.status.kind,
-                        // `762-diff-header-mtime`
+                        // `763-diff-header-mtime`
                         rs.and_then(|r| r.diff_file_modified.as_ref())
                             .filter(|(path, _)| *path == file.path)
                             .filter(|_| {
@@ -602,9 +602,9 @@ impl Workspace {
                     .and_then(|id| crate::no_changes::primary_action(state, id))
                     .into_iter()
                     .collect();
-                // Corvene (`782-editor-picker-dropdown`): the installed
+                // Corvene (`772-editor-picker-dropdown`): the installed
                 // editors; a pick becomes the editor (the repository's own
-                // one when `554-per-repo-editor` set it) and opens
+                // one when `518-per-repo-editor` set it) and opens
                 let editor_menu = {
                     let s = self.state.read(cx);
                     let per_repo = repo_id.filter(|_| {
@@ -959,7 +959,7 @@ thread_local! {
     static WHEEL_ZOOM_PIXELS: Cell<f32> = const { Cell::new(0.) };
 }
 
-/// `447-extra-zoom-inputs`: ⌘ / Ctrl + wheel zooms in (up) and out (down).
+/// `419-extra-zoom-inputs`: ⌘ / Ctrl + wheel zooms in (up) and out (down).
 /// A capture-phase listener painted before the content, so the scroll views
 /// under the pointer never see those wheel events. A mouse wheel notch is one
 /// step; a trackpad steps every 40 px.
@@ -1091,7 +1091,7 @@ impl Render for Workspace {
         let review = self.review_mode_active(cx);
         self.selected_commit
             .update(cx, |v, cx| v.set_file_list_hidden(review, cx));
-        // Corvene (`655-section-switch-restores-commit-focus`): leaving
+        // Corvene (`617-section-switch-restores-commit-focus`): leaving
         // Changes remembers a focused summary / description, coming back
         // focuses it again (before the list `603` would focus)
         let restore_commit_focus = self
@@ -1332,7 +1332,7 @@ impl Render for Workspace {
             .when(bare && cfg!(target_os = "macos"), |d| {
                 d.child(light_title_bar())
             })
-            // `450-banner-as-toast`: over the content, under the foldouts
+            // `422-banner-as-toast`: over the content, under the foldouts
             .when(self.welcome.is_none() && banner_toast, |d| {
                 d.when_some(banner.as_ref(), |d, banner| {
                     d.child(banner_toast_frame(banner_bar(banner, cx), cx))

@@ -284,7 +284,7 @@ pub(crate) fn main() {
         })
         .detach();
 
-        // `446-confirm-quit-while-busy`: a running clone, push / pull /
+        // `418-confirm-quit-while-busy`: a running clone, push / pull /
         // fetch or update asks first; Quit again while it asks quits.
         cx.on_action(|_: &Quit, cx| {
             let s = corvene_core::AppState::global(cx).read(cx);
@@ -517,7 +517,7 @@ pub(crate) fn main() {
                 Dispatcher::show_popup(Popup::AddLicense { repo: id }, cx);
             }
         });
-        // `451-undo-commit-menu-item`: the Undo bar's button
+        // `423-undo-commit-menu-item`: the Undo bar's button
         on_menu_action(cx, move |_: &UndoLastCommit, cx| {
             let s = corvene_core::AppState::global(cx).read(cx);
             let id = s.selected.filter(|_| {
@@ -681,7 +681,7 @@ pub(crate) fn main() {
                 cx,
             ))),
             // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400;
-            // `448-min-size-fits-display`: never more than the primary
+            // `420-min-size-fits-display`: never more than the primary
             // display's visible area (GHD's minimum can exceed a small
             // screen, `main-process/app-window.ts` `minWidth` / `minHeight`)
             window_min_size: Some(if let Some(forced) = forced_size {
@@ -1177,7 +1177,7 @@ fn resolve_theme(setting: ThemeSetting, cx: &App) -> corvene_ui::theme::GhdTheme
     resolve_theme_with(setting, high_contrast, variants, cx)
 }
 
-/// `643-system-reduce-motion`: spinners and smooth scrolling follow the
+/// `614-system-reduce-motion`: spinners and smooth scrolling follow the
 /// system's Reduce Motion setting (read again whenever the window is
 /// activated). Returns the flag's value.
 fn sync_reduce_motion(cx: &mut App) -> bool {
@@ -1224,7 +1224,7 @@ fn on_menu_action<A: Action>(cx: &mut App, f: impl Fn(&A, &mut App) + 'static) {
 }
 
 /// [`on_menu_action`] for an item `menu_state` can keep enabled under a
-/// popup (`456-conflicts-dialog-keeps-open-items`: the open items under the
+/// popup (`424-conflicts-dialog-keeps-open-items`: the open items under the
 /// merge-conflicts dialog).
 fn on_kept_menu_action<A: Action>(cx: &mut App, id: MenuId, f: impl Fn(&A, &mut App) + 'static) {
     cx.on_action(move |action: &A, cx| {

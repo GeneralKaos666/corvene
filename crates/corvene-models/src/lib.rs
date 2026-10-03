@@ -43,7 +43,7 @@ pub struct Repository {
     /// list's Pinned group.
     #[serde(default)]
     pub pinned: bool,
-    /// Corvene (flag `554-per-repo-editor`): the external editor (friendly
+    /// Corvene (flag `518-per-repo-editor`): the external editor (friendly
     /// name) this repository opens in; `None` = the one in Settings.
     #[serde(default)]
     pub editor: Option<String>,

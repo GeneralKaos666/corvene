@@ -41,7 +41,7 @@ pub const MAX_DIFF_LINES: usize = 50_000;
 /// `as_text` adds `--text` (Corvene `749-binary-diff-as-text`): a file git
 /// takes for binary is diffed line by line anyway.
 ///
-/// `cancel` (Corvene `763-cancel-stale-diffs`) stops the git processes when
+/// `cancel` (Corvene `764-cancel-stale-diffs`) stops the git processes when
 /// another file was selected meanwhile ([`crate::GitError::Cancelled`]).
 pub fn working_directory_diff(
     git: Arc<GitBinary>,
@@ -133,7 +133,7 @@ pub fn working_directory_diff(
     })
 }
 
-/// Corvene `761-too-large-diff-escape-hatch`: `git difftool -y` on one
+/// Corvene `762-too-large-diff-escape-hatch`: `git difftool -y` on one
 /// working-directory file against HEAD (a new file against `/dev/null`),
 /// with the repository's `diff.tool`. Blocks until the tool exits. Refuses
 /// without a configured `diff.tool` (git would fall back to a terminal tool).

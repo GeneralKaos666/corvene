@@ -23,7 +23,7 @@
 //! - `enableWorktreeSupport()` is `true` in GHD 3.6.6 and worktrees are
 //!   always on in Corvene, so the worktree ids are never forced off.
 //!
-//! Deviation (`456-conflicts-dialog-keeps-open-items`): while the
+//! Deviation (`424-conflicts-dialog-keeps-open-items`): while the
 //! merge-conflicts dialog is open, Show in Finder, Open in Editor, Open in
 //! Shell and View on GitHub keep their usual state (GHD disables every item
 //! while any popup is open).
@@ -410,7 +410,7 @@ pub struct MenuInputs {
     /// `currentPopup !== null`
     pub popup_open: bool,
     /// The open popup is the merge-conflicts dialog and
-    /// `456-conflicts-dialog-keeps-open-items` is on.
+    /// `424-conflicts-dialog-keeps-open-items` is on.
     pub conflicts_dialog_open: bool,
     /// `windowState !== 'hidden'`
     pub window_open: bool,
@@ -451,7 +451,7 @@ impl MenuInputs {
                 facts,
             }
         });
-        // `456-conflicts-dialog-keeps-open-items`
+        // `424-conflicts-dialog-keeps-open-items`
         let conflicts_dialog_open = state
             .flags
             .bool(crate::flags::ids::CONFLICTS_DIALOG_KEEPS_OPEN_ITEMS)
@@ -785,7 +785,7 @@ fn app_menu_builder(inputs: &MenuInputs) -> MenuStateBuilder {
     b
 }
 
-/// Corvene (`456-conflicts-dialog-keeps-open-items`): the items that stay as
+/// Corvene (`424-conflicts-dialog-keeps-open-items`): the items that stay as
 /// usual while the merge-conflicts dialog is open, to look at the conflicted
 /// files.
 const CONFLICTS_DIALOG_KEPT_IDS: [MenuId; 4] = [

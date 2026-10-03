@@ -180,7 +180,7 @@ pub fn most_recent_local_commit(
     }))
 }
 
-/// Corvene `891-unpublished-commit-links`: the commits reachable from `tip`
+/// Corvene `883-unpublished-commit-links`: the commits reachable from `tip`
 /// but from no remote-tracking branch (`rev-list <tip> --not --remotes`),
 /// newest first, at most `limit`. They are not on any remote, so links to
 /// them on GitHub would be dead.
@@ -611,7 +611,7 @@ pub fn merge_base_file_diff(
 
 /// The distinct authors (name, email) of the newest `limit` commits
 /// reachable from HEAD, most recent first, one per email (case ignored).
-/// Corvene `780-co-authors-from-history`: co-author suggestions for people
+/// Corvene `770-co-authors-from-history`: co-author suggestions for people
 /// without a GitHub account. An unborn branch has none.
 pub fn recent_authors(
     git: Arc<GitBinary>,

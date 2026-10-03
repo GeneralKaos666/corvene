@@ -18,7 +18,7 @@
 //! Deviations: text is not selectable (GPUI static text), link hover has no
 //! colour change, and inline code keeps the paragraph's font size (GHD 85 %).
 //!
-//! Deviation (`889-issue-title-tooltips`): with
+//! Deviation (`881-issue-title-tooltips`): with
 //! [`rich_text_with_issue_titles`] a `#123` link's tooltip is "#123 <title>"
 //! from the repository's issue cache (hovering loads the cache), else the URL.
 
@@ -84,7 +84,7 @@ pub fn rich_text(id: impl Into<SharedString>, text: &RichText, cx: &App) -> AnyE
     rich_text_with_issue_titles(id, text, None, cx)
 }
 
-/// [`rich_text`] whose `#123` links into `issues` (`889-issue-title-tooltips`)
+/// [`rich_text`] whose `#123` links into `issues` (`881-issue-title-tooltips`)
 /// show the issue's title as their tooltip.
 pub fn rich_text_with_issue_titles(
     id: impl Into<SharedString>,
@@ -106,7 +106,7 @@ pub fn rich_text_with_issue_titles(
     .rich(text)
 }
 
-/// `889-issue-title-tooltips`: "#N title" for issue `number` of `github` from
+/// `881-issue-title-tooltips`: "#N title" for issue `number` of `github` from
 /// the issue cache; a cache not read yet is loaded for the next hover.
 fn issue_title(github: &Rc<GitHubRepository>, number: u64, cx: &mut App) -> Option<String> {
     let state = corvene_core::AppState::try_global(cx)?;
@@ -138,7 +138,7 @@ struct Renderer<'a> {
     /// GHD `RichText`'s `LinkButton`s: `--link-button-color`, and the URL as
     /// the title when the text differs (`#123`, `@name`).
     link_buttons: bool,
-    /// `889-issue-title-tooltips`: whose issue titles `#123` links show.
+    /// `881-issue-title-tooltips`: whose issue titles `#123` links show.
     issues: Option<Rc<GitHubRepository>>,
     next: std::cell::Cell<usize>,
 }

@@ -7,7 +7,7 @@
 //! and `#123` references); the pretext goes through `crate::markdown` instead
 //! of GHD's sandboxed Markdown webview. "Install and Restart" appears when
 //! the notes are those of the update the self-updater has ready (GHD: when
-//! the version differs from the running one). `449-larger-dialogs`: the
+//! the version differs from the running one). `421-larger-dialogs`: the
 //! dialog grows to 80 % of the window (at most 960 px wide; GHD: 550 to
 //! 800 px wide and 500 px high).
 
@@ -95,7 +95,7 @@ impl Render for ReleaseNotesDialog {
         let t = cx.ghd();
         let r = &self.summary;
         let viewport = crate::theme::page_size(window);
-        // `449-larger-dialogs`: width and height
+        // `421-larger-dialogs`: width and height
         let large = crate::dialog::larger_dialogs(cx).then(|| {
             (
                 crate::dialog::larger_dialog_width(viewport).max(zpx(550.)),

@@ -9,10 +9,10 @@
 //! Deviation (`726-restore-stash-suggestion`): with a stash on the branch the
 //! first card is "Restore your stashed changes" with a primary Restore button
 //! in place of GHD's "View your stashed changes" ([`primary_action`]).
-//! Deviation (`781-blank-slate-pull-says-rebase`): the Pull card's button
+//! Deviation (`771-blank-slate-pull-says-rebase`): the Pull card's button
 //! says "Pull origin with rebase" when `pull.rebase` is set, like the
 //! toolbar button (GHD `renderPullBranchAction` always says "Pull origin").
-//! Deviation (`782-editor-picker-dropdown`): a ▾ beside "Open in <editor>"
+//! Deviation (`772-editor-picker-dropdown`): a ▾ beside "Open in <editor>"
 //! lists the installed editors; picking one makes it the editor and opens
 //! the repository in it.
 //! Not built yet: GHD's Create / Preview Pull Request dropdown card for a
@@ -37,7 +37,7 @@ pub struct SuggestedAction {
     pub keys: &'static [&'static str],
     pub button_label: SharedString,
     pub primary: bool,
-    /// Corvene (`782-editor-picker-dropdown`): a ▾ beside the button opens
+    /// Corvene (`772-editor-picker-dropdown`): a ▾ beside the button opens
     /// these items.
     pub menu: Option<Vec<crate::context_menu::MenuItem>>,
 }
@@ -178,7 +178,7 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
             ),
             hint: "Always available in the toolbar when there are remote changes or".into(),
             keys: &["⌘", "⇧", "P"],
-            // Corvene (`781-blank-slate-pull-says-rebase`): like the toolbar
+            // Corvene (`771-blank-slate-pull-says-rebase`): like the toolbar
             button_label: if rs.pull_with_rebase
                 && state
                     .flags

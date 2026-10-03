@@ -15,8 +15,8 @@
 //! repository's only `*.code-workspace` file (`509-vscode-workspace-file`).
 //! Deviation: [`launch_in_folder`] opens a file through the same tools with
 //! its repository folder, in that folder's window
-//! (`555-open-file-in-repository-window`).
-//! Deviation (`565-notepadpp-folder-workspace`, [`leading_args`]): Notepad++
+//! (`519-open-file-in-repository-window`).
+//! Deviation (`521-notepadpp-folder-workspace`, [`leading_args`]): Notepad++
 //! gets a folder with `-openFoldersAsWorkspace`, which shows it in its
 //! Folder as Workspace panel; GHD's `launch.ts` passes the folder alone and
 //! Notepad++ opens every file in the repository.
@@ -563,7 +563,7 @@ pub const SETTINGS_LABEL: &str = if cfg!(target_os = "macos") {
     "Options"
 };
 
-/// Corvene `565-notepadpp-folder-workspace`: the arguments that go before
+/// Corvene `521-notepadpp-folder-workspace`: the arguments that go before
 /// the target (Notepad++ given a folder, when `folder_as_workspace`).
 pub fn leading_args(
     editor_name: &str,
@@ -579,7 +579,7 @@ pub fn leading_args(
 
 /// GHD `launchExternalEditor`: `open -a <bundle> <path>` on macOS, the
 /// executable with the path elsewhere, detached. `folder_as_workspace`:
-/// flag `565-notepadpp-folder-workspace` (Windows).
+/// flag `521-notepadpp-folder-workspace` (Windows).
 pub fn launch(
     editor: &FoundEditor,
     target: &Path,
@@ -785,7 +785,7 @@ fn tool_command(
     Some((program, args))
 }
 
-/// Corvene (`555-open-file-in-repository-window`): open the file `target`
+/// Corvene (`519-open-file-in-repository-window`): open the file `target`
 /// (at `line`) through the editor's command line tool together with the
 /// repository `folder`, so it lands in that repository's window; editors
 /// without a tool open the file as [`launch`] / [`launch_at_line`] do.
@@ -967,7 +967,7 @@ mod tests {
         let (program, args) = line_command(&code, Path::new("/r/src/a.rs"), 12).unwrap();
         assert_eq!(program, bin.join("code"));
         assert_eq!(args, ["-g", "/r/src/a.rs:12"]);
-        // `555-open-file-in-repository-window`
+        // `519-open-file-in-repository-window`
         let (_, args) =
             tool_command(&code, Some(Path::new("/r")), Path::new("/r/src/a.rs"), None).unwrap();
         assert_eq!(args, ["/r", "/r/src/a.rs"]);

@@ -8,7 +8,7 @@
 //! from its Message field (flag `824`). A pushed tag can be deleted, from the
 //! remote too, after a confirmation (flag `826`). Create a Tag notes when
 //! the account can only read the GitHub repository, so the tag cannot be
-//! pushed there (flag `898-tag-push-permission-note`); GHD says nothing until
+//! pushed there (flag `884-tag-push-permission-note`); GHD says nothing until
 //! the push fails.
 
 use corvene_core::{AppState, Dispatcher, UnreachableCommitsTab};

@@ -8,7 +8,7 @@
 //! Deviation: while the repository is still conflicted, a new merge, rebase
 //! or update from the default branch is refused with an explanation (GHD
 //! starts it and shows git's error; `838-no-merge-while-conflicted`).
-//! Deviation: with `882-conflicts-open-as-banner`, conflicts found by an
+//! Deviation: with `878-conflicts-open-as-banner`, conflicts found by an
 //! operation show the conflicts banner instead of opening the conflicts
 //! dialog (GHD `startMultiCommitOperationConflictFlow` opens the dialog).
 
@@ -284,7 +284,7 @@ pub enum Banner {
         description: String,
         branch: Option<String>,
     },
-    /// Corvene (`352-git-email-mismatch-banner`): after signing in, the
+    /// Corvene (`322-git-email-mismatch-banner`): after signing in, the
     /// global `user.email` is unset (`missing`) or not one of the account's
     /// addresses on `host`; links to Settings › Git.
     GitEmailMismatch {
@@ -312,7 +312,7 @@ impl Banner {
         }
     }
 
-    /// `352-git-email-mismatch-banner`: the banner for a global
+    /// `322-git-email-mismatch-banner`: the banner for a global
     /// `user.email` of `email` after signing in to `account`, if commits
     /// with it would not be linked to the account.
     pub fn for_git_email(account: &corvene_models::Account, email: Option<&str>) -> Option<Self> {
@@ -834,7 +834,7 @@ impl Dispatcher {
     }
 
     /// Show the conflicts step of `id`'s operation: the dialog, or with
-    /// `882-conflicts-open-as-banner` the conflicts banner (as if the dialog
+    /// `878-conflicts-open-as-banner` the conflicts banner (as if the dialog
     /// had been closed).
     fn reveal_conflicts(id: u64, cx: &mut App) {
         if Self::state(cx)

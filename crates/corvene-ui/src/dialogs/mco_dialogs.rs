@@ -15,7 +15,7 @@
 //! go back to the target commit's message (flag `827`); Open in Merge Tool in
 //! a conflicted file's menu (flag `842`); closing the conflicts step asks
 //! whether to abort the operation or keep it in progress, and a line says it
-//! stays in progress (flag `881`).
+//! stays in progress (`877-conflicts-dialog-close-guard`).
 
 use corvene_core::{
     AppState, Dispatcher, ManualConflictResolution, McoStep, MultiCommitOperationKind, RetryAction,
@@ -50,7 +50,7 @@ pub struct McoDialog {
     dont_ask_force_push: bool,
     /// Cherry-pick › New Branch sub-dialog.
     create_branch: Option<Entity<CreateBranchDialog>>,
-    /// `881-conflicts-dialog-close-guard`: closing the conflicts step asked
+    /// `877-conflicts-dialog-close-guard`: closing the conflicts step asked
     /// whether to abort the operation or keep it in progress.
     confirm_close: bool,
 }
@@ -586,7 +586,7 @@ impl McoDialog {
             unmerged_files(&status).into_iter().cloned().collect();
         let conflicted_count = conflicted_files(&status, &resolutions).len();
         let resolved_count = resolved_files(&status, &resolutions).len();
-        // Corvene (`881-conflicts-dialog-close-guard`): closing asks first
+        // Corvene (`877-conflicts-dialog-close-guard`): closing asks first
         let close_guard = self
             .state
             .read(cx)
@@ -752,7 +752,7 @@ impl McoDialog {
                 .child(
                     div()
                         .id("unmerged-files")
-                        // `449-larger-dialogs`: the list takes what 80 % of
+                        // `421-larger-dialogs`: the list takes what 80 % of
                         // the window leaves after the header, title and footer
                         .max_h(if crate::dialog::larger_dialogs(cx) {
                             (crate::theme::page_size(window).height * 0.8 - zpx(260.))
@@ -840,7 +840,7 @@ impl McoDialog {
         .into_any_element()
     }
 
-    /// `881-conflicts-dialog-close-guard`: the conflicts dialog was closed;
+    /// `877-conflicts-dialog-close-guard`: the conflicts dialog was closed;
     /// abort the operation or keep it in progress (Esc goes back).
     fn confirm_close(
         &mut self,

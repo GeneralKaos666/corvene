@@ -11,7 +11,7 @@
 //! full fetch, so deleted and transferred issues leave `#` completion (GHD
 //! only ever asks for issues updated since the newest cached one).
 //!
-//! Deviation (`780-co-authors-from-history`): co-author suggestions also
+//! Deviation (`770-co-authors-from-history`): co-author suggestions also
 //! offer the distinct authors of the newest commits ([`authors_matching`]),
 //! for people without a GitHub account (GHD suggests mentionable users only).
 
@@ -271,7 +271,7 @@ pub fn cache_key(github: &GitHubRepository) -> String {
     github.html_url.clone()
 }
 
-/// Corvene `890-commit-author-links`: the GitHub login behind a commit
+/// Corvene `882-commit-author-links`: the GitHub login behind a commit
 /// author's e-mail in `github`'s repository: a no-reply address, a signed-in
 /// account of that endpoint with the address, or a mentionable user (the
 /// commit box's @ suggestions) with it.
@@ -305,10 +305,10 @@ pub fn login_for_email(
         .map(|u| u.login.clone())
 }
 
-/// How many recent commits `780-co-authors-from-history` reads authors from.
+/// How many recent commits `770-co-authors-from-history` reads authors from.
 pub const RECENT_AUTHOR_COMMITS: usize = 500;
 
-/// `780-co-authors-from-history`: the authors whose name or email contains
+/// `770-co-authors-from-history`: the authors whose name or email contains
 /// `text` (case ignored; all of them for an empty text), best match first,
 /// leaving out `exclude_emails` (already co-authors, yourself).
 pub fn authors_matching(
@@ -338,7 +338,7 @@ pub fn authors_matching(
 }
 
 impl Dispatcher {
-    /// `780-co-authors-from-history`: read the repository's recent commit
+    /// `770-co-authors-from-history`: read the repository's recent commit
     /// authors once per session.
     pub fn load_recent_authors(id: u64, cx: &mut App) {
         let start = Self::state(cx).update(cx, |s, _| {

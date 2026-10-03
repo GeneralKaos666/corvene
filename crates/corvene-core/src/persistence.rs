@@ -357,14 +357,14 @@ pub trait StoreExt {
     fn selected_repository(&self) -> Result<Option<u64>>;
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()>;
     /// Unfinished commit messages by repository id (flag
-    /// `776-persist-commit-drafts`).
+    /// `766-persist-commit-drafts`).
     fn commit_drafts(&self) -> Result<std::collections::HashMap<u64, crate::drafts::CommitDraft>>;
     fn save_commit_drafts(
         &self,
         drafts: &std::collections::HashMap<u64, crate::drafts::CommitDraft>,
     ) -> Result<()>;
     /// Unticked changed files by repository id (flag
-    /// `777-persist-file-selection`).
+    /// `767-persist-file-selection`).
     fn excluded_files(&self) -> Result<std::collections::HashMap<u64, Vec<String>>>;
     fn save_excluded_files(
         &self,

@@ -62,7 +62,7 @@ impl Dispatcher {
         // Synchronous: a few `git --version` probes (~10 ms), started on a
         // thread at the top of `main`. Avoids racing launch-time operations
         // against an async detection.
-        // `547-git-executable`: a chosen git goes first
+        // `516-git-executable`: a chosen git goes first
         let preferred = configured_git(
             flags.text(crate::flags::ids::GIT_EXECUTABLE),
             std::env::var_os("HOME")
@@ -94,7 +94,7 @@ impl Dispatcher {
         } else {
             std::collections::HashMap::new()
         };
-        // Corvene (`776-persist-commit-drafts`): last session's drafts
+        // Corvene (`766-persist-commit-drafts`): last session's drafts
         let commit_drafts = if flags.bool(crate::flags::ids::PERSIST_COMMIT_DRAFTS) {
             let mut saved = store.commit_drafts().unwrap_or_default();
             saved.retain(|id, _| repositories.iter().any(|r| r.id == *id));
@@ -102,7 +102,7 @@ impl Dispatcher {
         } else {
             std::collections::HashMap::new()
         };
-        // Corvene (`777-persist-file-selection`): last session's unticked files
+        // Corvene (`767-persist-file-selection`): last session's unticked files
         let excluded_files = if flags.bool(crate::flags::ids::PERSIST_FILE_SELECTION) {
             let mut saved = store.excluded_files().unwrap_or_default();
             saved.retain(|id, _| repositories.iter().any(|r| r.id == *id));
@@ -459,7 +459,7 @@ impl Dispatcher {
 
     /// GHD `MissingRepository.onTrustDirectory`: `addSafeDirectory` for the
     /// path git named, then look at the repository again. Deviation
-    /// (`295-explain-trust-failure`): when git still refuses the path, an
+    /// (`279-explain-trust-failure`): when git still refuses the path, an
     /// error explains why and shows the value git suggests; GHD silently
     /// shows the Trust Repository view again.
     pub fn trust_repository(id: u64, cx: &mut App) {
@@ -630,7 +630,7 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::EXPLAIN_BAD_CONFIG);
-        // Corvene (`296-stale-core-worktree-hint`): a `core.worktree` that
+        // Corvene (`280-stale-core-worktree-hint`): a `core.worktree` that
         // points at a folder that is gone is named instead of adding a
         // repository that shows up missing
         let stale_worktree_hint = state
@@ -1085,7 +1085,7 @@ impl Dispatcher {
                     let exclude_untracked = s
                         .flags
                         .bool(crate::flags::ids::NEW_UNTRACKED_FILES_EXCLUDED);
-                    // `777-persist-file-selection`: last session's unticked
+                    // `767-persist-file-selection`: last session's unticked
                     // files, for this repository's first status
                     let restore_excluded = (!s.excluded_files_restored.contains(&id))
                         .then(|| s.excluded_files.get(&id).cloned())
@@ -1450,7 +1450,7 @@ impl Dispatcher {
             .as_ref()
             .and_then(|stamp| crate::diff_cache::working_diff(&workdir, &path, stamp))
         {
-            // `763-cancel-stale-diffs`
+            // `764-cancel-stale-diffs`
             if let Some(previous) = state.update(cx, |s, _| s.repo_state_mut(id).diff_cancel.take())
             {
                 previous.cancel();
@@ -1459,7 +1459,7 @@ impl Dispatcher {
             Self::prefetch_working_diffs(id, cx);
             return;
         }
-        // `763-cancel-stale-diffs`: the diff still running for the previous
+        // `764-cancel-stale-diffs`: the diff still running for the previous
         // selection (or refresh) is stopped instead of finishing unseen
         let cancel_stale = state
             .read(cx)
@@ -1556,7 +1556,7 @@ impl Dispatcher {
         Self::load_diff_tool(id, cx);
     }
 
-    /// `762-diff-header-mtime`: the selected file's modification time for
+    /// `763-diff-header-mtime`: the selected file's modification time for
     /// the Changes diff header (re-read whenever its diff is loaded).
     fn load_file_modified(id: u64, cx: &mut App) {
         let s = Self::state(cx).read(cx);
@@ -1590,7 +1590,7 @@ impl Dispatcher {
         );
     }
 
-    /// `761-too-large-diff-escape-hatch`: read `diff.tool` once the selected
+    /// `762-too-large-diff-escape-hatch`: read `diff.tool` once the selected
     /// file's diff is too large to show, for "Open in External Diff Tool".
     fn load_diff_tool(id: u64, cx: &mut App) {
         let s = Self::state(cx).read(cx);
@@ -1621,7 +1621,7 @@ impl Dispatcher {
         );
     }
 
-    /// `761-too-large-diff-escape-hatch`: the selected file in the configured
+    /// `762-too-large-diff-escape-hatch`: the selected file in the configured
     /// `diff.tool` (`git difftool -y`).
     pub fn open_in_diff_tool(id: u64, cx: &mut App) {
         let s = Self::state(cx).read(cx);
@@ -1735,7 +1735,7 @@ impl Dispatcher {
                 Self::history_first_parent(s),
             )
         };
-        // `891-unpublished-commit-links`: which of them no remote has
+        // `883-unpublished-commit-links`: which of them no remote has
         let unpublished_git = {
             let s = state.read(cx);
             s.flags
@@ -2567,7 +2567,7 @@ impl Dispatcher {
         });
     }
 
-    /// `554-per-repo-editor`: the repository's own external editor (`None`:
+    /// `518-per-repo-editor`: the repository's own external editor (`None`:
     /// the one in Settings).
     pub fn set_repository_editor(id: u64, editor: Option<String>, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
@@ -5107,7 +5107,7 @@ impl Dispatcher {
         .detach();
     }
 
-    /// `352-git-email-mismatch-banner`: after signing in outside the Welcome
+    /// `322-git-email-mismatch-banner`: after signing in outside the Welcome
     /// flow (which asks for the identity itself), a banner when the global
     /// `user.email` is unset or would not link commits to `account`. Reads
     /// only; Settings › Git changes it.
@@ -5405,7 +5405,7 @@ fn compute_working_diff(
     })
 }
 
-/// `891-unpublished-commit-links`: with this many local-only commits or more
+/// `883-unpublished-commit-links`: with this many local-only commits or more
 /// none is marked (links stay as in GHD).
 const UNPUBLISHED_COMMITS_LIMIT: usize = 10_000;
 
@@ -5734,7 +5734,7 @@ fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
     }
 }
 
-/// `547-git-executable`: the flag's path, `~/` expanded against `home`;
+/// `516-git-executable`: the flag's path, `~/` expanded against `home`;
 /// `None` when empty.
 fn configured_git(text: &str, home: Option<PathBuf>) -> Option<PathBuf> {
     let text = text.trim();

@@ -9,12 +9,12 @@
 //! branch" banners, with an Undo that recreates the deleted branch, are
 //! Corvene's (GHD deletes branches without a way back).
 //!
-//! Deviation (`352-git-email-mismatch-banner`): after signing in, a banner
+//! Deviation (`322-git-email-mismatch-banner`): after signing in, a banner
 //! says when the global Git email won't link commits to the account (GHD
 //! warns only in Settings › Git and the commit form,
 //! `ui/lib/git-email-not-found-warning.tsx`).
 //!
-//! Deviation (`450-banner-as-toast`): [`banner_toast_frame`] floats the
+//! Deviation (`422-banner-as-toast`): [`banner_toast_frame`] floats the
 //! banner over the bottom-right corner instead of pushing the views down
 //! (GHD `ui/app.tsx` `renderBanner` puts it in the layout flow).
 
@@ -319,7 +319,7 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
 /// install is told to `brew upgrade corvene` instead (Linux: any other
 /// package manager install is told to update with it). Always dismissable
 /// (Corvene has no prioritised updates).
-/// `450-banner-as-toast`: a banner as a card in the window's bottom-right
+/// `422-banner-as-toast`: a banner as a card in the window's bottom-right
 /// corner, over the content. The banner's own bottom border is clipped (the
 /// card has a full border).
 pub fn banner_toast_frame(banner: impl IntoElement, cx: &App) -> impl IntoElement {

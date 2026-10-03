@@ -124,7 +124,7 @@ pub mod paths {
     }
 
     /// [`default_clone_dir`]; with `avoid_onedrive`
-    /// (`545-clone-dir-avoids-onedrive`, Windows) `%USERPROFILE%\GitHub` when
+    /// (`515-clone-dir-avoids-onedrive`, Windows) `%USERPROFILE%\GitHub` when
     /// Documents is synced by OneDrive, which handles Git repositories badly.
     pub fn default_clone_dir_avoiding_onedrive(avoid_onedrive: bool) -> PathBuf {
         #[cfg(target_os = "android")]

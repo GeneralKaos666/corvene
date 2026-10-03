@@ -41,20 +41,20 @@
 //! - "Name <email>" in the co-authors box adds a co-author without a GitHub
 //!   account (`735-free-form-co-authors`).
 //! - co-author suggestions include recent commit authors, also for a name
-//!   typed without @ (`780-co-authors-from-history`).
+//!   typed without @ (`770-co-authors-from-history`).
 //! - the "N changed files" row ends in a spinner while Discard Changes runs
 //!   or a status refresh is slow (`708-changes-busy-indicator`).
-//! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
+//! - rows follow the diff's row height, 9 px taller (`758-diff-line-height`).
 //! - adding yourself or a second token for the same co-author is refused
-//!   with a hint under the co-authors box (`779-co-author-validation`).
+//!   with a hint under the co-authors box (`769-co-author-validation`).
 //! - each repository keeps its commit message, also across restarts
-//!   (`776-persist-commit-drafts`).
+//!   (`766-persist-commit-drafts`).
 //! - typing a character in the file list types it into the summary
-//!   (`653-type-to-commit-summary`).
+//!   (`615-type-to-commit-summary`).
 //! - → in the empty summary types the generated placeholder
-//!   (`654-accept-summary-placeholder`).
+//!   (`616-accept-summary-placeholder`).
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
-//!   pattern before it is added to `.gitignore` (`778-ignore-custom-pattern`).
+//!   pattern before it is added to `.gitignore` (`768-ignore-custom-pattern`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -102,7 +102,7 @@ use crate::widgets::{
 /// `712-open-multiple-files`: the most files one "Open …" item launches.
 pub(crate) const MAX_BULK_OPEN: usize = 25;
 
-/// How long a `779-co-author-validation` hint stays.
+/// How long a `769-co-author-validation` hint stays.
 const CO_AUTHOR_HINT_DURATION: std::time::Duration = std::time::Duration::from_secs(4);
 
 /// GHD `MaxTagNameLength` (`737-commit-tag-field`).
@@ -205,12 +205,12 @@ pub struct ChangesSidebar {
     /// `731-recall-commit-messages`: index into the recent messages the form
     /// shows; `None` once the user edits it.
     recalled: Option<usize>,
-    /// `779-co-author-validation`: why the last co-author was not added, and
+    /// `769-co-author-validation`: why the last co-author was not added, and
     /// when (shown under the co-authors box for a few seconds).
     co_author_hint: Option<(SharedString, std::time::Instant)>,
     /// The summary's placeholder as last set (`getPlaceholderMessage`).
     summary_placeholder: SharedString,
-    /// `776-persist-commit-drafts`: the repository the form's text belongs to.
+    /// `766-persist-commit-drafts`: the repository the form's text belongs to.
     draft_repo: Option<u64>,
 }
 
@@ -253,7 +253,7 @@ impl ChangesSidebar {
                     Dispatcher::create_tag(repo, name, sha, String::new(), cx);
                 }
             }
-            // Corvene (`776-persist-commit-drafts`): each repository keeps its
+            // Corvene (`766-persist-commit-drafts`): each repository keeps its
             // own message; another repository's commits never clear it
             let selected = state.read(cx).selected;
             if selected != this.draft_repo
@@ -475,7 +475,7 @@ impl ChangesSidebar {
         }
     }
 
-    /// `776-persist-commit-drafts`: the form's message is repository `id`'s
+    /// `766-persist-commit-drafts`: the form's message is repository `id`'s
     /// draft (none when untouched).
     fn save_draft(&self, id: u64, cx: &mut Context<Self>) {
         let draft = corvene_core::drafts::CommitDraft::normalized(
@@ -579,7 +579,7 @@ impl ChangesSidebar {
                 && !trimmed.starts_with('@')
                 && !trimmed.contains('<')
             {
-                // Corvene (`780-co-authors-from-history`): a typed name or
+                // Corvene (`770-co-authors-from-history`): a typed name or
                 // email suggests recent commit authors without the @
                 let exclude = self.co_author_logins(cx);
                 let hits = autocompletion::history_author_hits(
@@ -724,7 +724,7 @@ impl ChangesSidebar {
             .co_author_logins(cx)
             .iter()
             .any(|u| u.eq_ignore_ascii_case(&login));
-        // Corvene (`779-co-author-validation`): neither the commit's own
+        // Corvene (`769-co-author-validation`): neither the commit's own
         // author nor a second token for the same co-author; the typed text
         // goes and a hint says why
         if self
@@ -783,7 +783,7 @@ impl ChangesSidebar {
         cx.notify();
     }
 
-    /// `779-co-author-validation`: the author is the one committing: their
+    /// `769-co-author-validation`: the author is the one committing: their
     /// account (login or one of its emails) or `user.email`.
     fn is_own_author(&self, author: &Author, cx: &App) -> bool {
         let s = self.state.read(cx);
@@ -811,7 +811,7 @@ impl ChangesSidebar {
         same_login || same_email
     }
 
-    /// `779-co-author-validation`: show `hint` under the co-authors box for
+    /// `769-co-author-validation`: show `hint` under the co-authors box for
     /// a few seconds.
     fn show_co_author_hint(&mut self, hint: String, cx: &mut Context<Self>) {
         let at = std::time::Instant::now();
@@ -1042,7 +1042,7 @@ impl ChangesSidebar {
                     username: name.clone(),
                     state: UnknownAuthorState::Searching,
                 },
-                // `780-co-authors-from-history`
+                // `770-co-authors-from-history`
                 Hit::Author { name, email } => Author::Known {
                     name: name.clone(),
                     email: email.clone(),
@@ -1442,7 +1442,7 @@ impl ChangesSidebar {
     }
 
     /// The summary or description field when it has focus
-    /// (`655-section-switch-restores-commit-focus`).
+    /// (`617-section-switch-restores-commit-focus`).
     pub fn focused_commit_field(&self, window: &Window) -> Option<FocusHandle> {
         [&self.summary_focus, &self.description_focus]
             .into_iter()
@@ -2246,7 +2246,7 @@ impl ChangesSidebar {
                         .enabled(!is_gitignore),
                 );
             }
-            // Corvene (`778-ignore-custom-pattern`): edit the pattern first
+            // Corvene (`768-ignore-custom-pattern`): edit the pattern first
             if self
                 .state
                 .read(cx)
@@ -3602,7 +3602,7 @@ impl ChangesSidebar {
         }
     }
 
-    /// Corvene (`653-type-to-commit-summary`): a printable key without
+    /// Corvene (`615-type-to-commit-summary`): a printable key without
     /// modifiers in the focused file list goes to the end of the commit
     /// summary, which takes focus.
     fn type_into_summary(
@@ -3648,7 +3648,7 @@ impl ChangesSidebar {
         true
     }
 
-    /// Corvene (`654-accept-summary-placeholder`): → in the empty summary
+    /// Corvene (`616-accept-summary-placeholder`): → in the empty summary
     /// types the generated placeholder, caret at the end.
     fn accept_summary_placeholder(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.summary_focus.is_focused(window)
@@ -4230,7 +4230,7 @@ impl ChangesSidebar {
                     div()
                         .mb(SPACING())
                         .child(self.co_author_input(window, cx))
-                        // `779-co-author-validation`
+                        // `769-co-author-validation`
                         .when_some(self.co_author_hint.clone(), |d, (hint, _)| {
                             d.child(
                                 div()
@@ -4614,7 +4614,7 @@ fn file_row(
             is_selected,
         )
         .w_full()
-        // `757-diff-line-height`: GHD's 29 px rows go with its 20 px diff rows
+        // `758-diff-line-height`: GHD's 29 px rows go with its 20 px diff rows
         .h(crate::diff_view::diff_line_height_setting(cx).map_or_else(ROW_HEIGHT, |h| zpx(h + 9.)))
         .flex_none()
         .flex()
