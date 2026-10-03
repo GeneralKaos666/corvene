@@ -1,11 +1,12 @@
 //! Helpers shared by `corvene-git`'s ports of GitHub Desktop's squash and
 //! reorder tests (`unit/git/squash-test.ts`, `unit/git/reorder-test.ts`).
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use corvene_git::RebaseResult;
 use corvene_models::WorkingDirectoryFileChange;
-use corvene_test_support::{TestRepo, create_temp_directory};
+use corvene_test_support::{TestRepo, create_temp_directory, git};
 use tempfile::TempDir;
 
 /// GitHub Desktop's `getTempFilePath(name)` (`lib/file-system.ts`): a path
@@ -17,18 +18,27 @@ pub fn get_temp_file_path(name: &str) -> (TempDir, PathBuf) {
     (dir, path)
 }
 
-/// Stand-in for GitHub Desktop's `continueRebase(repository, files,
-/// manualResolutions, { gitEditor })` (`lib/git/rebase.ts`): the tests pass
-/// `gitEditor` (`GIT_EDITOR` for `rebase --continue`) to reword the stopped
-/// commit. `corvene_git::continue_rebase` always runs with `GIT_EDITOR=:`
-/// and has no editor parameter; once it has one, call it here (with no
-/// manual resolutions, no commits for progress and `keep_messages: false`,
-/// GitHub Desktop's value of flag `834-rebase-keeps-hash-messages`) and
-/// remove the `#[ignore]`s.
+/// GitHub Desktop's `continueRebase(repository, files, manualResolutions,
+/// { gitEditor })` (`lib/git/rebase.ts`) as the tests call it:
+/// `corvene_git::continue_rebase` with no manual resolutions, no commits
+/// for progress and `keep_messages: false` (GitHub Desktop's value of flag
+/// `834-rebase-keeps-hash-messages`); `git_editor` is `GIT_EDITOR` for
+/// `rebase --continue` (`None` is `:`). An `Err` is GitHub Desktop's
+/// rejection and panics.
 pub fn continue_rebase(
-    _repository: &TestRepo,
-    _files: &[WorkingDirectoryFileChange],
-    _git_editor: Option<&str>,
+    repository: &TestRepo,
+    files: &[WorkingDirectoryFileChange],
+    git_editor: Option<&str>,
 ) -> RebaseResult {
-    unimplemented!("corvene_git::continue_rebase has no git editor option (GHD opts.gitEditor)")
+    corvene_git::continue_rebase(
+        git(),
+        repository.path(),
+        files,
+        &BTreeMap::new(),
+        &[],
+        false,
+        git_editor,
+        |_| {},
+    )
+    .expect("continueRebase")
 }

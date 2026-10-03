@@ -1,12 +1,10 @@
 //! Port of GitHub Desktop's `app/test/unit/git/push-terminal-chunk-test.ts`.
 //!
-//! Corvene has no equivalent of `pushTerminalChunk`
-//! (`lib/git/push-terminal-chunk.ts`): GitHub Desktop's `git()`
-//! (`lib/git/core.ts`) keeps the last 256 KiB of a command's combined
-//! stdout and stderr in a rolling buffer of chunks for error messages and
-//! hook failure output, while `corvene_git::GitCommand` keeps all of stdout
-//! and stderr separately. The cases call a stand-in and are ignored until
-//! it exists.
+//! GitHub Desktop's `pushTerminalChunk` (`lib/git/push-terminal-chunk.ts`)
+//! is `corvene_git::push_terminal_chunk`: GitHub Desktop's `git()`
+//! (`lib/git/core.ts`) and `corvene_git::GitCommand` keep the last 256 KiB
+//! of a command's combined stdout and stderr with it for the error a failed
+//! command reports.
 //!
 //! - A chunk is a `Buffer` or a string in GitHub Desktop: here anything that
 //!   is `AsRef<[u8]>`, a string literal for a string and a byte string
@@ -16,14 +14,7 @@
 //!   [`js_length`] is JavaScript's `.length`. `chunks.join('')` is
 //!   `chunks.concat()`.
 
-/// Stand-in for GitHub Desktop's `pushTerminalChunk(chunks, capacity,
-/// chunk)`: appends `chunk` (decoded as UTF-8) to `chunks`, then drops or
-/// trims chunks from the front until the total length is at most
-/// `capacity`. Replace it with the `corvene_git` function once there is one
-/// and remove the `#[ignore]`s.
-fn push_terminal_chunk(_chunks: &mut Vec<String>, _capacity: usize, _chunk: impl AsRef<[u8]>) {
-    unimplemented!("corvene_git has no pushTerminalChunk")
-}
+use corvene_git::push_terminal_chunk;
 
 /// JavaScript's `string.length`: the number of UTF-16 code units.
 fn js_length(s: &str) -> usize {
@@ -32,7 +23,6 @@ fn js_length(s: &str) -> usize {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › basic functionality › appends a string chunk to an empty buffer
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn appends_a_string_chunk_to_an_empty_buffer() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 100, "hello");
@@ -41,7 +31,6 @@ fn appends_a_string_chunk_to_an_empty_buffer() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › basic functionality › appends multiple string chunks
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn appends_multiple_string_chunks() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 100, "hello");
@@ -51,7 +40,6 @@ fn appends_multiple_string_chunks() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › basic functionality › appends a Buffer chunk by converting it to string
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn appends_a_buffer_chunk_by_converting_it_to_string() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 100, b"hello");
@@ -60,7 +48,6 @@ fn appends_a_buffer_chunk_by_converting_it_to_string() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › basic functionality › appends an empty string chunk
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn appends_an_empty_string_chunk() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 100, "");
@@ -69,7 +56,6 @@ fn appends_an_empty_string_chunk() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › basic functionality › appends an empty Buffer chunk
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn appends_an_empty_buffer_chunk() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 100, b"");
@@ -78,7 +64,6 @@ fn appends_an_empty_buffer_chunk() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › does not trim when total length equals capacity
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn does_not_trim_when_total_length_equals_capacity() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 10, "0123456789");
@@ -88,7 +73,6 @@ fn does_not_trim_when_total_length_equals_capacity() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › does not trim when total length is under capacity
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn does_not_trim_when_total_length_is_under_capacity() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 10, "12345");
@@ -97,7 +81,6 @@ fn does_not_trim_when_total_length_is_under_capacity() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › removes entire first chunk when overrun exceeds first chunk length
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn removes_entire_first_chunk_when_overrun_exceeds_first_chunk_length() {
     let mut chunks: Vec<String> = vec!["abc".into(), "def".into()];
     push_terminal_chunk(&mut chunks, 6, "ghij");
@@ -110,7 +93,6 @@ fn removes_entire_first_chunk_when_overrun_exceeds_first_chunk_length() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › partially trims first chunk when overrun is less than first chunk length
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn partially_trims_first_chunk_when_overrun_is_less_than_first_chunk_length() {
     let mut chunks: Vec<String> = vec!["abcdef".into()];
     push_terminal_chunk(&mut chunks, 8, "ghi");
@@ -122,7 +104,6 @@ fn partially_trims_first_chunk_when_overrun_is_less_than_first_chunk_length() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › removes multiple chunks when necessary
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn removes_multiple_chunks_when_necessary() {
     let mut chunks: Vec<String> = vec!["aa".into(), "bb".into(), "cc".into()];
     push_terminal_chunk(&mut chunks, 4, "dddd");
@@ -134,7 +115,6 @@ fn removes_multiple_chunks_when_necessary() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › handles single chunk that exceeds capacity
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_single_chunk_that_exceeds_capacity() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 5, "0123456789");
@@ -146,7 +126,6 @@ fn handles_single_chunk_that_exceeds_capacity() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › handles capacity of zero
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_capacity_of_zero() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 0, "hello");
@@ -157,7 +136,6 @@ fn handles_capacity_of_zero() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › capacity management › handles capacity of one
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_capacity_of_one() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 1, "hello");
@@ -167,7 +145,6 @@ fn handles_capacity_of_one() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › rolling buffer behavior › maintains rolling buffer with repeated pushes
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn maintains_rolling_buffer_with_repeated_pushes() {
     let mut chunks: Vec<String> = Vec::new();
     let capacity = 15;
@@ -192,7 +169,6 @@ fn maintains_rolling_buffer_with_repeated_pushes() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › rolling buffer behavior › preserves newest content when trimming
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn preserves_newest_content_when_trimming() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 10, "old_data_");
@@ -205,7 +181,6 @@ fn preserves_newest_content_when_trimming() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › edge cases › handles unicode characters correctly (counts characters, not bytes)
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_unicode_characters_correctly_counts_characters_not_bytes() {
     let mut chunks: Vec<String> = Vec::new();
     // '日本語' is 3 characters but 9 bytes in UTF-8
@@ -217,7 +192,6 @@ fn handles_unicode_characters_correctly_counts_characters_not_bytes() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › edge cases › trims unicode characters correctly
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn trims_unicode_characters_correctly() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 3, "日本語test");
@@ -228,7 +202,6 @@ fn trims_unicode_characters_correctly() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › edge cases › handles emoji characters
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_emoji_characters() {
     let mut chunks: Vec<String> = Vec::new();
     // Note: some emoji are 2 code units in JS strings
@@ -239,7 +212,6 @@ fn handles_emoji_characters() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › edge cases › handles mixed Buffer and string inputs
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_mixed_buffer_and_string_inputs() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 30, "string_input");
@@ -249,7 +221,6 @@ fn handles_mixed_buffer_and_string_inputs() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › edge cases › handles newlines and special characters
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_newlines_and_special_characters() {
     let mut chunks: Vec<String> = Vec::new();
     push_terminal_chunk(&mut chunks, 20, "line1\nline2\r\n");
@@ -258,7 +229,6 @@ fn handles_newlines_and_special_characters() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › edge cases › handles ANSI escape sequences
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_ansi_escape_sequences() {
     let mut chunks: Vec<String> = Vec::new();
     let ansi_colored = "\x1b[31mred\x1b[0m";
@@ -268,7 +238,6 @@ fn handles_ansi_escape_sequences() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › pre-existing buffer state › works correctly with pre-populated buffer
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn works_correctly_with_pre_populated_buffer() {
     let mut chunks: Vec<String> = vec!["existing".into(), "content".into()];
     push_terminal_chunk(&mut chunks, 20, "_new");
@@ -277,7 +246,6 @@ fn works_correctly_with_pre_populated_buffer() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › pre-existing buffer state › trims pre-existing content when adding new chunk exceeds capacity
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn trims_pre_existing_content_when_adding_new_chunk_exceeds_capacity() {
     let mut chunks: Vec<String> = vec!["aaaa".into(), "bbbb".into()]; // 8 chars
     push_terminal_chunk(&mut chunks, 10, "cccccc"); // would be 14, capacity 10
@@ -289,7 +257,6 @@ fn trims_pre_existing_content_when_adding_new_chunk_exceeds_capacity() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › boundary conditions › handles exact capacity boundary
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_exact_capacity_boundary() {
     let mut chunks: Vec<String> = vec!["12345".into()];
     push_terminal_chunk(&mut chunks, 10, "67890");
@@ -299,7 +266,6 @@ fn handles_exact_capacity_boundary() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › boundary conditions › handles one character over capacity
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_one_character_over_capacity() {
     let mut chunks: Vec<String> = vec!["12345".into()];
     push_terminal_chunk(&mut chunks, 10, "678901");
@@ -310,7 +276,6 @@ fn handles_one_character_over_capacity() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › boundary conditions › handles very large capacity with small chunks
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_very_large_capacity_with_small_chunks() {
     let mut chunks: Vec<String> = Vec::new();
     let capacity = 1000000;
@@ -320,7 +285,6 @@ fn handles_very_large_capacity_with_small_chunks() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › boundary conditions › handles many small chunks
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_many_small_chunks() {
     let mut chunks: Vec<String> = Vec::new();
     let capacity = 20;
@@ -335,7 +299,6 @@ fn handles_many_small_chunks() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › boundary conditions › correctly handles while loop with exact chunk removal
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn correctly_handles_while_loop_with_exact_chunk_removal() {
     // Set up scenario where overrun exactly equals first chunk length
     let mut chunks: Vec<String> = vec!["abc".into()]; // 3 chars
@@ -347,7 +310,6 @@ fn correctly_handles_while_loop_with_exact_chunk_removal() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › realistic terminal output scenarios › simulates git push output
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn simulates_git_push_output() {
     let mut chunks: Vec<String> = Vec::new();
     let capacity = 1000;
@@ -381,7 +343,6 @@ fn simulates_git_push_output() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › realistic terminal output scenarios › simulates progress output with carriage returns
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn simulates_progress_output_with_carriage_returns() {
     let mut chunks: Vec<String> = Vec::new();
     let capacity = 100;
@@ -398,7 +359,6 @@ fn simulates_progress_output_with_carriage_returns() {
 
 // GHD: unit/git/push-terminal-chunk-test.ts › pushTerminalChunk › realistic terminal output scenarios › handles large output that needs significant trimming
 #[test]
-#[ignore = "ghd: missing: corvene_git has no pushTerminalChunk (lib/git/push-terminal-chunk.ts)"]
 fn handles_large_output_that_needs_significant_trimming() {
     let mut chunks: Vec<String> = Vec::new();
     let capacity = 100;

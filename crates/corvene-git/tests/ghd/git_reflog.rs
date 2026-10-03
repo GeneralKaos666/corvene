@@ -5,9 +5,8 @@
 //! - `getRecentBranches(repository, limit)`: `corvene_git::recent_branches`
 //!   (the same `git log -g` over HEAD's reflog, parsed by
 //!   `parse_recent_branches`).
-//! - `getBranchCheckouts(repository, afterDate)`: none; GitHub Desktop uses
-//!   it for the branch pruner, which Corvene does not have.
-//!   [`get_branch_checkouts`] is a stand-in.
+//! - `getBranchCheckouts(repository, afterDate)`:
+//!   `corvene_git::get_branch_checkouts` ([`get_branch_checkouts`]).
 //! - `createBranch`, `checkoutBranch`, `renameBranch`:
 //!   `corvene_git::{create_branch, checkout_branch, rename_branch}`
 //!   (`renameBranch` passes `branch.nameWithoutRemote`, Corvene's
@@ -30,16 +29,9 @@ fn create_and_checkout(repository: &Path, name: &str) {
     checkout_branch(git(), repository, &branch).expect("checkoutBranch");
 }
 
-/// Stand-in for GitHub Desktop's `getBranchCheckouts(repository,
-/// afterDate)`: the branches checked out on or after `after_date` (from
-/// HEAD's reflog), with the date of their latest checkout. Replace it with
-/// the `corvene_git` function once there is one and remove the
-/// `#[ignore]`s.
-fn get_branch_checkouts(
-    _repository: &Path,
-    _after_date: SystemTime,
-) -> HashMap<String, SystemTime> {
-    unimplemented!("corvene_git has no getBranchCheckouts")
+/// `getBranchCheckouts(repository, afterDate)`.
+fn get_branch_checkouts(repository: &Path, after_date: SystemTime) -> HashMap<String, SystemTime> {
+    corvene_git::get_branch_checkouts(git(), repository, after_date).expect("getBranchCheckouts")
 }
 
 const HOUR: Duration = Duration::from_secs(60 * 60);
@@ -102,7 +94,6 @@ fn returns_a_limited_number_of_branches() {
 
 // GHD: unit/git/reflog-test.ts › git/reflog › getBranchCheckouts › returns does not return the branches that were checked out before a specific date
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchCheckouts (lib/git/reflog.ts)"]
 fn returns_does_not_return_the_branches_checked_out_before_a_date() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -115,7 +106,6 @@ fn returns_does_not_return_the_branches_checked_out_before_a_date() {
 
 // GHD: unit/git/reflog-test.ts › git/reflog › getBranchCheckouts › returns all branches checked out after a specific date
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchCheckouts (lib/git/reflog.ts)"]
 fn returns_all_branches_checked_out_after_a_specific_date() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -130,7 +120,6 @@ fn returns_all_branches_checked_out_after_a_specific_date() {
 
 // GHD: unit/git/reflog-test.ts › git/reflog › getBranchCheckouts › returns empty when current branch is orphaned
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchCheckouts (lib/git/reflog.ts)"]
 fn returns_empty_when_current_branch_is_orphaned() {
     let repository = setup_fixture_repository("test-repo");
 

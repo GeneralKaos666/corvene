@@ -15,16 +15,13 @@
 //! - `createDesktopStashMessage(branch)` is
 //!   `corvene_git::desktop_stash_message`.
 //! - `dropDesktopStashEntry(repository, stashSha)` and
-//!   `popStashEntry(repository, stashSha)` look the Desktop entry up by its
-//!   sha and run `git stash drop|pop <name>`; Corvene's
-//!   `corvene_git::drop_stash` / `pop_stash` take the entry's name
-//!   (`refs/stash@{n}`) and run git on it directly. The tests pass the name
-//!   of the same entry (for GitHub Desktop's made-up `IStashEntry`s, the
-//!   `name` they carry).
-//! - `getLastDesktopStashEntryForBranch(repository, branch)` has no Corvene
-//!   function: the dispatcher's refresh (`corvene-core/src/dispatcher.rs`)
-//!   finds the entry inline. [`get_last_desktop_stash_entry_for_branch`] is
-//!   a stand-in.
+//!   `popStashEntry(repository, stashSha)` are
+//!   `corvene_git::drop_desktop_stash_entry` and
+//!   `corvene_git::pop_stash_entry`: both look the Desktop entry up by its
+//!   sha and run `git stash drop|pop <name>`.
+//! - `getLastDesktopStashEntryForBranch(repository, branch)` is
+//!   `corvene_git::get_last_desktop_stash_entry_for_branch`
+//!   ([`get_last_desktop_stash_entry_for_branch`]).
 
 use corvene_models::{FileStatusKind, StashEntry};
 use corvene_test_support::{
@@ -48,16 +45,13 @@ fn get_stashes(repository: &TestRepo) -> StashResult {
     }
 }
 
-/// Stand-in for GitHub Desktop's `getLastDesktopStashEntryForBranch(repository,
-/// branch)` (`lib/git/stash.ts`): the newest Desktop entry made on `branch`,
-/// or `null`. Corvene finds it inline in the dispatcher's refresh; replace
-/// this with the `corvene_git` function once there is one and remove the
-/// `#[ignore]`s.
+/// `getLastDesktopStashEntryForBranch(repository, branch)`.
 fn get_last_desktop_stash_entry_for_branch(
-    _repository: &TestRepo,
-    _branch: &str,
+    repository: &TestRepo,
+    branch: &str,
 ) -> Option<StashEntry> {
-    unimplemented!("corvene_git has no getLastDesktopStashEntryForBranch")
+    corvene_git::get_last_desktop_stash_entry_for_branch(git(), repository.path(), branch)
+        .expect("getLastDesktopStashEntryForBranch")
 }
 
 /// The `setup` of every `describe` but `getStash`'s first two cases: an
@@ -184,7 +178,6 @@ fn stashes_untracked_files_and_removes_them_from_the_working_directory() {
 
 // GHD: unit/git/stash-test.ts › git/stash › getLastDesktopStashEntryForBranch › returns null when no stash entries exist for branch
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getLastDesktopStashEntryForBranch (lib/git/stash.ts); the dispatcher's refresh finds the entry inline"]
 fn returns_null_when_no_stash_entries_exist_for_branch() {
     let repository = setup();
     generate_test_stash_entry(&repository, "some-other-branch", true);
@@ -196,7 +189,6 @@ fn returns_null_when_no_stash_entries_exist_for_branch() {
 
 // GHD: unit/git/stash-test.ts › git/stash › getLastDesktopStashEntryForBranch › returns last entry made for branch
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getLastDesktopStashEntryForBranch (lib/git/stash.ts); the dispatcher's refresh finds the entry inline"]
 fn returns_last_entry_made_for_branch() {
     let repository = setup();
     let branch_name = "master";
@@ -236,7 +228,7 @@ fn removes_the_entry_identified_by_stash_sha() {
     assert_eq!(entries.len(), 2);
 
     let stash_to_delete = entries[1].clone();
-    corvene_git::drop_stash(git(), repository.path(), &stash_to_delete.name)
+    corvene_git::drop_desktop_stash_entry(git(), repository.path(), &stash_to_delete.sha)
         .expect("dropDesktopStashEntry");
 
     // using this function to get stashSha since it parses
@@ -264,19 +256,18 @@ fn does_not_exist(name: &str) -> StashEntry {
 
 // GHD: unit/git/stash-test.ts › git/stash › dropDesktopStashEntry › does not fail when attempting to delete when stash is empty
 #[test]
-#[ignore = "ghd: bug: drop_stash of an entry that is not there fails (git stash drop exits 1, not a valid reference); GHD dropDesktopStashEntry finds no matching entry and resolves"]
 fn does_not_fail_when_attempting_to_delete_when_stash_is_empty() {
     let repository = setup();
 
     let does_not_exist = does_not_exist("refs/stash@{0}");
 
-    let result = corvene_git::drop_stash(git(), repository.path(), &does_not_exist.name);
+    let result =
+        corvene_git::drop_desktop_stash_entry(git(), repository.path(), &does_not_exist.sha);
     assert!(result.is_ok(), "{result:?}");
 }
 
 // GHD: unit/git/stash-test.ts › git/stash › dropDesktopStashEntry › does not fail when attempting to delete stash entry that doesn't exist
 #[test]
-#[ignore = "ghd: bug: drop_stash of an entry that is not there fails (git stash drop exits 128, log only has 3 entries); GHD dropDesktopStashEntry finds no matching entry and resolves"]
 fn does_not_fail_when_attempting_to_delete_stash_entry_that_doesnt_exist() {
     let repository = setup();
     let does_not_exist = does_not_exist("refs/stash@{4}");
@@ -284,7 +275,8 @@ fn does_not_fail_when_attempting_to_delete_stash_entry_that_doesnt_exist() {
     generate_test_stash_entry(&repository, "master", true);
     generate_test_stash_entry(&repository, "master", true);
 
-    let result = corvene_git::drop_stash(git(), repository.path(), &does_not_exist.name);
+    let result =
+        corvene_git::drop_desktop_stash_entry(git(), repository.path(), &does_not_exist.sha);
     assert!(result.is_ok(), "{result:?}");
 }
 
@@ -303,7 +295,8 @@ fn restores_changes_back_to_the_working_directory() {
     assert_eq!(files.len(), 0);
 
     let entry_to_apply = &desktop_entries[0];
-    corvene_git::pop_stash(git(), repository.path(), &entry_to_apply.name).expect("popStashEntry");
+    corvene_git::pop_stash_entry(git(), repository.path(), &entry_to_apply.sha)
+        .expect("popStashEntry");
 
     let status = get_status_or_throw(&repository);
     let files = status.files;
@@ -312,7 +305,6 @@ fn restores_changes_back_to_the_working_directory() {
 
 // GHD: unit/git/stash-test.ts › git/stash › popStashEntry › when there are (resolvable) conflicts › restores changes and drops stash
 #[test]
-#[ignore = "ghd: bug: pop_stash fails when a conflicting git stash pop exits 1 with empty stderr and keeps the entry; GHD popStashEntry resolves and drops it"]
 fn restores_changes_and_drops_stash() {
     let repository = setup();
 
@@ -330,7 +322,8 @@ fn restores_changes_and_drops_stash() {
     assert_eq!(files.len(), 0);
 
     let entry_to_apply = desktop_entries[0].clone();
-    corvene_git::pop_stash(git(), repository.path(), &entry_to_apply.name).expect("popStashEntry");
+    corvene_git::pop_stash_entry(git(), repository.path(), &entry_to_apply.sha)
+        .expect("popStashEntry");
 
     let status = get_status_or_throw(&repository);
     let files = status.files;
@@ -356,6 +349,6 @@ fn throws_an_error() {
     std::fs::write(&readme, generate_string(DEFAULT_STRING_LENGTH)).unwrap();
 
     let entry_to_apply = &desktop_entries[0];
-    let result = corvene_git::pop_stash(git(), repository.path(), &entry_to_apply.name);
+    let result = corvene_git::pop_stash_entry(git(), repository.path(), &entry_to_apply.sha);
     assert!(result.is_err());
 }

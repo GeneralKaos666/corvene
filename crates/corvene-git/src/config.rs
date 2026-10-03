@@ -1,8 +1,10 @@
 //! Git config reads and writes for the Settings dialogs - GHD `lib/git/config.ts`
-//! (`getConfigValue`, `getGlobalConfigValue`, `setConfigValue`,
-//! `setGlobalConfigValue`, `removeConfigValue`, `setDefaultBranch`).
+//! (`getConfigValue`, `getGlobalConfigValue`, `getBooleanConfigValue`,
+//! `getGlobalBooleanConfigValue`, `getGlobalConfigPath`, `setConfigValue`,
+//! `setGlobalConfigValue`, `addSafeDirectory`, `removeConfigValue`,
+//! `setDefaultBranch`).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::detect::GitBinary;
@@ -45,7 +47,74 @@ pub fn global_config_values(git: Arc<GitBinary>, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// `git config --local <key> <value>`.
+/// GHD `getConfigValueInPath(.., 'bool')`: `git config -z [--global |
+/// --local] --type bool <key>`, `None` when unset (exit 1), else whether
+/// git's canonical value differs from `false` (`off`, `no` and `0` are
+/// false; `on`, `yes` and `1` true).
+fn boolean_value_of(cmd: GitCommand) -> Option<bool> {
+    let out = cmd.allow_exit_code(1).run().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    Some(text.split('\0').next().unwrap_or_default() != "false")
+}
+
+/// GHD `getBooleanConfigValue`: `key` as git reads it in `workdir` (every
+/// scope, or the repository's own with `only_local`), canonicalised as a
+/// boolean.
+pub fn boolean_config_value(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    key: &str,
+    only_local: bool,
+) -> Option<bool> {
+    let mut cmd = GitCommand::new(git)
+        .args(["config", "-z"])
+        .current_dir(workdir);
+    if only_local {
+        cmd = cmd.arg("--local");
+    }
+    boolean_value_of(cmd.args(["--type", "bool", key]))
+}
+
+/// GHD `getGlobalBooleanConfigValue`: the global `key` canonicalised as a
+/// boolean.
+pub fn global_boolean_config_value(git: Arc<GitBinary>, key: &str) -> Option<bool> {
+    boolean_value_of(GitCommand::new(git).args(["config", "-z", "--global", "--type", "bool", key]))
+}
+
+/// GHD `getGlobalConfigPath`: the global config file as git sees it
+/// (`GIT_CONFIG_GLOBAL`, `~/.gitconfig` or the XDG file), the path `git
+/// config --edit --global` hands its editor (`GIT_EDITOR='printf %s'`),
+/// normalised. git creates the file when it does not exist yet.
+pub fn global_config_path(git: Arc<GitBinary>) -> Result<PathBuf> {
+    let out = GitCommand::new(git)
+        .args(["config", "--edit", "--global"])
+        .env("GIT_EDITOR", "printf %s")
+        .run()?;
+    let path = PathBuf::from(out.stdout_string()?);
+    // `path.normalize`: drop `.` components and resolve `..` lexically
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir
+                if matches!(
+                    normalized.components().next_back(),
+                    Some(std::path::Component::Normal(_))
+                ) =>
+            {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    Ok(normalized)
+}
+
+/// GHD `setConfigValue`: `git config --replace-all <key> <value>` in
+/// `workdir`'s own config, so a key with several values ends up with one.
 pub fn set_local_config_value(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -53,34 +122,52 @@ pub fn set_local_config_value(
     value: &str,
 ) -> Result<()> {
     GitCommand::new(git)
-        .args(["config", "--local", key, value])
+        .args(["config", "--local", "--replace-all", key, value])
         .current_dir(workdir)
         .run()?;
     Ok(())
 }
 
-/// `git config --global <key> <value>`.
+/// GHD `setGlobalConfigValue`: `git config --global --replace-all <key>
+/// <value>`.
 pub fn set_global_config_value(git: Arc<GitBinary>, key: &str, value: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["config", "--global", key, value])
+        .args(["config", "--global", "--replace-all", key, value])
         .run()?;
     Ok(())
 }
 
-/// GHD `addSafeDirectory`: `git config --global --add safe.directory <path>`
-/// ("Trust Repository" for a repository git considers unsafe).
+/// GHD `addSafeDirectory` (`addGlobalConfigValueIfMissing`): `git config
+/// --global --add safe.directory <path>` unless the value is already there
+/// ("Trust Repository" for a repository git considers unsafe). On Windows a
+/// UNC path (`//server/share`) gets git's `%(prefix)/` in front.
 pub fn add_safe_directory(git: Arc<GitBinary>, path: &Path) -> Result<()> {
-    GitCommand::new(git)
-        .args(["config", "--global", "--add", "safe.directory"])
-        .arg(path.to_string_lossy().as_ref())
+    let mut value = path.to_string_lossy().into_owned();
+    if cfg!(windows) && value.starts_with('/') {
+        value = format!("%(prefix)/{value}");
+    }
+    let out = GitCommand::new(git.clone())
+        .args(["config", "--global", "-z", "--get-all", "safe.directory"])
+        .allow_exit_code(1)
         .run()?;
+    let present = out.status.success()
+        && String::from_utf8_lossy(&out.stdout)
+            .split('\0')
+            .any(|v| v == value);
+    if !present {
+        GitCommand::new(git)
+            .args(["config", "--global", "--add", "safe.directory"])
+            .arg(&value)
+            .run()?;
+    }
     Ok(())
 }
 
-/// `git config --local --unset <key>`; a missing key (exit 5) is not an error.
+/// GHD `removeConfigValue`: `git config --local --unset-all <key>`; a
+/// missing key (exit 5) is not an error (GHD's is).
 pub fn remove_local_config_value(git: Arc<GitBinary>, workdir: &Path, key: &str) -> Result<()> {
     GitCommand::new(git)
-        .args(["config", "--local", "--unset", key])
+        .args(["config", "--local", "--unset-all", key])
         .current_dir(workdir)
         .allow_exit_code(5)
         .run()?;

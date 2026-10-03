@@ -116,7 +116,6 @@ fn returns_null_when_the_branches_do_not_have_a_common_ancestor() {
 
 // GHD: unit/git/merge-test.ts › git/merge › getMergeBase › returns null when a ref cannot be found
 #[test]
-#[ignore = "ghd: bug: corvene_git::merge_base returns Err when git merge-base exits 128 for an unknown ref; GHD getMergeBase returns null (successExitCodes 0, 1, 128)"]
 fn returns_null_when_a_ref_cannot_be_found() {
     let repository = setup_empty_repository();
 

@@ -163,7 +163,6 @@ fn tracked(status: &WorkingDirectoryStatus) -> Vec<WorkingDirectoryFileChange> {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit normal › commits the given files
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn commits_the_given_files() {
     let repository = setup_fixture_repository("test-repo");
     write(&repository, "README.md", "Hi world\n");
@@ -193,7 +192,6 @@ fn commits_the_given_files() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit normal › commit does not strip commentary by default
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha; then corvene_git::get_commits trims the body's trailing newline ('# this is a comment' vs '# this is a comment\\n')"]
 fn commit_does_not_strip_commentary_by_default() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -220,7 +218,6 @@ fn commit_does_not_strip_commentary_by_default() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit normal › can commit for empty repository
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's '(root-commit)' for a root commit; then corvene_git::get_commits trims the body's trailing newline ('this is a description' vs 'this is a description\\n')"]
 fn can_commit_for_empty_repository() {
     let repo = setup_empty_repository();
 
@@ -256,7 +253,6 @@ fn can_commit_for_empty_repository() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit normal › can commit renames
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_renames() {
     let repo = setup_empty_repository();
 
@@ -289,7 +285,6 @@ fn can_commit_renames() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit partials › can commit some lines from new file
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_some_lines_from_new_file() {
     let repository = setup_fixture_repository("repo-with-changes");
 
@@ -329,7 +324,6 @@ fn can_commit_some_lines_from_new_file() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit partials › can commit second hunk from modified file
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_second_hunk_from_modified_file() {
     let repository = setup_fixture_repository("repo-with-changes");
 
@@ -387,7 +381,6 @@ fn can_commit_second_hunk_from_modified_file() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit partials › can commit single delete from modified file
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_single_delete_from_modified_file() {
     let repository = setup_fixture_repository("repo-with-changes");
 
@@ -424,7 +417,6 @@ fn can_commit_single_delete_from_modified_file() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit partials › can commit multiple hunks from modified file
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_multiple_hunks_from_modified_file() {
     let repository = setup_fixture_repository("repo-with-changes");
 
@@ -483,7 +475,6 @@ fn can_commit_multiple_hunks_from_modified_file() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit partials › can commit some lines from deleted file
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_some_lines_from_deleted_file() {
     let repository = setup_fixture_repository("repo-with-changes");
 
@@ -522,7 +513,6 @@ fn can_commit_some_lines_from_deleted_file() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit partials › can commit renames with modifications
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_renames_with_modifications() {
     let repo = setup_empty_repository();
 
@@ -560,7 +550,6 @@ fn can_commit_renames_with_modifications() {
 // commit one of these lines.
 // GHD: unit/git/commit-test.ts › git/commit › createCommit partials › can commit renames with partially selected modifications
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_renames_with_partially_selected_modifications() {
     let repo = setup_empty_repository();
 
@@ -609,7 +598,6 @@ fn can_commit_renames_with_partially_selected_modifications() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit with a merge conflict › creates a merge commit
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn create_commit_with_a_merge_conflict_creates_a_merge_commit() {
     let repo = setup_conflicted_repo();
     let file_path = repo.join("foo");
@@ -663,7 +651,6 @@ fn create_commit_with_a_merge_conflict_creates_a_merge_commit() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with a simple merge conflict › with a merge conflict › creates a merge commit
 #[test]
-#[ignore = "ghd: bug: corvene_git::create_merge_commit returns the full 40-char HEAD sha, GHD createMergeCommit returns parseCommitSHA's 7-char short sha"]
 fn create_merge_commit_with_a_simple_merge_conflict_creates_a_merge_commit() {
     let repository = setup_conflicted_repo();
 
@@ -677,7 +664,6 @@ fn create_merge_commit_with_a_simple_merge_conflict_creates_a_merge_commit() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with a merge conflict and manual resolutions › keeps files chosen to be added and commits
 #[test]
-#[ignore = "ghd: bug: corvene_git::create_merge_commit returns the full 40-char HEAD sha, GHD createMergeCommit returns parseCommitSHA's 7-char short sha"]
 fn keeps_files_chosen_to_be_added_and_commits() {
     let repository = setup_conflicted_repo_with_multiple_files();
 
@@ -693,7 +679,6 @@ fn keeps_files_chosen_to_be_added_and_commits() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with a merge conflict and manual resolutions › deletes files chosen to be removed and commits
 #[test]
-#[ignore = "ghd: bug: corvene_git::create_merge_commit returns the full 40-char HEAD sha, GHD createMergeCommit returns parseCommitSHA's 7-char short sha"]
 fn deletes_files_chosen_to_be_removed_and_commits() {
     let repository = setup_conflicted_repo_with_multiple_files();
 
@@ -709,7 +694,6 @@ fn deletes_files_chosen_to_be_removed_and_commits() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with a merge conflict and manual resolutions › checks out our content for file added in both branches
 #[test]
-#[ignore = "ghd: bug: corvene_git::create_merge_commit returns the full 40-char HEAD sha, GHD createMergeCommit returns parseCommitSHA's 7-char short sha"]
 fn checks_out_our_content_for_file_added_in_both_branches() {
     let repository = setup_conflicted_repo_with_multiple_files();
 
@@ -728,7 +712,6 @@ fn checks_out_our_content_for_file_added_in_both_branches() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with a merge conflict and manual resolutions › checks out their content for file added in both branches
 #[test]
-#[ignore = "ghd: bug: corvene_git::create_merge_commit returns the full 40-char HEAD sha, GHD createMergeCommit returns parseCommitSHA's 7-char short sha"]
 fn checks_out_their_content_for_file_added_in_both_branches() {
     let repository = setup_conflicted_repo_with_multiple_files();
 
@@ -771,7 +754,6 @@ fn read_utf8(path: &Path) -> String {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with a merge conflict and manual resolutions › binary file conflicts › chooses `their` version of a file and commits
 #[test]
-#[ignore = "ghd: bug: get_status reports the conflicted binary PNG with conflict_markers Some(0), not a manual conflict: binary_paths runs `diff --numstat` without GHD's MERGE_HEAD ref (getBinaryPaths) so git reports 0/0, not -/-"]
 fn chooses_their_version_of_a_file_and_commits() {
     let (repository, file_contents_theirs, file_contents_ours) = binary_conflict_setup();
 
@@ -798,7 +780,6 @@ fn chooses_their_version_of_a_file_and_commits() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with a merge conflict and manual resolutions › binary file conflicts › chooses `our` version of a file and commits
 #[test]
-#[ignore = "ghd: bug: get_status reports the conflicted binary PNG with conflict_markers Some(0), not a manual conflict: binary_paths runs `diff --numstat` without GHD's MERGE_HEAD ref (getBinaryPaths) so git reports 0/0, not -/-"]
 fn chooses_our_version_of_a_file_and_commits() {
     let (repository, _, file_contents_ours) = binary_conflict_setup();
 
@@ -824,7 +805,6 @@ fn chooses_our_version_of_a_file_and_commits() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createMergeCommit › with no changes › throws an error
 #[test]
-#[ignore = "ghd: bug: the error has no message: GitError::Failed keeps only stderr, git prints 'nothing to commit' on stdout, which GHD's git() also parses (NothingToCommit, 'There are no changes to commit.')"]
 fn create_merge_commit_with_no_changes_throws_an_error() {
     let repository = setup_fixture_repository("test-repo");
     let status = get_status_or_throw(&repository);
@@ -841,7 +821,6 @@ fn create_merge_commit_with_no_changes_throws_an_error() {
 
 // GHD: unit/git/commit-test.ts › git/commit › index corner cases › can commit when staged new file is then deleted
 #[test]
-#[ignore = "ghd: bug: get_status lists 2 files, GHD 1: the added-then-deleted `AD first` entry is kept (GHD buildStatusMap skips index Added + working tree Deleted); then corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's '(root-commit)' for a root commit"]
 fn can_commit_when_staged_new_file_is_then_deleted() {
     let repo = setup_empty_repository();
 
@@ -884,7 +863,6 @@ fn can_commit_when_staged_new_file_is_then_deleted() {
 
 // GHD: unit/git/commit-test.ts › git/commit › index corner cases › can commit when a delete is staged and the untracked file exists
 #[test]
-#[ignore = "ghd: bug: get_status lists 2 files, GHD 1: `D first` and `?? first` both kept (GHD buildStatusMap lets the untracked entry replace the staged delete); then corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn can_commit_when_a_delete_is_staged_and_the_untracked_file_exists() {
     let repo = setup_empty_repository();
 
@@ -929,7 +907,6 @@ fn can_commit_when_a_delete_is_staged_and_the_untracked_file_exists() {
 
 // GHD: unit/git/commit-test.ts › git/commit › index corner cases › file is deleted in index
 #[test]
-#[ignore = "ghd: bug: the commit records `secret` as Modified, not Deleted: stage_files re-adds the working copy and never runs GHD stageFiles' `update-index --force-remove` for Deleted files, so ignored contents get committed"]
 fn file_is_deleted_in_index() {
     let repo = setup_empty_repository();
     write(&repo, "secret", "contents\n");
@@ -974,7 +951,6 @@ fn file_is_deleted_in_index() {
 
 // GHD: unit/git/commit-test.ts › git/commit › createCommit allowEmpty › creates an empty commit when allowEmpty is true
 #[test]
-#[ignore = "ghd: bug: corvene_git::commit returns the full 40-char HEAD sha, GHD createCommit returns parseCommitSHA's 7-char short sha"]
 fn creates_an_empty_commit_when_allow_empty_is_true() {
     let repo = setup_empty_repository();
 

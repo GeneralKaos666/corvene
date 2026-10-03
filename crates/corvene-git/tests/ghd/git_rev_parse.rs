@@ -91,7 +91,6 @@ fn assert_regular(path: &Path, top_level: &Path, expected_git_dir: &Path) {
 
 // GHD: unit/git/rev-parse-test.ts › git/rev-parse › getRepositoryType › should return an absolute path when run inside a working directory
 #[test]
-#[ignore = "ghd: bug: path_status(<repository>/subdir) is NotARepository (Add Local Repository refuses it); GHD getRepositoryType discovers the repository and answers regular with its top level"]
 fn should_return_an_absolute_path_when_run_inside_a_working_directory() {
     let repository = setup_fixture_repository("test-repo");
 

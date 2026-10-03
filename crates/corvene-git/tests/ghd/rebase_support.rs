@@ -108,6 +108,7 @@ pub fn continue_rebase(
         manual_resolutions,
         &commits,
         false,
+        None,
         |p| {
             if let Some(callback) = progress_callback.as_mut() {
                 callback(p);

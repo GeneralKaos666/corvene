@@ -8,10 +8,10 @@
 //! like the input ([`remote_branch`]); `remote_name: None` is the split at
 //! the first `/` (flag `256-remote-names-with-slashes` off, as in the
 //! github-desktop preset). It falls back to the whole name instead of
-//! `null`, so the third case calls the stand-in [`remove_remote_prefix`]
-//! and is ignored until a function returning `None` exists.
+//! `null`, so the third case calls the free
+//! [`corvene_models::remove_remote_prefix`], which returns `None`.
 
-use corvene_models::{Branch, BranchKind};
+use corvene_models::{Branch, BranchKind, remove_remote_prefix};
 
 /// A remote-tracking branch whose short name is `name`.
 fn remote_branch(name: &str) -> Branch {
@@ -24,13 +24,6 @@ fn remote_branch(name: &str) -> Branch {
         tip_time: None,
         remote_name: None,
     }
-}
-
-/// Stand-in for GitHub Desktop's `removeRemotePrefix(name)`
-/// (`lib/remove-remote-prefix.ts`). Replace it with the Corvene function
-/// once there is one and remove the `#[ignore]`.
-fn remove_remote_prefix(_name: &str) -> Option<String> {
-    unimplemented!("Corvene has no removeRemotePrefix")
 }
 
 // GHD: unit/remove-remote-prefix-test.ts › removeRemotePrefix › removes the remote prefix
@@ -51,7 +44,6 @@ fn removes_only_the_remote_prefix_and_not_any_subsequent_slashes() {
 
 // GHD: unit/remove-remote-prefix-test.ts › removeRemotePrefix › returns null if there is no remote prefix
 #[test]
-#[ignore = "ghd: missing: no removeRemotePrefix (lib/remove-remote-prefix.ts) returning None; Branch::name_without_remote falls back to the whole name"]
 fn returns_null_if_there_is_no_remote_prefix() {
     let name = remove_remote_prefix("name");
     assert!(name.is_none());

@@ -25,11 +25,9 @@
 //!   only a path, a kind and a selection, while Corvene's also carries the
 //!   index / working tree columns `working_directory_diff` reads, which come
 //!   from Corvene's own status of that path.
-//! - `getBinaryPaths(repository, ref, conflictedFilesInIndex)` has no
-//!   equivalent: `corvene_git::binary_paths(git, path, paths)` takes no ref,
-//!   only diffs the given paths (index against working tree) and never
-//!   checks the `merge=binary` attribute. The cases call the stand-in
-//!   [`get_binary_paths`].
+//! - `getBinaryPaths(repository, ref, conflictedFilesInIndex)` is
+//!   `corvene_git::binary_paths(git, path, ref, conflicted_paths)`, given
+//!   the paths of the status entries ([`get_binary_paths`]).
 //! - `getBranchMergeBaseChangedFiles` is `corvene_git::merge_base_changed_files`
 //!   and `getBranchMergeBaseDiff` is `corvene_git::merge_base_file_diff`.
 //! - GitHub Desktop's `DiffLine.text` is the line as the unified diff prints
@@ -176,27 +174,26 @@ fn get_blob_image(repo: &TestRepo, path: &str, commitish: &str) -> ImageBlob {
 
 /// GitHub Desktop's `IStatusEntry` (`lib/status-parser.ts`), as
 /// `getBinaryPaths` takes the conflicted files.
-#[allow(dead_code)] // read by `getBinaryPaths` once Corvene has one
+#[allow(dead_code)] // `getBinaryPaths` reads only the path
 struct StatusEntry {
     path: &'static str,
     status_code: &'static str,
     submodule_status_code: &'static str,
 }
 
-/// Stand-in for GitHub Desktop's `getBinaryPaths(repository, ref,
-/// conflictedFilesInIndex)` (`lib/git/diff.ts`): the paths `git diff
-/// --numstat -z <ref>` reports as binary plus the conflicted files whose
-/// `merge` attribute is `binary` (`git check-attr --stdin -z merge`); fails
-/// when git does (e.g. no `HEAD`). Replace it with the `corvene_git`
-/// function once there is one and remove the `#[ignore]`s.
+/// GitHub Desktop's `getBinaryPaths(repository, ref,
+/// conflictedFilesInIndex)` (`lib/git/diff.ts`):
+/// `corvene_git::binary_paths` with the entries' paths.
 fn get_binary_paths(
-    _repository: &TestRepo,
-    _reference: &str,
-    _conflicted_files_in_index: &[StatusEntry],
+    repository: &TestRepo,
+    reference: &str,
+    conflicted_files_in_index: &[StatusEntry],
 ) -> Result<Vec<String>, GitError> {
-    unimplemented!(
-        "corvene_git::binary_paths takes no ref and only numstats the given paths; GitHub Desktop's getBinaryPaths diffs the whole tree against a ref and adds files with merge=binary"
-    )
+    let paths: Vec<String> = conflicted_files_in_index
+        .iter()
+        .map(|entry| entry.path.to_string())
+        .collect();
+    corvene_git::binary_paths(git(), repository.path(), reference, &paths)
 }
 
 // GHD: unit/git/diff-test.ts › git/diff › getWorkingDirectoryImage › retrieves valid image for new file
@@ -509,7 +506,6 @@ fn displays_unicode_characters() {
 
 // GHD: unit/git/diff-test.ts › git/diff › getBinaryPaths › in empty repo › throws since HEAD doesnt exist
 #[test]
-#[ignore = "ghd: missing: no getBinaryPaths(ref, conflictedFiles) (lib/git/diff.ts); corvene_git::binary_paths takes no ref"]
 fn throws_since_head_doesnt_exist() {
     let repo = setup_empty_repository();
     assert!(get_binary_paths(&repo, "HEAD", &[]).is_err());
@@ -517,7 +513,6 @@ fn throws_since_head_doesnt_exist() {
 
 // GHD: unit/git/diff-test.ts › git/diff › getBinaryPaths › with files using binary merge driver › includes plain text files using binary driver
 #[test]
-#[ignore = "ghd: missing: no getBinaryPaths(ref, conflictedFiles) (lib/git/diff.ts); corvene_git::binary_paths never checks merge=binary"]
 fn includes_plain_text_files_using_binary_driver() {
     let repo = setup_empty_repository();
     std::fs::write(repo.join("foo.bin"), "foo\n").unwrap();
@@ -553,7 +548,6 @@ fn includes_plain_text_files_using_binary_driver() {
 
 // GHD: unit/git/diff-test.ts › git/diff › getBinaryPaths › in repo with text only files › returns an empty array
 #[test]
-#[ignore = "ghd: missing: no getBinaryPaths(ref, conflictedFiles) (lib/git/diff.ts); corvene_git::binary_paths takes no ref"]
 fn returns_an_empty_array() {
     let repo = setup_fixture_repository("repo-with-changes");
     assert_eq!(get_binary_paths(&repo, "HEAD", &[]).unwrap().len(), 0);
@@ -561,7 +555,6 @@ fn returns_an_empty_array() {
 
 // GHD: unit/git/diff-test.ts › git/diff › getBinaryPaths › in repo with image changes › returns all changed image files
 #[test]
-#[ignore = "ghd: missing: no getBinaryPaths(ref, conflictedFiles) (lib/git/diff.ts); corvene_git::binary_paths takes no ref"]
 fn returns_all_changed_image_files() {
     let repo = setup_fixture_repository("repo-with-image-changes");
     assert_eq!(
@@ -576,7 +569,6 @@ fn returns_all_changed_image_files() {
 
 // GHD: unit/git/diff-test.ts › git/diff › getBinaryPaths › in repo with merge conflicts on image files › returns all conflicted image files
 #[test]
-#[ignore = "ghd: missing: no getBinaryPaths(ref, conflictedFiles) (lib/git/diff.ts); corvene_git::binary_paths takes no ref"]
 fn returns_all_conflicted_image_files() {
     let repo = setup_fixture_repository("detect-conflict-in-binary-file");
     exec(["checkout", "make-a-change"], repo.path());
@@ -756,7 +748,6 @@ fn loads_the_files_changed_between_two_branches_if_merged() {
 
 // GHD: unit/git/diff-test.ts › git/diff › getBranchMergeBaseChangedFiles › returns null for unrelated histories
 #[test]
-#[ignore = "ghd: bug: merge_base_changed_files is Err (merge-base exit 128, no feature-branch) instead of Ok(None); GHD getMergeBase maps exit 1 and 128 to null"]
 fn returns_null_for_unrelated_histories() {
     let repository = setup_fixture_repository("submodule-basic-setup");
 

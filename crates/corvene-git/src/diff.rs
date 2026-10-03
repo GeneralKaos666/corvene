@@ -281,6 +281,18 @@ pub fn working_file_lines(
     std::fs::read(full).ok().map(|b| file_lines(&b))
 }
 
+/// GHD `readPartialFile` (`lib/file-system.ts`): bytes `start..=end` of the
+/// file at `path` (fewer when the file ends first).
+pub fn read_partial_file(path: &Path, start: u64, end: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(end.saturating_add(1).saturating_sub(start))
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// A committed blob as lines (`None` when the path is not in that commit).
 pub fn blob_lines(
     git: Arc<GitBinary>,

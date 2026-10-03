@@ -582,11 +582,12 @@ fn conflicted_repo_with_unrelated_change_keeps_perlin_modified() {
         .iter()
         .map(|f| (f.path.as_str(), f.status.kind))
         .collect();
+    // git's order, as GHD `getStatus` keeps it: changed, unmerged, untracked
     assert_eq!(
         kinds,
         [
-            ("foo", FileStatusKind::Conflicted),
-            ("perlin", FileStatusKind::Modified)
+            ("perlin", FileStatusKind::Modified),
+            ("foo", FileStatusKind::Conflicted)
         ]
     );
 }
@@ -601,14 +602,15 @@ fn conflicted_repo_with_multiple_files() {
         .iter()
         .map(|f| (f.path.as_str(), f.status.kind))
         .collect();
+    // git's order, as GHD `getStatus` keeps it: unmerged, then untracked
     assert_eq!(
         kinds,
         [
             ("bar", FileStatusKind::Conflicted),
             ("baz", FileStatusKind::Conflicted),
             ("cat", FileStatusKind::Conflicted),
-            ("dog", FileStatusKind::Untracked),
             ("foo", FileStatusKind::Conflicted),
+            ("dog", FileStatusKind::Untracked),
         ]
     );
 }

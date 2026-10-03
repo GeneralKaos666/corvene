@@ -9,7 +9,8 @@
 //! - `getCommit(repository, 'HEAD')` / `getCommits(repository, 'HEAD', 5)`
 //!   are `corvene_git::get_commits(path, "HEAD", 0, 1 | 5)`.
 //! - `getRebaseInternalState` is `corvene_git::rebase_internal_state`.
-//! - `continueRebase` with `gitEditor` has no Corvene counterpart yet
+//! - `continueRebase(repository, files, undefined, { gitEditor })` is
+//!   `corvene_git::continue_rebase` with `git_editor`
 //!   (`crate::mco_support::continue_rebase`).
 
 use corvene_git::{RebaseOptions, RebaseResult};
@@ -160,7 +161,6 @@ fn reorders_using_the_root_of_the_branch_if_last_retained_commit_is_null() {
 
 // GHD: unit/git/reorder-test.ts › git/reorder › handles reordering a conflicting commit
 #[test]
-#[ignore = "ghd: missing: corvene_git::continue_rebase has no git editor option (GHD continueRebase opts.gitEditor, lib/git/rebase.ts)"]
 fn handles_reordering_a_conflicting_commit() {
     let repository = setup_empty_repository_default_main();
     let initial_commit = make_sample_commit(&repository, "initialize", None);

@@ -11,7 +11,8 @@
 //!   are `corvene_git::get_commits(path, "HEAD", 0, 1 | 5)`.
 //! - `getChangedFiles(repository, sha)` is `corvene_git::get_changed_files`.
 //! - `getRebaseInternalState` is `corvene_git::rebase_internal_state`.
-//! - `continueRebase` with `gitEditor` has no Corvene counterpart yet
+//! - `continueRebase(repository, files, undefined, { gitEditor })` is
+//!   `corvene_git::continue_rebase` with `git_editor`
 //!   (`crate::mco_support::continue_rebase`).
 
 use corvene_git::{RebaseOptions, RebaseResult};
@@ -72,7 +73,6 @@ fn make_squash_commit(repository: &TestRepo, desc: &str, file: Option<&str>) -> 
 
 // GHD: unit/git/squash-test.ts › git/cherry-pick › squashes one commit onto the next (non-conflicting)
 #[test]
-#[ignore = "ghd: bug: corvene_git::get_commits trims the body: \"Test Body\" vs GHD \"Test Body\\n\" (git log %b keeps the trailing newline)"]
 fn squashes_one_commit_onto_the_next_non_conflicting() {
     let repository = setup_empty_repository_default_main();
     let initial_commit = make_squash_commit(&repository, "initialize", None);
@@ -124,7 +124,6 @@ fn returns_error_when_squash_onto_is_in_the_to_squash_array() {
 
 // GHD: unit/git/squash-test.ts › git/cherry-pick › squashes multiple commit onto one (non-conflicting)
 #[test]
-#[ignore = "ghd: bug: corvene_git::get_commits trims the body: \"Test Body\" vs GHD \"Test Body\\n\" (git log %b keeps the trailing newline)"]
 fn squashes_multiple_commit_onto_one_non_conflicting() {
     let repository = setup_empty_repository_default_main();
     let initial_commit = make_squash_commit(&repository, "initialize", None);
@@ -160,7 +159,6 @@ fn squashes_multiple_commit_onto_one_non_conflicting() {
 
 // GHD: unit/git/squash-test.ts › git/cherry-pick › squashes using the root of the branch if last retained commit is null
 #[test]
-#[ignore = "ghd: bug: corvene_git::get_commits trims the body: \"Test Body\" vs GHD \"Test Body\\n\" (git log %b keeps the trailing newline)"]
 fn squashes_using_the_root_of_the_branch_if_last_retained_commit_is_null() {
     let repository = setup_empty_repository_default_main();
     let initial_commit = make_squash_commit(&repository, "initialize", None);
@@ -196,7 +194,6 @@ fn squashes_using_the_root_of_the_branch_if_last_retained_commit_is_null() {
 
 // GHD: unit/git/squash-test.ts › git/cherry-pick › squashes multiple commit non-sequential commits (reorders, non-conflicting)
 #[test]
-#[ignore = "ghd: bug: corvene_git::get_commits trims the body: \"third\\n\\nfifth\" vs GHD \"third\\n\\nfifth\\n\" (git log %b keeps the trailing newline)"]
 fn squashes_multiple_commit_non_sequential_commits_reorders_non_conflicting() {
     let repository = setup_empty_repository_default_main();
     let initial_commit = make_squash_commit(&repository, "initialize", None);
@@ -249,7 +246,6 @@ fn squashes_multiple_commit_non_sequential_commits_reorders_non_conflicting() {
 
 // GHD: unit/git/squash-test.ts › git/cherry-pick › handles squashing a conflicting commit
 #[test]
-#[ignore = "ghd: missing: corvene_git::continue_rebase has no git editor option (GHD continueRebase opts.gitEditor, lib/git/rebase.ts); the body check then hits the get_commits trailing-newline bug"]
 fn handles_squashing_a_conflicting_commit() {
     let repository = setup_empty_repository_default_main();
     let initial_commit = make_squash_commit(&repository, "initialize", None);
@@ -339,7 +335,6 @@ fn handles_squashing_a_conflicting_commit() {
 
 // GHD: unit/git/squash-test.ts › git/cherry-pick › squashes with default merged commit message/description if commit message not provided
 #[test]
-#[ignore = "ghd: bug: corvene_git::get_commits trims the body: \"second\" vs GHD \"second\\n\" (git log %b keeps the trailing newline)"]
 fn squashes_with_default_merged_commit_message_description_if_commit_message_not_provided() {
     let repository = setup_empty_repository_default_main();
     let initial_commit = make_squash_commit(&repository, "initialize", None);

@@ -11,9 +11,8 @@
 //!   removes the file again, since GitHub Desktop's never exists.
 //! - `readPartialFile(path, start, end)` (the inclusive byte range syntax
 //!   highlighting reads from the working copy, up to
-//!   `MaxHighlightContentLength`) has no Corvene equivalent:
-//!   `corvene_git::diff::working_file_lines` reads the whole file.
-//!   [`read_partial_file`] is a stand-in.
+//!   `MaxHighlightContentLength`) is `corvene_git::read_partial_file`
+//!   ([`read_partial_file`]).
 
 use std::path::{Path, PathBuf};
 
@@ -27,11 +26,9 @@ fn get_temp_file_path(name: &str) -> PathBuf {
     path
 }
 
-/// Stand-in for GitHub Desktop's `readPartialFile(path, start, end)`
-/// (`lib/file-system.ts`): bytes `start..=end` of the file. Replace it with
-/// the Corvene function once there is one and remove the `#[ignore]`s.
-fn read_partial_file(_path: &Path, _start: u64, _end: u64) -> Vec<u8> {
-    unimplemented!("Corvene has no readPartialFile (lib/file-system.ts)")
+/// `readPartialFile(path, start, end)`.
+fn read_partial_file(path: &Path, start: u64, end: u64) -> Vec<u8> {
+    corvene_git::read_partial_file(path, start, end).expect("readPartialFile")
 }
 
 // GHD: unit/file-system-test.ts › file-system › getTempFilePath › returns a path in the temp directory
@@ -62,7 +59,6 @@ fn generates_unique_paths_on_each_call() {
 
 // GHD: unit/file-system-test.ts › file-system › readPartialFile › reads a specific range from a file
 #[test]
-#[ignore = "ghd: missing: no readPartialFile (lib/file-system.ts); diff::working_file_lines reads the whole file"]
 fn reads_a_specific_range_from_a_file() {
     let temp_dir = create_temp_directory();
     let file_path = temp_dir.path().join("partial-read-test");
@@ -74,7 +70,6 @@ fn reads_a_specific_range_from_a_file() {
 
 // GHD: unit/file-system-test.ts › file-system › readPartialFile › reads from the middle of a file
 #[test]
-#[ignore = "ghd: missing: no readPartialFile (lib/file-system.ts); diff::working_file_lines reads the whole file"]
 fn reads_from_the_middle_of_a_file() {
     let temp_dir = create_temp_directory();
     let file_path = temp_dir.path().join("partial-read-test-mid");
@@ -86,7 +81,6 @@ fn reads_from_the_middle_of_a_file() {
 
 // GHD: unit/file-system-test.ts › file-system › readPartialFile › reads a single byte
 #[test]
-#[ignore = "ghd: missing: no readPartialFile (lib/file-system.ts); diff::working_file_lines reads the whole file"]
 fn reads_a_single_byte() {
     let temp_dir = create_temp_directory();
     let file_path = temp_dir.path().join("partial-read-single");

@@ -1,4 +1,7 @@
 //! `git status --porcelain=2 -z` (GHD `lib/status-parser.ts` + `lib/git/status.ts`).
+//! Files come in git's order, built like GHD's `buildStatusMap`; the
+//! changes list sorts them (`WorkingDirectoryStatus::sort_files`, GHD
+//! `updateChangedFiles`).
 //!
 //! Deviations behind flags: [`StatusOptions`] (`respect-show-untracked-files`,
 //! `ignore-submodules`) and [`working_directory_line_stats`]
@@ -103,12 +106,9 @@ pub fn get_status_with(
             }
         }
     }
-    // GHD `updateChangedFiles` (lib/stores/updates/changes-state.ts) lists
-    // files by `caseInsensitiveCompare` of their paths, not in git's order
-    // (tracked before untracked, bytewise)
-    status
-        .files
-        .sort_by_cached_key(|file| file.path.to_lowercase());
+    // git's order (tracked before untracked, bytewise), as GHD `getStatus`
+    // returns it; the changes list sorts them
+    // (`WorkingDirectoryStatus::sort_files`)
     Ok(status)
 }
 
@@ -229,6 +229,7 @@ pub fn parse_porcelain_v2(stdout: &[u8]) -> WorkingDirectoryStatus {
     let text = String::from_utf8_lossy(stdout);
     let mut fields = text.split('\0').filter(|f| !f.is_empty()).peekable();
     let mut status = WorkingDirectoryStatus::default();
+    let mut files = FileMap::default();
 
     while let Some(field) = fields.next() {
         let mut parts = field.splitn(2, ' ');
@@ -242,7 +243,7 @@ pub fn parse_porcelain_v2(stdout: &[u8]) -> WorkingDirectoryStatus {
                 if cols.len() == 8 {
                     let code = cols[0];
                     let sub = cols[1];
-                    push_file(&mut status, cols[7], None, code, sub, None);
+                    files.push(cols[7], None, code, sub, None);
                 }
             }
             "2" => {
@@ -253,42 +254,63 @@ pub fn parse_porcelain_v2(stdout: &[u8]) -> WorkingDirectoryStatus {
                     let sub = cols[1];
                     let score = cols[7].trim_start_matches(['R', 'C']).parse::<u8>().ok();
                     let orig = fields.next().map(str::to_string);
-                    push_file(&mut status, cols[8], orig, code, sub, score);
+                    files.push(cols[8], orig, code, sub, score);
                 }
             }
             "u" => {
                 // <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
                 let cols: Vec<&str> = rest.splitn(10, ' ').collect();
                 if cols.len() == 10 {
-                    push_file(&mut status, cols[9], None, cols[0], cols[1], None);
+                    files.push(cols[9], None, cols[0], cols[1], None);
                 }
             }
-            "?" => push_file(&mut status, rest, None, "??", "N...", None),
+            "?" => files.push(rest, None, "??", "N...", None),
             "!" => {}
             _ => {}
         }
     }
+    status.hidden_index_entries = files.hidden_index_entries;
+    status.files = files.slots.into_iter().flatten().collect();
     status
 }
 
 /// GHD `getConflictDetails`: text conflicts carry their marker count, binary
 /// and add/delete conflicts stay "manual" (`conflict_markers: None`).
+/// Binary files are detected against `MERGE_HEAD` during a merge,
+/// `REBASE_HEAD` during a rebase and `HEAD` otherwise (conflicts from
+/// popping a stash, where an unborn `HEAD` just means no binary files). A
+/// failure during a merge or rebase drops all details, as GHD's does.
 fn apply_conflict_details(
     git: Arc<GitBinary>,
     workdir: &Path,
     status: &mut WorkingDirectoryStatus,
 ) {
-    let markers =
-        crate::rebase_ops::conflict_marker_counts(git.clone(), workdir).unwrap_or_default();
     let conflicted: Vec<String> = status
         .files
         .iter()
-        .filter(|f| f.status.kind == FileStatusKind::Conflicted)
+        .filter(|f| f.status.is_conflicted())
         .map(|f| f.path.clone())
         .collect();
-    let binary = crate::rebase_ops::binary_paths(git, workdir, &conflicted).unwrap_or_default();
+    let details = || -> Result<_> {
+        let markers = crate::rebase_ops::conflict_marker_counts(git.clone(), workdir)?;
+        let binary_paths = |reference| {
+            crate::rebase_ops::binary_paths(git.clone(), workdir, reference, &conflicted)
+        };
+        let binary = if status.merge_head_found {
+            binary_paths("MERGE_HEAD")?
+        } else if status.rebase_internal_state.is_some() {
+            binary_paths("REBASE_HEAD")?
+        } else {
+            binary_paths("HEAD").unwrap_or_default()
+        };
+        Ok((markers, binary))
+    };
+    let (markers, binary) = details().unwrap_or_else(|err| {
+        tracing::error!(%err, "unexpected error from git operations in getConflictDetails");
+        Default::default()
+    });
     for file in &mut status.files {
-        if file.status.kind != FileStatusKind::Conflicted {
+        if !file.status.is_conflicted() {
             continue;
         }
         // GHD `TextConflictDetails`: both added or both modified, and not binary
@@ -325,23 +347,69 @@ fn parse_header(rest: &str, status: &mut WorkingDirectoryStatus) {
     }
 }
 
-fn push_file(
-    status: &mut WorkingDirectoryStatus,
-    path: &str,
-    old_path: Option<String>,
-    code: &str,
-    sub: &str,
-    score: Option<u8>,
-) {
-    let Some(file_status) = map_status(code, sub, score) else {
-        return;
-    };
-    status.files.push(WorkingDirectoryFileChange {
-        path: path.to_string(),
-        old_path,
-        status: file_status,
-        selection: DiffSelection::all(),
-    });
+/// GHD `buildStatusMap`: the changed files keyed on their path, in git's
+/// order (a `Map` keeps insertion order). Removed entries leave an empty
+/// slot so the index stays valid.
+#[derive(Default)]
+struct FileMap {
+    slots: Vec<Option<WorkingDirectoryFileChange>>,
+    index: std::collections::HashMap<String, usize>,
+    /// An index entry was left out
+    /// ([`WorkingDirectoryStatus::hidden_index_entries`]).
+    hidden_index_entries: bool,
+}
+
+impl FileMap {
+    fn push(
+        &mut self,
+        path: &str,
+        old_path: Option<String>,
+        code: &str,
+        sub: &str,
+        score: Option<u8>,
+    ) {
+        let Some(file_status) = map_status(code, sub, score) else {
+            return;
+        };
+        // added in the index, then removed from the working directory: the
+        // file won't be part of the commit, so it is not listed
+        if file_status.index == GitStatusEntry::Added
+            && file_status.working_tree == GitStatusEntry::Deleted
+        {
+            self.hidden_index_entries = true;
+            return;
+        }
+        // a staged delete and an untracked file at the same path: only the
+        // untracked one is listed (`files.delete`, so it goes to the end)
+        if file_status.kind == FileStatusKind::Untracked
+            && let Some(ix) = self.index.remove(path)
+        {
+            self.slots[ix] = None;
+        }
+        // a submodule whose commit did not change has nothing to commit
+        let selection = if file_status.kind == FileStatusKind::Modified
+            && file_status
+                .submodule_status
+                .is_some_and(|s| !s.commit_changed)
+        {
+            DiffSelection::none()
+        } else {
+            DiffSelection::all()
+        };
+        let file = WorkingDirectoryFileChange {
+            path: path.to_string(),
+            old_path,
+            status: file_status,
+            selection,
+        };
+        match self.index.get(path) {
+            Some(&ix) => self.slots[ix] = Some(file),
+            None => {
+                self.index.insert(path.to_string(), self.slots.len());
+                self.slots.push(Some(file));
+            }
+        }
+    }
 }
 
 fn entry(c: char) -> GitStatusEntry {
@@ -454,6 +522,45 @@ mod tests {
         assert_eq!(s.files[0].status.working_tree, GitStatusEntry::Modified);
         assert!(s.has_conflicts());
         assert_eq!(s.include_all(), Some(true));
+    }
+
+    #[test]
+    fn builds_the_status_map_like_ghd() {
+        use corvene_models::DiffSelectionType;
+        let raw = concat!(
+            "1 D. N... 100644 000000 000000 aaa 000 first\0",
+            "1 AD N... 000000 100644 000000 000 bbb gone\0",
+            "1 .M SC.. 160000 160000 160000 ccc ccc sub-moved\0",
+            "1 .M S.M. 160000 160000 160000 ddd ddd sub-dirty\0",
+            "? first\0",
+        );
+        let s = parse_porcelain_v2(raw.as_bytes());
+        let files: Vec<(&str, FileStatusKind, DiffSelectionType)> = s
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status.kind, f.selection.kind()))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                (
+                    "sub-moved",
+                    FileStatusKind::Modified,
+                    DiffSelectionType::All
+                ),
+                (
+                    "sub-dirty",
+                    FileStatusKind::Modified,
+                    DiffSelectionType::None
+                ),
+                ("first", FileStatusKind::Untracked, DiffSelectionType::All),
+            ]
+        );
+        // `gone` is still in the index, so a commit has to reset it first
+        assert!(s.hidden_index_entries);
+        assert!(
+            !parse_porcelain_v2(b"1 .M N... 100644 100644 100644 a b f\0").hidden_index_entries
+        );
     }
 
     #[test]

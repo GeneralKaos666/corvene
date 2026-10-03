@@ -6,14 +6,10 @@
 //! on an existing `config.lock`) offers to "delete the lock file and try
 //! again": `onDeleteLockFile` unlinks the lock, treats a lock that is
 //! already gone (`ENOENT`) as deleted and calls `onLockFileDeleted`, and
-//! hands any other failure to `onError`. Corvene has no counterpart: it
-//! reports `GitError::ConfigLockFileAlreadyExists` with a lead sentence
-//! ("Another program is changing this repository's Git configuration; try
-//! again in a moment.", `git_errors.rs`) and offers no deletion (its
-//! `index_lock` removal, flag `265-remove-stale-index-lock`, handles
-//! `index.lock` only). [`delete_config_lock_file`] is a stand-in: `Ok(())`
-//! is `onLockFileDeleted`, `Err(e)` is `onError(e)`. Replace it with the
-//! Corvene function once there is one and remove the `#[ignore]`s.
+//! hands any other failure to `onError`. Corvene's counterpart is
+//! `corvene_git::delete_config_lock_file`, which the error dialog of a Git
+//! configuration save offers (`Dispatcher::delete_config_lock_file`):
+//! `Ok(())` is `onLockFileDeleted`, `Err(e)` is `onError(e)`.
 //!
 //! GitHub Desktop mocks `fs/promises.unlink`; these tests use real files in a
 //! temporary directory instead: a lock file that exists, one that does not
@@ -26,13 +22,8 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use corvene_git::delete_config_lock_file;
 use corvene_test_support::create_temp_directory;
-
-/// Stand-in for GitHub Desktop's `ConfigLockFileExists.onDeleteLockFile`
-/// (`ui/lib/config-lock-file-exists.tsx`) for `lockFilePath`.
-fn delete_config_lock_file(_lock_file_path: &Path) -> io::Result<()> {
-    unimplemented!("Corvene has no ConfigLockFileExists (delete the config lock file and retry)")
-}
 
 /// `ConfigLockFileExists` with counting `onLockFileDeleted` / `onError`
 /// callbacks.
@@ -82,7 +73,6 @@ fn set_read_only(path: &Path, read_only: bool) {
 
 // GHD: unit/ui/helper-side-effect-surfaces-test.tsx › helper side-effect surfaces › deletes the config lock file and retries when deletion succeeds or file is already gone
 #[test]
-#[ignore = "ghd: missing: no ConfigLockFileExists delete-and-retry (ui/lib/config-lock-file-exists.tsx); Corvene only reports ConfigLockFileAlreadyExists with a lead sentence (git_errors.rs)"]
 fn deletes_the_config_lock_file_and_retries_when_deletion_succeeds_or_file_is_already_gone() {
     let temp = create_temp_directory();
     // `lockFilePath="/tmp/repo.lock"`: unlinking succeeds
@@ -108,7 +98,6 @@ fn deletes_the_config_lock_file_and_retries_when_deletion_succeeds_or_file_is_al
 
 // GHD: unit/ui/helper-side-effect-surfaces-test.tsx › helper side-effect surfaces › reports config lock deletion failures other than ENOENT
 #[test]
-#[ignore = "ghd: missing: no ConfigLockFileExists delete-and-retry (ui/lib/config-lock-file-exists.tsx); Corvene only reports ConfigLockFileAlreadyExists with a lead sentence (git_errors.rs)"]
 fn reports_config_lock_deletion_failures_other_than_enoent() {
     let temp = create_temp_directory();
     let dir = temp.path().join("locked");

@@ -4,9 +4,12 @@
 //!
 //! - `checkoutBranch(repository, branch, currentRemote, progressCallback,
 //!   allowFileProtocol)` (`lib/git/checkout.ts`) is
-//!   `corvene_git::checkout_branch(git, path, branch)`, which takes no
-//!   remote, progress callback or `allowFileProtocol`. An `Err` is a
-//!   rejection; its message is [`git_error_message`].
+//!   `corvene_git::checkout_branch(git, path, branch)` with GitHub Desktop's
+//!   defaults, or `corvene_git::checkout_branch_with(git, path, branch,
+//!   &CheckoutOptions { allow_file_protocol, .. })`; neither takes a remote
+//!   or a progress callback. Both update the submodules afterwards, as
+//!   GitHub Desktop 3.6.6 does. An `Err` is a rejection; its message is
+//!   [`git_error_message`].
 //! - `getBranches(repository, ...prefixes)` is [`get_branches`]
 //!   (`corvene_git::open_repository(..).branches`).
 //! - `createBranch(repository, name, null)` is
@@ -19,7 +22,7 @@
 //! - GitHub Desktop's `Branch` object literal is a `corvene_models::Branch`:
 //!   `ref: ''` is an empty `full_name`, `tip: { sha: '' }` is no tip.
 
-use corvene_git::GitError;
+use corvene_git::{CheckoutOptions, GitError};
 use corvene_models::{Branch, BranchKind, Tip};
 use corvene_test_support::{
     TestRepo, exec, get_branches, get_status_or_throw, git, git_error_message, load_tip,
@@ -36,7 +39,6 @@ fn checkout_branch(repository: &TestRepo, branch: &Branch) -> Result<(), GitErro
 
 // GHD: unit/git/checkout-test.ts › git/checkout › throws when invalid characters are used for branch name
 #[test]
-#[ignore = "ghd: bug: Corvene trims git's stderr in GitError: message is `fatal: invalid reference: ..`, GHD's GitError.message is the raw output with its trailing newline"]
 fn throws_when_invalid_characters_are_used_for_branch_name() {
     let repository = setup_empty_repository();
 
@@ -143,7 +145,6 @@ fn will_fail_when_an_existing_branch_matches_the_remote_branch() {
 
 // GHD: unit/git/checkout-test.ts › git/checkout › with submodules › updates a changed submodule reference
 #[test]
-#[ignore = "ghd: bug: checkout_branch never runs `git submodule update --init --recursive` (GHD 3.6.6 checkoutBranch → updateSubmodulesAfterOperation): status shows ` M inner`, expected no files; deviation 263 says GHD leaves submodules alone, 3.6.6 does not"]
 fn updates_a_changed_submodule_reference() {
     let repository = setup_fixture_repository("test-submodule-checkouts");
     let path = repository.path();
@@ -164,7 +165,6 @@ fn updates_a_changed_submodule_reference() {
 
 // GHD: unit/git/checkout-test.ts › git/checkout › with submodules › initializes an uninitialized submodule when checking out a branch
 #[test]
-#[ignore = "ghd: bug: checkout_branch never runs `git -c protocol.file.allow=always submodule update --init --recursive` (GHD 3.6.6 checkoutBranch with allowFileProtocol): test-submodule stays uninitialised (no .git); it also has no allowFileProtocol parameter"]
 fn initializes_an_uninitialized_submodule_when_checking_out_a_branch() {
     let repository = setup_repository_with_uninitialized_submodule();
 
@@ -173,10 +173,18 @@ fn initializes_an_uninitialized_submodule_when_checking_out_a_branch() {
         panic!("Could not find branch other than 'master'");
     };
 
-    // GitHub Desktop passes `allowFileProtocol = true` here: the submodule's
-    // source is a local path. `corvene_git::checkout_branch` takes no such
-    // argument.
-    checkout_branch(&repository, branch_with_submodule).expect("checkoutBranch");
+    // `checkoutBranch(repository, branch, null, undefined, true)`: the
+    // submodule's source is a local path
+    corvene_git::checkout_branch_with(
+        git(),
+        repository.path(),
+        branch_with_submodule,
+        &CheckoutOptions {
+            allow_file_protocol: true,
+            ..Default::default()
+        },
+    )
+    .expect("checkoutBranch");
 
     // Verify we're on the correct branch
     let status_output = exec(["status"], repository.path());

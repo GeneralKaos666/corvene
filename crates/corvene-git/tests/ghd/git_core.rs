@@ -6,17 +6,11 @@
 //! the accepted `0` where GitHub Desktop replaces it; no case runs into
 //! that), a rejected promise is `Err(GitError)`, and `IGitResult.gitError`
 //! is `corvene_git::known_git_error` of stderr (dugite's `parseError`,
-//! `KnownGitError` standing for dugite's `GitError`). [`git`] is that
-//! translation.
-//!
-//! Missing in Corvene:
-//!
-//! - `expectedErrors`: `GitCommand` has no way to accept a known git error
-//!   as a result; [`git`] reaches `unimplemented!` when a case asks for one.
-//! - `parseConfigLockFilePathFromError`: Corvene recognises the error
-//!   (`KnownGitError::ConfigLockFileAlreadyExists`) but never extracts the
-//!   lock file's path (`git_error_details` only does so for `index.lock`);
-//!   [`parse_config_lock_file_path_from_error`] stands in for it.
+//! `KnownGitError` standing for dugite's `GitError`), and its
+//! `expectedErrors` are [`GitCommand::expected_errors`]. [`git`] is that
+//! translation. GitHub Desktop's `parseConfigLockFilePathFromError(result)`
+//! is `corvene_git::parse_config_lock_file_path_from_error(stderr, path)`
+//! of the result's stderr and path ([`parse_config_lock_file_path_from_error`]).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -39,7 +33,6 @@ struct GitResult {
     path: PathBuf,
     #[allow(dead_code)]
     git_error_description: Option<String>,
-    #[allow(dead_code)] // read by the real `parseConfigLockFilePathFromError`
     stderr: String,
     #[allow(dead_code)]
     stdout: String,
@@ -61,7 +54,7 @@ fn git(
         }
     }
     if let Some(expected_errors) = options.expected_errors {
-        command = expect_errors(command, expected_errors);
+        command = command.expected_errors(expected_errors);
     }
     let output = command.run()?;
     Ok(GitResult {
@@ -74,23 +67,13 @@ fn git(
     })
 }
 
-/// Stand-in for `IGitExecutionOptions.expectedErrors` (`lib/git/core.ts`):
-/// a failure whose stderr parses to one of these errors is a result, not an
-/// error. `GitCommand` has nothing like it.
-fn expect_errors(_command: GitCommand, _expected_errors: HashSet<KnownGitError>) -> GitCommand {
-    unimplemented!("GitCommand has no expectedErrors (IGitExecutionOptions.expectedErrors)")
-}
-
-/// Stand-in for GitHub Desktop's `parseConfigLockFilePathFromError(result)`
-/// (`lib/git/core.ts`): the `<path>.lock` of git's "error: could not lock
-/// config file <path>: File exists", resolved against `result.path`.
-fn parse_config_lock_file_path_from_error(_result: &GitResult) -> Option<PathBuf> {
-    unimplemented!("corvene_git has no parseConfigLockFilePathFromError")
+/// GitHub Desktop's `parseConfigLockFilePathFromError(result)`.
+fn parse_config_lock_file_path_from_error(result: &GitResult) -> Option<PathBuf> {
+    corvene_git::parse_config_lock_file_path_from_error(&result.stderr, &result.path)
 }
 
 // GHD: unit/git/core-test.ts › git/core › error handling › does not throw for errors that were expected
 #[test]
-#[ignore = "ghd: missing: GitCommand has no expectedErrors option (IGitExecutionOptions.expectedErrors, lib/git/core.ts)"]
 fn does_not_throw_for_errors_that_were_expected() {
     let test_repo = setup_fixture_repository("test-repo");
 
@@ -110,7 +93,6 @@ fn does_not_throw_for_errors_that_were_expected() {
 
 // GHD: unit/git/core-test.ts › git/core › error handling › throws for errors that were not expected
 #[test]
-#[ignore = "ghd: missing: GitCommand has no expectedErrors option (IGitExecutionOptions.expectedErrors, lib/git/core.ts)"]
 fn throws_for_errors_that_were_not_expected() {
     let test_repo = setup_fixture_repository("test-repo");
 
@@ -164,7 +146,6 @@ fn throws_for_exit_codes_that_were_not_expected() {
 
 // GHD: unit/git/core-test.ts › git/core › config lock file error handling › can parse lock file path from stderr
 #[test]
-#[ignore = "ghd: missing: no parseConfigLockFilePathFromError and no expectedErrors option in corvene_git (lib/git/core.ts)"]
 fn can_parse_lock_file_path_from_stderr() {
     let repo = setup_fixture_repository("test-repo");
     let repo_path = repo.path();
@@ -200,7 +181,6 @@ fn can_parse_lock_file_path_from_stderr() {
 
 // GHD: unit/git/core-test.ts › git/core › config lock file error handling › normalizes paths
 #[test]
-#[ignore = "ghd: missing: corvene_git has no parseConfigLockFilePathFromError (lib/git/core.ts)"]
 fn normalizes_paths() {
     // GitHub Desktop compares the returned string exactly; a `PathBuf`
     // comparison would ignore the separators (on Windows `C:/…` equals

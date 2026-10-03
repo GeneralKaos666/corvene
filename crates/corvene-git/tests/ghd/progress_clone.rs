@@ -2,45 +2,22 @@
 //!
 //! GitHub Desktop's `CloneProgressParser` (`lib/progress/clone.ts`, a
 //! `GitProgressParser` with the clone steps) is
-//! `corvene_git::parse_clone_progress`, which `corvene_git::clone` feeds
-//! every `--progress` line. It is a function, not a parser object: it keeps
-//! no state between lines, so each test's fresh parser has nothing to
-//! translate to. Its `CloneProgress::value` is `Some(percent)` for GitHub
-//! Desktop's `{ kind: 'progress', percent }` and `None` for its
-//! `{ kind: 'context' }`.
+//! `corvene_git::CloneProgressParser`, which `corvene_git::clone` feeds
+//! every `--progress` line. The cases that parse one line with a fresh
+//! parser call `corvene_git::parse_clone_progress` (a fresh parser's
+//! `parse`). `CloneProgress::value` is `Some(percent)` for GitHub Desktop's
+//! `{ kind: 'progress', percent }` and `None` for its `{ kind: 'context' }`.
 //!
 //! - GitHub Desktop's "understands …" cases assert `parse(line) !== null`,
 //!   which its parser always satisfies (it returns a progress or a context
 //!   object); `parse_clone_progress` returns a `CloneProgress`, never
 //!   nothing, which the type already guarantees.
-//! - "ignores wrong order" needs a parser that remembers the step it has
-//!   seen, which a function of one line cannot be: it calls the stand-in
-//!   [`CloneProgressParser`] and is ignored until Corvene has one.
 //! - Percentages are JavaScript numbers (`f64`) in GitHub Desktop and `f32`
 //!   in Corvene. The expected values are GitHub Desktop's expressions
 //!   evaluated in `f64`, as GitHub Desktop evaluates them, then rounded to
 //!   `f32`: GitHub Desktop's exact value in Corvene's type.
 
-use corvene_git::{CloneProgress, parse_clone_progress};
-
-/// Stand-in for GitHub Desktop's `CloneProgressParser` (`lib/progress/clone.ts`):
-/// a `GitProgressParser` over the clone steps that keeps the highest step it
-/// has seen and answers context for a line of an earlier step. Replace it
-/// with the `corvene_git` parser once there is one and remove the
-/// `#[ignore]`.
-struct CloneProgressParser;
-
-impl CloneProgressParser {
-    /// `new CloneProgressParser()`.
-    fn new() -> Self {
-        Self
-    }
-
-    /// `parse(line)`, answering like `parse_clone_progress`.
-    fn parse(&mut self, _line: &str) -> CloneProgress {
-        unimplemented!("corvene_git has no stateful CloneProgressParser")
-    }
-}
+use corvene_git::{CloneProgress, CloneProgressParser, parse_clone_progress};
 
 // GHD: unit/progress/clone-test.ts › CloneProgressParser › #parse › understands receiving object
 #[test]
@@ -69,7 +46,6 @@ fn understands_remote_compression() {
 
 // GHD: unit/progress/clone-test.ts › CloneProgressParser › #parse › understands relative weights
 #[test]
-#[ignore = "ghd: bug: parse_clone_progress weights git's rounded percent (45% -> 0.045), GHD weights value/total ((10/22)*0.1 = 0.04545455)"]
 fn understands_relative_weights() {
     let compressing = parse_clone_progress("remote: Compressing objects:  45% (10/22)");
     assert!(compressing.value.is_some(), "kind: expected 'progress'");
@@ -100,7 +76,6 @@ fn understands_relative_weights() {
 
 // GHD: unit/progress/clone-test.ts › CloneProgressParser › #parse › ignores wrong order
 #[test]
-#[ignore = "ghd: missing: no stateful CloneProgressParser (lib/progress/clone.ts); stateless parse_clone_progress answers progress for 'Receiving objects' after 'Checking out files', GHD context"]
 fn ignores_wrong_order() {
     let mut parser = CloneProgressParser::new();
 

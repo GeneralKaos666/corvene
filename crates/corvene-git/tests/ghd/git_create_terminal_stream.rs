@@ -1,43 +1,21 @@
 //! Port of GitHub Desktop's
 //! `app/test/unit/git/create-terminal-stream-test.ts`.
 //!
-//! Corvene has no equivalent of `createTerminalStream()`
-//! (`lib/create-terminal-stream.ts`: a transform stream that applies `\r`
-//! the way a terminal does, so git's progress lines overwrite each other
-//! and only the last state of each line remains). In GitHub Desktop 3.6.6
-//! nothing in `app/src` uses it any more. The closest Corvene code,
-//! `corvene_git::GitCommand::run_streaming`, splits stderr at every `\r` and
-//! `\n` and keeps each piece as a line of `GitOutput::stderr`, which is a
-//! different transformation. The cases call a stand-in and are ignored
-//! until Corvene has one.
+//! GitHub Desktop's `createTerminalStream()` (`lib/create-terminal-stream.ts`:
+//! a transform stream that applies `\r` the way a terminal does, so git's
+//! progress lines overwrite each other and only the last state of each line
+//! remains) is `corvene_git::create_terminal_stream`. In GitHub Desktop
+//! 3.6.6 nothing in `app/src` uses it any more.
 //!
-//! The node stream becomes [`TerminalStream`]: `write` takes a chunk and
-//! returns the chunks the stream emits for it, `end` returns what it emits
-//! when it ends. `Readable.from(ts).toArray()` then `chunks.join('')` is
+//! The node stream is `corvene_git::TerminalStream`: `write` takes a chunk
+//! and returns the chunks the stream emits for it, `end` returns what it
+//! emits when it ends. `Readable.from(ts).toArray()` then `chunks.join('')` is
 //! the emitted chunks concatenated and decoded as UTF-8.
 //! `createReadStream(path).pipe(ts)` writes the file in 64 KiB chunks (node's
 //! default `highWaterMark` for file streams) and ends the stream.
 
+use corvene_git::create_terminal_stream;
 use corvene_test_support::get_fixture_path;
-
-/// Stand-in for the stream `createTerminalStream()` returns. Replace it with
-/// the `corvene_git` type once there is one and remove the `#[ignore]`s.
-struct TerminalStream;
-
-/// Stand-in for GitHub Desktop's `createTerminalStream()`.
-fn create_terminal_stream() -> TerminalStream {
-    TerminalStream
-}
-
-impl TerminalStream {
-    fn write(&mut self, _chunk: &[u8]) -> Vec<Vec<u8>> {
-        unimplemented!("corvene_git has no createTerminalStream")
-    }
-
-    fn end(self) -> Vec<Vec<u8>> {
-        unimplemented!("corvene_git has no createTerminalStream")
-    }
-}
 
 /// `chunks.join('')` of the emitted `Buffer`s.
 fn join(chunks: Vec<Vec<u8>>) -> String {
@@ -46,7 +24,6 @@ fn join(chunks: Vec<Vec<u8>>) -> String {
 
 // GHD: unit/git/create-terminal-stream-test.ts › terminal-stream › can handle git clone progress
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createTerminalStream (lib/create-terminal-stream.ts, unused in GHD 3.6.6 app/src)"]
 fn can_handle_git_clone_progress() {
     let mut ts = create_terminal_stream();
     let input = std::fs::read(get_fixture_path(["clone-with-progress-output"])).unwrap();
@@ -71,7 +48,6 @@ fn can_handle_git_clone_progress() {
 
 // GHD: unit/git/create-terminal-stream-test.ts › terminal-stream › can handle all kinds of chunk sizes
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createTerminalStream (lib/create-terminal-stream.ts, unused in GHD 3.6.6 app/src)"]
 fn can_handle_all_kinds_of_chunk_sizes() {
     let mut ts = create_terminal_stream();
     // `Buffer.alloc(2048).fill('abc…789')`: the pattern repeated
@@ -101,7 +77,6 @@ fn can_handle_all_kinds_of_chunk_sizes() {
 
 // GHD: unit/git/create-terminal-stream-test.ts › terminal-stream › can handle empty buffers
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createTerminalStream (lib/create-terminal-stream.ts, unused in GHD 3.6.6 app/src)"]
 fn can_handle_empty_buffers() {
     let mut ts = create_terminal_stream();
 

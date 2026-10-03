@@ -1,5 +1,9 @@
 //! Staging, committing, discarding and undoing - GHD `lib/git/{update-index,
-//! reset,commit,checkout-index}.ts` and `app-store._commitIncludedChanges`.
+//! reset,commit,checkout-index}.ts`, `app-store._commitIncludedChanges` and
+//! `GitStore.discardChanges` / `undoCommit` (`lib/stores/git-store.ts`).
+//!
+//! Deviation: [`discard_changes`] resets paths without naming `HEAD`, so it
+//! also works on an unborn branch.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -37,40 +41,70 @@ pub fn unstage_all(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Stage every fully-included file with `update-index --add --remove --replace`
-/// (GHD `stageFiles`). Partially-selected files are staged separately by
-/// `stage_partial_files` (`apply --cached`).
+/// GHD `stageFiles` (`lib/git/update-index.ts`) for every fully-included
+/// file, in three `update-index` steps: force-remove the old paths of
+/// renames (a new file may sit at the old path and stay out of the commit),
+/// add the paths themselves, then force-remove the deleted files (one still
+/// on disk, e.g. after `git rm --cached`, is committed as deleted).
+/// Partially-selected files are staged separately by `stage_partial_files`
+/// (`apply --cached`).
 pub fn stage_files(
     git: Arc<GitBinary>,
     workdir: &Path,
     files: &[WorkingDirectoryFileChange],
 ) -> Result<()> {
-    let mut paths: Vec<u8> = Vec::new();
+    stage_whole_files(
+        git,
+        workdir,
+        files
+            .iter()
+            .filter(|f| f.selection.kind() == DiffSelectionType::All),
+    )
+}
+
+/// The `update-index` steps of [`stage_files`] for `files`, whatever their
+/// selection.
+pub(crate) fn stage_whole_files<'a>(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    files: impl IntoIterator<Item = &'a WorkingDirectoryFileChange>,
+) -> Result<()> {
+    let mut normal: Vec<&str> = Vec::new();
+    let mut old_renamed: Vec<&str> = Vec::new();
+    let mut deleted: Vec<&str> = Vec::new();
     for file in files {
-        if file.selection.kind() != DiffSelectionType::All {
-            continue;
+        normal.push(&file.path);
+        match file.status.kind {
+            FileStatusKind::Renamed => old_renamed.extend(file.old_path.as_deref()),
+            FileStatusKind::Deleted => deleted.push(&file.path),
+            _ => {}
         }
-        if let Some(old) = &file.old_path {
-            paths.extend_from_slice(old.as_bytes());
-            paths.push(0);
-        }
-        paths.extend_from_slice(file.path.as_bytes());
-        paths.push(0);
     }
+    update_index(git.clone(), workdir, &old_renamed, true)?;
+    update_index(git.clone(), workdir, &normal, false)?;
+    update_index(git, workdir, &deleted, true)
+}
+
+/// GHD `updateIndex`: `update-index --add --remove [--force-remove]
+/// --replace -z --stdin` for `paths`; nothing without paths.
+fn update_index(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    paths: &[&str],
+    force_remove: bool,
+) -> Result<()> {
     if paths.is_empty() {
         return Ok(());
     }
+    let mut args = vec!["update-index", "--add", "--remove"];
+    if force_remove {
+        args.push("--force-remove");
+    }
+    args.extend(["--replace", "-z", "--stdin"]);
     GitCommand::new(git)
-        .args([
-            "update-index",
-            "--add",
-            "--remove",
-            "--replace",
-            "-z",
-            "--stdin",
-        ])
+        .args(args)
         .current_dir(workdir)
-        .stdin(paths)
+        .stdin(nul_separated(paths))
         .run()?;
     Ok(())
 }
@@ -133,7 +167,17 @@ pub fn add_paths(git: Arc<GitBinary>, workdir: &Path, paths: &[&str]) -> Result<
     Ok(())
 }
 
-/// `git commit -F -` with the message on stdin (GHD `createCommit`). Returns the new HEAD sha.
+/// GHD `parseCommitSHA` (`lib/git/core.ts`): the second word of `git
+/// commit`'s `[<branch> <sha>] <summary>` line, which is the abbreviated
+/// sha, or `(root-commit)` for a branch's first commit.
+pub fn parse_commit_sha(stdout: &str) -> String {
+    let head = stdout.split(']').next().unwrap_or_default();
+    head.split(' ').nth(1).unwrap_or_default().to_string()
+}
+
+/// `git commit -F -` with the message on stdin (GHD `createCommit`).
+/// Returns [`parse_commit_sha`] of git's output, as GHD does; callers that
+/// need the full sha read [`head_sha`].
 pub fn commit(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -153,12 +197,12 @@ pub fn commit(
     if opts.allow_empty {
         args.push("--allow-empty");
     }
-    GitCommand::new(git.clone())
+    let out = GitCommand::new(git)
         .args(args)
         .current_dir(workdir)
         .stdin(message.as_bytes().to_vec())
         .run()?;
-    let sha = head_sha(git, workdir)?;
+    let sha = parse_commit_sha(&String::from_utf8_lossy(&out.stdout));
     info!(%sha, "created commit");
     Ok(sha)
 }
@@ -211,24 +255,41 @@ pub fn format_message(summary: &str, description: &str) -> String {
     }
 }
 
-/// `git reset --soft HEAD^` (GHD `undoCommit` keeps the changes in the working
-/// directory). A root commit is undone by deleting the branch's HEAD ref.
+/// GHD `GitStore.undoCommit` for the `HEAD` commit: `git reset <parent>`
+/// (mixed), so its changes stay in the working directory, unstaged. A root
+/// commit (GHD `undoFirstCommit`): files deleted from the working directory
+/// are checked out again (they would be lost with the commit), the branch's
+/// HEAD ref is deleted and the index is cleared, leaving every file
+/// untracked.
 pub fn undo_last_commit(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
-    let has_parent = GitCommand::new(git.clone())
+    let parent = GitCommand::new(git.clone())
         .args(["rev-parse", "--verify", "--quiet", "HEAD^"])
         .current_dir(workdir)
         .allow_exit_code(1)
-        .run()?
-        .status
-        .success();
-    if has_parent {
+        .run()?;
+    if parent.status.success() {
+        let parent = parent.stdout_string()?.trim().to_string();
         GitCommand::new(git)
-            .args(["reset", "--soft", "HEAD^"])
+            .args(["reset", &parent])
             .current_dir(workdir)
             .run()?;
     } else {
+        let status = crate::status::get_status(git.clone(), workdir, None)?;
+        let deleted: Vec<&str> = status
+            .files
+            .iter()
+            .filter(|f| f.status.kind == FileStatusKind::Deleted)
+            .map(|f| f.path.as_str())
+            .collect();
+        if !deleted.is_empty() {
+            GitCommand::new(git.clone())
+                .args(["checkout", "HEAD", "--"])
+                .args(&deleted)
+                .current_dir(workdir)
+                .run()?;
+        }
         GitCommand::new(git.clone())
-            .args(["update-ref", "-d", "HEAD"])
+            .args(["update-ref", "-d", "HEAD", "-m", "Reverting first commit"])
             .current_dir(workdir)
             .run()?;
         // keep the files: clear the index back to "unstaged"
@@ -237,14 +298,26 @@ pub fn undo_last_commit(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Discard working-directory changes (GHD `discardChanges`): tracked files are
-/// reset and checked out from HEAD; new/untracked files go to the Trash
-/// (`moveToTrash`, so a discard is recoverable) or are deleted.
+/// Discard working-directory changes (GHD `GitStore.discardChanges`):
+///
+/// 1. every file that is not deleted (nor a submodule) goes to the Trash
+///    (`moveToTrash`, so a discard is recoverable), or is deleted when
+///    `move_to_trash` is off or the Trash fails;
+/// 2. submodules are reset to their recorded commit (`submodule update
+///    --recursive --force`);
+/// 3. the discarded paths that differ between the index and `HEAD` are reset
+///    (`git reset -- <paths>`), so other staged files stay staged;
+/// 4. the discarded paths are checked out from the index (`checkout-index`;
+///    exit code 1, for paths that are not in it, is fine). A copy or rename
+///    resets its new path and checks out (and resets) its old one.
+///
+/// Corvene resets the paths without naming `HEAD` (GHD `reset HEAD --`), so
+/// a staged new file can be discarded on an unborn branch too.
 ///
 /// With `clean_submodules` (Corvene, flag `discard-submodule-changes`), a
 /// submodule entry with changes inside also has its modified files checked
 /// out and its untracked (not ignored) files moved to the Trash, so the entry
-/// goes away; GHD leaves such a submodule dirty.
+/// goes away; GHD leaves a submodule's untracked files.
 pub fn discard_changes(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -252,7 +325,6 @@ pub fn discard_changes(
     move_to_trash: bool,
     clean_submodules: bool,
 ) -> Result<()> {
-    let mut tracked: Vec<&str> = Vec::new();
     if clean_submodules {
         for file in files {
             if let Some(sub) = file.status.submodule_status {
@@ -265,40 +337,113 @@ pub fn discard_changes(
             }
         }
     }
+    let mut to_checkout: Vec<&str> = Vec::new();
+    let mut to_reset: Vec<&str> = Vec::new();
+    let mut submodules: Vec<&str> = Vec::new();
     for file in files {
-        match file.status.kind {
-            FileStatusKind::New | FileStatusKind::Untracked => {
-                let full = workdir.join(&file.path);
-                if !move_to_trash || !trashed(&full) {
-                    let _ = std::fs::remove_file(&full).or_else(|_| std::fs::remove_dir_all(&full));
-                }
+        if file.status.submodule {
+            submodules.push(&file.path);
+        } else if file.status.kind != FileStatusKind::Deleted {
+            let full = workdir.join(file.path.trim_end_matches('/'));
+            if !move_to_trash || !trashed(&full) {
+                let _ = std::fs::remove_file(&full).or_else(|_| std::fs::remove_dir_all(&full));
+            }
+        }
+        match (file.status.kind, file.old_path.as_deref()) {
+            (FileStatusKind::Copied | FileStatusKind::Renamed, Some(old)) => {
+                // the new path is gone already; the index must forget it
+                to_reset.push(&file.path);
+                to_checkout.push(old);
+                to_reset.push(old);
             }
             _ => {
-                tracked.push(&file.path);
-                if let Some(old) = &file.old_path {
-                    tracked.push(old);
-                }
+                to_checkout.push(&file.path);
+                to_reset.push(&file.path);
             }
         }
     }
-    if !tracked.is_empty() {
-        let mut list: Vec<u8> = Vec::new();
-        for p in &tracked {
-            list.extend_from_slice(p.as_bytes());
-            list.push(0);
-        }
+    let index_changes = index_changes(git.clone(), workdir)?;
+    let to_reset: Vec<&str> = to_reset
+        .into_iter()
+        .filter(|p| index_changes.contains_key(*p))
+        .collect();
+    let submodule_paths: Vec<&str> = to_checkout
+        .iter()
+        .copied()
+        .filter(|p| submodules.contains(p))
+        .collect();
+    // GHD's filter: only a submodule that was added in the index is left out
+    let to_checkout: Vec<&str> = to_checkout
+        .into_iter()
+        .filter(|p| !submodule_paths.contains(p) || index_changes.get(*p) != Some(&'A'))
+        .collect();
+    crate::submodule::reset_submodule_paths(git.clone(), workdir, &submodule_paths)?;
+    if !to_reset.is_empty() {
         GitCommand::new(git.clone())
-            .args(["reset", "-q", "--", "."])
+            .args([
+                "reset",
+                "-q",
+                "--pathspec-from-file=-",
+                "--pathspec-file-nul",
+            ])
+            .env("GIT_LITERAL_PATHSPECS", "1")
             .current_dir(workdir)
-            .allow_exit_code(128)
+            .stdin(nul_separated(&to_reset))
             .run()?;
+    }
+    if !to_checkout.is_empty() {
         GitCommand::new(git)
             .args(["checkout-index", "-f", "-u", "-q", "--stdin", "-z"])
             .current_dir(workdir)
-            .stdin(list)
+            .stdin(nul_separated(&to_checkout))
+            .allow_exit_code(1)
             .run()?;
     }
     Ok(())
+}
+
+fn nul_separated(paths: &[&str]) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::new();
+    for path in paths {
+        out.extend_from_slice(path.as_bytes());
+        out.push(0);
+    }
+    out
+}
+
+/// GHD `getIndexChanges` (`lib/git/diff-index.ts`): the paths whose index
+/// entry differs from `HEAD` (the empty tree on an unborn branch), with
+/// their `--name-status` letter.
+fn index_changes(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+) -> Result<std::collections::HashMap<String, char>> {
+    let run = |base: &str| {
+        GitCommand::new(git.clone())
+            .args([
+                "diff-index",
+                "--cached",
+                "--name-status",
+                "--no-renames",
+                "-z",
+                base,
+                "--",
+            ])
+            .current_dir(workdir)
+            .allow_exit_code(128)
+            .run()
+    };
+    let mut out = run("HEAD")?;
+    if out.status.code() == Some(128) {
+        out = run(crate::log::NULL_TREE_SHA)?;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let pieces: Vec<&str> = text.split('\0').collect();
+    let (pairs, _) = pieces.as_chunks::<2>();
+    Ok(pairs
+        .iter()
+        .filter_map(|[status, path]| Some((path.to_string(), status.chars().next()?)))
+        .collect())
 }
 
 /// Whether `path` went to the Trash. Android has none, so the caller deletes.
@@ -393,14 +538,16 @@ mod tests {
         }
         unstage_all(git.clone(), path).unwrap();
         stage_files(git.clone(), path, &status.files).unwrap();
-        let sha = commit(
+        let parsed = commit(
             git.clone(),
             path,
             &format_message("Add a", "details"),
             &CommitOptions::default(),
         )
         .unwrap();
-        assert_eq!(sha.len(), 40);
+        // GHD `parseCommitSHA` of a branch's first commit
+        assert_eq!(parsed, "(root-commit)");
+        let sha = head_sha(git.clone(), path).unwrap();
         let after = crate::get_status(git.clone(), path, None).unwrap();
         let paths: Vec<_> = after.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["b.txt"]);
@@ -431,6 +578,19 @@ mod tests {
         let info = crate::open_repository(path).unwrap();
         assert!(matches!(info.tip, corvene_models::Tip::Unborn { .. }));
         assert!(path.join("a.txt").exists());
+    }
+
+    #[test]
+    fn parses_the_commit_sha_like_ghd() {
+        assert_eq!(
+            parse_commit_sha("[main 1a2b3c4] Add a\n 1 file changed\n"),
+            "1a2b3c4"
+        );
+        assert_eq!(
+            parse_commit_sha("[main (root-commit) 1a2b3c4] Add a\n"),
+            "(root-commit)"
+        );
+        assert_eq!(parse_commit_sha(""), "");
     }
 
     #[test]
@@ -520,9 +680,17 @@ mod tests {
         )
         .unwrap();
         assert!(hidden.files.is_empty());
-        // GHD behaviour: the submodule stays dirty
+        // GHD behaviour: `submodule update --force` checks the recorded
+        // commit out again, the untracked files stay
         discard_changes(git.clone(), path, &status.files, false, false).unwrap();
         assert!(sub.join("junk.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(sub.join("lib.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "lib\n"
+        );
+        std::fs::write(sub.join("lib.txt"), "dirty\n").unwrap();
         discard_changes(git.clone(), path, &status.files, false, true).unwrap();
         // the submodule's clone has the machine's `core.autocrlf`
         assert_eq!(

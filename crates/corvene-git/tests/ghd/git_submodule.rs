@@ -1,45 +1,30 @@
 //! Port of GitHub Desktop's `app/test/unit/git/submodule-test.ts`.
 //!
-//! Corvene has no equivalent of `listSubmodules` (`git submodule status`,
-//! used by GitHub Desktop's `GitStore.discardChanges` to tell submodules
-//! apart) or `resetSubmodulePaths` (`git submodule update --recursive
-//! --force -- <paths>`, which GitHub Desktop's discard runs for submodule
-//! entries) in `lib/git/submodule.ts`: Corvene's `corvene_git::discard_changes`
-//! never resets a submodule's commit, and only with flag
-//! `720-discard-submodule-changes` (off in the GitHub Desktop preset) runs
-//! `git checkout -f -- .` inside a submodule with modified files, so in the
-//! GitHub Desktop preset a discarded submodule keeps both its commit and its
-//! dirty files (`.docs/deviations.md` says GitHub Desktop "leaves it dirty",
-//! but its `--force` update does revert tracked files, which the last case
-//! checks). Neither is a counterpart of these functions: the cases call stand-ins
-//! ([`list_submodules`], [`reset_submodule_paths`]) and are ignored until
-//! they exist. The setup runs Corvene's own calls: `getBranches` is
-//! [`get_branches`], `checkoutBranch` is `corvene_git::checkout_branch`.
+//! `listSubmodules(repository)` and `resetSubmodulePaths(repository, paths)`
+//! (`lib/git/submodule.ts`) are `corvene_git::list_submodules` and
+//! `corvene_git::reset_submodule_paths`; GitHub Desktop's `SubmoduleEntry`
+//! (`models/submodule.ts`) is `corvene_git::SubmoduleEntry`. Corvene's
+//! discard (`corvene_git::discard_changes`) resets submodule entries with
+//! `reset_submodule_paths`, as GitHub Desktop's `GitStore.discardChanges`
+//! does, but tells them apart by their status rather than by
+//! `listSubmodules`. The setup runs
+//! Corvene's own calls: `getBranches` is [`get_branches`], `checkoutBranch`
+//! is `corvene_git::checkout_branch`.
 
 use std::path::Path;
 
+use corvene_git::SubmoduleEntry;
 use corvene_test_support::{TestRepo, get_branches, git, setup_fixture_repository};
 
-/// GitHub Desktop's `SubmoduleEntry` (`models/submodule.ts`).
-#[derive(Debug)]
-struct SubmoduleEntry {
-    sha: String,
-    path: String,
-    describe: String,
+/// `listSubmodules(repository)`.
+fn list_submodules(repository: &TestRepo) -> Vec<SubmoduleEntry> {
+    corvene_git::list_submodules(git(), repository.path()).expect("listSubmodules")
 }
 
-/// Stand-in for GitHub Desktop's `listSubmodules(repository)`
-/// (`lib/git/submodule.ts`). Replace this with the `corvene_git` function
-/// once there is one and remove the `#[ignore]`s.
-fn list_submodules(_repository: &TestRepo) -> Vec<SubmoduleEntry> {
-    unimplemented!("corvene_git has no listSubmodules")
-}
-
-/// Stand-in for GitHub Desktop's `resetSubmodulePaths(repository, paths)`
-/// (`lib/git/submodule.ts`). Replace this with the `corvene_git` function
-/// once there is one and remove the `#[ignore]`s.
-fn reset_submodule_paths(_repository: &TestRepo, _paths: &[&str]) {
-    unimplemented!("corvene_git has no resetSubmodulePaths")
+/// `resetSubmodulePaths(repository, paths)`.
+fn reset_submodule_paths(repository: &TestRepo, paths: &[&str]) {
+    corvene_git::reset_submodule_paths(git(), repository.path(), paths)
+        .expect("resetSubmodulePaths");
 }
 
 /// `getBranches(submoduleRepository, 'refs/remotes/origin/feature-branch')`
@@ -56,7 +41,6 @@ fn checkout_feature_branch(submodule_path: &Path) {
 
 // GHD: unit/git/submodule-test.ts › git/submodule › listSubmodules › returns the submodule entry
 #[test]
-#[ignore = "ghd: missing: corvene_git has no listSubmodules (lib/git/submodule.ts)"]
 fn returns_the_submodule_entry() {
     let repository = setup_fixture_repository("submodule-basic-setup");
     let result = list_submodules(&repository);
@@ -68,7 +52,6 @@ fn returns_the_submodule_entry() {
 
 // GHD: unit/git/submodule-test.ts › git/submodule › listSubmodules › returns the expected tag
 #[test]
-#[ignore = "ghd: missing: corvene_git has no listSubmodules (lib/git/submodule.ts)"]
 fn returns_the_expected_tag() {
     let repository = setup_fixture_repository("submodule-basic-setup");
 
@@ -85,7 +68,6 @@ fn returns_the_expected_tag() {
 
 // GHD: unit/git/submodule-test.ts › git/submodule › resetSubmodulePaths › update submodule to original commit
 #[test]
-#[ignore = "ghd: missing: corvene_git has no listSubmodules / resetSubmodulePaths (lib/git/submodule.ts)"]
 fn update_submodule_to_original_commit() {
     let repository = setup_fixture_repository("submodule-basic-setup");
 
@@ -104,7 +86,6 @@ fn update_submodule_to_original_commit() {
 
 // GHD: unit/git/submodule-test.ts › git/submodule › resetSubmodulePaths › eliminate submodule dirty state
 #[test]
-#[ignore = "ghd: missing: corvene_git has no resetSubmodulePaths (lib/git/submodule.ts)"]
 fn eliminate_submodule_dirty_state() {
     let repository = setup_fixture_repository("submodule-basic-setup");
 

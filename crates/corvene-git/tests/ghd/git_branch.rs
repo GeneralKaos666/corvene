@@ -13,16 +13,15 @@
 //!   `Branch.upstreamRemoteName`: `Branch::upstream_remote_name`;
 //!   `Branch.tip.sha`: `Branch::tip`. The fixtures' remotes have no `/` in
 //!   their names, so flag `256-remote-names-with-slashes` changes nothing.
-//! - `Branch.upstreamWithoutRemote` (`models/branch.ts`): no accessor in
-//!   `corvene_models::Branch`; [`upstream_without_remote`] is a stand-in. The
-//!   `deleteRemoteBranch` cases only pass it on, so they derive it as
-//!   `Dispatcher::delete_branch` does before it calls
-//!   `corvene_git::delete_remote_branch` (`upstream_short` split at the first
-//!   `/`).
+//! - `Branch.upstreamWithoutRemote` (`models/branch.ts`):
+//!   `Branch::upstream_without_remote`, which `Dispatcher::delete_branch`
+//!   passes to `corvene_git::delete_remote_branch` as the `deleteRemoteBranch`
+//!   cases do.
 //! - `getBranchesPointedAt` (`lib/git/branch.ts`, used for the "theirs"
-//!   branch of merge conflicts): none ([`get_branches_pointed_at`] is a
-//!   stand-in). `corvene_git::rebase_ops::branch_at` answers a different
-//!   question (one local or remote branch at a sha, for the rebase flow).
+//!   branch of merge conflicts): `corvene_git::get_branches_pointed_at`
+//!   ([`get_branches_pointed_at`]). `corvene_git::rebase_ops::branch_at`
+//!   answers a different question (one local or remote branch at a sha, for
+//!   the rebase flow).
 //! - `createBranch`, `deleteLocalBranch`, `deleteRemoteBranch`,
 //!   `checkoutBranch`: `corvene_git::{create_branch, delete_local_branch,
 //!   delete_remote_branch, checkout_branch}`; `getBranches`:
@@ -37,21 +36,10 @@ use corvene_test_support::{
     setup_local_fork_of_repository,
 };
 
-/// Stand-in for GitHub Desktop's `Branch.upstreamWithoutRemote`
-/// (`models/branch.ts`: `removeRemotePrefix(upstream)`). Replace it with
-/// the `corvene_models::Branch` accessor once there is one and remove the
-/// `#[ignore]`.
-fn upstream_without_remote(_branch: &Branch) -> Option<String> {
-    unimplemented!("corvene_models::Branch has no upstreamWithoutRemote")
-}
-
-/// Stand-in for GitHub Desktop's `getBranchesPointedAt(repository,
-/// commitish)` (`lib/git/branch.ts`): the names of the local branches whose
-/// tip is `commitish` (`git branch --points-at`), `None` when git fails
-/// (exit code 1 or 129). Replace it with the `corvene_git` function once
-/// there is one and remove the `#[ignore]`s.
-fn get_branches_pointed_at(_repository: &Path, _commitish: &str) -> Option<Vec<String>> {
-    unimplemented!("corvene_git has no getBranchesPointedAt")
+/// `getBranchesPointedAt(repository, commitish)`.
+fn get_branches_pointed_at(repository: &Path, commitish: &str) -> Option<Vec<String>> {
+    corvene_git::get_branches_pointed_at(git(), repository, commitish)
+        .expect("getBranchesPointedAt")
 }
 
 // GHD: unit/git/branch-test.ts › git/branch › tip › returns unborn for new repository
@@ -127,7 +115,6 @@ fn returns_non_origin_remote() {
 
 // GHD: unit/git/branch-test.ts › git/branch › upstreamWithoutRemote › returns the upstream name without the remote prefix
 #[test]
-#[ignore = "ghd: missing: corvene_models::Branch has no upstreamWithoutRemote (models/branch.ts)"]
 fn returns_the_upstream_name_without_the_remote_prefix() {
     let repository = setup_fixture_repository("repo-with-multiple-remotes");
 
@@ -138,12 +125,11 @@ fn returns_the_upstream_name_without_the_remote_prefix() {
     };
     assert_eq!(branch.upstream_remote_name(), Some("bassoon"));
     assert_eq!(branch.upstream_short(), Some("bassoon/master"));
-    assert_eq!(upstream_without_remote(&branch).as_deref(), Some("master"));
+    assert_eq!(branch.upstream_without_remote(), Some("master"));
 }
 
 // GHD: unit/git/branch-test.ts › git/branch › getBranchesPointedAt › in a local repo › finds one branch name
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchesPointedAt (lib/git/branch.ts)"]
 fn finds_one_branch_name() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -155,7 +141,6 @@ fn finds_one_branch_name() {
 
 // GHD: unit/git/branch-test.ts › git/branch › getBranchesPointedAt › in a local repo › finds no branch names
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchesPointedAt (lib/git/branch.ts)"]
 fn finds_no_branch_names() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -166,7 +151,6 @@ fn finds_no_branch_names() {
 
 // GHD: unit/git/branch-test.ts › git/branch › getBranchesPointedAt › in a local repo › returns null on a malformed committish
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchesPointedAt (lib/git/branch.ts)"]
 fn returns_null_on_a_malformed_committish() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -176,7 +160,6 @@ fn returns_null_on_a_malformed_committish() {
 
 // GHD: unit/git/branch-test.ts › git/branch › getBranchesPointedAt › in a repo with identical branches › finds multiple branch names
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchesPointedAt (lib/git/branch.ts)"]
 fn finds_multiple_branch_names() {
     let repository = setup_fixture_repository("repo-with-multiple-remotes");
     create_branch(git(), repository.path(), "other-branch", None, false).expect("createBranch");
@@ -209,16 +192,14 @@ fn deletes_local_branches() {
     assert_eq!(get_branches(repository.path(), &[&reference]).len(), 0);
 }
 
-/// `localBranch.upstreamRemoteName` and `localBranch.upstreamWithoutRemote`
-/// as `Dispatcher::delete_branch` derives them for
+/// `localBranch.upstreamRemoteName` and `localBranch.upstreamWithoutRemote`,
+/// which `Dispatcher::delete_branch` passes to
 /// `corvene_git::delete_remote_branch`.
 fn delete_remote_branch_arguments(branch: &Branch) -> (Option<&str>, Option<&str>) {
-    let remote = branch.upstream_remote_name();
-    let remote_branch = branch
-        .upstream_short()
-        .and_then(|upstream| upstream.split_once('/'))
-        .map(|(_, name)| name);
-    (remote, remote_branch)
+    (
+        branch.upstream_remote_name(),
+        branch.upstream_without_remote(),
+    )
 }
 
 // GHD: unit/git/branch-test.ts › git/branch › deleteRemoteBranch › delete a local branches upstream branch
@@ -268,7 +249,6 @@ fn delete_a_local_branches_upstream_branch() {
 
 // GHD: unit/git/branch-test.ts › git/branch › deleteRemoteBranch › handles attempted delete of removed remote branch
 #[test]
-#[ignore = "ghd: bug: delete_remote_branch fails (push: remote ref does not exist) and keeps refs/remotes/origin/test-branch; GHD treats BranchDeletionFailed as done and deletes that ref"]
 fn handles_attempted_delete_of_removed_remote_branch() {
     let mock_remote = setup_fixture_repository("test-repo");
 

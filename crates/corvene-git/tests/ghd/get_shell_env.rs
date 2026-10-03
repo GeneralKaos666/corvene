@@ -47,7 +47,7 @@ fn get_shell_env(_shell_kind: &str) -> std::io::Result<std::collections::HashMap
 // GHD: unit/get-shell-env-test.ts › getShellEnv › returns an env containing PATH (${label})
 #[cfg(windows)]
 #[test]
-#[ignore = "ghd: missing: hook_env::load_shell_env takes no shell kind on Windows (getShellEnv with git-bash, pwsh, powershell, cmd)"]
+#[ignore = "ghd: todo: Windows hook environment from a chosen shell (git-bash, pwsh, powershell, cmd; getShellEnv / getShell, Settings › Git › Hooks shell select)"]
 fn returns_an_env_containing_path_windows_shells() {
     corvene_test_support::init();
     for shell_kind in ["git-bash", "pwsh", "powershell", "cmd"] {

@@ -11,12 +11,9 @@
 //!
 //! GitHub Desktop's progress callback receives `IPushProgress` (`kind:
 //! 'push'`, title, value, remote, branch), first with an initial event sent
-//! before git runs. `corvene_git::push` reports only `(percent,
-//! description)` of the git progress lines it parses; the kind, title and
-//! the initial event are added by `corvene-core`'s `remote.rs`
-//! (`PushPullProgress`, `PushPullKind::Push`). So the progress case is two
-//! tests: the event count against `corvene_git::push`, and the kind
-//! against [`push_with_progress_callback`], a stand-in.
+//! before git runs. That is `corvene_git::push_with_progress`
+//! ([`push_with_progress_callback`]); `corvene_git::push` reports `(percent,
+//! description)` of the same events minus the initial one.
 
 use std::ffi::OsStr;
 use std::path::Path;
@@ -26,7 +23,6 @@ use corvene_models::Remote;
 use corvene_test_support::{
     TestRepo, Tree, TreeEntry, create_bare_upstream, exec, git, make_commit, setup_empty_repository,
 };
-use tempfile::TempDir;
 
 /// `{ name: 'origin', url: barePath }`.
 fn origin(bare_path: &Path) -> Remote {
@@ -77,19 +73,31 @@ struct PushProgress {
     kind: &'static str,
 }
 
-/// Stand-in for GitHub Desktop's `push(repository, remote, localBranch,
-/// remoteBranch, tagsToPush, options, progressCallback)` with a callback
-/// that receives `IPushProgress` (kind `'push'`) and is first called with
-/// an initial event before git runs. Replace it with the `corvene_git`
-/// function once its callback carries that and remove the `#[ignore]`.
+/// GitHub Desktop's `push(repository, remote, localBranch, remoteBranch,
+/// null, undefined, progressCallback)`: `corvene_git::push_with_progress`,
+/// whose callback receives `IPushProgress` (`corvene_git::PushProgress`).
 fn push_with_progress_callback(
-    _repo: &TestRepo,
-    _remote: &Remote,
-    _local_branch: &str,
-    _remote_branch: Option<&str>,
-    _progress_callback: &mut dyn FnMut(PushProgress),
+    repo: &TestRepo,
+    remote: &Remote,
+    local_branch: &str,
+    remote_branch: Option<&str>,
+    progress_callback: &mut dyn FnMut(PushProgress),
 ) -> Result<(), GitError> {
-    unimplemented!("corvene_git::push reports no IPushProgress (kind, title, initial event)")
+    corvene_git::push_with_progress(
+        git(),
+        repo.path(),
+        &remote.name,
+        local_branch,
+        remote_branch,
+        &[],
+        false,
+        None,
+        &mut |progress| {
+            progress_callback(PushProgress {
+                kind: progress.kind,
+            })
+        },
+    )
 }
 
 // GHD: unit/git/push-test.ts › git/push › pushes commits to a local remote
@@ -205,9 +213,9 @@ fn pushes_with_force_with_lease() {
     assert!(result.stdout.contains("rewritten commit"));
 }
 
-/// The setup of `reports progress when callback is provided`: a repository
-/// with a bare upstream as `origin` and one commit the upstream lacks.
-fn setup_progress_case() -> (TestRepo, TempDir) {
+// GHD: unit/git/push-test.ts › git/push › reports progress when callback is provided
+#[test]
+fn reports_progress_when_callback_is_provided() {
     let repo = setup_empty_repository();
     make_commit(
         &repo,
@@ -221,47 +229,6 @@ fn setup_progress_case() -> (TestRepo, TempDir) {
         &repo,
         &Tree::with_message("new commit", [TreeEntry::new("file.txt", "content")]),
     );
-    (repo, bare_path)
-}
-
-// The event count, against `corvene_git::push`'s `(percent, description)`
-// callback; the kind of the first event is checked by
-// `reports_progress_when_callback_is_provided_kind`.
-// GHD: unit/git/push-test.ts › git/push › reports progress when callback is provided
-#[test]
-fn reports_progress_when_callback_is_provided() {
-    let (repo, bare_path) = setup_progress_case();
-
-    let remote = origin(bare_path.path());
-    let mut progress_events: Vec<(f32, String)> = Vec::new();
-
-    corvene_git::push(
-        git(),
-        repo.path(),
-        &remote.name,
-        "master",
-        Some("master"),
-        &[],
-        false,
-        None,
-        &mut |value, description| progress_events.push((value, description)),
-    )
-    .unwrap_or_else(|err| panic!("push: {err}"));
-
-    // At minimum we should get the initial progress event
-    assert!(
-        !progress_events.is_empty(),
-        "Expected at least one progress event"
-    );
-}
-
-// The whole case, against the stand-in whose callback carries GitHub
-// Desktop's `IPushProgress.kind`.
-// GHD: unit/git/push-test.ts › git/push › reports progress when callback is provided
-#[test]
-#[ignore = "ghd: missing: corvene_git::push's progress callback carries no IPushProgress kind and sends no initial event (lib/git/push.ts push progressCallback)"]
-fn reports_progress_when_callback_is_provided_kind() {
-    let (repo, bare_path) = setup_progress_case();
 
     let remote = origin(bare_path.path());
     let mut progress_events: Vec<PushProgress> = Vec::new();

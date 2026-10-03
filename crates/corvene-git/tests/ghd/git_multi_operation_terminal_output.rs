@@ -1,22 +1,22 @@
 //! Port of GitHub Desktop's
 //! `app/test/unit/git/multi-operation-terminal-output-test.ts`.
 //!
-//! Corvene has no equivalent of `createMultiOperationTerminalOutputCallback`
+//! GitHub Desktop's `createMultiOperationTerminalOutputCallback`
 //! (`lib/git/multi-operation-terminal-output.ts`, which `merge` uses to show
-//! one terminal output for `merge` plus the squash commit), nor of the
+//! one terminal output for `merge` plus the squash commit) is
+//! `corvene_git::create_multi_operation_terminal_output_callback`, and the
 //! `onTerminalOutputAvailable` option of GitHub Desktop's `git()`
-//! (`lib/git/core.ts`) it plugs into: `corvene_git::GitCommand` hands back
-//! stdout and stderr when the command ends and has no subscription to its
-//! output. The cases use stand-ins for both and are ignored until they
-//! exist.
+//! (`lib/git/core.ts`) it plugs into is
+//! `corvene_git::GitCommand::run_with_terminal_output`; [`git_with_terminal_output`]
+//! is that call.
 //!
-//! GitHub Desktop's callback types become:
+//! GitHub Desktop's callback types are `corvene_git`'s:
 //!
-//! - `TerminalOutput` (`string | Buffer | Buffer[]`): [`TerminalOutput`],
+//! - `TerminalOutput` (`string | Buffer | Buffer[]`): `TerminalOutput`,
 //! - `TerminalOutputListener` (subscribe a callback, replaying what is
-//!   buffered; returns `{ unsubscribe }`): [`TerminalOutputListener`],
+//!   buffered; returns `{ unsubscribe }`): `TerminalOutputListener`,
 //! - `TerminalOutputCallback` (receives a listener):
-//!   [`TerminalOutputCallback`].
+//!   `TerminalOutputCallback`.
 //!
 //! `__dirname` (the directory `git version` runs in) is this file's
 //! directory.
@@ -25,24 +25,22 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use corvene_git::GitOutput;
 use corvene_git::error::Result;
+use corvene_git::{
+    GitCommand, GitOutput, TerminalOutput, TerminalOutputCallback, TerminalOutputListener,
+    create_multi_operation_terminal_output_callback,
+};
 use corvene_test_support::init;
 
-/// GitHub Desktop's `TerminalOutput`: a chunk (`string | Buffer`) or
-/// several (`Buffer[]`). Only the stand-ins' replacements produce values.
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq)]
-enum TerminalOutput {
-    Chunk(Vec<u8>),
-    Chunks(Vec<Vec<u8>>),
+/// JavaScript's `.length` of a `TerminalOutput`: bytes of a chunk, elements
+/// of an array. GitHub Desktop streams `Buffer`s (bytes) but replays its
+/// buffer as strings (UTF-16 code units); `git version` prints ASCII, where
+/// both counts are the same.
+trait Length {
+    fn length(&self) -> usize;
 }
 
-impl TerminalOutput {
-    /// JavaScript's `.length` of the value: bytes of a chunk, elements of an
-    /// array. GitHub Desktop streams `Buffer`s (bytes) but replays its
-    /// buffer as strings (UTF-16 code units); `git version` prints ASCII,
-    /// where both counts are the same.
+impl Length for TerminalOutput {
     fn length(&self) -> usize {
         match self {
             TerminalOutput::Chunk(bytes) => bytes.len(),
@@ -51,37 +49,18 @@ impl TerminalOutput {
     }
 }
 
-/// The `{ unsubscribe }` a [`TerminalOutputListener`] returns.
-type Unsubscribe = Box<dyn FnOnce()>;
-
-/// GitHub Desktop's `TerminalOutputListener`.
-type TerminalOutputListener = Rc<dyn Fn(Box<dyn FnMut(TerminalOutput)>) -> Unsubscribe>;
-
-/// GitHub Desktop's `TerminalOutputCallback`.
-type TerminalOutputCallback = Rc<dyn Fn(TerminalOutputListener)>;
-
-/// Stand-in for GitHub Desktop's
-/// `createMultiOperationTerminalOutputCallback(onTerminalOutputAvailable,
-/// capacity = 256 * 1024)`. Replace it with the `corvene_git` function once
-/// there is one and remove the `#[ignore]`s.
-fn create_multi_operation_terminal_output_callback(
-    _on_terminal_output_available: impl Fn(TerminalOutputListener) + 'static,
-    _capacity: Option<usize>,
-) -> TerminalOutputCallback {
-    unimplemented!("corvene_git has no createMultiOperationTerminalOutputCallback")
-}
-
-/// Stand-in for GitHub Desktop's `git(args, path, name, {
-/// onTerminalOutputAvailable })`: runs git and hands its combined output to
-/// the callback. Replace it with the `corvene_git` equivalent once there is
-/// one.
+/// GitHub Desktop's `git(args, path, name, { onTerminalOutputAvailable })`:
+/// `GitCommand::run_with_terminal_output`.
 fn git_with_terminal_output(
-    _args: &[&str],
-    _path: &std::path::Path,
+    args: &[&str],
+    path: &std::path::Path,
     _name: &str,
-    _on_terminal_output_available: &TerminalOutputCallback,
+    on_terminal_output_available: &TerminalOutputCallback,
 ) -> Result<GitOutput> {
-    unimplemented!("corvene_git::GitCommand has no onTerminalOutputAvailable")
+    GitCommand::new(corvene_test_support::git())
+        .args(args)
+        .current_dir(path)
+        .run_with_terminal_output(on_terminal_output_available)
 }
 
 /// GitHub Desktop's `__dirname` in the test file.
@@ -94,7 +73,6 @@ fn dirname() -> PathBuf {
 
 // GHD: unit/git/multi-operation-terminal-output-test.ts › git/multi-operation-terminal-output › streams output from two git operations
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createMultiOperationTerminalOutputCallback (lib/git/multi-operation-terminal-output.ts) nor git() onTerminalOutputAvailable"]
 fn streams_output_from_two_git_operations() {
     let chunks: Rc<RefCell<Vec<TerminalOutput>>> = Rc::default();
 
@@ -127,7 +105,6 @@ fn streams_output_from_two_git_operations() {
 
 // GHD: unit/git/multi-operation-terminal-output-test.ts › git/multi-operation-terminal-output › buffers output from two git operations
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createMultiOperationTerminalOutputCallback (lib/git/multi-operation-terminal-output.ts) nor git() onTerminalOutputAvailable"]
 fn buffers_output_from_two_git_operations() {
     let chunks: Rc<RefCell<Vec<TerminalOutput>>> = Rc::default();
     let holder: Rc<RefCell<Option<TerminalOutputListener>>> = Rc::default();
@@ -169,7 +146,6 @@ fn buffers_output_from_two_git_operations() {
 
 // GHD: unit/git/multi-operation-terminal-output-test.ts › git/multi-operation-terminal-output › calls the original callback only once
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createMultiOperationTerminalOutputCallback (lib/git/multi-operation-terminal-output.ts) nor git() onTerminalOutputAvailable"]
 fn calls_the_original_callback_only_once() {
     let callcount = Rc::new(Cell::new(0));
 
@@ -193,7 +169,6 @@ fn calls_the_original_callback_only_once() {
 
 // GHD: unit/git/multi-operation-terminal-output-test.ts › git/multi-operation-terminal-output › streams output untrimmed
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createMultiOperationTerminalOutputCallback (lib/git/multi-operation-terminal-output.ts) nor git() onTerminalOutputAvailable"]
 fn streams_output_untrimmed() {
     let chunks: Rc<RefCell<Vec<TerminalOutput>>> = Rc::default();
 
@@ -224,7 +199,6 @@ fn streams_output_untrimmed() {
 
 // GHD: unit/git/multi-operation-terminal-output-test.ts › git/multi-operation-terminal-output › trims buffered output
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createMultiOperationTerminalOutputCallback (lib/git/multi-operation-terminal-output.ts) nor git() onTerminalOutputAvailable"]
 fn trims_buffered_output() {
     let chunks: Rc<RefCell<Vec<TerminalOutput>>> = Rc::default();
     let holder: Rc<RefCell<Option<TerminalOutputListener>>> = Rc::default();
@@ -267,7 +241,6 @@ fn trims_buffered_output() {
 
 // GHD: unit/git/multi-operation-terminal-output-test.ts › git/multi-operation-terminal-output › handles multiple subscribers
 #[test]
-#[ignore = "ghd: missing: corvene_git has no createMultiOperationTerminalOutputCallback (lib/git/multi-operation-terminal-output.ts) nor git() onTerminalOutputAvailable"]
 fn handles_multiple_subscribers() {
     let holder: Rc<RefCell<Option<TerminalOutputListener>>> = Rc::default();
 

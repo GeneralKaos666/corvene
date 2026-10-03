@@ -21,31 +21,21 @@
 //!   `status-parser.ts` (`BothModified` is `UU`, `BothAdded` is `AA`,
 //!   `DeletedByThem` is `UD`); `entry.us` / `entry.them` →
 //!   `FileStatus::us()` / `them()` (`GitStatusEntry.UpdatedButUnmerged` is
-//!   `GitStatusEntry::Unmerged`). Corvene has no
-//!   `renameIncludesModifications` ([`rename_includes_modifications`] is a
-//!   stand-in, checked last so the other keys still run under `--ignored`).
+//!   `GitStatusEntry::Unmerged`);
+//!   `renameIncludesModifications` →
+//!   `FileStatus::rename_includes_modifications()`.
 //! - `isConflictedFile(s) && isManualConflict(s)` is
 //!   `FileStatus::is_manual_conflict` (which checks the kind itself; GitHub
 //!   Desktop's `isConflictedFile` only narrows the type for
 //!   `isManualConflict`).
 
 use corvene_git::GitError;
-use corvene_models::{FileStatus, FileStatusKind, GitStatusEntry, SubmoduleStatus};
+use corvene_models::{FileStatusKind, GitStatusEntry, SubmoduleStatus};
 use corvene_test_support::{
     DEFAULT_STRING_LENGTH, append_file, conflicted_count, exec, generate_string,
     get_status_or_throw, git, setup_conflicted_repo_with_multiple_files, setup_empty_directory,
     setup_empty_repository, setup_fixture_repository, setup_local_config, write_file,
 };
-
-/// Stand-in for GitHub Desktop's `renameIncludesModifications`
-/// (`CopiedOrRenamedFileStatus`, `models/status.ts`; set by
-/// `convertToAppStatus` in `lib/git/status.ts`: `false` for copies, and for
-/// renames `true` when the working tree is modified or the score is below
-/// 100). Replace this with the Corvene field once there is one and remove
-/// the `#[ignore]`s.
-fn rename_includes_modifications(_status: &FileStatus) -> bool {
-    unimplemented!("corvene_models::FileStatus has no renameIncludesModifications")
-}
 
 // ---------------------------------------------------------------------------
 // with conflicted repo
@@ -182,7 +172,6 @@ fn parses_resolved_files() {
 
 // GHD: unit/git/status-test.ts › git/status › getStatus › with conflicted images repo › parses conflicted image file on merge
 #[test]
-#[ignore = "ghd: bug: a both-modified binary image is a text conflict (conflict_markers Some(0)) not a manual one: binary_paths runs diff --numstat -- <paths> (0 0 for an unmerged binary), GHD getBinaryPaths diffs against MERGE_HEAD (- -)"]
 fn parses_conflicted_image_file_on_merge() {
     let repository = setup_fixture_repository("detect-conflict-in-binary-file");
     exec(["checkout", "make-a-change"], repository.path());
@@ -249,7 +238,6 @@ fn returns_an_empty_array_when_there_are_no_changes() {
 
 // GHD: unit/git/status-test.ts › git/status › getStatus › with unconflicted repo › reflects renames
 #[test]
-#[ignore = "ghd: missing: corvene_models::FileStatus has no renameIncludesModifications (models/status.ts, convertToAppStatus in lib/git/status.ts)"]
 fn reflects_renames() {
     let repo = setup_empty_repository();
 
@@ -272,12 +260,11 @@ fn reflects_renames() {
     assert!(!files[0].status.submodule);
     // (no conflictMarkerCount key)
     assert_eq!(files[0].status.conflict_markers, None);
-    assert!(!rename_includes_modifications(&files[0].status));
+    assert!(!files[0].status.rename_includes_modifications());
 }
 
 // GHD: unit/git/status-test.ts › git/status › getStatus › with unconflicted repo › reflects copies
 #[test]
-#[ignore = "ghd: missing: corvene_models::FileStatus has no renameIncludesModifications (models/status.ts, convertToAppStatus in lib/git/status.ts)"]
 fn reflects_copies() {
     let repository = setup_fixture_repository("copy-detection-status");
 
@@ -305,7 +292,7 @@ fn reflects_copies() {
     assert!(!files[1].status.submodule);
     // (no conflictMarkerCount key)
     assert_eq!(files[1].status.conflict_markers, None);
-    assert!(!rename_includes_modifications(&files[1].status));
+    assert!(!files[1].status.rename_includes_modifications());
 }
 
 // GHD: unit/git/status-test.ts › git/status › getStatus › with unconflicted repo › returns null for directory without a .git directory

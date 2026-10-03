@@ -6,35 +6,23 @@
 //!   `corvene_git::open_repository` ([`get_branches`]). `BranchType.Local` is
 //!   `BranchKind::Local`; `Branch.upstream` is `Branch::upstream` (`None`
 //!   when there is none); `Branch.tip.sha` is `Branch::tip`.
-//! - `getBranchesDifferingFromUpstream(repository)`: none. Corvene inlines a
-//!   variant of it (strictly behind only) in
-//!   `corvene_git::fast_forward_branches`; [`get_branches_differing_from_upstream`]
-//!   is a stand-in returning GitHub Desktop's `ITrackingBranch`
-//!   ([`TrackingBranch`]).
+//! - `getBranchesDifferingFromUpstream(repository)`:
+//!   `corvene_git::get_branches_differing_from_upstream`, which returns
+//!   GitHub Desktop's `ITrackingBranch` as `corvene_git::TrackingBranch`
+//!   (`ref` is `reference`).
 
 use std::path::Path;
 
+use corvene_git::TrackingBranch;
 use corvene_models::BranchKind;
 use corvene_test_support::{
-    get_branches, setup_empty_directory, setup_empty_repository, setup_fixture_repository,
+    get_branches, git, setup_empty_directory, setup_empty_repository, setup_fixture_repository,
 };
 
-/// GitHub Desktop's `ITrackingBranch` (`models/branch.ts`).
-#[allow(dead_code)]
-struct TrackingBranch {
-    reference: String,
-    sha: String,
-    upstream_ref: String,
-    upstream_sha: String,
-}
-
-/// Stand-in for GitHub Desktop's
-/// `getBranchesDifferingFromUpstream(repository)` (`lib/git/for-each-ref.ts`):
-/// the local branches other than the current one whose tip differs from
-/// their upstream's. Replace it with the `corvene_git` function once there
-/// is one and remove the `#[ignore]`.
-fn get_branches_differing_from_upstream(_repository: &Path) -> Vec<TrackingBranch> {
-    unimplemented!("corvene_git has no getBranchesDifferingFromUpstream")
+/// GitHub Desktop's `getBranchesDifferingFromUpstream(repository)`.
+fn get_branches_differing_from_upstream(repository: &Path) -> Vec<TrackingBranch> {
+    corvene_git::get_branches_differing_from_upstream(git(), repository)
+        .expect("getBranchesDifferingFromUpstream")
 }
 
 // GHD: unit/git/for-each-ref-test.ts › git/for-each-ref › getBranches › fetches branches using for-each-ref
@@ -92,7 +80,6 @@ fn should_return_empty_list_for_directory_without_a_git_directory() {
 
 // GHD: unit/git/for-each-ref-test.ts › git/for-each-ref › getBranchesDifferingFromUpstream › filters branches differing from upstream using for-each-ref
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getBranchesDifferingFromUpstream (lib/git/for-each-ref.ts); fast_forward_branches inlines a behind-only variant"]
 fn filters_branches_differing_from_upstream_using_for_each_ref() {
     let repository = setup_fixture_repository("repo-with-non-updated-branches");
 

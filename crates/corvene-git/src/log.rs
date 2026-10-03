@@ -1,7 +1,9 @@
 //! Commit history - GHD `lib/git/log.ts` (`getCommits`, `getChangedFiles`,
-//! `getCommitDiff`). The walk is done in-process with gitoxide; changed files
-//! and per-file diffs come from the git CLI so rename/copy detection matches
-//! GitHub Desktop exactly.
+//! `getCommitDiff`). The walk is done in-process with gitoxide, building each
+//! commit as GHD's `git log` format does: git's `%s` / `%b` for the summary
+//! and body, `%(trailers:unfold,only)` for the trailers and `%D`'s order for
+//! the tags. Changed files and per-file diffs come from the git CLI so
+//! rename/copy detection matches GitHub Desktop exactly.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -29,21 +31,156 @@ fn identity(sig: gix::actor::SignatureRef<'_>) -> CommitIdentity {
     }
 }
 
-/// Every tag's short name (`refs/tags/` stripped), sorted
-/// case-insensitively. Feeds the compare list's Tags group (flag `825`).
-pub fn tag_names(workdir: &Path) -> Result<Vec<String>> {
+/// GHD `getAllTags` (`lib/git/tag.ts`): every tag's short name
+/// (`refs/tags/` stripped) and the object it points at, annotated tags
+/// peeled to their commit (`git show-ref --tags -d`, read in-process).
+/// Empty without tags.
+pub fn get_all_tags(workdir: &Path) -> Result<HashMap<String, String>> {
     let repo = crate::handle::open(workdir)?;
     let refs = repo
         .references()
         .map_err(|e| GitError::Gix(e.to_string()))?;
-    let mut names: Vec<String> = refs
+    let mut tags = HashMap::new();
+    for r in refs
         .tags()
         .map_err(|e| GitError::Gix(e.to_string()))?
         .flatten()
-        .map(|r| r.name().shorten().to_string())
-        .collect();
+    {
+        let name = r.name().shorten().to_string();
+        if let Ok(id) = r.into_fully_peeled_id() {
+            tags.insert(name, id.to_string());
+        }
+    }
+    Ok(tags)
+}
+
+/// Every tag's short name ([`get_all_tags`]), sorted case-insensitively.
+/// Feeds the compare list's Tags group (flag `825`).
+pub fn tag_names(workdir: &Path) -> Result<Vec<String>> {
+    let mut names: Vec<String> = get_all_tags(workdir)?.into_keys().collect();
     names.sort_by_key(|n| n.to_lowercase());
     Ok(names)
+}
+
+/// The tags of each commit in `git log`'s `%D` order: git prepends each
+/// decoration while it walks the refs in name order, so a commit's tags
+/// come in descending ref-name order (GHD `getCommits` keeps that order).
+fn tags_by_commit(repo: &gix::Repository) -> HashMap<gix::ObjectId, Vec<String>> {
+    let mut tags: HashMap<gix::ObjectId, Vec<String>> = HashMap::new();
+    if let Ok(refs) = repo.references()
+        && let Ok(iter) = refs.tags()
+    {
+        for r in iter.flatten() {
+            let name = r.name().shorten().to_string();
+            if let Ok(id) = r.into_fully_peeled_id() {
+                tags.entry(id.detach()).or_default().push(name);
+            }
+        }
+    }
+    for names in tags.values_mut() {
+        names.sort_by(|a, b| b.cmp(a));
+    }
+    tags
+}
+
+/// GHD `getCommits` cuts the summary and the body at 100 KiB.
+const MESSAGE_FIELD_LIMIT: usize = 100 * 1024;
+
+fn message_field(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(&bytes[..bytes.len().min(MESSAGE_FIELD_LIMIT)]).into_owned()
+}
+
+/// git's `%s` and `%b` of a raw commit message (`pretty.c`
+/// `parse_commit_message` / `format_subject`): blank lines are skipped, the
+/// subject is the first paragraph with each line's trailing whitespace
+/// dropped and the lines joined by spaces, and the body is everything after
+/// that paragraph and the blank lines below it, verbatim (so it keeps its
+/// final newline).
+fn subject_and_body(message: &[u8]) -> (String, String) {
+    fn is_space(b: u8) -> bool {
+        matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+    }
+    // `get_one_line`: the line with its newline
+    fn line_len(s: &[u8]) -> usize {
+        s.iter()
+            .position(|&b| b == b'\n')
+            .map_or(s.len(), |i| i + 1)
+    }
+    // `is_blank_line`: the length without trailing whitespace
+    fn trimmed_len(line: &[u8]) -> usize {
+        line.iter()
+            .rposition(|&b| !is_space(b))
+            .map_or(0, |i| i + 1)
+    }
+    fn skip_blank_lines(mut s: &[u8]) -> &[u8] {
+        loop {
+            let n = line_len(s);
+            if n == 0 || trimmed_len(&s[..n]) != 0 {
+                return s;
+            }
+            s = &s[n..];
+        }
+    }
+    let mut rest = skip_blank_lines(message);
+    let mut subject: Vec<u8> = Vec::new();
+    let mut first = true;
+    loop {
+        let n = line_len(rest);
+        let line = &rest[..n];
+        rest = &rest[n..];
+        let len = trimmed_len(line);
+        if n == 0 || len == 0 {
+            break;
+        }
+        if !first {
+            subject.push(b' ');
+        }
+        subject.extend_from_slice(&line[..len]);
+        first = false;
+    }
+    (
+        message_field(&subject),
+        message_field(skip_blank_lines(rest)),
+    )
+}
+
+/// One walked commit as GHD's `getCommits` builds it.
+fn commit_from_walk(
+    info: gix::revision::walk::Info<'_>,
+    tags: &HashMap<gix::ObjectId, Vec<String>>,
+) -> Result<Commit> {
+    let commit = info.object().map_err(|e| GitError::Gix(e.to_string()))?;
+    let decoded = commit.decode().map_err(|e| GitError::Gix(e.to_string()))?;
+    let (summary, body) = subject_and_body(decoded.message);
+    // `%(trailers:unfold,only)` parsed by `parseRawUnfoldedTrailers`
+    let trailers = decoded
+        .message()
+        .body()
+        .map(|b| {
+            b.trailers()
+                .map(|t| {
+                    (
+                        t.token.to_string().trim().to_string(),
+                        t.value.to_string().trim().to_string(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(Commit {
+        sha: info.id.to_string(),
+        summary,
+        body,
+        author: identity(commit.author().map_err(|e| GitError::Gix(e.to_string()))?),
+        committer: identity(
+            commit
+                .committer()
+                .map_err(|e| GitError::Gix(e.to_string()))?,
+        ),
+        parents: info.parent_ids.iter().map(|p| p.to_string()).collect(),
+        trailers,
+        tags: tags.get(&info.id).cloned().unwrap_or_default(),
+    })
 }
 
 /// Commits reachable from `revision` (a ref name or sha), newest first,
@@ -70,17 +207,7 @@ pub fn get_commits_with(
     let Some(tip) = repo.rev_parse_single(revision).ok() else {
         return Ok(Vec::new());
     };
-    let mut tags: HashMap<gix::ObjectId, Vec<String>> = HashMap::new();
-    if let Ok(refs) = repo.references()
-        && let Ok(iter) = refs.tags()
-    {
-        for r in iter.flatten() {
-            let name = r.name().shorten().to_string();
-            if let Ok(id) = r.into_fully_peeled_id() {
-                tags.entry(id.detach()).or_default().push(name);
-            }
-        }
-    }
+    let tags = tags_by_commit(&repo);
     let mut walk = repo.rev_walk([tip.detach()]);
     if first_parent {
         walk = walk.first_parent_only();
@@ -94,27 +221,7 @@ pub fn get_commits_with(
     let mut out = Vec::with_capacity(limit.min(COMMIT_BATCH_SIZE));
     for info in walk.skip(skip).take(limit) {
         let info = info.map_err(|e| GitError::Gix(e.to_string()))?;
-        let commit = info.object().map_err(|e| GitError::Gix(e.to_string()))?;
-        let decoded = commit.decode().map_err(|e| GitError::Gix(e.to_string()))?;
-        let message = decoded.message();
-        let summary = message.summary().to_string();
-        let body = message
-            .body()
-            .map(|b| b.to_string().trim_end().to_string())
-            .unwrap_or_default();
-        out.push(Commit {
-            sha: info.id.to_string(),
-            summary,
-            body,
-            author: identity(commit.author().map_err(|e| GitError::Gix(e.to_string()))?),
-            committer: identity(
-                commit
-                    .committer()
-                    .map_err(|e| GitError::Gix(e.to_string()))?,
-            ),
-            parents: info.parent_ids.iter().map(|p| p.to_string()).collect(),
-            tags: tags.get(&info.id).cloned().unwrap_or_default(),
-        });
+        out.push(commit_from_walk(info, &tags)?);
     }
     Ok(out)
 }
@@ -159,25 +266,8 @@ pub fn most_recent_local_commit(
         return Ok(None);
     };
     let info = info.map_err(|e| GitError::Gix(e.to_string()))?;
-    let commit = info.object().map_err(|e| GitError::Gix(e.to_string()))?;
-    let decoded = commit.decode().map_err(|e| GitError::Gix(e.to_string()))?;
-    let message = decoded.message();
-    Ok(Some(Commit {
-        sha: info.id.to_string(),
-        summary: message.summary().to_string(),
-        body: message
-            .body()
-            .map(|b| b.to_string().trim_end().to_string())
-            .unwrap_or_default(),
-        author: identity(commit.author().map_err(|e| GitError::Gix(e.to_string()))?),
-        committer: identity(
-            commit
-                .committer()
-                .map_err(|e| GitError::Gix(e.to_string()))?,
-        ),
-        parents: info.parent_ids.iter().map(|p| p.to_string()).collect(),
-        tags: Vec::new(),
-    }))
+    // the undo bar shows no tags
+    Ok(Some(commit_from_walk(info, &HashMap::new())?))
 }
 
 /// Commits reachable from `to` but not from `from` (`from..to`), newest
@@ -192,17 +282,7 @@ pub fn get_commits_in_range(
     let (Ok(from_id), Ok(to_id)) = (repo.rev_parse_single(from), repo.rev_parse_single(to)) else {
         return Ok(Vec::new());
     };
-    let mut tags: HashMap<gix::ObjectId, Vec<String>> = HashMap::new();
-    if let Ok(refs) = repo.references()
-        && let Ok(iter) = refs.tags()
-    {
-        for r in iter.flatten() {
-            let name = r.name().shorten().to_string();
-            if let Ok(id) = r.into_fully_peeled_id() {
-                tags.entry(id.detach()).or_default().push(name);
-            }
-        }
-    }
+    let tags = tags_by_commit(&repo);
     let walk = repo
         .rev_walk([to_id.detach()])
         .with_hidden([from_id.detach()])
@@ -214,27 +294,7 @@ pub fn get_commits_in_range(
     let mut out = Vec::new();
     for info in walk.take(limit) {
         let info = info.map_err(|e| GitError::Gix(e.to_string()))?;
-        let commit = info.object().map_err(|e| GitError::Gix(e.to_string()))?;
-        let decoded = commit.decode().map_err(|e| GitError::Gix(e.to_string()))?;
-        let message = decoded.message();
-        let summary = message.summary().to_string();
-        let body = message
-            .body()
-            .map(|b| b.to_string().trim_end().to_string())
-            .unwrap_or_default();
-        out.push(Commit {
-            sha: info.id.to_string(),
-            summary,
-            body,
-            author: identity(commit.author().map_err(|e| GitError::Gix(e.to_string()))?),
-            committer: identity(
-                commit
-                    .committer()
-                    .map_err(|e| GitError::Gix(e.to_string()))?,
-            ),
-            parents: info.parent_ids.iter().map(|p| p.to_string()).collect(),
-            tags: tags.get(&info.id).cloned().unwrap_or_default(),
-        });
+        out.push(commit_from_walk(info, &tags)?);
     }
     Ok(out)
 }
@@ -260,6 +320,30 @@ pub fn get_changed_files(git: Arc<GitBinary>, workdir: &Path, sha: &str) -> Resu
         .current_dir(workdir)
         .run()?;
     Ok(parse_raw_log_with_numstat(&out.stdout, sha))
+}
+
+/// GHD `mapSubmoduleStatusFileModes` (`lib/git/log.ts`): a committed
+/// submodule (file mode `160000`) is modified (`M`, both modes: its commit
+/// changed), added (`A`) or deleted (`D`); anything else is not a submodule
+/// change. `raw` is the raw entry after its `:` (`<src mode> <dst mode> …`).
+fn map_submodule_status_file_modes(
+    raw: &str,
+    status: &str,
+) -> Option<corvene_models::SubmoduleStatus> {
+    const SUBMODULE_FILE_MODE: &str = "160000";
+    let mut modes = raw.split(' ');
+    let src = modes.next() == Some(SUBMODULE_FILE_MODE);
+    let dst = modes.next() == Some(SUBMODULE_FILE_MODE);
+    if src && dst && status == "M" {
+        Some(corvene_models::SubmoduleStatus {
+            commit_changed: true,
+            ..Default::default()
+        })
+    } else if (src && status == "D") || (dst && status == "A") {
+        Some(corvene_models::SubmoduleStatus::default())
+    } else {
+        None
+    }
 }
 
 /// Parse `--raw --numstat -z` output (GHD `parseRawLogWithNumstat`).
@@ -304,7 +388,7 @@ pub fn parse_raw_log_with_numstat(stdout: &[u8], sha: &str) -> ChangesetData {
                 FileStatusKind::Conflicted => GitStatusEntry::Unmerged,
                 _ => GitStatusEntry::Modified,
             };
-            let is_submodule = raw.starts_with("160000") || raw.split(' ').nth(1) == Some("160000");
+            let submodule_status = map_submodule_status_file_modes(raw, status);
             data.files.push(CommittedFileChange {
                 path,
                 old_path,
@@ -314,12 +398,8 @@ pub fn parse_raw_log_with_numstat(stdout: &[u8], sha: &str) -> ChangesetData {
                     working_tree: GitStatusEntry::Unchanged,
                     score,
                     code: letter.to_string(),
-                    submodule: is_submodule,
-                    // committed submodule entries only ever record a commit change
-                    submodule_status: is_submodule.then_some(corvene_models::SubmoduleStatus {
-                        commit_changed: true,
-                        ..Default::default()
-                    }),
+                    submodule: submodule_status.is_some(),
+                    submodule_status,
                     conflict_markers: None,
                 },
                 commitish: sha.to_string(),
@@ -498,12 +578,14 @@ pub fn commit_file_diff(
     ))
 }
 
-/// `getMergeBase`: `None` when the two commits have unrelated histories.
+/// `getMergeBase`: `None` when the two commits have unrelated histories
+/// (exit code 1) or a ref cannot be found (128).
 pub fn merge_base(git: Arc<GitBinary>, workdir: &Path, a: &str, b: &str) -> Result<Option<String>> {
     let out = GitCommand::new(git)
         .args(["merge-base", a, b])
         .current_dir(workdir)
         .allow_exit_code(1)
+        .allow_exit_code(128)
         .run()?;
     if !out.status.success() {
         return Ok(None);
@@ -627,7 +709,8 @@ mod tests {
         assert_eq!(commits[0].summary, "second");
         assert_eq!(commits[0].tags, vec!["v1".to_string()]);
         assert_eq!(commits[1].summary, "first");
-        assert_eq!(commits[1].body, "body line");
+        // git's `%b` keeps the final newline
+        assert_eq!(commits[1].body, "body line\n");
         assert_eq!(commits[1].author.name, "Ada");
         assert_eq!(commits[1].author.seconds, 1704164645);
         assert_eq!(commits[0].parents, vec![commits[1].sha.clone()]);
@@ -677,6 +760,18 @@ mod tests {
             panic!("text diff expected")
         };
         assert_eq!(hunks.len(), 1);
+    }
+
+    #[test]
+    fn subject_and_body_match_git_format() {
+        let split = |m: &str| subject_and_body(m.as_bytes());
+        assert_eq!(split("one\n"), ("one".into(), "".into()));
+        assert_eq!(
+            split("\n\none  \ntwo\n\n\nbody\n\nmore\n"),
+            ("one two".into(), "body\n\nmore\n".into())
+        );
+        assert_eq!(split("one\r\n\r\nbody"), ("one".into(), "body".into()));
+        assert_eq!(split(""), ("".into(), "".into()));
     }
 
     #[test]

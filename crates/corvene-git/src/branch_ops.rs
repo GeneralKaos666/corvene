@@ -1,14 +1,22 @@
 //! Branch, merge and stash operations - GHD `lib/git/{branch,checkout,
 //! reflog,merge,stash}.ts` and `lib/find-default-branch.ts`.
+//!
+//! Stash entries are dropped and popped by their commit sha, as GHD's
+//! `dropDesktopStashEntry` / `popStashEntry` do, so an entry whose
+//! `stash@{n}` shifted since the last refresh is still the one acted on.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use corvene_models::{Branch, BranchKind, StashEntry};
 
 use crate::detect::GitBinary;
 use crate::error::{GitError, Result};
+use crate::git_errors::{KnownGitError, known_git_error};
 use crate::process::GitCommand;
+use crate::remote_ops::AskpassEnv;
 
 /// `createBranch`: `git branch [--no-track] <name> [<start point>]`.
 pub fn create_branch(
@@ -38,10 +46,52 @@ pub fn is_local_changes_overwritten(err: &GitError) -> bool {
         || text.contains("Please commit your changes or stash them before you switch branches")
 }
 
-/// `checkoutBranch`: local branches by name; remote branches become a
-/// tracking local branch (`checkout -b <short> <remote/short>`).
+/// Which submodules [`checkout_branch_with`] updates after the checkout.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SubmoduleUpdate {
+    /// GHD 3.6.6 (`updateSubmodulesAfterOperation`): `git submodule update
+    /// --init --recursive`, every submodule.
+    #[default]
+    All,
+    /// Corvene (flag `263-submodules-follow-checkout`): every gitlink in the
+    /// index but these paths (`corvene_git::update_submodules`).
+    AllExcept(Vec<String>),
+    /// Leave the submodules alone; the caller updates them itself.
+    None,
+}
+
+/// The optional parameters of GHD `checkoutBranch`.
+#[derive(Default)]
+pub struct CheckoutOptions {
+    /// GHD `allowFileProtocol`: `-c protocol.file.allow=always` for the
+    /// submodule update (submodules cloned from a local path).
+    pub allow_file_protocol: bool,
+    pub submodules: SubmoduleUpdate,
+    /// Credentials for submodules the update clones (GHD
+    /// `envForRemoteOperation`).
+    pub askpass: Option<AskpassEnv>,
+}
+
+/// `checkoutBranch(repository, branch, null)`: [`checkout_branch_with`]
+/// GHD's defaults (every submodule updated, no file protocol, no askpass).
 pub fn checkout_branch(git: Arc<GitBinary>, workdir: &Path, branch: &Branch) -> Result<()> {
-    let mut cmd = GitCommand::new(git).args(["checkout"]).current_dir(workdir);
+    checkout_branch_with(git, workdir, branch, &CheckoutOptions::default())
+}
+
+/// `checkoutBranch`: local branches by name; remote branches become a
+/// tracking local branch (`checkout -b <short> <remote/short>`). Then the
+/// submodules follow the checkout as `options.submodules` says (GHD 3.6.6
+/// `updateSubmodulesAfterOperation`); a failure there is returned although
+/// the branch is checked out, as in GHD.
+pub fn checkout_branch_with(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch: &Branch,
+    options: &CheckoutOptions,
+) -> Result<()> {
+    let mut cmd = GitCommand::new(git.clone())
+        .args(["checkout"])
+        .current_dir(workdir);
     cmd = match branch.kind {
         BranchKind::Local => cmd.arg(&branch.name).arg("--"),
         BranchKind::Remote => cmd
@@ -51,7 +101,29 @@ pub fn checkout_branch(git: Arc<GitBinary>, workdir: &Path, branch: &Branch) -> 
             .arg("--"),
     };
     cmd.run()?;
-    Ok(())
+    update_submodules_after_checkout(git, workdir, options)
+}
+
+/// The submodule half of [`checkout_branch_with`], for a caller that checked
+/// out with [`SubmoduleUpdate::None`] and runs it later: the submodules
+/// follow the checkout as `options.submodules` says.
+pub fn update_submodules_after_checkout(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    options: &CheckoutOptions,
+) -> Result<()> {
+    match &options.submodules {
+        SubmoduleUpdate::All => crate::submodule::update_submodules_after_operation(
+            git,
+            workdir,
+            options.allow_file_protocol,
+            options.askpass.as_ref(),
+        ),
+        SubmoduleUpdate::AllExcept(skip) => {
+            crate::remote_ops::update_submodules(git, workdir, skip, options.askpass.as_ref())
+        }
+        SubmoduleUpdate::None => Ok(()),
+    }
 }
 
 /// `git checkout -b <name>`: creates the branch from HEAD, or renames an
@@ -82,19 +154,82 @@ pub fn delete_local_branch(git: Arc<GitBinary>, workdir: &Path, name: &str) -> R
     Ok(())
 }
 
-/// `deleteRemoteBranch`: `git push <remote> :<name>`.
+/// `deleteRemoteBranch`: `git push <remote> :<name>`. When the remote no
+/// longer has the branch (`BranchDeletionFailed`) the push failing is
+/// expected: the remote-tracking ref `refs/remotes/<remote>/<name>` is
+/// deleted instead, as the push would have done.
 pub fn delete_remote_branch(
     git: Arc<GitBinary>,
     workdir: &Path,
     remote: &str,
     name: &str,
 ) -> Result<()> {
-    GitCommand::new(git)
+    let out = GitCommand::new(git.clone())
         .args(["push", remote])
         .arg(format!(":{name}"))
         .current_dir(workdir)
+        .expected_errors([KnownGitError::BranchDeletionFailed])
         .run()?;
+    // a failed push only gets here as the expected error
+    if !out.status.success() {
+        crate::refs::delete_ref(git, workdir, &format!("refs/remotes/{remote}/{name}"), None)?;
+    }
     Ok(())
+}
+
+/// `getBranchesPointedAt`: the local branches whose tip is `commitish`
+/// (`git branch --points-at`), `None` when git cannot resolve it (exit 1)
+/// or the ref is malformed (exit 129).
+pub fn get_branches_pointed_at(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    commitish: &str,
+) -> Result<Option<Vec<String>>> {
+    let out = GitCommand::new(git)
+        .arg("branch")
+        .arg(format!("--points-at={commitish}"))
+        .arg("--format=%(refname:short)")
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .allow_exit_code(129)
+        .run()?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    Ok(Some(
+        out.stdout_string()?
+            .split('\n')
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect(),
+    ))
+}
+
+/// `getMergedBranches`: the local branches merged into `branch_name`
+/// (`git branch --merged`), canonical ref to tip sha, without `branch_name`
+/// itself.
+pub fn get_merged_branches(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch_name: &str,
+) -> Result<HashMap<String, String>> {
+    let canonical = crate::refs::format_as_local_ref(branch_name);
+    let out = GitCommand::new(git)
+        .args([
+            "branch",
+            "--format=%(objectname)%00%(refname)",
+            "--merged",
+            branch_name,
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(out
+        .stdout_string()?
+        .lines()
+        .filter_map(|line| line.split_once('\0'))
+        .filter(|(_, reference)| *reference != canonical)
+        .map(|(sha, reference)| (reference.to_string(), sha.to_string()))
+        .collect())
 }
 
 /// A local branch's relation to its upstream (`%(upstream:track)`).
@@ -201,22 +336,75 @@ pub fn parse_recent_branches(text: &str, limit: usize) -> Vec<String> {
     names
 }
 
-/// `getRemoteHEAD`: the branch `refs/remotes/<remote>/HEAD` points at.
-pub fn remote_head(git: Arc<GitBinary>, workdir: &Path, remote: &str) -> Result<Option<String>> {
+/// `getBranchCheckouts`: the branches checked out on or after `after` (from
+/// HEAD's reflog), each with the time of its latest checkout. An orphan
+/// branch without commits has no reflog to read: empty.
+pub fn get_branch_checkouts(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    after: SystemTime,
+) -> Result<HashMap<String, SystemTime>> {
+    // more than 8 digits: git's date parser reads seconds since the epoch
+    let after = after
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let out = GitCommand::new(git)
-        .args(["symbolic-ref", "-q"])
-        .arg(format!("refs/remotes/{remote}/HEAD"))
+        .args(["reflog", "--date=iso"])
+        .arg(format!("--after={after}"))
+        .args([
+            "--pretty=%H %gd %gs",
+            "--grep-reflog=checkout: moving from .* to .*$",
+            "--",
+        ])
         .current_dir(workdir)
-        .allow_exit_code(1)
         .allow_exit_code(128)
         .run()?;
-    if !out.status.success() {
-        return Ok(None);
+    Ok(parse_branch_checkouts(&out.stdout_string()?))
+}
+
+/// Parse [`get_branch_checkouts`]' `<sha> HEAD@{<iso date>} checkout: moving
+/// from A to B` lines (newest first): B with the newest date seen for it.
+pub fn parse_branch_checkouts(text: &str) -> HashMap<String, SystemTime> {
+    let mut checkouts = HashMap::new();
+    for line in text.lines() {
+        let Some((sha, rest)) = line.split_once(' ') else {
+            continue;
+        };
+        if sha.is_empty() || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Some(rest) = rest.strip_prefix("HEAD@{") else {
+            continue;
+        };
+        let Some((date, subject)) = rest.split_once("} checkout: moving from ") else {
+            continue;
+        };
+        let Some((_, branch)) = subject.rsplit_once(" to ") else {
+            continue;
+        };
+        let Ok(time) = gix::date::parse(date, None) else {
+            continue;
+        };
+        let at = if time.seconds >= 0 {
+            UNIX_EPOCH + Duration::from_secs(time.seconds.unsigned_abs())
+        } else {
+            UNIX_EPOCH - Duration::from_secs(time.seconds.unsigned_abs())
+        };
+        checkouts.entry(branch.to_string()).or_insert(at);
     }
-    let target = out.stdout_string()?.trim().to_string();
+    checkouts
+}
+
+/// `getRemoteHEAD`: the branch `refs/remotes/<remote>/HEAD` points at.
+pub fn remote_head(git: Arc<GitBinary>, workdir: &Path, remote: &str) -> Result<Option<String>> {
+    let namespace = format!("refs/remotes/{remote}/");
+    let target = crate::refs::get_symbolic_ref(git, workdir, &format!("{namespace}HEAD"))?;
     Ok(target
-        .strip_prefix(&format!("refs/remotes/{remote}/"))
-        .map(|s| s.to_string()))
+        .as_deref()
+        .and_then(|t| t.strip_prefix(&namespace))
+        .filter(|name| !name.is_empty())
+        .map(str::to_string))
 }
 
 /// `getDefaultBranch`: `init.defaultBranch` from the global config, else `main`.
@@ -505,21 +693,86 @@ pub fn stashed_files(
     Ok(crate::log::parse_raw_log_with_numstat(&out.stdout, sha))
 }
 
-/// `popStashEntry`: `git stash pop --quiet <name>`.
-pub fn pop_stash(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
-    GitCommand::new(git)
-        .args(["stash", "pop", "--quiet", name])
-        .current_dir(workdir)
-        .run()?;
-    Ok(())
+/// The find half of `getLastDesktopStashEntryForBranch` over entries
+/// [`get_stashes`] already read: the first (newest, the order is LIFO)
+/// Desktop entry made on `branch`.
+pub fn last_desktop_stash_entry_index(entries: &[StashEntry], branch: &str) -> Option<usize> {
+    entries
+        .iter()
+        .position(|e| e.branch.as_deref() == Some(branch))
 }
 
-/// `dropDesktopStashEntry`: `git stash drop <name>`.
-pub fn drop_stash(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
-    GitCommand::new(git)
-        .args(["stash", "drop", name])
+/// `getLastDesktopStashEntryForBranch`: the newest Desktop stash entry made
+/// on `branch`.
+pub fn get_last_desktop_stash_entry_for_branch(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch: &str,
+) -> Result<Option<StashEntry>> {
+    let (mut entries, _) = get_stashes(git, workdir)?;
+    Ok(last_desktop_stash_entry_index(&entries, branch).map(|i| entries.swap_remove(i)))
+}
+
+/// `getStashEntryMatchingSha`: the entry whose commit is `sha`. GHD looks
+/// among the Desktop entries only; Corvene takes any, since the branch can
+/// show a stash Desktop did not make (`728-show-latest-other-stash`).
+fn stash_entry_matching_sha(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    sha: &str,
+) -> Result<Option<StashEntry>> {
+    let (mut entries, _) = get_stashes(git, workdir)?;
+    Ok(entries
+        .iter()
+        .position(|e| e.sha == sha)
+        .map(|i| entries.swap_remove(i)))
+}
+
+/// `popStashEntry`: `git stash pop --quiet <name>` of the entry whose commit
+/// is `stash_sha` (nothing when there is none). A pop that conflicts
+/// exits 1 and keeps the entry; with nothing on stderr the changes were
+/// applied, so the entry is dropped as GHD does. Merge conflicts git names
+/// (`MergeConflicts`) are expected and keep the entry.
+pub fn pop_stash_entry(git: Arc<GitBinary>, workdir: &Path, stash_sha: &str) -> Result<()> {
+    let Some(entry) = stash_entry_matching_sha(git.clone(), workdir, stash_sha)? else {
+        return Ok(());
+    };
+    let out = GitCommand::new(git.clone())
+        .args(["stash", "pop", "--quiet", &entry.name])
         .current_dir(workdir)
+        .allow_any_exit_code()
         .run()?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let known = known_git_error(&out.stderr).or_else(|| known_git_error(&stdout));
+    if known == Some(KnownGitError::MergeConflicts) {
+        return Ok(());
+    }
+    if out.status.code() == Some(1) && out.stderr.is_empty() {
+        return drop_desktop_stash_entry(git, workdir, stash_sha);
+    }
+    Err(GitError::Failed {
+        args: format!("stash pop --quiet {}", entry.name),
+        code: out.status.code(),
+        stderr: out.stderr.trim().to_string(),
+    })
+}
+
+/// `dropDesktopStashEntry`: `git stash drop <name>` of the entry whose
+/// commit is `stash_sha`; nothing when there is none.
+pub fn drop_desktop_stash_entry(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    stash_sha: &str,
+) -> Result<()> {
+    if let Some(entry) = stash_entry_matching_sha(git.clone(), workdir, stash_sha)? {
+        GitCommand::new(git)
+            .args(["stash", "drop", &entry.name])
+            .current_dir(workdir)
+            .run()?;
+    }
     Ok(())
 }
 
@@ -709,12 +962,12 @@ eeee commit: something\n";
         let (entries, total) = get_stashes(git.clone(), path).unwrap();
         assert_eq!(total, 1);
         assert_eq!(entries[0].branch.as_deref(), Some("main"));
-        pop_stash(git.clone(), path, &entries[0].name).unwrap();
+        pop_stash_entry(git.clone(), path, &entries[0].sha).unwrap();
         let files = crate::get_status(git.clone(), path, None).unwrap().files;
         assert_eq!(files.len(), 2);
         assert!(create_desktop_stash(git.clone(), path, "main").unwrap());
         let (entries, _) = get_stashes(git.clone(), path).unwrap();
-        drop_stash(git.clone(), path, &entries[0].name).unwrap();
+        drop_desktop_stash_entry(git.clone(), path, &entries[0].sha).unwrap();
         assert_eq!(get_stashes(git, path).unwrap().1, 0);
     }
 
@@ -765,7 +1018,7 @@ eeee commit: something\n";
         let mut names: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         names.sort();
         assert_eq!(names, ["a.txt", "new.txt"]);
-        pop_stash(git.clone(), path, &stash.name).unwrap();
+        pop_stash_entry(git.clone(), path, &stash.sha).unwrap();
         assert_eq!(get_stashes(git, path).unwrap().1, 0);
         assert!(path.join("new.txt").exists());
     }

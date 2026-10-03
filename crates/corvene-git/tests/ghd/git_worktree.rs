@@ -8,16 +8,15 @@
 //!   `is_detached` / `is_locked` / `is_prunable`, `branch: null` is `None`,
 //!   paths are `PathBuf`s).
 //! - `listWorktrees(repository)` is `corvene_git::list_worktrees`.
-//! - `listWorktreesFromGitDir(gitDir)` has no Corvene function
-//!   ([`list_worktrees_from_git_dir`] is a stand-in).
-//! - `resolveMainWorktreePath(repository)` has no Corvene function either:
-//!   `Dispatcher::recover_missing_worktree` (`corvene-core/src/worktrees.rs`)
-//!   picks the main worktree inline from the recorded `main_worktree_path`
-//!   or the last `git worktree list`, and Corvene's `Repository` has no
-//!   `gitDir`. [`resolve_main_worktree_path`] is a stand-in that takes the
-//!   git dir beside the repository. Corvene records `main_worktree_path` on
-//!   every refresh and has no git-dir fallback (`.docs/deviations.md`, "A
-//!   deleted linked worktree falls back to its main worktree").
+//! - `listWorktreesFromGitDir(gitDir)` is
+//!   `corvene_git::list_worktrees_from_git_dir`.
+//! - `resolveMainWorktreePath(repository)` is
+//!   `corvene_git::resolve_main_worktree_path(git, repository, git_dir)`:
+//!   Corvene's `Repository` has no `gitDir`, so the git dir is passed beside
+//!   it. `Dispatcher::recover_missing_worktree` (`corvene-core/src/worktrees.rs`)
+//!   passes none, since Corvene records `main_worktree_path` on every refresh
+//!   and keeps no git dir (`.docs/deviations.md`, "A deleted linked worktree
+//!   falls back to its main worktree").
 //!
 //! GitHub Desktop's tests leave the linked worktrees they add beside the
 //! temporary repository (`<repo>-wt-a`); [`Siblings`] removes them.
@@ -31,24 +30,16 @@ use corvene_test_support::{
     TestRepo, Tree, TreeEntry, exec, git, make_commit, setup_empty_repository_with_default_branch,
 };
 
-/// Stand-in for GitHub Desktop's `listWorktreesFromGitDir(gitDir)`
-/// (`lib/git/worktree.ts`): `git --git-dir <gitDir> worktree list
-/// --porcelain -z` run in `gitDir`. Replace this with the `corvene_git`
-/// function once there is one and remove the `#[ignore]`.
-fn list_worktrees_from_git_dir(_git_dir: &Path) -> Vec<WorktreeEntry> {
-    unimplemented!("corvene_git has no listWorktreesFromGitDir")
+/// `listWorktreesFromGitDir(gitDir)`.
+fn list_worktrees_from_git_dir(git_dir: &Path) -> Vec<WorktreeEntry> {
+    corvene_git::list_worktrees_from_git_dir(git(), git_dir).expect("listWorktreesFromGitDir")
 }
 
-/// Stand-in for GitHub Desktop's `resolveMainWorktreePath(repository)`
-/// (`lib/git/worktree.ts`) with `repository.gitDir` passed beside the
-/// Corvene `Repository` (which has `path` and `main_worktree_path` but no
-/// git dir). Replace this with the Corvene function once there is one and
-/// remove the `#[ignore]`s.
-fn resolve_main_worktree_path(
-    _repository: &Repository,
-    _git_dir: Option<&Path>,
-) -> Option<PathBuf> {
-    unimplemented!("Corvene has no resolveMainWorktreePath")
+/// `resolveMainWorktreePath(repository)` of a repository whose `gitDir` is
+/// `git_dir`.
+fn resolve_main_worktree_path(repository: &Repository, git_dir: Option<&Path>) -> Option<PathBuf> {
+    corvene_git::resolve_main_worktree_path(git(), repository, git_dir)
+        .expect("resolveMainWorktreePath")
 }
 
 /// `repo.path + suffix`.
@@ -454,7 +445,6 @@ fn git_dir_of(worktree_path: &Path) -> PathBuf {
 
 // GHD: unit/git/worktree-test.ts › git/worktree › listWorktrees › lists worktrees from a git dir after a linked worktree directory is removed
 #[test]
-#[ignore = "ghd: missing: corvene_git has no listWorktreesFromGitDir (lib/git/worktree.ts)"]
 fn lists_worktrees_from_a_git_dir_after_a_linked_worktree_directory_is_removed() {
     let repo = main_repo_with_readme();
     let mut siblings = Siblings(Vec::new());
@@ -536,7 +526,6 @@ fn repository(path: &Path, main_worktree_path: Option<PathBuf>) -> Repository {
 
 // GHD: unit/git/worktree-test.ts › git/worktree › resolveMainWorktreePath › resolves from the persisted path once the worktree metadata is gone
 #[test]
-#[ignore = "ghd: missing: Corvene has no resolveMainWorktreePath (lib/git/worktree.ts); Dispatcher::recover_missing_worktree picks the main worktree inline"]
 fn resolves_from_the_persisted_path_once_the_worktree_metadata_is_gone() {
     let setup = setup_worktree();
 
@@ -565,7 +554,6 @@ fn resolves_from_the_persisted_path_once_the_worktree_metadata_is_gone() {
 
 // GHD: unit/git/worktree-test.ts › git/worktree › resolveMainWorktreePath › falls back to the git dir when no path was persisted
 #[test]
-#[ignore = "ghd: deviation: deviations.md 'A deleted linked worktree falls back to its main worktree': Corvene keeps no git dir per repository, so an entry saved without main_worktree_path cannot recover (no git-dir fallback)"]
 fn falls_back_to_the_git_dir_when_no_path_was_persisted() {
     let setup = setup_worktree();
 
@@ -586,7 +574,6 @@ fn falls_back_to_the_git_dir_when_no_path_was_persisted() {
 
 // GHD: unit/git/worktree-test.ts › git/worktree › resolveMainWorktreePath › returns null when the repository is already the main worktree
 #[test]
-#[ignore = "ghd: missing: Corvene has no resolveMainWorktreePath (lib/git/worktree.ts); Dispatcher::recover_missing_worktree picks the main worktree inline"]
 fn returns_null_when_the_repository_is_already_the_main_worktree() {
     let setup = setup_worktree();
 
@@ -598,7 +585,6 @@ fn returns_null_when_the_repository_is_already_the_main_worktree() {
 
 // GHD: unit/git/worktree-test.ts › git/worktree › resolveMainWorktreePath › falls back to the git dir when the persisted path is stale
 #[test]
-#[ignore = "ghd: deviation: deviations.md 'A deleted linked worktree falls back to its main worktree': Corvene keeps no git dir per repository (it re-records main_worktree_path on every refresh), so a stale recorded path has no git-dir fallback"]
 fn falls_back_to_the_git_dir_when_the_persisted_path_is_stale() {
     let setup = setup_worktree();
 
@@ -619,7 +605,6 @@ fn falls_back_to_the_git_dir_when_the_persisted_path_is_stale() {
 
 // GHD: unit/git/worktree-test.ts › git/worktree › resolveMainWorktreePath › returns null when neither a persisted path nor a git dir is available
 #[test]
-#[ignore = "ghd: missing: Corvene has no resolveMainWorktreePath (lib/git/worktree.ts); Dispatcher::recover_missing_worktree picks the main worktree inline"]
 fn returns_null_when_neither_a_persisted_path_nor_a_git_dir_is_available() {
     let setup = setup_worktree();
 

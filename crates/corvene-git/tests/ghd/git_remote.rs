@@ -92,7 +92,6 @@ fn returns_remotes_sorted_alphabetically() {
 
 // GHD: unit/git/remote-test.ts › git/remote › getRemotes › returns empty array for directory without a .git directory
 #[test]
-#[ignore = "ghd: bug: get_remotes fails (git exit 128, not a git repository) in a plain directory; GHD getRemotes returns [] on NotAGitRepository"]
 fn returns_empty_array_for_directory_without_a_git_directory() {
     let repository = setup_empty_directory();
     let remotes = get_remotes(git(), repository.path()).unwrap();
@@ -101,7 +100,6 @@ fn returns_empty_array_for_directory_without_a_git_directory() {
 
 // GHD: unit/git/remote-test.ts › git/remote › getRemotes › returns promisor remote
 #[test]
-#[ignore = "ghd: bug: get_remotes keeps only `remote -v` lines ending in ` (fetch)`, so a promisor remote (`<url> (fetch) [blob:none]`) is dropped: got 0 remotes, expected 1 (hasBlobFilter)"]
 fn returns_promisor_remote() {
     let repository = setup_empty_repository();
 

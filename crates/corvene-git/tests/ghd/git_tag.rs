@@ -9,14 +9,11 @@
 //! - `getCommit` / `getCommits(repository, 'HEAD', n)` are
 //!   `corvene_git::get_commits` ([`get_commit`]); a commit's `tags` are
 //!   `Commit::tags`.
-//! - `getAllTags(repository)` (a map of tag name to commit) is used by
-//!   GitHub Desktop's `GitStore.refreshTags` for the tag names; Corvene's
-//!   `corvene_git::tag_names` lists the names only, so the empty case runs
-//!   against it and the case that checks the commits calls the stand-in
-//!   [`get_all_tags`].
-//! - `fetchTagsToPush(repository, remote, branch)` has no Corvene function
-//!   ([`fetch_tags_to_push`] is a stand-in). The setup runs Corvene's own
-//!   calls: `getRemotes` / `findDefaultRemote` are `corvene_git::get_remotes`
+//! - `getAllTags(repository)` (a map of tag name to commit) is
+//!   `corvene_git::get_all_tags` ([`get_all_tags`]).
+//! - `fetchTagsToPush(repository, remote, branch)` is
+//!   `corvene_git::fetch_tags_to_push` ([`fetch_tags_to_push`]). The setup
+//!   runs Corvene's own calls: `getRemotes` / `findDefaultRemote` are `corvene_git::get_remotes`
 //!   / `find_default_remote`, `push` is `corvene_git::push`, `createBranch`
 //!   is `corvene_git::create_branch`, `getBranches` is [`get_branches`],
 //!   `checkoutBranch` is `corvene_git::checkout_branch`, `createCommit` is
@@ -39,21 +36,15 @@ fn create_tag(
     corvene_git::create_tag(git(), repository.path(), name, target_commit_sha, "")
 }
 
-/// Stand-in for GitHub Desktop's `getAllTags(repository)` (`lib/git/tag.ts`):
-/// every local tag and the commit it points at (`git show-ref --tags -d`).
-/// `corvene_git::tag_names` has the names only. Replace this with the
-/// `corvene_git` function once there is one and remove the `#[ignore]`.
-fn get_all_tags(_repository: &TestRepo) -> HashMap<String, String> {
-    unimplemented!("corvene_git has no getAllTags (tag_names has no commits)")
+/// GitHub Desktop's `getAllTags(repository)` (`lib/git/tag.ts`).
+fn get_all_tags(repository: &TestRepo) -> HashMap<String, String> {
+    corvene_git::get_all_tags(repository.path()).expect("getAllTags")
 }
 
-/// Stand-in for GitHub Desktop's `fetchTagsToPush(repository, remote,
-/// branchName)` (`lib/git/tag.ts`): the `[new tag]` lines of `git push
-/// <remote> <branch> --follow-tags --dry-run --no-verify --porcelain`.
-/// Replace this with the `corvene_git` function once there is one and
-/// remove the `#[ignore]`s.
-fn fetch_tags_to_push(_repository: &TestRepo, _remote: &Remote, _branch_name: &str) -> Vec<String> {
-    unimplemented!("corvene_git has no fetchTagsToPush")
+/// GitHub Desktop's `fetchTagsToPush(repository, remote, branchName)`.
+fn fetch_tags_to_push(repository: &TestRepo, remote: &Remote, branch_name: &str) -> Vec<String> {
+    corvene_git::fetch_tags_to_push(git(), repository.path(), &remote.name, branch_name, None)
+        .expect("fetchTagsToPush")
 }
 
 // GHD: unit/git/tag-test.ts › git/tag › createTag › creates a tag with the given name
@@ -82,7 +73,6 @@ fn creates_a_tag_with_the_a_comma_in_it() {
 
 // GHD: unit/git/tag-test.ts › git/tag › createTag › creates multiple tags
 #[test]
-#[ignore = "ghd: bug: get_commits orders Commit::tags by ref name; GHD keeps git log %D order (got [another-tag, my-new-tag], expected [my-new-tag, another-tag])"]
 fn creates_multiple_tags() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -143,16 +133,11 @@ fn deletes_a_tag_with_the_given_name() {
 fn returns_an_empty_map_when_the_repository_has_no_tags() {
     let repository = setup_fixture_repository("test-repo");
 
-    assert!(
-        corvene_git::tag_names(repository.path())
-            .expect("getAllTags")
-            .is_empty()
-    );
+    assert!(get_all_tags(&repository).is_empty());
 }
 
 // GHD: unit/git/tag-test.ts › git/tag › getAllTags › returns all the created tags
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getAllTags (lib/git/tag.ts) name to commit map; tag_names lists names only"]
 fn returns_all_the_created_tags() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -187,7 +172,6 @@ fn fetch_tags_setup() -> (TestRepo, Remote, TestRepo) {
 
 // GHD: unit/git/tag-test.ts › git/tag › fetchTagsToPush › returns an empty array when there are no tags to get pushed
 #[test]
-#[ignore = "ghd: missing: corvene_git has no fetchTagsToPush (lib/git/tag.ts)"]
 fn returns_an_empty_array_when_there_are_no_tags_to_get_pushed() {
     let (repository, origin_remote, _remote) = fetch_tags_setup();
     assert_eq!(
@@ -198,7 +182,6 @@ fn returns_an_empty_array_when_there_are_no_tags_to_get_pushed() {
 
 // GHD: unit/git/tag-test.ts › git/tag › fetchTagsToPush › returns local tags that haven't been pushed
 #[test]
-#[ignore = "ghd: missing: corvene_git has no fetchTagsToPush (lib/git/tag.ts)"]
 fn returns_local_tags_that_havent_been_pushed() {
     let (repository, origin_remote, _remote) = fetch_tags_setup();
     create_tag(&repository, "my-new-tag", "HEAD").expect("createTag");
@@ -211,7 +194,6 @@ fn returns_local_tags_that_havent_been_pushed() {
 
 // GHD: unit/git/tag-test.ts › git/tag › fetchTagsToPush › returns an empty array after pushing the tag
 #[test]
-#[ignore = "ghd: missing: corvene_git has no fetchTagsToPush (lib/git/tag.ts)"]
 fn returns_an_empty_array_after_pushing_the_tag() {
     let (repository, origin_remote, _remote) = fetch_tags_setup();
     create_tag(&repository, "my-new-tag", "HEAD").expect("createTag");
@@ -237,7 +219,6 @@ fn returns_an_empty_array_after_pushing_the_tag() {
 
 // GHD: unit/git/tag-test.ts › git/tag › fetchTagsToPush › does not return a tag created on a non-pushed branch
 #[test]
-#[ignore = "ghd: missing: corvene_git has no fetchTagsToPush (lib/git/tag.ts)"]
 fn does_not_return_a_tag_created_on_a_non_pushed_branch() {
     let (repository, origin_remote, _remote) = fetch_tags_setup();
     // Create a tag on a local branch that's not pushed to the remote.
@@ -265,7 +246,6 @@ fn does_not_return_a_tag_created_on_a_non_pushed_branch() {
 
 // GHD: unit/git/tag-test.ts › git/tag › fetchTagsToPush › returns unpushed tags even if it fails to push the branch
 #[test]
-#[ignore = "ghd: missing: corvene_git has no fetchTagsToPush (lib/git/tag.ts)"]
 fn returns_unpushed_tags_even_if_it_fails_to_push_the_branch() {
     // Create a new commit on the remote repository so the `git push` command
     // that fetchUnpushedTags() does fails.

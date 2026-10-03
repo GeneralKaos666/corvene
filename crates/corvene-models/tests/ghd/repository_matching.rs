@@ -2,11 +2,13 @@
 //!
 //! - `matchGitHubRepository(accounts, remote)` (`lib/repository-matching.ts`,
 //!   used when a repository is added or refreshed) is
-//!   `corvene_models::github_from_remote(url, ghes_hosts)`, whose second
-//!   argument names the Enterprise hosts the user has accounts on;
+//!   `corvene_models::github_from_remote(url, hosts)`, whose second
+//!   argument names the web hosts of the signed-in accounts (github.com only
+//!   when it is listed, as in GitHub Desktop);
 //!   [`match_github_repository`] passes the accounts' hosts
-//!   (`Account::host`). GitHub Desktop's result also carries the matching
-//!   account, which no case reads.
+//!   (`corvene_models::github_hosts(accounts, false)`, each `Account::host`).
+//!   GitHub Desktop's result also carries the matching account, which no
+//!   case reads.
 //! - `urlMatchesRemote(url, remote)` is
 //!   `corvene_models::url_matches_remote(url, &remote.url)`.
 //! - `urlMatchesCloneURL(url, gitHubRepository)` has no Corvene function of
@@ -28,7 +30,9 @@
 //! - `gitHubRepoFixture` (`helpers/github-repo-builder.ts`) is
 //!   `corvene_test_support::git_hub_repo_fixture`.
 
-use corvene_models::{Account, GitHubRepository, Remote, github_from_remote, url_matches_remote};
+use corvene_models::{
+    Account, GitHubRepository, Remote, github_from_remote, github_hosts, url_matches_remote,
+};
 use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
 
 /// `new Account(login, endpoint, '', [], '', 1, '', 'free')`, as every case
@@ -50,8 +54,7 @@ fn account(login: &str, endpoint: &str) -> Account {
 /// GitHub Desktop's `matchGitHubRepository(accounts, remote)`:
 /// `github_from_remote` with the hosts of the signed-in accounts.
 fn match_github_repository(accounts: &[Account], remote: &str) -> Option<GitHubRepository> {
-    let hosts: Vec<String> = accounts.iter().map(Account::host).collect();
-    github_from_remote(remote, &hosts)
+    github_from_remote(remote, &github_hosts(accounts, false))
 }
 
 /// GitHub Desktop's `urlMatchesRemote(url, remote)`.
@@ -94,7 +97,6 @@ fn matches_https_urls_without_the_git_extension() {
 
 // GHD: unit/repository-matching-test.ts › repository-matching › matchGitHubRepository › matches git URLs
 #[test]
-#[ignore = "ghd: bug: github_from_remote (split_remote) returns None for git:github.com/someuser/somerepo.git; GHD parseRemote matches ^git:(.+)/([^/]+)/([^/]+?) as someuser/somerepo"]
 fn matches_git_urls() {
     let accounts = [account("alovelace", "https://api.github.com")];
     let repo = match_github_repository(&accounts, "git:github.com/someuser/somerepo.git");
@@ -115,7 +117,6 @@ fn matches_ssh_urls() {
 
 // GHD: unit/repository-matching-test.ts › repository-matching › matchGitHubRepository › doesn't match if there aren't any users with that endpoint
 #[test]
-#[ignore = "ghd: bug: github_from_remote matches a github.com remote with only a github.babbageinc.com account (Corvene always treats github.com as GitHub); GHD matchGitHubRepository returns null without an account on that host"]
 fn doesnt_match_if_there_arent_any_users_with_that_endpoint() {
     let accounts = [account("alovelace", "https://github.babbageinc.com")];
     let repo = match_github_repository(&accounts, "https://github.com/someuser/somerepo.git");

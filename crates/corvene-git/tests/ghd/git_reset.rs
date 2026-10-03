@@ -5,24 +5,20 @@
 //! - `reset(repository, mode, ref)` (`lib/git/reset.ts`) is
 //!   `corvene_git::reset_to(git, path, mode, ref)`; `GitResetMode` is
 //!   `corvene_git::ResetMode`.
-//! - `resetPaths(repository, mode, ref, paths)` has no equivalent: Corvene
-//!   only resets every path (`git reset -- .` in `unstage_all` and
-//!   `discard_changes`). The case calls the stand-in [`reset_paths`] and is
-//!   ignored until it exists. GitHub Desktop itself marks this case
-//!   `it.skip`; its body awaits nothing between `git add` and the unlink,
-//!   which a blocking port does not have to work around.
+//! - `resetPaths(repository, mode, ref, paths)` is
+//!   `corvene_git::reset_paths(git, path, mode, ref, paths)`
+//!   ([`reset_paths`]). GitHub Desktop itself marks this case `it.skip`; its
+//!   body awaits nothing between `git add` and the unlink, which a blocking
+//!   port does not have to work around.
 
 use std::path::Path;
 
 use corvene_git::ResetMode;
 use corvene_test_support::{TestRepo, exec, get_status_or_throw, git, setup_fixture_repository};
 
-/// Stand-in for GitHub Desktop's `resetPaths(repository, mode, ref, paths)`
-/// (`lib/git/reset.ts`): `git reset [--hard | --soft] <ref> -- <paths>`
-/// (`--stdin -z` for a mixed reset on Windows). Replace it with the
-/// `corvene_git` function once there is one and remove the `#[ignore]`.
-fn reset_paths(_repository: &TestRepo, _mode: ResetMode, _reference: &str, _paths: &[&Path]) {
-    unimplemented!("corvene_git has no resetPaths")
+/// `resetPaths(repository, mode, ref, paths)`.
+fn reset_paths(repository: &TestRepo, mode: ResetMode, reference: &str, paths: &[&Path]) {
+    corvene_git::reset_paths(git(), repository.path(), mode, reference, paths).expect("resetPaths");
 }
 
 // GHD: unit/git/reset-test.ts › git/reset › reset › can hard reset a repository
@@ -44,7 +40,6 @@ fn can_hard_reset_a_repository() {
 
 // GHD: unit/git/reset-test.ts › git/reset › resetPaths › resets discarded staged file
 #[test]
-#[ignore = "ghd: missing: corvene_git has no resetPaths (lib/git/reset.ts), only whole-index resets"]
 fn resets_discarded_staged_file() {
     let repository = setup_fixture_repository("test-repo");
 

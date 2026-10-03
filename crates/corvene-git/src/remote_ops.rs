@@ -1,5 +1,8 @@
-//! Network operations - GHD `lib/git/{fetch,pull,push,remote,lfs}.ts` and
-//! `lib/progress/{git,fetch,pull,push}.ts`.
+//! Network operations - GHD `lib/git/{fetch,pull,push,remote,lfs}.ts`,
+//! `lib/git/for-each-ref.ts` (`getBranchesDifferingFromUpstream`),
+//! `lib/git/tag.ts` (`fetchTagsToPush`) and
+//! `lib/progress/{git,clone,fetch,pull,push}.ts`. Git LFS transfer progress
+//! is `crate::lfs_progress`.
 //!
 //! Authentication: every remote command gets `GIT_ASKPASS` pointing at the
 //! Corvene binary itself (see `crates/corvene/src/askpass.rs`), which answers
@@ -16,6 +19,7 @@ use corvene_models::Remote;
 
 use crate::detect::GitBinary;
 use crate::error::{GitError, Result};
+use crate::lfs_progress::run_with_progress;
 use crate::paths::git_dir;
 use crate::process::GitCommand;
 
@@ -26,15 +30,25 @@ use crate::process::GitCommand;
 /// GHD `IGitProgressInfo`: one parsed `--progress` line.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProgressLine {
+    /// Everything before the last `": "` (`remote: Compressing objects`).
     pub title: String,
+    /// Units processed (`159` of `14% (159/1133)`, `123` of `123`).
     pub value: u64,
+    /// `1133` of `14% (159/1133)`; `None` for a bare count.
     pub total: Option<u64>,
+    /// The integer before `%` (`14` of `14% (159/1133)`); `None` for a bare
+    /// count.
+    pub percent: Option<u32>,
+    /// The line has a trailing `, done.`.
     pub done: bool,
+    /// The line as given.
     pub text: String,
 }
 
 /// GHD `parse` in `lib/progress/git.ts`:
 /// `remote: Compressing objects:  14% (159/1133)` → title/value/total.
+/// A line without `": "` is not progress (GHD's `lastIndexOf` of -1 would
+/// give an empty title, which no step has).
 pub fn parse_progress_line(line: &str) -> Option<ProgressLine> {
     let title_len = line.rfind(": ")?;
     if title_len == 0 {
@@ -47,35 +61,137 @@ pub fn parse_progress_line(line: &str) -> Option<ProgressLine> {
     }
     let mut parts = rest.split(", ");
     let first = parts.next()?;
-    let (value, total) = if first.chars().all(|c| c.is_ascii_digit()) {
-        (first.parse::<u64>().ok()?, None)
+    let all_digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let (value, total, percent) = if all_digits(first) {
+        (first.parse::<u64>().ok()?, None, None)
     } else {
-        // "14% (159/1133)"
-        let (_, rest) = first.split_once("% (")?;
-        let rest = rest.strip_suffix(')')?;
-        let (value, total) = rest.split_once('/')?;
-        (value.parse::<u64>().ok()?, Some(total.parse::<u64>().ok()?))
+        // GHD `percentRe`: /^(\d{1,3})% \((\d+)\/(\d+)\)$/
+        let (percent, rest) = first.split_once("% (")?;
+        let (value, total) = rest.strip_suffix(')')?.split_once('/')?;
+        if percent.len() > 3 || !all_digits(percent) || !all_digits(value) || !all_digits(total) {
+            return None;
+        }
+        (
+            value.parse::<u64>().ok()?,
+            Some(total.parse::<u64>().ok()?),
+            Some(percent.parse::<u32>().ok()?),
+        )
     };
     let done = parts.any(|p| p == "done.");
     Some(ProgressLine {
         title: title.to_string(),
         value,
         total,
+        percent,
         done,
         text: line.to_string(),
     })
 }
 
-/// GHD `GitProgressParser`: weighted steps → overall 0..1.
+/// GHD `stripVTControlCharacters` (node's `util`), which
+/// `GitProgressParser.parse` applies to every line so hook output reads as
+/// plain text: drops CSI (`ESC [ … final`, `0x9B … final`) and OSC (`ESC ]
+/// … BEL` / `ESC \`) sequences, charset selections (`ESC ( B`) and other
+/// two-character `ESC x` escapes.
+pub fn strip_vt_control_characters(line: &str) -> String {
+    if !line.contains(['\u{1b}', '\u{9b}']) {
+        return line.to_string();
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        let introducer = match c {
+            '\u{9b}' => '[',
+            '\u{1b}' => match chars.next() {
+                Some(next) => next,
+                None => break,
+            },
+            _ => {
+                out.push(c);
+                continue;
+            }
+        };
+        match introducer {
+            // CSI: parameter and intermediate bytes, then one final byte
+            '[' => {
+                for c in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // OSC: up to BEL, ST or ESC '\'
+            ']' => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' || c == '\u{9c}' {
+                        break;
+                    }
+                    if c == '\u{1b}' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            '(' | ')' | '#' => {
+                chars.next();
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// GHD `IGitProgress | IGitOutput`: what [`ProgressParser::parse_event`]
+/// makes of one line.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GitProgressEvent {
+    /// GHD `IGitProgress`: a line of one of the parser's steps; `percent` is
+    /// the overall 0..1 of the operation.
+    Progress { percent: f64, details: ProgressLine },
+    /// GHD `IGitOutput`: any other line, with the last overall percent.
+    Context { percent: f64, text: String },
+}
+
+impl GitProgressEvent {
+    /// The overall 0..1.
+    pub fn percent(&self) -> f64 {
+        match self {
+            Self::Progress { percent, .. } | Self::Context { percent, .. } => *percent,
+        }
+    }
+
+    /// GHD `progress.kind === 'progress' ? progress.details.text :
+    /// progress.text`: the line to show.
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Progress { details, .. } => &details.text,
+            Self::Context { text, .. } => text,
+        }
+    }
+}
+
+/// GHD `GitProgressParser`: weighted steps → overall 0..1. Weights and the
+/// overall percent are `f64`, GHD's JavaScript numbers; [`Self::parse`]
+/// rounds the result to `f32` for [`ProgressFn`]. One parser per git run.
+#[derive(Clone, Debug)]
 pub struct ProgressParser {
-    steps: Vec<(&'static str, f32)>,
+    steps: Vec<(&'static str, f64)>,
     step_index: usize,
-    last_percent: f32,
+    last_percent: f64,
 }
 
 impl ProgressParser {
-    pub fn new(steps: &[(&'static str, f32)]) -> Self {
-        let total: f32 = steps.iter().map(|(_, w)| w).sum();
+    /// `steps` are `(title, weight)` in the order git prints them; weights
+    /// are relative and scaled to sum to 1.
+    ///
+    /// # Panics
+    ///
+    /// When `steps` is empty (GHD's constructor throws "must specify at
+    /// least one step"): the steps are constants, so this is a programming
+    /// error.
+    pub fn new(steps: &[(&'static str, f64)]) -> Self {
+        assert!(!steps.is_empty(), "must specify at least one step");
+        let total: f64 = steps.iter().map(|(_, w)| w).sum();
         Self {
             steps: steps.iter().map(|(t, w)| (*t, w / total)).collect(),
             step_index: 0,
@@ -83,6 +199,17 @@ impl ProgressParser {
         }
     }
 
+    /// GHD `CloneProgressParser` (`lib/progress/clone.ts`).
+    pub fn for_clone() -> Self {
+        Self::new(&[
+            ("remote: Compressing objects", 0.1),
+            ("Receiving objects", 0.6),
+            ("Resolving deltas", 0.1),
+            ("Checking out files", 0.2),
+        ])
+    }
+
+    /// GHD `FetchProgressParser` (`lib/progress/fetch.ts`).
     pub fn fetch() -> Self {
         Self::new(&[
             ("remote: Compressing objects", 0.1),
@@ -91,6 +218,7 @@ impl ProgressParser {
         ])
     }
 
+    /// GHD `PullProgressParser` (`lib/progress/pull.ts`).
     pub fn pull() -> Self {
         Self::new(&[
             ("remote: Compressing objects", 0.1),
@@ -100,6 +228,7 @@ impl ProgressParser {
         ])
     }
 
+    /// GHD `PushProgressParser` (`lib/progress/push.ts`).
     pub fn push() -> Self {
         Self::new(&[
             ("Compressing objects", 0.2),
@@ -108,27 +237,49 @@ impl ProgressParser {
         ])
     }
 
-    /// Returns `(percent, description)`; `None` for lines that are not
-    /// progress of a known step (they are still useful as context text).
-    pub fn parse(&mut self, line: &str) -> Option<(f32, String)> {
-        let progress = parse_progress_line(line)?;
+    /// GHD `GitProgressParser.parse`. Once a step was seen, lines of the
+    /// steps before it are context: the steps come in order, and the
+    /// earlier ones count as complete.
+    pub fn parse_event(&mut self, line: &str) -> GitProgressEvent {
+        let text = strip_vt_control_characters(line);
+        let Some(progress) = parse_progress_line(&text) else {
+            return GitProgressEvent::Context {
+                percent: self.last_percent,
+                text,
+            };
+        };
         let mut percent = 0.;
         for (i, (title, weight)) in self.steps.iter().enumerate() {
             if i >= self.step_index && progress.title == *title {
                 if let Some(total) = progress.total.filter(|t| *t > 0) {
-                    percent += weight * (progress.value as f32 / total as f32);
+                    percent += weight * (progress.value as f64 / total as f64);
                 }
                 self.step_index = i;
                 self.last_percent = percent;
-                return Some((percent, progress.text));
+                return GitProgressEvent::Progress {
+                    percent,
+                    details: progress,
+                };
             }
             percent += weight;
         }
-        None
+        GitProgressEvent::Context {
+            percent: self.last_percent,
+            text,
+        }
+    }
+
+    /// [`Self::parse_event`] as `Some((percent, text))` for a step's line
+    /// and `None` for context.
+    pub fn parse(&mut self, line: &str) -> Option<(f32, String)> {
+        match self.parse_event(line) {
+            GitProgressEvent::Progress { percent, details } => Some((percent as f32, details.text)),
+            GitProgressEvent::Context { .. } => None,
+        }
     }
 
     pub fn last_percent(&self) -> f32 {
-        self.last_percent
+        self.last_percent as f32
     }
 }
 
@@ -232,7 +383,7 @@ impl AskpassEnv {
         program.map(|program| Self { program, logins })
     }
 
-    fn apply(&self, cmd: GitCommand) -> GitCommand {
+    pub(crate) fn apply(&self, cmd: GitCommand) -> GitCommand {
         cmd.env("GIT_ASKPASS", &self.program)
             .env("CORVENE_ASKPASS", "1")
             .env("CORVENE_ASKPASS_LOGINS", &self.logins)
@@ -253,8 +404,9 @@ fn remote_command(git: Arc<GitBinary>, workdir: &Path, askpass: Option<&AskpassE
 /// Corvene (`submodules-follow-checkout` flag): `git submodule update
 /// --init --recursive` for every submodule recorded in the index except
 /// `skip` (those the caller saw changed before, whose work must not be moved
-/// away). New submodules are cloned, hence `askpass`. GHD leaves submodules
-/// at their old commits after a checkout or merge.
+/// away). New submodules are cloned, hence `askpass`. GHD 3.6.6 updates
+/// every submodule after a checkout (`update_submodules_after_operation`)
+/// and none after a merge.
 pub fn update_submodules(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -290,25 +442,42 @@ pub fn update_submodules(
 // ---------------------------------------------------------------------------
 
 /// GHD `getRemotes` via the CLI (`remote -v`, fetch URLs), sorted by name.
+/// A directory that is not a repository has no remotes (GHD expects
+/// `NotAGitRepository` and returns `[]`).
 pub fn get_remotes(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<Remote>> {
     let out = GitCommand::new(git)
         .args(["remote", "-v"])
         .current_dir(workdir)
+        .expected_errors([crate::KnownGitError::NotAGitRepository])
         .run()?;
+    if !out.status.success() {
+        // the expected `NotAGitRepository`; any other failure is an `Err`
+        return Ok(Vec::new());
+    }
     let text = out.stdout_string()?;
-    let mut remotes: Vec<Remote> = text
-        .lines()
-        .filter_map(|line| {
-            let (name, rest) = line.split_once('\t')?;
-            let url = rest.strip_suffix(" (fetch)")?;
-            Some(Remote {
-                name: name.to_string(),
-                url: url.to_string(),
-            })
-        })
-        .collect();
+    let mut remotes: Vec<Remote> = text.lines().filter_map(parse_remote_line).collect();
     remotes.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(remotes)
+}
+
+/// One fetch line of `git remote -v`, GHD's `/^(.+)\t(.+)\s\(fetch\)/`: the
+/// URL ends at the last whitespace + `(fetch)`, so a promisor remote's
+/// `<url> (fetch) [blob:none]` counts too.
+fn parse_remote_line(line: &str) -> Option<Remote> {
+    let mut end = line.len();
+    let before_marker = loop {
+        let at = line[..end].rfind("(fetch)")?;
+        let before = &line[..at];
+        match before.chars().next_back() {
+            Some(c) if c.is_whitespace() => break &before[..before.len() - c.len_utf8()],
+            _ => end = at,
+        }
+    };
+    let (name, url) = before_marker.rsplit_once('\t')?;
+    (!name.is_empty() && !url.is_empty()).then(|| Remote {
+        name: name.to_string(),
+        url: url.to_string(),
+    })
 }
 
 /// GHD `findDefaultRemote`: `origin`, else the first remote.
@@ -467,14 +636,23 @@ pub fn fetch_with(
         "--recurse-submodules=on-demand"
     });
     args.push(remote);
-    remote_command(git, workdir, askpass)
-        .args(args)
-        .run_streaming(|line| {
-            if let Some((percent, text)) = parser.parse(line) {
-                on_progress(percent, text);
-            }
-        })?;
+    let cmd = remote_command(git, workdir, askpass).args(args);
+    run_with_progress(cmd, &mut parser, &mut fetch_progress(on_progress))?;
     Ok(())
+}
+
+/// GHD `fetch` / `pull`'s progress callback: the ref updates git prints are
+/// left out, so of the context lines only `remote: Counting objects` is
+/// shown.
+fn fetch_progress(on_progress: ProgressFn<'_>) -> impl FnMut(GitProgressEvent) + '_ {
+    move |event| {
+        if matches!(&event, GitProgressEvent::Context { text, .. }
+            if !text.starts_with("remote: Counting objects"))
+        {
+            return;
+        }
+        on_progress(event.percent() as f32, event.text().to_string());
+    }
 }
 
 /// GHD `fetchRefspec`
@@ -561,19 +739,37 @@ pub fn pull(
         "--recurse-submodules"
     });
     args.extend(["--progress", remote]);
-    remote_command(git, workdir, askpass)
+    let cmd = remote_command(git, workdir, askpass)
         .args(&args)
-        .env("GIT_EDITOR", ":")
-        .run_streaming(|line| {
-            if let Some((percent, text)) = parser.parse(line) {
-                on_progress(percent, text);
-            }
-        })?;
+        .env("GIT_EDITOR", ":");
+    run_with_progress(cmd, &mut parser, &mut fetch_progress(on_progress))?;
     Ok(())
 }
 
+/// GHD `IPushProgress` (`models/progress.ts`): what [`push_with_progress`]
+/// reports.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PushProgress {
+    /// GHD's discriminant, always `"push"`.
+    pub kind: &'static str,
+    /// `Pushing to <remote>`.
+    pub title: String,
+    /// The line git (or Git LFS) printed last; `None` for the first event,
+    /// sent before git runs.
+    pub description: Option<String>,
+    /// Overall 0..1.
+    pub value: f32,
+    pub remote: String,
+    /// The local branch being pushed.
+    pub branch: String,
+}
+
 /// GHD `push`: `push <remote> <local>[:<remote branch>] [tags…]
-/// [--set-upstream | --force-with-lease] --progress`.
+/// [--set-upstream | --force-with-lease] --progress`, reporting
+/// `(percent, description)` for every line git prints (GHD shows each one,
+/// at the last percent for a line that is not a step) and Git LFS's
+/// uploads. [`push_with_progress`] with GHD's `IPushProgress` callback
+/// minus its first, line-less event.
 #[allow(clippy::too_many_arguments)]
 pub fn push(
     git: Arc<GitBinary>,
@@ -585,6 +781,37 @@ pub fn push(
     force_with_lease: bool,
     askpass: Option<&AskpassEnv>,
     on_progress: ProgressFn<'_>,
+) -> Result<()> {
+    push_with_progress(
+        git,
+        workdir,
+        remote,
+        local_branch,
+        remote_branch,
+        tags,
+        force_with_lease,
+        askpass,
+        &mut |progress| {
+            if let Some(description) = progress.description {
+                on_progress(progress.value, description);
+            }
+        },
+    )
+}
+
+/// GHD `push` with a progress callback: a first [`PushProgress`] at 0
+/// before git runs, then one per line git or Git LFS prints.
+#[allow(clippy::too_many_arguments)]
+pub fn push_with_progress(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+    local_branch: &str,
+    remote_branch: Option<&str>,
+    tags: &[String],
+    force_with_lease: bool,
+    askpass: Option<&AskpassEnv>,
+    on_progress: &mut dyn FnMut(PushProgress),
 ) -> Result<()> {
     let mut parser = ProgressParser::push();
     let refspec = match remote_branch {
@@ -599,14 +826,65 @@ pub fn push(
         args.push("--force-with-lease".into());
     }
     args.push("--progress".into());
-    remote_command(git, workdir, askpass)
-        .args(&args)
-        .run_streaming(|line| {
-            if let Some((percent, text)) = parser.parse(line) {
-                on_progress(percent, text);
-            }
-        })?;
+    let title = format!("Pushing to {remote}");
+    let mut report = |description: Option<String>, value: f32| {
+        on_progress(PushProgress {
+            kind: "push",
+            title: title.clone(),
+            description,
+            value,
+            remote: remote.to_string(),
+            branch: local_branch.to_string(),
+        })
+    };
+    report(None, 0.);
+    let cmd = remote_command(git, workdir, askpass).args(&args);
+    run_with_progress(cmd, &mut parser, &mut |event| {
+        report(Some(event.text().to_string()), event.percent() as f32)
+    })?;
     Ok(())
+}
+
+/// GHD `fetchTagsToPush` (`lib/git/tag.ts`): the local tags a push of
+/// `branch` to `remote` would send, from the `[new tag]` lines of `git push
+/// <remote> <branch> --follow-tags --dry-run --no-verify --porcelain`. Exit
+/// code 1 (the branch itself would be rejected) still lists the tags; any
+/// other failure is an error. GHD 3.6.6 calls it only from its tests (the
+/// app keeps its own list of tags to push, as Corvene does).
+pub fn fetch_tags_to_push(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+    branch: &str,
+    askpass: Option<&AskpassEnv>,
+) -> Result<Vec<String>> {
+    let out = remote_command(git, workdir, askpass)
+        .args([
+            "push",
+            remote,
+            branch,
+            "--follow-tags",
+            "--dry-run",
+            "--no-verify",
+            "--porcelain",
+        ])
+        .allow_exit_code(1)
+        .run()?;
+    let text = out.stdout_string()?;
+    // the first line is `To <url>`, the last `Done`
+    Ok(text
+        .split('\n')
+        .skip(1)
+        .take_while(|line| *line != "Done")
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.first() != Some(&"*") || parts.get(2) != Some(&"[new tag]") {
+                return None;
+            }
+            let tag = parts.get(1)?.split(':').next()?;
+            Some(tag.strip_prefix("refs/tags/").unwrap_or(tag).to_string())
+        })
+        .collect())
 }
 
 /// Corvene addition (flag `826`): `git push <remote> --delete
@@ -624,43 +902,101 @@ pub fn delete_remote_tag(
     Ok(())
 }
 
-/// GHD `getBranchesDifferingFromUpstream` + `fastForwardBranches`: local
-/// branches that are strictly behind their upstream get fast-forwarded with
-/// `fetch . --show-forced-updates --no-write-fetch-head --stdin`.
-pub fn fast_forward_branches(git: Arc<GitBinary>, workdir: &Path) -> Result<usize> {
-    // the checked-out branch is left to `pull`; git refuses to update it here
-    let head = GitCommand::new(git.clone())
-        .args(["symbolic-ref", "-q", "HEAD"])
-        .current_dir(workdir)
-        .allow_exit_code(1)
-        .run()
-        .ok()
-        .and_then(|o| o.stdout_string().ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-    let out = GitCommand::new(git.clone())
+/// GHD `ITrackingBranch` (`models/branch.ts`): a local branch and its
+/// upstream, by full ref name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrackingBranch {
+    /// `refs/heads/<name>` (GHD `ref`).
+    pub reference: String,
+    pub sha: String,
+    /// `refs/remotes/<remote>/<name>`.
+    pub upstream_ref: String,
+    pub upstream_sha: String,
+}
+
+/// GHD `getBranchesDifferingFromUpstream` (`lib/git/for-each-ref.ts`): the
+/// local branches with an upstream whose tip differs from the upstream's
+/// (ahead, behind or both), except the checked-out branch and symbolic refs.
+/// A directory that is not a repository has none.
+pub fn get_branches_differing_from_upstream(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+) -> Result<Vec<TrackingBranch>> {
+    let out = GitCommand::new(git)
         .args([
             "for-each-ref",
-            "--format=%(refname)%00%(upstream)%00%(upstream:trackshort)",
+            "--format=%(refname)%00%(objectname)%00%(upstream)%00%(symref)%00%(HEAD)",
             "refs/heads",
+            "refs/remotes",
         ])
         .current_dir(workdir)
+        .expected_errors([crate::KnownGitError::NotAGitRepository])
         .run()?;
-    let text = out.stdout_string()?;
-    let pairs: Vec<String> = text
-        .lines()
-        .filter_map(|line| {
-            let mut cols = line.split('\0');
-            let local = cols.next()?;
-            let upstream = cols.next()?;
-            let track = cols.next().unwrap_or("");
-            (!upstream.is_empty() && track == "<" && local != head)
-                .then(|| format!("{upstream}:{local}"))
-        })
-        .collect();
-    if pairs.is_empty() {
-        return Ok(0);
+    if !out.status.success() {
+        // the expected `NotAGitRepository`; any other failure is an `Err`
+        return Ok(Vec::new());
     }
+    let text = out.stdout_string()?;
+    let mut local = Vec::new();
+    let mut remote_shas = std::collections::HashMap::new();
+    for line in text.lines() {
+        let cols: Vec<&str> = line.split('\0').collect();
+        let [full_name, sha, upstream, symref, head] = cols[..] else {
+            continue;
+        };
+        // symbolic refs (`origin/HEAD`) and the current branch are skipped
+        if !symref.is_empty() || head == "*" {
+            continue;
+        }
+        if full_name.starts_with("refs/heads") {
+            if !upstream.is_empty() {
+                local.push((full_name, sha, upstream));
+            }
+        } else {
+            remote_shas.insert(full_name, sha);
+        }
+    }
+    Ok(local
+        .into_iter()
+        .filter_map(|(reference, sha, upstream)| {
+            let upstream_sha = *remote_shas.get(upstream)?;
+            (upstream_sha != sha).then(|| TrackingBranch {
+                reference: reference.to_string(),
+                sha: sha.to_string(),
+                upstream_ref: upstream.to_string(),
+                upstream_sha: upstream_sha.to_string(),
+            })
+        })
+        .collect())
+}
+
+/// GHD `AppStore.fastForwardBranches`: [`get_branches_differing_from_upstream`]
+/// fed to [`fast_forward_tracking_branches`]. Returns how many branches
+/// were offered to git (the ones it could not fast-forward stay as they
+/// are).
+pub fn fast_forward_branches(git: Arc<GitBinary>, workdir: &Path) -> Result<usize> {
+    let branches = get_branches_differing_from_upstream(git.clone(), workdir)?;
+    fast_forward_tracking_branches(git, workdir, &branches)?;
+    Ok(branches.len())
+}
+
+/// GHD `fastForwardBranches` (`lib/git/fetch.ts`): `fetch .
+/// --show-forced-updates --no-write-fetch-head --stdin` with
+/// `<upstream>:<ref>` pairs. git refuses the pairs that are not a
+/// fast-forward (a branch ahead of its upstream) and exits 1, which is
+/// expected.
+pub fn fast_forward_tracking_branches(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branches: &[TrackingBranch],
+) -> Result<()> {
+    if branches.is_empty() {
+        return Ok(());
+    }
+    let pairs: Vec<String> = branches
+        .iter()
+        .map(|b| format!("{}:{}", b.upstream_ref, b.reference))
+        .collect();
     GitCommand::new(git)
         .args([
             "fetch",
@@ -674,7 +1010,7 @@ pub fn fast_forward_branches(git: Arc<GitBinary>, workdir: &Path) -> Result<usiz
         .stdin(pairs.join("\n").into_bytes())
         .allow_exit_code(1)
         .run()?;
-    Ok(pairs.len())
+    Ok(())
 }
 
 /// Fast-forward the checked-out branch to its upstream when the working
@@ -818,6 +1154,39 @@ fn attributes_use_lfs(text: &str) -> bool {
         .any(|line| line.split_whitespace().skip(1).any(|a| a == "filter=lfs"))
 }
 
+/// GHD `isTrackedByLFS`: `git check-attr filter <path>` says `filter: lfs`
+/// for the repository-relative `path` (`README.md: filter: unspecified`
+/// when no `.gitattributes` rule covers it). Corvene puts `--` before the
+/// path, so one starting with `-` is not read as an option (GHD's command
+/// fails on it).
+pub fn is_tracked_by_lfs(git: Arc<GitBinary>, workdir: &Path, path: &str) -> Result<bool> {
+    let out = GitCommand::new(git)
+        .args(["check-attr", "filter", "--"])
+        .arg(path)
+        .current_dir(workdir)
+        .run()?;
+    Ok(out.stdout_string()?.contains(": filter: lfs"))
+}
+
+/// GHD `filesNotTrackedByLFS`: the repository-relative `paths` that
+/// [`is_tracked_by_lfs`] rejects, in order. GHD's caller, the commit flow's
+/// check for files over 100 MB (`OversizedFiles`), is not built yet
+/// (`.docs/TODO.md`).
+pub fn files_not_tracked_by_lfs<S: AsRef<str>>(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    paths: &[S],
+) -> Result<Vec<String>> {
+    let mut untracked = Vec::new();
+    for path in paths {
+        let path = path.as_ref();
+        if !is_tracked_by_lfs(git.clone(), workdir, path)? {
+            untracked.push(path.to_string());
+        }
+    }
+    Ok(untracked)
+}
+
 /// The repository's `pre-push` hook was written by Git LFS.
 pub fn lfs_hooks_installed(workdir: &Path) -> bool {
     std::fs::read_to_string(git_dir(workdir).join("hooks/pre-push"))
@@ -920,6 +1289,25 @@ mod tests {
     }
 
     #[test]
+    fn progress_lines_lose_terminal_escapes() {
+        assert_eq!(strip_vt_control_characters("\x1b[31mred\x1b[0m"), "red");
+        assert_eq!(
+            strip_vt_control_characters("a\x1b]8;;https://x\x07link\x1b]8;;\x1b\\b"),
+            "alinkb"
+        );
+        assert_eq!(strip_vt_control_characters("\x1b(Bplain\x1b[K"), "plain");
+        let mut parser = ProgressParser::push();
+        let (percent, text) = parser
+            .parse("\x1b[1mWriting objects:  50% (1/2)\x1b[0m")
+            .unwrap();
+        assert_eq!(text, "Writing objects:  50% (1/2)");
+        assert!((percent - 0.55).abs() < 1e-6, "{percent}");
+        // a line that is not a step keeps the last percent
+        let last = parser.parse_event("To /tmp/remote.git").percent();
+        assert!((last - 0.55).abs() < 1e-9, "{last}");
+    }
+
+    #[test]
     fn classifies_failures() {
         assert_eq!(
             classify_remote_failure(
@@ -979,6 +1367,35 @@ mod tests {
         assert!(!is_using_lfs_by_attributes(git.clone(), dir.path()));
         run(dir.path(), &["add", "art/.gitattributes"]);
         assert!(is_using_lfs_by_attributes(git, dir.path()));
+    }
+
+    /// The rules `git lfs track` writes, without needing git-lfs.
+    #[test]
+    fn lfs_tracking_by_check_attr() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q"]);
+        let tracked = |path: &str| is_tracked_by_lfs(git.clone(), dir.path(), path).unwrap();
+        assert!(!tracked("README.md"));
+        std::fs::write(
+            dir.path().join(".gitattributes"),
+            "*.png filter=lfs diff=lfs merge=lfs -text\n\
+             app/src/*.psd filter=lfs diff=lfs merge=lfs -text\n",
+        )
+        .unwrap();
+        assert!(tracked("photo.png"));
+        assert!(tracked("app/src/some cool photo.png"));
+        assert!(tracked("app/src/art.psd"));
+        assert!(!tracked("art.psd"));
+        assert_eq!(
+            files_not_tracked_by_lfs(
+                git,
+                dir.path(),
+                &["a.mp4", "b.png", "art.psd", "app/src/art.psd", "-dash.md"]
+            )
+            .unwrap(),
+            ["a.mp4", "art.psd", "-dash.md"]
+        );
     }
 
     #[test]
@@ -1078,6 +1495,70 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("hook-stdout\nhook-stderr"), "{err}");
+    }
+
+    /// Git LFS's pre-push hook writes to `GIT_LFS_PROGRESS`; a stand-in hook
+    /// does the same without git-lfs.
+    #[test]
+    fn push_reports_lfs_progress_from_the_progress_file() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("remote.git");
+        let work = dir.path().join("work");
+        run(
+            dir.path(),
+            &["init", "-q", "--bare", bare.to_str().unwrap()],
+        );
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", work.to_str().unwrap()],
+        );
+        run(&work, &["config", "commit.gpgsign", "false"]);
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        let hook = work.join(".git/hooks/pre-push");
+        std::fs::write(
+            &hook,
+            "#!/bin/sh\nprintf '%s' \"$GIT_LFS_PROGRESS\" > ../progress-path\n\
+             printf 'upload 1/1 0/4 a.bin\\nupload 1/1 4/4 a.bin\\n' >> \"$GIT_LFS_PROGRESS\"\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        run(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        let mut events = Vec::new();
+        push_with_progress(
+            git,
+            &work,
+            "origin",
+            "main",
+            None,
+            &[],
+            false,
+            None,
+            &mut |progress| events.push(progress),
+        )
+        .unwrap();
+        assert_eq!(events[0].kind, "push");
+        assert_eq!(events[0].title, "Pushing to origin");
+        assert_eq!(
+            (events[0].description.as_deref(), events[0].value),
+            (None, 0.)
+        );
+        let descriptions: Vec<_> = events
+            .iter()
+            .filter_map(|e| e.description.as_deref())
+            .collect();
+        assert!(
+            descriptions
+                .contains(&"Uploading a.bin (1 out of an estimated 1 completed, 4 B / 4 B)"),
+            "{descriptions:?}"
+        );
+        let progress_path = std::fs::read_to_string(dir.path().join("progress-path")).unwrap();
+        assert!(!progress_path.is_empty());
+        assert!(!Path::new(&progress_path).exists(), "{progress_path}");
     }
 
     #[test]

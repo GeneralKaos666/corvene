@@ -10,21 +10,12 @@
 //! - GitHub Desktop's committed file status `{ kind, oldPath,
 //!   submoduleStatus, renameIncludesModifications }` is Corvene's
 //!   `FileStatus::kind`, `CommittedFileChange::old_path` and
-//!   `FileStatus::submodule_status`; Corvene keeps git's similarity score
-//!   (`FileStatus::score`) but has no `renameIncludesModifications`
-//!   ([`rename_includes_modifications`] is a stand-in).
+//!   `FileStatus::submodule_status`, and `renameIncludesModifications` is
+//!   `FileStatus::rename_includes_modifications()` (from git's similarity
+//!   score, `FileStatus::score`).
 
-use corvene_models::{FileStatus, FileStatusKind};
+use corvene_models::FileStatusKind;
 use corvene_test_support::{git, setup_fixture_repository, setup_local_config};
-
-/// Stand-in for GitHub Desktop's `renameIncludesModifications`
-/// (`CopiedOrRenamedFileStatus`, `models/status.ts`; set by `mapStatus` in
-/// `lib/git/log.ts`: `true` for a rename whose score is not 100, `false`
-/// for copies). Replace this with the Corvene field once there is one and
-/// remove the `#[ignore]`s.
-fn rename_includes_modifications(_status: &FileStatus) -> bool {
-    unimplemented!("corvene_models::FileStatus has no renameIncludesModifications")
-}
 
 // GHD: unit/git/log-test.ts › git/log › getCommits › loads history
 #[test]
@@ -67,7 +58,6 @@ fn handles_repository_with_signed_commit_and_log_show_signature_set() {
 
 // GHD: unit/git/log-test.ts › git/log › getCommits › parses tags
 #[test]
-#[ignore = "ghd: bug: get_commits orders Commit::tags by ref name; GHD keeps git log %D order (got [less-important, tentative], expected [tentative, less-important])"]
 fn parses_tags() {
     let repository = setup_fixture_repository("test-repo-with-tags");
 
@@ -97,7 +87,6 @@ fn loads_the_files_changed_in_the_commit() {
 
 // GHD: unit/git/log-test.ts › git/log › getChangedFiles › detects renames
 #[test]
-#[ignore = "ghd: missing: corvene_models::FileStatus has no renameIncludesModifications (models/status.ts, mapStatus in lib/git/log.ts)"]
 fn detects_renames() {
     let repository = setup_fixture_repository("rename-history-detection");
 
@@ -111,7 +100,7 @@ fn detects_renames() {
     assert_eq!(first.files[0].status.kind, FileStatusKind::Renamed);
     assert_eq!(first.files[0].old_path.as_deref(), Some("NEW.md"));
     assert_eq!(first.files[0].status.submodule_status, None);
-    assert!(rename_includes_modifications(&first.files[0].status));
+    assert!(first.files[0].status.rename_includes_modifications());
 
     let second = corvene_git::get_changed_files(git(), repository.path(), "c898ca8")
         .expect("getChangedFiles");
@@ -123,12 +112,11 @@ fn detects_renames() {
     assert_eq!(second.files[0].status.kind, FileStatusKind::Renamed);
     assert_eq!(second.files[0].old_path.as_deref(), Some("OLD.md"));
     assert_eq!(second.files[0].status.submodule_status, None);
-    assert!(!rename_includes_modifications(&second.files[0].status));
+    assert!(!second.files[0].status.rename_includes_modifications());
 }
 
 // GHD: unit/git/log-test.ts › git/log › getChangedFiles › detect copies
 #[test]
-#[ignore = "ghd: missing: corvene_models::FileStatus has no renameIncludesModifications (models/status.ts, mapStatus in lib/git/log.ts)"]
 fn detect_copies() {
     let repository = setup_fixture_repository("copies-history-detection");
 
@@ -147,9 +135,11 @@ fn detect_copies() {
         changeset_data.files[0].old_path.as_deref(),
         Some("initial.md")
     );
-    assert!(!rename_includes_modifications(
-        &changeset_data.files[0].status
-    ));
+    assert!(
+        !changeset_data.files[0]
+            .status
+            .rename_includes_modifications()
+    );
     assert_eq!(changeset_data.files[0].status.submodule_status, None);
 
     assert_eq!(changeset_data.files[1].path, "duplicate.md");
@@ -159,9 +149,11 @@ fn detect_copies() {
         changeset_data.files[1].old_path.as_deref(),
         Some("initial.md")
     );
-    assert!(!rename_includes_modifications(
-        &changeset_data.files[1].status
-    ));
+    assert!(
+        !changeset_data.files[1]
+            .status
+            .rename_includes_modifications()
+    );
     assert_eq!(changeset_data.files[1].status.submodule_status, None);
 }
 

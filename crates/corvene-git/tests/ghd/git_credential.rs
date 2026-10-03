@@ -5,22 +5,14 @@
 //! protocol (`key=value` lines, `key[]` arrays expanded to `key[0]`,
 //! `key[1]`…) for its credential-helper trampoline and for `git credential
 //! fill/approve/reject`. Corvene answers git through `GIT_ASKPASS` instead
-//! (`corvene_git::AskpassEnv`, `crates/corvene/src/askpass.rs`) and never
-//! speaks the credential protocol, so [`parse_credential`] and
-//! [`format_credential`] stand in for both functions. GitHub Desktop's
-//! `Map<string, string>` keeps insertion order; the stand-ins use a
-//! `Vec<(String, String)>` of the entries in that order.
+//! (`corvene_git::AskpassEnv`, `crates/corvene/src/askpass.rs`); the two
+//! functions are `corvene_git::parse_credential` and
+//! `corvene_git::format_credential`. GitHub Desktop's `Map<string, string>`
+//! keeps insertion order; Corvene's credential is a `Vec<(String, String)>`
+//! of the entries in that order. `formatCredential` throws for a value it
+//! cannot write, `format_credential` returns an `Err`.
 
-/// Stand-in for GitHub Desktop's `parseCredential(value)`: the entries of
-/// the returned `Map`, in insertion order.
-fn parse_credential(_value: &str) -> Vec<(String, String)> {
-    unimplemented!("corvene_git has no parseCredential (lib/git/credential.ts)")
-}
-
-/// Stand-in for GitHub Desktop's `formatCredential(credential)`.
-fn format_credential(_credential: &[(String, String)]) -> String {
-    unimplemented!("corvene_git has no formatCredential (lib/git/credential.ts)")
-}
+use corvene_git::{format_credential, parse_credential};
 
 fn entries(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
     pairs
@@ -31,7 +23,6 @@ fn entries(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
 
 // GHD: unit/git/credential-test.ts › git/credential › parseCredential › expands arrays into numeric entries
 #[test]
-#[ignore = "ghd: missing: corvene_git has no parseCredential, Corvene uses GIT_ASKPASS instead of the credential helper protocol (lib/git/credential.ts)"]
 fn expands_arrays_into_numeric_entries() {
     assert_eq!(
         parse_credential("wwwauth[]=foo\nwwwauth[]=bar"),
@@ -41,10 +32,10 @@ fn expands_arrays_into_numeric_entries() {
 
 // GHD: unit/git/credential-test.ts › git/credential › formatCredential › transforms numbered array entries into unnumbered
 #[test]
-#[ignore = "ghd: missing: corvene_git has no formatCredential, Corvene uses GIT_ASKPASS instead of the credential helper protocol (lib/git/credential.ts)"]
 fn transforms_numbered_array_entries_into_unnumbered() {
     assert_eq!(
-        format_credential(&entries(&[("wwwauth[0]", "foo"), ("wwwauth[1]", "bar")])),
+        format_credential(&entries(&[("wwwauth[0]", "foo"), ("wwwauth[1]", "bar")]))
+            .expect("formatCredential"),
         "wwwauth[]=foo\nwwwauth[]=bar\n"
     );
 }

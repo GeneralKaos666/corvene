@@ -96,7 +96,6 @@ fn reads_contents_from_disk() {
 
 // GHD: unit/git/gitignore-test.ts › gitignore › readGitIgnoreAtRoot › rejects a symbolic link
 #[test]
-#[ignore = "ghd: bug: read_gitignore reads through a symbolic link .gitignore (Ok(Some(\"target contents\"))); GHD rejects it (Cannot use a symbolic link as the root .gitignore file)"]
 fn read_git_ignore_at_root_rejects_a_symbolic_link() {
     let repo = setup_empty_repository();
     let target_path = repo.join("target");
@@ -112,7 +111,6 @@ fn read_git_ignore_at_root_rejects_a_symbolic_link() {
 
 // GHD: unit/git/gitignore-test.ts › gitignore › readGitIgnoreAtRoot › rejects a dangling symbolic link
 #[test]
-#[ignore = "ghd: bug: read_gitignore treats a dangling symbolic link .gitignore as missing (Ok(None)); GHD rejects it (Cannot use a symbolic link as the root .gitignore file)"]
 fn read_git_ignore_at_root_rejects_a_dangling_symbolic_link() {
     let repo = setup_empty_repository();
     let target_path = repo.join("missing-target");
@@ -190,7 +188,6 @@ fn creates_gitignore_file_when_it_doesnt_exist() {
 
 // GHD: unit/git/gitignore-test.ts › gitignore › saveGitIgnore › rejects a symbolic link without modifying its target
 #[test]
-#[ignore = "ghd: bug: save_gitignore writes through a symbolic link .gitignore (Ok, target now `node_modules\\n`); GHD rejects it and leaves the target alone"]
 fn save_git_ignore_rejects_a_symbolic_link_without_modifying_its_target() {
     let repo = setup_empty_repository();
     let target_path = repo.join("target");
@@ -210,7 +207,6 @@ fn save_git_ignore_rejects_a_symbolic_link_without_modifying_its_target() {
 
 // GHD: unit/git/gitignore-test.ts › gitignore › saveGitIgnore › rejects a dangling symbolic link
 #[test]
-#[ignore = "ghd: bug: save_gitignore writes through a dangling symbolic link .gitignore (Ok, creates its target); GHD rejects it"]
 fn save_git_ignore_rejects_a_dangling_symbolic_link() {
     let repo = setup_empty_repository();
     let target_path = repo.join("missing-target");

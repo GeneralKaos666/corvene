@@ -7,6 +7,8 @@
 //! fragments: a pattern matches when every fragment is found after the one
 //! before it, which is what the `(.+)` wildcards between them allow.
 
+use std::path::{Path, PathBuf};
+
 use crate::error::GitError;
 
 /// dugite's `GitError`: the git failures GHD recognises in stderr.
@@ -483,7 +485,7 @@ impl KnownGitError {
                  repository. Delete the folder, commit the change, then try again."
             }
             SubmoduleRepositoryDoesNotExist => {
-                "A submodule points to a location which does not exist, and cannot be cloned."
+                "A submodule points to a location which does not exist."
             }
             InvalidSubmoduleSHA => "A submodule points to a commit which does not exist.",
             LocalPermissionDenied => "Permission denied.",
@@ -517,7 +519,7 @@ impl KnownGitError {
             NoMergeToAbort => "There is no merge in progress, so there is nothing to abort.",
             LocalChangesOverwritten => {
                 "Unable to switch branches as there are working directory changes which would \
-                 be overwritten."
+                 be overwritten. Please commit or stash your changes."
             }
             UnresolvedConflicts => "There are unresolved conflicts in the working directory.",
             TagAlreadyExists => "A tag with that name already exists",
@@ -550,7 +552,6 @@ impl KnownGitError {
                  \"Keep my email address private\", then switch back to GitHub Desktop to push \
                  your commits. You can then enable the setting again."
             }
-            GPGFailedToSignData => "Failed to sign data.",
             // GHD shows git's output (or a dedicated dialog) for the rest
             HTTPSAuthenticationFailed
             | SSHAuthenticationFailed
@@ -563,6 +564,7 @@ impl KnownGitError {
             | UnsafeDirectory
             | PathExistsButNotInRef
             | PushWithSecretDetected
+            | GPGFailedToSignData
             | ConflictModifyDeletedInBranch => return None,
         };
         Some(text.to_string())
@@ -588,6 +590,7 @@ impl KnownGitError {
                 "This is a merge commit; Git needs to know which parent to compare it with."
             }
             PathExistsButNotInRef => "The file exists on disk but not in that commit.",
+            GPGFailedToSignData => "Failed to sign data.",
             ConflictModifyDeletedInBranch => {
                 "A file was deleted on one side and modified on the other, which Git cannot \
                  merge on its own."
@@ -598,29 +601,49 @@ impl KnownGitError {
     }
 }
 
-/// GHD `parseFilesToBeOverwritten`: the files git lists (tab-indented) under
-/// "Your local changes to the following files would be overwritten by …" and
-/// "The following untracked working tree files would be overwritten by …".
+/// GHD `parseFilesToBeOverwritten` (`ui/lib/parse-files-to-be-overwritten.ts`):
+/// the tab-indented files git lists under the first `error: … files would be
+/// overwritten …:` line ("Your local changes to the following files would be
+/// overwritten by checkout:", "The following untracked working tree files
+/// would be overwritten by merge:", …), up to the first line that is not
+/// indented.
 pub fn files_that_would_be_overwritten(stderr: &str) -> Vec<String> {
     let mut files = Vec::new();
     let mut in_list = false;
-    for line in stderr.lines() {
+    for line in stderr.split('\n') {
         if in_list {
-            if let Some(file) = line.strip_prefix('\t') {
-                files.push(file.trim_end().to_string());
-                continue;
+            match line.strip_prefix('\t') {
+                Some(_) => files.push(line.trim_start().to_string()),
+                None => break,
             }
-            in_list = false;
-        }
-        if line.starts_with("error: Your local changes to the following files would be overwritten")
-            || line.starts_with(
-                "error: The following untracked working tree files would be overwritten",
-            )
+        } else if line.starts_with("error:")
+            && line.contains("files would be overwritten")
+            && line.ends_with(':')
         {
             in_list = true;
         }
     }
     files
+}
+
+/// GHD `parseConfigLockFilePathFromError` (`lib/git/core.ts`): the lock file
+/// of git's "error: could not lock config file <path>: File exists"
+/// (`<path>.lock`), resolved against `path`, the directory git ran in, as
+/// `Path.resolve` does (`.` and `..` folded). Windows: the first `/` of the
+/// path becomes `\`, as in GHD; the rest are normalised by the resolving.
+pub fn parse_config_lock_file_path_from_error(stderr: &str, path: &Path) -> Option<PathBuf> {
+    const PREFIX: &str = "error: could not lock config file ";
+    const SUFFIX: &str = ": File exists";
+    // `/^error: could not lock config file (.+?): File exists$/m`
+    let config = stderr
+        .split(['\n', '\r', '\u{2028}', '\u{2029}'])
+        .find_map(|line| {
+            let rest = line.strip_prefix(PREFIX)?.strip_suffix(SUFFIX)?;
+            (!rest.is_empty()).then_some(rest)
+        })?;
+    #[cfg(windows)]
+    let config = config.replacen('/', "\\", 1);
+    Some(crate::ops::resolve(&path.join(format!("{config}.lock"))))
 }
 
 /// What git named in its output, pulled out so the error dialog can show it
@@ -762,7 +785,8 @@ pub struct GitFailure {
     /// key=value` configuration Corvene prepends.
     pub command: String,
     pub exit_code: Option<i32>,
-    /// git's output (stderr; stdout first for streamed commands).
+    /// git's output as GHD's `GitError` message has it: stdout and stderr
+    /// (the last 256 KiB), untrimmed.
     pub output: String,
     pub known: Option<KnownGitError>,
 }
@@ -772,7 +796,7 @@ impl GitFailure {
         Self {
             command: display_command(args),
             exit_code,
-            output: output.trim().to_string(),
+            output: output.to_string(),
             known: known_git_error(output),
         }
     }
@@ -785,7 +809,8 @@ impl GitFailure {
         };
         format!(
             "{} failed with exit code {code}:\n{}",
-            self.command, self.output
+            self.command,
+            self.output.trim_end()
         )
     }
 
@@ -958,6 +983,37 @@ mod tests {
             ]
         );
         assert!(files_that_would_be_overwritten("fatal: nope").is_empty());
+        // any `error: … files would be overwritten …:` header; the first
+        // list only; leading white space dropped, trailing kept
+        let stderr = "error: The following untracked working tree files would be overwritten by merge:\n\
+                      \ta.txt \n\
+                      Please move or remove them before you merge.\n\
+                      error: Your local changes to the following files would be overwritten by checkout:\n\
+                      \tb.txt\n";
+        assert_eq!(files_that_would_be_overwritten(stderr), vec!["a.txt "]);
+    }
+
+    #[test]
+    fn parses_the_config_lock_file_path() {
+        let stderr = "error: could not lock config file .git/config: File exists\n";
+        // Windows: `/r` is not absolute
+        if cfg!(not(windows)) {
+            assert_eq!(
+                parse_config_lock_file_path_from_error(stderr, Path::new("/r/sub/..")),
+                Some(PathBuf::from("/r/.git/config.lock"))
+            );
+        }
+        assert_eq!(
+            parse_config_lock_file_path_from_error(
+                "error: could not lock config file : File exists",
+                Path::new("/")
+            ),
+            None
+        );
+        assert_eq!(
+            parse_config_lock_file_path_from_error("fatal: nope", Path::new("/")),
+            None
+        );
     }
 
     #[test]

@@ -4,6 +4,11 @@
 //!
 //! Deviation (flag `ignore-skips-existing-rules`): patterns already in the
 //! file are not appended again.
+//!
+//! As in GHD (`openExistingGitIgnore`), the root `.gitignore` is never read
+//! or written through a symbolic link; Corvene refuses one in a directory's
+//! `.gitignore` (flag `ignore-file-targets`) too, while `info/exclude` and
+//! the global excludes file may be links.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -134,7 +139,14 @@ pub fn append_ignore_rules_to(
     skip_existing: bool,
 ) -> Result<()> {
     let path = ignore_target_path(git, workdir, target)?;
-    append_to_ignore_file(&path, patterns, skip_existing)
+    // the repository's own files must not lead outside it (GHD checks the
+    // root file); `info/exclude` and the global file are the user's
+    let no_follow = match target {
+        IgnoreTarget::Root => Some(SYMBOLIC_LINK_ERROR),
+        IgnoreTarget::Directory(_) => Some(NESTED_SYMBOLIC_LINK_ERROR),
+        IgnoreTarget::InfoExclude | IgnoreTarget::ExcludesFile => None,
+    };
+    append_to_ignore_file(&path, patterns, skip_existing, no_follow)
 }
 
 /// Escape the characters git treats specially in a pattern: `[ ] ! * # ?`.
@@ -152,22 +164,38 @@ pub fn escape_gitignore_pattern(path: &str) -> String {
 /// Append raw patterns to the root `.gitignore`, creating it if needed. Keeps
 /// the file's existing line endings (GHD consults `core.autocrlf`). With
 /// `skip_existing`, patterns already in the file as a line (or earlier in
-/// `patterns`) are not added again; GHD appends them blindly.
+/// `patterns`) are not added again; GHD appends them blindly. A symbolic link
+/// in its place is refused, as [`read_gitignore`] and [`save_gitignore`] do.
 pub fn append_ignore_rules(workdir: &Path, patterns: &[String], skip_existing: bool) -> Result<()> {
-    append_to_ignore_file(&workdir.join(".gitignore"), patterns, skip_existing)
+    append_to_ignore_file(
+        &workdir.join(".gitignore"),
+        patterns,
+        skip_existing,
+        Some(SYMBOLIC_LINK_ERROR),
+    )
 }
 
 /// [`append_ignore_rules`] for any ignore file; missing parent directories
-/// are created.
-fn append_to_ignore_file(path: &Path, patterns: &[String], skip_existing: bool) -> Result<()> {
+/// are created. With `no_follow` (the error to give) a symbolic link at
+/// `path` is refused instead of written through.
+fn append_to_ignore_file(
+    path: &Path,
+    patterns: &[String],
+    skip_existing: bool,
+    no_follow: Option<&str>,
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(err.into()),
+    let existing = match no_follow {
+        Some(message) => read_no_follow(path, message)?,
+        None => match std::fs::read_to_string(path) {
+            Ok(text) => Some(text),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err.into()),
+        },
     };
+    let mut text = existing.unwrap_or_default();
     let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     if !text.is_empty() && !text.ends_with('\n') {
         text.push_str(eol);
@@ -188,25 +216,128 @@ fn append_to_ignore_file(path: &Path, patterns: &[String], skip_existing: bool) 
     if skip_existing && text.len() == before {
         return Ok(());
     }
-    std::fs::write(path, text)?;
-    Ok(())
+    match no_follow {
+        Some(message) => write_no_follow(path, &text, message),
+        None => Ok(std::fs::write(path, text)?),
+    }
 }
 
-/// The root `.gitignore` text, `None` when the file does not exist
-/// (GHD `readGitIgnoreAtRoot`).
-pub fn read_gitignore(workdir: &Path) -> Result<Option<String>> {
-    match std::fs::read_to_string(workdir.join(".gitignore")) {
-        Ok(text) => Ok(Some(text)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+/// GHD `symbolicLinkErrorMessage`.
+const SYMBOLIC_LINK_ERROR: &str = "Cannot use a symbolic link as the root .gitignore file";
+/// [`SYMBOLIC_LINK_ERROR`] for a directory's `.gitignore` (Corvene, flag
+/// `ignore-file-targets`).
+const NESTED_SYMBOLIC_LINK_ERROR: &str = "Cannot use a symbolic link as a .gitignore file";
+
+fn symbolic_link_error(message: &str) -> GitError {
+    GitError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        message.to_string(),
+    ))
+}
+
+/// GHD `ensureGitIgnoreIsNotSymbolicLink`: fails when `path` is a symbolic
+/// link (live or dangling); a missing path is fine.
+fn ensure_not_symbolic_link(path: &Path, message: &str) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(symbolic_link_error(message)),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err.into()),
     }
 }
 
+/// GHD `openExistingGitIgnore`: `path` opened without following a symbolic
+/// link (`O_NOFOLLOW`; on Windows the link itself is opened), `None` when it
+/// does not exist. A symbolic link, or a file that is not the one at `path`
+/// any more (replaced between the open and the check), is refused.
+fn open_existing_no_follow(
+    path: &Path,
+    options: &mut std::fs::OpenOptions,
+    message: &str,
+) -> Result<Option<std::fs::File>> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT
+        options.custom_flags(0x0020_0000);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            ensure_not_symbolic_link(path, message)?;
+            return Ok(None);
+        }
+        #[cfg(unix)]
+        Err(err) if err.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(symbolic_link_error(message));
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let path_meta = std::fs::symlink_metadata(path)?;
+    if path_meta.file_type().is_symlink() {
+        return Err(symbolic_link_error(message));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let file_meta = file.metadata()?;
+        if file_meta.dev() != path_meta.dev() || file_meta.ino() != path_meta.ino() {
+            return Err(symbolic_link_error(message));
+        }
+    }
+    Ok(Some(file))
+}
+
+/// [`open_existing_no_follow`] for reading, then the text.
+fn read_no_follow(path: &Path, message: &str) -> Result<Option<String>> {
+    use std::io::Read;
+    let Some(mut file) =
+        open_existing_no_follow(path, std::fs::OpenOptions::new().read(true), message)?
+    else {
+        return Ok(None);
+    };
+    let mut text = String::new();
+    file.read_to_string(&mut text)?;
+    Ok(Some(text))
+}
+
+/// GHD `saveGitIgnore`'s write: the existing file (opened without following
+/// a link) truncated and rewritten, or a new one created exclusively, so a
+/// symbolic link put there meanwhile is never followed.
+fn write_no_follow(path: &Path, text: &str, message: &str) -> Result<()> {
+    use std::io::Write;
+    let mut file =
+        match open_existing_no_follow(path, std::fs::OpenOptions::new().write(true), message)? {
+            Some(file) => file,
+            None => std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)?,
+        };
+    file.set_len(0)?;
+    file.write_all(text.as_bytes())?;
+    Ok(())
+}
+
+/// The root `.gitignore` text, `None` when the file does not exist
+/// (GHD `readGitIgnoreAtRoot`). A symbolic link there, live or dangling, is
+/// refused ("Cannot use a symbolic link as the root .gitignore file").
+pub fn read_gitignore(workdir: &Path) -> Result<Option<String>> {
+    read_no_follow(&workdir.join(".gitignore"), SYMBOLIC_LINK_ERROR)
+}
+
 /// GHD `saveGitIgnore`: empty text deletes the file; otherwise the text is
 /// written with a trailing newline, using CRLF when `core.autocrlf` is on.
+/// A symbolic link in the file's place is refused and its target left alone.
 pub fn save_gitignore(workdir: &Path, text: &str, autocrlf: bool) -> Result<()> {
     let path = workdir.join(".gitignore");
     if text.is_empty() {
+        ensure_not_symbolic_link(&path, SYMBOLIC_LINK_ERROR)?;
         return match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -223,8 +354,7 @@ pub fn save_gitignore(workdir: &Path, text: &str, autocrlf: bool) -> Result<()> 
     while out.ends_with(&format!("{eol}{eol}")) {
         out.truncate(out.len() - eol.len());
     }
-    std::fs::write(&path, out)?;
-    Ok(())
+    write_no_follow(&path, &out, SYMBOLIC_LINK_ERROR)
 }
 
 /// Ignore file paths (escaped first), as the "Ignore File" menu items do.

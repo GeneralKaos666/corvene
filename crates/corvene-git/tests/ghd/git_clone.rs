@@ -1,21 +1,18 @@
 //! Port of GitHub Desktop's `app/test/unit/git/clone-test.ts`.
 //!
 //! GitHub Desktop's `clone(url, path, options, progressCallback?)`
-//! (`lib/git/clone.ts`) is `corvene_git::clone(git, url, path,
-//! default_branch, depth, cancel, on_progress)`, called the way
-//! `Dispatcher::clone_repository` calls it: `options.defaultBranch` is the
-//! `default_branch` argument (the dispatcher passes the repository's default
-//! branch when the clone dialog knows it), no `depth`, no cancel token.
-//! [`clone`] is that call. Differences the cases run into:
+//! (`lib/git/clone.ts`) is `corvene_git::clone_with_options(git, url, path,
+//! options, cancel, on_progress)` (`corvene_git::clone`, which
+//! `Dispatcher::clone_repository` calls, is the same without a branch):
+//! `CloneOptions.branch` and `defaultBranch` are the options' `branch` and
+//! `default_branch`, no `depth`, no cancel token. [`clone`] is that call.
+//! Differences the cases run into:
 //!
-//! - `CloneOptions.branch` (`git clone -b <branch>`): `corvene_git::clone`
-//!   has no branch argument, so [`clone_with_branch`] stands in for it.
 //! - `ICloneProgress.kind` (`'clone'`) is the tag of GitHub Desktop's
 //!   progress union (`IProgress`, `models/progress.ts`). Corvene's clone
 //!   callback receives a `corvene_git::CloneProgress`, the type that stands
 //!   for that tag, so "reports progress when callback is provided" checks
 //!   the kind through the events' type (at compile time).
-//! - `isClonePathSensitive`: `corvene_git::clone` clones into any path.
 //!
 //! "clones with a custom default branch name" forces protocol v0 with
 //! `GIT_CONFIG_PARAMETERS='protocol.version=0'` in the process environment
@@ -52,15 +49,15 @@ fn clone(
     options: &CloneOptions,
     mut progress_callback: Option<&mut dyn FnMut(CloneProgress)>,
 ) -> Result<(), GitError> {
-    if let Some(branch) = &options.branch {
-        return clone_with_branch(url, path, options, branch);
-    }
-    corvene_git::clone(
+    corvene_git::clone_with_options(
         git(),
         url,
         path,
-        options.default_branch.as_deref(),
-        None,
+        &corvene_git::CloneOptions {
+            branch: options.branch.clone(),
+            default_branch: options.default_branch.clone(),
+            ..Default::default()
+        },
         None,
         |progress| {
             if let Some(callback) = progress_callback.as_mut() {
@@ -68,18 +65,6 @@ fn clone(
             }
         },
     )
-}
-
-/// Stand-in for `clone(url, path, { branch })` (`git clone -b <branch>`,
-/// `lib/git/clone.ts`): `corvene_git::clone` has no branch argument. Give it
-/// one and call it from [`clone`].
-fn clone_with_branch(
-    _url: &str,
-    _path: &Path,
-    _options: &CloneOptions,
-    _branch: &str,
-) -> Result<(), GitError> {
-    unimplemented!("corvene_git::clone has no branch option (CloneOptions.branch)")
 }
 
 /// The test's `createEmptyBareRepository(t)`: `git init --bare
@@ -129,7 +114,6 @@ fn clones_a_local_repository() {
 
 // GHD: unit/git/clone-test.ts › git/clone › clones with a specific branch
 #[test]
-#[ignore = "ghd: missing: corvene_git::clone has no branch option (CloneOptions.branch, git clone -b, lib/git/clone.ts)"]
 fn clones_with_a_specific_branch() {
     let source = setup_empty_repository();
     make_commit(
@@ -233,7 +217,6 @@ fn clones_with_a_custom_default_branch_name() {
 
 // GHD: unit/git/clone-test.ts › git/clone › rejects cloning into ~/.ssh
 #[test]
-#[ignore = "ghd: bug: corvene_git::clone has no isClonePathSensitive backstop: a clone into ~/.ssh runs git instead of failing with 'sensitive system location'"]
 fn rejects_cloning_into_ssh() {
     // the clone writes below $HOME, where the global configuration lives
     let _global = lock_global_config();
@@ -254,7 +237,6 @@ fn rejects_cloning_into_ssh() {
 
 // GHD: unit/git/clone-test.ts › git/clone › rejects cloning into home directory root
 #[test]
-#[ignore = "ghd: bug: corvene_git::clone has no isClonePathSensitive backstop: a clone into the home directory runs git instead of failing with 'sensitive system location'"]
 fn rejects_cloning_into_home_directory_root() {
     // the clone writes into $HOME, where the global configuration lives
     let _global = lock_global_config();
@@ -275,7 +257,6 @@ fn rejects_cloning_into_home_directory_root() {
 
 // GHD: unit/git/clone-test.ts › git/clone › rejects cloning into ~/.config/git
 #[test]
-#[ignore = "ghd: bug: corvene_git::clone has no isClonePathSensitive backstop: a clone into ~/.config/git runs git instead of failing with 'sensitive system location'"]
 fn rejects_cloning_into_config_git() {
     // the clone writes into $HOME/.config/git, the XDG global configuration
     let _global = lock_global_config();

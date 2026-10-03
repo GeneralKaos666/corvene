@@ -13,13 +13,11 @@
 //!   `corvene_git::global_config_value(git, name)` and
 //!   `setGlobalConfigValue(name, value, env)`
 //!   `corvene_git::set_global_config_value(git, name, value)`.
-//! - `getGlobalConfigPath(env)` and `getGlobalBooleanConfigValue(name, env)`
-//!   have no equivalent (Settings › Git's "edit your global Git config
-//!   file" opens `$HOME/.gitconfig` without asking git, in
-//!   `Dispatcher::edit_global_git_config`; nothing reads a boolean config
-//!   value as git canonicalises it): the cases call the stand-ins
-//!   [`get_global_config_path`] and [`get_global_boolean_config_value`] and
-//!   are ignored until they exist.
+//! - `getGlobalConfigPath(env)` is `corvene_git::global_config_path(git)`
+//!   (Settings › Git's "edit your global Git config file",
+//!   `Dispatcher::edit_global_git_config`) and
+//!   `getGlobalBooleanConfigValue(name, env)`
+//!   `corvene_git::global_boolean_config_value(git, name)`.
 //!
 //! The `global config` cases give each call `env: { HOME }`, a new
 //! temporary home, so the global configuration is private to the test.
@@ -36,21 +34,14 @@ use corvene_test_support::{
     setup_fixture_repository,
 };
 
-/// Stand-in for GitHub Desktop's `getGlobalConfigPath(env)`
-/// (`lib/git/config.ts`): the path git prints for `git config --edit
-/// --global` with `GIT_EDITOR='printf %s'`, normalised. Replace it with the
-/// `corvene_git` function once there is one and remove the `#[ignore]`.
+/// `getGlobalConfigPath(env)`.
 fn get_global_config_path() -> PathBuf {
-    unimplemented!("corvene_git has no getGlobalConfigPath")
+    corvene_git::global_config_path(git()).expect("getGlobalConfigPath")
 }
 
-/// Stand-in for GitHub Desktop's `getGlobalBooleanConfigValue(name, env)`
-/// (`lib/git/config.ts`): `git config -z --global --type bool <name>`,
-/// `None` when unset, else whether git printed something other than
-/// `false`. Replace it with the `corvene_git` function once there is one and
-/// remove the `#[ignore]`s.
-fn get_global_boolean_config_value(_name: &str) -> Option<bool> {
-    unimplemented!("corvene_git has no getGlobalBooleanConfigValue")
+/// `getGlobalBooleanConfigValue(name, env)`.
+fn get_global_boolean_config_value(name: &str) -> Option<bool> {
+    corvene_git::global_boolean_config_value(git(), name)
 }
 
 /// The `global config` describe's `setup(t)`: the private global
@@ -149,7 +140,6 @@ fn takes_precedence_over_git_config() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalConfigPath › gets the config path
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalConfigPath (lib/git/config.ts); Dispatcher::edit_global_git_config hardcodes $HOME/.gitconfig"]
 fn gets_the_config_path() {
     let setup = setup();
 
@@ -166,7 +156,6 @@ fn gets_the_config_path() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › setGlobalConfigValue › will replace all entries for a global value
 #[test]
-#[ignore = "ghd: bug: set_global_config_value runs `git config --global <key> <value>`, which fails (exit 5) on a key with several values; GHD passes --replace-all and leaves one value"]
 fn will_replace_all_entries_for_a_global_value() {
     let setup = setup();
     let key = "foo.bar";
@@ -192,7 +181,6 @@ fn global_boolean_config_value_of(value: &str) -> Option<bool> {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "false" as false
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_false_as_false() {
     let value = global_boolean_config_value_of("false");
     assert_eq!(value, Some(false));
@@ -200,7 +188,6 @@ fn treats_false_as_false() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "off" as false
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_off_as_false() {
     let value = global_boolean_config_value_of("off");
     assert_eq!(value, Some(false));
@@ -208,7 +195,6 @@ fn treats_off_as_false() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "no" as false
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_no_as_false() {
     let value = global_boolean_config_value_of("no");
     assert_eq!(value, Some(false));
@@ -216,7 +202,6 @@ fn treats_no_as_false() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "0" as false
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_0_as_false() {
     let value = global_boolean_config_value_of("0");
     assert_eq!(value, Some(false));
@@ -224,7 +209,6 @@ fn treats_0_as_false() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "true" as true
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_true_as_true() {
     let value = global_boolean_config_value_of("true");
     assert_eq!(value, Some(true));
@@ -232,7 +216,6 @@ fn treats_true_as_true() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "yes" as true
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_yes_as_true() {
     let value = global_boolean_config_value_of("yes");
     assert_eq!(value, Some(true));
@@ -240,7 +223,6 @@ fn treats_yes_as_true() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "on" as true
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_on_as_true() {
     let value = global_boolean_config_value_of("on");
     assert_eq!(value, Some(true));
@@ -248,7 +230,6 @@ fn treats_on_as_true() {
 
 // GHD: unit/git/config-test.ts › git/config › global config › getGlobalBooleanConfigValue › treats "1" as true
 #[test]
-#[ignore = "ghd: missing: corvene_git has no getGlobalBooleanConfigValue (lib/git/config.ts)"]
 fn treats_1_as_true() {
     let value = global_boolean_config_value_of("1");
     assert_eq!(value, Some(true));
