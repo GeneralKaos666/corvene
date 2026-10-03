@@ -110,7 +110,22 @@ impl RepositoryFoldout {
         if count == 0 {
             return;
         }
-        let ix = match self.highlighted {
+        // Corvene (`613-repository-list-starts-at-selected`): the first
+        // arrow steps from the selected repository's (first) row
+        let start = self.highlighted.or_else(|| {
+            let s = self.state.read(cx);
+            let selected = s.selected?;
+            s.flags
+                .bool(corvene_core::flags::ids::REPOSITORY_LIST_STARTS_AT_SELECTED)
+                .then(|| {
+                    groups
+                        .iter()
+                        .flat_map(|g| &g.repos)
+                        .position(|(r, _)| r.id == selected)
+                })
+                .flatten()
+        });
+        let ix = match start {
             Some(ix) => crate::filter_list::wrap_step(ix, delta, count),
             None if delta < 0 => count - 1,
             None => 0,

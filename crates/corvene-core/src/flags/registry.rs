@@ -2337,6 +2337,21 @@ registry! {
         ],
     },
 
+    /// Arrow keys in the repository list start at the selected repository.
+    REPOSITORY_LIST_STARTS_AT_SELECTED = 613 "repository-list-starts-at-selected" {
+        title: "Repository list arrows start at the current repository",
+        summary: "With no row highlighted yet, ↓ / ↑ in the repository list's filter box move to \
+                  the row after / before the selected repository instead of the first / last row.",
+        ghd_behaviour: "The first ↓ always goes to the top of the list (↑ to the bottom), however \
+                        far down the current repository is.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(2650)],
+        code: &["crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.
