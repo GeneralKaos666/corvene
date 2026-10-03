@@ -524,12 +524,18 @@ impl SelectedCommitView {
             .then(|| s.repository(id).and_then(|r| r.github.as_ref()))
             .flatten()
             .map(|g| g.html_url.clone());
+        let token_options = corvene_core::text_tokens::TokenOptions {
+            trailing_punctuation: s
+                .flags
+                .bool(corvene_core::flags::ids::LINKIFY_TRAILING_PUNCTUATION),
+        };
         let message = |id: &'static str, text: &str, cx: &App| {
             crate::markdown::rich_text(
                 id,
                 &corvene_core::markdown::commit_message_rich_text(
                     text,
                     token_repository.as_ref(),
+                    token_options,
                     rich_extras,
                     commit_base.as_deref(),
                 ),

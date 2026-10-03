@@ -9,6 +9,12 @@
 //!
 //! Deviation: GitHub's image-only emoji (`:shipit:`) keep their shortcode as
 //! text; GHD shows the image (`<img class="emoji">`).
+//!
+//! Deviation (`765-linkify-trailing-punctuation`, [`TokenOptions`]): a URL
+//! may follow an opening bracket or quote and leaves out trailing
+//! punctuation and unbalanced closing brackets, and an
+//! issue reference any run of closing punctuation (`[#12]`, `#12:`), as
+//! github.com does (GHD strips one `)`, `.` and `,` from issues only).
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -56,6 +62,13 @@ impl TokenRepository {
     }
 }
 
+/// Corvene deviations from GHD's tokenizer; the default is GHD's behaviour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TokenOptions {
+    /// `765-linkify-trailing-punctuation`
+    pub trailing_punctuation: bool,
+}
+
 static EMOJI: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     crate::emoji::all()
         .iter()
@@ -65,9 +78,19 @@ static EMOJI: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
 
 /// `Tokenizer.tokenize`
 pub fn tokenize(text: &str, repository: Option<&TokenRepository>) -> Vec<Token> {
+    tokenize_with(text, repository, TokenOptions::default())
+}
+
+/// [`tokenize`] with Corvene's [`TokenOptions`].
+pub fn tokenize_with(
+    text: &str,
+    repository: Option<&TokenRepository>,
+    options: TokenOptions,
+) -> Vec<Token> {
     let mut t = Tokenizer {
         results: Vec::new(),
         current: String::new(),
+        options,
     };
     let mut i = 0;
     while let Some(c) = text[i..].chars().next() {
@@ -93,6 +116,7 @@ pub fn tokenize(text: &str, repository: Option<&TokenRepository>) -> Vec<Token> 
 struct Tokenizer {
     results: Vec<Token>,
     current: String,
+    options: TokenOptions,
 }
 
 impl Tokenizer {
@@ -141,11 +165,16 @@ impl Tokenizer {
         repository: &TokenRepository,
     ) -> Option<usize> {
         let mut next = end_of_word(text, index);
-        // `(#123)` from "squash and merge", `#123.` in release notes, and
-        // lists of issues - one of each, in this order
-        for suffix in [')', '.', ','] {
-            if text[index..next].ends_with(suffix) {
-                next -= 1;
+        if self.options.trailing_punctuation {
+            // `765`: `[#123]`, `#123:`, `(#1, #2).` - any closing run
+            next = index + text[index..next].trim_end_matches(ISSUE_TRAILING).len();
+        } else {
+            // `(#123)` from "squash and merge", `#123.` in release notes, and
+            // lists of issues - one of each, in this order
+            for suffix in [')', '.', ','] {
+                if text[index..next].ends_with(suffix) {
+                    next -= 1;
+                }
             }
         }
         let digits = text[index..next].strip_prefix('#')?;
@@ -198,11 +227,17 @@ impl Tokenizer {
         index: usize,
         repository: Option<&TokenRepository>,
     ) -> Option<usize> {
-        // not the middle of a word
-        if !self.after_whitespace() {
+        // not the middle of a word (`765`: an opening bracket or quote may
+        // come before it, `(https://…)`)
+        let after_opening = self.options.trailing_punctuation
+            && self.current.ends_with(['(', '[', '{', '<', '"', '\'']);
+        if !self.after_whitespace() && !after_opening {
             return None;
         }
-        let next = end_of_word(text, index);
+        let mut next = end_of_word(text, index);
+        if self.options.trailing_punctuation {
+            next = index + trim_url_end(&text[index..next]).len();
+        }
         let maybe = &text[index..next];
         let rest = maybe
             .strip_prefix("https://")
@@ -232,6 +267,34 @@ impl Tokenizer {
             url: maybe.to_string(),
         });
         Some(next)
+    }
+}
+
+/// `765-linkify-trailing-punctuation`: what may follow an issue number.
+const ISSUE_TRAILING: &[char] = &[')', ']', '}', '>', '.', ',', ';', ':', '!', '?', '\'', '"'];
+
+/// `765-linkify-trailing-punctuation`: `url` without the trailing punctuation
+/// github.com leaves out of an autolink, and without closing brackets that
+/// do not close one opened inside it (`(see https://x.io/a_(b))` keeps one).
+pub fn trim_url_end(url: &str) -> &str {
+    let mut url = url;
+    loop {
+        let Some(last) = url.chars().next_back() else {
+            return url;
+        };
+        let unbalanced = |open: char| url.matches(open).count() < url.matches(last).count();
+        let strip = match last {
+            '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"' | '*' | '_' | '~' => true,
+            ')' => unbalanced('('),
+            ']' => unbalanced('['),
+            '}' => unbalanced('{'),
+            '>' => true,
+            _ => false,
+        };
+        if !strip {
+            return url;
+        }
+        url = &url[..url.len() - last.len_utf8()];
     }
 }
 
@@ -339,6 +402,43 @@ mod tests {
             [link("#9", "https://GitHub.com/o/r/issues/9#c")]
         );
         assert_eq!(tokenize("http:// h", None), [text("http:// h")]);
+    }
+
+    #[test]
+    fn trailing_punctuation() {
+        let r = repo();
+        let on = TokenOptions {
+            trailing_punctuation: true,
+        };
+        assert_eq!(
+            tokenize_with(
+                "via https://x.io/pull/39177. (https://w.org/a_(b)) ok",
+                None,
+                on
+            ),
+            [
+                text("via "),
+                link("https://x.io/pull/39177", "https://x.io/pull/39177"),
+                text(". ("),
+                link("https://w.org/a_(b)", "https://w.org/a_(b)"),
+                text(") ok"),
+            ]
+        );
+        assert_eq!(
+            tokenize_with("[#12] #3: #4!?", Some(&r), on),
+            [
+                text("["),
+                link("#12", "https://github.com/o/r/issues/12"),
+                text("] "),
+                link("#3", "https://github.com/o/r/issues/3"),
+                text(": "),
+                link("#4", "https://github.com/o/r/issues/4"),
+                text("!?"),
+            ]
+        );
+        // GHD: the bracket and colon break the reference
+        assert_eq!(tokenize("[#12] #3:", Some(&r)), [text("[#12] #3:")]);
+        assert_eq!(tokenize_with("https://.", None, on), [text("https://.")]);
     }
 
     #[test]

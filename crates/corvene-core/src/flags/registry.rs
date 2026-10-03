@@ -4238,6 +4238,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Links in commit messages end where github.com ends them.
+    LINKIFY_TRAILING_PUNCTUATION = 887 "linkify-trailing-punctuation" {
+        title: "Links leave out trailing punctuation",
+        summary: "In commit messages a URL stops before trailing punctuation (`.` `,` `:` `!` \
+                  `?` quotes) and closing brackets it did not open, and may follow an opening \
+                  bracket; an issue reference is found before any closing punctuation, so \
+                  `[#12]` and `#12:` link to issue 12, as on github.com.",
+        ghd_behaviour: "A full stop after a URL is part of the link, a URL right after `(` is not \
+                        linked, and `[#12]` or `#12:` are plain text.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16373), Upstream::issue(16939)],
+        code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
