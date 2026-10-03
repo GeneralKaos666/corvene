@@ -442,6 +442,21 @@ registry! {
         code: &["crates/corvene-ui/src/widgets.rs", "vendor/gpui-pre/src/window.rs", "vendor/gpui-pre/src/elements/div.rs"],
     },
 
+    /// Initials instead of the grey placeholder avatar.
+    INITIALS_AVATARS = 121 "initials-avatars" {
+        title: "Initials for authors without an avatar",
+        summary: "A commit author whose avatar is not (yet) loaded, offline for example, shows \
+                  their initials on a colour that stays the same for their e-mail, in the \
+                  history list and the commit details, instead of the grey person symbol.",
+        ghd_behaviour: "The same grey person symbol for every author without an avatar.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7256)],
+        code: &["crates/corvene-ui/src/widgets.rs", "crates/corvene-core/src/avatars.rs"],
+    },
+
     // ---- 200 Repository ----
 
     /// `commit.template` prefills the commit description.

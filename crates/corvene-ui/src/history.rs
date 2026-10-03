@@ -48,7 +48,7 @@ use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{GhdTooltip, IconButtonA11y, ListRowA11y};
-use crate::widgets::{avatar_image, avatar_lookup, kbd, primary_button};
+use crate::widgets::{author_avatar, kbd, primary_button};
 
 /// `RowHeight` in `commit-list.tsx`
 #[allow(non_snake_case)]
@@ -1841,8 +1841,9 @@ pub(crate) fn commit_row_contents(
                             .flex_row()
                             .items_center()
                             .gap(zpx(4.))
-                            .child(avatar_image(
-                                avatar_lookup(&commit.author.email, cx),
+                            .child(author_avatar(
+                                &commit.author.name,
+                                &commit.author.email,
                                 zpx(16.),
                                 cx,
                             ))

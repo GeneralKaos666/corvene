@@ -176,6 +176,46 @@ impl Dispatcher {
     }
 }
 
+/// Corvene `121-initials-avatars`: up to two upper-case initials of an
+/// author name (first and last word), else of the e-mail's local part.
+pub fn initials(name: &str, email: &str) -> String {
+    let words: Vec<&str> = name
+        .split(|c: char| c.is_whitespace() || c == '.' || c == '_' || c == '-')
+        .filter(|w| w.chars().next().is_some_and(char::is_alphanumeric))
+        .collect();
+    let words = if words.is_empty() {
+        email
+            .split('@')
+            .next()
+            .unwrap_or("")
+            .split(['.', '_', '-', '+'])
+            .filter(|w| w.chars().next().is_some_and(char::is_alphanumeric))
+            .collect()
+    } else {
+        words
+    };
+    let first = |w: &str| {
+        w.chars()
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>())
+    };
+    match words.as_slice() {
+        [] => String::new(),
+        [only] => first(only).unwrap_or_default(),
+        [head, .., last] => first(head).unwrap_or_default() + &first(last).unwrap_or_default(),
+    }
+}
+
+/// Corvene `121-initials-avatars`: a stable hue (0–359) for an e-mail.
+pub fn initials_hue(email: &str) -> u16 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in email.trim().to_lowercase().bytes() {
+        hash ^= b as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    (hash % 360) as u16
+}
+
 /// Cached image path for an e-mail, if resolved.
 pub fn avatar_for_email(avatars: &Avatars, email: &str) -> Option<PathBuf> {
     avatars
@@ -193,6 +233,18 @@ pub fn avatar_for_url(avatars: &Avatars, url: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn author_initials() {
+        assert_eq!(initials("Ada Lovelace", "a@x.io"), "AL");
+        assert_eq!(initials("ada  b. king-lovelace", "a@x.io"), "AL");
+        assert_eq!(initials("Mona", "a@x.io"), "M");
+        assert_eq!(initials("", "jane.doe@x.io"), "JD");
+        assert_eq!(initials(" ", ""), "");
+        assert_eq!(initials("élodie", ""), "É");
+        assert_eq!(initials_hue("A@x.io"), initials_hue("a@x.io "));
+        assert!(initials_hue("a@x.io") < 360);
+    }
 
     #[test]
     fn email_candidates_end_with_the_github_endpoint() {

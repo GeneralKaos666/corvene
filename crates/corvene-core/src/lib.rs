@@ -52,7 +52,7 @@ pub use autocomplete::{
     DEFAULT_MAX_HITS, Issue, IssueCache, IssueHit, MentionableCache, MentionableUser, Trigger,
     TriggerKind, find_trigger, folder_completions, issues_matching, users_matching,
 };
-pub use avatars::{AvatarEntry, avatar_for_email, avatar_for_url};
+pub use avatars::{AvatarEntry, avatar_for_email, avatar_for_url, initials, initials_hue};
 pub use commit_status::{CommitStatusStore, combined_status_summary, group_check_runs, status_key};
 pub use compare::{CompareForm, CompareState, ComparisonMode};
 pub use corvene_models::*;

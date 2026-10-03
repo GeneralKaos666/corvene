@@ -1188,6 +1188,38 @@ pub fn avatar_image(path: Option<std::path::PathBuf>, size: Pixels, cx: &App) ->
     }
 }
 
+/// A commit author's avatar: the cached image, else (with
+/// `121-initials-avatars`) their initials on a colour derived from the
+/// e-mail, else GHD's placeholder.
+pub fn author_avatar(name: &str, email: &str, size: Pixels, cx: &App) -> AnyElement {
+    let path = avatar_lookup(email, cx);
+    let initials_on = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+        s.read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::INITIALS_AVATARS)
+    });
+    let text = corvene_core::initials(name, email);
+    if path.is_some() || !initials_on || text.is_empty() {
+        return avatar_image(path, size, cx);
+    }
+    let hue = corvene_core::initials_hue(email) as f32 / 360.;
+    div()
+        .size(size)
+        .flex_none()
+        .rounded_full()
+        .overflow_hidden()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(hsla(hue, 0.45, 0.42, 1.))
+        .text_color(white())
+        .text_size(size * if text.chars().count() > 1 { 0.42 } else { 0.55 })
+        .font_weight(FontWeight::SEMIBOLD)
+        .line_height(size)
+        .child(text)
+        .into_any_element()
+}
+
 /// Cached avatar for a commit e-mail (request it with
 /// `Dispatcher::request_avatar_for_email` from a render with `&mut App`).
 pub fn avatar_lookup(email: &str, cx: &App) -> Option<std::path::PathBuf> {

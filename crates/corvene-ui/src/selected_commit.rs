@@ -41,7 +41,7 @@ use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, mono_font};
-use crate::widgets::{avatar_image, avatar_lookup, link_button};
+use crate::widgets::{author_avatar, link_button};
 
 /// `commitSummaryWidth` constraints (GHD `constrain(250, 100, 600)`).
 #[allow(non_snake_case)]
@@ -695,8 +695,9 @@ impl SelectedCommitView {
                                 .child(
                                     meta_item(div())
                                         .gap(zpx(4.))
-                                        .child(avatar_image(
-                                            avatar_lookup(&commit.author.email, cx),
+                                        .child(author_avatar(
+                                            &commit.author.name,
+                                            &commit.author.email,
                                             zpx(16.),
                                             cx,
                                         ))
