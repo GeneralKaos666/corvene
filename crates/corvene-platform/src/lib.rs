@@ -9,6 +9,7 @@ pub const BUNDLE_ID: &str = "com.wasimaster.corvene";
 pub mod accessibility;
 #[cfg(target_os = "android")]
 pub mod android;
+pub mod app_icons;
 pub mod app_location;
 pub mod apps;
 pub mod cli;

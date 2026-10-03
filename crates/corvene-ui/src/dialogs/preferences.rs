@@ -11,6 +11,8 @@
 //! no Formatting section (behind a feature flag in GHD).
 //! With flag `custom-editor-name` the custom editor form has a Name box used
 //! in "Open in …" labels (GHD `CustomIntegrationForm` has path and arguments).
+//! With flag `513-integration-app-icons` the editor and shell menus show the
+//! applications' icons (GHD `integrations.tsx` lists plain `<option>`s).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -587,9 +589,25 @@ impl PreferencesDialog {
             .iter()
             .map(|s| SharedString::from(s.shell.label()))
             .collect();
-        // Android: the applications behind the options, for their icons
-        let editor_apps: Vec<String> = s.editors.iter().map(|e| e.bundle_id.clone()).collect();
-        let shell_apps: Vec<String> = s.shells.iter().map(|s| s.bundle_id.clone()).collect();
+        // the applications' icons: Android's launcher icons; elsewhere the
+        // ones loaded with the integrations (flag `513-integration-app-icons`)
+        let app_icon = |key: &str, path: &Path| {
+            if cfg!(target_os = "android") {
+                crate::widgets::app_icon(key)
+            } else {
+                s.app_icons.get(path).cloned()
+            }
+        };
+        let editor_icons: Vec<_> = s
+            .editors
+            .iter()
+            .map(|e| app_icon(&e.bundle_id, &e.path))
+            .collect();
+        let shell_icons: Vec<_> = s
+            .shells
+            .iter()
+            .map(|s| app_icon(&s.bundle_id, &s.path))
+            .collect();
         let use_custom_editor = self.draft.use_custom_editor;
         let use_custom_shell = self.draft.use_custom_shell;
         // `CustomIntegrationValue`: the last option configures a custom integration.
@@ -673,7 +691,7 @@ impl PreferencesDialog {
                 select_button_items(
                     "prefs-editor",
                     editor_value,
-                    with_app_icons(editor_options, &editor_apps),
+                    with_app_icons(editor_options, editor_icons),
                     editor_ix,
                     false,
                     on_editor,
@@ -718,7 +736,7 @@ impl PreferencesDialog {
                 select_button_items(
                     "prefs-shell",
                     shell_value,
-                    with_app_icons(shell_options, &shell_apps),
+                    with_app_icons(shell_options, shell_icons),
                     shell_ix,
                     false,
                     on_shell,
@@ -2273,16 +2291,15 @@ fn android_ssh_key(cx: &App) -> AnyElement {
     }
 }
 
-/// Select options with the launcher icon of the application each one stands
-/// for (`apps`, in the options' order): Android's editors and shells. No
-/// icons elsewhere.
-fn with_app_icons(options: Vec<SharedString>, apps: &[String]) -> Vec<SelectItem> {
+/// Select options with the icon of the application each one stands for
+/// (`icons`, in the options' order; the custom option has none).
+fn with_app_icons(
+    options: Vec<SharedString>,
+    icons: Vec<Option<std::sync::Arc<Image>>>,
+) -> Vec<SelectItem> {
+    let mut icons = icons.into_iter();
     options
         .into_iter()
-        .enumerate()
-        .map(|(ix, label)| {
-            let icon = apps.get(ix).and_then(|app| crate::widgets::app_icon(app));
-            SelectItem::IconOption(label, icon)
-        })
+        .map(|label| SelectItem::IconOption(label, icons.next().flatten()))
         .collect()
 }

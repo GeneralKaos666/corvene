@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use cocoa::appkit::NSMenuItem;
 use cocoa::base::{NO, YES, id, nil};
-use cocoa::foundation::{NSPoint, NSRect, NSString};
+use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString};
 use gpui_kit::*;
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
@@ -60,6 +60,23 @@ unsafe fn ns_string(text: &str) -> id {
     unsafe { NSString::alloc(nil).init_str(text) }
 }
 
+/// A 16 pt picture in front of the item's title (`MenuItem::icon`), as
+/// AppKit's own application menus show them.
+unsafe fn set_image(ns_item: id, icon: &Image) {
+    unsafe {
+        let bytes = icon.bytes();
+        let data: id = msg_send![class!(NSData), dataWithBytes: bytes.as_ptr() length: bytes.len()];
+        let image: id = msg_send![class!(NSImage), alloc];
+        let image: id = msg_send![image, initWithData: data];
+        if image == nil {
+            return;
+        }
+        let _: () = msg_send![image, setSize: NSSize::new(16., 16.)];
+        let _: () = msg_send![ns_item, setImage: image];
+        let _: () = msg_send![image, release];
+    }
+}
+
 /// Build an `NSMenu` (+1 retained) and collect the actions by tag.
 unsafe fn build_menu(items: &[MenuItem], actions: &mut Vec<Option<MenuAction>>) -> id {
     unsafe {
@@ -82,6 +99,9 @@ unsafe fn build_menu(items: &[MenuItem], actions: &mut Vec<Option<MenuAction>>) 
                     let _: () = msg_send![ns_item, setEnabled: if item.enabled { YES } else { NO }];
                     if item.checked == Some(true) {
                         let _: () = msg_send![ns_item, setState: 1i64];
+                    }
+                    if let Some(icon) = &item.icon {
+                        set_image(ns_item, icon);
                     }
                     let _: () = msg_send![menu, addItem: ns_item];
                     let _: () = msg_send![ns_item, release];
@@ -149,4 +169,44 @@ pub fn show_context_menu(
             }
         })
         .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use cocoa::base::{id, nil};
+    use cocoa::foundation::NSSize;
+    use gpui_kit::{Image, ImageFormat};
+    use objc::{msg_send, sel, sel_impl};
+
+    use super::build_menu;
+    use crate::context_menu::MenuItem;
+
+    /// A 1×1 green PNG.
+    const PNG: [u8; 70] = [
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6,
+        0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240,
+        31, 0, 5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+
+    #[test]
+    fn items_show_their_icon() {
+        let icon = std::sync::Arc::new(Image::from_bytes(ImageFormat::Png, PNG.to_vec()));
+        let items = [
+            MenuItem::checkbox("Visual Studio Code", true, |_, _| {}).icon(Some(icon)),
+            MenuItem::new("Custom", |_, _| {}),
+        ];
+        let mut actions = Vec::new();
+        unsafe {
+            let menu = build_menu(&items, &mut actions);
+            let with: id = msg_send![menu, itemAtIndex: 0i64];
+            let without: id = msg_send![menu, itemAtIndex: 1i64];
+            let image: id = msg_send![with, image];
+            assert_ne!(image, nil);
+            let size: NSSize = msg_send![image, size];
+            assert_eq!((size.width, size.height), (16., 16.));
+            let none: id = msg_send![without, image];
+            assert_eq!(none, nil);
+            let _: () = msg_send![menu, release];
+        }
+    }
 }

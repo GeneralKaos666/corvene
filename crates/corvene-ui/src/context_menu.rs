@@ -74,8 +74,9 @@ pub struct MenuItem {
     pub kind: MenuItemKind,
     /// `type: 'checkbox'` items show a check mark column.
     pub checked: Option<bool>,
-    /// A 16 px picture in front of the label (Android's lists of
-    /// applications); only the menus drawn by `views_menu` show it.
+    /// A 16 px picture in front of the label (the editor and shell menus'
+    /// application icons); the menus drawn by `views_menu` and macOS's
+    /// `NSMenu`s show it.
     pub icon: Option<std::sync::Arc<Image>>,
 }
 

@@ -117,6 +117,7 @@ impl Dispatcher {
             mentionables: std::collections::HashMap::new(),
             editors: Vec::new(),
             shells: Vec::new(),
+            app_icons: std::collections::HashMap::new(),
             global_git: None,
             repo_settings: None,
             pending_open_in_desktop: None,

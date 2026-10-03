@@ -204,7 +204,9 @@ impl Dispatcher {
             Self::restart_watcher(cx);
         }
         Self::sync_crash_reports_setting(cx);
-        if now.bool(ids::EXTRA_EDITORS) != previous.bool(ids::EXTRA_EDITORS) {
+        if now.bool(ids::EXTRA_EDITORS) != previous.bool(ids::EXTRA_EDITORS)
+            || now.bool(ids::INTEGRATION_APP_ICONS) != previous.bool(ids::INTEGRATION_APP_ICONS)
+        {
             Self::detect_integrations(cx);
         }
         if now.bool(ids::TREE_SITTER_HIGHLIGHTING) && !previous.bool(ids::TREE_SITTER_HIGHLIGHTING)

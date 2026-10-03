@@ -49,6 +49,15 @@ fn linux_only() -> Availability {
     }
 }
 
+/// Android's lists of applications always show their launcher icons.
+fn android_built_in() -> Availability {
+    if cfg!(target_os = "android") {
+        Availability::BuiltIn("Android always shows the applications' icons.")
+    } else {
+        Availability::Available
+    }
+}
+
 fn product_name(s: &str) -> Result<(), &'static str> {
     let s = s.trim();
     if s.is_empty() {
@@ -2063,6 +2072,21 @@ registry! {
         restart: false, visible: false, availability: available,
         upstream: &[],
         code: &["crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
+    /// Application icons in the editor and shell menus.
+    INTEGRATION_APP_ICONS = 513 "integration-app-icons" {
+        title: "Application icons in Settings › Integrations",
+        summary: "The External editor and Shell menus of Settings › Integrations show each \
+                  application's icon in front of its name (macOS: the app's Finder icon; Linux: \
+                  the icon of its desktop entry; Windows: the program's icon).",
+        ghd_behaviour: "Names only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: android_built_in,
+        upstream: &[],
+        code: &["crates/corvene-platform/src/app_icons.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/native_menu.rs"],
     },
 
     // ---- 600 Keyboard & accessibility ----

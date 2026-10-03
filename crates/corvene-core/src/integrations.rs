@@ -8,9 +8,11 @@
 //! remote as a web page (`remote_web_url`, `262-view-on-remote`); GHD
 //! disables it.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use gpui_kit::App;
+use gpui_kit::{App, Image, ImageFormat};
 use tracing::{error, info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -129,33 +131,62 @@ pub fn pull_request_url(
     )
 }
 
+/// Flag `513-integration-app-icons`: the icons of the applications at
+/// these paths, keyed by path (blocking).
+fn app_icons<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> HashMap<PathBuf, Arc<Image>> {
+    paths
+        .filter_map(|path| {
+            let icon = corvene_platform::app_icons::icon(path)?;
+            let format = match icon.format {
+                corvene_platform::app_icons::IconFormat::Png => ImageFormat::Png,
+                corvene_platform::app_icons::IconFormat::Svg => ImageFormat::Svg,
+            };
+            Some((
+                path.clone(),
+                Arc::new(Image::from_bytes(format, icon.bytes)),
+            ))
+        })
+        .collect()
+}
+
 impl Dispatcher {
     // ---- integrations ----
 
     /// Probe LaunchServices for every known editor and shell (background),
-    /// then remember them for the menus and Settings › Integrations.
+    /// then remember them for the menus and Settings › Integrations, with
+    /// their icons under flag `513-integration-app-icons`.
     pub fn detect_integrations(cx: &mut App) {
-        let extras = Self::state(cx)
-            .read(cx)
-            .flags
-            .bool(crate::flags::ids::EXTRA_EDITORS);
+        let flags = &Self::state(cx).read(cx).flags;
+        let extras = flags.bool(crate::flags::ids::EXTRA_EDITORS);
+        let with_icons = flags.bool(crate::flags::ids::INTEGRATION_APP_ICONS);
         spawn_bg(
             cx,
             move || {
-                (
-                    editors::available_editors(extras),
-                    shells::available_shells(),
-                )
+                let editors = editors::available_editors(extras);
+                let shells = shells::available_shells();
+                let icons = if with_icons {
+                    app_icons(
+                        editors
+                            .iter()
+                            .map(|e| &e.path)
+                            .chain(shells.iter().map(|s| &s.path)),
+                    )
+                } else {
+                    HashMap::new()
+                };
+                (editors, shells, icons)
             },
-            |(editors, shells), cx| {
+            |(editors, shells, icons), cx| {
                 info!(
                     editors = editors.len(),
                     shells = shells.len(),
+                    icons = icons.len(),
                     "integrations detected"
                 );
                 Self::state(cx).update(cx, |s, cx| {
                     s.editors = editors;
                     s.shells = shells;
+                    s.app_icons = icons;
                     cx.notify();
                 });
             },

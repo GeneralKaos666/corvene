@@ -24,10 +24,13 @@ trash = "5"
 # through the Win32 API
 [target.'cfg(windows)'.dependencies]
 notify-rust = "4"
+# Settings › Integrations' application icons
+png = "0.18"
 windows-registry = "0.6"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",

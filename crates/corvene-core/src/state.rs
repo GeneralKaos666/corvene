@@ -1033,6 +1033,9 @@ pub struct AppState {
     /// Installed editors / shells (`getAvailableEditors` / `getAvailableShells`).
     pub editors: Vec<FoundEditor>,
     pub shells: Vec<FoundShell>,
+    /// The icons of `editors` and `shells` by their `path` (flag
+    /// `513-integration-app-icons`; empty while it is off).
+    pub app_icons: HashMap<PathBuf, Arc<gpui_kit::Image>>,
     /// Loaded when the Settings dialog opens (`None` while loading).
     pub global_git: Option<GlobalGitConfig>,
     /// Loaded when the Repository Settings dialog opens.
