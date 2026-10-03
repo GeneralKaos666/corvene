@@ -7,6 +7,10 @@
 //! Deviation: View on GitHub also opens a non-GitHub repository's default
 //! remote as a web page (`remote_web_url`, `262-view-on-remote`); GHD
 //! disables it.
+//! Deviation: `555-open-file-in-repository-window` opens a file inside a
+//! repository through the editor's command line tool with the repository
+//! folder, in that folder's window (GHD `launchExternalEditor` opens the
+//! file alone).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -227,8 +231,22 @@ impl Dispatcher {
     /// (the diff's "Open in <Editor> at Line N", flag
     /// `diff-open-in-editor-at-line`); a custom editor opens the file.
     pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut App) {
-        let (editors, selected, custom, workspace_file) = {
+        let (editors, selected, custom, workspace_file, folder) = {
             let s = Self::state(cx).read(cx);
+            // `555-open-file-in-repository-window`: the repository holding a
+            // file (the innermost one)
+            let folder = s
+                .flags
+                .bool(crate::flags::ids::OPEN_FILE_IN_REPOSITORY_WINDOW)
+                .then(|| {
+                    s.repositories
+                        .iter()
+                        .map(|r| &r.path)
+                        .filter(|repo| path != **repo && path.starts_with(repo))
+                        .max_by_key(|repo| repo.components().count())
+                        .cloned()
+                })
+                .flatten();
             (
                 s.editors.clone(),
                 s.settings.external_editor.clone(),
@@ -237,6 +255,7 @@ impl Dispatcher {
                     .then(|| s.settings.custom_editor.clone())
                     .flatten(),
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
+                folder,
             )
         };
         if let Some(custom) = custom {
@@ -281,16 +300,21 @@ impl Dispatcher {
         };
         spawn_bg(
             cx,
-            move || match line {
-                Some(line) => editors::launch_at_line(&editor, &path, line),
-                None => {
-                    // `509-vscode-workspace-file`: a repository opens its only
-                    // workspace file instead of the folder
-                    let target = workspace_file
-                        .then(|| editors::code_workspace_file(&editor, &path))
-                        .flatten()
-                        .unwrap_or(path);
-                    editors::launch(&editor, &target)
+            move || {
+                if let Some(folder) = folder.filter(|_| path.is_file()) {
+                    return editors::launch_in_folder(&editor, &folder, &path, line);
+                }
+                match line {
+                    Some(line) => editors::launch_at_line(&editor, &path, line),
+                    None => {
+                        // `509-vscode-workspace-file`: a repository opens its only
+                        // workspace file instead of the folder
+                        let target = workspace_file
+                            .then(|| editors::code_workspace_file(&editor, &path))
+                            .flatten()
+                            .unwrap_or(path);
+                        editors::launch(&editor, &target)
+                    }
                 }
             },
             |result, cx| {

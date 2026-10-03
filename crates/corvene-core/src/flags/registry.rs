@@ -2376,6 +2376,22 @@ registry! {
         code: &["crates/corvene-platform/src/app_icons.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/native_menu.rs"],
     },
 
+    /// Files open in their repository's editor window.
+    OPEN_FILE_IN_REPOSITORY_WINDOW = 555 "open-file-in-repository-window" {
+        title: "Open files in the repository's editor window",
+        summary: "Opening a changed or committed file in VS Code (and its forks), Cursor, \
+                  Windsurf, Zed or Sublime Text passes the repository folder along (`code <repo> \
+                  <file>`), so the file opens in the window that has the repository open instead \
+                  of a loose window or the last active one.",
+        ghd_behaviour: "The file is handed to the editor alone.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22278)],
+        code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-platform/src/editors.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

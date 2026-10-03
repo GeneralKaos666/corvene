@@ -13,6 +13,9 @@
 //! `EXTRA_EDITORS` (flag `extra-editors`) adds editors GHD does not list.
 //! Deviation: [`code_workspace_file`] lets VS Code and its forks open a
 //! repository's only `*.code-workspace` file (`509-vscode-workspace-file`).
+//! Deviation: [`launch_in_folder`] opens a file through the same tools with
+//! its repository folder, in that folder's window
+//! (`555-open-file-in-repository-window`).
 
 use std::path::{Path, PathBuf};
 
@@ -702,6 +705,19 @@ fn line_tool_key(editor: &FoundEditor) -> &str {
 /// `editor`, when its bundle has a command line tool that can.
 #[cfg_attr(target_os = "android", allow(dead_code))]
 fn line_command(editor: &FoundEditor, target: &Path, line: u32) -> Option<(PathBuf, Vec<String>)> {
+    tool_command(editor, None, target, Some(line))
+}
+
+/// The command line tool invocation that opens `target` (at `line`, when
+/// given) in `editor`, inside the window of `folder` when given (`code
+/// <folder> <file>`, `zed <folder> <file>`, `subl <folder> <file>`).
+#[cfg_attr(target_os = "android", allow(dead_code))]
+fn tool_command(
+    editor: &FoundEditor,
+    folder: Option<&Path>,
+    target: &Path,
+    line: Option<u32>,
+) -> Option<(PathBuf, Vec<String>)> {
     let (candidates, syntax) = line_tool(line_tool_key(editor))?;
     let program = candidates
         .iter()
@@ -713,12 +729,45 @@ fn line_command(editor: &FoundEditor, target: &Path, line: u32) -> Option<(PathB
             }
         })
         .find(|p| p.is_file())?;
-    let at = format!("{}:{line}", target.display());
-    let args = match syntax {
-        LineArgs::Goto => vec!["-g".to_string(), at],
-        LineArgs::Suffix => vec![at],
-    };
+    let mut args: Vec<String> = folder
+        .map(|f| f.to_string_lossy().into_owned())
+        .into_iter()
+        .collect();
+    match line {
+        Some(line) => {
+            let at = format!("{}:{line}", target.display());
+            if syntax == LineArgs::Goto {
+                args.push("-g".to_string());
+            }
+            args.push(at);
+        }
+        None => args.push(target.to_string_lossy().into_owned()),
+    }
     Some((program, args))
+}
+
+/// Corvene (`555-open-file-in-repository-window`): open the file `target`
+/// (at `line`) through the editor's command line tool together with the
+/// repository `folder`, so it lands in that repository's window; editors
+/// without a tool open the file as [`launch`] / [`launch_at_line`] do.
+pub fn launch_in_folder(
+    editor: &FoundEditor,
+    folder: &Path,
+    target: &Path,
+    line: Option<u32>,
+) -> Result<(), EditorError> {
+    #[cfg(not(target_os = "android"))]
+    if let Some((program, args)) = tool_command(editor, Some(folder), target, line) {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        if apps::spawn_detached(&program, &args).is_ok() {
+            return Ok(());
+        }
+    }
+    let _ = folder;
+    match line {
+        Some(line) => launch_at_line(editor, target, line),
+        None => launch(editor, target),
+    }
 }
 
 /// Whether `editor` can open a file at a line (see [`launch_at_line`]).
@@ -868,6 +917,13 @@ mod tests {
         let (program, args) = line_command(&code, Path::new("/r/src/a.rs"), 12).unwrap();
         assert_eq!(program, bin.join("code"));
         assert_eq!(args, ["-g", "/r/src/a.rs:12"]);
+        // `555-open-file-in-repository-window`
+        let (_, args) =
+            tool_command(&code, Some(Path::new("/r")), Path::new("/r/src/a.rs"), None).unwrap();
+        assert_eq!(args, ["/r", "/r/src/a.rs"]);
+        let (_, args) =
+            tool_command(&code, Some(Path::new("/r")), Path::new("/r/a.rs"), Some(3)).unwrap();
+        assert_eq!(args, ["/r", "-g", "/r/a.rs:3"]);
         // the bundle lacks the tool: no line command
         let zed = FoundEditor {
             name: "Zed".into(),
