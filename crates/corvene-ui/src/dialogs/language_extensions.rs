@@ -16,7 +16,9 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use corvene_core::extensions::{ExtensionProgress, ExtensionsFocus, ExtensionsState, InstallSource};
+use corvene_core::extensions::{
+    ExtensionProgress, ExtensionsFocus, ExtensionsState, InstallSource,
+};
 use corvene_core::{AppState, Dispatcher};
 use corvene_extensions::github::RepoRef;
 use corvene_extensions::importer::{Editor, ImportCandidate};
@@ -67,6 +69,8 @@ pub struct LanguageExtensionsDialog {
     add_mode: Option<AddMode>,
     add_error: Option<String>,
     import_checked: BTreeSet<PathBuf>,
+    /// the consent sheet's "Remember for this grammar version"
+    remember_consent: bool,
 }
 
 impl LanguageExtensionsDialog {
@@ -125,6 +129,7 @@ impl LanguageExtensionsDialog {
             add_mode: None,
             add_error: None,
             import_checked: BTreeSet::new(),
+            remember_consent: false,
         };
         if !initial_query.is_empty() {
             this.search(initial_query, cx);
@@ -238,7 +243,12 @@ impl LanguageExtensionsDialog {
 
     // ---- Installed ----
 
-    fn row(&self, installed: &Installed, extensions: &ExtensionsState, cx: &Context<Self>) -> AnyElement {
+    fn row(
+        &self,
+        installed: &Installed,
+        extensions: &ExtensionsState,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd();
         let md = &installed.metadata;
         let id = md.id.clone();
@@ -263,6 +273,38 @@ impl LanguageExtensionsDialog {
         let kind = grammar_kind_label(installed);
         let error = extensions.errors.get(&md.id).cloned();
         let update = extensions.updates.get(&md.id).cloned();
+        let build_flag = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::BUILD_GRAMMARS_FROM_SOURCE);
+        // tree-sitter grammars waiting for a build, and builds in flight
+        let needs_build: Vec<String> = md
+            .grammars
+            .iter()
+            .filter(|g| g.resolution == Resolution::NeedsBuild && g.repository.is_some())
+            .map(|g| g.name.clone())
+            .collect();
+        let building: Vec<String> = md
+            .grammars
+            .iter()
+            .filter_map(|g| {
+                extensions
+                    .builds
+                    .get(&format!("{}/{}", md.id, g.name))
+                    .map(|b| format!("{}: {}", g.name, b.stage.describe()))
+            })
+            .collect();
+        let build_errors: Vec<String> = md
+            .grammars
+            .iter()
+            .filter_map(|g| {
+                extensions
+                    .build_errors
+                    .get(&format!("{}/{}", md.id, g.name))
+                    .map(|e| format!("{}: {e}", g.name))
+            })
+            .collect();
         let row_id = SharedString::from(format!("lang-ext-row-{}", md.id));
         let select_id = id.clone();
         let enabled_id = id.clone();
@@ -315,6 +357,15 @@ impl LanguageExtensionsDialog {
                             .child(v)
                     }))
                     .child(div().flex_1())
+                    .children(needs_build.first().filter(|_| build_flag && building.is_empty()).map(|grammar| {
+                        let (build_id, build_grammar) = (id.clone(), grammar.clone());
+                        small_button(
+                            SharedString::from(format!("lang-ext-build-{}", md.id)),
+                            if needs_build.len() == 1 { "Build Grammar…".to_string() } else { format!("Build {} Grammars…", needs_build.len()) },
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| Dispatcher::request_grammar_build(&build_id, &build_grammar, cx))
+                    }))
                     .children(update.map(|candidate| {
                         let label = format!(
                             "Update to {}",
@@ -385,17 +436,147 @@ impl LanguageExtensionsDialog {
                             .on_click(move |_, _, cx| Dispatcher::remove_extension(&remove_id, cx)),
                     ),
             )
-            .children(error.map(|e| {
+            .children(building.into_iter().map(|b| {
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .child(b)
+            }))
+            .children(build_errors.into_iter().chain(error).map(|e| {
                 div()
                     .text_size(FONT_SIZE_SM())
                     .text_color(t.color_deleted)
                     .whitespace_normal()
                     .child(e)
             }))
+            .when(!needs_build.is_empty() && !build_flag, |d| {
+                d.child(
+                    div()
+                        .text_size(FONT_SIZE_SM())
+                        .text_color(t.color_modified)
+                        .whitespace_normal()
+                        .child("Its tree-sitter grammar is not bundled with Corvene; the flag build-grammars-from-source offers to compile it."),
+                )
+            })
             .into_any_element()
     }
 
-    fn pending_row(&self, key: &str, progress: &ExtensionProgress, cx: &Context<Self>) -> AnyElement {
+    /// The consent sheet over the dialog: what a grammar build will
+    /// download and run, before anything happens.
+    fn consent_sheet(
+        &self,
+        consent: &corvene_core::extensions::BuildConsent,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let t = cx.ghd();
+        let plan = &consent.plan;
+        let line = |text: String| {
+            div()
+                .text_size(FONT_SIZE_SM())
+                .whitespace_normal()
+                .min_w_0()
+                .child(text)
+        };
+        let remember = self.remember_consent;
+        let can_build = consent.compiler.is_ok();
+        let compiler_line = match &consent.compiler {
+            Ok(compiler) => line(format!(
+                "It will compile the parser with the compiler on this Mac: {} ({}).",
+                compiler.cc.display(),
+                compiler.version
+            )),
+            Err(message) => line(message.clone()).text_color(t.color_deleted),
+        };
+        let card = div()
+            .w(zpx(520.))
+            .max_w_full()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .p(SPACING_DOUBLE())
+            .rounded(zpx(6.))
+            .bg(t.background)
+            .border_1()
+            .border_color(t.box_border)
+            .shadow_lg()
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING_HALF())
+                    .child(octicon(Octicon::Alert, t.color_modified).size(zpx(16.)))
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child(format!("Build the {} grammar from source?", consent.grammar))),
+            )
+            .child(line(format!(
+                "Corvene will download the grammar's source code from {} at commit {} ({}).",
+                plan.repository,
+                plan.short_rev(),
+                plan.tarball_url
+            )))
+            .child(compiler_line)
+            .child(line(format!(
+                "The built library is kept in {} and loaded into Corvene the next time a diff needs it.",
+                plan.library_path().parent().map(|p| p.display().to_string()).unwrap_or_default()
+            )))
+            .child(
+                line("A grammar's code runs inside Corvene; a bug in it can crash the app. Only build grammars from sources you trust.".to_string())
+                    .text_color(t.text_secondary),
+            )
+            .child(
+                div()
+                    .id("lang-ext-consent-remember-row")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING_HALF())
+                    .cursor_pointer()
+                    .child(checkbox("lang-ext-consent-remember", remember, !can_build, cx))
+                    .child(div().text_size(FONT_SIZE_SM()).child("Remember for this grammar version"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.remember_consent = !this.remember_consent;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_end()
+                    .gap(SPACING())
+                    .child(
+                        button("lang-ext-consent-cancel", "Cancel", cx)
+                            .on_click(|_, _, cx| Dispatcher::respond_to_build_consent(false, false, cx)),
+                    )
+                    .child(
+                        primary_button("lang-ext-consent-build", "Download and Build", !can_build, cx).on_click(
+                            cx.listener(|this, _, _, cx| {
+                                let remember = this.remember_consent;
+                                this.remember_consent = false;
+                                Dispatcher::respond_to_build_consent(true, remember, cx);
+                            }),
+                        ),
+                    ),
+            );
+        div()
+            .id("lang-ext-consent")
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(t.dialog_backdrop)
+            .occlude()
+            .child(card)
+            .into_any_element()
+    }
+
+    fn pending_row(
+        &self,
+        key: &str,
+        progress: &ExtensionProgress,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd();
         let what = key
             .strip_prefix("pending:")
@@ -409,7 +590,11 @@ impl LanguageExtensionsDialog {
             .gap(zpx(3.))
             .border_b_1()
             .border_color(t.box_border)
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(format!("Installing {what}…")))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(format!("Installing {what}…")),
+            )
             .child(
                 div()
                     .text_size(FONT_SIZE_SM())
@@ -474,7 +659,11 @@ impl LanguageExtensionsDialog {
             .overflow_hidden()
             .p(SPACING())
             .gap(zpx(2.))
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(md.display_name.clone()))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(md.display_name.clone()),
+            )
             .children(md.description.clone().map(|d| {
                 div()
                     .text_size(FONT_SIZE_SM())
@@ -507,7 +696,8 @@ impl LanguageExtensionsDialog {
             panel = panel.child(line("None declared.".to_string()).text_color(t.text_secondary));
         }
         for language in &md.languages {
-            let mut types: Vec<String> = language.suffixes.iter().map(|s| format!(".{s}")).collect();
+            let mut types: Vec<String> =
+                language.suffixes.iter().map(|s| format!(".{s}")).collect();
             types.extend(language.filenames.iter().cloned());
             let name = language.name.clone().unwrap_or_else(|| language.id.clone());
             panel = panel.child(line(if types.is_empty() {
@@ -527,7 +717,9 @@ impl LanguageExtensionsDialog {
                 (GrammarKind::TreeSitter, _, Resolution::Bundled { name }) => {
                     format!("uses Corvene's {name} grammar")
                 }
-                (GrammarKind::TreeSitter, _, Resolution::Built { .. }) => "built from source".to_string(),
+                (GrammarKind::TreeSitter, _, Resolution::Built { .. }) => {
+                    "built from source".to_string()
+                }
                 (GrammarKind::TreeSitter, _, Resolution::NeedsBuild) => {
                     "parser not available: needs a build from source".to_string()
                 }
@@ -565,9 +757,13 @@ impl LanguageExtensionsDialog {
         }
         panel = panel.child(
             div().mt(SPACING()).child(
-                link_button("lang-ext-reveal", crate::context_menu::labels::REVEAL_IN_FILE_MANAGER, cx)
-                    .text_size(FONT_SIZE_SM())
-                    .on_click(move |_, _, cx| Dispatcher::show_in_finder(&dir, cx)),
+                link_button(
+                    "lang-ext-reveal",
+                    crate::context_menu::labels::REVEAL_IN_FILE_MANAGER,
+                    cx,
+                )
+                .text_size(FONT_SIZE_SM())
+                .on_click(move |_, _, cx| Dispatcher::show_in_finder(&dir, cx)),
             ),
         );
         div()
@@ -579,7 +775,12 @@ impl LanguageExtensionsDialog {
             .into_any_element()
     }
 
-    fn installed_tab(&self, extensions: &ExtensionsState, window: &Window, cx: &Context<Self>) -> AnyElement {
+    fn installed_tab(
+        &self,
+        extensions: &ExtensionsState,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd();
         let visible = self.visible(extensions, cx);
         let mut pending: Vec<(&String, &ExtensionProgress)> = extensions
@@ -640,7 +841,13 @@ impl LanguageExtensionsDialog {
                         .items_center()
                         .gap(SPACING_HALF())
                         .child(div().text_size(FONT_SIZE_SM()).flex_none().child(label))
-                        .child(div().flex_1().child(text_box("lang-ext-add-input", &self.add_input, None, window, cx)))
+                        .child(div().flex_1().child(text_box(
+                            "lang-ext-add-input",
+                            &self.add_input,
+                            None,
+                            window,
+                            cx,
+                        )))
                         .child(
                             small_button("lang-ext-add-submit", "Install", cx)
                                 .on_click(cx.listener(|this, _, _, cx| this.submit_add(cx))),
@@ -714,12 +921,22 @@ impl LanguageExtensionsDialog {
 
     // ---- Find ----
 
-    fn candidate_row(&self, candidate: &Candidate, extensions: &ExtensionsState, cx: &Context<Self>) -> AnyElement {
+    fn candidate_row(
+        &self,
+        candidate: &Candidate,
+        extensions: &ExtensionsState,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd();
         let id = registry::extension_id(candidate);
         let installed = extensions.get(&id).map(|i| i.metadata.version.clone());
-        let installing = extensions.progress.contains_key(&InstallSource::Registry(candidate.clone()).key());
-        let error = extensions.errors.get(&InstallSource::Registry(candidate.clone()).key()).cloned();
+        let installing = extensions
+            .progress
+            .contains_key(&InstallSource::Registry(candidate.clone()).key());
+        let error = extensions
+            .errors
+            .get(&InstallSource::Registry(candidate.clone()).key())
+            .cloned();
         let mut meta: Vec<String> = Vec::new();
         if let Some(publisher) = &candidate.publisher {
             meta.push(publisher.clone());
@@ -728,13 +945,25 @@ impl LanguageExtensionsDialog {
             meta.push(version.clone());
         }
         if candidate.downloads > 0 {
-            meta.push(format!("{} downloads", group_thousands(candidate.downloads)));
+            meta.push(format!(
+                "{} downloads",
+                group_thousands(candidate.downloads)
+            ));
         }
         if !candidate.suffixes.is_empty() {
-            meta.push(candidate.suffixes.iter().map(|s| format!(".{s}")).collect::<Vec<_>>().join(" "));
+            meta.push(
+                candidate
+                    .suffixes
+                    .iter()
+                    .map(|s| format!(".{s}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
         }
         let note = match candidate.grammar {
-            GrammarHint::TreeSitter => Some("tree-sitter grammar: works with a grammar Corvene bundles, else needs a build from source"),
+            GrammarHint::TreeSitter => Some(
+                "tree-sitter grammar: works with a grammar Corvene bundles, else needs a build from source",
+            ),
             GrammarHint::TextMate | GrammarHint::Unknown => None,
         };
         let action: AnyElement = match (installed, installing) {
@@ -750,15 +979,27 @@ impl LanguageExtensionsDialog {
                 .into_any_element(),
             (Some(_), _) => {
                 let c = candidate.clone();
-                small_button(SharedString::from(format!("lang-ext-install-{id}")), "Update", cx)
-                    .on_click(move |_, _, cx| Dispatcher::install_extension(InstallSource::Registry(c.clone()), cx))
-                    .into_any_element()
+                small_button(
+                    SharedString::from(format!("lang-ext-install-{id}")),
+                    "Update",
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    Dispatcher::install_extension(InstallSource::Registry(c.clone()), cx)
+                })
+                .into_any_element()
             }
             (None, _) => {
                 let c = candidate.clone();
-                small_button(SharedString::from(format!("lang-ext-install-{id}")), "Install", cx)
-                    .on_click(move |_, _, cx| Dispatcher::install_extension(InstallSource::Registry(c.clone()), cx))
-                    .into_any_element()
+                small_button(
+                    SharedString::from(format!("lang-ext-install-{id}")),
+                    "Install",
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    Dispatcher::install_extension(InstallSource::Registry(c.clone()), cx)
+                })
+                .into_any_element()
             }
         };
         div()
@@ -775,13 +1016,29 @@ impl LanguageExtensionsDialog {
                     .flex_row()
                     .items_center()
                     .gap(SPACING_HALF())
-                    .child(div().font_weight(FontWeight::SEMIBOLD).min_w_0().truncate().child(candidate.display_name.clone()))
-                    .child(pill(candidate.registry.title(), None, t.list_item_badge_background, t.list_item_badge_text, cx))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .min_w_0()
+                            .truncate()
+                            .child(candidate.display_name.clone()),
+                    )
+                    .child(pill(
+                        candidate.registry.title(),
+                        None,
+                        t.list_item_badge_background,
+                        t.list_item_badge_text,
+                        cx,
+                    ))
                     .child(div().flex_1())
                     .child(action),
             )
             .children(candidate.description.clone().map(|d| {
-                div().text_size(FONT_SIZE_SM()).min_w_0().truncate().child(d)
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .min_w_0()
+                    .truncate()
+                    .child(d)
             }))
             .child(
                 div()
@@ -791,19 +1048,40 @@ impl LanguageExtensionsDialog {
                     .truncate()
                     .child(meta.join("  ·  ")),
             )
-            .children(note.map(|n| div().text_size(FONT_SIZE_SM()).text_color(t.color_modified).child(n)))
-            .children(error.map(|e| div().text_size(FONT_SIZE_SM()).text_color(t.color_deleted).whitespace_normal().child(e)))
+            .children(note.map(|n| {
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.color_modified)
+                    .child(n)
+            }))
+            .children(error.map(|e| {
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.color_deleted)
+                    .whitespace_normal()
+                    .child(e)
+            }))
             .into_any_element()
     }
 
-    fn find_tab(&self, extensions: &ExtensionsState, window: &Window, cx: &Context<Self>) -> AnyElement {
+    fn find_tab(
+        &self,
+        extensions: &ExtensionsState,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd();
         let search = &extensions.search;
         let mut status: Vec<String> = Vec::new();
         if !search.in_flight.is_empty() {
             status.push(format!(
                 "Searching {}…",
-                search.in_flight.iter().map(|r| r.title()).collect::<Vec<_>>().join(", ")
+                search
+                    .in_flight
+                    .iter()
+                    .map(|r| r.title())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
         for registry in Registry::ALL {
@@ -834,7 +1112,12 @@ impl LanguageExtensionsDialog {
             div()
                 .flex()
                 .flex_col()
-                .children(search.results.iter().map(|c| self.candidate_row(c, extensions, cx)))
+                .children(
+                    search
+                        .results
+                        .iter()
+                        .map(|c| self.candidate_row(c, extensions, cx)),
+                )
                 .into_any_element()
         };
         div()
@@ -858,10 +1141,12 @@ impl LanguageExtensionsDialog {
                         cx,
                     )))
                     .child(
-                        button("lang-ext-search", "Search", cx).on_click(cx.listener(|this, _, _, cx| {
-                            let text = this.query.read(cx).value().to_string();
-                            this.search(text, cx);
-                        })),
+                        button("lang-ext-search", "Search", cx).on_click(cx.listener(
+                            |this, _, _, cx| {
+                                let text = this.query.read(cx).value().to_string();
+                                this.search(text, cx);
+                            },
+                        )),
                     ),
             )
             .children(status.into_iter().map(|s| {
@@ -941,7 +1226,12 @@ impl LanguageExtensionsDialog {
             .into_any_element()
     }
 
-    fn import_row(&self, candidate: &ImportCandidate, extensions: &ExtensionsState, cx: &Context<Self>) -> AnyElement {
+    fn import_row(
+        &self,
+        candidate: &ImportCandidate,
+        extensions: &ExtensionsState,
+        cx: &Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd();
         let id = install::extension_id(
             SourceKind::Imported,
@@ -949,7 +1239,9 @@ impl LanguageExtensionsDialog {
             &candidate.name,
         );
         let installed = extensions.get(&id).is_some();
-        let installing = extensions.progress.contains_key(&InstallSource::Import(candidate.clone()).key());
+        let installing = extensions
+            .progress
+            .contains_key(&InstallSource::Import(candidate.clone()).key());
         let checked = self.import_checked.contains(&candidate.path);
         let path = candidate.path.clone();
         let mut meta: Vec<String> = Vec::new();
@@ -960,13 +1252,26 @@ impl LanguageExtensionsDialog {
             meta.push(candidate.languages.join(", "));
         }
         if !candidate.suffixes.is_empty() {
-            meta.push(candidate.suffixes.iter().map(|s| format!(".{s}")).collect::<Vec<_>>().join(" "));
+            meta.push(
+                candidate
+                    .suffixes
+                    .iter()
+                    .map(|s| format!(".{s}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
         }
         if candidate.tree_sitter {
             meta.push("tree-sitter".to_string());
         }
-        let row_id = SharedString::from(format!("lang-ext-import-row-{}", install::slug(&candidate.path.to_string_lossy())));
-        let check_id = SharedString::from(format!("lang-ext-import-check-{}", install::slug(&candidate.path.to_string_lossy())));
+        let row_id = SharedString::from(format!(
+            "lang-ext-import-row-{}",
+            install::slug(&candidate.path.to_string_lossy())
+        ));
+        let check_id = SharedString::from(format!(
+            "lang-ext-import-check-{}",
+            install::slug(&candidate.path.to_string_lossy())
+        ));
         let state_text = if installing {
             Some("Importing…")
         } else if installed {
@@ -985,12 +1290,13 @@ impl LanguageExtensionsDialog {
             .border_b_1()
             .border_color(t.box_border)
             .when(state_text.is_none(), |d| {
-                d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                    if !this.import_checked.remove(&path) {
-                        this.import_checked.insert(path.clone());
-                    }
-                    cx.notify();
-                }))
+                d.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.import_checked.remove(&path) {
+                            this.import_checked.insert(path.clone());
+                        }
+                        cx.notify();
+                    }))
             })
             .child(match state_text {
                 Some(text) => div()
@@ -1012,7 +1318,13 @@ impl LanguageExtensionsDialog {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(div().font_weight(FontWeight::SEMIBOLD).min_w_0().truncate().child(candidate.display_name.clone()))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .min_w_0()
+                            .truncate()
+                            .child(candidate.display_name.clone()),
+                    )
                     .child(
                         div()
                             .text_size(FONT_SIZE_SM())
@@ -1042,7 +1354,7 @@ fn group_thousands(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -1060,7 +1372,11 @@ fn extension_state(installed: &Installed, extensions: &ExtensionsState) -> (Hsla
     } else if !md.usable() {
         (hsla(0., 0.7, 0.5, 1.), "No usable grammar".to_string())
     } else if md.grammars.iter().any(|g| {
-        g.status == Status::Rejected || matches!(g.resolution, Resolution::NeedsBuild | Resolution::Failed { .. })
+        g.status == Status::Rejected
+            || matches!(
+                g.resolution,
+                Resolution::NeedsBuild | Resolution::Failed { .. }
+            )
     }) {
         (hsla(0.12, 0.8, 0.5, 1.), "Partly working".to_string())
     } else if extensions.rebuilding {
@@ -1074,7 +1390,9 @@ fn extension_state(installed: &Installed, extensions: &ExtensionsState) -> (Hsla
 fn grammar_kind_label(installed: &Installed) -> &'static str {
     let kinds: Vec<GrammarKind> = installed.metadata.grammars.iter().map(|g| g.kind).collect();
     let tree_sitter = kinds.contains(&GrammarKind::TreeSitter);
-    let textmate = kinds.iter().any(|k| matches!(k, GrammarKind::TextMate | GrammarKind::Sublime));
+    let textmate = kinds
+        .iter()
+        .any(|k| matches!(k, GrammarKind::TextMate | GrammarKind::Sublime));
     match (textmate, tree_sitter) {
         (true, true) => "TextMate + tree-sitter",
         (false, true) => "tree-sitter",
@@ -1136,14 +1454,33 @@ impl Render for LanguageExtensionsDialog {
             Tab::Find => self.find_tab(&extensions, window, cx),
             Tab::Import => self.import_tab(&extensions, cx),
         };
+        let consent = extensions
+            .pending_consent
+            .as_ref()
+            .map(|c| self.consent_sheet(c, cx));
         let content = div()
             .w(crate::theme::fit_width(WIDTH))
             .max_w_full()
             .min_w_0()
+            .relative()
             .flex()
             .flex_col()
-            .child(div().w_full().border_b_1().border_color(t.box_border).child(bar))
-            .child(div().h(zpx(HEIGHT)).w_full().min_w_0().overflow_hidden().child(body));
+            .child(
+                div()
+                    .w_full()
+                    .border_b_1()
+                    .border_color(t.box_border)
+                    .child(bar),
+            )
+            .child(
+                div()
+                    .h(zpx(HEIGHT))
+                    .w_full()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .child(body),
+            )
+            .children(consent);
         let summary = match count {
             0 => "No extensions installed.".to_string(),
             1 => "1 extension installed.".to_string(),

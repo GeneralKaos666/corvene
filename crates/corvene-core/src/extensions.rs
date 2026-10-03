@@ -13,11 +13,17 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+use std::sync::Arc;
+
 use corvene_extensions::github::RepoRef;
 use corvene_extensions::importer::ImportCandidate;
-use corvene_extensions::install::{self, GrammarKind, Installed, Metadata, Resolution, Source, SourceKind, Status};
+use corvene_extensions::index::Index;
+use corvene_extensions::install::{
+    self, GrammarKind, Installed, Metadata, Resolution, Source, SourceKind, Status,
+};
 use corvene_extensions::manifest::GrammarRef;
 use corvene_extensions::registry::{self, Candidate, Registry};
+use corvene_extensions::tsbuild::{self, BuildPlan, Stage, compiler::Compiler};
 use corvene_highlight::treesitter::{self, UserGrammar, UserLanguage};
 use corvene_highlight::user;
 use gpui_kit::{App, AsyncApp};
@@ -107,7 +113,9 @@ impl InstallSource {
             InstallSource::LocalPath(path) => format!("pending:{}", path.display()),
             InstallSource::Url(url) => format!("pending:{url}"),
             InstallSource::GitHub(repo) => format!("pending:{}", repo.url()),
-            InstallSource::Registry(candidate) => format!("pending:{}", registry::extension_id(candidate)),
+            InstallSource::Registry(candidate) => {
+                format!("pending:{}", registry::extension_id(candidate))
+            }
             InstallSource::Import(candidate) => format!("pending:{}", candidate.path.display()),
         }
     }
@@ -133,7 +141,10 @@ impl InstallSource {
 
     /// Whether this source is downloaded.
     pub fn is_remote(&self) -> bool {
-        matches!(self, InstallSource::Url(_) | InstallSource::GitHub(_) | InstallSource::Registry(_))
+        matches!(
+            self,
+            InstallSource::Url(_) | InstallSource::GitHub(_) | InstallSource::Registry(_)
+        )
     }
 }
 
@@ -157,7 +168,37 @@ pub struct HintResult {
     pub candidates: Vec<Candidate>,
     pub in_flight: bool,
     pub error: Option<String>,
+    /// answered from the offline index
+    pub from_index: bool,
 }
+
+/// A grammar build waiting for the user's consent (the sheet in the
+/// Language Extensions dialog).
+#[derive(Clone, Debug)]
+pub struct BuildConsent {
+    pub extension: String,
+    pub grammar: String,
+    pub plan: BuildPlan,
+    /// the compiler that would run, or why none can
+    pub compiler: Result<Compiler, String>,
+}
+
+/// A grammar build in flight (`builds`, by `<extension id>/<grammar>`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildProgress {
+    pub stage: Stage,
+}
+
+/// The offline index's state.
+#[derive(Clone, Debug, Default)]
+pub struct IndexState {
+    pub index: Option<Arc<Index>>,
+    pub refreshing: bool,
+    pub error: Option<String>,
+}
+
+/// Days after which the offline index is fetched again.
+const INDEX_MAX_AGE_DAYS: u64 = 7;
 
 /// `AppState::extensions`.
 #[derive(Clone, Debug, Default)]
@@ -188,6 +229,12 @@ pub struct ExtensionsState {
     /// Extension id → the newer version a registry has.
     pub updates: HashMap<String, Candidate>,
     pub checking_updates: bool,
+    pub pending_consent: Option<BuildConsent>,
+    /// `<extension id>/<grammar>` → the build's stage.
+    pub builds: HashMap<String, BuildProgress>,
+    /// `<extension id>/<grammar>` → the last build error.
+    pub build_errors: HashMap<String, String>,
+    pub index: IndexState,
 }
 
 impl ExtensionsState {
@@ -198,6 +245,25 @@ impl ExtensionsState {
     /// Extensions enabled, in order.
     pub fn enabled(&self) -> impl Iterator<Item = &Installed> {
         self.installed.iter().filter(|i| i.metadata.enabled)
+    }
+
+    /// The suffix the "no syntax highlighting" hint would name for `path`:
+    /// its extension, unless the hint was dismissed for it or the file has
+    /// none.
+    pub fn hint_suffix(&self, path: &str) -> Option<String> {
+        let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+        let (stem, suffix) = name.rsplit_once('.')?;
+        if stem.is_empty()
+            || suffix.is_empty()
+            || suffix.len() > 16
+            || suffix
+                .chars()
+                .any(|c| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
+        {
+            return None;
+        }
+        let suffix = suffix.to_ascii_lowercase();
+        (!self.prefs.dismissed_suffixes.contains(&suffix)).then_some(suffix)
     }
 
     /// Apply the stored switches to freshly read metadata (the store wins).
@@ -211,7 +277,8 @@ impl ExtensionsState {
     }
 
     fn upsert(&mut self, installed: Installed) {
-        self.installed.retain(|i| i.metadata.id != installed.metadata.id);
+        self.installed
+            .retain(|i| i.metadata.id != installed.metadata.id);
         self.installed.push(installed);
         self.installed.sort_by(|a, b| {
             a.metadata
@@ -222,16 +289,22 @@ impl ExtensionsState {
     }
 }
 
+/// Syntax name → (extension id, prefers its grammar over the built-ins).
+type Owners = HashMap<String, (String, bool)>;
+
 /// What a rebuild of the user layer produced.
 struct Rebuilt {
-    set: Option<(corvene_extensions::cache::SyntaxSet, HashMap<String, (String, bool)>)>,
+    set: Option<(corvene_extensions::cache::SyntaxSet, Owners)>,
     tree_sitter: Vec<(String, bool, Vec<UserGrammar>)>,
     errors: Vec<(String, String)>,
 }
 
 impl Dispatcher {
     fn extensions_enabled(cx: &App) -> bool {
-        Self::state(cx).read(cx).flags.bool(ids::LANGUAGE_EXTENSIONS)
+        Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(ids::LANGUAGE_EXTENSIONS)
     }
 
     fn save_extension_prefs(cx: &mut App) {
@@ -279,6 +352,7 @@ impl Dispatcher {
                     info!(count, "language extensions found");
                 }
                 Self::rebuild_user_syntaxes(cx);
+                Self::load_extension_index(cx);
                 if let Ok(path) = std::env::var("CORVENE_INSTALL_EXTENSION")
                     && !path.is_empty()
                 {
@@ -447,6 +521,22 @@ impl Dispatcher {
         if query.is_empty() {
             return;
         }
+        if let Some(suffix) = &suffix {
+            let from_index: Vec<Candidate> = Self::state(cx)
+                .read(cx)
+                .extensions
+                .index
+                .index
+                .as_ref()
+                .map(|i| i.lookup(suffix))
+                .unwrap_or_default();
+            if !from_index.is_empty() {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.extensions.search.results = from_index;
+                    cx.notify();
+                });
+            }
+        }
         for registry in Registry::ALL {
             let (query, suffix) = (query.clone(), suffix.clone());
             spawn_bg(
@@ -464,7 +554,15 @@ impl Dispatcher {
                         search.in_flight.remove(&registry);
                         match result {
                             Ok(found) => {
-                                search.results.extend(found);
+                                for candidate in found {
+                                    if let Some(slot) = search.results.iter_mut().find(|c| {
+                                        c.registry == candidate.registry && c.id == candidate.id
+                                    }) {
+                                        *slot = candidate;
+                                    } else {
+                                        search.results.push(candidate);
+                                    }
+                                }
                                 search.results.sort_by(|a, b| {
                                     a.registry
                                         .cmp(&b.registry)
@@ -483,8 +581,105 @@ impl Dispatcher {
         }
     }
 
-    /// The registries' extensions for files with `suffix` (the diff hint).
-    /// Zed's suggestion table answers at once; the others are asked.
+    /// Where the offline index lives (`<extensions dir>/index.json.gz`).
+    fn index_path() -> PathBuf {
+        extensions_dir().join("index.json.gz")
+    }
+
+    /// Read the offline index from disk (in the background) and fetch a
+    /// fresh one when it is missing or older than a week.
+    pub fn load_extension_index(cx: &mut App) {
+        let path = Self::index_path();
+        let refreshed_at = Self::state(cx).read(cx).extensions.prefs.index_refreshed_at;
+        spawn_bg(
+            cx,
+            move || path.is_file().then(|| Index::load(&path)).transpose(),
+            move |result, cx| {
+                let loaded = match result {
+                    Ok(Some(index)) => Some(Arc::new(index)),
+                    Ok(None) => None,
+                    Err(err) => {
+                        warn!(%err, "the extension index on disk could not be read");
+                        None
+                    }
+                };
+                let age = loaded.as_ref().and_then(|i| i.age_days(install::now()));
+                Self::state(cx).update(cx, |s, cx| {
+                    s.extensions.index.index = loaded.clone();
+                    cx.notify();
+                });
+                let stale = loaded.is_none()
+                    || age.is_none_or(|d| d >= INDEX_MAX_AGE_DAYS)
+                        && refreshed_at.is_none_or(|t| {
+                            install::now().saturating_sub(t) >= INDEX_MAX_AGE_DAYS * 86_400
+                        });
+                if stale {
+                    Self::refresh_extension_index(cx);
+                }
+            },
+        );
+    }
+
+    /// Fetch the index the packs manifest lists (sha256-checked) and use it.
+    pub fn refresh_extension_index(cx: &mut App) {
+        let state = Self::state(cx);
+        if state.read(cx).extensions.index.refreshing {
+            return;
+        }
+        state.update(cx, |s, cx| {
+            s.extensions.index.refreshing = true;
+            s.extensions.index.error = None;
+            cx.notify();
+        });
+        let path = Self::index_path();
+        spawn_bg(
+            cx,
+            move || -> Result<Index, String> {
+                let manifest = corvene_packs::fetch_manifest().map_err(|e| e.to_string())?;
+                let entry = manifest
+                    .entry_for(
+                        corvene_packs::PackKind::LanguageExtensionsIndex,
+                        env!("CARGO_PKG_VERSION"),
+                    )
+                    .ok_or_else(|| "the packs manifest lists no extension index".to_string())?;
+                let mut progress = |_, _| {};
+                let downloaded = corvene_extensions::http::download(
+                    &entry.url,
+                    &path,
+                    corvene_extensions::http::MAX_JSON_BYTES,
+                    None,
+                    &mut progress,
+                )
+                .map_err(|e| e.to_string())?;
+                if !downloaded.sha256.eq_ignore_ascii_case(entry.sha256.trim()) {
+                    let _ = std::fs::remove_file(&path);
+                    return Err("the downloaded index is corrupt (sha256 mismatch)".to_string());
+                }
+                Index::load(&path).map_err(|e| e.to_string())
+            },
+            |result, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.extensions.index.refreshing = false;
+                    match result {
+                        Ok(index) => {
+                            s.extensions.index.index = Some(Arc::new(index));
+                            s.extensions.prefs.index_refreshed_at = Some(install::now());
+                        }
+                        Err(err) => {
+                            info!(%err, "the extension index was not refreshed");
+                            s.extensions.index.error = Some(err);
+                        }
+                    }
+                    cx.notify();
+                });
+                Self::save_extension_prefs(cx);
+            },
+        );
+    }
+
+    /// The registries' extensions for files with `suffix` (the diff hint):
+    /// the offline index answers at once when it knows the suffix, else the
+    /// registries are asked.
     pub fn lookup_extensions_for_suffix(suffix: &str, cx: &mut App) {
         let suffix = suffix.trim_start_matches('.').to_ascii_lowercase();
         let state = Self::state(cx);
@@ -495,6 +690,29 @@ impl Dispatcher {
             .get(&suffix)
             .is_some_and(|h| h.in_flight || !h.candidates.is_empty())
         {
+            return;
+        }
+        let from_index: Vec<Candidate> = state
+            .read(cx)
+            .extensions
+            .index
+            .index
+            .as_ref()
+            .map(|i| i.lookup(&suffix))
+            .unwrap_or_default();
+        if !from_index.is_empty() {
+            state.update(cx, |s, cx| {
+                s.extensions.hint_lookup.insert(
+                    suffix.clone(),
+                    HintResult {
+                        candidates: from_index,
+                        in_flight: false,
+                        error: None,
+                        from_index: true,
+                    },
+                );
+                cx.notify();
+            });
             return;
         }
         state.update(cx, |s, cx| {
@@ -519,7 +737,7 @@ impl Dispatcher {
                         Err(err) => errors.push(format!("{}: {err}", registry.title())),
                     }
                 }
-                candidates.sort_by(|a, b| b.downloads.cmp(&a.downloads));
+                candidates.sort_by_key(|c| std::cmp::Reverse(c.downloads));
                 (candidates, errors)
             },
             move |(candidates, errors), cx| {
@@ -530,6 +748,7 @@ impl Dispatcher {
                             candidates,
                             in_flight: false,
                             error: (!errors.is_empty()).then(|| errors.join("; ")),
+                            from_index: false,
                         },
                     );
                     cx.notify();
@@ -606,7 +825,9 @@ impl Dispatcher {
                         Registry::Pulsar => registry::pulsar::latest(&registry_id),
                     };
                     match latest {
-                        Ok(Some(candidate)) if candidate.version.is_some() && candidate.version != version => {
+                        Ok(Some(candidate))
+                            if candidate.version.is_some() && candidate.version != version =>
+                        {
                             newer.push((id, candidate));
                         }
                         Ok(_) => {}
@@ -627,6 +848,220 @@ impl Dispatcher {
         );
     }
 
+    /// `1001-build-grammars-from-source`: offer to build `grammar` of
+    /// extension `id`. Shows the consent sheet unless the user remembered
+    /// their answer for this repository and commit.
+    pub fn request_grammar_build(id: &str, grammar: &str, cx: &mut App) {
+        let state = Self::state(cx);
+        let (plan, remembered) = {
+            let s = state.read(cx);
+            if !s.flags.bool(ids::BUILD_GRAMMARS_FROM_SOURCE) {
+                return;
+            }
+            let Some(installed) = s.extensions.get(id) else {
+                return;
+            };
+            let Some(status) = installed
+                .metadata
+                .grammars
+                .iter()
+                .find(|g| g.name == grammar)
+            else {
+                return;
+            };
+            let Some(repository) = &status.repository else {
+                return;
+            };
+            let plan = BuildPlan::new(
+                id,
+                grammar,
+                repository,
+                status.rev.as_deref().unwrap_or("HEAD"),
+                status.path.as_deref(),
+                &extensions_cache_dir(),
+            );
+            let plan = match plan {
+                Ok(plan) => plan,
+                Err(err) => {
+                    Self::state(cx).update(cx, |s, cx| {
+                        s.extensions
+                            .build_errors
+                            .insert(format!("{id}/{grammar}"), err.to_string());
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let remembered = s
+                .extensions
+                .prefs
+                .build_consents
+                .contains(&plan.consent_key());
+            (plan, remembered)
+        };
+        let (id, grammar) = (id.to_string(), grammar.to_string());
+        spawn_bg(cx, Compiler::find, move |compiler, cx| {
+            match (remembered, compiler) {
+                (true, Ok(compiler)) => Self::build_grammar(plan, compiler, cx),
+                (_, compiler) => {
+                    Self::state(cx).update(cx, |s, cx| {
+                        s.extensions.pending_consent = Some(BuildConsent {
+                            extension: id,
+                            grammar,
+                            plan,
+                            compiler,
+                        });
+                        cx.notify();
+                    });
+                }
+            }
+        });
+    }
+
+    /// `CORVENE_POPUP=language-extensions:consent`: offer the first grammar
+    /// waiting for a build (dev / snapshot convenience).
+    pub fn request_first_grammar_build(cx: &mut App) {
+        let found = Self::state(cx)
+            .read(cx)
+            .extensions
+            .installed
+            .iter()
+            .find_map(|i| {
+                i.metadata
+                    .grammars
+                    .iter()
+                    .find(|g| g.resolution == Resolution::NeedsBuild)
+                    .map(|g| (i.metadata.id.clone(), g.name.clone()))
+            });
+        if let Some((id, grammar)) = found {
+            Self::request_grammar_build(&id, &grammar, cx);
+        }
+    }
+
+    /// The consent sheet's answer.
+    pub fn respond_to_build_consent(accept: bool, remember: bool, cx: &mut App) {
+        let consent = Self::state(cx).update(cx, |s, cx| {
+            cx.notify();
+            s.extensions.pending_consent.take()
+        });
+        let Some(consent) = consent else {
+            return;
+        };
+        if !accept {
+            return;
+        }
+        let Ok(compiler) = consent.compiler else {
+            return;
+        };
+        if remember {
+            Self::state(cx).update(cx, |s, _| {
+                s.extensions
+                    .prefs
+                    .build_consents
+                    .insert(consent.plan.consent_key());
+            });
+            Self::save_extension_prefs(cx);
+        }
+        Self::build_grammar(consent.plan, compiler, cx);
+    }
+
+    /// Download, compile, verify (in a helper process) and register a
+    /// grammar; on success the extension's metadata records the library.
+    fn build_grammar(plan: BuildPlan, compiler: Compiler, cx: &mut App) {
+        let key = format!("{}/{}", plan.extension, plan.grammar);
+        let state = Self::state(cx);
+        if state.read(cx).extensions.builds.contains_key(&key) {
+            return;
+        }
+        state.update(cx, |s, cx| {
+            s.extensions.build_errors.remove(&key);
+            s.extensions.builds.insert(
+                key.clone(),
+                BuildProgress {
+                    stage: Stage::Downloading {
+                        received: 0,
+                        total: None,
+                    },
+                },
+            );
+            cx.notify();
+        });
+        let (tx, rx) = async_channel::unbounded::<Stage>();
+        cx.spawn({
+            let state = state.clone();
+            let key = key.clone();
+            async move |cx: &mut AsyncApp| {
+                while let Ok(stage) = rx.recv().await {
+                    state.update(cx, |s, cx| {
+                        if let Some(build) = s.extensions.builds.get_mut(&key) {
+                            build.stage = stage;
+                            cx.notify();
+                        }
+                    });
+                }
+            }
+        })
+        .detach();
+        let (extension, grammar) = (plan.extension.clone(), plan.grammar.clone());
+        let dir = extensions_dir().join(&plan.extension);
+        spawn_bg(
+            cx,
+            move || {
+                let mut progress = |stage: Stage| {
+                    let _ = tx.try_send(stage);
+                };
+                let built = tsbuild::build(&plan, &compiler, &mut progress, &verify_in_helper)?;
+                // record the library in the extension's metadata
+                let mut metadata = install::read(&dir)?;
+                if let Some(status) = metadata.grammars.iter_mut().find(|g| g.name == grammar) {
+                    status.resolution = Resolution::Built {
+                        library: built.library.to_string_lossy().into_owned(),
+                    };
+                    status.error = None;
+                    if status.queries.is_some() {
+                        status.status = Status::Ok;
+                    }
+                }
+                install::write(&dir, &metadata)?;
+                Ok::<Metadata, corvene_extensions::ExtensionError>(metadata)
+            },
+            move |result, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.extensions.builds.remove(&key);
+                    match &result {
+                        Ok(metadata) => {
+                            if let Some(installed) = s
+                                .extensions
+                                .installed
+                                .iter_mut()
+                                .find(|i| i.metadata.id == extension)
+                            {
+                                let (enabled, prefer) = (
+                                    installed.metadata.enabled,
+                                    installed.metadata.prefer_over_builtin,
+                                );
+                                installed.metadata = metadata.clone();
+                                installed.metadata.enabled = enabled;
+                                installed.metadata.prefer_over_builtin = prefer;
+                            }
+                        }
+                        Err(err) => {
+                            warn!(%err, key, "grammar build failed");
+                            s.extensions
+                                .build_errors
+                                .insert(key.clone(), err.to_string());
+                        }
+                    }
+                    cx.notify();
+                });
+                if result.is_ok() {
+                    info!(key, "grammar built from source");
+                    Self::rebuild_user_syntaxes(cx);
+                }
+            },
+        );
+    }
+
     /// Turn an extension on or off.
     pub fn set_extension_enabled(id: &str, enabled: bool, cx: &mut App) {
         Self::update_switches(id, cx, |switches| switches.enabled = enabled);
@@ -638,7 +1073,12 @@ impl Dispatcher {
     pub fn set_extension_preferred(id: &str, preferred: bool, cx: &mut App) {
         Self::update_switches(id, cx, |switches| switches.prefer_over_builtin = preferred);
         user::set_owner_preference(id, preferred);
-        if Self::state(cx).read(cx).extensions.registered_tree_sitter.contains(id) {
+        if Self::state(cx)
+            .read(cx)
+            .extensions
+            .registered_tree_sitter
+            .contains(id)
+        {
             // re-rank: the registration carries the preference
             Self::rebuild_user_syntaxes(cx);
         }
@@ -646,9 +1086,11 @@ impl Dispatcher {
 
     fn update_switches(id: &str, cx: &mut App, change: impl FnOnce(&mut ExtensionSwitches)) {
         let changed = Self::state(cx).update(cx, |s, cx| {
-            let Some(installed) = s.extensions.installed.iter_mut().find(|i| i.metadata.id == id) else {
-                return None;
-            };
+            let installed = s
+                .extensions
+                .installed
+                .iter_mut()
+                .find(|i| i.metadata.id == id)?;
             let mut switches = ExtensionSwitches {
                 enabled: installed.metadata.enabled,
                 prefer_over_builtin: installed.metadata.prefer_over_builtin,
@@ -677,9 +1119,11 @@ impl Dispatcher {
     /// Delete an extension.
     pub fn remove_extension(id: &str, cx: &mut App) {
         let removed = Self::state(cx).update(cx, |s, cx| {
-            let Some(index) = s.extensions.installed.iter().position(|i| i.metadata.id == id) else {
-                return None;
-            };
+            let index = s
+                .extensions
+                .installed
+                .iter()
+                .position(|i| i.metadata.id == id)?;
             let installed = s.extensions.installed.remove(index);
             s.extensions.prefs.switches.remove(id);
             s.extensions.errors.remove(id);
@@ -763,6 +1207,28 @@ impl Dispatcher {
     }
 }
 
+/// Load a built library in a helper process (`corvene --verify-grammar`):
+/// a library that crashes on load fails here instead of in the app.
+fn verify_in_helper(library: &Path) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|err| err.to_string())?;
+    let output = std::process::Command::new(exe)
+        .arg("--verify-grammar")
+        .arg(library)
+        .output()
+        .map_err(|err| format!("could not run the verifier: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.lines().last().unwrap_or("").trim().to_string();
+        Err(if message.is_empty() {
+            format!("the verifier exited with {}", output.status)
+        } else {
+            message
+        })
+    }
+}
+
 /// Where a tree-sitter grammar's parser comes from: one of Corvene's own
 /// when the repository or name matches, else a build from source.
 pub fn resolve_grammar(grammar: &GrammarRef) -> Resolution {
@@ -776,7 +1242,9 @@ pub fn resolve_grammar(grammar: &GrammarRef) -> Resolution {
             Some(bundled) => Resolution::Bundled { name: bundled },
             None if repository.is_some() => Resolution::NeedsBuild,
             None => Resolution::Failed {
-                error: format!("Corvene has no grammar named {name} and the extension names no repository to build it from"),
+                error: format!(
+                    "Corvene has no grammar named {name} and the extension names no repository to build it from"
+                ),
             },
         },
         _ => Resolution::Unresolved,
@@ -798,7 +1266,13 @@ fn install_from(
         let mut progress = |received, total| {
             report(ExtensionProgress::Downloading { received, total });
         };
-        let downloaded = http::download(url, &dest, http::MAX_ARCHIVE_BYTES, extra_host, &mut progress)?;
+        let downloaded = http::download(
+            url,
+            &dest,
+            http::MAX_ARCHIVE_BYTES,
+            extra_host,
+            &mut progress,
+        )?;
         report(ExtensionProgress::Unpacking);
         Ok::<_, corvene_extensions::ExtensionError>((dest, downloaded))
     };
@@ -818,7 +1292,11 @@ fn install_from(
                 editor: None,
                 registry_id: None,
             };
-            let id = install::extension_id(kind, scanned.manifest.publisher.as_deref(), &scanned.manifest.name);
+            let id = install::extension_id(
+                kind,
+                scanned.manifest.publisher.as_deref(),
+                &scanned.manifest.name,
+            );
             (scanned, record, id)
         }
         InstallSource::Url(url) => {
@@ -837,7 +1315,11 @@ fn install_from(
                 editor: None,
                 registry_id: None,
             };
-            let id = install::extension_id(SourceKind::Url, scanned.manifest.publisher.as_deref(), &scanned.manifest.name);
+            let id = install::extension_id(
+                SourceKind::Url,
+                scanned.manifest.publisher.as_deref(),
+                &scanned.manifest.name,
+            );
             (scanned, record, id)
         }
         InstallSource::GitHub(repo) => {
@@ -861,7 +1343,9 @@ fn install_from(
                 )));
             }
             let mut scanned = scan::scan_dir(&root)?;
-            if scanned.root == root && scanned.manifest.name == root.file_name().and_then(|n| n.to_str()).unwrap_or("") {
+            if scanned.root == root
+                && scanned.manifest.name == root.file_name().and_then(|n| n.to_str()).unwrap_or("")
+            {
                 scanned.manifest.name = repo.id_parts().1;
             }
             if scanned.manifest.repository.is_none() {
@@ -912,14 +1396,19 @@ fn install_from(
                 registry_id: None,
             };
             let editor = install::slug(candidate.editor.title());
-            let id = install::extension_id(SourceKind::Imported, Some(&editor), &scanned.manifest.name);
+            let id =
+                install::extension_id(SourceKind::Imported, Some(&editor), &scanned.manifest.name);
             (scanned, record, id)
         }
     };
     report(ExtensionProgress::Converting);
     let out = extensions_dir.join(&id);
     let prepared = install::prepare::prepare(&scanned, &id, record, &out, &resolve_grammar)?;
-    info!(id, grammars = prepared.metadata.grammars.len(), "language extension installed");
+    info!(
+        id,
+        grammars = prepared.metadata.grammars.len(),
+        "language extension installed"
+    );
     Ok(Installed {
         dir: out,
         metadata: prepared.metadata,
@@ -963,19 +1452,33 @@ fn rebuild(enabled: &[Installed], extensions_dir: &Path) -> Rebuilt {
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0)
                         ));
-                        sources.push((md.id.clone(), md.prefer_over_builtin, path, grammar.name.clone()));
+                        sources.push((
+                            md.id.clone(),
+                            md.prefer_over_builtin,
+                            path,
+                            grammar.name.clone(),
+                        ));
                     }
                 }
                 GrammarKind::TreeSitter => {
                     let language = match &grammar.resolution {
-                        Resolution::Bundled { name } => UserLanguage::Derived { base: name.clone() },
-                        Resolution::Built { library } => UserLanguage::Library(PathBuf::from(library)),
-                        Resolution::Unresolved | Resolution::NeedsBuild | Resolution::Failed { .. } => continue,
+                        Resolution::Bundled { name } => {
+                            UserLanguage::Derived { base: name.clone() }
+                        }
+                        Resolution::Built { library } => {
+                            UserLanguage::Library(PathBuf::from(library))
+                        }
+                        Resolution::Unresolved
+                        | Resolution::NeedsBuild
+                        | Resolution::Failed { .. } => continue,
                     };
                     let Some(queries) = &grammar.queries else {
                         continue;
                     };
-                    let read = |file: &str| std::fs::read_to_string(installed.dir.join(queries).join(file)).unwrap_or_default();
+                    let read = |file: &str| {
+                        std::fs::read_to_string(installed.dir.join(queries).join(file))
+                            .unwrap_or_default()
+                    };
                     let languages: Vec<_> = md
                         .languages
                         .iter()
@@ -1015,7 +1518,7 @@ fn rebuild(enabled: &[Installed], extensions_dir: &Path) -> Rebuilt {
     }
     let key = cache::cache_key(&key_parts);
     let dump_path = extensions_dir.join(format!("syntaxes-{key}.packdump"));
-    let mut owners: HashMap<String, (String, bool)> = HashMap::new();
+    let mut owners: Owners = HashMap::new();
     let mut definitions = Vec::new();
     for (id, preferred, path, grammar_name) in &sources {
         let text = match std::fs::read_to_string(path) {

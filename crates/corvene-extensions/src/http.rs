@@ -122,10 +122,27 @@ pub fn download(
     extra_host: Option<&str>,
     progress: &mut dyn FnMut(u64, Option<u64>),
 ) -> Result<Downloaded, ExtensionError> {
-    allowed(url, extra_host)?;
     if let Some(dir) = dest.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    // tests and `CORVENE_PACKS_MANIFEST`-style local setups: a file copied
+    // through the same path (size cap and digest included)
+    if let Some(path) = url.strip_prefix("file://") {
+        let bytes = std::fs::read(path)?;
+        if bytes.len() as u64 > cap {
+            return Err(ExtensionError::Archive(
+                "the file is larger than Corvene accepts".to_string(),
+            ));
+        }
+        std::fs::write(dest, &bytes)?;
+        progress(bytes.len() as u64, Some(bytes.len() as u64));
+        return Ok(Downloaded {
+            bytes: bytes.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            url: url.to_string(),
+        });
+    }
+    allowed(url, extra_host)?;
     let mut response = agent().get(url).call().map_err(|err| {
         ExtensionError::Archive(format!("{}: {err}", host_of(url).unwrap_or_default()))
     })?;

@@ -415,6 +415,18 @@ fn open_library(path: &Path) -> Result<Vec<Arc<Grammar>>, String> {
     Ok(grammars)
 }
 
+/// Open a library and read its table without registering it: the
+/// `corvene --verify-grammar` helper runs this in its own process so a
+/// library that crashes on load never takes the app down. Returns the
+/// grammar names.
+pub fn verify_library(path: &Path) -> Result<Vec<String>, String> {
+    let grammars = open_library(path)?;
+    if grammars.is_empty() {
+        return Err("the library holds no usable grammar".to_string());
+    }
+    Ok(grammars.iter().map(|g| g.name.clone()).collect())
+}
+
 /// Use one grammar library (every grammar in it, loaded now) under `name`.
 /// Returns how many grammars it holds.
 pub fn load_library(name: &str, path: &Path) -> Result<usize, String> {
@@ -550,8 +562,9 @@ fn load_user(user: &UserGrammar) -> Result<Grammar, String> {
                 .or_else(|| None)
                 .ok_or_else(|| format!("{} holds no grammar named {}", path.display(), user.name))?
         }
-        UserLanguage::Derived { base } => base_grammar(base)
-            .ok_or_else(|| format!("Corvene has no grammar named {base} (is its pack installed?)"))?,
+        UserLanguage::Derived { base } => base_grammar(base).ok_or_else(|| {
+            format!("Corvene has no grammar named {base} (is its pack installed?)")
+        })?,
     };
     let pick = |own: &str, inherited: &str| {
         if own.trim().is_empty() {
@@ -624,7 +637,11 @@ pub fn register_user(extension: &str, preferred: bool, grammars: Vec<UserGrammar
             Arc::new(entry)
         })
         .collect();
-    let prefix = if preferred { USER_PREFERRED } else { USER_FALLBACK };
+    let prefix = if preferred {
+        USER_PREFERRED
+    } else {
+        USER_FALLBACK
+    };
     insert(&format!("{prefix}{extension}"), entries);
 }
 
@@ -641,7 +658,8 @@ fn unregister_user_quiet(extension: &str) -> bool {
     };
     let before = sources.len();
     sources.retain(|s| {
-        !(s.name == format!("{USER_PREFERRED}{extension}") || s.name == format!("{USER_FALLBACK}{extension}"))
+        !(s.name == format!("{USER_PREFERRED}{extension}")
+            || s.name == format!("{USER_FALLBACK}{extension}"))
     });
     sources.len() != before
 }

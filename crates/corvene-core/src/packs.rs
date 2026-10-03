@@ -51,7 +51,7 @@ impl PacksState {
             PackKind::TreeSitterAll | PackKind::TreeSitterRest => {
                 corvene_highlight::treesitter::bundled()
             }
-            PackKind::GitPortable | PackKind::GitLfs => false,
+            PackKind::GitPortable | PackKind::GitLfs | PackKind::LanguageExtensionsIndex => false,
         }
     }
 
@@ -90,7 +90,7 @@ pub fn offered_packs(flags: &Flags) -> Vec<PackKind> {
             PackKind::TreeSitterAll | PackKind::TreeSitterRest => {
                 flags.bool(ids::TREE_SITTER_HIGHLIGHTING)
             }
-            PackKind::GitPortable | PackKind::GitLfs => false,
+            PackKind::GitPortable | PackKind::GitLfs | PackKind::LanguageExtensionsIndex => false,
         })
         .collect()
 }
@@ -123,7 +123,7 @@ fn activate(pack: &InstalledPack) -> Result<(), String> {
             info!(count, version = %pack.version, pack = pack.kind.name(), "tree-sitter grammars loaded");
             Ok(())
         }
-        PackKind::GitPortable | PackKind::GitLfs => Ok(()),
+        PackKind::GitPortable | PackKind::GitLfs | PackKind::LanguageExtensionsIndex => Ok(()),
     }
 }
 
@@ -133,7 +133,7 @@ fn deactivate(kind: PackKind) {
             corvene_highlight::treesitter::unload_library(kind.name());
             let _ = std::fs::remove_dir_all(grammar_cache(kind));
         }
-        PackKind::GitPortable | PackKind::GitLfs => {}
+        PackKind::GitPortable | PackKind::GitLfs | PackKind::LanguageExtensionsIndex => {}
     }
 }
 

@@ -14,12 +14,14 @@ pub mod cson;
 pub mod github;
 pub mod http;
 pub mod importer;
+pub mod index;
 pub mod install;
 pub mod manifest;
 pub mod plist;
 pub mod registry;
 pub mod scan;
 pub mod tm;
+pub mod tsbuild;
 pub mod value;
 
 use thiserror::Error;

@@ -25,6 +25,29 @@ use tracing::{debug, error, info, warn};
 // `pub(crate)`: on Android this file is a module of the activity's native
 // library (`android.rs`), whose `android_main` calls it
 pub(crate) fn main() {
+    // `corvene --verify-grammar <library>`: load a grammar library built by a
+    // language extension and exit 0 when it reads (run as a helper process
+    // by corvene_core::extensions, so a library that crashes on load never
+    // takes the app down)
+    {
+        let mut args = std::env::args().skip(1);
+        if args.next().as_deref() == Some("--verify-grammar") {
+            let Some(path) = args.next() else {
+                eprintln!("usage: corvene --verify-grammar <library>");
+                std::process::exit(2);
+            };
+            match corvene_highlight::treesitter::verify_library(std::path::Path::new(&path)) {
+                Ok(names) => {
+                    println!("{}", names.join("\n"));
+                    std::process::exit(0);
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
     // `GIT_ASKPASS` runs this same binary; answer git and exit before touching GPUI.
     if std::env::var_os("CORVENE_ASKPASS").is_some() {
         askpass::run();
@@ -421,8 +444,9 @@ pub(crate) fn main() {
         //   ready / Homebrew / package manager state: the banner, plus About or
         //   the Release Notes with "Install and Restart")
         //   flags[:<search>] (Corvene › Flags…, with the search box prefilled)
-        //   language-extensions[:find|:find=<suffix>|:import] (Settings › Appearance ›
-        //   Language extensions…; flag 111)
+        //   language-extensions[:find|:find=<suffix>|:import|:consent] (Settings › Appearance ›
+        //   Language extensions…; flag 111; :consent offers the first grammar waiting for a
+        //   build from source, flag 1001)
         //   git-error[:raw|:known|:push|:plain] (the error dialog for a failed pull:
         //   a merge blocked by local changes, an output nobody has words for, a
         //   failure GHD describes, a push a protected branch rejected, or an error
@@ -1219,9 +1243,13 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         (other, _) if other == "flags" || other.starts_with("flags:") => {
             Dispatcher::open_flags(other.strip_prefix("flags:").map(str::to_string), cx)
         }
-        (other, _) if other == "language-extensions" || other.starts_with("language-extensions:") => {
+        (other, _)
+            if other == "language-extensions" || other.starts_with("language-extensions:") =>
+        {
             use corvene_core::extensions::ExtensionsFocus;
+            let consent = other.ends_with(":consent");
             let focus = match other.strip_prefix("language-extensions:") {
+                Some("consent") => None,
                 Some("find") => Some(ExtensionsFocus::Find),
                 Some("import") => Some(ExtensionsFocus::Import),
                 Some(rest) => rest
@@ -1229,7 +1257,17 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                     .map(|suffix| ExtensionsFocus::Suffix(suffix.to_string())),
                 None => None,
             };
-            Dispatcher::open_language_extensions(focus, None, cx)
+            Dispatcher::open_language_extensions(focus, None, cx);
+            if consent {
+                // the extensions load in the background: ask once they have
+                cx.spawn(async move |cx: &mut AsyncApp| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(1500))
+                        .await;
+                    cx.update(Dispatcher::request_first_grammar_build);
+                })
+                .detach();
+            }
         }
         (other, _) if other.starts_with("preferences") => {
             use corvene_core::PreferencesTab as Tab;

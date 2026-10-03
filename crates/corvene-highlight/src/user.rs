@@ -216,17 +216,31 @@ mod tests {
         let _guard = lock();
         // `.js` has a CodeMirror mode: `function` is a keyword there
         install(true);
-        assert_eq!(first_class("a.js", "function f() {}"), Some(TokenClass::Comment));
+        assert_eq!(
+            first_class("a.js", "function f() {}"),
+            Some(TokenClass::Comment)
+        );
         set_owner_preference("local.zzz", false);
-        assert_eq!(first_class("a.js", "function f() {}"), Some(TokenClass::Keyword));
+        assert_eq!(
+            first_class("a.js", "function f() {}"),
+            Some(TokenClass::Keyword)
+        );
         assert_eq!(claims("a.js", "").map(|c| c.preferred), Some(false));
         // a file nothing built in covers still gets the user grammar
         assert_eq!(first_class("a.zzz", "zork x"), Some(TokenClass::Comment));
         // the prefix path agrees
         let prefix = crate::highlight_prefix("a.zzz", &["zork", "zork"], 1).expect("prefix");
         assert_eq!(prefix.len(), 1);
-        assert!(!crate::has_builtin_highlighting(crate::Engine::GitHubDesktop, "a.zzz", ""));
-        assert!(crate::has_builtin_highlighting(crate::Engine::GitHubDesktop, "a.js", ""));
+        assert!(!crate::has_builtin_highlighting(
+            crate::Engine::GitHubDesktop,
+            "a.zzz",
+            ""
+        ));
+        assert!(crate::has_builtin_highlighting(
+            crate::Engine::GitHubDesktop,
+            "a.js",
+            ""
+        ));
         clear();
     }
 }

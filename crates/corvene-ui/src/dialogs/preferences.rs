@@ -1337,7 +1337,9 @@ impl PreferencesDialog {
             // Corvene addition: `105-tree-sitter-highlighting`
             .when(tree_sitter, |d| d.child(self.syntax_highlighter_field(cx)))
             // Corvene addition: `111-language-extensions`
-            .when(language_extensions, |d| d.child(self.language_extensions_field(cx)))
+            .when(language_extensions, |d| {
+                d.child(self.language_extensions_field(cx))
+            })
             .into_any_element()
     }
 
@@ -1355,7 +1357,11 @@ impl PreferencesDialog {
             .flex()
             .flex_col()
             .mt(SPACING())
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("Language extensions"))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Language extensions"),
+            )
             .child(settings_description(cx).mt(zpx(2.)).child(
                 "Add highlighting for more languages with grammars from VS Code, Zed, Pulsar, \
                  Sublime Text or TextMate extensions.",
@@ -1814,6 +1820,7 @@ impl PreferencesDialog {
             }
             PackKind::GitPortable => "A private copy of Git for machines without one.",
             PackKind::GitLfs => "Git Large File Storage for repositories that use it.",
+            PackKind::LanguageExtensionsIndex => "Which extensions cover which file types.",
         };
         // Android's `play` flavour gets the grammars from Google Play
         let description = if corvene_packs::store_delivered(kind) {

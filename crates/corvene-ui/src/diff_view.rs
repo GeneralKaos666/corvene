@@ -2169,6 +2169,90 @@ fn carry_over<'a>(
         .collect()
 }
 
+impl DiffView {
+    /// `756-missing-highlighting-hint`: one line above a text diff no
+    /// grammar colours, offering the Language Extensions dialog's Find tab
+    /// for the file's suffix. Corvene addition; GHD shows such a diff
+    /// without comment.
+    fn highlighting_hint(&self, snap: &Snapshot, cx: &Context<Self>) -> Option<AnyElement> {
+        use corvene_core::extensions::ExtensionsFocus;
+        use corvene_core::flags::ids;
+        let s = self.state.read(cx);
+        if !s.flags.bool(ids::MISSING_HIGHLIGHTING_HINT) || !s.flags.bool(ids::LANGUAGE_EXTENSIONS)
+        {
+            return None;
+        }
+        if !matches!(*snap.diff, Diff::Text { .. } | Diff::LargeText { .. })
+            || snap.diff.line_count() == 0
+        {
+            return None;
+        }
+        let suffix = s.extensions.hint_suffix(&snap.path)?;
+        let first = snap
+            .contents
+            .as_ref()
+            .and_then(|c| c.first())
+            .map(String::as_str)
+            .unwrap_or("");
+        let (engine, _) = highlight_engine(s);
+        if corvene_highlight::has_builtin_highlighting(engine, &snap.path, first)
+            || corvene_highlight::user::claims(&snap.path, first).is_some()
+        {
+            return None;
+        }
+        let t = cx.ghd();
+        let find_suffix = suffix.clone();
+        let dismiss_suffix = suffix.clone();
+        Some(
+            div()
+                .id("diff-highlighting-hint")
+                .flex_none()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(SPACING_HALF())
+                .px(SPACING())
+                .py(SPACING_HALF())
+                .text_size(FONT_SIZE_SM())
+                .bg(t.box_alt_background)
+                .border_b_1()
+                .border_color(t.box_border)
+                .child(octicon(Octicon::Info, t.text_secondary).size(zpx(14.)))
+                .child(
+                    div()
+                        .text_color(t.text_secondary)
+                        .child(format!("No syntax highlighting for .{suffix}.")),
+                )
+                .child(
+                    link_button("diff-highlighting-hint-find", "Find an extension…", cx)
+                        .text_size(FONT_SIZE_SM())
+                        .on_click(move |_, _, cx| {
+                            Dispatcher::lookup_extensions_for_suffix(&find_suffix, cx);
+                            Dispatcher::open_language_extensions(
+                                Some(ExtensionsFocus::Suffix(find_suffix.clone())),
+                                None,
+                                cx,
+                            );
+                        }),
+                )
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .id("diff-highlighting-hint-dismiss")
+                        .cursor_pointer()
+                        .p(zpx(2.))
+                        .rounded(zpx(3.))
+                        .hover(move |d| d.bg(t.list_item_hover_background))
+                        .child(octicon(Octicon::X, t.text_secondary).size(zpx(14.)))
+                        .on_click(move |_, _, cx| {
+                            Dispatcher::dismiss_suffix_hint(&dismiss_suffix, cx)
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
 /// The highlighter diffs use (Settings › Appearance › Syntax highlighting,
 /// offered by `105-tree-sitter-highlighting`) and, when it runs tree-sitter,
 /// the grammar set's generation.
@@ -2274,6 +2358,7 @@ impl Render for DiffView {
             Diff::TooLarge => self.panel("The diff is too large to be displayed.", cx),
             Diff::Submodule(sub) => self.submodule_panel(sub, cx),
         };
+        let hint = self.highlighting_hint(&snap, cx);
         div()
             .id("diff-container")
             .track_focus(&self.focus_handle)
@@ -2317,6 +2402,7 @@ impl Render for DiffView {
                     this.drag_text_selection(ev.position, cx);
                 }
             }))
+            .children(hint)
             .child(body)
             .children(options)
             .children(
