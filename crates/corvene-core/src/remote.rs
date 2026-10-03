@@ -81,8 +81,22 @@ pub enum PushPullKind {
     Generic,
 }
 
-/// Sidebar indicators (`ILocalRepositoryState`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Corvene (`271-persist-repository-indicators`): keep the indicators for
+/// the next launch, so the repository list is not blank until the first
+/// refresh. GHD keeps them in memory only (`RepositoryIndicatorUpdater`).
+fn save_indicators(s: &crate::state::AppState) {
+    if s.flags
+        .bool(crate::flags::ids::PERSIST_REPOSITORY_INDICATORS)
+        && let Err(err) = s.store.save_repository_indicators(&s.indicators)
+    {
+        warn!(?err, "could not save repository indicators");
+    }
+}
+
+/// Sidebar indicators (`ILocalRepositoryState`); saved between launches
+/// with `271-persist-repository-indicators`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RepoIndicator {
     pub ahead_behind: Option<AheadBehind>,
     pub changed_files: usize,
@@ -1641,6 +1655,7 @@ impl Dispatcher {
             Self::state(cx).update(cx, |s, cx| {
                 if !s.indicators.is_empty() {
                     s.indicators.clear();
+                    save_indicators(s);
                     cx.notify();
                 }
             });
@@ -1692,6 +1707,7 @@ impl Dispatcher {
             move |indicators, cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.indicators = indicators;
+                    save_indicators(s);
                     cx.notify();
                 });
             },

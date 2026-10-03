@@ -1492,6 +1492,22 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/repo.rs"],
     },
 
+    /// Repository list indicators survive a restart.
+    PERSIST_REPOSITORY_INDICATORS = 271 "persist-repository-indicators" {
+        title: "Remember repository indicators",
+        summary: "The repository list's ahead/behind arrows, changes dot (and branch and stash \
+                  extras) are saved after each background refresh and shown at the next launch \
+                  until the first refresh replaces them.",
+        ghd_behaviour: "The indicators are kept in memory only, so after a launch the list shows \
+                        none until the background refresh has visited every repository.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(5591)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

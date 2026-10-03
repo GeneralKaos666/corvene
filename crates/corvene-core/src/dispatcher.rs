@@ -75,6 +75,17 @@ impl Dispatcher {
                 )
             }
         };
+        // Corvene (`271-persist-repository-indicators`): last launch's
+        // indicators until the first refresh
+        let indicators = if flags.bool(crate::flags::ids::PERSIST_REPOSITORY_INDICATORS)
+            && settings.repository_indicators_enabled
+        {
+            let mut saved = store.repository_indicators().unwrap_or_default();
+            saved.retain(|id, _| repositories.iter().any(|r| r.id == *id && !r.missing));
+            saved
+        } else {
+            std::collections::HashMap::new()
+        };
         let state = cx.new(|_| AppState {
             store,
             settings,
@@ -99,7 +110,7 @@ impl Dispatcher {
             watched_repo: None,
             banner: None,
             banner_nonce: 0,
-            indicators: std::collections::HashMap::new(),
+            indicators,
             generic_logins,
             enterprise_oauth_apps,
             avatars: std::collections::HashMap::new(),
