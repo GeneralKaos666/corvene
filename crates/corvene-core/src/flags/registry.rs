@@ -1842,6 +1842,21 @@ registry! {
         code: &["crates/corvene-core/src/forks.rs"],
     },
 
+    /// Publish to an organization can grant a team access.
+    PUBLISH_TEAM = 378 "publish-team" {
+        title: "Publish: Team picker",
+        summary: "Publishing a repository to an organization offers an optional Team picker \
+                  listing the organization's teams; the picked team gets access to the new \
+                  repository.",
+        ghd_behaviour: "No team; access has to be granted on GitHub afterwards.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(826)],
+        code: &["crates/corvene-ui/src/dialogs/remote_dialogs.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-github/src/api.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

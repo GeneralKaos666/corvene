@@ -783,6 +783,20 @@ impl Client {
         Ok(response.body_mut().read_json()?)
     }
 
+    /// `GET /orgs/{org}/teams` (flag `publish-team`): the organization's
+    /// teams the account can see, as `(id, name)` sorted by name.
+    pub fn org_teams(&self, org: &str) -> Result<Vec<(u64, String)>> {
+        #[derive(Deserialize)]
+        struct Team {
+            id: u64,
+            name: String,
+        }
+        let teams: Vec<Team> = self.get_json(&format!("orgs/{org}/teams?per_page=100"))?;
+        let mut teams: Vec<(u64, String)> = teams.into_iter().map(|t| (t.id, t.name)).collect();
+        teams.sort_by_key(|(_, name)| name.to_lowercase());
+        Ok(teams)
+    }
+
     /// `GET /user/orgs`: organisations the user can publish to.
     pub fn user_orgs(&self) -> Result<Vec<String>> {
         #[derive(Deserialize)]
@@ -796,22 +810,29 @@ impl Client {
     }
 
     /// `POST /user/repos` or `/orgs/{org}/repos` (GHD `createRepository`).
+    ///
+    /// `team_id` (flag `publish-team`, organizations only) grants that team
+    /// access to the new repository.
     pub fn create_repository(
         &self,
         org: Option<&str>,
         name: &str,
         description: &str,
         private: bool,
+        team_id: Option<u64>,
     ) -> Result<GitHubRepository> {
         let path = match org {
             Some(org) => format!("orgs/{org}/repos"),
             None => "user/repos".to_string(),
         };
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "name": name,
             "description": description,
             "private": private,
         });
+        if let (Some(team_id), Some(_)) = (team_id, org) {
+            body["team_id"] = serde_json::json!(team_id);
+        }
         let repo: ApiRepository = self.post_json(&path, &body)?;
         Ok(self.convert(repo))
     }

@@ -1356,6 +1356,8 @@ impl Dispatcher {
     // ---- publish ----
 
     /// `_publishRepository`: create the GitHub repository, add `origin`, push.
+    /// `team_id`: flag `378-publish-team`.
+    #[allow(clippy::too_many_arguments)]
     pub fn publish_repository(
         id: u64,
         name: String,
@@ -1363,6 +1365,7 @@ impl Dispatcher {
         private: bool,
         account: Account,
         org: Option<String>,
+        team_id: Option<u64>,
         cx: &mut App,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
@@ -1398,7 +1401,7 @@ impl Dispatcher {
                     .with_error_details(error_details)
                     .with_sso_hint(sso_hint);
                 let repo = client
-                    .create_repository(org.as_deref(), &name, &description, private)
+                    .create_repository(org.as_deref(), &name, &description, private, team_id)
                     .map_err(|e| e.to_string())?;
                 corvene_git::add_remote(git, &workdir, "origin", &repo.clone_url)
                     .map_err(|e| e.to_string())?;

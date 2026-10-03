@@ -637,7 +637,10 @@ impl Render for OpenPullRequestDialog {
             .map(|c| (c.lines_added, c.lines_deleted))
             .unwrap_or((0, 0));
         let ok_disabled = preview.commit_shas.as_ref().is_none_or(|s| s.is_empty());
-        let no_file_changes = preview.changeset.as_ref().is_some_and(|c| c.files.is_empty())
+        let no_file_changes = preview
+            .changeset
+            .as_ref()
+            .is_some_and(|c| c.files.is_empty())
             && self
                 .state
                 .read(cx)

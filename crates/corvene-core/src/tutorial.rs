@@ -443,7 +443,7 @@ fn create_tutorial_repository(
     }
     let description = format!("{product_name} tutorial repository");
     let repo = client
-        .create_repository(None, TUTORIAL_REPOSITORY_NAME, &description, true)
+        .create_repository(None, TUTORIAL_REPOSITORY_NAME, &description, true, None)
         .map_err(|err| {
             let text = err.to_string();
             if text.contains("name already exists") {
