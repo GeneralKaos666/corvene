@@ -2582,6 +2582,21 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// → accepts the generated commit summary placeholder.
+    ACCEPT_SUMMARY_PLACEHOLDER = 654 "accept-summary-placeholder" {
+        title: "→ accepts the summary placeholder",
+        summary: "With one file included, the empty commit summary shows a generated summary \
+                  (\"Update README.md\"); pressing → there types it into the field, caret at the \
+                  end, to extend it instead of retyping it.",
+        ghd_behaviour: "The placeholder is only used as is when committing with an empty summary.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20563)],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

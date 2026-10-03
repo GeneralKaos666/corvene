@@ -44,6 +44,8 @@
 //! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
 //! - adding yourself or a second token for the same co-author is refused
 //!   with a hint under the co-authors box (`779-co-author-validation`).
+//! - → in the empty summary types the generated placeholder
+//!   (`654-accept-summary-placeholder`).
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
 //!   pattern before it is added to `.gitignore` (`778-ignore-custom-pattern`).
 
@@ -60,8 +62,8 @@ use corvene_core::{
 };
 use gpui_kit::component::Sizable;
 use gpui_kit::component::input::{
-    Copy, Cut, Enter, Escape, IndentInline, InlineToken, InputEvent, InputState, MoveDown, MoveUp,
-    Paste, Redo, SelectAll, Textarea, TextareaState, Undo,
+    Copy, Cut, Enter, Escape, IndentInline, InlineToken, InputEvent, InputState, MoveDown,
+    MoveRight, MoveUp, Paste, Redo, SelectAll, Textarea, TextareaState, Undo,
 };
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -199,6 +201,8 @@ pub struct ChangesSidebar {
     /// `779-co-author-validation`: why the last co-author was not added, and
     /// when (shown under the co-authors box for a few seconds).
     co_author_hint: Option<(SharedString, std::time::Instant)>,
+    /// The summary's placeholder as last set (`getPlaceholderMessage`).
+    summary_placeholder: SharedString,
 }
 
 /// What the repository rules say about the commit being written
@@ -402,6 +406,7 @@ impl ChangesSidebar {
             rule_hint_bounds: Rc::new(Cell::new(Bounds::default())),
             recalled: None,
             co_author_hint: None,
+            summary_placeholder: "Summary (required)".into(),
         }
     }
 
@@ -2387,7 +2392,7 @@ impl ChangesSidebar {
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
-        let summary = self.summary.read(cx).value().to_string();
+        let summary = self.summary_or_placeholder(cx);
         let description = self.description.read(cx).value().to_string();
         let unknown = self.unknown_co_authors(cx);
         // `737-commit-tag-field`
@@ -2830,7 +2835,7 @@ impl ChangesSidebar {
             .and_then(|i| i.current_branch())
             .map(|b| b.name.clone());
         // `formatCommitMessage`: summary, blank line, description, trailers
-        let summary = self.summary.read(cx).value().trim().to_string();
+        let summary = self.summary_or_placeholder(cx).trim().to_string();
         let description = self.description.read(cx).value().trim().to_string();
         let message = if description.is_empty() {
             format!("{summary}\n")
@@ -3455,6 +3460,61 @@ impl ChangesSidebar {
         )
     }
 
+    /// GHD `getPlaceholderMessage` when `prepopulateCommitSummary` (exactly
+    /// one file included, not the tutorial repository): "Create x", "Delete
+    /// x" or "Update x", which an empty summary commits with.
+    fn generated_summary(&self, cx: &App) -> Option<String> {
+        let s = self.state.read(cx);
+        if s.selected_repository()?.is_tutorial_repository {
+            return None;
+        }
+        let status = s.selected_state()?.status.as_ref()?;
+        let mut included = status
+            .files
+            .iter()
+            .filter(|f| f.selection.kind() != DiffSelectionType::None);
+        let file = included.next()?;
+        if included.next().is_some() {
+            return None;
+        }
+        let name = file.path.rsplit('/').next().unwrap_or(&file.path);
+        Some(match file.status.kind {
+            FileStatusKind::New | FileStatusKind::Untracked => format!("Create {name}"),
+            FileStatusKind::Deleted => format!("Delete {name}"),
+            _ => format!("Update {name}"),
+        })
+    }
+
+    /// GHD `summaryOrPlaceholder`.
+    fn summary_or_placeholder(&self, cx: &App) -> String {
+        let summary = self.summary.read(cx).value().to_string();
+        if summary.is_empty() {
+            self.generated_summary(cx).unwrap_or(summary)
+        } else {
+            summary
+        }
+    }
+
+    /// Corvene (`654-accept-summary-placeholder`): → in the empty summary
+    /// types the generated placeholder, caret at the end.
+    fn accept_summary_placeholder(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.summary_focus.is_focused(window)
+            || !self.summary.read(cx).value().is_empty()
+            || !self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::ACCEPT_SUMMARY_PLACEHOLDER)
+        {
+            return false;
+        }
+        let Some(text) = self.generated_summary(cx) else {
+            return false;
+        };
+        self.summary.update(cx, |s, cx| s.replace(text, window, cx));
+        true
+    }
+
     fn commit_disabled(&self, cx: &App) -> bool {
         let s = self.state.read(cx);
         let rs = s.selected_state();
@@ -3473,7 +3533,7 @@ impl ChangesSidebar {
             .map(|r| r.commit_options.allow_empty_commit)
             .unwrap_or(false);
         let amending = rs.is_some_and(|r| r.commit_to_amend.is_some());
-        self.summary.read(cx).value().trim().is_empty()
+        self.summary_or_placeholder(cx).trim().is_empty()
             || (!any_included && !allow_empty && !amending)
             || committing
             || self.has_repo_rule_failure(cx)
@@ -3495,7 +3555,7 @@ impl ChangesSidebar {
             .selected
             .and_then(|id| s.repository(id))
             .is_some_and(|r| r.commit_options.allow_empty_commit);
-        if self.summary.read(cx).value().trim().is_empty() {
+        if self.summary_or_placeholder(cx).trim().is_empty() {
             Some("A commit summary is required to commit")
         } else if !any_included && any_available && !allow_empty {
             Some("Select one or more files to commit")
@@ -3815,6 +3875,11 @@ impl ChangesSidebar {
                     cx.stop_propagation();
                 }
             }))
+            .capture_action(cx.listener(|this, _: &MoveRight, window, cx| {
+                if this.accept_summary_placeholder(window, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .capture_action(cx.listener(|this, ev: &Enter, window, cx| {
                 if !ev.secondary && !ev.shift && this.autocomplete_accept(window, cx) {
                     cx.stop_propagation();
@@ -4128,6 +4193,16 @@ impl Render for ChangesSidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some((range, author)) = self.pending_author.take() {
             self.add_co_author(range, author, window, cx);
+        }
+        // `getPlaceholderMessage`
+        let placeholder: SharedString = self
+            .generated_summary(cx)
+            .map(SharedString::from)
+            .unwrap_or_else(|| "Summary (required)".into());
+        if self.summary_placeholder != placeholder {
+            self.summary_placeholder = placeholder.clone();
+            self.summary
+                .update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
         }
         // `CommitMessageAvatar`: the committer's avatar next to the summary.
         let identity_email = self
