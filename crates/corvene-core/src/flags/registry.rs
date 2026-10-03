@@ -1762,6 +1762,23 @@ registry! {
         code: &["crates/corvene-core/src/pull_requests.rs"],
     },
 
+    /// Pull request and branch names match ignoring case as a fallback.
+    PR_BRANCH_CASE_INSENSITIVE = 374 "pr-branch-case-insensitive" {
+        title: "Match pull request branches ignoring case",
+        summary: "When no branch matches a pull request's head branch exactly, a branch whose \
+                  name differs only in case is used, so clicking the pull request switches to it \
+                  and the current branch shows its pull request even after a case-insensitive \
+                  file system folded the remote branch's name.",
+        ghd_behaviour: "Compares names exactly, so such pull requests do not switch to their \
+                        branch and are not shown as the current branch's.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(9463)],
+        code: &["crates/corvene-core/src/pull_requests.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
