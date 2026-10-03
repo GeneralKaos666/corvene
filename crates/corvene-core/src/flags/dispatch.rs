@@ -204,6 +204,7 @@ impl Dispatcher {
             Self::restart_watcher(cx);
         }
         Self::sync_crash_reports_setting(cx);
+        corvene_git::set_explain_missing_workdir(now.bool(ids::GIT_SPAWN_ERROR_DETAILS));
         if now.bool(ids::EXTRA_EDITORS) != previous.bool(ids::EXTRA_EDITORS)
             || now.bool(ids::INTEGRATION_APP_ICONS) != previous.bool(ids::INTEGRATION_APP_ICONS)
         {

@@ -4268,6 +4268,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/error.rs"],
     },
 
+    /// A missing repository folder is named instead of "Not a directory".
+    GIT_SPAWN_ERROR_DETAILS = 876 "git-spawn-error-details" {
+        title: "Name a missing repository folder",
+        summary: "When git cannot start because the repository's folder is gone or is a file, \
+                  the error says which folder is missing instead of \"could not run git: Not a \
+                  directory\".",
+        ghd_behaviour: "Shows \"spawn ENOTDIR\" or a similar system error that reads as if Git \
+                        were broken.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(9887)],
+        code: &["crates/corvene-git/src/process.rs", "crates/corvene-git/src/error.rs", "crates/corvene-core/src/flags/dispatch.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

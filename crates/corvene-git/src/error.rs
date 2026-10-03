@@ -8,6 +8,13 @@ pub enum GitError {
     GitTooOld { found: String, required: String },
     #[error("could not run git: {0}")]
     Spawn(#[source] std::io::Error),
+    /// Flag `876`: the command's working directory is missing or a file.
+    #[error(
+        "The repository folder {} is missing or not a folder. It may have been moved, renamed \
+         or deleted, or be on a drive that is not connected.",
+        .0.display()
+    )]
+    MissingWorkdir(PathBuf),
     #[error("git {args} failed with exit code {code:?}: {stderr}")]
     Failed {
         args: String,

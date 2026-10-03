@@ -81,7 +81,8 @@ pub use patch::{
 };
 pub use paths::git_dir;
 pub use process::{
-    CancelToken, GitCommand, GitOutput, set_credential_helper, set_network_stall_timeout,
+    CancelToken, GitCommand, GitOutput, set_credential_helper, set_explain_missing_workdir,
+    set_network_stall_timeout,
 };
 pub use rebase_ops::{
     CherryPickResult, CherryPickSnapshot, RebaseOptions, RebaseResult, RebaseSnapshot,

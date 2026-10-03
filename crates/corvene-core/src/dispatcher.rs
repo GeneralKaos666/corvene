@@ -75,6 +75,10 @@ impl Dispatcher {
                 )
             }
         };
+        // `876-git-spawn-error-details`
+        corvene_git::set_explain_missing_workdir(
+            flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
+        );
         let state = cx.new(|_| AppState {
             store,
             settings,
