@@ -12,6 +12,9 @@
 //! Deviation (`781-blank-slate-pull-says-rebase`): the Pull card's button
 //! says "Pull origin with rebase" when `pull.rebase` is set, like the
 //! toolbar button (GHD `renderPullBranchAction` always says "Pull origin").
+//! Deviation (`782-editor-picker-dropdown`): a ▾ beside "Open in <editor>"
+//! lists the installed editors; picking one makes it the editor and opens
+//! the repository in it.
 //! Not built yet: GHD's Create / Preview Pull Request dropdown card for a
 //! published branch, and the `Ref` styling of branch names in descriptions.
 
@@ -34,6 +37,9 @@ pub struct SuggestedAction {
     pub keys: &'static [&'static str],
     pub button_label: SharedString,
     pub primary: bool,
+    /// Corvene (`782-editor-picker-dropdown`): a ▾ beside the button opens
+    /// these items.
+    pub menu: Option<Vec<crate::context_menu::MenuItem>>,
 }
 
 /// GHD `NoChanges` primary group, `renderViewStashAction() ||
@@ -69,6 +75,7 @@ fn stash_action(state: &AppState, id: u64) -> Option<SuggestedAction> {
             keys: &[],
             button_label: "Restore".into(),
             primary: true,
+            menu: None,
         });
     }
     let count = rs.stash_files.as_ref()?.len();
@@ -87,6 +94,7 @@ fn stash_action(state: &AppState, id: u64) -> Option<SuggestedAction> {
         keys: &[],
         button_label: "View stash".into(),
         primary: true,
+        menu: None,
     })
 }
 
@@ -110,6 +118,7 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
             keys: &["⌘", "P"],
             button_label: "Publish repository".into(),
             primary: true,
+            menu: None,
         });
     }
     let remote = Dispatcher::current_remote_in(state, id)?.name;
@@ -138,6 +147,7 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
             keys: &["⌘", "P"],
             button_label: "Publish branch".into(),
             primary: true,
+            menu: None,
         });
     }
     let ab = rs.ahead_behind?;
@@ -179,6 +189,7 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
                 format!("Pull {remote}").into()
             },
             primary: true,
+            menu: None,
         });
     }
     let tags = state.repository(id).map_or(0, |r| r.tags_to_push.len());
@@ -221,6 +232,7 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
             keys: &["⌘", "P"],
             button_label: format!("Push {remote}").into(),
             primary: true,
+            menu: None,
         });
     }
     None
@@ -301,6 +313,22 @@ fn card(action: SuggestedAction, cx: &App) -> impl IntoElement {
                     .on_click(move |_, window, cx| on_click(window, cx))
                     .into_any_element()
             }
+        })
+        .when_some(action.menu, |d, items| {
+            let arrow = cx.ghd().secondary_button_text;
+            d.child(
+                button(SharedString::from(format!("{}-menu", action.id)), "", cx)
+                    .ml(SPACING_HALF())
+                    .px(SPACING_HALF())
+                    .child(crate::icons::octicon(
+                        crate::icons::Octicon::TriangleDown,
+                        arrow,
+                    ))
+                    .on_click(move |ev: &ClickEvent, window, cx| {
+                        let position = ev.mouse_position().unwrap_or_default();
+                        crate::native_menu::show_context_menu(items.clone(), position, window, cx);
+                    }),
+            )
         })
 }
 

@@ -2031,6 +2031,7 @@ impl DiffView {
                     keys: &[],
                     button_label: mac_or("Open Repository", "Open repository").into(),
                     primary: true,
+                    menu: None,
                 },
                 cx,
             )

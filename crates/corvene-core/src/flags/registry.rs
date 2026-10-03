@@ -3743,6 +3743,21 @@ registry! {
         code: &["crates/corvene-core/src/autocomplete.rs", "crates/corvene-ui/src/autocompletion.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/log.rs"],
     },
 
+    /// Pick the editor from the no-changes "Open in" card.
+    EDITOR_PICKER_DROPDOWN = 782 "editor-picker-dropdown" {
+        title: "Editor menu on the no-changes card",
+        summary: "With more than one editor installed, a ▾ next to the no-changes view's \"Open \
+                  in <editor>\" button lists them; picking one makes it the external editor (the \
+                  repository's own one when it has one) and opens the repository in it.",
+        ghd_behaviour: "The button opens the editor chosen in Settings only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20330)],
+        code: &["crates/corvene-ui/src/workspace.rs", "crates/corvene-ui/src/no_changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

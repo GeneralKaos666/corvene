@@ -600,6 +600,51 @@ impl Workspace {
                     .and_then(|id| crate::no_changes::primary_action(state, id))
                     .into_iter()
                     .collect();
+                // Corvene (`782-editor-picker-dropdown`): the installed
+                // editors; a pick becomes the editor (the repository's own
+                // one when `554-per-repo-editor` set it) and opens
+                let editor_menu = {
+                    let s = self.state.read(cx);
+                    let per_repo = repo_id.filter(|_| {
+                        repo_path
+                            .as_deref()
+                            .is_some_and(|p| s.repository_editor(p).is_some())
+                    });
+                    (s.flags
+                        .bool(corvene_core::flags::ids::EDITOR_PICKER_DROPDOWN)
+                        && s.editors.len() > 1)
+                        .then(|| {
+                            s.editors
+                                .iter()
+                                .map(|e| {
+                                    let name = e.name.clone();
+                                    let path = path.clone();
+                                    crate::context_menu::MenuItem::checkbox(
+                                        e.name.clone(),
+                                        e.name == editor_label,
+                                        move |_, cx| {
+                                            match per_repo {
+                                                Some(id) => Dispatcher::set_repository_editor(
+                                                    id,
+                                                    Some(name.clone()),
+                                                    cx,
+                                                ),
+                                                None => {
+                                                    let name = name.clone();
+                                                    Dispatcher::update_settings(cx, move |s| {
+                                                        s.external_editor = Some(name);
+                                                        s.use_custom_editor = false;
+                                                    })
+                                                }
+                                            }
+                                            Dispatcher::open_in_editor(path.clone(), cx);
+                                        },
+                                    )
+                                    .icon(s.app_icons.get(&e.path).cloned())
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                };
                 if editor_available {
                     actions.push(SuggestedAction {
                         id: "suggested-editor",
@@ -613,6 +658,7 @@ impl Workspace {
                         keys: &["⌘", "⇧", "A"],
                         button_label: format!("Open in {editor_label}").into(),
                         primary: false,
+                        menu: editor_menu,
                     });
                 }
                 actions.extend([SuggestedAction {
@@ -641,6 +687,7 @@ impl Workspace {
                     }
                     .into(),
                     primary: false,
+                    menu: None,
                 }]);
                 if let Some(shell) = shell_label {
                     actions.push(SuggestedAction {
@@ -655,6 +702,7 @@ impl Workspace {
                         keys: &["⌃", "`"],
                         button_label: format!("Open in {shell}").into(),
                         primary: false,
+                        menu: None,
                     });
                 }
                 // `725-no-changes-view-pull-request`: GHD shows no remote
@@ -688,6 +736,7 @@ impl Workspace {
                             )
                             .into(),
                             primary: true,
+                            menu: None,
                         },
                     );
                 }
@@ -701,6 +750,7 @@ impl Workspace {
                         keys: &["⌘", "⇧", "G"],
                         button_label: "View on GitHub".into(),
                         primary: false,
+                        menu: None,
                     });
                 }
                 no_changes(actions, cx).into_any_element()
