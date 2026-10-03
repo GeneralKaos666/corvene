@@ -1409,6 +1409,68 @@ impl Dispatcher {
                 cx.notify();
             }
         });
+        Self::load_diff_tool(id, cx);
+    }
+
+    /// `761-too-large-diff-escape-hatch`: read `diff.tool` once the selected
+    /// file's diff is too large to show, for "Open in External Diff Tool".
+    fn load_diff_tool(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        if !matches!(rs.diff.as_deref(), Some(corvene_models::Diff::TooLarge))
+            || !s.flags.bool(crate::flags::ids::TOO_LARGE_DIFF_ESCAPE_HATCH)
+        {
+            return;
+        }
+        let (Some(git), Some(info)) = (s.git.clone(), rs.info.as_ref()) else {
+            return;
+        };
+        let workdir = info.workdir.clone();
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::config_value(git, &workdir, "diff.tool"),
+            move |tool, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    if rs.diff_tool != tool {
+                        rs.diff_tool = tool;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
+    /// `761-too-large-diff-escape-hatch`: the selected file in the configured
+    /// `diff.tool` (`git difftool -y`).
+    pub fn open_in_diff_tool(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        let Some(git) = s.git.clone() else { return };
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let (Some(info), Some(path), Some(status)) = (
+            rs.info.as_ref(),
+            rs.selected_file.as_ref(),
+            rs.status.as_ref(),
+        ) else {
+            return;
+        };
+        let Some(file) = status.files.iter().find(|f| &f.path == path).cloned() else {
+            return;
+        };
+        let workdir = info.workdir.clone();
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::open_difftool(git, &workdir, &file),
+            |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not open the diff tool", err.to_string(), cx);
+                }
+            },
+        );
     }
 
     /// `901-prefetch-diffs`: compute the diffs of the files next to the

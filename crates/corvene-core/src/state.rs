@@ -727,6 +727,9 @@ pub struct RepositoryState {
     /// The old side (`HEAD:<old path>`), for syntax highlighting like GHD
     /// (`fileContents.oldContents`); `None` for new files.
     pub diff_old_contents: Option<Arc<Vec<String>>>,
+    /// `761-too-large-diff-escape-hatch`: the repository's `diff.tool`, read
+    /// when a diff turned out too large to show.
+    pub diff_tool: Option<String>,
     /// Most recent commit made from Corvene in this session (`UndoCommit` bar).
     pub last_commit: Option<LastCommit>,
     /// Summaries of the upstream's commits the current branch lacks

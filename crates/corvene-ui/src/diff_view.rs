@@ -35,6 +35,11 @@
 //! text in the Changes tab adds the gutter's "Discard … Line" items (for the
 //! line and for its block).
 //!
+//! Deviation (`761-too-large-diff-escape-hatch`): a working-directory diff
+//! too large to show offers "Open in external diff tool" (with `diff.tool`
+//! configured) and "Open file in <Editor>" (GHD `ui/diff/index.tsx` only says
+//! it is too large).
+//!
 //! Deviation (`757-diff-line-height`): the rows' height can be set (14–32
 //! px); GHD's is fixed at 20 px.
 //!
@@ -1766,6 +1771,61 @@ impl DiffView {
             .into_any_element()
     }
 
+    /// GHD `renderDiff` for an unrenderable diff. With
+    /// `761-too-large-diff-escape-hatch` a working-directory file offers its
+    /// configured `diff.tool` and the external editor.
+    fn too_large_panel(&self, snap: &Snapshot, cx: &Context<Self>) -> AnyElement {
+        const MESSAGE: &str = "The diff is too large to be displayed.";
+        let s = self.state.read(cx);
+        if self.source != DiffSource::WorkingDirectory
+            || !s
+                .flags
+                .bool(corvene_core::flags::ids::TOO_LARGE_DIFF_ESCAPE_HATCH)
+        {
+            return self.panel(MESSAGE, cx);
+        }
+        let t = cx.ghd();
+        let repo = snap.repo;
+        let diff_tool = s
+            .repo_states
+            .get(&repo)
+            .and_then(|rs| rs.diff_tool.clone())
+            .map(|tool| {
+                div().py(SPACING_HALF()).child(
+                    link_button(
+                        "too-large-diff-tool",
+                        format!("Open in external diff tool ({tool})."),
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| Dispatcher::open_in_diff_tool(repo, cx)),
+                )
+            });
+        let editor = (snap.kind != FileStatusKind::Deleted).then(|| {
+            let full_path = snap.repo_path.join(&snap.path);
+            div().py(SPACING_HALF()).child(
+                link_button(
+                    "too-large-editor",
+                    format!("Open file in {}.", s.editor_label()),
+                    cx,
+                )
+                .on_click(move |_, _, cx| Dispatcher::open_in_editor(full_path.clone(), cx)),
+            )
+        });
+        div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .p(SPACING_DOUBLE())
+            .text_size(FONT_SIZE())
+            .text_color(t.text_secondary)
+            .child(div().py(SPACING_HALF()).child(MESSAGE))
+            .children(diff_tool)
+            .children(editor)
+            .into_any_element()
+    }
+
     /// GHD `renderLargeTextDiff`.
     fn large_diff_panel(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
@@ -2388,7 +2448,7 @@ impl Render for DiffView {
                 Some(image) => image.into_any_element(),
                 None => self.panel("This binary file has changed.", cx),
             },
-            Diff::TooLarge => self.panel("The diff is too large to be displayed.", cx),
+            Diff::TooLarge => self.too_large_panel(&snap, cx),
             Diff::Submodule(sub) => self.submodule_panel(sub, cx),
         };
         div()

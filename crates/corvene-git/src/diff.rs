@@ -125,6 +125,34 @@ pub fn working_directory_diff(
     })
 }
 
+/// Corvene `761-too-large-diff-escape-hatch`: `git difftool -y` on one
+/// working-directory file against HEAD (a new file against `/dev/null`),
+/// with the repository's `diff.tool`. Blocks until the tool exits. Refuses
+/// without a configured `diff.tool` (git would fall back to a terminal tool).
+pub fn open_difftool(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &WorkingDirectoryFileChange,
+) -> Result<()> {
+    if crate::config_value(git.clone(), workdir, "diff.tool").is_none() {
+        return Err(crate::error::GitError::Gix(
+            "No diff tool is configured. Set one with git config --global diff.tool <tool>.".into(),
+        ));
+    }
+    let cmd = GitCommand::new(git)
+        .args(["difftool", "-y"])
+        .current_dir(workdir);
+    let cmd = if file.status.kind.is_new_or_untracked() {
+        // `--no-index` exits 1 when the files differ
+        cmd.args(["--no-index", "--", "/dev/null"])
+            .arg(&file.path)
+            .allow_exit_code(1)
+    } else {
+        cmd.args(["HEAD", "--"]).arg(&file.path)
+    };
+    cmd.run().map(|_| ())
+}
+
 /// Corvene `714-copy-diff`: the working-directory changes of `files` as one
 /// patch `git apply` takes (`--binary`), against `base` (`HEAD`, or
 /// [`crate::NULL_TREE_SHA`] on an unborn branch). Tracked files come first,
@@ -560,6 +588,45 @@ mod tests {
         // the patch reverses cleanly onto the working tree
         std::fs::write(path.join("p.diff"), &patch).unwrap();
         run(&["apply", "--check", "-R", "p.diff"]);
+    }
+
+    #[test]
+    fn difftool_runs_the_configured_tool() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "commit.gpgsign", "false"]);
+        run(&["config", "user.name", "T"]);
+        run(&["config", "user.email", "t@example.com"]);
+        std::fs::write(path.join("a.txt"), "one\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "init"]);
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        let git = Arc::new(crate::find_git().unwrap());
+        assert_eq!(crate::config_value(git.clone(), path, "diff.tool"), None);
+        run(&["config", "diff.tool", "fake"]);
+        run(&["config", "difftool.fake.cmd", "cat \"$REMOTE\" > seen.txt"]);
+        assert_eq!(
+            crate::config_value(git.clone(), path, "diff.tool").as_deref(),
+            Some("fake")
+        );
+        let status = crate::get_status(git.clone(), path, None).unwrap();
+        open_difftool(git, path, &status.files[0]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path.join("seen.txt")).unwrap(),
+            "two\n"
+        );
     }
 
     const SAMPLE: &str = "diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n+three\n four\n\\ No newline at end of file\n";

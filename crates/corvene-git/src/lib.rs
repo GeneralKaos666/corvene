@@ -49,7 +49,7 @@ pub use config::{
 };
 pub use detect::{GitBinary, GitVersion, find_git, find_git_prefetched, prefetch_git};
 pub use diff::{
-    blob_bytes, blob_lines, file_lines, has_hidden_bidi_chars, image_diff,
+    blob_bytes, blob_lines, file_lines, has_hidden_bidi_chars, image_diff, open_difftool,
     parse_line_endings_warning, parse_raw_diff, parse_raw_diff_with_warnings, parse_unified,
     submodule_diff, working_directory_diff, working_directory_patch, working_file_lines,
 };

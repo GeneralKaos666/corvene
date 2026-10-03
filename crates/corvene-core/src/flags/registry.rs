@@ -3212,6 +3212,21 @@ registry! {
         code: &["crates/corvene-ui/src/image_diff.rs"],
     },
 
+    /// A way out of "The diff is too large to be displayed".
+    TOO_LARGE_DIFF_ESCAPE_HATCH = 761 "too-large-diff-escape-hatch" {
+        title: "Open diffs too large to show elsewhere",
+        summary: "When a changed file's diff is too large to be displayed (over 70 MB), the \
+                  pane offers \"Open in external diff tool\" (git difftool, when diff.tool is set \
+                  in the Git configuration) and \"Open file in <Editor>\".",
+        ghd_behaviour: "\"The diff is too large to be displayed.\" and nothing else.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4053)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
