@@ -30,6 +30,10 @@
 //! old-line-number column can act as the hunk handle (GHD: only the 16 px
 //! strip; the new-number column keeps selecting single lines).
 //!
+//! Deviation (`759-discard-from-text-menu`): right-clicking a changed line's
+//! text in the Changes tab adds the gutter's "Discard … Line" items (for the
+//! line and for its block).
+//!
 //! Deviation (`757-diff-line-height`): the rows' height can be set (14–32
 //! px); GHD's is fixed at 20 px.
 //!
@@ -1224,10 +1228,14 @@ impl DiffView {
     /// expansion item. `line` is the clicked row's new-file line number;
     /// with `diff-open-in-editor-at-line` a working-directory diff adds
     /// "Open in <Editor> at Line N" when the editor can jump to a line.
+    /// `discard` is a changed row's selection index and block
+    /// ([`Row::discard_target`](crate::diff_view_rows::Row::discard_target)):
+    /// with `759-discard-from-text-menu` the gutter's discard items follow.
     pub fn text_menu(
         &mut self,
         position: Point<Pixels>,
         line: Option<u32>,
+        discard: Option<(u32, (u32, u32), RangeType)>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1250,6 +1258,21 @@ impl DiffView {
         if let Some(item) = self.open_at_line_menu_item(line, cx) {
             items.push(MenuItem::separator());
             items.push(item);
+        }
+        // `759-discard-from-text-menu`: the line, then its block
+        if let Some((original, (start, len), kind)) = discard
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::DISCARD_FROM_TEXT_MENU)
+            && let Some(line_item) = self.discard_item(original, 1, kind, cx)
+        {
+            items.push(MenuItem::separator());
+            items.push(line_item);
+            if len > 1 {
+                items.extend(self.discard_item(start, len, kind, cx));
+            }
         }
         if let Some(item) = self.expand_menu_item(cx) {
             items.push(MenuItem::separator());
@@ -1319,22 +1342,36 @@ impl DiffView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(snap) = self.snapshot(cx) else {
-            return;
-        };
+        if let Some(item) = self.discard_item(start, len, kind, cx) {
+            self.open_menu(vec![item], position, window, cx);
+        }
+    }
+
+    /// "Discard Added Line…" for `len` selection lines from `start`; none
+    /// outside the Changes tab, for conflicts or with whitespace hidden.
+    fn discard_item(
+        &self,
+        start: u32,
+        len: u32,
+        kind: RangeType,
+        cx: &Context<Self>,
+    ) -> Option<MenuItem> {
+        let snap = self.snapshot(cx)?;
         if self.source != DiffSource::WorkingDirectory
             || snap.kind == FileStatusKind::Conflicted
             || snap.hide_whitespace
+            // the rows were not selectable (`text_diff`'s `canSelect`)
+            || snap.as_text
+            || self.locked_type_change(&snap.diff, cx)
         {
-            return;
+            return None;
         }
         let label = kind.discard_label(len, snap.confirm_discard);
         let (repo, path) = (snap.repo, snap.path.clone());
-        let item = MenuItem::new(label, move |_, cx| {
+        Some(MenuItem::new(label, move |_, cx| {
             let selection = DiffSelection::none().with_range(start, len, true);
             Dispatcher::request_discard_selection(repo, path.clone(), selection, cx);
-        });
-        self.open_menu(vec![item], position, window, cx);
+        }))
     }
 
     // ---- search ----

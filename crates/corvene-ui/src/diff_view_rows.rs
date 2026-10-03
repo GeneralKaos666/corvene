@@ -112,6 +112,19 @@ impl Row {
             _ => DIFF_LINE_HEIGHT(),
         }
     }
+
+    /// `759-discard-from-text-menu`: a changed row's selection index, its
+    /// block of changes and what the block contains.
+    pub fn discard_target(&self) -> Option<(u32, (u32, u32), RangeType)> {
+        if !matches!(self.kind, DiffLineKind::Add | DiffLineKind::Delete) {
+            return None;
+        }
+        Some((
+            self.original.unwrap_or(self.abs),
+            self.group?,
+            self.group_type?,
+        ))
+    }
 }
 
 /// GHD `temporarySelection`: a drag in progress over the line numbers
@@ -712,6 +725,7 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
     };
     let view_for_text_menu = ctx.view.clone();
     let line = row.new;
+    let discard = row.discard_target();
     let content = div()
         .id(("diff-text", abs as usize))
         .flex_1()
@@ -720,7 +734,9 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         .flex_row()
         .on_mouse_down(MouseButton::Right, move |ev, window, cx| {
             view_for_text_menu
-                .update(cx, |this, cx| this.text_menu(ev.position, line, window, cx))
+                .update(cx, |this, cx| {
+                    this.text_menu(ev.position, line, discard, window, cx)
+                })
                 .ok();
         })
         .child(div().flex_none().whitespace_nowrap().child(prefix))
@@ -1529,6 +1545,7 @@ fn split_content(
     let body = selectable_text(ctx, list_ix, column, row, highlights, inner_bg);
     let view_for_menu = ctx.view.clone();
     let line = row.new;
+    let discard = row.discard_target();
     div()
         .id(("split-text", unified))
         .flex_1()
@@ -1537,7 +1554,9 @@ fn split_content(
         .flex_row()
         .on_mouse_down(MouseButton::Right, move |ev, window, cx| {
             view_for_menu
-                .update(cx, |this, cx| this.text_menu(ev.position, line, window, cx))
+                .update(cx, |this, cx| {
+                    this.text_menu(ev.position, line, discard, window, cx)
+                })
                 .ok();
         })
         .child(div().flex_none().whitespace_nowrap().child(prefix))

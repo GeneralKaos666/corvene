@@ -3180,6 +3180,22 @@ registry! {
         code: &["crates/corvene-ui/src/diff_view_rows.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// Discard items in the diff text's context menu.
+    DISCARD_FROM_TEXT_MENU = 759 "discard-from-text-menu" {
+        title: "Discard lines from the text menu",
+        summary: "Right-clicking the text of an added or removed line in the Changes tab's diff \
+                  offers \"Discard Added Line\" (and \"Discard Added Lines\" for its whole block), \
+                  the items the line number gutter has, below Copy and Select All.",
+        ghd_behaviour: "Discarding lines needs a right-click on the line numbers; the text's menu \
+                        has Copy, Select All and the expansion item only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14279)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
