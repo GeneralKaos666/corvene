@@ -4413,6 +4413,21 @@ registry! {
         code: &["crates/corvene-git/src/process.rs", "crates/corvene-git/src/error.rs", "crates/corvene-core/src/flags/dispatch.rs"],
     },
 
+    /// Create a Tag says when the tag cannot be pushed.
+    TAG_PUSH_PERMISSION_NOTE = 898 "tag-push-permission-note" {
+        title: "Create a Tag notes a read-only repository",
+        summary: "When GitHub says the account can only read the repository, Create a Tag adds \
+                  \"You can't push this tag to <owner/name>\": the tag can be created but only \
+                  exists on this computer.",
+        ghd_behaviour: "Creates the tag without a word; pushing it later fails.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(9833)],
+        code: &["crates/corvene-ui/src/dialogs/history_dialogs.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
