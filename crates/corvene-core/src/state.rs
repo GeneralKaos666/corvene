@@ -868,6 +868,10 @@ pub struct RepositoryState {
     pub rewritten_selection: Vec<(String, Option<i64>)>,
     /// `changesState.conflictState`
     pub conflict_state: Option<crate::mco::ConflictState>,
+    /// `780-co-authors-from-history`: the distinct authors (name, email) of
+    /// the newest commits, read once per session; whether that read runs.
+    pub recent_authors: Option<std::sync::Arc<Vec<(String, String)>>>,
+    pub recent_authors_loading: bool,
     /// `forcePushBranches`: branch → tip after a rewrite that needs a force push.
     pub force_push_branches: HashMap<String, String>,
     /// The current branch is ahead of and behind its upstream, and its

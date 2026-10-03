@@ -44,6 +44,12 @@ pub enum Hit {
     /// GHD `unknown-user`: a handle nobody in the mentionables matched
     /// (co-author input only; looked up on the API once added).
     UnknownUser(String),
+    /// Corvene (`780-co-authors-from-history`): an author of a recent
+    /// commit, offered as a co-author without a GitHub account.
+    Author {
+        name: String,
+        email: String,
+    },
     /// GHD `IBranchHit`: a branch name and its matched char positions.
     Branch {
         name: String,
@@ -64,6 +70,7 @@ impl Hit {
             Hit::Issue(i) => format!("#{}", i.number),
             Hit::User(u) => format!("@{}", u.login),
             Hit::UnknownUser(name) => format!("@{name}"),
+            Hit::Author { name, email } => format!("{name} <{email}>"),
             Hit::Branch { name, .. } => name.clone(),
             Hit::Folder { completion, .. } => completion.clone(),
         }
@@ -96,6 +103,16 @@ pub fn co_author_hits(
         .filter(|u| !exclude.iter().any(|e| e.eq_ignore_ascii_case(&u.login)))
         .map(Hit::User)
         .collect();
+    // Corvene (`780-co-authors-from-history`)
+    let user_emails: Vec<String> = hits
+        .iter()
+        .filter_map(|h| match h {
+            Hit::User(u) => u.email.clone(),
+            _ => None,
+        })
+        .collect();
+    let room = DEFAULT_MAX_HITS.saturating_sub(hits.len()).max(3);
+    hits.extend(history_author_hits(filter, exclude, &user_emails, room, cx));
     if !filter.is_empty() {
         let exact = hits.iter().any(|h| match h {
             Hit::User(u) => u.login.eq_ignore_ascii_case(filter),
@@ -106,6 +123,49 @@ pub fn co_author_hits(
         }
     }
     hits
+}
+
+/// Corvene (`780-co-authors-from-history`): authors of the selected
+/// repository's recent commits matching `filter`, leaving out co-author ids
+/// in `exclude` (free-form co-authors are their email), `also_exclude` and
+/// the committer (`user.email`). Starts reading the authors the first time.
+pub fn history_author_hits(
+    filter: &str,
+    exclude: &[String],
+    also_exclude: &[String],
+    max_hits: usize,
+    cx: &mut App,
+) -> Vec<Hit> {
+    let Some(state) = AppState::try_global(cx) else {
+        return Vec::new();
+    };
+    let (id, on) = {
+        let s = state.read(cx);
+        (
+            s.selected,
+            s.flags
+                .bool(corvene_core::flags::ids::CO_AUTHORS_FROM_HISTORY),
+        )
+    };
+    let Some(id) = id.filter(|_| on) else {
+        return Vec::new();
+    };
+    Dispatcher::load_recent_authors(id, cx);
+    let s = state.read(cx);
+    let Some(rs) = s.repo_states.get(&id) else {
+        return Vec::new();
+    };
+    let Some(authors) = rs.recent_authors.as_ref() else {
+        return Vec::new();
+    };
+    let mut excluded: Vec<String> = exclude.iter().chain(also_exclude).cloned().collect();
+    if let Some(own) = rs.info.as_ref().and_then(|i| i.identity.email.clone()) {
+        excluded.push(own);
+    }
+    corvene_core::autocomplete::authors_matching(authors, filter, &excluded, max_hits)
+        .into_iter()
+        .map(|(name, email)| Hit::Author { name, email })
+        .collect()
 }
 
 /// GHD `IAutocompletionState`.
@@ -422,6 +482,32 @@ fn row(ix: usize, hit: &Hit, selected: bool, on_pick: PickHandler, cx: &mut App)
                     .text_color(secondary)
                     .child("Search for user"),
             ),
+        Hit::Author { name, email } => {
+            Dispatcher::request_avatar_for_email(email, cx);
+            let avatar = crate::widgets::avatar_lookup(email, cx);
+            d.child(
+                div()
+                    .mr(SPACING_HALF())
+                    .child(avatar_image(avatar, zpx(16.), cx)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .max_w_full()
+                    .truncate()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .mr(SPACING_HALF())
+                    .child(name.clone()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(secondary)
+                    .child(email.clone()),
+            )
+        }
         Hit::Branch { name, highlight } => d
             // `.branch`: git-branch octicon, then the name with `<mark>` hits
             .child(

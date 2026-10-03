@@ -3690,6 +3690,22 @@ registry! {
         code: &["crates/corvene-core/src/drafts.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Co-author suggestions from the repository's commit authors.
+    CO_AUTHORS_FROM_HISTORY = 780 "co-authors-from-history" {
+        title: "Suggest co-authors from history",
+        summary: "The co-authors box also suggests the authors of the repository's last 500 \
+                  commits (name and email, read once per session), for people without a GitHub \
+                  account or outside the repository's collaborators; typing a name or email \
+                  without @ suggests them too.",
+        ghd_behaviour: "Only the GitHub repository's mentionable users are suggested, after @.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(9468)],
+        code: &["crates/corvene-core/src/autocomplete.rs", "crates/corvene-ui/src/autocompletion.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/log.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

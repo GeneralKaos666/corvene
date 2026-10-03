@@ -68,7 +68,8 @@ pub use log::{
     COMMIT_BATCH_SIZE, NULL_TREE_SHA, commit_file_diff, commit_range_file_diff, get_changed_files,
     get_commit_range_changed_files, get_commits, get_commits_in_range, get_commits_with,
     local_only_commits, merge_base, merge_base_changed_files, merge_base_file_diff,
-    most_recent_local_commit, parse_raw_log_with_numstat, tag_names,
+    most_recent_local_commit, parse_raw_log_with_numstat, parse_recent_authors, recent_authors,
+    tag_names,
 };
 pub use ops::{
     CloneProgress, InitOptions, PathStatus, clone, explain_open_failure, global_identity,

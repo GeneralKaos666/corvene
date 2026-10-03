@@ -609,8 +609,58 @@ pub fn merge_base_file_diff(
     ))
 }
 
+/// The distinct authors (name, email) of the newest `limit` commits
+/// reachable from HEAD, most recent first, one per email (case ignored).
+/// Corvene `780-co-authors-from-history`: co-author suggestions for people
+/// without a GitHub account. An unborn branch has none.
+pub fn recent_authors(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    limit: usize,
+) -> Result<Vec<(String, String)>> {
+    let out = GitCommand::new(git)
+        .args([
+            "log",
+            "-n",
+            &limit.to_string(),
+            "--format=%an%x1f%ae",
+            "HEAD",
+            "--",
+        ])
+        .current_dir(workdir)
+        .allow_exit_code(128)
+        .run()?;
+    if !out.status.success() {
+        return Ok(Vec::new());
+    }
+    Ok(parse_recent_authors(&out.stdout_string()?))
+}
+
+/// `%an%x1f%ae` lines to distinct (name, email) pairs, first seen wins.
+pub fn parse_recent_authors(text: &str) -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    text.lines()
+        .filter_map(|line| line.split_once('\u{1f}'))
+        .map(|(name, email)| (name.trim().to_string(), email.trim().to_string()))
+        .filter(|(name, email)| !name.is_empty() && email.contains('@'))
+        .filter(|(_, email)| seen.insert(email.to_lowercase()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recent_authors_are_distinct_by_email() {
+        let text = "Ann\u{1f}ann@x.io\nBob\u{1f}bob@x.io\nAnn B\u{1f}ANN@x.io\nNo Mail\u{1f}\n";
+        assert_eq!(
+            parse_recent_authors(text),
+            vec![
+                ("Ann".to_string(), "ann@x.io".to_string()),
+                ("Bob".to_string(), "bob@x.io".to_string()),
+            ]
+        );
+    }
+
     use super::*;
     use std::process::Command;
 

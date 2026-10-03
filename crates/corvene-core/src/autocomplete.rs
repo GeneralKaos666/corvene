@@ -10,6 +10,10 @@
 //! every open issue again once this many hours have passed since the last
 //! full fetch, so deleted and transferred issues leave `#` completion (GHD
 //! only ever asks for issues updated since the newest cached one).
+//!
+//! Deviation (`780-co-authors-from-history`): co-author suggestions also
+//! offer the distinct authors of the newest commits ([`authors_matching`]),
+//! for people without a GitHub account (GHD suggests mentionable users only).
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -301,7 +305,77 @@ pub fn login_for_email(
         .map(|u| u.login.clone())
 }
 
+/// How many recent commits `780-co-authors-from-history` reads authors from.
+pub const RECENT_AUTHOR_COMMITS: usize = 500;
+
+/// `780-co-authors-from-history`: the authors whose name or email contains
+/// `text` (case ignored; all of them for an empty text), best match first,
+/// leaving out `exclude_emails` (already co-authors, yourself).
+pub fn authors_matching(
+    authors: &[(String, String)],
+    text: &str,
+    exclude_emails: &[String],
+    max_hits: usize,
+) -> Vec<(String, String)> {
+    let needle = text.to_lowercase();
+    let mut hits: Vec<(usize, usize, &(String, String))> = authors
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, email))| !exclude_emails.iter().any(|e| e.eq_ignore_ascii_case(email)))
+        .filter_map(|(order, author)| {
+            format!("{} {}", author.0, author.1)
+                .to_lowercase()
+                .find(&needle)
+                .map(|ix| (ix, order, author))
+        })
+        .collect();
+    // where the text matched, then recency
+    hits.sort_by(|x, y| x.0.cmp(&y.0).then(x.1.cmp(&y.1)));
+    hits.into_iter()
+        .take(max_hits)
+        .map(|h| h.2.clone())
+        .collect()
+}
+
 impl Dispatcher {
+    /// `780-co-authors-from-history`: read the repository's recent commit
+    /// authors once per session.
+    pub fn load_recent_authors(id: u64, cx: &mut App) {
+        let start = Self::state(cx).update(cx, |s, _| {
+            if !s.flags.bool(crate::flags::ids::CO_AUTHORS_FROM_HISTORY) {
+                return false;
+            }
+            let rs = s.repo_state_mut(id);
+            if rs.recent_authors.is_some() || rs.recent_authors_loading {
+                return false;
+            }
+            rs.recent_authors_loading = true;
+            true
+        });
+        if !start {
+            return;
+        }
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || corvene_git::recent_authors(git, &workdir, RECENT_AUTHOR_COMMITS),
+            move |result, cx| {
+                let authors = result.unwrap_or_else(|err| {
+                    warn!(%err, "could not read recent commit authors");
+                    Vec::new()
+                });
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    rs.recent_authors_loading = false;
+                    rs.recent_authors = Some(std::sync::Arc::new(authors));
+                    cx.notify();
+                });
+            },
+        );
+    }
+
     pub(crate) fn api_for(
         github: &GitHubRepository,
         cx: &App,
@@ -658,6 +732,27 @@ pub type MentionableCaches = HashMap<String, MentionableCache>;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authors_match_name_or_email_and_skip_excluded() {
+        let authors = vec![
+            ("Ann Lee".to_string(), "ann@x.io".to_string()),
+            ("Bob".to_string(), "bob@lee.dev".to_string()),
+            ("Cy".to_string(), "cy@x.io".to_string()),
+        ];
+        let names = |hits: Vec<(String, String)>| hits.into_iter().map(|h| h.0).collect::<Vec<_>>();
+        assert_eq!(
+            names(authors_matching(&authors, "lee", &[], 5)),
+            vec!["Ann Lee", "Bob"]
+        );
+        assert_eq!(
+            names(authors_matching(&authors, "", &["ANN@x.io".to_string()], 5)),
+            vec!["Bob", "Cy"]
+        );
+        assert_eq!(
+            names(authors_matching(&authors, "", &[], 1)),
+            vec!["Ann Lee"]
+        );
+    }
 
     #[test]
     fn parses_co_author_address() {

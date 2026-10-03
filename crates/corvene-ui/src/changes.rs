@@ -39,6 +39,8 @@
 //!   `info/exclude`, the global excludes file; flag `ignore-file-targets`).
 //! - "Name <email>" in the co-authors box adds a co-author without a GitHub
 //!   account (`735-free-form-co-authors`).
+//! - co-author suggestions include recent commit authors, also for a name
+//!   typed without @ (`780-co-authors-from-history`).
 //! - the "N changed files" row ends in a spinner while Discard Changes runs
 //!   or a status refresh is slow (`708-changes-busy-indicator`).
 //! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
@@ -570,6 +572,37 @@ impl ChangesSidebar {
                         },
                     ));
                 }
+            } else if github.is_some()
+                && caret == text.len()
+                && !trimmed.is_empty()
+                && !trimmed.starts_with('@')
+                && !trimmed.contains('<')
+            {
+                // Corvene (`780-co-authors-from-history`): a typed name or
+                // email suggests recent commit authors without the @
+                let exclude = self.co_author_logins(cx);
+                let hits = autocompletion::history_author_hits(
+                    &trimmed.to_lowercase(),
+                    &exclude,
+                    &[],
+                    corvene_core::DEFAULT_MAX_HITS,
+                    cx,
+                );
+                if !hits.is_empty() {
+                    // the insert replaces from one byte before `range` (the
+                    // trigger character there is none, so start one later)
+                    let start = free_start + (free.len() - trimmed.len()) + 1;
+                    self.autocomplete = Some((
+                        field,
+                        Autocompletion {
+                            kind: corvene_core::TriggerKind::User,
+                            range: start..text.len(),
+                            hits,
+                            selected: None,
+                            scroll: UniformListScrollHandle::new(),
+                        },
+                    ));
+                }
             }
             cx.notify();
             return;
@@ -1007,6 +1040,12 @@ impl ChangesSidebar {
                 Hit::UnknownUser(name) => Author::Unknown {
                     username: name.clone(),
                     state: UnknownAuthorState::Searching,
+                },
+                // `780-co-authors-from-history`
+                Hit::Author { name, email } => Author::Known {
+                    name: name.clone(),
+                    email: email.clone(),
+                    username: None,
                 },
                 _ => return,
             };
