@@ -22,7 +22,9 @@
 //! sends that URL so an already running Corvene receives it. With flag
 //! `exact-repository-url-first`, `openRepo` prefers the repository that is
 //! the URL over a fork matching through its parent (`doesRepositoryMatchUrl`
-//! callers take the first match).
+//! callers take the first match). With `277-url-background-open`, an
+//! `openRepo` / `openLocalRepo` URL carrying `background=1` (the CLI's
+//! `--background`) does not bring the window forward.
 
 use std::path::{Path, PathBuf};
 
@@ -51,6 +53,10 @@ pub enum UrlAction {
     },
     /// Corvene: open a local path (the CLI's `open`).
     OpenLocalRepository { path: PathBuf },
+    /// Corvene (`417-cli-add-repository`): `openLocalRepo/<path>?add=<token>`,
+    /// the CLI's `add`: added without the dialog when `token` checks out
+    /// (`corvene_platform::cli::take_add_token`), else opened as above.
+    AddLocalRepository { path: PathBuf, token: String },
     /// Corvene on Android: git settings another git on the device offers
     /// (`x-corvene://importGitConfig/<base64url of git config --list>`,
     /// see `git_config_import`).
@@ -192,20 +198,37 @@ pub fn parse_app_url(url: &str) -> UrlAction {
         },
         "openlocalrepo" => {
             let decoded = percent_decode(parsed_path, false);
-            UrlAction::OpenLocalRepository {
-                // Windows: `C:\…` and `\\server\share\…` are absolute as
-                // they are
-                path: if decoded.starts_with('/')
-                    || (cfg!(windows) && Path::new(&decoded).is_absolute())
-                {
-                    PathBuf::from(decoded)
-                } else {
-                    Path::new("/").join(decoded)
-                },
+            // Windows: `C:\…` and `\\server\share\…` are absolute as
+            // they are
+            let path = if decoded.starts_with('/')
+                || (cfg!(windows) && Path::new(&decoded).is_absolute())
+            {
+                PathBuf::from(decoded)
+            } else {
+                Path::new("/").join(decoded)
+            };
+            match query_value(query, "add").filter(|t| !t.is_empty()) {
+                Some(token) => UrlAction::AddLocalRepository { path, token },
+                None => UrlAction::OpenLocalRepository { path },
             }
         }
         _ => unknown(),
     }
+}
+
+/// Corvene (`277-url-background-open`): an `openRepo` / `openLocalRepo` URL
+/// asking to stay in the background (`?background=1` or `true`).
+pub fn opens_in_background(url: &str) -> bool {
+    let Some((_, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let rest = rest.split('#').next().unwrap_or(rest);
+    let Some((location, query)) = rest.split_once('?') else {
+        return false;
+    };
+    let action = location.split('/').next().unwrap_or("").to_lowercase();
+    matches!(action.as_str(), "openrepo" | "openlocalrepo")
+        && query_value(query, "background").is_some_and(|v| v == "1" || v == "true")
 }
 
 /// `x-corvene://openLocalRepo/<path>` (the CLI builds the same string).
@@ -273,7 +296,8 @@ impl AppUrlInbox {
 
 impl Dispatcher {
     /// Handle every URL queued in `inbox` (`app.on('open-url')`);
-    /// `focus_window` shows the (possibly hidden) window first.
+    /// `focus_window` shows the (possibly hidden) window first, unless the
+    /// URL opens in the background (`277-url-background-open`).
     pub fn listen_for_app_urls(
         inbox: AppUrlInbox,
         focus_window: impl Fn(&mut App) + 'static,
@@ -283,7 +307,14 @@ impl Dispatcher {
         cx.spawn(async move |cx| {
             while let Ok(url) = rx.recv().await {
                 cx.update(|cx| {
-                    focus_window(cx);
+                    let background = opens_in_background(&url)
+                        && Self::state(cx)
+                            .read(cx)
+                            .flags
+                            .bool(crate::flags::ids::URL_BACKGROUND_OPEN);
+                    if !background {
+                        focus_window(cx);
+                    }
                     if !url.is_empty() {
                         Self::handle_app_url(&url, cx);
                     }
@@ -306,6 +337,19 @@ impl Dispatcher {
                 filepath,
             } => Self::open_repository_from_url(url, branch, pr, filepath, cx),
             UrlAction::OpenLocalRepository { path } => Self::open_local_repository(path, cx),
+            UrlAction::AddLocalRepository { path, token } => {
+                // the token file goes whatever the flag says
+                let trusted = corvene_platform::cli::take_add_token(&token, &path);
+                let enabled = Self::state(cx)
+                    .read(cx)
+                    .flags
+                    .bool(crate::flags::ids::CLI_ADD_REPOSITORY);
+                if trusted && enabled {
+                    Self::add_local_repository_silently(path, cx);
+                } else {
+                    Self::open_local_repository(path, cx);
+                }
+            }
             UrlAction::ImportGitConfig { list } => Self::offer_git_config(list, cx),
             UrlAction::Flags { query } => Self::open_flags(query, cx),
             UrlAction::Unknown { url } => warn!(%url, "unknown URL action"),
@@ -600,6 +644,17 @@ impl Dispatcher {
         );
     }
 
+    /// Corvene (`417-cli-add-repository`): the CLI's `add`: the repository
+    /// containing `path` is added (or selected) without the Add Local
+    /// Repository dialog; a folder outside any repository says so.
+    fn add_local_repository_silently(path: PathBuf, cx: &mut App) {
+        spawn_bg(
+            cx,
+            move || corvene_git::top_level_working_directory(&path).unwrap_or(path),
+            Self::add_repository,
+        );
+    }
+
     pub fn open_local_repository(path: PathBuf, cx: &mut App) {
         // Android (`corvene <dir>` in Termux): say why a folder cannot be
         // opened instead of calling a readable-looking path "not found"
@@ -679,6 +734,46 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn add_query_asks_for_a_silent_add() {
+        assert_eq!(
+            parse_app_url("x-corvene://openLocalRepo/tmp/a?add=Ab12&background=1"),
+            UrlAction::AddLocalRepository {
+                path: PathBuf::from("/tmp/a"),
+                token: "Ab12".into()
+            }
+        );
+        assert_eq!(
+            parse_app_url("x-corvene://openLocalRepo/tmp/a?add="),
+            UrlAction::OpenLocalRepository {
+                path: PathBuf::from("/tmp/a")
+            }
+        );
+    }
+
+    #[test]
+    fn background_query_on_open_actions() {
+        assert!(opens_in_background(
+            "x-corvene://openLocalRepo/tmp/a?background=1"
+        ));
+        assert!(opens_in_background(
+            "x-corvene://openRepo/https://github.com/a/b?branch=dev&background=true"
+        ));
+        assert!(!opens_in_background("x-corvene://openLocalRepo/tmp/a"));
+        assert!(!opens_in_background(
+            "x-corvene://openLocalRepo/tmp/a?background=0"
+        ));
+        assert!(!opens_in_background("x-corvene://flags?background=1"));
+        assert!(!opens_in_background(""));
+        // the path still parses with the query attached
+        assert_eq!(
+            parse_app_url("x-corvene://openLocalRepo/tmp/a?background=1"),
+            UrlAction::OpenLocalRepository {
+                path: PathBuf::from("/tmp/a")
+            }
+        );
+    }
 
     fn open_repo(url: &str) -> (String, Option<String>, Option<String>, Option<String>) {
         match parse_app_url(url) {

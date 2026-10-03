@@ -6,6 +6,12 @@
 #   corvene clone [-b branch] <url>    clone the repository by url or
 #                                      owner/name (ex torvalds/linux),
 #                                      optionally checking out the branch
+#   corvene add [path]                 add the repository at the path
+#                                      without the Add Local Repository
+#                                      dialog (flag 417-cli-add-repository)
+#   corvene -g|--background …          (before open or clone) leave Corvene
+#                                      in the background (flag
+#                                      277-url-background-open)
 # Each command becomes an x-corvene:// URL handed to the Corvene binary,
 # which passes it to the running Corvene (single instance) or starts one.
 # Installed as <prefix>/lib/corvene/bin/corvene next to the binary
@@ -30,6 +36,8 @@ Corvene CLI usage:
   corvene clone [-b branch] <url>    Clone the repository by url or name/owner
                                      (ex torvalds/linux), optionally checking out
                                      the branch
+  corvene add [path]                 Add the repository at the path without asking
+  corvene -g|--background ...        Do it without bringing Corvene forward
 USAGE
   exit "$1"
 }
@@ -39,7 +47,21 @@ if [ -z "$CORVENE_BIN" ]; then
   CORVENE_BIN="$(dirname "$HERE")/corvene"
 fi
 
+BACKGROUND=""
+if [ "$1" = "-g" ] || [ "$1" = "--background" ]; then
+  BACKGROUND=1
+  shift
+fi
+
 send() {
+  TARGET="$1"
+  if [ -n "$BACKGROUND" ]; then
+    case "$TARGET" in
+      *\?*) TARGET="$TARGET&background=1" ;;
+      *) TARGET="$TARGET?background=1" ;;
+    esac
+  fi
+  set -- "$TARGET"
   if [ -n "$CORVENE_CLI_DRY_RUN" ]; then
     printf '%s\n' "$1"
     exit 0
@@ -88,6 +110,19 @@ case "$1" in
       TARGET="$TARGET?branch=$(urlencode "$BRANCH")"
     fi
     send "$TARGET"
+    ;;
+  add|--add)
+    shift
+    DIR="${1:-.}"
+    if ! DIR="$(cd "$DIR" 2>/dev/null && pwd -P)"; then
+      echo "corvene: $1: no such directory" >&2
+      exit 1
+    fi
+    # a private file only this user's shell can write proves the request
+    # did not come from a web page (Corvene removes it)
+    TOKEN_FILE="$(mktemp "${TMPDIR:-/tmp}/corvene-add.XXXXXXXX")" || exit 1
+    printf '%s' "$DIR" > "$TOKEN_FILE"
+    send "x-corvene://openLocalRepo$(urlencode "$DIR")?add=${TOKEN_FILE##*/corvene-add.}"
     ;;
   *)
     if [ "$1" = "open" ]; then

@@ -3482,7 +3482,7 @@ impl ChangesSidebar {
         let mut items = vec![
             MenuItem::new(mac_or("Amend Commit…", "Amend commit…"), {
                 let sha = sha.clone();
-                move |_, cx| Dispatcher::start_amending(id, sha.clone(), cx)
+                move |_, cx| Dispatcher::request_start_amending(id, sha.clone(), cx)
             }),
             MenuItem::new(mac_or("Undo Commit…", "Undo commit…"), move |_, cx| {
                 Dispatcher::request_undo_commit(id, cx)

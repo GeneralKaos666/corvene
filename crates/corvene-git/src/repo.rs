@@ -167,6 +167,17 @@ fn branches(repo: &gix::Repository, remote_list: &[Remote]) -> Result<Vec<Branch
     Ok(out)
 }
 
+/// Whether the repository has stash entries (`refs/stash` exists), for the
+/// repository list's stash icon (Corvene, `270-repository-list-stash-icon`).
+pub fn has_stash(path: &Path) -> bool {
+    crate::handle::open(path).is_ok_and(|repo| {
+        repo.try_find_reference("refs/stash")
+            .ok()
+            .flatten()
+            .is_some()
+    })
+}
+
 fn tip(repo: &gix::Repository, branches: &[Branch]) -> Result<Tip> {
     let head = repo.head().map_err(|e| GitError::Gix(e.to_string()))?;
     if head.is_unborn() {
@@ -317,6 +328,23 @@ mod tests {
         assert_eq!(info.remotes.len(), 1);
         assert_eq!(info.remotes[0].name, "origin");
         assert!(info.remotes[0].url.contains("github.com"));
+    }
+
+    #[test]
+    fn has_stash_follows_refs_stash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        git(path, &["init", "-q", "-b", "main"]);
+        git(path, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(path.join("a.txt"), "1").unwrap();
+        git(path, &["add", "."]);
+        git(path, &["commit", "-q", "-m", "one"]);
+        assert!(!has_stash(path));
+        std::fs::write(path.join("a.txt"), "2").unwrap();
+        git(path, &["stash", "-q"]);
+        assert!(has_stash(path));
+        git(path, &["stash", "drop", "-q"]);
+        assert!(!has_stash(path));
     }
 
     #[test]

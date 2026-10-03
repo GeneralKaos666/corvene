@@ -100,6 +100,17 @@ fn branch_name_prefix(s: &str) -> Result<(), &'static str> {
     }
 }
 
+/// `873-branch-name-forbidden-chars`: the characters, written together.
+fn forbidden_branch_chars(s: &str) -> Result<(), &'static str> {
+    if s.chars().count() > 40 {
+        Err("At most 40 characters")
+    } else if s.contains(['\n', '\r']) {
+        Err("One line only")
+    } else {
+        Ok(())
+    }
+}
+
 /// `228-clone-default-account`: logins separated by commas or spaces.
 fn account_logins(s: &str) -> Result<(), &'static str> {
     if s.chars().count() > 200 {
@@ -425,6 +436,7 @@ registry! {
         upstream: &[Upstream::issue(22123), Upstream::issue(22470)],
         code: &["crates/corvene-ui/src/theme/mod.rs", "crates/corvene-ui/src/title_bar.rs", "crates/corvene/src/main.rs"],
     },
+
     /// Typing hides hover highlights and tooltips until the pointer moves.
     KEYBOARD_HIDES_HOVER = 110 "keyboard-hides-hover" {
         title: "Typing hides hover highlights",
@@ -486,7 +498,6 @@ registry! {
         upstream: &[Upstream::issue(22600), Upstream::issue(2790)],
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/watcher.rs"],
     },
-
 
     /// The clone dialog's `owner/name` 404.
     CLONE_SHORTHAND_NOT_FOUND = 204 "clone-shorthand-not-found" {
@@ -1266,15 +1277,19 @@ registry! {
     /// Plain-language text for two confusing git errors.
     PLAIN_LANGUAGE_REMOTE_ERRORS = 255 "plain-language-remote-errors" {
         title: "Plain-language remote errors",
-        summary: "A pull whose upstream branch was deleted on the remote, and a clone into a folder \
-                  you may not write to, explain what happened in a sentence before git's message.",
+        summary: "A pull whose upstream branch was deleted on the remote, a clone into a folder \
+                  you may not write to, a remote failure whose real cause (out of memory, a lost \
+                  connection) precedes \"Could not read from remote repository\", and a \
+                  non-origin remote whose repository is gone explain what happened in a \
+                  sentence before git's message.",
         ghd_behaviour: "Shows git's text only (\"Your configuration specifies to merge with the \
-                        ref …\", \"Permission denied\").",
+                        ref …\", \"Permission denied\"), and calls every \"Could not read from \
+                        remote repository\" an SSH permission problem.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(1325), Upstream::issue(13187)],
+        upstream: &[Upstream::issue(1325), Upstream::issue(13187), Upstream::issue(22413), Upstream::issue(3715)],
         code: &["crates/corvene-core/src/push_errors.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
@@ -1402,7 +1417,6 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
-
     /// Remove a left-over index.lock from the error dialog.
     REMOVE_STALE_INDEX_LOCK = 265 "remove-stale-index-lock" {
         title: "Remove a left-over index.lock",
@@ -1418,8 +1432,194 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/index_lock.rs", "crates/corvene-ui/src/dialogs/simple.rs"],
     },
 
+    /// Repository list group headers collapse.
+    COLLAPSIBLE_REPOSITORY_GROUPS = 266 "collapsible-repository-groups" {
+        title: "Collapsible repository groups",
+        summary: "The repository list's group headers (Recent, each owner, Other) get a chevron; \
+                  clicking a header hides or shows its repositories and the collapsed groups are \
+                  remembered. While the list is filtered every group is expanded, and the arrow \
+                  keys skip hidden rows.",
+        ghd_behaviour: "Groups are always expanded, so a long list of one owner's repositories has \
+                        to be scrolled past.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[
+            Upstream::issue(9910),
+            Upstream::issue(20228),
+            Upstream::issue(21908),
+            Upstream::issue(14997),
+        ],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
+    /// Pin repositories to the top of the repository list.
+    PINNED_REPOSITORIES = 267 "pinned-repositories" {
+        title: "Pinned repositories",
+        summary: "The repository list's context menu offers Pin and Unpin; pinned repositories are \
+                  listed by name in a Pinned group above Recent (and stay in their owner groups). \
+                  The group is hidden while the list is filtered.",
+        ghd_behaviour: "Only the three most recently opened repositories are listed above the \
+                        owner groups; there is no way to keep a repository at the top.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22751)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
+    /// One alphabetical repository list instead of owner groups.
+    UNGROUPED_REPOSITORY_LIST = 268 "ungrouped-repository-list" {
+        title: "Ungrouped repository list",
+        summary: "Without filter text the repository list shows every repository in one \
+                  alphabetical Repositories group after Recent, instead of a group per GitHub \
+                  owner and Other. ⇧⌘] / ⇧⌘[ (612) follow the same order.",
+        ghd_behaviour: "Repositories are always grouped by GitHub owner, with the rest under Other.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11460)],
+        code: &["crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// Remove several repositories at once.
+    BULK_REMOVE_REPOSITORIES = 269 "bulk-remove-repositories" {
+        title: "Remove several repositories at once",
+        summary: "File › Remove Repositories… and the repository list's context menu open a dialog \
+                  listing every repository with a checkbox and a filter box; Remove takes the \
+                  ticked ones out of Corvene (optionally moving their folders to the Trash, as \
+                  the single Remove does).",
+        ghd_behaviour: "Repositories are removed one at a time, each with its own confirmation.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20684), Upstream::issue(22135), Upstream::issue(22434)],
+        code: &[
+            "crates/corvene-ui/src/dialogs/remove_repositories.rs",
+            "crates/corvene-ui/src/repository_list.rs",
+            "crates/corvene/src/menus.rs",
+            "crates/corvene/src/main.rs",
+        ],
+    },
+
+    /// A stash icon on repositories with stashed changes.
+    REPOSITORY_LIST_STASH_ICON = 270 "repository-list-stash-icon" {
+        title: "Repository list shows stashes",
+        summary: "Repositories with stashed changes show a stash icon in the repository list (from \
+                  the opened repository's stashes, or the background indicator refresh for the \
+                  others), like the branch list's stash icon (854).",
+        ghd_behaviour: "Nothing in the repository list tells which repositories hold stashed changes.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15225)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/repo.rs"],
+    },
+
+    /// Repository list indicators survive a restart.
+    PERSIST_REPOSITORY_INDICATORS = 271 "persist-repository-indicators" {
+        title: "Remember repository indicators",
+        summary: "The repository list's ahead/behind arrows, changes dot (and branch and stash \
+                  extras) are saved after each background refresh and shown at the next launch \
+                  until the first refresh replaces them.",
+        ghd_behaviour: "The indicators are kept in memory only, so after a launch the list shows \
+                        none until the background refresh has visited every repository.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(5591)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
+    /// Ahead / behind counts with a thousands separator.
+    GROUPED_AHEAD_BEHIND_COUNTS = 272 "grouped-ahead-behind-counts" {
+        title: "Thousands separators in ahead/behind counts",
+        summary: "The push/pull button's ahead/behind badge, its commits-to-pull tooltip and the \
+                  repository list's ahead/behind tooltip and screen reader label write counts \
+                  with the thousands separator from Appearance › Formatting (1,234).",
+        ghd_behaviour: "Counts are plain digits (1234) whatever the number format.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1245)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// Forks name their parent in the repository tooltips.
+    FORK_PARENT_IN_TOOLTIP = 273 "fork-parent-in-tooltip" {
+        title: "Tooltips name a fork's parent",
+        summary: "For a forked GitHub repository, the Current Repository button's tooltip and the \
+                  repository list row's tooltip end with \"Fork of owner/name\".",
+        ghd_behaviour: "Only the fork icon tells a fork apart; its parent repository is not shown.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16568)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// No "Publish repository" before the repository has loaded.
+    NO_PUBLISH_BEFORE_LOAD = 274 "no-publish-before-load" {
+        title: "No Publish repository while loading",
+        summary: "Until a newly selected repository has been read, the push/pull button is a \
+                  disabled blank button instead of \"Publish repository\", which a repository \
+                  with a remote never needs.",
+        ghd_behaviour: "Briefly offers \"Publish this repository to GitHub\" for every repository \
+                        while it loads, including cloned ones.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(4107)],
+        code: &["crates/corvene-ui/src/toolbar.rs"],
+    },
+
+    /// A friendlier branch button on a detached HEAD.
+    DETACHED_HEAD_FRIENDLY = 275 "detached-head-friendly" {
+        title: "Friendlier detached HEAD",
+        summary: "On a detached HEAD the branch button names the tag HEAD is at (\"On v1.2.0\") \
+                  instead of the short SHA when there is one, and its tooltip explains that \
+                  no branch is checked out and new commits need a branch to be kept.",
+        ghd_behaviour: "Shows \"On <short SHA>\" with the tooltip \"Currently on a detached HEAD\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10857)],
+        code: &["crates/corvene-ui/src/toolbar.rs"],
+    },
+
+    /// Destructive confirmations name what they remove.
+    DESCRIPTIVE_CONFIRM_BUTTONS = 276 "descriptive-confirm-buttons" {
+        title: "Descriptive confirmation buttons",
+        summary: "The destructive button of the Remove Repository, Delete Branch, Delete Tag and \
+                  Delete Worktree confirmations says what it does (\"Remove Repository\", \
+                  \"Delete Branch\") instead of a bare \"Remove\" or \"Delete\".",
+        ghd_behaviour: "The buttons read \"Remove\" and \"Delete\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8591)],
+        code: &[
+            "crates/corvene-ui/src/dialog.rs",
+            "crates/corvene-ui/src/dialogs/app_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/branch_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/history_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/worktree_dialogs.rs",
+        ],
+    },
+
     /// Bold filter matches in the clone list, like the other lists.
-    CONSISTENT_FILTER_HIGHLIGHT = 274 "consistent-filter-highlight" {
+    CONSISTENT_FILTER_HIGHLIGHT = 277 "consistent-filter-highlight" {
         title: "Bold filter matches when cloning",
         summary: "In Clone a Repository's lists (and the signed-in blank slate) the characters \
                   matching the filter are bold, as in the branch and repository lists.",
@@ -1941,6 +2141,44 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-platform/src/cli.rs"],
     },
 
+    /// Open-repository URLs and the CLI can leave Corvene in the background.
+    URL_BACKGROUND_OPEN = 416 "url-background-open" {
+        title: "Open repositories in the background",
+        summary: "An x-corvene://openRepo or openLocalRepo URL with ?background=1 (the command \
+                  line tool's corvene --background …) selects the repository without bringing \
+                  the window forward, so scripts and editor integrations can switch repositories \
+                  quietly.",
+        ghd_behaviour: "Every URL action and CLI command activates the app and shows its window.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(22150)],
+        code: &["crates/corvene-core/src/app_url.rs", "packaging/corvene.sh", "packaging/linux/corvene.sh"],
+    },
+
+    /// The command line tool adds a repository without the dialog.
+    CLI_ADD_REPOSITORY = 417 "cli-add-repository" {
+        title: "Add repositories from the command line",
+        summary: "corvene add [path] (macOS and Linux command line tool) adds the repository \
+                  containing the path without the Add Local Repository dialog, or says it is not \
+                  a Git repository. The request carries a token only the user's own shell can \
+                  create, so x-corvene:// links from elsewhere still ask first.",
+        ghd_behaviour: "The command line tool can only open a path; one Corvene doesn't list yet \
+                        shows the Add Local Repository dialog.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(21260)],
+        code: &[
+            "crates/corvene-core/src/app_url.rs",
+            "crates/corvene-platform/src/cli.rs",
+            "packaging/corvene.sh",
+            "packaging/linux/corvene.sh",
+        ],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
@@ -2088,6 +2326,7 @@ registry! {
         upstream: &[Upstream::issue(21762)],
         code: &["crates/corvene-core/src/dispatcher.rs"],
     },
+
     /// Settings › Prompts leaves out the Copilot prompt.
     COPILOT_PROMPT_OMITTED = 512 "copilot-prompt-omitted" {
         title: "Settings › Prompts: no Copilot prompt",
@@ -2311,6 +2550,21 @@ registry! {
             "crates/corvene/src/main.rs",
             "crates/corvene/src/menus.rs",
         ],
+    },
+
+    /// Arrow keys in the repository list start at the selected repository.
+    REPOSITORY_LIST_STARTS_AT_SELECTED = 613 "repository-list-starts-at-selected" {
+        title: "Repository list arrows start at the current repository",
+        summary: "With no row highlighted yet, ↓ / ↑ in the repository list's filter box move to \
+                  the row after / before the selected repository instead of the first / last row.",
+        ghd_behaviour: "The first ↓ always goes to the top of the list (↑ to the bottom), however \
+                        far down the current repository is.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(2650)],
+        code: &["crates/corvene-ui/src/repository_list.rs"],
     },
 
     // ---- 700 Changes & diffs ----
@@ -3570,18 +3824,19 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs"],
     },
 
-    /// Undo Commit warns about the commit's tags.
+    /// Undo Commit and Amend Commit warn about the commit's tags.
     WARN_UNDO_TAGGED_COMMIT = 819 "warn-undo-tagged-commit" {
-        title: "Warn before undoing a tagged commit",
-        summary: "Undo Commit on a commit that has tags asks first: the tags would stay on a commit \
-                  that is no longer on any branch.",
-        ghd_behaviour: "Undoes silently; the tags keep pointing at the orphaned commit.",
+        title: "Warn before undoing or amending a tagged commit",
+        summary: "Undo Commit and Amend Commit on a commit that has tags ask first: the tags \
+                  would stay on a commit that is no longer on any branch.",
+        ghd_behaviour: "Undoes and amends silently; the tags keep pointing at the orphaned \
+                        commit.",
         nature: Nature::BugFix,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: ON, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(19844)],
-        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs", "crates/corvene-ui/src/changes.rs"],
+        upstream: &[Upstream::issue(19844), Upstream::issue(17737)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/history.rs"],
     },
 
     /// History › Cherry-pick Without Committing.
@@ -4265,6 +4520,178 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(11491)],
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Checking out a remote branch whose name is already a local branch.
+    REMOTE_CHECKOUT_USES_LOCAL = 866 "remote-checkout-uses-local" {
+        title: "Remote branches check out the local branch",
+        summary: "Choosing a remote branch such as origin/foo while a local branch foo exists \
+                  switches to the local foo (with the usual handling of uncommitted changes).",
+        ghd_behaviour: "Tries to create foo again and fails with \"a branch named 'foo' already \
+                        exists\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4527)],
+        code: &["crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Push and remote branch deletion name full refs.
+    QUALIFIED_PUSH_REFSPECS = 867 "qualified-push-refspecs" {
+        title: "Push branches by their full ref name",
+        summary: "Push, Publish branch and deleting a branch on the remote name the branch as \
+                  refs/heads/<name>, so a tag with the same name as the branch does not make \
+                  them fail.",
+        ghd_behaviour: "Pushes <name>:<name>; a tag called like the branch makes git stop with \
+                        \"src refspec <name> matches more than one\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7726)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Restore checks the stash still belongs to the checked-out branch.
+    STASH_RESTORE_CHECKS_BRANCH = 868 "stash-restore-checks-branch" {
+        title: "Restore stash checks the branch",
+        summary: "Restore picks the stash by its commit and only while the branch it was made \
+                  on is checked out; clicked during a branch switch, it stops with an error \
+                  instead of applying the changes to the other branch.",
+        ghd_behaviour: "Pops the stash entry as listed at the last refresh, even when a branch \
+                        switch has just changed what is checked out.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10651)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
+    /// Stashing stops when it would reset assume-unchanged files.
+    STASH_PROTECTS_ASSUME_UNCHANGED = 869 "stash-protects-assume-unchanged" {
+        title: "Protect assume-unchanged files from stashing",
+        summary: "Stashing (Stash All Changes, leaving changes on a branch, or Stash and \
+                  Continue) stops with an explanation when a file marked assume-unchanged has \
+                  local changes, because git would reset that file without saving it in the \
+                  stash.",
+        ghd_behaviour: "Stashes anyway; the assume-unchanged file's changes are lost.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20806)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
+    /// Delete Branch names the remote branch it would delete.
+    DELETE_REMOTE_NAMES_UPSTREAM = 870 "delete-remote-names-upstream" {
+        title: "Delete Branch names the remote branch",
+        summary: "The Delete Branch dialog's \"delete on the remote\" checkbox names the remote \
+                  branch it would delete (for example origin/feature), and is not offered when \
+                  that branch is the remote's default branch.",
+        ghd_behaviour: "Says \"delete this branch on the remote\" and deletes the upstream, \
+                        whatever its name: a local branch tracking origin/main deletes origin/main.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20638)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
+    /// No "Will be saved as" for a name still being typed.
+    BRANCH_NAME_TRAILING_SLASH_QUIET = 871 "branch-name-trailing-slash-quiet" {
+        title: "Quiet branch name warning while typing a slash",
+        summary: "A branch name box does not warn that the name will be changed while the only \
+                  difference is a trailing / or . (as in feature/ on the way to feature/x).",
+        ghd_behaviour: "Flashes \"Will be created as feature\" after each / typed, which reads \
+                        as if slashes were not allowed.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12275)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
+    /// Rename Branch opens with the name box focused.
+    RENAME_BRANCH_FOCUSES_NAME = 872 "rename-branch-focuses-name" {
+        title: "Rename Branch focuses the name",
+        summary: "The Rename Branch dialog opens with the focus in the name box and the current \
+                  name selected, so typing replaces it at once (as in Create a Branch).",
+        ghd_behaviour: "Focuses the dialog's close button; the name box needs a click or Tab.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17661)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
+    /// More characters a branch name may not contain.
+    BRANCH_NAME_FORBIDDEN_CHARS = 873 "branch-name-forbidden-chars" {
+        title: "Forbidden branch name characters",
+        summary: "Characters (written together, for example #&%) that Create a Branch, Rename \
+                  Branch and the worktree dialogs replace with - in a branch name, along with \
+                  those Git forbids; empty for none.",
+        ghd_behaviour: "Only the characters Git forbids are replaced.",
+        nature: Nature::Feature,
+        kind: Kind::Text { placeholder: "#&%", validate: forbidden_branch_chars },
+        corvene: Value::text(""), ghd: Value::text(""),
+        familiar: Value::text(""), max: Value::text(""),
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22603)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/worktree_dialogs.rs"],
+    },
+
+    /// A linked worktree's "Last fetched" counts the main repository's fetches.
+    WORKTREE_SHARED_LAST_FETCHED = 874 "worktree-shared-last-fetched" {
+        title: "Worktrees share the last fetch time",
+        summary: "In a linked worktree, the Fetch button's \"Last fetched\" time also counts \
+                  fetches made from the main worktree (they update the same remote branches), \
+                  so it does not say \"Never fetched\" right after a fetch elsewhere.",
+        ghd_behaviour: "Reads only the worktree's own FETCH_HEAD, so a linked worktree shows \
+                        \"Never fetched\" until it fetches itself.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22520)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/paths.rs"],
+    },
+
+    /// Broken config files are named, and a broken .gitmodules does not stop a fetch.
+    EXPLAIN_BAD_CONFIG = 875 "explain-bad-config" {
+        title: "Explain broken Git config files",
+        summary: "Adding a repository whose .git/config git cannot read says which file and line \
+                  to fix, and a fetch that fails because .gitmodules cannot be read (for example \
+                  a merge conflict in it) is retried without submodules.",
+        ghd_behaviour: "Says the folder is not a Git repository, and fetching fails with git's \
+                        \"bad config line\" error until .gitmodules is fixed.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6200), Upstream::issue(6534)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/error.rs"],
+    },
+
+    /// A missing repository folder is named instead of "Not a directory".
+    GIT_SPAWN_ERROR_DETAILS = 876 "git-spawn-error-details" {
+        title: "Name a missing repository folder",
+        summary: "When git cannot start because the repository's folder is gone or is a file, \
+                  the error says which folder is missing instead of \"could not run git: Not a \
+                  directory\".",
+        ghd_behaviour: "Shows \"spawn ENOTDIR\" or a similar system error that reads as if Git \
+                        were broken.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(9887)],
+        code: &["crates/corvene-git/src/process.rs", "crates/corvene-git/src/error.rs", "crates/corvene-core/src/flags/dispatch.rs"],
     },
 
     /// Links in commit messages end where github.com ends them.

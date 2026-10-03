@@ -147,6 +147,10 @@ pub struct Settings {
     pub custom_shell: Option<CustomIntegration>,
     #[serde(default)]
     pub use_custom_shell: bool,
+    /// Flag `266-collapsible-repository-groups`: the repository list groups
+    /// the user collapsed (`Group::key` in `corvene-ui`'s repository list).
+    #[serde(default)]
+    pub collapsed_repository_groups: Vec<String>,
 }
 
 /// GHD `ICustomIntegration`: an executable (or macOS app bundle) plus its
@@ -321,6 +325,7 @@ impl Default for Settings {
             use_custom_editor: false,
             custom_shell: None,
             use_custom_shell: false,
+            collapsed_repository_groups: Vec::new(),
         }
     }
 }
@@ -340,6 +345,15 @@ pub trait StoreExt {
 
     fn recent_repositories(&self) -> Result<Vec<u64>>;
     fn save_recent_repositories(&self, ids: &[u64]) -> Result<()>;
+    /// The repository list's indicators by repository id (flag
+    /// `271-persist-repository-indicators`).
+    fn repository_indicators(
+        &self,
+    ) -> Result<std::collections::HashMap<u64, crate::remote::RepoIndicator>>;
+    fn save_repository_indicators(
+        &self,
+        indicators: &std::collections::HashMap<u64, crate::remote::RepoIndicator>,
+    ) -> Result<()>;
     fn selected_repository(&self) -> Result<Option<u64>>;
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()>;
 
@@ -397,6 +411,19 @@ impl StoreExt for Store {
 
     fn save_recent_repositories(&self, ids: &[u64]) -> Result<()> {
         self.set("repositories.recent", ids)
+    }
+
+    fn repository_indicators(
+        &self,
+    ) -> Result<std::collections::HashMap<u64, crate::remote::RepoIndicator>> {
+        Ok(self.get("repositories.indicators")?.unwrap_or_default())
+    }
+
+    fn save_repository_indicators(
+        &self,
+        indicators: &std::collections::HashMap<u64, crate::remote::RepoIndicator>,
+    ) -> Result<()> {
+        self.set("repositories.indicators", indicators)
     }
 
     fn selected_repository(&self) -> Result<Option<u64>> {
@@ -515,6 +542,29 @@ mod tests {
         assert_eq!(store.recent_repositories().unwrap(), vec![2, 1]);
         store.save_selected_repository(Some(2)).unwrap();
         assert_eq!(store.selected_repository().unwrap(), Some(2));
+    }
+
+    #[test]
+    fn repository_indicators_round_trip() {
+        use crate::remote::RepoIndicator;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_in(dir.path()).unwrap();
+        assert!(store.repository_indicators().unwrap().is_empty());
+        let mut indicators = std::collections::HashMap::new();
+        indicators.insert(
+            7,
+            RepoIndicator {
+                ahead_behind: Some(corvene_models::AheadBehind {
+                    ahead: 2,
+                    behind: 1,
+                }),
+                changed_files: 3,
+                branch: Some("main".into()),
+                has_stash: true,
+            },
+        );
+        store.save_repository_indicators(&indicators).unwrap();
+        assert_eq!(store.repository_indicators().unwrap(), indicators);
     }
 
     #[test]

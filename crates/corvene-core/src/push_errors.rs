@@ -8,7 +8,11 @@
 //! upstream branch that was deleted, and a clone into a folder the user may
 //! not write to, get a plain-language sentence before git's own message
 //! ([`plain_remote_error`], [`plain_clone_error`]); GHD shows git's text
-//! (desktop#1325, desktop#13187).
+//! (desktop#1325, desktop#13187). The same flag leads with the real cause
+//! when "Could not read from remote repository." follows another `fatal:`
+//! line (desktop#22413; dugite calls it an SSH permission error), and
+//! explains a non-origin remote whose repository is gone
+//! ([`plain_missing_remote_repository`], desktop#3715).
 
 use corvene_models::{BypassReason, SecretLocation, SecretScanResult};
 use gpui_kit::App;
@@ -107,12 +111,34 @@ pub fn plain_remote_error(err: &corvene_git::GitError) -> Option<String> {
     let corvene_git::GitError::Failed { stderr, .. } = err else {
         return None;
     };
+    if let Some(cause) = corvene_git::remote_read_failure_cause(stderr) {
+        return Some(format!(
+            "Git could not talk to the remote: {cause}\n\nThis is not a problem with your \
+             credentials or SSH key.\n\n{err}"
+        ));
+    }
     let branch = missing_remote_branch(stderr)?;
     Some(format!(
         "The branch \"{branch}\" no longer exists on the remote, so there is nothing to pull. \
          It may have been deleted after a merge. Push to publish it again, or switch to \
          another branch.\n\n{err}"
     ))
+}
+
+/// "Repository not found" from `remote` (not origin): its repository was
+/// deleted, renamed or made private, which is easy to miss when the branch
+/// tracks a fork's parent.
+pub fn plain_missing_remote_repository(
+    remote: &str,
+    url: &str,
+    err: &corvene_git::GitError,
+) -> String {
+    format!(
+        "The repository of the remote \"{remote}\" ({url}) does not seem to exist anymore. It \
+         may have been deleted, renamed or made private. Point the current branch at another \
+         remote, or remove \"{remote}\" (git remote remove {remote}) if you no longer need \
+         it.\n\n{err}"
+    )
 }
 
 /// A plain-language explanation for a clone into `path` that failed because
@@ -349,6 +375,39 @@ error: failed to push some refs to 'https://github.com/octocat/hello.git'
             stderr: "fatal: repository not found\n".into(),
         };
         assert!(plain_clone_error(&other, path).is_none());
+    }
+
+    #[test]
+    fn leads_with_the_real_cause_of_a_remote_read_failure() {
+        let failed = |stderr: &str| corvene_git::GitError::Failed {
+            args: "fetch".into(),
+            code: Some(128),
+            stderr: stderr.into(),
+        };
+        let oom = "fatal: Out of memory, malloc failed (tried to allocate 1048576 bytes)\n\
+                   fatal: Could not read from remote repository.\n\n\
+                   Please make sure you have the correct access rights\n";
+        let text = plain_remote_error(&failed(oom)).unwrap();
+        assert!(
+            text.starts_with("Git could not talk to the remote: Out of memory"),
+            "{text}"
+        );
+        let ssh = "git@github.com: Permission denied (publickey).\n\
+                   fatal: Could not read from remote repository.\n";
+        assert!(plain_remote_error(&failed(ssh)).is_none());
+        let offline = "ssh: Could not resolve hostname github.com: nodename nor servname provided\n\
+                       fatal: Could not read from remote repository.\n";
+        assert!(
+            plain_remote_error(&failed(offline))
+                .unwrap()
+                .contains("Could not resolve hostname")
+        );
+        let text = plain_missing_remote_repository(
+            "upstream",
+            "https://github.com/gone/repo.git",
+            &failed("remote: Repository not found.\n"),
+        );
+        assert!(text.contains("remote \"upstream\""), "{text}");
     }
 
     #[test]

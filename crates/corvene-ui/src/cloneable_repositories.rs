@@ -3,7 +3,7 @@
 //! `styles/ui/_account-picker.scss`), shared by Clone a Repository's account
 //! tabs and the signed-in blank slate (`no-repositories-view.tsx`).
 //!
-//! Deviation (`274-consistent-filter-highlight`): the filter's matched
+//! Deviation (`277-consistent-filter-highlight`): the filter's matched
 //! characters can be bold like in the branch and repository lists instead of
 //! GHD's black-on-yellow `<mark>`.
 //!
@@ -312,7 +312,7 @@ pub fn repository_list(
     on_select: OnRepository,
 ) -> AnyElement {
     uniform_list(id, rows.len(), move |range, _window, cx| {
-        // `274-consistent-filter-highlight`
+        // `277-consistent-filter-highlight`
         let bold_matches = corvene_core::AppState::try_global(cx).is_some_and(|s| {
             s.read(cx)
                 .flags

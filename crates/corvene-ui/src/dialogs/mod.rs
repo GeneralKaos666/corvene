@@ -29,6 +29,7 @@ mod push_protection;
 mod reauth_dialogs;
 mod release_notes;
 mod remote_dialogs;
+mod remove_repositories;
 mod repository_settings;
 mod sign_in;
 mod simple;
@@ -342,6 +343,9 @@ impl DialogHost {
             } => cx
                 .new(|_| WarnTaggedCommitBeforeUndoDialog::new(*repo, tags.clone(), *warn_local))
                 .into(),
+            Popup::WarnTaggedCommitBeforeAmend { repo, sha, tags } => cx
+                .new(|_| WarnTaggedCommitBeforeUndoDialog::amend(*repo, tags.clone(), sha.clone()))
+                .into(),
             Popup::CreateBranch {
                 repo,
                 target_sha,
@@ -530,6 +534,11 @@ impl DialogHost {
             Popup::Acknowledgements => cx.new(acknowledgements::AcknowledgementsDialog::new).into(),
             Popup::ImportFromGitHubDesktop => cx
                 .new(import_github_desktop::ImportGitHubDesktopDialog::new)
+                .into(),
+            Popup::RemoveRepositories { ticked } => cx
+                .new(|cx| {
+                    remove_repositories::RemoveRepositoriesDialog::new(state, *ticked, window, cx)
+                })
                 .into(),
             Popup::AddLicense { repo } => {
                 cx.new(|_| add_license::AddLicenseDialog::new(*repo)).into()

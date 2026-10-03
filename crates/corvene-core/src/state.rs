@@ -94,6 +94,11 @@ pub enum Popup {
     /// Corvene addition (flag 206): pick repositories from GitHub Desktop's
     /// list to add.
     ImportFromGitHubDesktop,
+    /// Corvene addition (flag 269): tick repositories to remove at once;
+    /// `ticked` starts ticked (the row the context menu was opened on).
+    RemoveRepositories {
+        ticked: Option<u64>,
+    },
     /// Corvene addition (flag 455): Repository › Add License….
     AddLicense {
         repo: u64,
@@ -270,6 +275,12 @@ pub enum Popup {
         /// History's Undo Commit goes on to the local-changes warning;
         /// the Changes view's Undo button undoes straight away.
         warn_local: bool,
+    },
+    /// Flag `819`: the commit about to be amended carries tags.
+    WarnTaggedCommitBeforeAmend {
+        repo: u64,
+        sha: String,
+        tags: Vec<String>,
     },
     /// `CreateBranch`; `target_sha` when created from a commit in History.
     CreateBranch {

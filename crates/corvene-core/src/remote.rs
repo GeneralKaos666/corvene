@@ -81,13 +81,29 @@ pub enum PushPullKind {
     Generic,
 }
 
-/// Sidebar indicators (`ILocalRepositoryState`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Corvene (`271-persist-repository-indicators`): keep the indicators for
+/// the next launch, so the repository list is not blank until the first
+/// refresh. GHD keeps them in memory only (`RepositoryIndicatorUpdater`).
+fn save_indicators(s: &crate::state::AppState) {
+    if s.flags
+        .bool(crate::flags::ids::PERSIST_REPOSITORY_INDICATORS)
+        && let Err(err) = s.store.save_repository_indicators(&s.indicators)
+    {
+        warn!(?err, "could not save repository indicators");
+    }
+}
+
+/// Sidebar indicators (`ILocalRepositoryState`); saved between launches
+/// with `271-persist-repository-indicators`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RepoIndicator {
     pub ahead_behind: Option<AheadBehind>,
     pub changed_files: usize,
     /// The checked-out branch, for `214-repository-list-branch`.
     pub branch: Option<String>,
+    /// `refs/stash` exists, for `270-repository-list-stash-icon`.
+    pub has_stash: bool,
 }
 
 /// GHD `ForcePushBranchState`
@@ -454,14 +470,33 @@ impl Dispatcher {
                     cx,
                 );
             }
-            _ => {
+            failure => {
                 // `255-plain-language-remote-errors`: say what went wrong
                 // before git's message
-                let plain = Self::state(cx)
-                    .read(cx)
+                let s = Self::state(cx).read(cx);
+                let plain = s
                     .flags
                     .bool(crate::flags::ids::PLAIN_LANGUAGE_REMOTE_ERRORS)
-                    .then(|| crate::push_errors::plain_remote_error(&err))
+                    .then(|| {
+                        crate::push_errors::plain_remote_error(&err).or_else(|| {
+                            // a non-origin remote (a fork's parent) that is gone
+                            let remote = s
+                                .repo_states
+                                .get(&id)?
+                                .info
+                                .as_ref()?
+                                .remotes
+                                .iter()
+                                .find(|r| r.url == remote_url && r.name != "origin")?;
+                            (failure == RemoteFailure::RepositoryNotFound).then(|| {
+                                crate::push_errors::plain_missing_remote_repository(
+                                    &remote.name,
+                                    &remote.url,
+                                    &err,
+                                )
+                            })
+                        })
+                    })
                     .flatten();
                 Self::show_error(title, plain.unwrap_or_else(|| err.to_string()), cx)
             }
@@ -504,6 +539,8 @@ impl Dispatcher {
             write_commit_graph: s.flags.bool(crate::flags::ids::FETCH_WRITES_COMMIT_GRAPH),
             // `250-sync-skips-submodules`
             skip_submodules: s.flags.bool(crate::flags::ids::SYNC_SKIPS_SUBMODULES),
+            // `875-explain-bad-config`
+            retry_bad_gitmodules: s.flags.bool(crate::flags::ids::EXPLAIN_BAD_CONFIG),
         }
     }
 
@@ -1137,13 +1174,23 @@ impl Dispatcher {
             }),
             cx,
         );
-        let local = up_to.clone().unwrap_or_else(|| branch.name.clone());
+        // Corvene (`867-qualified-push-refspecs`): full ref names, so a tag
+        // named like the branch does not make the refspec ambiguous (GHD
+        // pushes `name:name`)
+        let qualified = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::QUALIFIED_PUSH_REFSPECS);
+        let local = up_to.clone().unwrap_or_else(|| match qualified {
+            true => format!("refs/heads/{}", branch.name),
+            false => branch.name.clone(),
+        });
         let remote_branch = branch
             .upstream_short()
             .and_then(|u| u.split_once('/').map(|(_, b)| b.to_string()))
-            .map(|b| match up_to {
-                Some(_) => format!("refs/heads/{b}"),
-                None => b,
+            .map(|b| match up_to.is_some() || qualified {
+                true => format!("refs/heads/{b}"),
+                false => b,
             });
         let remote_url = remote.url.clone();
         // GHD `pushRepo(…, gitStore.tagsToPush)`: unpushed tags ride along
@@ -1639,12 +1686,13 @@ impl Dispatcher {
             Self::state(cx).update(cx, |s, cx| {
                 if !s.indicators.is_empty() {
                     s.indicators.clear();
+                    save_indicators(s);
                     cx.notify();
                 }
             });
             return;
         }
-        let (git, repos) = {
+        let (git, repos, stash_icon) = {
             let s = Self::state(cx).read(cx);
             let Some(git) = s.git.clone() else { return };
             (
@@ -1654,6 +1702,7 @@ impl Dispatcher {
                     .filter(|r| !r.missing)
                     .map(|r| (r.id, r.path.clone()))
                     .collect::<Vec<_>>(),
+                s.flags.bool(crate::flags::ids::REPOSITORY_LIST_STASH_ICON),
             )
         };
         spawn_bg(
@@ -1673,12 +1722,14 @@ impl Dispatcher {
                             .flatten()
                     });
                     let branch = info.current_branch().map(|b| b.name.clone());
+                    let has_stash = stash_icon && corvene_git::has_stash(&info.workdir);
                     out.insert(
                         id,
                         RepoIndicator {
                             ahead_behind,
                             changed_files: changed,
                             branch,
+                            has_stash,
                         },
                     );
                 }
@@ -1687,6 +1738,7 @@ impl Dispatcher {
             move |indicators, cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.indicators = indicators;
+                    save_indicators(s);
                     cx.notify();
                 });
             },

@@ -146,6 +146,14 @@ pub fn set_credential_helper(enabled: bool) {
     CREDENTIAL_HELPER.store(enabled, Ordering::Relaxed);
 }
 
+/// Flag `876-git-spawn-error-details`: a missing working directory is named
+/// instead of "could not run git: Not a directory" (set by the dispatcher).
+static EXPLAIN_MISSING_WORKDIR: AtomicBool = AtomicBool::new(false);
+
+pub fn set_explain_missing_workdir(enabled: bool) {
+    EXPLAIN_MISSING_WORKDIR.store(enabled, Ordering::Relaxed);
+}
+
 /// Seconds a network command's HTTP transfer may stay below 1 byte/s before
 /// git aborts it (`GIT_HTTP_LOW_SPEED_LIMIT` / `GIT_HTTP_LOW_SPEED_TIME`);
 /// 0 = no limit, as in GHD. Set by the dispatcher from flag
@@ -261,6 +269,24 @@ impl GitCommand {
         self
     }
 
+    /// [`GitError::Spawn`], or with flag `876` [`GitError::MissingWorkdir`]
+    /// when the working directory is gone or not a folder (the OS reports
+    /// that as "No such file or directory" / "Not a directory", which reads
+    /// as if git were missing).
+    fn spawn_error(&self, err: std::io::Error) -> GitError {
+        use std::io::ErrorKind;
+        match &self.cwd {
+            Some(cwd)
+                if EXPLAIN_MISSING_WORKDIR.load(Ordering::Relaxed)
+                    && matches!(err.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
+                    && !cwd.is_dir() =>
+            {
+                GitError::MissingWorkdir(cwd.clone())
+            }
+            _ => GitError::Spawn(err),
+        }
+    }
+
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.bin.path);
         #[cfg(windows)]
@@ -329,7 +355,7 @@ impl GitCommand {
         #[cfg(target_os = "android")]
         let output = {
             let mut child = crate::spawn::spawn(self.command(), self.stdin.is_some())
-                .map_err(GitError::Spawn)?;
+                .map_err(|err| self.spawn_error(err))?;
             if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
                 use std::io::Write;
                 let _ = stdin.write_all(bytes);
@@ -338,14 +364,17 @@ impl GitCommand {
         };
         #[cfg(not(target_os = "android"))]
         let output = match (&self.stdin, &self.cancel) {
-            (None, None) => self.command().output().map_err(GitError::Spawn)?,
+            (None, None) => self
+                .command()
+                .output()
+                .map_err(|err| self.spawn_error(err))?,
             (stdin_bytes, cancel) => {
                 let mut child = self
                     .command()
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
-                    .map_err(GitError::Spawn)?;
+                    .map_err(|err| self.spawn_error(err))?;
                 if let Some(token) = cancel {
                     token.attach(child.id());
                 }
@@ -417,10 +446,10 @@ impl GitCommand {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(GitError::Spawn)?;
+            .map_err(|err| self.spawn_error(err))?;
         #[cfg(target_os = "android")]
-        let mut child =
-            crate::spawn::spawn(self.command(), self.stdin.is_some()).map_err(GitError::Spawn)?;
+        let mut child = crate::spawn::spawn(self.command(), self.stdin.is_some())
+            .map_err(|err| self.spawn_error(err))?;
         if let Some(token) = &cancel {
             token.attach(child.id());
         }
@@ -574,6 +603,31 @@ mod tests {
             version.cancel_token(token).run(),
             Err(GitError::Cancelled(_))
         ));
+    }
+
+    #[test]
+    fn missing_working_directory_is_named() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file");
+        std::fs::write(&file, "").unwrap();
+        let gone = dir.path().join("gone");
+        let run = |cwd: &Path| {
+            GitCommand::new(git.clone())
+                .args(["status"])
+                .current_dir(cwd)
+                .run()
+                .unwrap_err()
+        };
+        set_explain_missing_workdir(true);
+        for cwd in [&gone, &file] {
+            match run(cwd) {
+                GitError::MissingWorkdir(path) => assert_eq!(&path, cwd),
+                other => panic!("{other:?}"),
+            }
+        }
+        set_explain_missing_workdir(false);
+        assert!(matches!(run(&gone), GitError::Spawn(_)));
     }
 
     #[test]

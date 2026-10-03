@@ -8,9 +8,15 @@
 //! current branch while there are uncommitted changes
 //! (`844-create-branch-with-changes-from-current`).
 //! Delete Branch warns about unmerged commits and a stash on the branch
-//! (`860-delete-branch-warnings`).
+//! (`860-delete-branch-warnings`), names the upstream in its "delete on the
+//! remote" checkbox and hides it for the remote's default branch
+//! (`870-delete-remote-names-upstream`).
 //! Create and Rename refuse `head` in any case (`846-reject-head-branch-name`).
+//! Rename Branch focuses the name box, not the close button
+//! (`872-rename-branch-focuses-name`).
 //! Create a Branch can prefill a name prefix (`845-branch-name-prefix`).
+//! Branch names can have more characters replaced with `-`
+//! (`873-branch-name-forbidden-chars`).
 //! `ConfirmSwitchBranchDialog` is a Corvene addition (`864-confirm-branch-switch`).
 //! Switch Branch can discard the changes instead (`865-switch-branch-discard`).
 //! Squash and merge has commit message fields (flag `837`).
@@ -55,6 +61,43 @@ pub fn sanitize_ref_name(input: &str) -> String {
         out.pop();
     }
     out.replace("..", "-").replace("@{", "-").replace("//", "/")
+}
+
+/// [`sanitize_ref_name`] after replacing each character of `forbidden`
+/// with `-` (`873-branch-name-forbidden-chars`).
+pub fn sanitize_ref_name_with(input: &str, forbidden: &str) -> String {
+    let replaced: String = input
+        .chars()
+        .map(|c| {
+            if !c.is_whitespace() && forbidden.contains(c) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    sanitize_ref_name(&replaced)
+}
+
+/// What a new branch name box turns its input into: [`sanitize_ref_name`]
+/// plus the characters the `873-branch-name-forbidden-chars` flag lists.
+pub fn sanitize_branch_name(input: &str, cx: &App) -> String {
+    let flags = &AppState::global(cx).read(cx).flags;
+    sanitize_ref_name_with(
+        input,
+        flags.text(corvene_core::flags::ids::BRANCH_NAME_FORBIDDEN_CHARS),
+    )
+}
+
+/// Whether a ref name box shows "Will be … as <sanitized>" for `raw`.
+/// `quiet_trailing` (`871-branch-name-trailing-slash-quiet`) keeps it hidden
+/// while the only difference is a trailing `/` or `.`, typed on the way to
+/// `feature/x` (GHD flashes "Will be created as feature").
+pub fn ref_name_warning(raw: &str, sanitized: &str, quiet_trailing: bool) -> bool {
+    let raw = raw.trim();
+    !raw.is_empty()
+        && sanitized != raw
+        && !(quiet_trailing && raw.trim_end_matches(['/', '.']) == sanitized)
 }
 
 /// Flag `846-reject-head-branch-name`: `head` in any case names `HEAD`
@@ -188,7 +231,7 @@ impl Render for CreateBranchDialog {
             }
         };
         let raw = self.name.read(cx).value().to_string();
-        let name = sanitize_ref_name(&raw);
+        let name = sanitize_branch_name(&raw, cx);
         let (tip, default_branch, existing, target_commit) = {
             let s = self.state.read(cx);
             let rs = s.repo_states.get(&self.repo);
@@ -519,12 +562,24 @@ impl RenameBranchDialog {
         let name = cx.new(|cx| InputState::new(window, cx));
         name.update(cx, |s, cx| s.set_value(branch.clone(), window, cx));
         cx.observe(&name, |_, _, cx| cx.notify()).detach();
+        // `872-rename-branch-focuses-name`: the name box takes the focus with
+        // the name selected (GHD `focusCloseButtonOnOpen` focuses the close
+        // button)
+        let focus_name = state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::RENAME_BRANCH_FOCUSES_NAME);
+        if focus_name {
+            let handle = name.read(cx).focus_handle(cx);
+            window.focus(&handle, cx);
+            name.update(cx, |input, cx| input.select_all(window, cx));
+        }
         Self {
             state,
             repo,
             branch,
             name,
-            close_focus_visible: true,
+            close_focus_visible: !focus_name,
         }
     }
 }
@@ -533,7 +588,7 @@ impl Render for RenameBranchDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let t = cx.ghd();
-        let new_name = sanitize_ref_name(&self.name.read(cx).value());
+        let new_name = sanitize_branch_name(&self.name.read(cx).value(), cx);
         let (upstream, existing) = {
             let s = self.state.read(cx);
             let info = s.repo_states.get(&self.repo).and_then(|r| r.info.as_ref());
@@ -728,19 +783,48 @@ impl Render for DeleteBranchDialog {
                 })
                 .unwrap_or_default()
         };
-        let exists_on_remote = {
+        // `870-delete-remote-names-upstream`: the checkbox names the
+        // upstream, and is not offered for the remote's default branch (a
+        // local branch tracking origin/main would delete origin/main)
+        let names_upstream = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::DELETE_REMOTE_NAMES_UPSTREAM);
+        let remote_upstream = {
             let s = self.state.read(cx);
-            let info = s.repo_states.get(&self.repo).and_then(|r| r.info.as_ref());
-            info.and_then(|i| i.branches.iter().find(|b| b.name == self.branch))
+            let rs = s.repo_states.get(&self.repo);
+            let info = rs.and_then(|r| r.info.as_ref());
+            let upstream = info
+                .and_then(|i| i.branches.iter().find(|b| b.name == self.branch))
                 .and_then(|b| b.upstream_short().map(|u| u.to_string()))
-                .map(|u| {
+                .filter(|u| {
                     info.is_some_and(|i| {
                         i.branches
                             .iter()
-                            .any(|b| b.kind == BranchKind::Remote && b.name == u)
+                            .any(|b| b.kind == BranchKind::Remote && &b.name == u)
                     })
-                })
-                .unwrap_or(false)
+                });
+            let is_remote_default = |u: &str| {
+                let Some(default) = rs.and_then(|r| r.default_branch.as_deref()) else {
+                    return false;
+                };
+                let default_upstream = info
+                    .and_then(|i| {
+                        i.branches
+                            .iter()
+                            .find(|b| b.name == default && b.kind == BranchKind::Local)
+                    })
+                    .and_then(|b| b.upstream_short());
+                default_upstream == Some(u)
+                    || u.split_once('/').is_some_and(|(_, name)| name == default)
+            };
+            upstream.filter(|u| !(names_upstream && is_remote_default(u)))
+        };
+        let exists_on_remote = remote_upstream.is_some();
+        let remote_label = match remote_upstream.as_deref().filter(|_| names_upstream) {
+            Some(upstream) => format!("Yes, delete {upstream} on the remote"),
+            None => "Yes, delete this branch on the remote".to_string(),
         };
         let (repo, name, include_remote) = (self.repo, self.branch.clone(), self.include_remote);
         let content = div()
@@ -795,7 +879,7 @@ impl Render for DeleteBranchDialog {
                             false,
                             cx,
                         ))
-                        .child("Yes, delete this branch on the remote"),
+                        .child(remote_label),
                 )
             });
         // destructive: Cancel is the submit button, which gets the focus
@@ -815,7 +899,12 @@ impl Render for DeleteBranchDialog {
                 },
                 DialogButton {
                     id: "delete-branch-ok",
-                    label: "Delete".into(),
+                    label: crate::dialog::confirm_label(
+                        "Delete",
+                        "Delete Branch",
+                        "Delete branch",
+                        cx,
+                    ),
                     primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
@@ -1654,4 +1743,32 @@ pub fn split_button(
                 .bg(bg)
                 .child(octicon(Octicon::TriangleDown, text)),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn trailing_separator_alone_does_not_warn() {
+        let check = |raw: &str, quiet| ref_name_warning(raw, &sanitize_ref_name(raw), quiet);
+        assert!(check("feature/", false));
+        assert!(!check("feature/", true));
+        assert!(!check("v1.", true));
+        assert!(!check("feature/x", true));
+        assert!(check("my branch/", true));
+        assert!(check("a..b", true));
+        assert!(!check("", true));
+    }
+
+    #[::core::prelude::v1::test]
+    fn forbidden_characters_become_dashes() {
+        assert_eq!(
+            sanitize_ref_name_with("fix#12 & more", "#&"),
+            "fix-12---more"
+        );
+        assert_eq!(sanitize_ref_name_with("#lead/x", "#"), "lead/x");
+        assert_eq!(sanitize_ref_name_with("a b", " "), "a-b");
+        assert_eq!(sanitize_ref_name_with("plain", ""), "plain");
+    }
 }

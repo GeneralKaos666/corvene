@@ -18,6 +18,8 @@ pub struct MenuOptions {
     pub show_release_notes: bool,
     /// Flag `206-import-from-github-desktop`.
     pub show_import: bool,
+    /// Flag `269-bulk-remove-repositories`.
+    pub show_remove_repositories: bool,
     /// Flag `321-view-upstream-on-github`.
     pub show_view_upstream: bool,
     /// Flag `405-window-menu-main-window`.
@@ -43,6 +45,7 @@ impl MenuOptions {
             // GitHub Desktop does not run on Android
             show_import: !cfg!(target_os = "android")
                 && s.flags.bool(ids::IMPORT_FROM_GITHUB_DESKTOP),
+            show_remove_repositories: s.flags.bool(ids::BULK_REMOVE_REPOSITORIES),
             show_view_upstream: s.flags.bool(ids::VIEW_UPSTREAM_ON_GITHUB),
             show_main_window: s.flags.bool(ids::WINDOW_MENU_MAIN_WINDOW),
             show_add_license: s.flags.bool(ids::ADD_LICENSE),
@@ -73,7 +76,8 @@ const fn l(mac: &'static str, other: &'static str) -> &'static str {
 /// branch on macOS and the other one elsewhere.
 /// Corvene additions: "Flags…" (no GHD equivalent), File › Import
 /// Repositories from GitHub Desktop…, Repository › Fetch All Repositories,
-/// Repository › View Upstream on GitHub, Repository › Add License…,
+/// File › Remove Repositories…, Repository › View Upstream on GitHub,
+/// Repository › Add License…,
 /// Window › Corvene (shows the window hidden with ⌘W) and Help › Show
 /// Release Notes; on Linux "Flags…" and "Install Command Line Tool…" sit
 /// under File after "Options…" (GHD's Linux menu has no app menu).
@@ -308,6 +312,15 @@ pub fn install(cx: &mut App, options: &MenuOptions) {
             ),
             ImportFromGitHubDesktop,
         ));
+    }
+    if options.show_remove_repositories {
+        file_items.extend([
+            MenuItem::separator(),
+            MenuItem::action(
+                l("Remove Repositories…", "Remo&ve repositories…"),
+                RemoveRepositories,
+            ),
+        ]);
     }
     let mut menus = Vec::new();
     #[cfg(target_os = "macos")]
