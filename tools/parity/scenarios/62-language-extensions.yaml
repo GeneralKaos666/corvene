@@ -3,7 +3,7 @@
 # and the Settings entry point. Run with
 #   PARITY_CORVENE_FLAGS=preset=github-desktop,111-language-extensions=on
 # GHD has no counterpart: its steps are skipped and the snaps are
-# recorded, not compared (deviations.md › Settings).
+# recorded, not compared (`corvene_only`; deviations.md › Settings).
 name: language-extensions
 description: Language Extensions dialog (Corvene only)
 setup: repo
@@ -12,12 +12,12 @@ steps:
     corvene: {popup: language-extensions}
     wait: 900
   - dump: {name: installed, root: dialog}
-  - snap: {name: installed, note: "Corvene only: GHD has no language extensions (deviations.md › Settings)"}
+  - snap: {name: installed, corvene_only: true, note: "GHD has no language extensions (deviations.md › Settings)"}
   - ghd: {skip: true}
     corvene: {popup: "language-extensions:find"}
     wait: 900
-  - snap: {name: find, note: "Corvene only"}
+  - snap: {name: find, corvene_only: true}
   - ghd: {skip: true}
     corvene: {popup: "language-extensions:import"}
     wait: 1500
-  - snap: {name: import, note: "Corvene only; lists this machine's editors"}
+  - snap: {name: import, corvene_only: true, note: "lists this machine's editors"}

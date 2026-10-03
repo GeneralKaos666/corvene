@@ -104,6 +104,7 @@ steps:
   - context_menu_pick: "Clone Repository…"   # choose an item in both (GHD: resolves its IPC; Corvene: menu-pick)
   - dump: open                           # GHD DOM boxes + computed styles as JSON ({name, root: css})
   - snap: open                           # or {name, threshold, tolerance, edge_tolerance, radius, mask: [[x,y,w,h]…], region: [x,y,w,h], note}
+                                         #   corvene_only: true records Corvene's shot without a comparison (a surface GHD lacks)
 ```
 
 Masks are for deliberate differences only (product name, version numbers) and
