@@ -5,6 +5,12 @@
 //! 80 px on every side; header "Merge N commits into [base ▾] from
 //! <current>." with the lines added/removed, a resizable file list next to
 //! the merge-base diff, the mergeability in the footer.
+//!
+//! Deviation (flag `pr-preview-empty-files-message`): when the branch has
+//! commits but they add up to no file changes against the base, the dialog
+//! says "No file changes between <base> and <current>." where GHD
+//! (`open-pull-request-dialog.tsx#renderContent`) shows an empty file list
+//! and a blank diff.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -631,6 +637,12 @@ impl Render for OpenPullRequestDialog {
             .map(|c| (c.lines_added, c.lines_deleted))
             .unwrap_or((0, 0));
         let ok_disabled = preview.commit_shas.as_ref().is_none_or(|s| s.is_empty());
+        let no_file_changes = preview.changeset.as_ref().is_some_and(|c| c.files.is_empty())
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::PR_PREVIEW_EMPTY_FILES_MESSAGE);
         // `renderContent`: no base branch / no changes / files + diff
         let content: AnyElement =
             if preview.base_branch.is_none() {
@@ -672,6 +684,23 @@ impl Render for OpenPullRequestDialog {
                         .into_any_element()
                 };
                 self.message("There are no changes.", body, cx)
+            } else if no_file_changes && preview.commit_shas.is_some() {
+                let base = preview.base_branch.clone().unwrap_or_default();
+                let current = preview.current_branch.clone();
+                let body = div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_center()
+                    .gap(zpx(3.))
+                    .child("No file changes between")
+                    .child(code_ref(base, cx))
+                    .child("and")
+                    .child(code_ref(current, cx))
+                    .child(".")
+                    .into_any_element();
+                self.message("There are no file changes.", body, cx)
             } else if preview.commit_shas.is_none() {
                 div()
                     .size_full()

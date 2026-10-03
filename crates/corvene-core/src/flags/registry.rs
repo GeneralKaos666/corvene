@@ -1779,6 +1779,20 @@ registry! {
         code: &["crates/corvene-core/src/pull_requests.rs"],
     },
 
+    /// Preview Pull Request explains commits without file changes.
+    PR_PREVIEW_EMPTY_FILES_MESSAGE = 375 "pr-preview-empty-files-message" {
+        title: "Preview Pull Request says when there are no file changes",
+        summary: "When the branch's commits add up to no file changes against the base branch, \
+                  Preview Pull Request says \"No file changes between <base> and <branch>.\"",
+        ghd_behaviour: "Shows an empty file list and a blank diff.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17536)],
+        code: &["crates/corvene-ui/src/dialogs/open_pull_request.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
