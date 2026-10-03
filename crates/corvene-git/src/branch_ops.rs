@@ -396,10 +396,81 @@ pub fn desktop_stash_message(branch: &str) -> String {
     format!("{DESKTOP_STASH_MARKER}<{branch}>")
 }
 
+/// Files marked `--assume-unchanged` (lower-case tag in `ls-files -v`)
+/// whose working copy differs from the index. `git stash push` leaves them
+/// out of the stash but still resets them, so their changes are lost.
+pub fn modified_assume_unchanged(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<String>> {
+    let out = GitCommand::new(git.clone())
+        .args(["ls-files", "-v", "-s", "-z"])
+        .current_dir(workdir)
+        .run()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // `<tag> <mode> <sha> <stage>\t<path>`
+    let candidates: Vec<(String, String)> = text
+        .split('\0')
+        .filter_map(|record| {
+            let (meta, path) = record.split_once('\t')?;
+            let mut cols = meta.split(' ');
+            let tag = cols.next()?;
+            let sha = cols.nth(1)?;
+            (tag.chars().all(|c| c.is_ascii_lowercase()) && workdir.join(path).is_file())
+                .then(|| (path.to_string(), sha.to_string()))
+        })
+        .collect();
+    if candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+    let list: String = candidates.iter().map(|(p, _)| format!("{p}\n")).collect();
+    let hashes = GitCommand::new(git)
+        .args(["hash-object", "--stdin-paths"])
+        .current_dir(workdir)
+        .stdin(list)
+        .run()?
+        .stdout_string()?;
+    Ok(candidates
+        .into_iter()
+        .zip(hashes.lines())
+        .filter(|((_, indexed), now)| indexed != now.trim())
+        .map(|((path, _), _)| path)
+        .collect())
+}
+
+/// Corvene addition (flag `869`): refuse to stash while
+/// [`modified_assume_unchanged`] finds files a stash would silently reset.
+pub fn ensure_no_modified_assume_unchanged(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
+    let files = modified_assume_unchanged(git, workdir)?;
+    if files.is_empty() {
+        return Ok(());
+    }
+    let shown: Vec<&str> = files.iter().take(5).map(String::as_str).collect();
+    let more = match files.len() - shown.len() {
+        0 => String::new(),
+        n => format!(" and {n} more"),
+    };
+    Err(GitError::Gix(format!(
+        "Your changes were not stashed: {}{more} {} marked assume-unchanged and {} local \
+         changes that a stash would discard without saving. Commit or copy those changes, or \
+         run git update-index --no-assume-unchanged on {}, then try again.",
+        shown.join(", "),
+        if files.len() == 1 { "is" } else { "are" },
+        if files.len() == 1 { "has" } else { "have" },
+        if files.len() == 1 { "it" } else { "them" },
+    )))
+}
+
 /// `createDesktopStashEntry`: stage untracked files first so they are
 /// included, then `stash push -m !!GitHub_Desktop<branch>`. Returns false
-/// when there was nothing to stash.
-pub fn create_desktop_stash(git: Arc<GitBinary>, workdir: &Path, branch: &str) -> Result<bool> {
+/// when there was nothing to stash. `guard_assume_unchanged` (flag `869`)
+/// first stops with [`ensure_no_modified_assume_unchanged`]'s error.
+pub fn create_desktop_stash(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch: &str,
+    guard_assume_unchanged: bool,
+) -> Result<bool> {
+    if guard_assume_unchanged {
+        ensure_no_modified_assume_unchanged(git.clone(), workdir)?;
+    }
     // stage untracked files (only those) so `stash push` picks them up
     let untracked = GitCommand::new(git.clone())
         .args(["ls-files", "--others", "--exclude-standard", "-z"])
@@ -735,7 +806,7 @@ eeee commit: something\n";
         let path = dir.path();
         std::fs::write(path.join("a.txt"), "changed\n").unwrap();
         std::fs::write(path.join("new.txt"), "n\n").unwrap();
-        assert!(create_desktop_stash(git.clone(), path, "main").unwrap());
+        assert!(create_desktop_stash(git.clone(), path, "main", false).unwrap());
         assert!(
             crate::get_status(git.clone(), path, None)
                 .unwrap()
@@ -748,7 +819,7 @@ eeee commit: something\n";
         pop_stash(git.clone(), path, &entries[0].name).unwrap();
         let files = crate::get_status(git.clone(), path, None).unwrap().files;
         assert_eq!(files.len(), 2);
-        assert!(create_desktop_stash(git.clone(), path, "main").unwrap());
+        assert!(create_desktop_stash(git.clone(), path, "main", false).unwrap());
         let (entries, _) = get_stashes(git.clone(), path).unwrap();
         drop_stash(git.clone(), path, &entries[0].name).unwrap();
         assert_eq!(get_stashes(git, path).unwrap().1, 0);
@@ -790,7 +861,7 @@ eeee commit: something\n";
         let path = dir.path();
         std::fs::write(path.join("a.txt"), "changed\n").unwrap();
         std::fs::write(path.join("new.txt"), "untracked\n").unwrap();
-        create_desktop_stash(git.clone(), path, "main").unwrap();
+        create_desktop_stash(git.clone(), path, "main", false).unwrap();
         let (stashes, count) = get_stashes(git.clone(), path).unwrap();
         assert_eq!(count, 1);
         let stash = stashes
@@ -811,7 +882,7 @@ eeee commit: something\n";
         let (dir, git) = repo();
         let path = dir.path();
         std::fs::write(path.join("a.txt"), "changed\n").unwrap();
-        create_desktop_stash(git.clone(), path, "main").unwrap();
+        create_desktop_stash(git.clone(), path, "main", false).unwrap();
         let (stashes, _) = get_stashes(git.clone(), path).unwrap();
         let sha = stashes[0].sha.clone();
         checkout_new_branch(git.clone(), path, "other").unwrap();
@@ -829,5 +900,34 @@ eeee commit: something\n";
         pop_stash_on_branch(git.clone(), path, &sha, "main").unwrap();
         assert_eq!(get_stashes(git.clone(), path).unwrap().1, 0);
         assert!(pop_stash_on_branch(git, path, &sha, "main").is_err());
+    }
+
+    #[test]
+    fn stash_refuses_to_reset_modified_assume_unchanged_files() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        GitCommand::new(git.clone())
+            .args(["update-index", "--assume-unchanged", "a.txt"])
+            .current_dir(path)
+            .run()
+            .unwrap();
+        assert!(
+            modified_assume_unchanged(git.clone(), path)
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::write(path.join("a.txt"), "local only\n").unwrap();
+        std::fs::write(path.join("new.txt"), "untracked\n").unwrap();
+        assert_eq!(
+            modified_assume_unchanged(git.clone(), path).unwrap(),
+            ["a.txt"]
+        );
+        let err = create_desktop_stash(git.clone(), path, "main", true).unwrap_err();
+        assert!(err.to_string().contains("a.txt is marked"), "{err}");
+        assert_eq!(get_stashes(git, path).unwrap().1, 0);
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "local only\n"
+        );
     }
 }

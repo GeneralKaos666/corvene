@@ -4143,6 +4143,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/branch_ops.rs"],
     },
 
+    /// Stashing stops when it would reset assume-unchanged files.
+    STASH_PROTECTS_ASSUME_UNCHANGED = 869 "stash-protects-assume-unchanged" {
+        title: "Protect assume-unchanged files from stashing",
+        summary: "Stashing (Stash All Changes, leaving changes on a branch, or Stash and \
+                  Continue) stops with an explanation when a file marked assume-unchanged has \
+                  local changes, because git would reset that file without saving it in the \
+                  stash.",
+        ghd_behaviour: "Stashes anyway; the assume-unchanged file's changes are lost.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20806)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

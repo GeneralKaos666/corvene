@@ -639,11 +639,15 @@ impl Dispatcher {
         let Some((branch, _)) = Self::current_branch_and_tip(id, cx) else {
             return;
         };
+        let guard = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED);
         Self::close_popup(cx);
         spawn_bg(
             cx,
             move || {
-                corvene_git::create_desktop_stash(git.clone(), &workdir, &branch)
+                corvene_git::create_desktop_stash(git.clone(), &workdir, &branch, guard)
                     .and_then(|_| corvene_git::get_status(git, &workdir, None))
             },
             move |result, cx| match result {

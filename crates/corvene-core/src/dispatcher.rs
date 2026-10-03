@@ -2592,6 +2592,12 @@ impl Dispatcher {
             .and_then(|r| r.desktop_stash())
             .map(|s| s.name.clone());
         let target = branch.name.clone();
+        // Corvene (`869-stash-protects-assume-unchanged`): no stash while it
+        // would reset assume-unchanged files with local changes
+        let guard = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED);
         let submodules = Self::submodule_update_plan(id, cx);
         let git_for_submodules = git.clone();
         let workdir_for_submodules = workdir.clone();
@@ -2612,11 +2618,17 @@ impl Dispatcher {
                     if let Some(current) = current.as_deref()
                         && has_changes
                     {
+                        if guard {
+                            corvene_git::ensure_no_modified_assume_unchanged(
+                                git.clone(),
+                                &workdir,
+                            )?;
+                        }
                         // `createStashAndDropPreviousEntry`
                         if let Some(old) = previous_stash {
                             let _ = corvene_git::drop_stash(git.clone(), &workdir, &old);
                         }
-                        corvene_git::create_desktop_stash(git.clone(), &workdir, current)?;
+                        corvene_git::create_desktop_stash(git.clone(), &workdir, current, false)?;
                     }
                     corvene_git::checkout_branch(git, &workdir, &branch)
                 }
@@ -2626,7 +2638,12 @@ impl Dispatcher {
                         Ok(()) => Ok(()),
                         Err(err) if corvene_git::is_local_changes_overwritten(&err) => {
                             let target = branch.name_without_remote().to_string();
-                            if !corvene_git::create_desktop_stash(git.clone(), &workdir, &target)? {
+                            if !corvene_git::create_desktop_stash(
+                                git.clone(),
+                                &workdir,
+                                &target,
+                                guard,
+                            )? {
                                 return Err(err);
                             }
                             corvene_git::checkout_branch(git.clone(), &workdir, &branch)?;
@@ -3083,14 +3100,21 @@ impl Dispatcher {
             .get(&id)
             .and_then(|r| r.desktop_stash())
             .map(|s| s.name.clone());
+        let guard = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED);
         Self::run_history_op(
             id,
             "Could not stash changes",
             move |git, workdir| {
+                if guard {
+                    corvene_git::ensure_no_modified_assume_unchanged(git.clone(), &workdir)?;
+                }
                 if let Some(old) = previous {
                     let _ = corvene_git::drop_stash(git.clone(), &workdir, &old);
                 }
-                corvene_git::create_desktop_stash(git, &workdir, &current).map(|_| ())
+                corvene_git::create_desktop_stash(git, &workdir, &current, false).map(|_| ())
             },
             cx,
         );
