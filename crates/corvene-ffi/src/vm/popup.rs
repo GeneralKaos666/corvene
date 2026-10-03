@@ -71,7 +71,7 @@ impl Fields {
 fn kind_name(popup: &Popup) -> String {
     let debug = format!("{popup:?}");
     debug
-        .split(|c: char| c == ' ' || c == '{' || c == '(')
+        .split([' ', '{', '('])
         .next()
         .unwrap_or(&debug)
         .to_string()
@@ -501,7 +501,7 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
     let banner = s.banner.as_ref()?;
     let debug = format!("{banner:?}");
     let kind = debug
-        .split(|c: char| c == ' ' || c == '{' || c == '(')
+        .split([' ', '{', '('])
         .next()
         .unwrap_or(&debug)
         .to_string();

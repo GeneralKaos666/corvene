@@ -50,10 +50,10 @@ pub fn repo_list(s: &AppState) -> RepoListVm {
                     .unwrap_or(0),
                 ahead: indicator
                     .and_then(|i| i.ahead_behind.as_ref())
-                    .map(|ab| u32::try_from(ab.ahead).unwrap_or(u32::MAX)),
+                    .map(|ab| ab.ahead),
                 behind: indicator
                     .and_then(|i| i.ahead_behind.as_ref())
-                    .map(|ab| u32::try_from(ab.behind).unwrap_or(u32::MAX)),
+                    .map(|ab| ab.behind),
             }
         })
         .collect();
