@@ -4195,6 +4195,23 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// The working directory status read by gitoxide in-process.
+    IN_PROCESS_STATUS = 906 "in-process-status" {
+        title: "In-process status",
+        summary: "The changes list is read by gitoxide inside Corvene instead of by a git status \
+                  process: the same files, codes, upstream and ahead/behind counts, without \
+                  starting git on every refresh (about a third faster on a typical repository, \
+                  the same on a 50,000-file one). Corvene runs git as before whenever gitoxide \
+                  cannot read the repository.",
+        ghd_behaviour: "Runs `git status --porcelain=2` on every refresh.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/status_gix.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 1000 Experimental ----
 }
 

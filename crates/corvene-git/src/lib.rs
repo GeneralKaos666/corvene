@@ -30,6 +30,7 @@ pub mod repo;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;
 pub mod status;
+mod status_gix;
 pub mod worktree;
 
 pub use branch_ops::{

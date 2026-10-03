@@ -719,6 +719,7 @@ impl Dispatcher {
                         "all" => corvene_git::IgnoreSubmodules::All,
                         _ => corvene_git::IgnoreSubmodules::AsConfigured,
                     },
+                    in_process: s.flags.bool(crate::flags::ids::IN_PROCESS_STATUS),
                 },
                 // GHD `RecentBranchesLimit` is 5
                 usize::try_from(s.flags.number(crate::flags::ids::RECENT_BRANCHES_COUNT))
