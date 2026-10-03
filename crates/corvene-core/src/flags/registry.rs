@@ -1568,6 +1568,27 @@ registry! {
         code: &["crates/corvene-ui/src/toolbar.rs"],
     },
 
+    /// Destructive confirmations name what they remove.
+    DESCRIPTIVE_CONFIRM_BUTTONS = 276 "descriptive-confirm-buttons" {
+        title: "Descriptive confirmation buttons",
+        summary: "The destructive button of the Remove Repository, Delete Branch, Delete Tag and \
+                  Delete Worktree confirmations says what it does (\"Remove Repository\", \
+                  \"Delete Branch\") instead of a bare \"Remove\" or \"Delete\".",
+        ghd_behaviour: "The buttons read \"Remove\" and \"Delete\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8591)],
+        code: &[
+            "crates/corvene-ui/src/dialog.rs",
+            "crates/corvene-ui/src/dialogs/app_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/branch_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/history_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/worktree_dialogs.rs",
+        ],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

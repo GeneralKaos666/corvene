@@ -604,7 +604,7 @@ impl Render for ConfirmDeletePushedTagDialog {
                 },
                 DialogButton {
                     id: "delete-tag-confirm",
-                    label: "Delete".into(),
+                    label: crate::dialog::confirm_label("Delete", "Delete Tag", "Delete tag", cx),
                     primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {

@@ -531,7 +531,12 @@ impl Render for DeleteWorktreeDialog {
                 },
                 DialogButton {
                     id: "delete-worktree-ok",
-                    label: "Delete".into(),
+                    label: crate::dialog::confirm_label(
+                        "Delete",
+                        "Delete Worktree",
+                        "Delete worktree",
+                        cx,
+                    ),
                     primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
