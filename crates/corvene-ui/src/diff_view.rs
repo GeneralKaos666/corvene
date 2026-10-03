@@ -1449,7 +1449,7 @@ impl DiffView {
                         .id("diff-options-popover")
                         .occlude()
                         .child(crate::widgets::touch_drag_occluder())
-                        .w(width)
+                        .w_full()
                         .p(SPACING())
                         .flex()
                         .flex_col()

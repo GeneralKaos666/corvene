@@ -211,8 +211,8 @@ pub mod fonts {
     /// Whether Chromium would draw text with subpixel antialiasing: its
     /// Linux font render params come from GTK, whose `gtk-xft-rgba` is the
     /// desktop's XSETTINGS (GNOME: `font-antialiasing` 'rgba') or the
-    /// `Xft.rgba` X resource, and "none" (grayscale) otherwise. fontconfig's
-    /// own `rgba` is not consulted.
+    /// `Xft.rgba` X resource, and "none" (grayscale) otherwise, unless
+    /// fontconfig's own `rgba` for the UI font decides first.
     #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
     pub fn subpixel_antialiasing() -> bool {
         if let Some(subpixel) = fontconfig_subpixel(&ghd_ui_family()) {
@@ -283,6 +283,45 @@ pub mod fonts {
     #[cfg(target_os = "android")]
     pub fn subpixel_antialiasing() -> bool {
         false
+    }
+
+    /// The family Chromium draws an emoji presentation sequence with:
+    /// fontconfig's `emoji` match (Noto Color Emoji on a stock desktop).
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
+    pub fn emoji_family() -> String {
+        fc_match("emoji").unwrap_or_else(|| "Noto Color Emoji".to_string())
+    }
+
+    /// Windows ships Segoe UI Emoji.
+    #[cfg(windows)]
+    pub fn emoji_family() -> String {
+        "Segoe UI Emoji".to_string()
+    }
+
+    /// Android's emoji font (`/system/etc/fonts.xml`).
+    #[cfg(target_os = "android")]
+    pub fn emoji_family() -> String {
+        "Noto Color Emoji".to_string()
+    }
+
+    /// fontconfig's `rgba` for the family (`fc-match -f '%{rgba}'`), which
+    /// Chromium lets override GTK's render params: `Some(true)` for a
+    /// subpixel layout (rgb, bgr, vrgb, vbgr), `Some(false)` for none, and
+    /// `None` when fontconfig leaves it unknown.
+    #[cfg(not(any(target_os = "macos", target_os = "android", windows)))]
+    fn fontconfig_subpixel(family: &str) -> Option<bool> {
+        let out = std::process::Command::new("fc-match")
+            .args(["-f", "%{rgba}", family])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        match String::from_utf8_lossy(&out.stdout).trim() {
+            "1" | "2" | "3" | "4" | "rgb" | "bgr" | "vrgb" | "vbgr" => Some(true),
+            "5" | "none" => Some(false),
+            _ => None,
+        }
     }
 
     /// `fc-match -f '%{family[0]}' <pattern>`: the family fontconfig picks.

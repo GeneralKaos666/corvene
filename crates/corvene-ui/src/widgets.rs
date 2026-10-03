@@ -406,6 +406,23 @@ pub fn emoji(text: &'static str) -> Div {
     el
 }
 
+/// The colours of Chromium's `outline: auto` focus ring: the 2 px ring and
+/// the 1 px line around it. Off macOS the ring is two-tone, `--focus-color`
+/// inside a white line on a light page and white inside `#101010` on a dark
+/// one; on macOS Chromium draws a single `--focus-color` ring, so both are
+/// the focus colour.
+pub fn focus_ring_colors(cx: &App) -> (Hsla, Hsla) {
+    let t = cx.ghd();
+    if cfg!(target_os = "macos") {
+        return (t.focus, t.focus);
+    }
+    if t.background.l < 0.5 {
+        (rgb(0xffffff).into(), rgb(0x101010).into())
+    } else {
+        (t.focus, rgb(0xffffff).into())
+    }
+}
+
 /// Chromium's `outline: auto` focus ring in `--focus-color` for a
 /// `.button-component` (`outline-offset` draws it 2 px outside the border):
 /// absolutely placed in a `relative()` wrapper around the button. Off macOS
