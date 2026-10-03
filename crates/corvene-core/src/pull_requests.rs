@@ -12,6 +12,12 @@
 //! Deviation (flag `pull-requests-from-deleted-forks`): open pull requests
 //! whose head repository was deleted stay in the list (GHD drops them) and
 //! check out from the base repository's `refs/pull/<n>/head` into `pr/<n>`.
+//!
+//! Deviation (flag `pull-requests-full-refresh-hours`): every N hours and on
+//! the list's refresh button the whole open list is fetched again and
+//! replaces the cache, so pull requests that were deleted or whose
+//! repository was renamed or removed drop out. GHD only ever asks for what
+//! changed since the newest cached `updated_at`, which never reports them.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -74,6 +80,9 @@ pub struct PullRequestCache {
     pub last_refreshed: Option<Instant>,
     /// `pullRequestsLastUpdated`: the newest `updated_at` seen.
     last_updated: Option<String>,
+    /// Flag `pull-requests-full-refresh-hours`: when the whole open list
+    /// was last fetched (Unix seconds, 0 = never).
+    full_refreshed_at_secs: u64,
 }
 
 pub type PullRequestCaches = HashMap<String, PullRequestCache>;
@@ -82,6 +91,16 @@ pub type PullRequestCaches = HashMap<String, PullRequestCache>;
 struct PersistedPullRequests {
     pull_requests: Vec<PullRequest>,
     last_updated: Option<String>,
+    #[serde(default)]
+    full_refreshed_at_secs: u64,
+}
+
+/// Flag `pull-requests-full-refresh-hours`: whether this refresh should
+/// fetch every open pull request instead of what changed since the last one
+/// (`every_hours` 0 never does).
+fn full_refresh_due(every_hours: i64, force: bool, last_full_secs: u64, now_secs: u64) -> bool {
+    let every_hours = every_hours.max(0) as u64;
+    every_hours > 0 && (force || now_secs.saturating_sub(last_full_secs) >= every_hours * 3600)
 }
 
 /// Cache key of a GitHub repository (endpoint + lower-cased `owner/name`).
@@ -231,12 +250,16 @@ impl Dispatcher {
         let key = cache_key(&target);
         let (skip, since) = Self::state(cx).update(cx, |s, cx| {
             let store = s.store.clone();
+            let full_every_hours = s
+                .flags
+                .number(crate::flags::ids::PULL_REQUESTS_FULL_REFRESH_HOURS);
             let cache = s.pull_requests.entry(key.clone()).or_default();
             if !cache.loaded {
                 cache.loaded = true;
                 if let Ok(Some(persisted)) = store.get::<PersistedPullRequests>(&store_key(&key)) {
                     cache.pull_requests = persisted.pull_requests;
                     cache.last_updated = persisted.last_updated;
+                    cache.full_refreshed_at_secs = persisted.full_refreshed_at_secs;
                 }
                 cx.notify();
             }
@@ -251,7 +274,13 @@ impl Dispatcher {
             cache.loading = true;
             cache.last_refreshed = Some(Instant::now());
             cx.notify();
-            (false, cache.last_updated.clone())
+            let full = full_refresh_due(
+                full_every_hours,
+                force,
+                cache.full_refreshed_at_secs,
+                crate::autocomplete::now_secs(),
+            );
+            (false, cache.last_updated.clone().filter(|_| !full))
         });
         if skip {
             return;
@@ -309,6 +338,7 @@ impl Dispatcher {
                         Ok((fetched, full)) => {
                             if full {
                                 cache.pull_requests.clear();
+                                cache.full_refreshed_at_secs = crate::autocomplete::now_secs();
                             }
                             let mut newest = cache.last_updated.clone();
                             for (pr, open) in fetched {
@@ -327,6 +357,7 @@ impl Dispatcher {
                             let persisted = PersistedPullRequests {
                                 pull_requests: cache.pull_requests.clone(),
                                 last_updated: cache.last_updated.clone(),
+                                full_refreshed_at_secs: cache.full_refreshed_at_secs,
                             };
                             if let Err(err) = store.set(&store_key(&key), &persisted) {
                                 warn!(%err, "could not persist pull requests");
@@ -788,6 +819,19 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn full_refresh_schedule() {
+        let day = 24 * 3600;
+        // off: never, not even from the refresh button
+        assert!(!full_refresh_due(0, true, 0, 10 * day));
+        // the refresh button always takes the whole list
+        assert!(full_refresh_due(24, true, 10 * day, 10 * day));
+        assert!(!full_refresh_due(24, false, 10 * day - 3600, 10 * day));
+        assert!(full_refresh_due(24, false, 9 * day, 10 * day));
+        // never fully fetched (an old cache)
+        assert!(full_refresh_due(24, false, 0, 10 * day));
+    }
 
     fn gh(owner: &str, name: &str) -> GitHubRepository {
         GitHubRepository {

@@ -1744,6 +1744,24 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs"],
     },
 
+    /// Full refresh of the pull request cache.
+    PULL_REQUESTS_FULL_REFRESH_HOURS = 373 "pull-requests-full-refresh-hours" {
+        title: "Pull requests: full refresh interval",
+        summary: "Every this many hours, and whenever the Pull Requests list's refresh button is \
+                  clicked, all open pull requests are fetched again and replace the cached list, \
+                  so deleted pull requests and those of removed or renamed repositories drop out \
+                  (0 never does).",
+        ghd_behaviour: "Only fetches pull requests updated since the newest cached one, so pull \
+                        requests that disappeared stay in the list forever.",
+        nature: Nature::BugFix,
+        kind: Kind::Number { min: 0, max: 720, unit: Some("h") },
+        corvene: Value::Number(24), ghd: Value::Number(0),
+        familiar: Value::Number(24), max: Value::Number(24),
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(21124), Upstream::issue(21567)],
+        code: &["crates/corvene-core/src/pull_requests.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
