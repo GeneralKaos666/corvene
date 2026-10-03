@@ -94,6 +94,11 @@ pub enum Popup {
     /// Corvene addition (flag 206): pick repositories from GitHub Desktop's
     /// list to add.
     ImportFromGitHubDesktop,
+    /// Corvene addition (flag 269): tick repositories to remove at once;
+    /// `ticked` starts ticked (the row the context menu was opened on).
+    RemoveRepositories {
+        ticked: Option<u64>,
+    },
     /// Corvene addition (flag 455): Repository › Add License….
     AddLicense {
         repo: u64,
@@ -733,12 +738,24 @@ pub struct RepositoryState {
     /// The old side (`HEAD:<old path>`), for syntax highlighting like GHD
     /// (`fileContents.oldContents`); `None` for new files.
     pub diff_old_contents: Option<Arc<Vec<String>>>,
+    /// `761-too-large-diff-escape-hatch`: the repository's `diff.tool`, read
+    /// when a diff turned out too large to show.
+    pub diff_tool: Option<String>,
+    /// `762-diff-header-mtime`: the selected working-directory file's path
+    /// and modification time.
+    pub diff_file_modified: Option<(String, std::time::SystemTime)>,
+    /// `763-cancel-stale-diffs`: stops the working-directory diff still
+    /// being computed when another one is asked for.
+    pub diff_cancel: Option<corvene_git::CancelToken>,
     /// Most recent commit made from Corvene in this session (`UndoCommit` bar).
     pub last_commit: Option<LastCommit>,
     /// Summaries of the upstream's commits the current branch lacks
     /// (`HEAD..upstream`, newest first, at most [`INCOMING_COMMITS_LIMIT`]),
     /// for the Pull button's tooltip (flag `257`).
     pub incoming_commits: Vec<String>,
+    /// `891-unpublished-commit-links`: HEAD's commits no remote-tracking
+    /// branch contains (`None`: not known, or the flag is off).
+    pub unpublished_commits: Option<std::collections::HashSet<String>>,
     /// Incremented after every successful commit so the form can clear itself.
     pub commit_nonce: u64,
     /// `723-discard-confirm-snooze`: discarding (not all changes) skips the

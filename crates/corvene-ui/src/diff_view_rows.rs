@@ -112,6 +112,19 @@ impl Row {
             _ => DIFF_LINE_HEIGHT(),
         }
     }
+
+    /// `759-discard-from-text-menu`: a changed row's selection index, its
+    /// block of changes and what the block contains.
+    pub fn discard_target(&self) -> Option<(u32, (u32, u32), RangeType)> {
+        if !matches!(self.kind, DiffLineKind::Add | DiffLineKind::Delete) {
+            return None;
+        }
+        Some((
+            self.original.unwrap_or(self.abs),
+            self.group?,
+            self.group_type?,
+        ))
+    }
 }
 
 /// GHD `temporarySelection`: a drag in progress over the line numbers
@@ -161,6 +174,8 @@ pub struct RowContext {
     pub text_bounds: TextBounds,
     /// `748-diff-show-whitespace`: marks spaces and tabs in the text.
     pub show_whitespace: bool,
+    /// `758-wide-hunk-handle`: the old-number column toggles the group.
+    pub wide_hunk_handle: bool,
 }
 
 impl RowContext {
@@ -181,6 +196,26 @@ impl RowContext {
             len
         };
         (start < end).then_some(start..end)
+    }
+}
+
+/// `741-diff-open-in-editor-at-line`: ⌥-click on a line's text opens the
+/// editor at `line` instead of starting a text selection.
+fn open_at_line_on_alt_click(
+    view: &WeakEntity<DiffView>,
+    ev: &MouseDownEvent,
+    line: Option<u32>,
+    cx: &mut App,
+) {
+    let m = ev.modifiers;
+    if ev.button != MouseButton::Left || !m.alt || m.shift || m.control || m.platform {
+        return;
+    }
+    if view
+        .update(cx, |this, cx| this.open_at_line(line, cx))
+        .unwrap_or(false)
+    {
+        cx.stop_propagation();
     }
 }
 
@@ -709,16 +744,23 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         _ => "     ",
     };
     let view_for_text_menu = ctx.view.clone();
+    let view_for_open = ctx.view.clone();
     let line = row.new;
+    let discard = row.discard_target();
     let content = div()
         .id(("diff-text", abs as usize))
         .flex_1()
         .min_w_0()
         .flex()
         .flex_row()
+        .capture_any_mouse_down(move |ev, _, cx| {
+            open_at_line_on_alt_click(&view_for_open, ev, line, cx)
+        })
         .on_mouse_down(MouseButton::Right, move |ev, window, cx| {
             view_for_text_menu
-                .update(cx, |this, cx| this.text_menu(ev.position, line, window, cx))
+                .update(cx, |this, cx| {
+                    this.text_menu(ev.position, line, discard, window, cx)
+                })
                 .ok();
         })
         .child(div().flex_none().whitespace_nowrap().child(prefix))
@@ -1024,7 +1066,53 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
                     }),
             )
         })
-        .child(number(row.old).border_r_1().border_color(num_border))
+        .child({
+            let old_number = number(row.old).border_r_1().border_color(num_border);
+            // `758-wide-hunk-handle`: the old-number column toggles the
+            // whole group, like the 16 px handle strip
+            match row
+                .group
+                .filter(|_| ctx.wide_hunk_handle && selectable && changed)
+            {
+                Some((start, len)) => {
+                    let kind = ctx
+                        .groups
+                        .get(&start)
+                        .copied()
+                        .unwrap_or(DiffSelectionType::None);
+                    let (repo, path) = (ctx.repo, ctx.path.clone());
+                    let (view, view_for_hint) = (ctx.view.clone(), ctx.view.clone());
+                    old_number
+                        .id(("diff-old-number", abs as usize))
+                        .on_hover(move |hovered: &bool, _, cx| {
+                            let next = if *hovered { Some(start) } else { None };
+                            view.update(cx, |this, cx| this.set_hovered_group(next, cx))
+                                .ok();
+                        })
+                        .on_mouse_down(MouseButton::Left, move |ev, _, cx| {
+                            cx.stop_propagation();
+                            if hide_whitespace {
+                                view_for_hint
+                                    .update(cx, |this, cx| {
+                                        this.show_whitespace_hint(ev.position, cx)
+                                    })
+                                    .ok();
+                                return;
+                            }
+                            Dispatcher::set_diff_lines(
+                                repo,
+                                path.clone(),
+                                start,
+                                len,
+                                kind != DiffSelectionType::All,
+                                cx,
+                            )
+                        })
+                        .into_any_element()
+                }
+                None => old_number.into_any_element(),
+            }
+        })
         .child(number(row.new));
 
     el = el.child(gutter).child(content);
@@ -1480,16 +1568,23 @@ fn split_content(
         };
     let body = selectable_text(ctx, list_ix, column, row, highlights, inner_bg);
     let view_for_menu = ctx.view.clone();
+    let view_for_open = ctx.view.clone();
     let line = row.new;
+    let discard = row.discard_target();
     div()
         .id(("split-text", unified))
         .flex_1()
         .min_w_0()
         .flex()
         .flex_row()
+        .capture_any_mouse_down(move |ev, _, cx| {
+            open_at_line_on_alt_click(&view_for_open, ev, line, cx)
+        })
         .on_mouse_down(MouseButton::Right, move |ev, window, cx| {
             view_for_menu
-                .update(cx, |this, cx| this.text_menu(ev.position, line, window, cx))
+                .update(cx, |this, cx| {
+                    this.text_menu(ev.position, line, discard, window, cx)
+                })
                 .ok();
         })
         .child(div().flex_none().whitespace_nowrap().child(prefix))

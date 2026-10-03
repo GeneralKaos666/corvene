@@ -180,6 +180,35 @@ pub fn most_recent_local_commit(
     }))
 }
 
+/// Corvene `891-unpublished-commit-links`: the commits reachable from `tip`
+/// but from no remote-tracking branch (`rev-list <tip> --not --remotes`),
+/// newest first, at most `limit`. They are not on any remote, so links to
+/// them on GitHub would be dead.
+pub fn local_only_commits(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    tip: &str,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let out = GitCommand::new(git)
+        .args([
+            "rev-list",
+            &format!("--max-count={limit}"),
+            tip,
+            "--not",
+            "--remotes",
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(out
+        .stdout_string()?
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
 /// Commits reachable from `to` but not from `from` (`from..to`), newest
 /// first, at most `limit` (GHD `getCommits(repository, revRange(from, to))`).
 pub fn get_commits_in_range(
@@ -584,6 +613,22 @@ pub fn merge_base_file_diff(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn local_only_commits_exclude_remote_ones() {
+        let (dir, git) = repo();
+        let all = local_only_commits(git.clone(), dir.path(), "HEAD", 100).unwrap();
+        assert_eq!(all.len(), 2);
+        // a remote-tracking ref at the first commit publishes it
+        let status = Command::new("git")
+            .args(["update-ref", "refs/remotes/origin/main", "HEAD~1"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let local = local_only_commits(git, dir.path(), "HEAD", 100).unwrap();
+        assert_eq!(local, all[..1]);
+    }
 
     fn repo() -> (tempfile::TempDir, Arc<GitBinary>) {
         let dir = tempfile::tempdir().unwrap();

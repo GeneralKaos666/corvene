@@ -37,9 +37,30 @@ pub struct RepositoryFoldout {
 
 struct Group {
     title: SharedString,
+    /// Corvene (`266-collapsible-repository-groups`): the name the collapsed
+    /// set stores, `None` when the header has no chevron (flag off, a
+    /// filtered list, the flat result list).
+    key: Option<String>,
+    /// Hidden rows: `repos` is empty and the header shows a right chevron.
+    collapsed: bool,
     /// Each repository with the char positions of its name the filter
     /// matched (`HighlightText`).
     repos: Vec<(Repository, Vec<usize>)>,
+}
+
+impl Group {
+    fn new(
+        title: impl Into<SharedString>,
+        key: Option<String>,
+        repos: Vec<(Repository, Vec<usize>)>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            key,
+            collapsed: false,
+            repos,
+        }
+    }
 }
 
 impl RepositoryFoldout {
@@ -89,7 +110,22 @@ impl RepositoryFoldout {
         if count == 0 {
             return;
         }
-        let ix = match self.highlighted {
+        // Corvene (`613-repository-list-starts-at-selected`): the first
+        // arrow steps from the selected repository's (first) row
+        let start = self.highlighted.or_else(|| {
+            let s = self.state.read(cx);
+            let selected = s.selected?;
+            s.flags
+                .bool(corvene_core::flags::ids::REPOSITORY_LIST_STARTS_AT_SELECTED)
+                .then(|| {
+                    groups
+                        .iter()
+                        .flat_map(|g| &g.repos)
+                        .position(|(r, _)| r.id == selected)
+                })
+                .flatten()
+        });
+        let ix = match start {
             Some(ix) => crate::filter_list::wrap_step(ix, delta, count),
             None if delta < 0 => count - 1,
             None => 0,
@@ -169,8 +205,34 @@ impl RepositoryFoldout {
             })
         };
 
+        // Corvene (`266-collapsible-repository-groups`): chevrons on the
+        // headers, except while filtering (then every group is expanded)
+        let filtering = !query.is_empty() || status_filter || fork_filter;
+        let collapsible = !filtering
+            && state
+                .flags
+                .bool(corvene_core::flags::ids::COLLAPSIBLE_REPOSITORY_GROUPS);
+        let key = |k: String| collapsible.then_some(k);
+
         let mut groups: Vec<Group> = Vec::new();
-        if query.is_empty() && !status_filter && !fork_filter {
+        // Corvene (`267-pinned-repositories`): the pinned repositories, by
+        // name, above Recent (they stay in their owner groups too)
+        if !filtering
+            && state
+                .flags
+                .bool(corvene_core::flags::ids::PINNED_REPOSITORIES)
+        {
+            let pinned: Vec<_> = state
+                .sorted_repositories()
+                .into_iter()
+                .filter(|r| r.pinned)
+                .map(|r| (r.clone(), Vec::new()))
+                .collect();
+            if !pinned.is_empty() {
+                groups.push(Group::new("Pinned", key(":pinned".into()), pinned));
+            }
+        }
+        if !filtering {
             // Corvene (`209-recent-repositories-count`; GHD shows 3)
             let shown = usize::try_from(
                 state
@@ -186,10 +248,7 @@ impl RepositoryFoldout {
                 .map(|r| (r, Vec::new()))
                 .collect();
             if !recent.is_empty() && state.repositories.len() > 1 {
-                groups.push(Group {
-                    title: "Recent".into(),
-                    repos: recent,
-                });
+                groups.push(Group::new("Recent", key(":recent".into()), recent));
             }
         }
 
@@ -236,17 +295,29 @@ impl RepositoryFoldout {
             hits.into_iter().map(|(_, r, p)| (r, p)).collect()
         };
         owners.sort_by_key(|(o, _)| o.to_lowercase());
+        // Corvene (`268-ungrouped-repository-list`): without a typed filter,
+        // one alphabetical group instead of the owner groups and Other
+        if query.is_empty()
+            && state
+                .flags
+                .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST)
+        {
+            let mut all: Hits = owners.into_iter().flat_map(|(_, hits)| hits).collect();
+            all.extend(other);
+            all.sort_by_key(|(_, r, _)| r.name().to_lowercase());
+            if !all.is_empty() {
+                let k = key(":all".into());
+                groups.push(Group::new("Repositories", k, ranked(all)));
+            }
+            owners = Vec::new();
+            other = Vec::new();
+        }
         for (owner, hits) in owners {
-            groups.push(Group {
-                title: owner.into(),
-                repos: ranked(hits),
-            });
+            let k = key(format!("owner:{owner}"));
+            groups.push(Group::new(owner, k, ranked(hits)));
         }
         if !other.is_empty() {
-            groups.push(Group {
-                title: "Other".into(),
-                repos: ranked(other),
-            });
+            groups.push(Group::new("Other", key(":other".into()), ranked(other)));
         }
         // Corvene (`212-flat-repository-results`): while a query is typed,
         // one list without group headers, best match first
@@ -262,12 +333,33 @@ impl RepositoryFoldout {
             };
             // stable: equal scores keep the grouped order
             repos.sort_by(|a, b| score(&b.0).total_cmp(&score(&a.0)));
-            return vec![Group {
-                title: SharedString::default(),
-                repos,
-            }];
+            return vec![Group::new(SharedString::default(), None, repos)];
+        }
+        if collapsible {
+            let collapsed = &state.settings.collapsed_repository_groups;
+            for group in &mut groups {
+                if group.key.as_ref().is_some_and(|k| collapsed.contains(k)) {
+                    group.collapsed = true;
+                    group.repos.clear();
+                }
+            }
         }
         groups
+    }
+
+    /// Corvene (`266-collapsible-repository-groups`): a header click hides
+    /// or shows the group's rows.
+    fn toggle_group(&mut self, key: String, cx: &mut Context<Self>) {
+        self.highlighted = None;
+        Dispatcher::update_settings(cx, |s| {
+            let collapsed = &mut s.collapsed_repository_groups;
+            match collapsed.iter().position(|k| *k == key) {
+                Some(ix) => {
+                    collapsed.remove(ix);
+                }
+                None => collapsed.push(key),
+            }
+        });
     }
 
     fn row(
@@ -296,6 +388,19 @@ impl RepositoryFoldout {
             .flags
             .bool(corvene_core::flags::ids::REPOSITORY_LIST_BEHIND_ACCENT);
         let (ahead_behind, has_changes) = indicators(self.state.read(cx), id);
+        // Corvene (`270-repository-list-stash-icon`): the loaded state's
+        // stash count for an opened repository, else the indicator refresh
+        let has_stash = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::REPOSITORY_LIST_STASH_ICON)
+                && s.repo_states
+                    .get(&id)
+                    .filter(|rs| rs.info.is_some())
+                    .map(|rs| rs.stash_count > 0)
+                    .or_else(|| s.indicators.get(&id).map(|i| i.has_stash))
+                    .unwrap_or(false)
+        };
         // Corvene (`214-repository-list-branch`): the checked-out branch
         // (the loaded state for an opened repository, else the background
         // indicator refresh) joins the dimmed detail
@@ -322,8 +427,13 @@ impl RepositoryFoldout {
         if has_changes {
             label.push_str(", uncommitted changes");
         }
+        let count = |n: u32| crate::toolbar::ahead_behind_count(n, self.state.read(cx));
         if let Some(ab) = ahead_behind {
-            label.push_str(&format!(", {} ahead, {} behind", ab.ahead, ab.behind));
+            label.push_str(&format!(
+                ", {} ahead, {} behind",
+                count(ab.ahead),
+                count(ab.behind)
+            ));
         }
         div()
             .id(("repo-row", id))
@@ -364,6 +474,10 @@ impl RepositoryFoldout {
                 }
                 text.push('\n');
                 text.push_str(&repo.path.to_string_lossy());
+                // Corvene (`273-fork-parent-in-tooltip`)
+                if let Some(parent) = crate::toolbar::fork_parent(repo, self.state.read(cx)) {
+                    text.push_str(&format!("\nFork of {parent}"));
+                }
                 crate::widgets::rich_tooltip(text, bold)
             })
             .tooltip_show_delay(crate::widgets::TOOLTIP_DELAY)
@@ -417,6 +531,23 @@ impl RepositoryFoldout {
                         }
                     }),
             )
+            .when(has_stash, |d| {
+                d.child(
+                    div()
+                        .id(("repo-stash", id))
+                        .flex_none()
+                        .ml(SPACING_HALF())
+                        .child(octicon(
+                            Octicon::Stash,
+                            if selected || highlighted {
+                                t.box_selected_text
+                            } else {
+                                t.text_secondary
+                            },
+                        ))
+                        .ghd_tooltip("Stashed changes"),
+                )
+            })
             // `.repo-indicators`: ahead / behind arrows, then the changes dot
             .when(has_changes || ahead_behind.is_some(), |d| {
                 let (badge_bg, badge_text) = if selected {
@@ -441,7 +572,7 @@ impl RepositoryFoldout {
                             let tooltip = format!(
                                 "The currently checked out branch is{}{}{}its tracked branch.",
                                 if ab.behind > 0 {
-                                    format!(" {} behind ", commit_grammar(ab.behind))
+                                    format!(" {} behind ", commit_grammar(ab.behind, &count))
                                 } else {
                                     String::new()
                                 },
@@ -451,7 +582,7 @@ impl RepositoryFoldout {
                                     ""
                                 },
                                 if ab.ahead > 0 {
-                                    format!(" {} ahead of ", commit_grammar(ab.ahead))
+                                    format!(" {} ahead of ", commit_grammar(ab.ahead, &count))
                                 } else {
                                     String::new()
                                 },
@@ -655,6 +786,17 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
             move |_, cx| Dispatcher::change_repository_alias(id, None, cx),
         ));
     }
+    // Corvene (`267-pinned-repositories`)
+    if state
+        .flags
+        .bool(corvene_core::flags::ids::PINNED_REPOSITORIES)
+    {
+        let pinned = repo.pinned;
+        items.push(MenuItem::new(
+            if pinned { "Unpin" } else { "Pin" },
+            move |_, cx| Dispatcher::set_repository_pinned(id, !pinned, cx),
+        ));
+    }
     items.extend([
         // `buildWorktreeMenuItems` (worktree support is on)
         MenuItem::new(mac_or("Show Worktrees", "Show worktrees"), move |_, cx| {
@@ -713,6 +855,20 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
             },
         ),
     ]);
+    // Corvene (`269-bulk-remove-repositories`)
+    if state.repositories.len() > 1
+        && state
+            .flags
+            .bool(corvene_core::flags::ids::BULK_REMOVE_REPOSITORIES)
+    {
+        items.push(MenuItem::new(
+            mac_or("Remove Repositories…", "Remove repositories…"),
+            move |_, cx| {
+                Dispatcher::close_foldout(cx);
+                Dispatcher::show_popup(Popup::RemoveRepositories { ticked: Some(id) }, cx)
+            },
+        ));
+    }
     // Corvene (`216-remove-all-missing-repositories`): on a missing row,
     // remove every repository Corvene cannot find (without confirmation,
     // as GHD removes one missing repository)
@@ -935,6 +1091,7 @@ impl Render for RepositoryFoldout {
                                 d.child(
                                     // `.filter-list-group-header`
                                     div()
+                                        .id(("repo-group-header", group_ix))
                                         .h(ROW_HEIGHT())
                                         .pt(SPACING())
                                         .px(SPACING())
@@ -943,6 +1100,25 @@ impl Render for RepositoryFoldout {
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_size(FONT_SIZE())
                                         .truncate()
+                                        // Corvene (`266-collapsible-repository-groups`)
+                                        .when_some(group.key.clone(), |d, key| {
+                                            d.cursor_pointer()
+                                                .child(
+                                                    octicon(
+                                                        if group.collapsed {
+                                                            Octicon::ChevronRight
+                                                        } else {
+                                                            Octicon::ChevronDown
+                                                        },
+                                                        t.text_secondary,
+                                                    )
+                                                    .size(zpx(12.))
+                                                    .mr(SPACING_HALF()),
+                                                )
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.toggle_group(key.clone(), cx)
+                                                }))
+                                        })
                                         .child(group.title.clone()),
                                 )
                             })
@@ -1051,9 +1227,16 @@ fn duplicate_name_paths<'a>(
 
 /// Corvene (`612-navigation-shortcuts`): the repositories in the list's
 /// order without the Recent group (owner groups by owner, then Other; by
-/// name within a group), for ⇧⌘] / ⇧⌘[.
+/// name within a group; by name alone with `268-ungrouped-repository-list`),
+/// for ⇧⌘] / ⇧⌘[.
 pub fn list_order(state: &AppState) -> Vec<u64> {
     let mut repos = state.sorted_repositories();
+    if state
+        .flags
+        .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST)
+    {
+        return repos.iter().map(|r| r.id).collect();
+    }
     repos.sort_by_key(|r| match &r.github {
         Some(gh) => (0, gh.owner.to_lowercase()),
         None => (1, String::new()),
@@ -1075,12 +1258,13 @@ pub fn step_repository(order: &[u64], current: Option<u64>, step: isize) -> Opti
     order.get(next as usize).copied()
 }
 
-/// GHD `commitGrammar`: "1 commit" / "N commits".
-fn commit_grammar(n: u32) -> String {
+/// GHD `commitGrammar`: "1 commit" / "N commits" (N through `count`,
+/// `272-grouped-ahead-behind-counts`).
+fn commit_grammar(n: u32, count: &dyn Fn(u32) -> String) -> String {
     if n == 1 {
         "1 commit".to_string()
     } else {
-        format!("{n} commits")
+        format!("{} commits", count(n))
     }
 }
 

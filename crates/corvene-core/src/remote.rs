@@ -85,13 +85,29 @@ pub enum PushPullKind {
     Generic,
 }
 
-/// Sidebar indicators (`ILocalRepositoryState`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Corvene (`271-persist-repository-indicators`): keep the indicators for
+/// the next launch, so the repository list is not blank until the first
+/// refresh. GHD keeps them in memory only (`RepositoryIndicatorUpdater`).
+fn save_indicators(s: &crate::state::AppState) {
+    if s.flags
+        .bool(crate::flags::ids::PERSIST_REPOSITORY_INDICATORS)
+        && let Err(err) = s.store.save_repository_indicators(&s.indicators)
+    {
+        warn!(?err, "could not save repository indicators");
+    }
+}
+
+/// Sidebar indicators (`ILocalRepositoryState`); saved between launches
+/// with `271-persist-repository-indicators`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RepoIndicator {
     pub ahead_behind: Option<AheadBehind>,
     pub changed_files: usize,
     /// The checked-out branch, for `214-repository-list-branch`.
     pub branch: Option<String>,
+    /// `refs/stash` exists, for `270-repository-list-stash-icon`.
+    pub has_stash: bool,
 }
 
 /// GHD `ForcePushBranchState`
@@ -1724,12 +1740,13 @@ impl Dispatcher {
             Self::state(cx).update(cx, |s, cx| {
                 if !s.indicators.is_empty() {
                     s.indicators.clear();
+                    save_indicators(s);
                     cx.notify();
                 }
             });
             return;
         }
-        let (git, repos) = {
+        let (git, repos, stash_icon) = {
             let s = Self::state(cx).read(cx);
             let Some(git) = s.git.clone() else { return };
             (
@@ -1739,6 +1756,7 @@ impl Dispatcher {
                     .filter(|r| !r.missing)
                     .map(|r| (r.id, r.path.clone()))
                     .collect::<Vec<_>>(),
+                s.flags.bool(crate::flags::ids::REPOSITORY_LIST_STASH_ICON),
             )
         };
         spawn_bg(
@@ -1758,12 +1776,14 @@ impl Dispatcher {
                             .flatten()
                     });
                     let branch = info.current_branch().map(|b| b.name.clone());
+                    let has_stash = stash_icon && corvene_git::has_stash(&info.workdir);
                     out.insert(
                         id,
                         RepoIndicator {
                             ahead_behind,
                             changed_files: changed,
                             branch,
+                            has_stash,
                         },
                     );
                 }
@@ -1772,6 +1792,7 @@ impl Dispatcher {
             move |indicators, cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.indicators = indicators;
+                    save_indicators(s);
                     cx.notify();
                 });
             },

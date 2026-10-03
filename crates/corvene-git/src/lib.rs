@@ -51,7 +51,7 @@ pub use config::{
 };
 pub use detect::{GitBinary, GitVersion, find_git, find_git_prefetched, prefetch_git};
 pub use diff::{
-    blob_bytes, blob_lines, file_lines, has_hidden_bidi_chars, image_diff,
+    blob_bytes, blob_lines, file_lines, has_hidden_bidi_chars, image_diff, open_difftool,
     parse_line_endings_warning, parse_raw_diff, parse_raw_diff_with_warnings, parse_unified,
     submodule_diff, working_directory_diff, working_directory_patch, working_file_lines,
 };
@@ -68,8 +68,8 @@ pub use index_lock::{index_lock_path, remove_stale_index_lock};
 pub use log::{
     COMMIT_BATCH_SIZE, NULL_TREE_SHA, commit_file_diff, commit_range_file_diff, get_changed_files,
     get_commit_range_changed_files, get_commits, get_commits_in_range, get_commits_with,
-    merge_base, merge_base_changed_files, merge_base_file_diff, most_recent_local_commit,
-    parse_raw_log_with_numstat, tag_names,
+    local_only_commits, merge_base, merge_base_changed_files, merge_base_file_diff,
+    most_recent_local_commit, parse_raw_log_with_numstat, tag_names,
 };
 pub use ops::{
     CloneProgress, InitOptions, PathStatus, clone, explain_open_failure, explain_stale_worktree,
@@ -105,7 +105,7 @@ pub use remote_ops::{
     set_remote_url, update_remote_head, update_submodules, upstream_tip_in_reflog,
 };
 pub use repo::{
-    ahead_behind, main_worktree_path, open_repository, symmetric_ahead_behind,
+    ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,
     top_level_working_directory,
 };
 pub use status::{

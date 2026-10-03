@@ -899,7 +899,12 @@ impl Render for DeleteBranchDialog {
                 },
                 DialogButton {
                     id: "delete-branch-ok",
-                    label: "Delete".into(),
+                    label: crate::dialog::confirm_label(
+                        "Delete",
+                        "Delete Branch",
+                        "Delete branch",
+                        cx,
+                    ),
                     primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {

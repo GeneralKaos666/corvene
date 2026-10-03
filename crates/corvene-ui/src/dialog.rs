@@ -108,6 +108,26 @@ pub fn ok_cancel_order<T>(mut buttons: Vec<T>) -> Vec<T> {
     buttons
 }
 
+/// A destructive confirmation's button: GHD's bare `verb` ("Delete"), or
+/// with `276-descriptive-confirm-buttons` the verb and its object ("Delete
+/// Branch", sentence case off macOS).
+pub fn confirm_label(
+    verb: &'static str,
+    mac: &'static str,
+    other: &'static str,
+    cx: &App,
+) -> SharedString {
+    let descriptive = corvene_core::AppState::global(cx)
+        .read(cx)
+        .flags
+        .bool(corvene_core::flags::ids::DESCRIPTIVE_CONFIRM_BUTTONS);
+    if descriptive {
+        crate::context_menu::mac_or(mac, other).into()
+    } else {
+        verb.into()
+    }
+}
+
 pub struct DialogButton {
     pub id: &'static str,
     pub label: SharedString,

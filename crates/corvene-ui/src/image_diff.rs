@@ -17,6 +17,10 @@
 //!
 //! Deviation (`754-image-diff-alignment`): images of different sizes can
 //! share the top left corner instead of the centre.
+//!
+//! Deviation (`760-pixelated-small-images`): images under 64 px are enlarged
+//! by a whole factor with nearest-neighbour sampling, so pixel art and icons
+//! show their pixels (GHD draws them at their natural size, tiny).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -49,8 +53,26 @@ pub const TGA_MEDIA_TYPE: &str = "image/x-tga";
 struct Side {
     image: Arc<Image>,
     bytes: usize,
-    /// Natural size in pixels (`None` when the format could not be decoded).
+    /// Size of `image` in pixels (`None` when the format could not be
+    /// decoded): the natural size unless `760-pixelated-small-images`
+    /// enlarged it.
     size: Option<(u32, u32)>,
+    /// The file's own size in pixels, for the footer.
+    natural: Option<(u32, u32)>,
+}
+
+/// `760-pixelated-small-images`: images whose longer side is under this are
+/// enlarged.
+const SMALL_IMAGE: u32 = 64;
+
+/// `760-pixelated-small-images`: the whole factor that brings a small image's
+/// longer side close to 256 px (at most 16×); 1 for larger images.
+fn upscale_factor((w, h): (u32, u32)) -> u32 {
+    let longest = w.max(h);
+    if longest == 0 || longest >= SMALL_IMAGE {
+        return 1;
+    }
+    (256 / longest).clamp(1, 16)
 }
 
 impl Side {
@@ -74,7 +96,40 @@ impl Side {
             image: Arc::new(Image::from_bytes(format, blob.bytes.clone())),
             bytes: blob.bytes.len(),
             size,
+            natural: size,
         }
+    }
+
+    /// `760-pixelated-small-images`: a small still image re-encoded at a
+    /// whole multiple of its size with nearest-neighbour sampling (GPUI
+    /// would blur it when drawing it larger). GIFs keep their animation.
+    fn pixelated(mut self) -> Self {
+        let Some((w, h)) = self.size else {
+            return self;
+        };
+        let k = upscale_factor((w, h));
+        if k < 2 || self.image.format == ImageFormat::Gif {
+            return self;
+        }
+        let Ok(decoded) = image::load_from_memory(&self.image.bytes) else {
+            return self;
+        };
+        let big = image::imageops::resize(
+            &decoded.to_rgba8(),
+            w * k,
+            h * k,
+            image::imageops::FilterType::Nearest,
+        );
+        let mut png = Vec::new();
+        if big
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .is_err()
+        {
+            return self;
+        }
+        self.image = Arc::new(Image::from_bytes(ImageFormat::Png, png));
+        self.size = Some((w * k, h * k));
+        self
     }
 }
 
@@ -99,6 +154,7 @@ impl Side {
             image: Arc::new(Image::from_bytes(ImageFormat::Png, bytes)),
             bytes: blob.bytes.len(),
             size,
+            natural: size,
         }
     }
 }
@@ -148,9 +204,18 @@ impl ImageDiff {
             cx.subscribe(s, |_, _, _: &SliderEvent, cx| cx.notify())
                 .detach();
         }
+        let pixelated = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+            s.read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::PIXELATED_SMALL_IMAGES)
+        });
+        let side = |blob: &ImageBlob| {
+            let side = Side::from_blob(blob);
+            if pixelated { side.pixelated() } else { side }
+        };
         Self {
-            previous: previous.map(Side::from_blob),
-            current: current.map(Side::from_blob),
+            previous: previous.map(side),
+            current: current.map(side),
             status,
             swipe,
             onion,
@@ -315,7 +380,7 @@ impl ImageDiff {
 
     fn footer(side: &Side, cx: &App) -> AnyElement {
         let t = cx.ghd();
-        let (w, h) = side.size.unwrap_or((0, 0));
+        let (w, h) = side.natural.unwrap_or((0, 0));
         let strong = |s: &str| div().font_weight(FontWeight::SEMIBOLD).child(s.to_string());
         div()
             .flex()
@@ -880,7 +945,7 @@ fn blend_difference(backdrop: [u8; 4], source: [u8; 4]) -> [u8; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::{Side, TGA_MEDIA_TYPE, blend_difference};
+    use super::{Side, TGA_MEDIA_TYPE, blend_difference, upscale_factor};
     use corvene_core::ImageBlob;
 
     #[test]
@@ -897,6 +962,28 @@ mod tests {
         assert_eq!(side.size, Some((3, 2)));
         assert_eq!(side.bytes, tga.len());
         assert!(side.image.bytes.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn small_images_get_whole_factors() {
+        assert_eq!(upscale_factor((16, 16)), 16);
+        assert_eq!(upscale_factor((32, 8)), 8);
+        assert_eq!(upscale_factor((63, 10)), 4);
+        assert_eq!(upscale_factor((64, 10)), 1);
+        assert_eq!(upscale_factor((0, 0)), 1);
+        let blob = ImageBlob {
+            bytes: {
+                let mut png = Vec::new();
+                image::RgbaImage::from_pixel(4, 2, image::Rgba([0, 0, 255, 255]))
+                    .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                    .unwrap();
+                png
+            },
+            media_type: "image/png".to_string(),
+        };
+        let side = Side::from_blob(&blob).pixelated();
+        assert_eq!(side.size, Some((64, 32)));
+        assert_eq!(side.natural, Some((4, 2)));
     }
 
     #[test]

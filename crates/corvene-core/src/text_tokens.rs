@@ -9,6 +9,16 @@
 //!
 //! Deviation: GitHub's image-only emoji (`:shipit:`) keep their shortcode as
 //! text; GHD shows the image (`<img class="emoji">`).
+//!
+//! Deviation (`765-linkify-trailing-punctuation`, [`TokenOptions`]): a URL
+//! may follow an opening bracket or quote and leaves out trailing
+//! punctuation and unbalanced closing brackets, and an
+//! issue reference any run of closing punctuation (`[#12]`, `#12:`), as
+//! github.com does (GHD strips one `)`, `.` and `,` from issues only).
+//!
+//! Deviation (`766-cross-repository-issue-links`): `owner/repo#123` is one
+//! link to that repository's issue and `owner/repo@<sha>` one link to its
+//! commit (GHD links `#123` to the current repository and leaves the rest).
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -56,6 +66,15 @@ impl TokenRepository {
     }
 }
 
+/// Corvene deviations from GHD's tokenizer; the default is GHD's behaviour.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TokenOptions {
+    /// `765-linkify-trailing-punctuation`
+    pub trailing_punctuation: bool,
+    /// `766-cross-repository-issue-links`
+    pub cross_repository: bool,
+}
+
 static EMOJI: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     crate::emoji::all()
         .iter()
@@ -65,16 +84,29 @@ static EMOJI: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
 
 /// `Tokenizer.tokenize`
 pub fn tokenize(text: &str, repository: Option<&TokenRepository>) -> Vec<Token> {
+    tokenize_with(text, repository, TokenOptions::default())
+}
+
+/// [`tokenize`] with Corvene's [`TokenOptions`].
+pub fn tokenize_with(
+    text: &str,
+    repository: Option<&TokenRepository>,
+    options: TokenOptions,
+) -> Vec<Token> {
     let mut t = Tokenizer {
         results: Vec::new(),
         current: String::new(),
+        options,
     };
     let mut i = 0;
     while let Some(c) = text[i..].chars().next() {
         let matched = match c {
             ':' => t.scan_for_emoji(text, i),
             '#' => repository.and_then(|r| t.scan_for_issue(text, i, r)),
-            '@' => repository.and_then(|r| t.scan_for_mention(text, i, r)),
+            '@' => repository.and_then(|r| {
+                t.scan_for_cross_repository_commit(text, i, r)
+                    .or_else(|| t.scan_for_mention(text, i, r))
+            }),
             'h' => t.scan_for_hyperlink(text, i, repository),
             _ => None,
         };
@@ -93,6 +125,7 @@ pub fn tokenize(text: &str, repository: Option<&TokenRepository>) -> Vec<Token> 
 struct Tokenizer {
     results: Vec<Token>,
     current: String,
+    options: TokenOptions,
 }
 
 impl Tokenizer {
@@ -141,26 +174,101 @@ impl Tokenizer {
         repository: &TokenRepository,
     ) -> Option<usize> {
         let mut next = end_of_word(text, index);
-        // `(#123)` from "squash and merge", `#123.` in release notes, and
-        // lists of issues - one of each, in this order
-        for suffix in [')', '.', ','] {
-            if text[index..next].ends_with(suffix) {
-                next -= 1;
+        if self.options.trailing_punctuation {
+            // `765`: `[#123]`, `#123:`, `(#1, #2).` - any closing run
+            next = index + text[index..next].trim_end_matches(ISSUE_TRAILING).len();
+        } else {
+            // `(#123)` from "squash and merge", `#123.` in release notes, and
+            // lists of issues - one of each, in this order
+            for suffix in [')', '.', ','] {
+                if text[index..next].ends_with(suffix) {
+                    next -= 1;
+                }
             }
         }
         let digits = text[index..next].strip_prefix('#')?;
         if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
             return None;
         }
+        // `766`: `owner/repo` right before the `#` names another repository
+        let other = self
+            .options
+            .cross_repository
+            .then(|| self.repository_prefix())
+            .flatten();
+        let prefix = other.map(|len| self.current.split_off(self.current.len() - len));
         self.flush();
         // `parseInt` drops leading zeros
         let id = match digits.trim_start_matches('0') {
             "" => "0",
             id => id,
         };
+        let (text, url) = match prefix {
+            Some(prefix) => (
+                format!("{prefix}{}", &text[index..next]),
+                format!("{}/{prefix}/issues/{id}", repository.web_base),
+            ),
+            None => (
+                text[index..next].to_string(),
+                format!("{}/issues/{id}", repository.html_url),
+            ),
+        };
+        self.results.push(Token::Link { text, url });
+        Some(next)
+    }
+
+    /// `766-cross-repository-issue-links`: the byte length of an
+    /// `owner/repo` at the end of the pending text that starts a word.
+    fn repository_prefix(&self) -> Option<usize> {
+        let tail_start = self
+            .current
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '/'))
+            .last()
+            .map(|(ix, _)| ix)?;
+        let tail = &self.current[tail_start..];
+        let before = self.current[..tail_start].chars().next_back();
+        if before.is_some_and(|c| !c.is_whitespace() && !"([{<\"'".contains(c)) {
+            return None;
+        }
+        let (owner, repo) = tail.split_once('/')?;
+        let owner_ok = (1..=39).contains(&owner.len())
+            && !owner.starts_with('-')
+            && owner
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        let repo_ok = !repo.is_empty()
+            && !matches!(repo, "." | "..")
+            && repo
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_'));
+        (owner_ok && repo_ok).then_some(tail.len())
+    }
+
+    /// `766-cross-repository-issue-links`: `owner/repo@<sha>` (7 to 40 hex
+    /// characters) as one link to that commit.
+    fn scan_for_cross_repository_commit(
+        &mut self,
+        text: &str,
+        index: usize,
+        repository: &TokenRepository,
+    ) -> Option<usize> {
+        if !self.options.cross_repository {
+            return None;
+        }
+        let len = self.repository_prefix()?;
+        let end = end_of_word(text, index);
+        let next = index + text[index..end].trim_end_matches(ISSUE_TRAILING).len();
+        let sha = &text[index + 1..next];
+        if !(7..=40).contains(&sha.len()) || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        let prefix = self.current.split_off(self.current.len() - len);
+        self.flush();
         self.results.push(Token::Link {
-            text: text[index..next].to_string(),
-            url: format!("{}/issues/{id}", repository.html_url),
+            text: format!("{prefix}@{sha}"),
+            url: format!("{}/{prefix}/commit/{sha}", repository.web_base),
         });
         Some(next)
     }
@@ -198,11 +306,17 @@ impl Tokenizer {
         index: usize,
         repository: Option<&TokenRepository>,
     ) -> Option<usize> {
-        // not the middle of a word
-        if !self.after_whitespace() {
+        // not the middle of a word (`765`: an opening bracket or quote may
+        // come before it, `(https://…)`)
+        let after_opening = self.options.trailing_punctuation
+            && self.current.ends_with(['(', '[', '{', '<', '"', '\'']);
+        if !self.after_whitespace() && !after_opening {
             return None;
         }
-        let next = end_of_word(text, index);
+        let mut next = end_of_word(text, index);
+        if self.options.trailing_punctuation {
+            next = index + trim_url_end(&text[index..next]).len();
+        }
         let maybe = &text[index..next];
         let rest = maybe
             .strip_prefix("https://")
@@ -232,6 +346,34 @@ impl Tokenizer {
             url: maybe.to_string(),
         });
         Some(next)
+    }
+}
+
+/// `765-linkify-trailing-punctuation`: what may follow an issue number.
+const ISSUE_TRAILING: &[char] = &[')', ']', '}', '>', '.', ',', ';', ':', '!', '?', '\'', '"'];
+
+/// `765-linkify-trailing-punctuation`: `url` without the trailing punctuation
+/// github.com leaves out of an autolink, and without closing brackets that
+/// do not close one opened inside it (`(see https://x.io/a_(b))` keeps one).
+pub fn trim_url_end(url: &str) -> &str {
+    let mut url = url;
+    loop {
+        let Some(last) = url.chars().next_back() else {
+            return url;
+        };
+        let unbalanced = |open: char| url.matches(open).count() < url.matches(last).count();
+        let strip = match last {
+            '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '"' | '*' | '_' | '~' => true,
+            ')' => unbalanced('('),
+            ']' => unbalanced('['),
+            '}' => unbalanced('{'),
+            '>' => true,
+            _ => false,
+        };
+        if !strip {
+            return url;
+        }
+        url = &url[..url.len() - last.len_utf8()];
     }
 }
 
@@ -339,6 +481,80 @@ mod tests {
             [link("#9", "https://GitHub.com/o/r/issues/9#c")]
         );
         assert_eq!(tokenize("http:// h", None), [text("http:// h")]);
+    }
+
+    #[test]
+    fn trailing_punctuation() {
+        let r = repo();
+        let on = TokenOptions {
+            trailing_punctuation: true,
+            ..TokenOptions::default()
+        };
+        assert_eq!(
+            tokenize_with(
+                "via https://x.io/pull/39177. (https://w.org/a_(b)) ok",
+                None,
+                on
+            ),
+            [
+                text("via "),
+                link("https://x.io/pull/39177", "https://x.io/pull/39177"),
+                text(". ("),
+                link("https://w.org/a_(b)", "https://w.org/a_(b)"),
+                text(") ok"),
+            ]
+        );
+        assert_eq!(
+            tokenize_with("[#12] #3: #4!?", Some(&r), on),
+            [
+                text("["),
+                link("#12", "https://github.com/o/r/issues/12"),
+                text("] "),
+                link("#3", "https://github.com/o/r/issues/3"),
+                text(": "),
+                link("#4", "https://github.com/o/r/issues/4"),
+                text("!?"),
+            ]
+        );
+        // GHD: the bracket and colon break the reference
+        assert_eq!(tokenize("[#12] #3:", Some(&r)), [text("[#12] #3:")]);
+        assert_eq!(tokenize_with("https://.", None, on), [text("https://.")]);
+    }
+
+    #[test]
+    fn cross_repository_references() {
+        let r = repo();
+        let on = TokenOptions {
+            cross_repository: true,
+            ..TokenOptions::default()
+        };
+        assert_eq!(
+            tokenize_with(
+                "See a-b/c.d#12, (x/y@a5c37851) and a/b/c#3 #4",
+                Some(&r),
+                on
+            ),
+            [
+                text("See "),
+                link("a-b/c.d#12", "https://github.com/a-b/c.d/issues/12"),
+                text(", ("),
+                link("x/y@a5c37851", "https://github.com/x/y/commit/a5c37851"),
+                text(") and a/b/c"),
+                link("#3", "https://github.com/o/r/issues/3"),
+                text(" "),
+                link("#4", "https://github.com/o/r/issues/4"),
+            ]
+        );
+        // a short or non-hex word after `@` is no commit; mid-word stays text
+        assert_eq!(
+            tokenize_with("x/y@abc x/y@zzzzzzzz", Some(&r), on),
+            [text("x/y@abc x/y@zzzzzzzz")]
+        );
+        // GHD: only `#12` is linked, to the current repository
+        assert_eq!(
+            tokenize("a/b#12", Some(&r)),
+            [text("a/b"), link("#12", "https://github.com/o/r/issues/12")]
+        );
     }
 
     #[test]

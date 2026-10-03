@@ -246,10 +246,17 @@ pub fn toolbar_models(
         spin: false,
         pr_badge: None,
         resize: None,
-        // `repository && !isOpen ? repository.path : undefined`
+        // `repository && !isOpen ? repository.path : undefined`; Corvene
+        // (`273-fork-parent-in-tooltip`) adds "Fork of owner/name"
         tooltip: repo
             .filter(|_| state.foldout != Some(Foldout::Repository))
-            .map(|r| r.path.to_string_lossy().into_owned().into()),
+            .map(|r| {
+                let mut text = r.path.to_string_lossy().into_owned();
+                if let Some(parent) = fork_parent(r, state) {
+                    text.push_str(&format!("\nFork of {parent}"));
+                }
+                text.into()
+            }),
         tooltip_fixed_width: false,
     };
 
@@ -260,6 +267,21 @@ pub fn toolbar_models(
         status: state.commit_status_summary(pr),
         bounds: pr_badge_bounds.clone(),
     });
+    // Corvene (`275-detached-head-friendly`): the tag HEAD sits on, from the
+    // loaded history
+    let detached_friendly = state
+        .flags
+        .bool(corvene_core::flags::ids::DETACHED_HEAD_FRIENDLY);
+    let head_tag = |sha: &str| -> Option<String> {
+        if !detached_friendly {
+            return None;
+        }
+        repo_state?
+            .commits
+            .iter()
+            .find(|c| c.sha == sha)
+            .and_then(|c| c.tags.first().cloned())
+    };
     let (branch_icon, branch_desc, branch_title): (Octicon, &str, SharedString) =
         match info.map(|i| &i.tip) {
             Some(Tip::Valid { branch }) => (
@@ -279,7 +301,11 @@ pub fn toolbar_models(
             Some(Tip::Detached { sha }) => (
                 Octicon::GitCommit,
                 "Detached HEAD",
-                format!("On {}", sha.chars().take(7).collect::<String>()).into(),
+                format!(
+                    "On {}",
+                    head_tag(sha).unwrap_or_else(|| sha.chars().take(7).collect())
+                )
+                .into(),
             ),
             _ => (
                 Octicon::GitBranch,
@@ -335,6 +361,14 @@ pub fn toolbar_models(
         ),
         (None, Some(Tip::Valid { branch })) => Some(branch.name.clone().into()),
         (None, Some(Tip::Unborn { name })) => Some(format!("Current branch is {name}").into()),
+        (None, Some(Tip::Detached { .. })) if detached_friendly => Some(
+            format!(
+                "Currently on a detached HEAD at {}\nNot on any branch. Create a branch to keep \
+                 new commits.",
+                branch_title.trim_start_matches("On ")
+            )
+            .into(),
+        ),
         (None, Some(Tip::Detached { .. })) => Some("Currently on a detached HEAD".into()),
         _ => None,
     };
@@ -424,6 +458,17 @@ pub fn toolbar_models(
             disabled: true,
             progress: Some(p.value),
             spin: true,
+            ..base
+        }
+    } else if info.is_none()
+        && state
+            .flags
+            .bool(corvene_core::flags::ids::NO_PUBLISH_BEFORE_LOAD)
+    {
+        // Corvene (`274-no-publish-before-load`): the remotes are unknown
+        // until the repository is read, so no "Publish repository" yet
+        ToolbarButtonModel {
+            disabled: true,
             ..base
         }
     } else if !has_remote {
@@ -522,6 +567,30 @@ pub fn toolbar_models(
 }
 
 /// Flag `257`: the Pull button's tooltip lists the incoming commits.
+/// Corvene (`273-fork-parent-in-tooltip`): the parent's `owner/name` of a
+/// forked GitHub repository, for the repository tooltips.
+pub(crate) fn fork_parent(repo: &corvene_core::Repository, state: &AppState) -> Option<String> {
+    let gh = repo.github.as_ref().filter(|gh| gh.fork)?;
+    let parent = gh.parent.as_ref()?;
+    state
+        .flags
+        .bool(corvene_core::flags::ids::FORK_PARENT_IN_TOOLTIP)
+        .then(|| parent.full_name())
+}
+
+/// An ahead / behind count: with the thousands separator under
+/// `272-grouped-ahead-behind-counts`, else GHD's plain digits.
+pub(crate) fn ahead_behind_count(n: u32, state: &AppState) -> String {
+    if state
+        .flags
+        .bool(corvene_core::flags::ids::GROUPED_AHEAD_BEHIND_COUNTS)
+    {
+        crate::format::format_count(u64::from(n))
+    } else {
+        n.to_string()
+    }
+}
+
 fn incoming_tooltip(
     behind: u32,
     repo_state: Option<&corvene_core::RepositoryState>,
@@ -540,7 +609,7 @@ fn incoming_tooltip(
     let mut lines = vec![if behind == 1 {
         "1 commit to pull:".to_string()
     } else {
-        format!("{behind} commits to pull:")
+        format!("{} commits to pull:", ahead_behind_count(behind, state))
     }];
     lines.extend(summaries.iter().map(|s| format!("• {s}")));
     let more = behind as usize - summaries.len().min(behind as usize);
@@ -751,6 +820,13 @@ pub fn toolbar_button(
             )
         })
         .when_some(model.badge, |d, ab| {
+            let (ahead, behind) = {
+                let s = AppState::global(cx).read(cx);
+                (
+                    ahead_behind_count(ab.ahead, s),
+                    ahead_behind_count(ab.behind, s),
+                )
+            };
             // `.ahead-behind` pill: 13 px tall (darwin; elsewhere no height
             // is set and the 16 px octicons make it 16), radius 8, 9 px text
             d.child(
@@ -768,11 +844,11 @@ pub fn toolbar_button(
                     .text_size(FONT_SIZE_XS())
                     .line_height(zpx(11.))
                     .when(ab.ahead > 0, |d| {
-                        d.child(format!("{}", ab.ahead))
+                        d.child(ahead)
                             .child(octicon(Octicon::ArrowUp, text).size(zpx(9.)))
                     })
                     .when(ab.behind > 0, |d| {
-                        d.child(format!("{}", ab.behind))
+                        d.child(behind)
                             .child(octicon(Octicon::ArrowDown, text).size(zpx(9.)))
                     }),
             )

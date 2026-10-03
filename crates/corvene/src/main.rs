@@ -214,6 +214,12 @@ pub(crate) fn main() {
                 .flags
                 .bool(corvene_core::flags::ids::CALENDAR_RELATIVE_DATES),
         );
+        corvene_highlight::cm::modes::set_extra_extensions(
+            state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
+        );
         corvene_ui::widgets::sync_hover_while_typing(cx);
         cx.observe(&state, move |state, cx| {
             corvene_ui::widgets::sync_hover_while_typing(cx);
@@ -226,6 +232,10 @@ pub(crate) fn main() {
                 corvene_ui::relative_time::set_calendar_dates(
                     s.flags
                         .bool(corvene_core::flags::ids::CALENDAR_RELATIVE_DATES),
+                );
+                corvene_highlight::cm::modes::set_extra_extensions(
+                    s.flags
+                        .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
                 );
                 (
                     s.settings.theme,
@@ -277,6 +287,15 @@ pub(crate) fn main() {
                 .bool(corvene_core::flags::ids::IMPORT_FROM_GITHUB_DESKTOP);
             if enabled {
                 Dispatcher::show_popup(Popup::ImportFromGitHubDesktop, cx)
+            }
+        });
+        on_menu_action(cx, |_: &RemoveRepositories, cx| {
+            let s = corvene_core::AppState::global(cx).read(cx);
+            if s.flags
+                .bool(corvene_core::flags::ids::BULK_REMOVE_REPOSITORIES)
+                && !s.repositories.is_empty()
+            {
+                Dispatcher::show_popup(Popup::RemoveRepositories { ticked: None }, cx)
             }
         });
         on_menu_action(cx, |_: &AddLocalRepository, cx| {
@@ -419,6 +438,8 @@ pub(crate) fn main() {
         //   ready / Homebrew / package manager state: the banner, plus About or
         //   the Release Notes with "Install and Restart")
         //   flags[:<search>] (Corvene › Flags…, with the search box prefilled)
+        //   remove-repositories (File › Remove Repositories…, the selected one ticked)
+        //   repository-list (the repository foldout)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1145,6 +1166,10 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
     let selected = corvene_core::AppState::global(cx).read(cx).selected;
     match (popup, selected) {
         ("import-ghd", _) => Dispatcher::show_popup(Popup::ImportFromGitHubDesktop, cx),
+        ("repository-list", _) => Dispatcher::toggle_foldout(corvene_core::Foldout::Repository, cx),
+        ("remove-repositories", ticked) => {
+            Dispatcher::show_popup(Popup::RemoveRepositories { ticked }, cx)
+        }
         (other, _) if other == "flags" || other.starts_with("flags:") => {
             Dispatcher::open_flags(other.strip_prefix("flags:").map(str::to_string), cx)
         }

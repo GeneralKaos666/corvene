@@ -41,6 +41,7 @@
 //!   account (`735-free-form-co-authors`).
 //! - the "N changed files" row ends in a spinner while Discard Changes runs
 //!   or a status refresh is slow (`708-changes-busy-indicator`).
+//! - rows follow the diff's row height, 9 px taller (`757-diff-line-height`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -4255,7 +4256,8 @@ fn file_row(
             is_selected,
         )
         .w_full()
-        .h(ROW_HEIGHT())
+        // `757-diff-line-height`: GHD's 29 px rows go with its 20 px diff rows
+        .h(crate::diff_view::diff_line_height_setting(cx).map_or_else(ROW_HEIGHT, |h| zpx(h + 9.)))
         .flex_none()
         .flex()
         .flex_row()

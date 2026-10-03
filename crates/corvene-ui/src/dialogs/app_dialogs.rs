@@ -364,7 +364,12 @@ impl Render for ConfirmRemoveRepositoryDialog {
                 },
                 DialogButton {
                     id: "remove-repo-ok",
-                    label: "Remove".into(),
+                    label: crate::dialog::confirm_label(
+                        "Remove",
+                        "Remove Repository",
+                        "Remove repository",
+                        cx,
+                    ),
                     primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {

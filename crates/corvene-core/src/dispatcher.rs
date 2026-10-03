@@ -75,6 +75,17 @@ impl Dispatcher {
                 )
             }
         };
+        // Corvene (`271-persist-repository-indicators`): last launch's
+        // indicators until the first refresh
+        let indicators = if flags.bool(crate::flags::ids::PERSIST_REPOSITORY_INDICATORS)
+            && settings.repository_indicators_enabled
+        {
+            let mut saved = store.repository_indicators().unwrap_or_default();
+            saved.retain(|id, _| repositories.iter().any(|r| r.id == *id && !r.missing));
+            saved
+        } else {
+            std::collections::HashMap::new()
+        };
         // `876-git-spawn-error-details`
         corvene_git::set_explain_missing_workdir(
             flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
@@ -103,7 +114,7 @@ impl Dispatcher {
             watched_repo: None,
             banner: None,
             banner_nonce: 0,
-            indicators: std::collections::HashMap::new(),
+            indicators,
             generic_logins,
             enterprise_oauth_apps,
             avatars: std::collections::HashMap::new(),
@@ -1362,6 +1373,7 @@ impl Dispatcher {
     }
 
     pub fn load_diff(id: u64, cx: &mut App) {
+        Self::load_file_modified(id, cx);
         let state = Self::state(cx);
         let (git, workdir, file, options, head) = {
             let s = state.read(cx);
@@ -1396,23 +1408,46 @@ impl Dispatcher {
             .as_ref()
             .and_then(|stamp| crate::diff_cache::working_diff(&workdir, &path, stamp))
         {
+            // `763-cancel-stale-diffs`
+            if let Some(previous) = state.update(cx, |s, _| s.repo_state_mut(id).diff_cancel.take())
+            {
+                previous.cancel();
+            }
             Self::apply_working_diff(id, &path, loaded, cx);
             Self::prefetch_working_diffs(id, cx);
             return;
         }
+        // `763-cancel-stale-diffs`: the diff still running for the previous
+        // selection (or refresh) is stopped instead of finishing unseen
+        let cancel_stale = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CANCEL_STALE_DIFFS);
+        let cancel = cancel_stale.then(corvene_git::CancelToken::new);
         state.update(cx, |s, cx| {
-            s.repo_state_mut(id).diff_loading = true;
+            let rs = s.repo_state_mut(id);
+            rs.diff_loading = true;
+            if let Some(previous) = std::mem::replace(&mut rs.diff_cancel, cancel.clone()) {
+                previous.cancel();
+            }
             cx.notify();
         });
         let work = cx.background_executor().spawn(async move {
-            let loaded = compute_working_diff(git, &workdir, &file, options);
+            let loaded = compute_working_diff(git, &workdir, &file, options, cancel.as_ref());
+            // a stopped diff is incomplete: neither cached nor shown
+            if cancel
+                .as_ref()
+                .is_some_and(corvene_git::CancelToken::is_cancelled)
+            {
+                return None;
+            }
             if let Some(stamp) = stamp {
                 crate::diff_cache::store_working_diff(&workdir, &file.path, stamp, loaded.clone());
             }
-            loaded
+            Some(loaded)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let loaded = work.await;
+            let Some(loaded) = work.await else { return };
             cx.update(|cx| {
                 Self::apply_working_diff(id, &path, loaded, cx);
                 Self::prefetch_working_diffs(id, cx);
@@ -1476,6 +1511,102 @@ impl Dispatcher {
                 cx.notify();
             }
         });
+        Self::load_diff_tool(id, cx);
+    }
+
+    /// `762-diff-header-mtime`: the selected file's modification time for
+    /// the Changes diff header (re-read whenever its diff is loaded).
+    fn load_file_modified(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::DIFF_HEADER_MTIME) {
+            return;
+        }
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let (Some(info), Some(path)) = (rs.info.as_ref(), rs.selected_file.clone()) else {
+            return;
+        };
+        let full = info.workdir.join(&path);
+        crate::remote::spawn_bg(
+            cx,
+            move || {
+                std::fs::symlink_metadata(full)
+                    .and_then(|m| m.modified())
+                    .ok()
+            },
+            move |modified, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    let next = modified.map(|at| (path, at));
+                    if rs.diff_file_modified != next {
+                        rs.diff_file_modified = next;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
+    /// `761-too-large-diff-escape-hatch`: read `diff.tool` once the selected
+    /// file's diff is too large to show, for "Open in External Diff Tool".
+    fn load_diff_tool(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        if !matches!(rs.diff.as_deref(), Some(corvene_models::Diff::TooLarge))
+            || !s.flags.bool(crate::flags::ids::TOO_LARGE_DIFF_ESCAPE_HATCH)
+        {
+            return;
+        }
+        let (Some(git), Some(info)) = (s.git.clone(), rs.info.as_ref()) else {
+            return;
+        };
+        let workdir = info.workdir.clone();
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::config_value(git, &workdir, "diff.tool"),
+            move |tool, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    if rs.diff_tool != tool {
+                        rs.diff_tool = tool;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
+    /// `761-too-large-diff-escape-hatch`: the selected file in the configured
+    /// `diff.tool` (`git difftool -y`).
+    pub fn open_in_diff_tool(id: u64, cx: &mut App) {
+        let s = Self::state(cx).read(cx);
+        let Some(git) = s.git.clone() else { return };
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let (Some(info), Some(path), Some(status)) = (
+            rs.info.as_ref(),
+            rs.selected_file.as_ref(),
+            rs.status.as_ref(),
+        ) else {
+            return;
+        };
+        let Some(file) = status.files.iter().find(|f| &f.path == path).cloned() else {
+            return;
+        };
+        let workdir = info.workdir.clone();
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::open_difftool(git, &workdir, &file),
+            |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not open the diff tool", err.to_string(), cx);
+                }
+            },
+        );
     }
 
     /// `901-prefetch-diffs`: compute the diffs of the files next to the
@@ -1521,7 +1652,7 @@ impl Dispatcher {
                     if crate::diff_cache::working_diff(&workdir, &file.path, &stamp).is_some() {
                         continue;
                     }
-                    let loaded = compute_working_diff(git.clone(), &workdir, &file, options);
+                    let loaded = compute_working_diff(git.clone(), &workdir, &file, options, None);
                     crate::diff_cache::store_working_diff(&workdir, &file.path, stamp, loaded);
                 }
             })
@@ -1562,24 +1693,43 @@ impl Dispatcher {
                 Self::history_first_parent(s),
             )
         };
+        // `891-unpublished-commit-links`: which of them no remote has
+        let unpublished_git = {
+            let s = state.read(cx);
+            s.flags
+                .bool(crate::flags::ids::UNPUBLISHED_COMMIT_LINKS)
+                .then(|| s.git.clone())
+                .flatten()
+        };
         state.update(cx, |s, _| s.repo_state_mut(id).commits_loading = true);
         let task = cx.background_executor().spawn(async move {
-            corvene_git::get_commits_with(
+            let unpublished = unpublished_git.and_then(|git| {
+                corvene_git::local_only_commits(git, &workdir, "HEAD", UNPUBLISHED_COMMITS_LIMIT)
+                    .ok()
+                    .filter(|shas| shas.len() < UNPUBLISHED_COMMITS_LIMIT)
+                    .map(|shas| shas.into_iter().collect::<std::collections::HashSet<_>>())
+            });
+            let commits = corvene_git::get_commits_with(
                 &workdir,
                 "HEAD",
                 skip,
                 corvene_git::COMMIT_BATCH_SIZE,
                 first_parent,
-            )
+            );
+            (commits, unpublished)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let result = task.await;
+            let (result, unpublished) = task.await;
             cx.update(|cx| {
                 let mut rewritten = Vec::new();
                 let reselect = Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
                     rs.commits_loading = false;
                     let mut changed = true;
+                    if rs.unpublished_commits != unpublished {
+                        rs.unpublished_commits = unpublished;
+                        cx.notify();
+                    }
                     match result {
                         Ok(batch) => {
                             if more {
@@ -2358,6 +2508,17 @@ impl Dispatcher {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
                 repo.alias = alias.filter(|a| !a.is_empty());
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
+    /// Corvene (`267-pinned-repositories`): pin or unpin a repository.
+    pub fn set_repository_pinned(id: u64, pinned: bool, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
+                repo.pinned = pinned;
                 persist_repositories(s);
                 cx.notify();
             }
@@ -5057,6 +5218,7 @@ fn compute_working_diff(
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
     options: WorkingDiffOptions,
+    cancel: Option<&corvene_git::CancelToken>,
 ) -> LoadedDiff {
     // the old side is read in-process meanwhile
     std::thread::scope(|scope| {
@@ -5079,9 +5241,12 @@ fn compute_working_diff(
             options.hide_whitespace,
             options.renamed_against_head,
             options.as_text,
+            cancel,
         )
         .unwrap_or_else(|err| {
-            warn!(%err, "diff failed");
+            if !matches!(err, corvene_git::GitError::Cancelled(_)) {
+                warn!(%err, "diff failed");
+            }
             corvene_models::Diff::Empty
         });
         // GHD `fileContents.newContents`: the working copy, for hunk expansion.
@@ -5094,6 +5259,10 @@ fn compute_working_diff(
         (Arc::new(diff), contents.map(Arc::new), old.map(Arc::new))
     })
 }
+
+/// `891-unpublished-commit-links`: with this many local-only commits or more
+/// none is marked (links stay as in GHD).
+const UNPUBLISHED_COMMITS_LIMIT: usize = 10_000;
 
 /// The changed files of one commit or of a contiguous range (oldest first).
 fn compute_changeset(

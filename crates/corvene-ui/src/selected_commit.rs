@@ -17,7 +17,8 @@
 //! (flag `804`). A file's menu can revert that file's
 //! changes from the commit (flag `814`).
 //! A file's context menu adds "Open All Files of Commit in <editor>"
-//! (`712-open-multiple-files`).
+//! (`712-open-multiple-files`). The author's name can link to their GitHub
+//! profile (`890-commit-author-links`).
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher, Popup, UnreachableCommitsTab};
 use gpui_kit::component::resizable::{
@@ -40,7 +41,7 @@ use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, mono_font};
-use crate::widgets::{avatar_image, avatar_lookup, link_button};
+use crate::widgets::{author_avatar, link_button};
 
 /// `commitSummaryWidth` constraints (GHD `constrain(250, 100, 600)`).
 #[allow(non_snake_case)]
@@ -508,9 +509,15 @@ impl SelectedCommitView {
         let extras = s
             .flags
             .bool(corvene_core::flags::ids::COMMIT_DETAILS_EXTRAS);
+        // `891-unpublished-commit-links`: not for a commit no remote has
+        let unpublished = rs
+            .unpublished_commits
+            .as_ref()
+            .is_some_and(|shas| shas.contains(&commit.sha));
         let commit_url = extras
             .then(|| s.repository(id).and_then(|r| r.github.as_ref()))
             .flatten()
+            .filter(|_| !unpublished)
             .map(|g| format!("{}/commit/{}", g.html_url, commit.sha));
         // GHD `RichText`: emoji, `#123`, `@name` and links; `804` adds `code`
         // spans and (GitHub repositories) SHAs
@@ -524,15 +531,46 @@ impl SelectedCommitView {
             .then(|| s.repository(id).and_then(|r| r.github.as_ref()))
             .flatten()
             .map(|g| g.html_url.clone());
+        let token_options = corvene_core::text_tokens::TokenOptions {
+            trailing_punctuation: s
+                .flags
+                .bool(corvene_core::flags::ids::LINKIFY_TRAILING_PUNCTUATION),
+            cross_repository: s
+                .flags
+                .bool(corvene_core::flags::ids::CROSS_REPOSITORY_ISSUE_LINKS),
+        };
+        // `890-commit-author-links`: the author's GitHub profile, when known
+        let author_url = s
+            .flags
+            .bool(corvene_core::flags::ids::COMMIT_AUTHOR_LINKS)
+            .then(|| s.repository(id).and_then(|r| r.github.as_ref()))
+            .flatten()
+            .and_then(|gh| {
+                let login = corvene_core::autocomplete::login_for_email(
+                    &commit.author.email,
+                    gh,
+                    &s.accounts,
+                    &s.mentionables,
+                )?;
+                Some(corvene_github::Endpoint::from_api_base(&gh.endpoint).web(&login))
+            });
+        // `889-issue-title-tooltips`
+        let issue_titles = s
+            .flags
+            .bool(corvene_core::flags::ids::ISSUE_TITLE_TOOLTIPS)
+            .then(|| s.repository(id).and_then(|r| r.non_fork_github()).cloned())
+            .flatten();
         let message = |id: &'static str, text: &str, cx: &App| {
-            crate::markdown::rich_text(
+            crate::markdown::rich_text_with_issue_titles(
                 id,
                 &corvene_core::markdown::commit_message_rich_text(
                     text,
                     token_repository.as_ref(),
+                    token_options,
                     rich_extras,
                     commit_base.as_deref(),
                 ),
+                issue_titles.clone(),
                 cx,
             )
         };
@@ -657,12 +695,26 @@ impl SelectedCommitView {
                                 .child(
                                     meta_item(div())
                                         .gap(zpx(4.))
-                                        .child(avatar_image(
-                                            avatar_lookup(&commit.author.email, cx),
+                                        .child(author_avatar(
+                                            &commit.author.name,
+                                            &commit.author.email,
                                             zpx(16.),
                                             cx,
                                         ))
-                                        .child(commit.author.name.clone()),
+                                        .child(match author_url {
+                                            Some(url) => link_button(
+                                                "commit-author-link",
+                                                commit.author.name.clone(),
+                                                cx,
+                                            )
+                                            .text_size(FONT_SIZE_SM())
+                                            .ghd_tooltip(url.clone())
+                                            .on_click(move |_, _, cx| {
+                                                Dispatcher::open_url(&url, cx)
+                                            })
+                                            .into_any_element(),
+                                            None => commit.author.name.clone().into_any_element(),
+                                        }),
                                 )
                                 .when(extras, |d| {
                                     let date = commit.author.date();
@@ -1315,7 +1367,7 @@ impl Render for SelectedCommitView {
             .flex_col()
             .min_h_0()
             .when_some(selected_file, |d, (path, kind)| {
-                d.child(diff_header(&path, kind, &self.diff, cx))
+                d.child(diff_header(&path, kind, None, &self.diff, cx))
             })
             .child(DiffView::embed(&self.diff));
         // Corvene (`801-history-review-mode`): the diff alone, full width

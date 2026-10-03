@@ -1,7 +1,8 @@
 //! Avatar cache (GHD `ui/lib/avatar.tsx` + `AvatarStore`): commit authors
 //! resolve through GitHub's e-mail avatar endpoint, signed-in accounts
 //! through their API `avatar_url`. Images land in `~/Library/Caches/Corvene/avatars`
-//! and are loaded from there afterwards.
+//! and are loaded from there afterwards. An Enterprise Server repository's
+//! authors resolve through that server's endpoint, as in GHD.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -23,8 +24,16 @@ pub type Avatars = HashMap<String, AvatarEntry>;
 
 const AVATAR_SIZE: u32 = 64;
 
-/// `getAvatarUrlCandidates` for a commit author e-mail.
-fn candidates_for_email(email: &str, accounts: &[corvene_models::Account]) -> Vec<String> {
+/// `getAvatarUrlCandidates` for a commit author e-mail. `api_base` is the
+/// selected repository's GitHub endpoint: an Enterprise Server answers on
+/// its own `enterprise/avatars/u/e`, a ghe.com host only with an avatar
+/// token (which Corvene does not fetch), anything else on GitHub.com's
+/// (`getEmailAvatarUrl`).
+fn candidates_for_email(
+    email: &str,
+    accounts: &[corvene_models::Account],
+    api_base: Option<&str>,
+) -> Vec<String> {
     let mut out = Vec::new();
     for account in accounts {
         if account.emails.iter().any(|e| e.eq_ignore_ascii_case(email))
@@ -33,11 +42,16 @@ fn candidates_for_email(email: &str, accounts: &[corvene_models::Account]) -> Ve
             out.push(with_size(url));
         }
     }
-    // GitHub's e-mail avatar endpoint falls back to Gravatar server-side.
-    out.push(format!(
-        "https://avatars.githubusercontent.com/u/e?email={}&s={AVATAR_SIZE}",
-        urlencode(email)
-    ));
+    let endpoint = api_base.map(corvene_github::Endpoint::from_api_base);
+    let query = format!("email={}&s={AVATAR_SIZE}", urlencode(email));
+    match endpoint.filter(|e| !e.is_dotcom()) {
+        // `isGHE`: needs `api.getAvatarToken()`
+        Some(e) if e.host().to_ascii_lowercase().ends_with(".ghe.com") => {}
+        // `isGHES`
+        Some(e) => out.push(format!("{}/enterprise/avatars/u/e?{query}", e.api_base)),
+        // GitHub's e-mail avatar endpoint falls back to Gravatar server-side.
+        None => out.push(format!("https://avatars.githubusercontent.com/u/e?{query}")),
+    }
     out
 }
 
@@ -143,8 +157,12 @@ impl Dispatcher {
         if Self::state(cx).read(cx).avatars.contains_key(&email) {
             return;
         }
-        let accounts = Self::state(cx).read(cx).accounts.clone();
-        let candidates = candidates_for_email(&email, &accounts);
+        let s = Self::state(cx).read(cx);
+        let api_base = s
+            .selected_repository()
+            .and_then(|r| r.github.as_ref())
+            .map(|g| g.endpoint.clone());
+        let candidates = candidates_for_email(&email, &s.accounts, api_base.as_deref());
         Self::request_avatar(email, candidates, cx);
     }
 
@@ -156,6 +174,46 @@ impl Dispatcher {
         }
         Self::request_avatar(key, vec![with_size(url)], cx);
     }
+}
+
+/// Corvene `121-initials-avatars`: up to two upper-case initials of an
+/// author name (first and last word), else of the e-mail's local part.
+pub fn initials(name: &str, email: &str) -> String {
+    let words: Vec<&str> = name
+        .split(|c: char| c.is_whitespace() || c == '.' || c == '_' || c == '-')
+        .filter(|w| w.chars().next().is_some_and(char::is_alphanumeric))
+        .collect();
+    let words = if words.is_empty() {
+        email
+            .split('@')
+            .next()
+            .unwrap_or("")
+            .split(['.', '_', '-', '+'])
+            .filter(|w| w.chars().next().is_some_and(char::is_alphanumeric))
+            .collect()
+    } else {
+        words
+    };
+    let first = |w: &str| {
+        w.chars()
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>())
+    };
+    match words.as_slice() {
+        [] => String::new(),
+        [only] => first(only).unwrap_or_default(),
+        [head, .., last] => first(head).unwrap_or_default() + &first(last).unwrap_or_default(),
+    }
+}
+
+/// Corvene `121-initials-avatars`: a stable hue (0–359) for an e-mail.
+pub fn initials_hue(email: &str) -> u16 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in email.trim().to_lowercase().bytes() {
+        hash ^= b as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    (hash % 360) as u16
 }
 
 /// Cached image path for an e-mail, if resolved.
@@ -177,12 +235,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn author_initials() {
+        assert_eq!(initials("Ada Lovelace", "a@x.io"), "AL");
+        assert_eq!(initials("ada  b. king-lovelace", "a@x.io"), "AL");
+        assert_eq!(initials("Mona", "a@x.io"), "M");
+        assert_eq!(initials("", "jane.doe@x.io"), "JD");
+        assert_eq!(initials(" ", ""), "");
+        assert_eq!(initials("élodie", ""), "É");
+        assert_eq!(initials_hue("A@x.io"), initials_hue("a@x.io "));
+        assert!(initials_hue("a@x.io") < 360);
+    }
+
+    #[test]
     fn email_candidates_end_with_the_github_endpoint() {
-        let c = candidates_for_email("a+b@example.com", &[]);
+        let c = candidates_for_email("a+b@example.com", &[], None);
         assert_eq!(
             c,
             vec!["https://avatars.githubusercontent.com/u/e?email=a%2Bb%40example.com&s=64"]
         );
+        let dotcom = candidates_for_email("a@b.c", &[], Some("https://api.github.com"));
+        assert_eq!(
+            dotcom,
+            vec!["https://avatars.githubusercontent.com/u/e?email=a%40b.c&s=64"]
+        );
+        // GHD `getEmailAvatarUrl` for an Enterprise Server
+        let ghes = candidates_for_email("a@b.c", &[], Some("https://ghe.corp/api/v3"));
+        assert_eq!(
+            ghes,
+            vec!["https://ghe.corp/api/v3/enterprise/avatars/u/e?email=a%40b.c&s=64"]
+        );
+        assert!(candidates_for_email("a@b.c", &[], Some("https://api.x.ghe.com")).is_empty());
         assert_ne!(cache_file("x"), cache_file("y"));
     }
 }

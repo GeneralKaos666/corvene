@@ -436,6 +436,7 @@ registry! {
         upstream: &[Upstream::issue(22123), Upstream::issue(22470)],
         code: &["crates/corvene-ui/src/theme/mod.rs", "crates/corvene-ui/src/title_bar.rs", "crates/corvene/src/main.rs"],
     },
+
     /// Typing hides hover highlights and tooltips until the pointer moves.
     KEYBOARD_HIDES_HOVER = 110 "keyboard-hides-hover" {
         title: "Typing hides hover highlights",
@@ -451,6 +452,21 @@ registry! {
         restart: false, visible: false, availability: available,
         upstream: &[],
         code: &["crates/corvene-ui/src/widgets.rs", "vendor/gpui-pre/src/window.rs", "vendor/gpui-pre/src/elements/div.rs"],
+    },
+
+    /// Initials instead of the grey placeholder avatar.
+    INITIALS_AVATARS = 121 "initials-avatars" {
+        title: "Initials for authors without an avatar",
+        summary: "A commit author whose avatar is not (yet) loaded, offline for example, shows \
+                  their initials on a colour that stays the same for their e-mail, in the \
+                  history list and the commit details, instead of the grey person symbol.",
+        ghd_behaviour: "The same grey person symbol for every author without an avatar.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7256)],
+        code: &["crates/corvene-ui/src/widgets.rs", "crates/corvene-core/src/avatars.rs"],
     },
 
     // ---- 200 Repository ----
@@ -482,7 +498,6 @@ registry! {
         upstream: &[Upstream::issue(22600), Upstream::issue(2790)],
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/watcher.rs"],
     },
-
 
     /// The clone dialog's `owner/name` 404.
     CLONE_SHORTHAND_NOT_FOUND = 204 "clone-shorthand-not-found" {
@@ -1402,7 +1417,6 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
-
     /// Remove a left-over index.lock from the error dialog.
     REMOVE_STALE_INDEX_LOCK = 265 "remove-stale-index-lock" {
         title: "Remove a left-over index.lock",
@@ -1416,6 +1430,206 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(908)],
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/index_lock.rs", "crates/corvene-ui/src/dialogs/simple.rs"],
+    },
+
+    /// Repository list group headers collapse.
+    COLLAPSIBLE_REPOSITORY_GROUPS = 266 "collapsible-repository-groups" {
+        title: "Collapsible repository groups",
+        summary: "The repository list's group headers (Recent, each owner, Other) get a chevron; \
+                  clicking a header hides or shows its repositories and the collapsed groups are \
+                  remembered. While the list is filtered every group is expanded, and the arrow \
+                  keys skip hidden rows.",
+        ghd_behaviour: "Groups are always expanded, so a long list of one owner's repositories has \
+                        to be scrolled past.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[
+            Upstream::issue(9910),
+            Upstream::issue(20228),
+            Upstream::issue(21908),
+            Upstream::issue(14997),
+        ],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
+    /// Pin repositories to the top of the repository list.
+    PINNED_REPOSITORIES = 267 "pinned-repositories" {
+        title: "Pinned repositories",
+        summary: "The repository list's context menu offers Pin and Unpin; pinned repositories are \
+                  listed by name in a Pinned group above Recent (and stay in their owner groups). \
+                  The group is hidden while the list is filtered.",
+        ghd_behaviour: "Only the three most recently opened repositories are listed above the \
+                        owner groups; there is no way to keep a repository at the top.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22751)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
+    /// One alphabetical repository list instead of owner groups.
+    UNGROUPED_REPOSITORY_LIST = 268 "ungrouped-repository-list" {
+        title: "Ungrouped repository list",
+        summary: "Without filter text the repository list shows every repository in one \
+                  alphabetical Repositories group after Recent, instead of a group per GitHub \
+                  owner and Other. ⇧⌘] / ⇧⌘[ (612) follow the same order.",
+        ghd_behaviour: "Repositories are always grouped by GitHub owner, with the rest under Other.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11460)],
+        code: &["crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// Remove several repositories at once.
+    BULK_REMOVE_REPOSITORIES = 269 "bulk-remove-repositories" {
+        title: "Remove several repositories at once",
+        summary: "File › Remove Repositories… and the repository list's context menu open a dialog \
+                  listing every repository with a checkbox and a filter box; Remove takes the \
+                  ticked ones out of Corvene (optionally moving their folders to the Trash, as \
+                  the single Remove does).",
+        ghd_behaviour: "Repositories are removed one at a time, each with its own confirmation.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20684), Upstream::issue(22135), Upstream::issue(22434)],
+        code: &[
+            "crates/corvene-ui/src/dialogs/remove_repositories.rs",
+            "crates/corvene-ui/src/repository_list.rs",
+            "crates/corvene/src/menus.rs",
+            "crates/corvene/src/main.rs",
+        ],
+    },
+
+    /// A stash icon on repositories with stashed changes.
+    REPOSITORY_LIST_STASH_ICON = 270 "repository-list-stash-icon" {
+        title: "Repository list shows stashes",
+        summary: "Repositories with stashed changes show a stash icon in the repository list (from \
+                  the opened repository's stashes, or the background indicator refresh for the \
+                  others), like the branch list's stash icon (854).",
+        ghd_behaviour: "Nothing in the repository list tells which repositories hold stashed changes.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15225)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/repo.rs"],
+    },
+
+    /// Repository list indicators survive a restart.
+    PERSIST_REPOSITORY_INDICATORS = 271 "persist-repository-indicators" {
+        title: "Remember repository indicators",
+        summary: "The repository list's ahead/behind arrows, changes dot (and branch and stash \
+                  extras) are saved after each background refresh and shown at the next launch \
+                  until the first refresh replaces them.",
+        ghd_behaviour: "The indicators are kept in memory only, so after a launch the list shows \
+                        none until the background refresh has visited every repository.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(5591)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
+    /// Ahead / behind counts with a thousands separator.
+    GROUPED_AHEAD_BEHIND_COUNTS = 272 "grouped-ahead-behind-counts" {
+        title: "Thousands separators in ahead/behind counts",
+        summary: "The push/pull button's ahead/behind badge, its commits-to-pull tooltip and the \
+                  repository list's ahead/behind tooltip and screen reader label write counts \
+                  with the thousands separator from Appearance › Formatting (1,234).",
+        ghd_behaviour: "Counts are plain digits (1234) whatever the number format.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1245)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// Forks name their parent in the repository tooltips.
+    FORK_PARENT_IN_TOOLTIP = 273 "fork-parent-in-tooltip" {
+        title: "Tooltips name a fork's parent",
+        summary: "For a forked GitHub repository, the Current Repository button's tooltip and the \
+                  repository list row's tooltip end with \"Fork of owner/name\".",
+        ghd_behaviour: "Only the fork icon tells a fork apart; its parent repository is not shown.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16568)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
+    /// No "Publish repository" before the repository has loaded.
+    NO_PUBLISH_BEFORE_LOAD = 274 "no-publish-before-load" {
+        title: "No Publish repository while loading",
+        summary: "Until a newly selected repository has been read, the push/pull button is a \
+                  disabled blank button instead of \"Publish repository\", which a repository \
+                  with a remote never needs.",
+        ghd_behaviour: "Briefly offers \"Publish this repository to GitHub\" for every repository \
+                        while it loads, including cloned ones.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(4107)],
+        code: &["crates/corvene-ui/src/toolbar.rs"],
+    },
+
+    /// A friendlier branch button on a detached HEAD.
+    DETACHED_HEAD_FRIENDLY = 275 "detached-head-friendly" {
+        title: "Friendlier detached HEAD",
+        summary: "On a detached HEAD the branch button names the tag HEAD is at (\"On v1.2.0\") \
+                  instead of the short SHA when there is one, and its tooltip explains that \
+                  no branch is checked out and new commits need a branch to be kept.",
+        ghd_behaviour: "Shows \"On <short SHA>\" with the tooltip \"Currently on a detached HEAD\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10857)],
+        code: &["crates/corvene-ui/src/toolbar.rs"],
+    },
+
+    /// Destructive confirmations name what they remove.
+    DESCRIPTIVE_CONFIRM_BUTTONS = 276 "descriptive-confirm-buttons" {
+        title: "Descriptive confirmation buttons",
+        summary: "The destructive button of the Remove Repository, Delete Branch, Delete Tag and \
+                  Delete Worktree confirmations says what it does (\"Remove Repository\", \
+                  \"Delete Branch\") instead of a bare \"Remove\" or \"Delete\".",
+        ghd_behaviour: "The buttons read \"Remove\" and \"Delete\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8591)],
+        code: &[
+            "crates/corvene-ui/src/dialog.rs",
+            "crates/corvene-ui/src/dialogs/app_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/branch_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/history_dialogs.rs",
+            "crates/corvene-ui/src/dialogs/worktree_dialogs.rs",
+        ],
+    },
+
+    /// Bold filter matches in the clone list, like the other lists.
+    CONSISTENT_FILTER_HIGHLIGHT = 277 "consistent-filter-highlight" {
+        title: "Bold filter matches when cloning",
+        summary: "In Clone a Repository's lists (and the signed-in blank slate) the characters \
+                  matching the filter are bold, as in the branch and repository lists.",
+        ghd_behaviour: "Black on bright yellow (an unstyled `<mark>`), unlike every other list.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6898)],
+        code: &["crates/corvene-ui/src/cloneable_repositories.rs"],
     },
 
     /// The background fetch also runs when GitHub saw a push.
@@ -2105,6 +2319,44 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-platform/src/cli.rs"],
     },
 
+    /// Open-repository URLs and the CLI can leave Corvene in the background.
+    URL_BACKGROUND_OPEN = 416 "url-background-open" {
+        title: "Open repositories in the background",
+        summary: "An x-corvene://openRepo or openLocalRepo URL with ?background=1 (the command \
+                  line tool's corvene --background …) selects the repository without bringing \
+                  the window forward, so scripts and editor integrations can switch repositories \
+                  quietly.",
+        ghd_behaviour: "Every URL action and CLI command activates the app and shows its window.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(22150)],
+        code: &["crates/corvene-core/src/app_url.rs", "packaging/corvene.sh", "packaging/linux/corvene.sh"],
+    },
+
+    /// The command line tool adds a repository without the dialog.
+    CLI_ADD_REPOSITORY = 417 "cli-add-repository" {
+        title: "Add repositories from the command line",
+        summary: "corvene add [path] (macOS and Linux command line tool) adds the repository \
+                  containing the path without the Add Local Repository dialog, or says it is not \
+                  a Git repository. The request carries a token only the user's own shell can \
+                  create, so x-corvene:// links from elsewhere still ask first.",
+        ghd_behaviour: "The command line tool can only open a path; one Corvene doesn't list yet \
+                        shows the Add Local Repository dialog.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(21260)],
+        code: &[
+            "crates/corvene-core/src/app_url.rs",
+            "crates/corvene-platform/src/cli.rs",
+            "packaging/corvene.sh",
+            "packaging/linux/corvene.sh",
+        ],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
@@ -2253,6 +2505,7 @@ registry! {
         upstream: &[Upstream::issue(21762)],
         code: &["crates/corvene-core/src/dispatcher.rs"],
     },
+
     /// Settings › Prompts leaves out the Copilot prompt.
     COPILOT_PROMPT_OMITTED = 512 "copilot-prompt-omitted" {
         title: "Settings › Prompts: no Copilot prompt",
@@ -2506,6 +2759,21 @@ registry! {
             "crates/corvene/src/main.rs",
             "crates/corvene/src/menus.rs",
         ],
+    },
+
+    /// Arrow keys in the repository list start at the selected repository.
+    REPOSITORY_LIST_STARTS_AT_SELECTED = 613 "repository-list-starts-at-selected" {
+        title: "Repository list arrows start at the current repository",
+        summary: "With no row highlighted yet, ↓ / ↑ in the repository list's filter box move to \
+                  the row after / before the selected repository instead of the first / last row.",
+        ghd_behaviour: "The first ↓ always goes to the top of the list (↑ to the bottom), however \
+                        far down the current repository is.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(2650)],
+        code: &["crates/corvene-ui/src/repository_list.rs"],
     },
 
     // ---- 700 Changes & diffs ----
@@ -3128,7 +3396,8 @@ registry! {
         title: "Diff: Open in editor at a line",
         summary: "Right-clicking a line of a working-directory diff offers \"Open in <Editor> at \
                   Line N\" when the editor can jump to a line (VS Code and its forks, Sublime \
-                  Text, Zed; on Android the Termux editors and Markor).",
+                  Text, Zed; on Android the Termux editors and Markor), and ⌥-clicking (Alt-click) \
+                  a line's text opens it there directly.",
         ghd_behaviour: "The diff's context menu has no editor item; Open in <Editor> opens the \
                         file at its top.",
         nature: Nature::Feature,
@@ -3351,6 +3620,147 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(21970)],
         code: &["crates/corvene-ui/src/image_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
+    /// Type changes (file to symbolic link) are parsed as two sections.
+    TYPECHANGE_DIFF = 756 "typechange-diff" {
+        title: "Type changes in the diff",
+        summary: "When a file becomes a symbolic link (or the other way round), the diff says \
+                  so above the rows and its lines can be neither selected nor expanded, since \
+                  no partial commit can describe half of such a change. (The second file \
+                  section's `---` / `+++` headers are never shown as content, flag or not.)",
+        ghd_behaviour: "The diff parser fails on the second `diff --git` line and the diff keeps \
+                        loading forever.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21975), Upstream::issue(12142)],
+        code: &["crates/corvene-git/src/diff.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
+    /// The diff's row height (and the changes list's with it).
+    DIFF_LINE_HEIGHT = 757 "diff-line-height" {
+        title: "Diff line height",
+        summary: "The height of the diff's rows, 14 to 32 pixels at 100 % zoom (0 keeps \
+                  20 px), for a denser or roomier diff. The changes list's rows follow, 9 px \
+                  taller (29 px with the default).",
+        ghd_behaviour: "20 px diff rows and 29 px changes rows, changed only by zooming the \
+                        whole window.",
+        nature: Nature::Feature,
+        kind: Kind::Number { min: 0, max: 32, unit: Some("px") },
+        corvene: Value::Number(0), ghd: Value::Number(0),
+        familiar: Value::Number(0), max: Value::Number(0),
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19361), Upstream::issue(20480)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
+    /// The old-line-number column selects the whole hunk.
+    WIDE_HUNK_HANDLE = 758 "wide-hunk-handle" {
+        title: "Wide hunk handle",
+        summary: "In the unified diff of the Changes tab, clicking the old line number column \
+                  ticks or unticks the whole block of changes, like the thin handle strip to its \
+                  left; the new line number column still selects single lines (and drags \
+                  ranges).",
+        ghd_behaviour: "Only the 16 px strip selects a block; both number columns select single \
+                        lines.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20945)],
+        code: &["crates/corvene-ui/src/diff_view_rows.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
+    /// Discard items in the diff text's context menu.
+    DISCARD_FROM_TEXT_MENU = 759 "discard-from-text-menu" {
+        title: "Discard lines from the text menu",
+        summary: "Right-clicking the text of an added or removed line in the Changes tab's diff \
+                  offers \"Discard Added Line\" (and \"Discard Added Lines\" for its whole block), \
+                  the items the line number gutter has, below Copy and Select All.",
+        ghd_behaviour: "Discarding lines needs a right-click on the line numbers; the text's menu \
+                        has Copy, Select All and the expansion item only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14279)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
+    },
+
+    /// Small images are enlarged with sharp pixels.
+    PIXELATED_SMALL_IMAGES = 760 "pixelated-small-images" {
+        title: "Enlarge small images in image diffs",
+        summary: "Images under 64 pixels (pixel art, icons) are shown at a whole multiple of \
+                  their size, up to 16× and about 256 px, with sharp nearest-neighbour pixels \
+                  (still shrunk to fit the pane). The footer keeps the real size.",
+        ghd_behaviour: "Small images are drawn at their natural size, a few pixels across.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21531)],
+        code: &["crates/corvene-ui/src/image_diff.rs"],
+    },
+
+    /// A way out of "The diff is too large to be displayed".
+    TOO_LARGE_DIFF_ESCAPE_HATCH = 761 "too-large-diff-escape-hatch" {
+        title: "Open diffs too large to show elsewhere",
+        summary: "When a changed file's diff is too large to be displayed (over 70 MB), the \
+                  pane offers \"Open in external diff tool\" (git difftool, when diff.tool is set \
+                  in the Git configuration) and \"Open file in <Editor>\".",
+        ghd_behaviour: "\"The diff is too large to be displayed.\" and nothing else.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4053)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs"],
+    },
+
+    /// The working file's modification time in the Changes diff header.
+    DIFF_HEADER_MTIME = 762 "diff-header-mtime" {
+        title: "Modification time in the diff header",
+        summary: "The Changes tab's diff header shows when the selected file was last modified \
+                  (\"Modified 5 minutes ago\", the date and time in its tooltip).",
+        ghd_behaviour: "The header shows the path only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18300)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/workspace.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
+    /// Stop computing a diff nobody will see.
+    CANCEL_STALE_DIFFS = 763 "cancel-stale-diffs" {
+        title: "Stop stale diffs",
+        summary: "Selecting another changed file (or a refresh) stops the git diff still running \
+                  for the previous selection, so moving quickly through large files does not \
+                  queue up diffs that are thrown away.",
+        ghd_behaviour: "Every started diff runs to completion and the stale ones are discarded.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1915)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-git/src/process.rs"],
+    },
+
+    /// Highlighting for .jsonc, .slnx and MQL files.
+    MORE_HIGHLIGHT_EXTENSIONS = 764 "more-highlight-extensions" {
+        title: "Highlight more file types",
+        summary: "GitHub Desktop's highlighter also colours `.jsonc` as JSON, `.slnx` (Visual \
+                  Studio solutions) as XML and MetaQuotes `.mq4` / `.mq5` / `.mqh` sources as \
+                  C++. (The tree-sitter grammars know these extensions either way.)",
+        ghd_behaviour: "These files are not highlighted.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22663), Upstream::issue(20861)],
+        code: &["crates/corvene-highlight/src/cm/modes/mod.rs", "crates/corvene/src/main.rs", "crates/corvene-grammars/src/grammars.rs"],
     },
 
     // ---- 800 History & branches ----
@@ -4491,6 +4901,84 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(9887)],
         code: &["crates/corvene-git/src/process.rs", "crates/corvene-git/src/error.rs", "crates/corvene-core/src/flags/dispatch.rs"],
+    },
+
+    /// Links in commit messages end where github.com ends them.
+    LINKIFY_TRAILING_PUNCTUATION = 887 "linkify-trailing-punctuation" {
+        title: "Links leave out trailing punctuation",
+        summary: "In commit messages a URL stops before trailing punctuation (`.` `,` `:` `!` \
+                  `?` quotes) and closing brackets it did not open, and may follow an opening \
+                  bracket; an issue reference is found before any closing punctuation, so \
+                  `[#12]` and `#12:` link to issue 12, as on github.com.",
+        ghd_behaviour: "A full stop after a URL is part of the link, a URL right after `(` is not \
+                        linked, and `[#12]` or `#12:` are plain text.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16373), Upstream::issue(16939)],
+        code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
+    /// `owner/repo#123` and `owner/repo@sha` in commit messages.
+    CROSS_REPOSITORY_ISSUE_LINKS = 888 "cross-repository-issue-links" {
+        title: "Links to other repositories in commit messages",
+        summary: "In a GitHub repository's commit messages `owner/repo#123` is one link to issue \
+                  123 of that repository and `owner/repo@<sha>` one link to that commit, as \
+                  github.com links them.",
+        ghd_behaviour: "`owner/repo` stays plain text and `#123` links to issue 123 of the current \
+                        repository; `owner/repo@<sha>` is not linked.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8161), Upstream::issue(8403), Upstream::issue(22311)],
+        code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
+    /// Issue titles in the tooltips of `#123` links.
+    ISSUE_TITLE_TOOLTIPS = 889 "issue-title-tooltips" {
+        title: "Issue titles on #123 links",
+        summary: "Hovering a `#123` link in the selected commit's message shows \"#123 <issue \
+                  title>\" for an open issue in the issue cache the commit box's # suggestions \
+                  use (hovering loads it), else the link's URL.",
+        ghd_behaviour: "The tooltip is the link's URL (older versions showed the commit title).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2257)],
+        code: &["crates/corvene-ui/src/markdown.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
+    /// The commit author's name links to their GitHub profile.
+    COMMIT_AUTHOR_LINKS = 890 "commit-author-links" {
+        title: "Link commit authors to their profiles",
+        summary: "In a GitHub repository the selected commit's author name opens their GitHub \
+                  profile when the login is known: a no-reply address, a signed-in account with \
+                  that e-mail, or a collaborator from the commit box's @ suggestions.",
+        ghd_behaviour: "The author name is plain text.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3785)],
+        code: &["crates/corvene-ui/src/selected_commit.rs", "crates/corvene-core/src/autocomplete.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
+    /// No GitHub links for commits that are not on any remote.
+    UNPUBLISHED_COMMIT_LINKS = 891 "unpublished-commit-links" {
+        title: "No GitHub links for unpublished commits",
+        summary: "\"View on GitHub\" (and Copy Commit URL and the commit details' SHA link) are \
+                  disabled for a commit that no remote-tracking branch contains, such as one \
+                  made on a detached HEAD or not pushed yet, since GitHub does not have it.",
+        ghd_behaviour: "Every commit links to GitHub, which answers 404 for unpublished ones.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1478)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
     /// Create a Tag says when the tag cannot be pushed.

@@ -18,7 +18,7 @@ use corvene_models::{
 
 use crate::detect::GitBinary;
 use crate::error::Result;
-use crate::process::GitCommand;
+use crate::process::{CancelToken, GitCommand};
 
 /// GHD `MaxReasonableDiffSize`: beyond this the diff is `LargeText` and only
 /// rendered on request.
@@ -40,6 +40,9 @@ pub const MAX_DIFF_LINES: usize = 50_000;
 ///
 /// `as_text` adds `--text` (Corvene `749-binary-diff-as-text`): a file git
 /// takes for binary is diffed line by line anyway.
+///
+/// `cancel` (Corvene `763-cancel-stale-diffs`) stops the git processes when
+/// another file was selected meanwhile ([`crate::GitError::Cancelled`]).
 pub fn working_directory_diff(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -47,6 +50,7 @@ pub fn working_directory_diff(
     hide_whitespace: bool,
     renamed_against_head: bool,
     as_text: bool,
+    cancel: Option<&CancelToken>,
 ) -> Result<Diff> {
     let mut args = vec!["diff"];
     if hide_whitespace {
@@ -57,9 +61,13 @@ pub fn working_directory_diff(
     }
     args.extend(["--no-ext-diff", "--patch-with-raw", "-z", "--no-color"]);
     let base = || {
-        GitCommand::new(git.clone())
+        let cmd = GitCommand::new(git.clone())
             .args(&args)
-            .current_dir(workdir)
+            .current_dir(workdir);
+        match cancel {
+            Some(token) => cmd.cancel_token(token.clone()),
+            None => cmd,
+        }
     };
     let mut cmd = base();
     let is_submodule = file.status.submodule;
@@ -123,6 +131,34 @@ pub fn working_directory_diff(
         }
         other => other,
     })
+}
+
+/// Corvene `761-too-large-diff-escape-hatch`: `git difftool -y` on one
+/// working-directory file against HEAD (a new file against `/dev/null`),
+/// with the repository's `diff.tool`. Blocks until the tool exits. Refuses
+/// without a configured `diff.tool` (git would fall back to a terminal tool).
+pub fn open_difftool(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &WorkingDirectoryFileChange,
+) -> Result<()> {
+    if crate::config_value(git.clone(), workdir, "diff.tool").is_none() {
+        return Err(crate::error::GitError::Gix(
+            "No diff tool is configured. Set one with git config --global diff.tool <tool>.".into(),
+        ));
+    }
+    let cmd = GitCommand::new(git)
+        .args(["difftool", "-y"])
+        .current_dir(workdir);
+    let cmd = if file.status.kind.is_new_or_untracked() {
+        // `--no-index` exits 1 when the files differ
+        cmd.args(["--no-index", "--", "/dev/null"])
+            .arg(&file.path)
+            .allow_exit_code(1)
+    } else {
+        cmd.args(["HEAD", "--"]).arg(&file.path)
+    };
+    cmd.run().map(|_| ())
 }
 
 /// Corvene `714-copy-diff`: the working-directory changes of `files` as one
@@ -394,10 +430,20 @@ pub fn parse_unified(patch: &str) -> Diff {
     let mut total_lines = 0usize;
     let mut truncated = false;
     let (mut old_mode, mut new_mode) = (None, None);
+    // a type change prints two file sections: the deletion, then the addition
+    let (mut sections, mut deleted_mode, mut added_mode) = (0usize, None, None);
 
     for line in patch.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.starts_with("diff --git ") {
+            // the next section's headers (`--- /dev/null`) are not content
+            sections += 1;
+            if let Some(h) = current.take() {
+                hunks.push(h);
+            }
+            continue;
+        }
         if let Some((os, ol, ns, nl)) = parse_hunk_header(line) {
             if let Some(h) = current.take() {
                 hunks.push(h);
@@ -427,6 +473,10 @@ pub fn parse_unified(patch: &str) -> Diff {
                 old_mode = Some(mode.to_string());
             } else if let Some(mode) = line.strip_prefix("new mode ") {
                 new_mode = Some(mode.to_string());
+            } else if let Some(mode) = line.strip_prefix("deleted file mode ") {
+                deleted_mode = Some(mode.to_string());
+            } else if let Some(mode) = line.strip_prefix("new file mode ") {
+                added_mode = Some(mode.to_string());
             }
             continue;
         };
@@ -478,6 +528,11 @@ pub fn parse_unified(patch: &str) -> Diff {
         hunks.push(h);
     }
     let mode_change = old_mode.zip(new_mode);
+    let type_change = if sections >= 2 {
+        deleted_mode.zip(added_mode)
+    } else {
+        None
+    };
     if hunks.is_empty() && mode_change.is_none() {
         return Diff::Empty;
     }
@@ -488,6 +543,7 @@ pub fn parse_unified(patch: &str) -> Diff {
             .any(|l| has_hidden_bidi_chars(&l.text)),
         line_endings: None,
         mode_change,
+        type_change,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }
@@ -540,6 +596,45 @@ mod tests {
         // the patch reverses cleanly onto the working tree
         std::fs::write(path.join("p.diff"), &patch).unwrap();
         run(&["apply", "--check", "-R", "p.diff"]);
+    }
+
+    #[test]
+    fn difftool_runs_the_configured_tool() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "commit.gpgsign", "false"]);
+        run(&["config", "user.name", "T"]);
+        run(&["config", "user.email", "t@example.com"]);
+        std::fs::write(path.join("a.txt"), "one\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "init"]);
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        let git = Arc::new(crate::find_git().unwrap());
+        assert_eq!(crate::config_value(git.clone(), path, "diff.tool"), None);
+        run(&["config", "diff.tool", "fake"]);
+        run(&["config", "difftool.fake.cmd", "cat \"$REMOTE\" > seen.txt"]);
+        assert_eq!(
+            crate::config_value(git.clone(), path, "diff.tool").as_deref(),
+            Some("fake")
+        );
+        let status = crate::get_status(git.clone(), path, None).unwrap();
+        open_difftool(git, path, &status.files[0]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path.join("seen.txt")).unwrap(),
+            "two\n"
+        );
     }
 
     const SAMPLE: &str = "diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n-two\n+TWO\n+three\n four\n\\ No newline at end of file\n";
@@ -615,7 +710,7 @@ mod tests {
         let status = crate::status::get_status(git.clone(), path, None).unwrap();
         for file in &status.files {
             let diff =
-                working_directory_diff(git.clone(), path, file, false, false, false).unwrap();
+                working_directory_diff(git.clone(), path, file, false, false, false, None).unwrap();
             let Diff::Text { hunks, .. } = diff else {
                 panic!("text diff for {}", file.path)
             };
@@ -648,6 +743,41 @@ mod tests {
         };
         assert_eq!(hunks.len(), 1);
         assert!(warnings.mode_change.is_some());
+    }
+
+    #[test]
+    fn type_change_sections_are_not_content() {
+        let patch = "diff --git a/l b/l\ndeleted file mode 100644\nindex 1..0\n--- a/l\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-one\n-two\ndiff --git a/l b/l\nnew file mode 120000\nindex 0..2\n--- /dev/null\n+++ b/l\n@@ -0,0 +1 @@\n+target\n\\ No newline at end of file\n";
+        let Diff::Text { hunks, warnings } = parse_unified(patch) else {
+            panic!("text diff expected")
+        };
+        assert_eq!(hunks.len(), 2);
+        let texts: Vec<_> = hunks
+            .iter()
+            .flat_map(|h| &h.lines[1..])
+            .map(|l| (l.kind, l.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (DiffLineKind::Delete, "one"),
+                (DiffLineKind::Delete, "two"),
+                (DiffLineKind::Add, "target"),
+            ]
+        );
+        assert_eq!(hunks[1].unified_diff_start, 3);
+        assert_eq!(hunks[1].lines[1].new_line, Some(1));
+        assert_eq!(
+            warnings.type_change,
+            Some(("100644".to_string(), "120000".to_string()))
+        );
+        // one section: a plain new file is no type change
+        let Diff::Text { warnings, .. } = parse_unified(
+            "diff --git a/n b/n\nnew file mode 100644\n--- /dev/null\n+++ b/n\n@@ -0,0 +1 @@\n+a\n",
+        ) else {
+            panic!("text diff expected")
+        };
+        assert_eq!(warnings.type_change, None);
     }
 
     #[test]
@@ -699,9 +829,10 @@ mod tests {
         let git = Arc::new(crate::find_git().unwrap());
         let status = crate::get_status(git.clone(), path, None).unwrap();
         let file = &status.files[0];
-        let binary = working_directory_diff(git.clone(), path, file, false, false, false).unwrap();
+        let binary =
+            working_directory_diff(git.clone(), path, file, false, false, false, None).unwrap();
         assert_eq!(binary, Diff::Binary);
-        let text = working_directory_diff(git, path, file, false, false, true).unwrap();
+        let text = working_directory_diff(git, path, file, false, false, true, None).unwrap();
         assert!(matches!(text, Diff::Text { .. }));
     }
 

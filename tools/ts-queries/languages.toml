@@ -102,7 +102,7 @@ helix = "common-lisp"
 package = "tree-sitter-cpp"
 version = "0.23.4"
 language = "LANGUAGE"
-extensions = ["cc", "cpp", "cxx", "c++", "hpp", "hxx", "hh", "h++", "ipp", "tpp", "inl"]
+extensions = ["cc", "cpp", "cxx", "c++", "hpp", "hxx", "hh", "h++", "ipp", "tpp", "inl", "mq4", "mq5", "mqh"]
 aliases = ["c++"]
 source = "nvim"
 
@@ -794,7 +794,7 @@ source = "nvim"
 package = "tree-sitter-xml"
 version = "0.7.0"
 language = "LANGUAGE_XML"
-extensions = ["xml", "svg", "xsd", "xslt", "xsl", "rng", "plist", "xaml", "csproj", "fsproj", "vbproj", "vcxproj", "props", "targets", "resx", "nuspec", "wsdl", "kml", "gpx", "storyboard", "xib", "entitlements"]
+extensions = ["xml", "svg", "xsd", "xslt", "xsl", "rng", "plist", "xaml", "csproj", "fsproj", "vbproj", "vcxproj", "props", "targets", "resx", "nuspec", "wsdl", "kml", "gpx", "storyboard", "xib", "entitlements", "slnx"]
 first_line = "^<\\?xml"
 source = "nvim"
 
