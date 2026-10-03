@@ -1717,6 +1717,10 @@ impl Dispatcher {
             };
             (Self::ordered_selection(rs), rs.commits_contiguous)
         };
+        let in_process = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
         if ordered.is_empty() || (ordered.len() > 1 && !contiguous) {
             return;
         }
@@ -1727,7 +1731,7 @@ impl Dispatcher {
         }
         let key = ordered.clone();
         let task = cx.background_executor().spawn(async move {
-            let data = compute_changeset(git, &workdir, &ordered)?;
+            let data = compute_changeset(git, &workdir, &ordered, in_process)?;
             crate::diff_cache::store_changeset(&workdir, &ordered, data.clone());
             Ok(data)
         });
@@ -1876,6 +1880,7 @@ impl Dispatcher {
             return;
         }
         let hide_whitespace = s.settings.hide_whitespace_in_history_diff;
+        let in_process = s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
         let (Some(git), Some(rs)) = (s.git.clone(), s.repo_states.get(&id)) else {
             return;
         };
@@ -1907,7 +1912,9 @@ impl Dispatcher {
                     let data = match crate::diff_cache::changeset(&workdir, &shas) {
                         Some(data) => data,
                         None => {
-                            let Ok(data) = compute_changeset(git.clone(), &workdir, &shas) else {
+                            let Ok(data) =
+                                compute_changeset(git.clone(), &workdir, &shas, in_process)
+                            else {
                                 continue;
                             };
                             crate::diff_cache::store_changeset(&workdir, &shas, data.clone());
@@ -2363,11 +2370,12 @@ impl Dispatcher {
 
     /// The local-changes half of [`Self::request_undo_commit`].
     pub fn request_undo_commit_after_tags(id: u64, cx: &mut App) {
-        let (confirm, overlap_only) = {
+        let (confirm, overlap_only, in_process) = {
             let s = Self::state(cx).read(cx);
             (
                 s.settings.confirm_undo_commit,
                 s.flags.bool(crate::flags::ids::UNDO_WARNS_ONLY_ON_OVERLAP),
+                s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES),
             )
         };
         if !(confirm && Self::working_directory_dirty(id, cx)) {
@@ -2390,9 +2398,9 @@ impl Dispatcher {
                     .collect()
             })
             .unwrap_or_default();
-        let task = cx
-            .background_executor()
-            .spawn(async move { corvene_git::get_changed_files(git, &workdir, "HEAD") });
+        let task = cx.background_executor().spawn(async move {
+            corvene_git::get_changed_files(git, &workdir, "HEAD", in_process)
+        });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let changed = task.await;
             cx.update(|cx| {
@@ -4939,15 +4947,17 @@ fn compute_working_diff(
 }
 
 /// The changed files of one commit or of a contiguous range (oldest first).
+/// `in_process`: flag `907-in-process-commit-files`.
 fn compute_changeset(
     git: Arc<corvene_git::GitBinary>,
     workdir: &Path,
     ordered: &[String],
+    in_process: bool,
 ) -> corvene_git::error::Result<Arc<corvene_models::ChangesetData>> {
     if ordered.len() > 1 {
-        corvene_git::get_commit_range_changed_files(git, workdir, ordered)
+        corvene_git::get_commit_range_changed_files(git, workdir, ordered, in_process)
     } else {
-        corvene_git::get_changed_files(git, workdir, &ordered[0])
+        corvene_git::get_changed_files(git, workdir, &ordered[0], in_process)
     }
     .map(Arc::new)
 }

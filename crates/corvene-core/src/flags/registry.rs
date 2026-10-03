@@ -4212,6 +4212,23 @@ registry! {
         code: &["crates/corvene-git/src/status_gix.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// A commit's changed files read by gitoxide in-process.
+    IN_PROCESS_COMMIT_FILES = 907 "in-process-commit-files" {
+        title: "In-process commit files",
+        summary: "The changed files and line counts of a selected commit (or range of commits) \
+                  are read by gitoxide inside Corvene instead of by a git log process, with git's \
+                  rename and copy detection. Corvene runs git as before whenever gitoxide cannot \
+                  read them.",
+        ghd_behaviour: "Runs `git log --raw --numstat` (or `git diff` for a range) for every \
+                        selected commit.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/log_gix.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 1000 Experimental ----
 }
 

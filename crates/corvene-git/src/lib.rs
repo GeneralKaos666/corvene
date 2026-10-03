@@ -15,6 +15,7 @@ pub mod hook_env;
 pub mod ignore;
 pub mod index_lock;
 pub mod log;
+mod log_gix;
 pub mod ops;
 pub mod patch;
 pub mod paths;
