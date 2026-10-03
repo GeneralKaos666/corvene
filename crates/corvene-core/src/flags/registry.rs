@@ -143,6 +143,20 @@ fn app_name(s: &str) -> Result<(), &'static str> {
     }
 }
 
+/// `547-git-executable`: empty, or an absolute or `~/` path on one line.
+fn git_path(s: &str) -> Result<(), &'static str> {
+    let s = s.trim();
+    if s.contains(['\n', '\r']) {
+        Err("One line only")
+    } else if s.chars().count() > 500 {
+        Err("At most 500 characters")
+    } else if !s.is_empty() && !s.starts_with("~/") && !std::path::Path::new(s).is_absolute() {
+        Err("Enter a full path, e.g. /usr/local/bin/git")
+    } else {
+        Ok(())
+    }
+}
+
 /// A comma-separated list of GitHub logins (`229-hidden-clone-owners`).
 fn owner_list(s: &str) -> Result<(), &'static str> {
     if s.contains(['\n', '\r']) {
@@ -2469,6 +2483,22 @@ registry! {
         restart: false, visible: cfg!(windows), availability: available,
         upstream: &[Upstream::issue(13017)],
         code: &["crates/corvene-platform/src/lib.rs", "crates/corvene-core/src/state.rs"],
+    },
+
+    /// Which git to use.
+    GIT_EXECUTABLE = 547 "git-executable" {
+        title: "Git executable",
+        summary: "Full path of the git Corvene runs (e.g. /opt/homebrew/bin/git or ~/bin/git), \
+                  tried before CORVENE_GIT, PATH and the usual install locations. Empty finds \
+                  git as usual; a path that can't be run or is too old is skipped.",
+        ghd_behaviour: "Always its bundled git.",
+        nature: Nature::Feature,
+        kind: Kind::Text { placeholder: "/usr/local/bin/git", validate: git_path },
+        corvene: Value::text(""), ghd: Value::text(""),
+        familiar: Value::text(""), max: Value::text(""),
+        restart: true, visible: true, availability: available,
+        upstream: &[Upstream::issue(14222)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/detect.rs"],
     },
 
     // ---- 600 Keyboard & accessibility ----

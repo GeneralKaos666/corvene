@@ -62,19 +62,27 @@ impl Dispatcher {
         // Synchronous: a few `git --version` probes (~10 ms), started on a
         // thread at the top of `main`. Avoids racing launch-time operations
         // against an async detection.
-        let (git, git_error, popup) = match corvene_git::find_git_prefetched() {
-            Ok(bin) => (Some(Arc::new(bin)), None, None),
-            Err(err) => {
-                warn!(%err, "git not usable");
-                (
-                    None,
-                    Some(err.to_string()),
-                    Some(Popup::InstallGit {
-                        reason: err.to_string(),
-                    }),
-                )
-            }
-        };
+        // `547-git-executable`: a chosen git goes first
+        let preferred = configured_git(
+            flags.text(crate::flags::ids::GIT_EXECUTABLE),
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from),
+        );
+        let (git, git_error, popup) =
+            match corvene_git::find_git_prefetched_preferring(preferred.as_deref()) {
+                Ok(bin) => (Some(Arc::new(bin)), None, None),
+                Err(err) => {
+                    warn!(%err, "git not usable");
+                    (
+                        None,
+                        Some(err.to_string()),
+                        Some(Popup::InstallGit {
+                            reason: err.to_string(),
+                        }),
+                    )
+                }
+            };
         // Corvene (`271-persist-repository-indicators`): last launch's
         // indicators until the first refresh
         let indicators = if flags.bool(crate::flags::ids::PERSIST_REPOSITORY_INDICATORS)
@@ -5394,5 +5402,37 @@ fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
         let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
     } else if imported {
         let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
+    }
+}
+
+/// `547-git-executable`: the flag's path, `~/` expanded against `home`;
+/// `None` when empty.
+fn configured_git(text: &str, home: Option<PathBuf>) -> Option<PathBuf> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    match (text.strip_prefix("~/"), home) {
+        (Some(rest), Some(home)) => Some(home.join(rest)),
+        _ => Some(PathBuf::from(text)),
+    }
+}
+
+#[cfg(test)]
+mod configured_git_tests {
+    use super::*;
+
+    #[test]
+    fn expands_home_and_ignores_empty() {
+        let home = Some(PathBuf::from("/Users/mona"));
+        assert_eq!(configured_git("  ", home.clone()), None);
+        assert_eq!(
+            configured_git("~/bin/git", home.clone()),
+            Some(PathBuf::from("/Users/mona/bin/git"))
+        );
+        assert_eq!(
+            configured_git(" /opt/git/bin/git ", home),
+            Some(PathBuf::from("/opt/git/bin/git"))
+        );
     }
 }
