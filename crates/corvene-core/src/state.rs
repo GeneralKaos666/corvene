@@ -854,8 +854,10 @@ pub struct RepositoryState {
     pub trusting_path: bool,
     pub last_refresh: Option<Instant>,
     pub section: Section,
-    /// `git status` result (`IChangesState.workingDirectory`).
-    pub status: Option<WorkingDirectoryStatus>,
+    /// `git status` result (`IChangesState.workingDirectory`). Shared: a
+    /// refresh hands it to the next one and views key caches on the
+    /// pointer, so every change goes through `Arc::make_mut`.
+    pub status: Option<Arc<WorkingDirectoryStatus>>,
     /// Lines added / deleted per changed file against HEAD (Corvene
     /// addition, flag `changes-line-counts`; empty while the flag is off).
     pub line_stats: Arc<HashMap<String, corvene_git::LineStats>>,
@@ -1102,7 +1104,7 @@ impl RepositoryState {
     }
 
     pub fn changed_files(&self) -> usize {
-        self.status.as_ref().map(|s| s.files.len()).unwrap_or(0)
+        self.status.as_deref().map(|s| s.files.len()).unwrap_or(0)
     }
 
     /// [`Self::stash`] when a Desktop made it for this branch: the entry a new

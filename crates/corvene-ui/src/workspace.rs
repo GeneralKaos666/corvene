@@ -500,7 +500,7 @@ impl Workspace {
         let selected_change = rs.and_then(|r| {
             let path = r.selected_file.as_ref()?;
             r.status
-                .as_ref()?
+                .as_deref()?
                 .files
                 .iter()
                 .find(|f| &f.path == path)

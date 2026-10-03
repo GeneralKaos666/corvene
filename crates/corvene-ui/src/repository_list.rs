@@ -997,7 +997,7 @@ fn indicators(s: &AppState, id: u64) -> (Option<corvene_core::AheadBehind>, bool
         .or_else(|| indicator.and_then(|i| i.ahead_behind))
         .filter(|ab| ab.ahead > 0 || ab.behind > 0);
     let changes = rs
-        .and_then(|r| r.status.as_ref())
+        .and_then(|r| r.status.as_deref())
         .map(|st| !st.files.is_empty())
         .or_else(|| indicator.map(|i| i.changed_files > 0))
         .unwrap_or(false);

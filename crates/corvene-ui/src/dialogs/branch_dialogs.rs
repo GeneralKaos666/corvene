@@ -138,7 +138,7 @@ impl CreateBranchDialog {
             let has_changes = s
                 .repo_states
                 .get(&repo)
-                .and_then(|r| r.status.as_ref())
+                .and_then(|r| r.status.as_deref())
                 .is_some_and(|st| !st.files.is_empty());
             if has_changes
                 && s.flags

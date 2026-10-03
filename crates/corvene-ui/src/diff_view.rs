@@ -443,7 +443,7 @@ impl DiffView {
                 DiffSource::WorkingDirectory => {
                     let file = rs.selected_file.as_ref().and_then(|p| {
                         rs.status
-                            .as_ref()
+                            .as_deref()
                             .and_then(|st| st.files.iter().find(|f| &f.path == p))
                     })?;
                     (

@@ -228,33 +228,74 @@ pub fn filtered_files<'a>(
     hide: &[String],
     mode: &str,
 ) -> Vec<&'a WorkingDirectoryFileChange> {
+    filtered_indices(files, None, text, filter, hide, mode)
+        .into_iter()
+        .map(|i| &files[i])
+        .collect()
+}
+
+/// [`filtered_files`] as indices into `files`, taking the files in `order`
+/// (indices, see [`sorted_indices`]) or as they are. Indices let a view
+/// keep a 100,000-file list without copying it.
+pub fn filtered_indices(
+    files: &[WorkingDirectoryFileChange],
+    order: Option<&[usize]>,
+    text: &str,
+    filter: &FileListFilter,
+    hide: &[String],
+    mode: &str,
+) -> Vec<usize> {
     let text = text.trim();
-    let mut scored: Vec<(f32, &WorkingDirectoryFileChange)> = files
-        .iter()
-        .filter(|f| hide.is_empty() || !hidden_by(hide, &f.path))
-        .filter(|f| matches_options(filter, f))
-        .filter_map(|f| path_match(mode, text, &f.path).map(|(s, _)| (s, f)))
-        .collect();
+    let keep = |i: usize| {
+        let f = &files[i];
+        if !hide.is_empty() && hidden_by(hide, &f.path) {
+            return None;
+        }
+        if !matches_options(filter, f) {
+            return None;
+        }
+        if text.is_empty() {
+            return Some((1.0, i));
+        }
+        path_match(mode, text, &f.path).map(|(s, _)| (s, i))
+    };
+    let mut scored: Vec<(f32, usize)> = match order {
+        Some(order) => order.iter().filter_map(|&i| keep(i)).collect(),
+        None => (0..files.len()).filter_map(keep).collect(),
+    };
     if !text.is_empty() {
         scored.sort_by(|a, b| b.0.total_cmp(&a.0));
     }
-    scored.into_iter().map(|(_, f)| f).collect()
+    scored.into_iter().map(|(_, i)| i).collect()
+}
+
+/// [`sort_files`] as a permutation of `files`' indices; `None` when the
+/// order is git's path order (the files as they are).
+pub fn sorted_indices(files: &[WorkingDirectoryFileChange], order: &str) -> Option<Vec<usize>> {
+    let mut indices: Vec<usize> = (0..files.len()).collect();
+    match order {
+        "status" => indices.sort_by_key(|&i| status_rank(files[i].status.kind)),
+        "name" => indices.sort_by_cached_key(|&i| files[i].file_name().to_lowercase()),
+        _ => return None,
+    }
+    Some(indices)
+}
+
+fn status_rank(kind: FileStatusKind) -> u8 {
+    match kind {
+        FileStatusKind::Conflicted => 0,
+        FileStatusKind::New | FileStatusKind::Untracked => 1,
+        FileStatusKind::Modified => 2,
+        FileStatusKind::Renamed | FileStatusKind::Copied => 3,
+        FileStatusKind::Deleted => 4,
+    }
 }
 
 /// `703-changes-sort-order`: how the changes list orders its files before
 /// the filter ranks them. Unknown flag values keep git's path order.
 pub fn sort_files(files: &mut [WorkingDirectoryFileChange], order: &str) {
-    fn rank(kind: FileStatusKind) -> u8 {
-        match kind {
-            FileStatusKind::Conflicted => 0,
-            FileStatusKind::New | FileStatusKind::Untracked => 1,
-            FileStatusKind::Modified => 2,
-            FileStatusKind::Renamed | FileStatusKind::Copied => 3,
-            FileStatusKind::Deleted => 4,
-        }
-    }
     match order {
-        "status" => files.sort_by_key(|f| rank(f.status.kind)),
+        "status" => files.sort_by_key(|f| status_rank(f.status.kind)),
         "name" => files.sort_by_cached_key(|f| f.file_name().to_lowercase()),
         _ => {}
     }

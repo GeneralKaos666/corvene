@@ -109,9 +109,16 @@ pub fn get_status_with(
         apply_conflict_details(git, workdir, &mut status);
     }
     if let Some(prev) = previous {
+        // by path: a linear search per file is quadratic, minutes on a tree
+        // with 100,000 untracked files
+        let old: std::collections::HashMap<&str, &corvene_models::DiffSelection> = prev
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), &f.selection))
+            .collect();
         for file in &mut status.files {
-            if let Some(old) = prev.files.iter().find(|f| f.path == file.path) {
-                file.selection = old.selection.clone();
+            if let Some(selection) = old.get(file.path.as_str()) {
+                file.selection = (*selection).clone();
             }
         }
     }
@@ -191,10 +198,34 @@ pub fn working_directory_line_stats(
         Err(err) => return Err(err),
     };
     let mut stats = parse_numstat(&out.stdout);
+    // untracked files are counted again only when their size or mtime moved:
+    // reading every file of a 100,000-file untracked tree on each refresh
+    // takes seconds
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+    type Counts = HashMap<String, (u64, std::time::SystemTime, Option<u64>)>;
+    static SEEN: LazyLock<Mutex<HashMap<std::path::PathBuf, Counts>>> =
+        LazyLock::new(Default::default);
+    let previous = SEEN
+        .lock()
+        .ok()
+        .and_then(|mut seen| seen.remove(workdir))
+        .unwrap_or_default();
+    let mut counted = Counts::new();
     for file in &status.files {
-        if file.status.kind == FileStatusKind::Untracked
-            && let Some(lines) = untracked_line_count(&workdir.join(&file.path))
-        {
+        if file.status.kind != FileStatusKind::Untracked {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(workdir.join(&file.path)) else {
+            continue;
+        };
+        let stamp = (meta.len(), meta.modified().unwrap_or(std::time::UNIX_EPOCH));
+        let lines = match previous.get(&file.path) {
+            Some(&(len, mtime, lines)) if (len, mtime) == stamp => lines,
+            _ => untracked_line_count(&workdir.join(&file.path), &meta),
+        };
+        counted.insert(file.path.clone(), (stamp.0, stamp.1, lines));
+        if let Some(lines) = lines {
             stats.insert(
                 file.path.clone(),
                 LineStats {
@@ -203,6 +234,9 @@ pub fn working_directory_line_stats(
                 },
             );
         }
+    }
+    if let Ok(mut seen) = SEEN.lock() {
+        seen.insert(workdir.to_path_buf(), counted);
     }
     Ok(stats)
 }
@@ -221,8 +255,7 @@ fn parse_numstat(stdout: &[u8]) -> std::collections::HashMap<String, LineStats> 
         .collect()
 }
 
-fn untracked_line_count(path: &Path) -> Option<u64> {
-    let meta = std::fs::metadata(path).ok()?;
+fn untracked_line_count(path: &Path, meta: &std::fs::Metadata) -> Option<u64> {
     if !meta.is_file() || meta.len() > UNTRACKED_LINE_COUNT_LIMIT {
         return None;
     }

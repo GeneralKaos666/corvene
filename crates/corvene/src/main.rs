@@ -1051,7 +1051,7 @@ pub(crate) fn main() {
                     .read(cx)
                     .repo_states
                     .get(&id)
-                    .and_then(|r| r.status.as_ref())
+                    .and_then(|r| r.status.as_deref())
                     .map(|st| st.files.iter().map(|f| f.path.clone()).collect())
                     .unwrap_or_default();
                 Dispatcher::request_discard_changes(id, paths, cx);

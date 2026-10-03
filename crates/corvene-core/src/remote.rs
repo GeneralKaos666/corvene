@@ -891,7 +891,7 @@ impl Dispatcher {
                         let rs = s.repo_state_mut(id);
                         rs.conflict_state =
                             crate::mco::derive_conflict_state(&status, rs.conflict_state.as_ref());
-                        rs.status = Some(status);
+                        rs.status = Some(std::sync::Arc::new(status));
                         cx.notify();
                     });
                 }

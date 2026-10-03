@@ -13,7 +13,9 @@
 //! the stopped commit above the conflicts list (flag `841`); the rebase list
 //! preselects the default branch (flag `831`); the squash message popup can
 //! go back to the target commit's message (flag `827`); Open in Merge Tool in
-//! a conflicted file's menu (flag `842`).
+//! a conflicted file's menu (flag `842`). "Local changes would be
+//! overwritten" lists the first [`MAX_OVERWRITTEN_LISTED`] files and how
+//! many more there are (GHD lists them all, `local-changes-overwritten-dialog.tsx`).
 
 use corvene_core::{
     AppState, Dispatcher, ManualConflictResolution, McoStep, MultiCommitOperationKind, RetryAction,
@@ -34,6 +36,9 @@ use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{button, checkbox, link_button, text_box};
+
+/// How many files the overwritten-files list shows.
+const MAX_OVERWRITTEN_LISTED: usize = 500;
 
 /// `MultiCommitOperation`: renders the dialog for the current step.
 pub struct McoDialog {
@@ -1293,7 +1298,20 @@ impl Render for LocalChangesOverwrittenDialog {
                         .font_family(crate::theme::mono_font())
                         .text_size(FONT_SIZE_SM())
                         .text_color(t.text_secondary)
-                        .children(self.files.iter().map(|f| div().truncate().child(f.clone())))
+                        // the first few hundred: 100,000 rows would stall
+                        // every frame of the dialog
+                        .children(
+                            self.files
+                                .iter()
+                                .take(MAX_OVERWRITTEN_LISTED)
+                                .map(|f| div().truncate().child(f.clone())),
+                        )
+                        .when(self.files.len() > MAX_OVERWRITTEN_LISTED, |d| {
+                            d.child(format!(
+                                "and {} more",
+                                self.files.len() - MAX_OVERWRITTEN_LISTED
+                            ))
+                        })
                         .with_scrollbar(),
                 )
             })
