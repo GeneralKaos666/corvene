@@ -554,14 +554,31 @@ impl Dispatcher {
             then(id, cx);
             return;
         }
-        #[cfg(target_os = "android")]
         let git = state.read(cx).git.clone();
+        // Corvene (`875-explain-bad-config`): a repository git cannot open
+        // because of a broken config file names the file and line
+        let explain = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::EXPLAIN_BAD_CONFIG);
         let probe = cx.background_executor().spawn(async move {
             #[cfg(target_os = "android")]
-            if let Some(git) = git {
+            if let Some(git) = git.clone() {
                 android_prepare_repository(git, &path);
             }
-            open_repository(&path).map(|info| (path, info))
+            open_repository(&path)
+                .map_err(|err| {
+                    if explain
+                        && !matches!(err, GitError::NotARepository(_))
+                        && let Some(text) =
+                            git.and_then(|git| corvene_git::explain_open_failure(git, &path))
+                    {
+                        GitError::Gix(text)
+                    } else {
+                        err
+                    }
+                })
+                .map(|info| (path, info))
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = probe.await;

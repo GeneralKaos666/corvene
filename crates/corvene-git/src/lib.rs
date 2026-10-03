@@ -54,7 +54,7 @@ pub use diff::{
     parse_line_endings_warning, parse_raw_diff, parse_raw_diff_with_warnings, parse_unified,
     submodule_diff, working_directory_diff, working_directory_patch, working_file_lines,
 };
-pub use error::{GitError, dubious_ownership_path};
+pub use error::{GitError, bad_config_line, dubious_ownership_path, explain_bad_config};
 pub use history_ops::{
     ResetMode, checkout_commit, cherry_pick_no_commit, create_tag, delete_tag, format_patches,
     reset_to, revert_commit, revert_commits_no_commit, revert_file_in_commit,
@@ -71,8 +71,8 @@ pub use log::{
     parse_raw_log_with_numstat, tag_names,
 };
 pub use ops::{
-    CloneProgress, InitOptions, PathStatus, clone, global_identity, init_repository,
-    normalize_clone_url, parse_clone_progress, path_status, readme_exists,
+    CloneProgress, InitOptions, PathStatus, clone, explain_open_failure, global_identity,
+    init_repository, normalize_clone_url, parse_clone_progress, path_status, readme_exists,
     repository_name_from_url, set_global_identity,
 };
 pub use patch::{

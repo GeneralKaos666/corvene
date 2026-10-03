@@ -74,6 +74,27 @@ pub fn branch_in_other_worktree(stderr: &str) -> Option<(String, PathBuf)> {
     })
 }
 
+/// git's "bad config line <n> in file <path>": the line number and file.
+pub fn bad_config_line(stderr: &str) -> Option<(usize, String)> {
+    const MARKER: &str = "bad config line ";
+    stderr.lines().find_map(|line| {
+        let rest = &line[line.find(MARKER)? + MARKER.len()..];
+        let (number, file) = rest.split_once(" in file ")?;
+        Some((number.trim().parse().ok()?, file.trim().to_string()))
+    })
+}
+
+/// Corvene addition (flag `875`): a sentence for [`bad_config_line`] that
+/// names the file and line (GHD shows git's words, or "not a git
+/// repository" when adding such a repository).
+pub fn explain_bad_config(stderr: &str) -> Option<String> {
+    let (line, file) = bad_config_line(stderr)?;
+    Some(format!(
+        "Git cannot read line {line} of {file}. Fix or remove that line (a merge conflict left \
+         in the file is a common cause), then try again."
+    ))
+}
+
 impl GitError {
     /// [`branch_in_other_worktree`] of a failed git command.
     pub fn branch_in_other_worktree(&self) -> Option<(String, PathBuf)> {
@@ -106,6 +127,26 @@ mod tests {
             Some(PathBuf::from("/Users/o'brien/repo"))
         );
         assert_eq!(dubious_ownership_path("fatal: not a git repository"), None);
+    }
+
+    #[test]
+    fn parses_bad_config_line() {
+        assert_eq!(
+            bad_config_line("fatal: bad config line 14 in file .git/config\n"),
+            Some((14, ".git/config".to_string()))
+        );
+        assert_eq!(
+            bad_config_line("fatal: bad config line 2 in file /tmp/a b/.gitmodules"),
+            Some((2, "/tmp/a b/.gitmodules".to_string()))
+        );
+        assert_eq!(
+            bad_config_line("fatal: bad config line 3 in blob abc"),
+            None
+        );
+        assert!(
+            explain_bad_config("fatal: bad config line 14 in file .git/config")
+                .is_some_and(|text| text.starts_with("Git cannot read line 14 of .git/config."))
+        );
     }
 
     #[test]

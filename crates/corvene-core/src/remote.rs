@@ -504,6 +504,8 @@ impl Dispatcher {
             write_commit_graph: s.flags.bool(crate::flags::ids::FETCH_WRITES_COMMIT_GRAPH),
             // `250-sync-skips-submodules`
             skip_submodules: s.flags.bool(crate::flags::ids::SYNC_SKIPS_SUBMODULES),
+            // `875-explain-bad-config`
+            retry_bad_gitmodules: s.flags.bool(crate::flags::ids::EXPLAIN_BAD_CONFIG),
         }
     }
 

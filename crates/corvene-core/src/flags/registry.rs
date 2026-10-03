@@ -4248,6 +4248,22 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/paths.rs"],
     },
 
+    /// Broken config files are named, and a broken .gitmodules does not stop a fetch.
+    EXPLAIN_BAD_CONFIG = 875 "explain-bad-config" {
+        title: "Explain broken Git config files",
+        summary: "Adding a repository whose .git/config git cannot read says which file and line \
+                  to fix, and a fetch that fails because .gitmodules cannot be read (for example \
+                  a merge conflict in it) is retried without submodules.",
+        ghd_behaviour: "Says the folder is not a Git repository, and fetching fails with git's \
+                        \"bad config line\" error until .gitmodules is fixed.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6200), Upstream::issue(6534)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-git/src/error.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

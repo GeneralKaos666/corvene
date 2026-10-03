@@ -442,6 +442,10 @@ pub struct FetchOptions {
     /// `--no-recurse-submodules` instead of `--recurse-submodules=on-demand`:
     /// submodules are left to the user (desktop#15758).
     pub skip_submodules: bool,
+    /// When git cannot read `.gitmodules` ("bad config line N in file
+    /// .gitmodules", e.g. a merge conflict in it), fetch again without
+    /// submodules instead of failing (flag `875`, desktop#6200).
+    pub retry_bad_gitmodules: bool,
 }
 
 /// [`fetch`] with [`FetchOptions`].
@@ -467,14 +471,38 @@ pub fn fetch_with(
         "--recurse-submodules=on-demand"
     });
     args.push(remote);
-    remote_command(git, workdir, askpass)
-        .args(args)
+    let result = remote_command(git.clone(), workdir, askpass)
+        .args(&args)
         .run_streaming(|line| {
             if let Some((percent, text)) = parser.parse(line) {
                 on_progress(percent, text);
             }
-        })?;
-    Ok(())
+        });
+    match result {
+        Err(GitError::Failed { stderr, .. })
+            if options.retry_bad_gitmodules
+                && !options.skip_submodules
+                && crate::bad_config_line(&stderr)
+                    .is_some_and(|(_, file)| file.ends_with(".gitmodules")) =>
+        {
+            tracing::warn!("fetching without submodules: {}", stderr.trim());
+            if let Some(arg) = args
+                .iter_mut()
+                .find(|a| a.starts_with("--recurse-submodules"))
+            {
+                *arg = "--no-recurse-submodules";
+            }
+            remote_command(git, workdir, askpass)
+                .args(&args)
+                .run_streaming(|line| {
+                    if let Some((percent, text)) = parser.parse(line) {
+                        on_progress(percent, text);
+                    }
+                })?;
+            Ok(())
+        }
+        result => result.map(|_| ()),
+    }
 }
 
 /// GHD `fetchRefspec`
@@ -1047,6 +1075,38 @@ mod tests {
         assert!(
             fast_forward_branch_from_remote(git, &work, "origin", "main", "main", None).is_err()
         );
+    }
+
+    #[test]
+    fn fetch_skips_submodules_when_gitmodules_is_broken() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let up = dir.path().join("up");
+        let work = dir.path().join("work");
+        run(
+            dir.path(),
+            &["init", "-q", "-b", "main", up.to_str().unwrap()],
+        );
+        run(&up, &["config", "commit.gpgsign", "false"]);
+        run(&up, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        run(
+            dir.path(),
+            &["clone", "-q", up.to_str().unwrap(), work.to_str().unwrap()],
+        );
+        std::fs::write(
+            work.join(".gitmodules"),
+            "[submodule \"x\"]\n<<<<<<< HEAD\n\tpath = x\n=======\n",
+        )
+        .unwrap();
+        let fetch = |retry| {
+            let options = FetchOptions {
+                retry_bad_gitmodules: retry,
+                ..FetchOptions::default()
+            };
+            fetch_with(git.clone(), &work, "origin", options, None, &mut |_, _| {})
+        };
+        assert!(fetch(false).is_err());
+        fetch(true).unwrap();
     }
 
     #[test]
