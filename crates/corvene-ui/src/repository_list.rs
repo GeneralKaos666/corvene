@@ -37,9 +37,30 @@ pub struct RepositoryFoldout {
 
 struct Group {
     title: SharedString,
+    /// Corvene (`266-collapsible-repository-groups`): the name the collapsed
+    /// set stores, `None` when the header has no chevron (flag off, a
+    /// filtered list, the flat result list).
+    key: Option<String>,
+    /// Hidden rows: `repos` is empty and the header shows a right chevron.
+    collapsed: bool,
     /// Each repository with the char positions of its name the filter
     /// matched (`HighlightText`).
     repos: Vec<(Repository, Vec<usize>)>,
+}
+
+impl Group {
+    fn new(
+        title: impl Into<SharedString>,
+        key: Option<String>,
+        repos: Vec<(Repository, Vec<usize>)>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            key,
+            collapsed: false,
+            repos,
+        }
+    }
 }
 
 impl RepositoryFoldout {
@@ -169,8 +190,17 @@ impl RepositoryFoldout {
             })
         };
 
+        // Corvene (`266-collapsible-repository-groups`): chevrons on the
+        // headers, except while filtering (then every group is expanded)
+        let filtering = !query.is_empty() || status_filter || fork_filter;
+        let collapsible = !filtering
+            && state
+                .flags
+                .bool(corvene_core::flags::ids::COLLAPSIBLE_REPOSITORY_GROUPS);
+        let key = |k: String| collapsible.then_some(k);
+
         let mut groups: Vec<Group> = Vec::new();
-        if query.is_empty() && !status_filter && !fork_filter {
+        if !filtering {
             // Corvene (`209-recent-repositories-count`; GHD shows 3)
             let shown = usize::try_from(
                 state
@@ -186,10 +216,7 @@ impl RepositoryFoldout {
                 .map(|r| (r, Vec::new()))
                 .collect();
             if !recent.is_empty() && state.repositories.len() > 1 {
-                groups.push(Group {
-                    title: "Recent".into(),
-                    repos: recent,
-                });
+                groups.push(Group::new("Recent", key(":recent".into()), recent));
             }
         }
 
@@ -237,16 +264,11 @@ impl RepositoryFoldout {
         };
         owners.sort_by_key(|(o, _)| o.to_lowercase());
         for (owner, hits) in owners {
-            groups.push(Group {
-                title: owner.into(),
-                repos: ranked(hits),
-            });
+            let k = key(format!("owner:{owner}"));
+            groups.push(Group::new(owner, k, ranked(hits)));
         }
         if !other.is_empty() {
-            groups.push(Group {
-                title: "Other".into(),
-                repos: ranked(other),
-            });
+            groups.push(Group::new("Other", key(":other".into()), ranked(other)));
         }
         // Corvene (`212-flat-repository-results`): while a query is typed,
         // one list without group headers, best match first
@@ -262,12 +284,33 @@ impl RepositoryFoldout {
             };
             // stable: equal scores keep the grouped order
             repos.sort_by(|a, b| score(&b.0).total_cmp(&score(&a.0)));
-            return vec![Group {
-                title: SharedString::default(),
-                repos,
-            }];
+            return vec![Group::new(SharedString::default(), None, repos)];
+        }
+        if collapsible {
+            let collapsed = &state.settings.collapsed_repository_groups;
+            for group in &mut groups {
+                if group.key.as_ref().is_some_and(|k| collapsed.contains(k)) {
+                    group.collapsed = true;
+                    group.repos.clear();
+                }
+            }
         }
         groups
+    }
+
+    /// Corvene (`266-collapsible-repository-groups`): a header click hides
+    /// or shows the group's rows.
+    fn toggle_group(&mut self, key: String, cx: &mut Context<Self>) {
+        self.highlighted = None;
+        Dispatcher::update_settings(cx, |s| {
+            let collapsed = &mut s.collapsed_repository_groups;
+            match collapsed.iter().position(|k| *k == key) {
+                Some(ix) => {
+                    collapsed.remove(ix);
+                }
+                None => collapsed.push(key),
+            }
+        });
     }
 
     fn row(
@@ -935,6 +978,7 @@ impl Render for RepositoryFoldout {
                                 d.child(
                                     // `.filter-list-group-header`
                                     div()
+                                        .id(("repo-group-header", group_ix))
                                         .h(ROW_HEIGHT())
                                         .pt(SPACING())
                                         .px(SPACING())
@@ -943,6 +987,25 @@ impl Render for RepositoryFoldout {
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_size(FONT_SIZE())
                                         .truncate()
+                                        // Corvene (`266-collapsible-repository-groups`)
+                                        .when_some(group.key.clone(), |d, key| {
+                                            d.cursor_pointer()
+                                                .child(
+                                                    octicon(
+                                                        if group.collapsed {
+                                                            Octicon::ChevronRight
+                                                        } else {
+                                                            Octicon::ChevronDown
+                                                        },
+                                                        t.text_secondary,
+                                                    )
+                                                    .size(zpx(12.))
+                                                    .mr(SPACING_HALF()),
+                                                )
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.toggle_group(key.clone(), cx)
+                                                }))
+                                        })
                                         .child(group.title.clone()),
                                 )
                             })

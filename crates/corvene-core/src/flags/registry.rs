@@ -1403,6 +1403,28 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/index_lock.rs", "crates/corvene-ui/src/dialogs/simple.rs"],
     },
 
+    /// Repository list group headers collapse.
+    COLLAPSIBLE_REPOSITORY_GROUPS = 266 "collapsible-repository-groups" {
+        title: "Collapsible repository groups",
+        summary: "The repository list's group headers (Recent, each owner, Other) get a chevron; \
+                  clicking a header hides or shows its repositories and the collapsed groups are \
+                  remembered. While the list is filtered every group is expanded, and the arrow \
+                  keys skip hidden rows.",
+        ghd_behaviour: "Groups are always expanded, so a long list of one owner's repositories has \
+                        to be scrolled past.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[
+            Upstream::issue(9910),
+            Upstream::issue(20228),
+            Upstream::issue(21908),
+            Upstream::issue(14997),
+        ],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

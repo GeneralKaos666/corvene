@@ -147,6 +147,10 @@ pub struct Settings {
     pub custom_shell: Option<CustomIntegration>,
     #[serde(default)]
     pub use_custom_shell: bool,
+    /// Flag `266-collapsible-repository-groups`: the repository list groups
+    /// the user collapsed (`Group::key` in `corvene-ui`'s repository list).
+    #[serde(default)]
+    pub collapsed_repository_groups: Vec<String>,
 }
 
 /// GHD `ICustomIntegration`: an executable (or macOS app bundle) plus its
@@ -321,6 +325,7 @@ impl Default for Settings {
             use_custom_editor: false,
             custom_shell: None,
             use_custom_shell: false,
+            collapsed_repository_groups: Vec::new(),
         }
     }
 }
