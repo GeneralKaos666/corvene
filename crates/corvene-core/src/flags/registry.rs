@@ -1889,6 +1889,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/remote_dialogs.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// Clone checks the local path before git runs.
+    CLONE_PATH_VALIDATION = 379 "clone-path-validation" {
+        title: "Clone checks the local path",
+        summary: "The Clone dialog's local path expands a leading ~/ to the home folder, must be \
+                  a full path, and a folder that does not exist yet must be creatable: Clone \
+                  stays disabled with a reason when part of the path is a file or the location \
+                  is not writable.",
+        ghd_behaviour: "Only checks that the folder is empty; ~/ is taken literally and other bad \
+                        paths fail inside git.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13816)],
+        code: &["crates/corvene-ui/src/dialogs/clone_repository.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

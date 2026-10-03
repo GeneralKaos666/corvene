@@ -35,6 +35,12 @@
 //!
 //! Deviation (`226-clone-prefers-ssh`): repositories picked from the list
 //! and `owner/name` shorthands can clone over SSH.
+//!
+//! Deviation (`379-clone-path-validation`): the local path expands a leading
+//! `~/`, must be absolute, and a missing folder must be creatable (its
+//! nearest existing parent is a writable folder); GHD only checks that the
+//! path is not a non-empty folder, so `~/x` clones into a folder named `~`
+//! next to the app and other bad paths fail inside git.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -366,13 +372,26 @@ impl CloneRepositoryDialog {
     /// `validatePath`: nothing to say while the path is still the default and
     /// no URL was entered; otherwise `validateEmptyFolder`.
     fn validate(&mut self, cx: &App) {
-        let path = self.path.read(cx).value().trim().to_string();
+        let raw = self.path.read(cx).value().trim().to_string();
         let url_empty = self.url.read(cx).value().trim().is_empty();
-        self.path_error = if path == self.initial_path && url_empty {
-            None
+        let strict = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CLONE_PATH_VALIDATION);
+        let (expanded, strict_error) = if strict {
+            validate_clone_path(&raw, &dirs_home())
         } else {
-            validate_empty_folder(Path::new(&path))
+            (PathBuf::from(&raw), None)
         };
+        self.path_error = if raw == self.initial_path && url_empty {
+            None
+        } else if strict {
+            strict_error
+        } else {
+            validate_empty_folder(Path::new(&raw))
+        };
+        let path = expanded.to_string_lossy().to_string();
         let offer_add = self
             .state
             .read(cx)
@@ -420,6 +439,15 @@ impl CloneRepositoryDialog {
         let path = self.path.read(cx).value().trim().to_string();
         if path.is_empty() {
             return None;
+        }
+        // `379-clone-path-validation`: `~/` means the home folder
+        if self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CLONE_PATH_VALIDATION)
+        {
+            return Some((url, expand_home(&path, &dirs_home())));
         }
         Some((url, PathBuf::from(path)))
     }
@@ -867,6 +895,72 @@ fn validate_empty_folder(path: &Path) -> Option<&'static str> {
     }
 }
 
+/// `379-clone-path-validation`: a leading `~` or `~/` is the home folder.
+fn expand_home(raw: &str, home: &Path) -> PathBuf {
+    let rest = raw
+        .strip_prefix("~/")
+        .or_else(|| raw.strip_prefix("~\\").filter(|_| cfg!(windows)));
+    match rest {
+        Some(rest) => home.join(rest),
+        None if raw == "~" => home.to_path_buf(),
+        None => PathBuf::from(raw),
+    }
+}
+
+/// `379-clone-path-validation`: the expanded path and what is wrong with it:
+/// relative, a non-empty folder or a file (`validateEmptyFolder`), or a
+/// missing folder whose nearest existing parent is a file or not writable.
+fn validate_clone_path(raw: &str, home: &Path) -> (PathBuf, Option<&'static str>) {
+    let path = expand_home(raw, home);
+    if raw.is_empty() {
+        return (path, None);
+    }
+    if !path.is_absolute() {
+        return (
+            path,
+            Some("Enter a full path, such as ~/Documents/repository."),
+        );
+    }
+    if path.exists() {
+        let error = validate_empty_folder(&path);
+        return (path, error);
+    }
+    let error = match path.ancestors().skip(1).find(|a| a.exists()) {
+        Some(parent) if !parent.is_dir() => {
+            Some("Part of this path is a file. Git can only clone into a folder.")
+        }
+        Some(parent) if !dir_writable(parent) => {
+            Some("You don't have permission to create a folder here. Choose another location.")
+        }
+        _ => None,
+    };
+    (path, error)
+}
+
+/// `access(path, W_OK | X_OK)`: new entries can be created in `path`.
+#[cfg(unix)]
+fn dir_writable(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return true;
+    };
+    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call.
+    unsafe { libc::access(c_path.as_ptr(), libc::W_OK | libc::X_OK) == 0 }
+}
+
+/// Windows ACLs are left to git.
+#[cfg(not(unix))]
+fn dir_writable(_: &Path) -> bool {
+    true
+}
+
+fn dirs_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
 impl Render for CloneRepositoryDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let can_clone =
@@ -994,6 +1088,35 @@ impl Render for CloneRepositoryDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[::core::prelude::v1::test]
+    #[cfg(unix)]
+    fn validates_clone_paths() {
+        let home = Path::new("/home/me");
+        assert_eq!(
+            expand_home("~/src/app", home),
+            Path::new("/home/me/src/app")
+        );
+        assert_eq!(expand_home("~", home), Path::new("/home/me"));
+        assert_eq!(expand_home("/abs/~/x", home), Path::new("/abs/~/x"));
+        assert!(validate_clone_path("relative/app", home).1.is_some());
+        assert!(validate_clone_path("", home).1.is_none());
+        let dir = std::env::temp_dir().join(format!("corvene-clone-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("file");
+        std::fs::write(&file, "x").unwrap();
+        let under_file = file.join("app");
+        assert_eq!(
+            validate_clone_path(&under_file.to_string_lossy(), home).1,
+            Some("Part of this path is a file. Git can only clone into a folder.")
+        );
+        let fresh = dir.join("new").join("app");
+        assert_eq!(validate_clone_path(&fresh.to_string_lossy(), home).1, None);
+        // a home-relative path lands in the home folder
+        let (expanded, _) = validate_clone_path("~/new", &dir);
+        assert_eq!(expanded, dir.join("new"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[::core::prelude::v1::test]
     fn derived_path_can_include_the_owner() {
