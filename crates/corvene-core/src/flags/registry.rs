@@ -2184,6 +2184,21 @@ registry! {
         code: &["crates/corvene-ui/src/keymap.rs", "crates/corvene-ui/src/workspace.rs"],
     },
 
+    /// The minimum window size never exceeds the screen.
+    MIN_SIZE_FITS_DISPLAY = 448 "min-size-fits-display" {
+        title: "Minimum window size fits the screen",
+        summary: "On a display smaller than the minimum window size the minimum shrinks to the \
+                  screen's usable area, so the window can still be resized and moved.",
+        ghd_behaviour: "The 960 × 660 minimum holds even on smaller screens, which forces a \
+                        window that covers or overflows the whole display.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: true, visible: true, availability: available,
+        upstream: &[Upstream::issue(17669)],
+        code: &["crates/corvene/src/main.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

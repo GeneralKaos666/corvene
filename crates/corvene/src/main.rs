@@ -636,17 +636,27 @@ pub(crate) fn main() {
                 window_size,
                 cx,
             ))),
-            // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400
+            // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400;
+            // `448-min-size-fits-display`: never more than the primary
+            // display's visible area (GHD's minimum can exceed a small
+            // screen, `main-process/app-window.ts` `minWidth` / `minHeight`)
             window_min_size: Some(if let Some(forced) = forced_size {
                 forced
-            } else if state
-                .read(cx)
-                .flags
-                .bool(corvene_core::flags::ids::SMALLER_MINIMUM_SIZES)
-            {
-                size(px(600.), px(400.))
             } else {
-                size(px(960.), px(660.))
+                let flags = &state.read(cx).flags;
+                let min = if flags.bool(corvene_core::flags::ids::SMALLER_MINIMUM_SIZES) {
+                    size(px(600.), px(400.))
+                } else {
+                    size(px(960.), px(660.))
+                };
+                match cx.primary_display() {
+                    Some(display)
+                        if flags.bool(corvene_core::flags::ids::MIN_SIZE_FITS_DISPLAY) =>
+                    {
+                        min.min(&display.visible_bounds().size)
+                    }
+                    _ => min,
+                }
             }),
             app_id: Some(corvene_platform::BUNDLE_ID.into()),
             // X11 `_NET_WM_ICON` (Electron sets the app icon on its window)
