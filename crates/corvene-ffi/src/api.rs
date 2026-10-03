@@ -120,6 +120,11 @@ impl Corvene {
                 tracing::warn!("{err}");
             }
             Dispatcher::init(store, settings, flag_overrides, flags_env, host);
+            // what the desktop window does once it is up
+            Dispatcher::start_background_tasks(host);
+            Dispatcher::refresh_accounts(host);
+            Dispatcher::start_pull_request_updater(host);
+            Dispatcher::refresh_indicators(host);
             Ok(())
         });
         match init {
@@ -148,6 +153,23 @@ impl Corvene {
     /// The activity came to the front (GHD refreshes on window focus).
     pub fn focus(&self) {
         self.loop_.post(|host| Dispatcher::refresh_selected(host));
+    }
+
+    /// The application is on screen or not: periodic work (pull request
+    /// updater, background fetch, indicators) runs only while it is.
+    pub fn app_visible(&self, visible: bool) {
+        self.loop_.post(move |host| {
+            Dispatcher::set_app_focus_state(visible, host);
+            if visible {
+                Dispatcher::refresh_selected(host);
+            }
+        });
+    }
+
+    /// `true` once the constructor returned: the store is open and the
+    /// state exists, so the first query answers at once.
+    pub fn ready(&self) -> bool {
+        true
     }
 
     pub fn select_repository(&self, id: u64) {
