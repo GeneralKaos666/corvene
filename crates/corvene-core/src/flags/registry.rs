@@ -2904,7 +2904,8 @@ registry! {
         title: "Diff: Open in editor at a line",
         summary: "Right-clicking a line of a working-directory diff offers \"Open in <Editor> at \
                   Line N\" when the editor can jump to a line (VS Code and its forks, Sublime \
-                  Text, Zed; on Android the Termux editors and Markor).",
+                  Text, Zed; on Android the Termux editors and Markor), and ⌥-clicking (Alt-click) \
+                  a line's text opens it there directly.",
         ghd_behaviour: "The diff's context menu has no editor item; Open in <Editor> opens the \
                         file at its top.",
         nature: Nature::Feature,

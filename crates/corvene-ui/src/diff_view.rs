@@ -15,7 +15,8 @@
 //! Deviation (flag `diff-open-in-editor-at-line`): a working-directory diff's
 //! text context menu offers "Open in <Editor> at Line N" for the clicked
 //! row's new-file line when the editor can jump to a line (GHD
-//! `onContextMenuText` has Copy, Select All and the expansion item only).
+//! `onContextMenuText` has Copy, Select All and the expansion item only);
+//! ⌥-clicking a line's text opens it there directly.
 //!
 //! Deviation (`742-file-mode-change-message`): a mode-only change says "The
 //! file mode changed from … to …" instead of GHD's "No content changes found".
@@ -1283,6 +1284,34 @@ impl DiffView {
 
     /// "Open in <Editor> at Line N" (not in GHD, desktop/desktop#14476).
     fn open_at_line_menu_item(&self, line: Option<u32>, cx: &Context<Self>) -> Option<MenuItem> {
+        let (full, line, editor) = self.open_at_line_target(line, cx)?;
+        let label = if IS_MAC {
+            format!("Open in {editor} at Line {line}")
+        } else {
+            format!("Open in {editor} at line {line}")
+        };
+        Some(MenuItem::new(label, move |_, cx| {
+            Dispatcher::open_in_editor_at(full.clone(), Some(line), cx)
+        }))
+    }
+
+    /// `741-diff-open-in-editor-at-line`: ⌥-click on a line's text opens the
+    /// editor there (desktop/desktop#20254). False when it does not apply,
+    /// so the click selects text as usual.
+    pub fn open_at_line(&self, line: Option<u32>, cx: &mut Context<Self>) -> bool {
+        let Some((full, line, _)) = self.open_at_line_target(line, cx) else {
+            return false;
+        };
+        Dispatcher::open_in_editor_at(full, Some(line), cx);
+        true
+    }
+
+    /// The file, line and editor name for "Open in <Editor> at Line N".
+    fn open_at_line_target(
+        &self,
+        line: Option<u32>,
+        cx: &App,
+    ) -> Option<(std::path::PathBuf, u32, String)> {
         let line = line?;
         if self.source != DiffSource::WorkingDirectory {
             return None;
@@ -1297,15 +1326,7 @@ impl DiffView {
         {
             return None;
         }
-        let label = if IS_MAC {
-            format!("Open in {} at Line {line}", s.editor_label())
-        } else {
-            format!("Open in {} at line {line}", s.editor_label())
-        };
-        let full = snap.repo_path.join(&snap.path);
-        Some(MenuItem::new(label, move |_, cx| {
-            Dispatcher::open_in_editor_at(full.clone(), Some(line), cx)
-        }))
+        Some((snap.repo_path.join(&snap.path), line, s.editor_label()))
     }
 
     /// `onContextMenuLine`: discard one changed line.

@@ -199,6 +199,26 @@ impl RowContext {
     }
 }
 
+/// `741-diff-open-in-editor-at-line`: ⌥-click on a line's text opens the
+/// editor at `line` instead of starting a text selection.
+fn open_at_line_on_alt_click(
+    view: &WeakEntity<DiffView>,
+    ev: &MouseDownEvent,
+    line: Option<u32>,
+    cx: &mut App,
+) {
+    let m = ev.modifiers;
+    if ev.button != MouseButton::Left || !m.alt || m.shift || m.control || m.platform {
+        return;
+    }
+    if view
+        .update(cx, |this, cx| this.open_at_line(line, cx))
+        .unwrap_or(false)
+    {
+        cx.stop_propagation();
+    }
+}
+
 /// The selectable text of a row: records its bounds for hit-testing, starts
 /// a text selection on mouse down (shift extends) and paints the selection.
 /// `inner` is the intra-line change background, drawn behind the text over
@@ -724,6 +744,7 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         _ => "     ",
     };
     let view_for_text_menu = ctx.view.clone();
+    let view_for_open = ctx.view.clone();
     let line = row.new;
     let discard = row.discard_target();
     let content = div()
@@ -732,6 +753,9 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         .min_w_0()
         .flex()
         .flex_row()
+        .capture_any_mouse_down(move |ev, _, cx| {
+            open_at_line_on_alt_click(&view_for_open, ev, line, cx)
+        })
         .on_mouse_down(MouseButton::Right, move |ev, window, cx| {
             view_for_text_menu
                 .update(cx, |this, cx| {
@@ -1544,6 +1568,7 @@ fn split_content(
         };
     let body = selectable_text(ctx, list_ix, column, row, highlights, inner_bg);
     let view_for_menu = ctx.view.clone();
+    let view_for_open = ctx.view.clone();
     let line = row.new;
     let discard = row.discard_target();
     div()
@@ -1552,6 +1577,9 @@ fn split_content(
         .min_w_0()
         .flex()
         .flex_row()
+        .capture_any_mouse_down(move |ev, _, cx| {
+            open_at_line_on_alt_click(&view_for_open, ev, line, cx)
+        })
         .on_mouse_down(MouseButton::Right, move |ev, window, cx| {
             view_for_menu
                 .update(cx, |this, cx| {
