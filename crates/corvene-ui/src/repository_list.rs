@@ -388,6 +388,19 @@ impl RepositoryFoldout {
             .flags
             .bool(corvene_core::flags::ids::REPOSITORY_LIST_BEHIND_ACCENT);
         let (ahead_behind, has_changes) = indicators(self.state.read(cx), id);
+        // Corvene (`270-repository-list-stash-icon`): the loaded state's
+        // stash count for an opened repository, else the indicator refresh
+        let has_stash = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::REPOSITORY_LIST_STASH_ICON)
+                && s.repo_states
+                    .get(&id)
+                    .filter(|rs| rs.info.is_some())
+                    .map(|rs| rs.stash_count > 0)
+                    .or_else(|| s.indicators.get(&id).map(|i| i.has_stash))
+                    .unwrap_or(false)
+        };
         // Corvene (`214-repository-list-branch`): the checked-out branch
         // (the loaded state for an opened repository, else the background
         // indicator refresh) joins the dimmed detail
@@ -509,6 +522,23 @@ impl RepositoryFoldout {
                         }
                     }),
             )
+            .when(has_stash, |d| {
+                d.child(
+                    div()
+                        .id(("repo-stash", id))
+                        .flex_none()
+                        .ml(SPACING_HALF())
+                        .child(octicon(
+                            Octicon::Stash,
+                            if selected || highlighted {
+                                t.box_selected_text
+                            } else {
+                                t.text_secondary
+                            },
+                        ))
+                        .ghd_tooltip("Stashed changes"),
+                )
+            })
             // `.repo-indicators`: ahead / behind arrows, then the changes dot
             .when(has_changes || ahead_behind.is_some(), |d| {
                 let (badge_bg, badge_text) = if selected {

@@ -429,6 +429,7 @@ pub(crate) fn main() {
         //   the Release Notes with "Install and Restart")
         //   flags[:<search>] (Corvene › Flags…, with the search box prefilled)
         //   remove-repositories (File › Remove Repositories…, the selected one ticked)
+        //   repository-list (the repository foldout)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1155,6 +1156,7 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
     let selected = corvene_core::AppState::global(cx).read(cx).selected;
     match (popup, selected) {
         ("import-ghd", _) => Dispatcher::show_popup(Popup::ImportFromGitHubDesktop, cx),
+        ("repository-list", _) => Dispatcher::toggle_foldout(corvene_core::Foldout::Repository, cx),
         ("remove-repositories", ticked) => {
             Dispatcher::show_popup(Popup::RemoveRepositories { ticked }, cx)
         }

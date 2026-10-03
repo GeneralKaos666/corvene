@@ -1477,6 +1477,21 @@ registry! {
         ],
     },
 
+    /// A stash icon on repositories with stashed changes.
+    REPOSITORY_LIST_STASH_ICON = 270 "repository-list-stash-icon" {
+        title: "Repository list shows stashes",
+        summary: "Repositories with stashed changes show a stash icon in the repository list (from \
+                  the opened repository's stashes, or the background indicator refresh for the \
+                  others), like the branch list's stash icon (854).",
+        ghd_behaviour: "Nothing in the repository list tells which repositories hold stashed changes.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15225)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/repo.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
