@@ -528,6 +528,9 @@ impl SelectedCommitView {
             trailing_punctuation: s
                 .flags
                 .bool(corvene_core::flags::ids::LINKIFY_TRAILING_PUNCTUATION),
+            cross_repository: s
+                .flags
+                .bool(corvene_core::flags::ids::CROSS_REPOSITORY_ISSUE_LINKS),
         };
         let message = |id: &'static str, text: &str, cx: &App| {
             crate::markdown::rich_text(

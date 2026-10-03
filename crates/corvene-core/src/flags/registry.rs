@@ -4255,6 +4255,22 @@ registry! {
         code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// `owner/repo#123` and `owner/repo@sha` in commit messages.
+    CROSS_REPOSITORY_ISSUE_LINKS = 888 "cross-repository-issue-links" {
+        title: "Links to other repositories in commit messages",
+        summary: "In a GitHub repository's commit messages `owner/repo#123` is one link to issue \
+                  123 of that repository and `owner/repo@<sha>` one link to that commit, as \
+                  github.com links them.",
+        ghd_behaviour: "`owner/repo` stays plain text and `#123` links to issue 123 of the current \
+                        repository; `owner/repo@<sha>` is not linked.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8161), Upstream::issue(8403), Upstream::issue(22311)],
+        code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
