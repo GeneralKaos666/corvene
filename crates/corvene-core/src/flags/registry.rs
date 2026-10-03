@@ -4096,6 +4096,21 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Checking out a remote branch whose name is already a local branch.
+    REMOTE_CHECKOUT_USES_LOCAL = 866 "remote-checkout-uses-local" {
+        title: "Remote branches check out the local branch",
+        summary: "Choosing a remote branch such as origin/foo while a local branch foo exists \
+                  switches to the local foo (with the usual handling of uncommitted changes).",
+        ghd_behaviour: "Tries to create foo again and fails with \"a branch named 'foo' already \
+                        exists\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4527)],
+        code: &["crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

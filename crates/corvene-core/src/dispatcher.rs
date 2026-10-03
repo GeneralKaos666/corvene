@@ -2519,9 +2519,24 @@ impl Dispatcher {
         explicit: Option<UncommittedChangesStrategy>,
         cx: &mut App,
     ) {
-        let Some(branch) = Self::branch_by_name(id, &name, cx) else {
+        let Some(mut branch) = Self::branch_by_name(id, &name, cx) else {
             return;
         };
+        let mut name = name;
+        // Corvene (`866-remote-checkout-uses-local`): a remote branch whose
+        // short name is already a local branch checks the local one out
+        // (GHD runs `checkout -b`, which fails with "already exists")
+        if branch.kind == corvene_models::BranchKind::Remote
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::REMOTE_CHECKOUT_USES_LOCAL)
+            && let Some(local) = Self::branch_by_name(id, branch.name_without_remote(), cx)
+                .filter(|b| b.kind == corvene_models::BranchKind::Local)
+        {
+            name = local.name.clone();
+            branch = local;
+        }
         let (has_changes, has_stash, tip_valid, current, setting) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
