@@ -199,18 +199,19 @@ pub(crate) fn main() {
             resolve_theme_with(shown_theme, high_contrast, theme_variants, cx),
         );
         let sidebar_width = corvene_ui::theme::sizes::zpx(settings.sidebar_width);
-        let state = Dispatcher::init(store, settings, flag_overrides, flags_env, cx);
+        Dispatcher::init(store, settings, flag_overrides, flags_env, cx);
+        let state = corvene_core::AppState::global(cx);
         Dispatcher::load_custom_emoji(cx);
         Dispatcher::check_crash_reports(cx);
         // a notification click brings the (possibly hidden) window forward
         // and opens its dialog; installed before the first frame so a click
         // that launched Corvene is delivered too
-        Dispatcher::listen_for_notification_clicks(focus_main_window, cx);
+        Dispatcher::listen_for_notification_clicks(focus_main_window_host, cx);
         let service_urls = url_inbox.sender();
         corvene_platform::services::register_open_in_corvene(move |path| {
             service_urls.send(corvene_core::app_url::open_local_repo_url(&path));
         });
-        Dispatcher::listen_for_app_urls(url_inbox, focus_main_window, cx);
+        Dispatcher::listen_for_app_urls(url_inbox, focus_main_window_host, cx);
         // flag-dependent key bindings, before the menu bar reads its shortcuts
         let keymap_flags = corvene_ui::keymap::KeymapFlags::from_flags(&state.read(cx).flags);
         corvene_ui::keymap::sync(keymap_flags, cx);
@@ -1160,6 +1161,13 @@ fn on_menu_action<A: Action>(cx: &mut App, f: impl Fn(&A, &mut App) + 'static) {
     });
 }
 
+/// `focus_main_window` for the dispatcher's host callbacks.
+fn focus_main_window_host(cx: &mut dyn corvene_core::Host) {
+    if let Some(cx) = cx.gpui_app() {
+        focus_main_window(cx);
+    }
+}
+
 fn focus_main_window(cx: &mut App) {
     cx.activate(true);
     #[cfg(target_os = "macos")]
@@ -1264,7 +1272,7 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                     cx.background_executor()
                         .timer(std::time::Duration::from_millis(1500))
                         .await;
-                    cx.update(Dispatcher::request_first_grammar_build);
+                    cx.update(|cx| Dispatcher::request_first_grammar_build(cx));
                 })
                 .detach();
             }

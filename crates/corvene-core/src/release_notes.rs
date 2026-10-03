@@ -12,8 +12,8 @@
 
 use std::time::SystemTime;
 
+use crate::host::Host;
 use corvene_github::{Client, Endpoint};
-use gpui_kit::App;
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
@@ -188,7 +188,7 @@ pub fn release_summary(
 impl Dispatcher {
     /// Help › Show Release Notes: fetch the running version's release and
     /// open the `ReleaseNotes` popup.
-    pub fn show_release_notes(cx: &mut App) {
+    pub fn show_release_notes(cx: &mut dyn Host) {
         let version = env!("CARGO_PKG_VERSION").to_string();
         spawn_bg(
             cx,

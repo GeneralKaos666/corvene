@@ -3,7 +3,7 @@
 //! reports hook). `main.rs` owns the rest (menus, theme) through its
 //! observer.
 
-use gpui_kit::App;
+use crate::host::Host;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
@@ -22,7 +22,7 @@ pub struct ImportReport {
 impl Dispatcher {
     /// The single write path (mirrors `update_settings`): edit the stored
     /// layer, re-resolve, persist, notify, then apply live side effects.
-    pub fn update_flags(cx: &mut App, edit: impl FnOnce(&mut FlagOverrides)) {
+    pub fn update_flags(cx: &mut dyn Host, edit: impl FnOnce(&mut FlagOverrides)) {
         let previous = Self::state(cx).update(cx, |s, cx| {
             let previous = s.flags.clone();
             edit(&mut s.flag_overrides);
@@ -38,7 +38,7 @@ impl Dispatcher {
 
     /// Set one flag. A value equal to the preset's own drops the override,
     /// so the accent bar means "differs from the preset".
-    pub fn set_flag(id: FlagId, value: Value, cx: &mut App) -> Result<(), String> {
+    pub fn set_flag(id: FlagId, value: Value, cx: &mut dyn Host) -> Result<(), String> {
         let def = def(id);
         def.kind.validate(&value)?;
         if let Availability::BuiltIn(reason) = def.availability() {
@@ -62,7 +62,7 @@ impl Dispatcher {
     }
 
     /// Back to the preset's value.
-    pub fn reset_flag(id: FlagId, cx: &mut App) {
+    pub fn reset_flag(id: FlagId, cx: &mut dyn Host) {
         let slug = def(id).slug;
         Self::update_flags(cx, |o| {
             o.overrides.remove(slug);
@@ -71,7 +71,7 @@ impl Dispatcher {
 
     /// Switch the base layer; the overrides go with it (picking "GitHub
     /// Desktop" has to give GitHub Desktop).
-    pub fn apply_preset(preset: Preset, cx: &mut App) {
+    pub fn apply_preset(preset: Preset, cx: &mut dyn Host) {
         info!(preset = preset.slug(), "flags preset applied");
         Self::update_flags(cx, |o| {
             o.preset = preset;
@@ -80,24 +80,24 @@ impl Dispatcher {
     }
 
     /// Drop every override, keep the preset.
-    pub fn reset_all_flags(cx: &mut App) {
+    pub fn reset_all_flags(cx: &mut dyn Host) {
         Self::update_flags(cx, |o| o.overrides.clear());
     }
 
     /// The stored layer as pretty JSON (the dialog's "Copy as JSON").
-    pub fn export_flags_json(cx: &App) -> String {
+    pub fn export_flags_json(cx: &dyn Host) -> String {
         serde_json::to_string_pretty(&Self::state(cx).read(cx).flag_overrides)
             .unwrap_or_else(|_| "{}".to_string())
     }
 
     /// The stored layer as a `CORVENE_FLAGS` spec.
-    pub fn export_env_string(cx: &App) -> String {
+    pub fn export_env_string(cx: &dyn Host) -> String {
         super::env::render(&Self::state(cx).read(cx).flag_overrides)
     }
 
     /// Replace the stored layer with `text` (the dialog's "Paste JSON"):
     /// unknown slugs are dropped and reported, an invalid value aborts.
-    pub fn import_flags_json(text: &str, cx: &mut App) -> Result<ImportReport, String> {
+    pub fn import_flags_json(text: &str, cx: &mut dyn Host) -> Result<ImportReport, String> {
         let mut parsed: FlagOverrides =
             serde_json::from_str(text.trim()).map_err(|err| format!("Not a flags JSON: {err}"))?;
         let mut report = ImportReport::default();
@@ -120,14 +120,14 @@ impl Dispatcher {
 
     /// Corvene › Flags… (also `CORVENE_POPUP=flags[:query]` and
     /// `x-corvene://flags?q=`).
-    pub fn open_flags(query: Option<String>, cx: &mut App) {
+    pub fn open_flags(query: Option<String>, cx: &mut dyn Host) {
         Self::show_popup(Popup::Flags { query }, cx);
     }
 
     /// The Flags dialog's Relaunch button: start Corvene again once this
     /// process has exited (the updater's path: `open -n` the bundle on
     /// macOS, the AppImage or executable on Linux), then quit.
-    pub fn relaunch(cx: &mut App) {
+    pub fn relaunch(cx: &mut dyn Host) {
         // Android: the activity starts itself again and ends the process
         #[cfg(target_os = "android")]
         {
@@ -140,7 +140,7 @@ impl Dispatcher {
     }
 
     #[cfg(not(target_os = "android"))]
-    fn relaunch_from_bundle(cx: &mut App) {
+    fn relaunch_from_bundle(cx: &mut dyn Host) {
         let Some(bundle) = corvene_platform::app_location::relaunch_target() else {
             Self::show_error(
                 "Could not relaunch Corvene",
@@ -160,7 +160,7 @@ impl Dispatcher {
 
     /// Sign in the way `307-sign-in-flow` says (the dialog's primary button,
     /// Welcome, re-authorization prompts).
-    pub fn begin_sign_in(endpoint: corvene_github::Endpoint, cx: &mut App) {
+    pub fn begin_sign_in(endpoint: corvene_github::Endpoint, cx: &mut dyn Host) {
         if Self::browser_sign_in_first(&endpoint, cx) {
             Self::sign_in_web_flow(endpoint, cx)
         } else {
@@ -172,7 +172,7 @@ impl Dispatcher {
     /// "auto" does on GitHub.com when the build has a client secret (GitHub
     /// refuses the web flow's token exchange without one); GitHub Enterprise
     /// keeps the device flow, as its secret lives in the keychain.
-    pub fn browser_sign_in_first(endpoint: &corvene_github::Endpoint, cx: &App) -> bool {
+    pub fn browser_sign_in_first(endpoint: &corvene_github::Endpoint, cx: &dyn Host) -> bool {
         match Self::state(cx).read(cx).flags.text(ids::SIGN_IN_FLOW) {
             // Android: a build without the client secret cannot finish the
             // browser flow on GitHub.com, and a phone has no terminal to
@@ -192,7 +192,7 @@ impl Dispatcher {
     }
 
     /// Live side effects core owns.
-    fn after_flags_changed(previous: &Flags, cx: &mut App) {
+    fn after_flags_changed(previous: &Flags, cx: &mut dyn Host) {
         let now = Self::state(cx).read(cx).flags.clone();
         if now == *previous {
             return;
@@ -227,7 +227,7 @@ impl Dispatcher {
 
     /// Drop the watcher and start it again for the selected repository (or
     /// not, when `202-fs-watcher` is off).
-    pub fn restart_watcher(cx: &mut App) {
+    pub fn restart_watcher(cx: &mut dyn Host) {
         let selected = Self::state(cx).update(cx, |s, _| {
             s.watcher = None;
             s.watched_repo = None;

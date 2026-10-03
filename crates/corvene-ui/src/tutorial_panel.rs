@@ -305,7 +305,7 @@ impl Render for TutorialPanel {
                 TutorialStep::PickEditor,
                 "Install a text editor",
                 current,
-                Some(Dispatcher::skip_pick_editor_tutorial_step),
+                Some(|cx| Dispatcher::skip_pick_editor_tutorial_step(cx)),
                 pick_editor,
                 cx,
             ),
@@ -375,7 +375,7 @@ impl Render for TutorialPanel {
                 TutorialStep::OpenPullRequest,
                 "Open a pull request",
                 current,
-                Some(Dispatcher::mark_pull_request_tutorial_step_complete),
+                Some(|cx| Dispatcher::mark_pull_request_tutorial_step_complete(cx)),
                 contents(
                     div()
                         .child(

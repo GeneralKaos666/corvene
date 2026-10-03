@@ -14,18 +14,27 @@ corvene-github.workspace = true
 corvene-models.workspace = true
 corvene-platform.workspace = true
 corvene-store.workspace = true
-gpui-kit = { workspace = true, default-features = false }
+gpui-kit = { workspace = true, default-features = false, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
-rust-embed.workspace = true
+rust-embed = { workspace = true, features = ["include-exclude"] }
 notify = "7"
 dunce = "1"
 regex.workspace = true
 pulldown-cmark.workspace = true
 async-channel = "2"
+
+[features]
+# The GPUI host (`host::gpui`): `App`/`Context<V>` implement `host::Host` so the
+# desktop UI passes its `cx` straight to the dispatcher. Off for the Android
+# FFI library, which drives the dispatcher from `host::LocalHost`.
+default = ["gpui"]
+gpui = ["dep:gpui-kit"]
+# `host::LocalHost` outside Android and tests (the FFI crate turns it on).
+local-host = []
 
 [dev-dependencies]
 tempfile = "3"

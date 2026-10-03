@@ -18,9 +18,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use crate::host::{AsyncCtx, Host};
 use corvene_github::Endpoint;
 use corvene_github::auth::{LoopbackListener, SCHEME_REDIRECT_URI, WebFlow};
-use gpui_kit::App;
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -66,7 +66,7 @@ pub(crate) fn oauth_client_secret(
 impl Dispatcher {
     /// `authenticateWithBrowser`: start the web flow for `endpoint` and open
     /// GitHub's authorize page.
-    pub fn sign_in_web_flow(endpoint: Endpoint, cx: &mut App) {
+    pub fn sign_in_web_flow(endpoint: Endpoint, cx: &mut dyn Host) {
         let client_id = Self::oauth_client_id(&endpoint, cx);
         let state = Self::state(cx);
         state.update(cx, |s, cx| {
@@ -98,7 +98,7 @@ impl Dispatcher {
                     return;
                 }
             };
-            cx.spawn(async move |cx: &mut gpui_kit::AsyncApp| {
+            cx.spawn(async move |cx: &mut AsyncCtx| {
                 if let Ok(Some((code, state))) = rx.recv().await {
                     // Android: the browser's tab sits over the activity
                     #[cfg(target_os = "android")]
@@ -139,7 +139,7 @@ impl Dispatcher {
 
     /// `resolveOAuthRequest`: the callback's `code` and `state`; the state
     /// must be the pending flow's, then the code is exchanged for a token.
-    pub fn complete_web_flow(code: String, state: String, cx: &mut App) {
+    pub fn complete_web_flow(code: String, state: String, cx: &mut dyn Host) {
         let pending = {
             let s = Self::state(cx).read(cx);
             s.sign_in.as_ref().and_then(|si| {

@@ -48,6 +48,7 @@ impl CiCheckRunRerunDialog {
             github.clone(),
             considered,
             move |rerunnable, non_rerunnable, cx| {
+                let Some(cx) = cx.gpui_app() else { return };
                 weak.update(cx, |this, cx| {
                     this.loading_suites = false;
                     this.rerunnable = rerunnable;

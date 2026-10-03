@@ -22,6 +22,7 @@ pub mod ghd_import;
 pub mod git_config_import;
 #[cfg(any(target_os = "android", test))]
 pub mod headless;
+pub mod host;
 pub mod integrations;
 pub mod list_selection;
 pub mod markdown;
@@ -61,6 +62,7 @@ pub use dispatcher::Dispatcher;
 pub use emoji::CustomEmoji;
 pub use flags::{FlagId, FlagOverrides, Flags};
 pub use forks::UPSTREAM_REMOTE_NAME;
+pub use host::{AsyncCtx, Ctx, Host, HostServices, StateCx, StateHandle};
 pub use integrations::{PreferencesSave, RepositorySettingsSave};
 pub use mco::{
     Banner, ConflictKind, ConflictState, McoConflicts, McoDetail, McoStep, McoUndo, MergePreview,

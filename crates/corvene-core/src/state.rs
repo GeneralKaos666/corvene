@@ -8,7 +8,6 @@ use std::time::Instant;
 
 use corvene_git::GitBinary;
 use corvene_store::Store;
-use gpui_kit::{App, Entity, Global};
 
 use crate::persistence::Settings;
 use corvene_models::{
@@ -1121,7 +1120,7 @@ pub struct AppState {
     pub shells: Vec<FoundShell>,
     /// The icons of `editors` and `shells` by their `path` (flag
     /// `513-integration-app-icons`; empty while it is off).
-    pub app_icons: HashMap<PathBuf, Arc<gpui_kit::Image>>,
+    pub app_icons: HashMap<PathBuf, Arc<corvene_platform::app_icons::AppIcon>>,
     /// Loaded when the Settings dialog opens (`None` while loading).
     pub global_git: Option<GlobalGitConfig>,
     /// Loaded when the Repository Settings dialog opens.
@@ -1153,24 +1152,7 @@ impl AppState {
     }
 }
 
-struct AppStateHandle(Entity<AppState>);
-impl Global for AppStateHandle {}
-
 impl AppState {
-    pub(crate) fn install(entity: Entity<AppState>, cx: &mut App) {
-        cx.set_global(AppStateHandle(entity));
-    }
-
-    /// The single app-state entity. Panics if `Dispatcher::init` has not run.
-    pub fn global(cx: &App) -> Entity<AppState> {
-        cx.global::<AppStateHandle>().0.clone()
-    }
-
-    /// `None` before `Dispatcher::init` (widgets rendered in isolation).
-    pub fn try_global(cx: &App) -> Option<Entity<AppState>> {
-        cx.try_global::<AppStateHandle>().map(|h| h.0.clone())
-    }
-
     /// The editor "Open in …" menu items name: the selected editor, else the
     /// first installed one, else GHD's generic "External Editor" (lower
     /// case off macOS, as GHD's non-darwin labels).

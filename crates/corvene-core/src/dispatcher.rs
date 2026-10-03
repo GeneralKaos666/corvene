@@ -1,14 +1,14 @@
 //! `Dispatcher`: the only thing that mutates `AppState`. Every method is
-//! callable from the UI with an `&mut App`; git and disk work runs on the
+//! callable from the UI with an `&mut dyn Host`; git and disk work runs on the
 //! background executor and results are applied on the main thread.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::host::{AsyncCtx, Host, StateHandle};
 use corvene_git::{GitError, InitOptions, find_git, open_repository};
 use corvene_store::Store;
-use gpui_kit::{App, AppContext, AsyncApp, Entity};
 use tracing::{error, info, warn};
 
 use crate::persistence::{Settings, StoreExt, UncommittedChangesStrategy};
@@ -33,8 +33,8 @@ impl Dispatcher {
         settings: Settings,
         flag_overrides: crate::flags::FlagOverrides,
         flags_env: crate::flags::EnvFlags,
-        cx: &mut App,
-    ) -> Entity<AppState> {
+        cx: &mut dyn Host,
+    ) -> StateHandle {
         let flags = crate::flags::Flags::resolve(&flag_overrides, &flags_env);
         let mut repositories = store.repositories().unwrap_or_else(|err| {
             error!(?err, "could not load repositories");
@@ -75,7 +75,7 @@ impl Dispatcher {
                 )
             }
         };
-        let state = cx.new(|_| AppState {
+        cx.install_state(AppState {
             store,
             settings,
             flag_overrides,
@@ -126,7 +126,7 @@ impl Dispatcher {
             extensions: crate::extensions::ExtensionsState::default(),
             alive: crate::alive::AliveState::default(),
         });
-        AppState::install(state.clone(), cx);
+        let state = StateHandle;
         cx.background_executor()
             .spawn(async { corvene_highlight::prewarm() })
             .detach();
@@ -143,7 +143,7 @@ impl Dispatcher {
     /// Watch the repository's worktree; each debounced change triggers a
     /// refresh. `202-fs-watcher` turns this off (GHD only refreshes on focus
     /// and after its own actions); `904-fs-watcher-debounce-ms` is the wait.
-    pub fn start_watching(id: u64, cx: &mut App) {
+    pub fn start_watching(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (path, debounce, leading) = {
             let s = state.read(cx);
@@ -166,8 +166,7 @@ impl Dispatcher {
                     s.watcher = Some(watcher);
                     s.watched_repo = Some(id);
                 });
-                let state = state.clone();
-                cx.spawn(async move |cx: &mut AsyncApp| {
+                cx.spawn(async move |cx: &mut AsyncCtx| {
                     while let Ok(changed_at) = rx.recv().await {
                         let (still_watched, seen) = state.read_with(cx, |s, _| {
                             (
@@ -204,7 +203,7 @@ impl Dispatcher {
     /// Window focus (GHD `focus` IPC). A refresh that started a moment ago
     /// already sees what focus would: at launch the window activates while
     /// the first refresh runs, which queued a second full refresh.
-    pub fn refresh_selected(cx: &mut App) {
+    pub fn refresh_selected(cx: &mut dyn Host) {
         let s = Self::state(cx).read(cx);
         let Some(id) = s.selected else { return };
         let fresh = s.repo_states.get(&id).is_some_and(|rs| {
@@ -218,14 +217,14 @@ impl Dispatcher {
         }
     }
 
-    pub(crate) fn state(cx: &App) -> Entity<AppState> {
-        AppState::global(cx)
+    pub(crate) fn state(_cx: &dyn Host) -> StateHandle {
+        StateHandle
     }
 
     /// Find git on a background thread, then refresh the selected repository.
-    pub fn detect_git(cx: &mut App) {
+    pub fn detect_git(cx: &mut dyn Host) {
         let task = cx.background_executor().spawn(async move { find_git() });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 let state = Self::state(cx);
@@ -256,7 +255,7 @@ impl Dispatcher {
 
     // ---- foldouts / popups ----
 
-    pub fn toggle_foldout(foldout: Foldout, cx: &mut App) {
+    pub fn toggle_foldout(foldout: Foldout, cx: &mut dyn Host) {
         let opened = Self::state(cx).update(cx, |s, cx| {
             s.foldout = if s.foldout == Some(foldout) {
                 None
@@ -287,7 +286,7 @@ impl Dispatcher {
         }
     }
 
-    pub fn close_foldout(cx: &mut App) {
+    pub fn close_foldout(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.foldout.take().is_some() {
                 cx.notify();
@@ -295,7 +294,7 @@ impl Dispatcher {
         });
     }
 
-    pub fn show_popup(popup: Popup, cx: &mut App) {
+    pub fn show_popup(popup: Popup, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.popup = Some(popup);
             cx.notify();
@@ -304,7 +303,7 @@ impl Dispatcher {
 
     /// `265-remove-stale-index-lock`: the error dialog's "Remove Lock File":
     /// delete `lock` unless a git process is running in the repository.
-    pub fn remove_index_lock(lock: PathBuf, cx: &mut App) {
+    pub fn remove_index_lock(lock: PathBuf, cx: &mut dyn Host) {
         Self::close_popup(cx);
         let (selected, workdir) = {
             let s = Self::state(cx).read(cx);
@@ -322,7 +321,7 @@ impl Dispatcher {
         let task = cx
             .background_executor()
             .spawn(async move { corvene_git::remove_stale_index_lock(&lock, &workdir) });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
@@ -336,7 +335,7 @@ impl Dispatcher {
         .detach();
     }
 
-    pub fn close_popup(cx: &mut App) {
+    pub fn close_popup(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(popup) = s.popup.take() {
                 if matches!(popup, Popup::SignIn { .. }) {
@@ -349,14 +348,23 @@ impl Dispatcher {
 
     /// The re-authorization prompts' "Sign in" / "Continue in browser": open
     /// the sign-in dialog and run `retry` in repository `id` once it succeeds.
-    pub fn sign_in_then_retry(enterprise: bool, id: u64, retry: Option<RetryAction>, cx: &mut App) {
+    pub fn sign_in_then_retry(
+        enterprise: bool,
+        id: u64,
+        retry: Option<RetryAction>,
+        cx: &mut dyn Host,
+    ) {
         Self::show_popup(Popup::SignIn { enterprise }, cx);
         Self::state(cx).update(cx, |s, _| {
             s.retry_after_sign_in = retry.map(|retry| (id, retry));
         });
     }
 
-    pub fn show_error(title: impl Into<String>, message: impl Into<ErrorMessage>, cx: &mut App) {
+    pub fn show_error(
+        title: impl Into<String>,
+        message: impl Into<ErrorMessage>,
+        cx: &mut dyn Host,
+    ) {
         let message = message.into();
         let full = message.full_text();
         // any git call refused for an unsafe repository switches that
@@ -397,7 +405,7 @@ impl Dispatcher {
 
     /// The repository git named as unsafe (by path, else the selected one)
     /// shows the unsafe view; `false` when there is no such repository.
-    fn mark_unsafe_repository(path: PathBuf, cx: &mut App) -> bool {
+    fn mark_unsafe_repository(path: PathBuf, cx: &mut dyn Host) -> bool {
         Self::state(cx).update(cx, |s, cx| {
             let id = s
                 .repositories
@@ -420,7 +428,7 @@ impl Dispatcher {
 
     /// GHD `MissingRepository.onTrustDirectory`: `addSafeDirectory` for the
     /// path git named, then look at the repository again.
-    pub fn trust_repository(id: u64, cx: &mut App) {
+    pub fn trust_repository(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (git, path) = {
             let s = state.read(cx);
@@ -457,7 +465,7 @@ impl Dispatcher {
     /// missing until the refresh reads it; an unsafe repository then gets the
     /// "Trust Repository" view. The main worktree is resolved again by that
     /// refresh (the recorded one belongs to the old location).
-    pub fn relocate_repository(id: u64, cx: &mut App) {
+    pub fn relocate_repository(id: u64, cx: &mut dyn Host) {
         Self::pick_directory("Locate", cx, move |picked, cx| {
             let Some(picked) = picked else {
                 return;
@@ -511,7 +519,7 @@ impl Dispatcher {
     /// GHD `_cloneAgain` (the missing view's "Clone Again"): clone the
     /// GitHub repository back into the entry's path; adding the finished
     /// clone selects the existing entry, whose refresh clears `missing`.
-    pub fn clone_again(id: u64, cx: &mut App) {
+    pub fn clone_again(id: u64, cx: &mut dyn Host) {
         let Some((url, path)) = Self::state(cx).read(cx).repository(id).and_then(|r| {
             let gh = r.github.as_ref().filter(|gh| !gh.clone_url.is_empty())?;
             Some((gh.clone_url.clone(), r.path.clone()))
@@ -525,7 +533,7 @@ impl Dispatcher {
 
     /// Validate `path` is a git repository (background), then add + select it.
     /// Existing entries for the same path are selected instead of duplicated.
-    pub fn add_repository(path: PathBuf, cx: &mut App) {
+    pub fn add_repository(path: PathBuf, cx: &mut dyn Host) {
         Self::add_repository_then(path, cx, |_, _| {});
     }
 
@@ -533,15 +541,15 @@ impl Dispatcher {
     /// once it is added (or found) and selected.
     pub fn add_repository_then(
         path: PathBuf,
-        cx: &mut App,
-        then: impl FnOnce(u64, &mut App) + 'static,
+        cx: &mut dyn Host,
+        then: impl FnOnce(u64, &mut dyn Host) + 'static,
     ) {
         // GHD stores `Path.resolve(path)`: absolute, `.`/`..` folded lexically
         let path = resolve_path(&path);
         let state = Self::state(cx);
         // `224-alias-when-adding`
         let alias = Self::take_pending_alias(&path, cx);
-        let then = move |id: u64, cx: &mut App| {
+        let then = move |id: u64, cx: &mut dyn Host| {
             if let Some(alias) = alias {
                 Self::change_repository_alias(id, Some(alias), cx);
             }
@@ -567,7 +575,7 @@ impl Dispatcher {
             }
             open_repository(&path).map(|info| (path, info))
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = probe.await;
             cx.update(|cx| match result {
                 Ok((path, info)) => {
@@ -608,7 +616,7 @@ impl Dispatcher {
         .detach();
     }
 
-    pub fn select_repository(id: u64, cx: &mut App) {
+    pub fn select_repository(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let changed = state.update(cx, |s, cx| {
             if s.repository(id).is_none() {
@@ -658,7 +666,7 @@ impl Dispatcher {
         }
     }
 
-    pub fn remove_repository(id: u64, cx: &mut App) {
+    pub fn remove_repository(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let next = state.update(cx, |s, cx| {
             s.repositories.retain(|r| r.id != id);
@@ -687,7 +695,7 @@ impl Dispatcher {
 
     /// GHD `_refreshRepository`: re-read tip/branches/remotes, ahead/behind
     /// and working-directory status; then reload the selected diff.
-    pub fn refresh_repository(id: u64, cx: &mut App) {
+    pub fn refresh_repository(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (
             path,
@@ -761,7 +769,7 @@ impl Dispatcher {
             .flags
             .bool(crate::flags::ids::CHANGES_BUSY_INDICATOR)
         {
-            cx.spawn(async move |cx: &mut AsyncApp| {
+            cx.spawn(async move |cx: &mut AsyncCtx| {
                 cx.background_executor()
                     .timer(crate::state::BUSY_INDICATOR_DELAY)
                     .await;
@@ -971,7 +979,7 @@ impl Dispatcher {
                 .and_then(|_| corvene_git::main_worktree_path(&path));
             (result, unsafe_main)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let (result, unsafe_main) = work.await;
             cx.update(|cx| {
                 let snapshots = result
@@ -1158,7 +1166,7 @@ impl Dispatcher {
     // ---- changes list ----
 
     /// GHD `_changeChangesSelection`: select a file and load its diff.
-    pub fn select_file(id: u64, path: String, cx: &mut App) {
+    pub fn select_file(id: u64, path: String, cx: &mut dyn Host) {
         let changed = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             let same_anchor = rs.selected_file.as_deref() == Some(path.as_str());
@@ -1180,7 +1188,7 @@ impl Dispatcher {
     }
 
     /// ⌘-click (`SelectionSource` toggle): add or remove one path.
-    pub fn toggle_file_selection(id: u64, path: String, cx: &mut App) {
+    pub fn toggle_file_selection(id: u64, path: String, cx: &mut dyn Host) {
         let changed = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             let before = rs.selected_file.clone();
@@ -1205,7 +1213,7 @@ impl Dispatcher {
     }
 
     /// ⇧-click: select the visible range between the anchor and `path`.
-    pub fn extend_file_selection(id: u64, path: String, order: Vec<String>, cx: &mut App) {
+    pub fn extend_file_selection(id: u64, path: String, order: Vec<String>, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             // `707-shift-click-keeps-selection`
             let keep = s.flags.bool(crate::flags::ids::SHIFT_CLICK_KEEPS_SELECTION);
@@ -1244,7 +1252,7 @@ impl Dispatcher {
     /// ⇧↑ / ⇧↓ (GHD `List.addSelection`): grow or shrink the range between the
     /// anchor and its moving end by one visible row. With no anchor it moves
     /// the plain selection like an unmodified arrow key.
-    pub fn extend_file_selection_by(id: u64, delta: isize, order: Vec<String>, cx: &mut App) {
+    pub fn extend_file_selection_by(id: u64, delta: isize, order: Vec<String>, cx: &mut dyn Host) {
         let first = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             let anchor = rs
@@ -1270,7 +1278,7 @@ impl Dispatcher {
     }
 
     /// ⌘A in the list: every visible file.
-    pub fn select_all_files(id: u64, order: Vec<String>, cx: &mut App) {
+    pub fn select_all_files(id: u64, order: Vec<String>, cx: &mut dyn Host) {
         let changed = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if order.is_empty() {
@@ -1291,7 +1299,7 @@ impl Dispatcher {
 
     /// `749-binary-diff-as-text`: "Show diff anyway" on a binary file
     /// reloads its diff with `git diff --text`.
-    pub fn show_binary_diff_as_text(id: u64, cx: &mut App) {
+    pub fn show_binary_diff_as_text(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
             rs.diff_as_text = rs.selected_file.clone();
@@ -1299,7 +1307,7 @@ impl Dispatcher {
         Self::load_diff(id, cx);
     }
 
-    pub fn load_diff(id: u64, cx: &mut App) {
+    pub fn load_diff(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (git, workdir, file, options, head) = {
             let s = state.read(cx);
@@ -1349,7 +1357,7 @@ impl Dispatcher {
             }
             loaded
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let loaded = work.await;
             cx.update(|cx| {
                 Self::apply_working_diff(id, &path, loaded, cx);
@@ -1361,7 +1369,7 @@ impl Dispatcher {
 
     /// Show a loaded working-directory diff of `path` (dropped when another
     /// file was selected meanwhile).
-    fn apply_working_diff(id: u64, path: &str, loaded: LoadedDiff, cx: &mut App) {
+    fn apply_working_diff(id: u64, path: &str, loaded: LoadedDiff, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             // ignore stale results
@@ -1419,7 +1427,7 @@ impl Dispatcher {
     /// `901-prefetch-diffs`: compute the diffs of the files next to the
     /// selected one in the background, so moving the selection finds them
     /// in [`crate::diff_cache`].
-    fn prefetch_working_diffs(id: u64, cx: &mut App) {
+    fn prefetch_working_diffs(id: u64, cx: &mut dyn Host) {
         let s = Self::state(cx).read(cx);
         if !s.flags.bool(crate::flags::ids::PREFETCH_DIFFS) {
             return;
@@ -1475,7 +1483,7 @@ impl Dispatcher {
 
     /// Flag `807`: switch History to first parents only (or back) and
     /// reload the selected repository's list.
-    pub fn set_history_first_parent(on: bool, cx: &mut App) {
+    pub fn set_history_first_parent(on: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.history_first_parent = on);
         if let Some(id) = Self::state(cx).read(cx).selected {
             Self::load_commits(id, false, cx);
@@ -1483,7 +1491,7 @@ impl Dispatcher {
     }
 
     /// Load the first page of HEAD's history, or the next one when `more`.
-    pub fn load_commits(id: u64, more: bool, cx: &mut App) {
+    pub fn load_commits(id: u64, more: bool, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (workdir, skip, first_parent) = {
             let s = state.read(cx);
@@ -1510,7 +1518,7 @@ impl Dispatcher {
                 first_parent,
             )
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 let mut rewritten = Vec::new();
@@ -1586,12 +1594,12 @@ impl Dispatcher {
         .detach();
     }
 
-    pub fn select_commit(id: u64, sha: String, cx: &mut App) {
+    pub fn select_commit(id: u64, sha: String, cx: &mut dyn Host) {
         Self::select_commits(id, vec![sha], cx);
     }
 
     /// GHD `_changeCommitSelection`: `shas` in click order.
-    pub fn select_commits(id: u64, shas: Vec<String>, cx: &mut App) {
+    pub fn select_commits(id: u64, shas: Vec<String>, cx: &mut dyn Host) {
         let changed = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if rs.selected_commits == shas {
@@ -1620,7 +1628,7 @@ impl Dispatcher {
     }
 
     /// ⌘-click: add or remove one commit from the selection.
-    pub fn toggle_commit_selection(id: u64, sha: String, cx: &mut App) {
+    pub fn toggle_commit_selection(id: u64, sha: String, cx: &mut dyn Host) {
         let mut shas = Self::state(cx)
             .read(cx)
             .repo_states
@@ -1638,7 +1646,7 @@ impl Dispatcher {
     }
 
     /// ⇧-click: select everything between the anchor and `sha`.
-    pub fn extend_commit_selection(id: u64, sha: String, cx: &mut App) {
+    pub fn extend_commit_selection(id: u64, sha: String, cx: &mut dyn Host) {
         let shas = {
             let s = Self::state(cx).read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
@@ -1707,7 +1715,7 @@ impl Dispatcher {
     }
 
     /// `_loadChangedFilesForCurrentSelection`
-    fn load_changeset(id: u64, cx: &mut App) {
+    fn load_changeset(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -1736,7 +1744,7 @@ impl Dispatcher {
             crate::diff_cache::store_changeset(&workdir, &ordered, data.clone());
             Ok(data)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| Self::apply_changeset(id, &key, result, cx));
         })
@@ -1747,7 +1755,7 @@ impl Dispatcher {
         id: u64,
         key: &[String],
         result: corvene_git::error::Result<Arc<corvene_models::ChangesetData>>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let load = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
@@ -1784,7 +1792,7 @@ impl Dispatcher {
         }
     }
 
-    pub fn select_commit_file(id: u64, path: String, cx: &mut App) {
+    pub fn select_commit_file(id: u64, path: String, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).commit_selected_file = Some(path);
             cx.notify();
@@ -1792,7 +1800,7 @@ impl Dispatcher {
         Self::load_commit_diff(id, cx);
     }
 
-    fn load_commit_diff(id: u64, cx: &mut App) {
+    fn load_commit_diff(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -1841,7 +1849,7 @@ impl Dispatcher {
             );
             loaded
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let loaded = task.await;
             cx.update(|cx| {
                 Self::apply_commit_diff(id, &key.0, &key.1, loaded, cx);
@@ -1851,7 +1859,13 @@ impl Dispatcher {
         .detach();
     }
 
-    fn apply_commit_diff(id: u64, shas: &[String], path: &str, loaded: LoadedDiff, cx: &mut App) {
+    fn apply_commit_diff(
+        id: u64,
+        shas: &[String],
+        path: &str,
+        loaded: LoadedDiff,
+        cx: &mut dyn Host,
+    ) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if Self::ordered_selection(rs) != shas
@@ -1875,7 +1889,7 @@ impl Dispatcher {
 
     /// `901-prefetch-diffs`: the changed files and first diff of the
     /// commits next to the selected one, computed in the background.
-    fn prefetch_commit_diffs(id: u64, cx: &mut App) {
+    fn prefetch_commit_diffs(id: u64, cx: &mut dyn Host) {
         let s = Self::state(cx).read(cx);
         if !s.flags.bool(crate::flags::ids::PREFETCH_DIFFS) {
             return;
@@ -1960,7 +1974,7 @@ impl Dispatcher {
         ) -> corvene_git::error::Result<()>
         + Send
         + 'static,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::run_history_op_then(id, error_title, op, |_| {}, cx);
     }
@@ -1975,8 +1989,8 @@ impl Dispatcher {
         ) -> corvene_git::error::Result<()>
         + Send
         + 'static,
-        then: impl FnOnce(&mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(&mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -1984,7 +1998,7 @@ impl Dispatcher {
         let task = cx
             .background_executor()
             .spawn(async move { op(git, workdir) });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 let ok = result.is_ok();
@@ -2007,7 +2021,7 @@ impl Dispatcher {
         sha: String,
         path: String,
         old_path: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::run_history_op(
             id,
@@ -2019,7 +2033,7 @@ impl Dispatcher {
         );
     }
 
-    pub(crate) fn working_directory_dirty(id: u64, cx: &App) -> bool {
+    pub(crate) fn working_directory_dirty(id: u64, cx: &dyn Host) -> bool {
         Self::state(cx)
             .read(cx)
             .repo_states
@@ -2028,7 +2042,11 @@ impl Dispatcher {
             .is_some_and(|st| !st.files.is_empty())
     }
 
-    pub(crate) fn commit_by_sha(id: u64, sha: &str, cx: &App) -> Option<corvene_models::Commit> {
+    pub(crate) fn commit_by_sha(
+        id: u64,
+        sha: &str,
+        cx: &dyn Host,
+    ) -> Option<corvene_models::Commit> {
         Self::state(cx)
             .read(cx)
             .repo_states
@@ -2040,7 +2058,7 @@ impl Dispatcher {
     }
 
     /// `Revert Changes in Commit`
-    pub fn revert_commit(id: u64, sha: String, cx: &mut App) {
+    pub fn revert_commit(id: u64, sha: String, cx: &mut dyn Host) {
         let is_merge = Self::commit_by_sha(id, &sha, cx).is_some_and(|c| c.is_merge());
         Self::run_history_op(
             id,
@@ -2053,7 +2071,7 @@ impl Dispatcher {
     /// Corvene addition (flag `815`): revert `shas` without committing, the
     /// newest first, and show Changes with the result staged. Needs a clean
     /// working directory, so a conflict can roll everything back.
-    pub fn revert_commits_without_committing(id: u64, mut shas: Vec<String>, cx: &mut App) {
+    pub fn revert_commits_without_committing(id: u64, mut shas: Vec<String>, cx: &mut dyn Host) {
         const TITLE: &str = "Could not revert changes";
         if Self::working_directory_dirty(id, cx) {
             Self::show_error(
@@ -2086,7 +2104,7 @@ impl Dispatcher {
     }
 
     /// `shas` sorted oldest first by their place in the loaded history.
-    fn oldest_first(id: u64, mut shas: Vec<String>, cx: &App) -> Vec<String> {
+    fn oldest_first(id: u64, mut shas: Vec<String>, cx: &dyn Host) -> Vec<String> {
         if let Some(rs) = Self::state(cx).read(cx).repo_states.get(&id) {
             shas.sort_by_key(|sha| {
                 std::cmp::Reverse(rs.commits.iter().position(|c| &c.sha == sha))
@@ -2098,7 +2116,7 @@ impl Dispatcher {
     /// Corvene addition (flag `820`): apply `shas` to the current branch
     /// without committing (oldest first) and show Changes with the result
     /// staged. Needs a clean working directory, so a conflict can roll back.
-    pub fn cherry_pick_without_committing(id: u64, shas: Vec<String>, cx: &mut App) {
+    pub fn cherry_pick_without_committing(id: u64, shas: Vec<String>, cx: &mut dyn Host) {
         const TITLE: &str = "Could not cherry-pick";
         if Self::working_directory_dirty(id, cx) {
             Self::show_error(
@@ -2123,7 +2141,7 @@ impl Dispatcher {
 
     /// Corvene addition (flag `821`): `git format-patch` each of `shas`
     /// (oldest first) into `dir`, then reveal the first patch in Finder.
-    pub fn create_patch_files(id: u64, shas: Vec<String>, dir: PathBuf, cx: &mut App) {
+    pub fn create_patch_files(id: u64, shas: Vec<String>, dir: PathBuf, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2131,7 +2149,7 @@ impl Dispatcher {
         let task = cx
             .background_executor()
             .spawn(async move { corvene_git::format_patches(git, &workdir, &shas, &dir) });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
                 Ok(files) => {
@@ -2146,7 +2164,7 @@ impl Dispatcher {
     }
 
     /// `Reset to Commit…`: warn first when the working directory is dirty.
-    pub fn request_reset_to_commit(id: u64, sha: String, cx: &mut App) {
+    pub fn request_reset_to_commit(id: u64, sha: String, cx: &mut dyn Host) {
         if Self::working_directory_dirty(id, cx) {
             Self::show_popup(Popup::ResetToCommit { repo: id, sha }, cx);
         } else {
@@ -2154,7 +2172,7 @@ impl Dispatcher {
         }
     }
 
-    pub fn reset_to_commit(id: u64, sha: String, cx: &mut App) {
+    pub fn reset_to_commit(id: u64, sha: String, cx: &mut dyn Host) {
         Self::show_section(id, Section::Changes, cx);
         Self::run_history_op(
             id,
@@ -2168,7 +2186,7 @@ impl Dispatcher {
 
     /// The push/pull foldout's "Reset to <upstream>" (`261-reset-to-remote`;
     /// GHD has no such command): confirm, then [`Self::reset_to_remote`].
-    pub fn request_reset_to_remote(id: u64, cx: &mut App) {
+    pub fn request_reset_to_remote(id: u64, cx: &mut dyn Host) {
         let popup = {
             let s = Self::state(cx).read(cx);
             if !s.flags.bool(crate::flags::ids::RESET_TO_REMOTE) {
@@ -2198,7 +2216,7 @@ impl Dispatcher {
 
     /// `reset --hard <upstream>`: the branch matches its upstream; local
     /// commits stay reachable through the reflog.
-    pub fn reset_to_remote(id: u64, upstream: String, cx: &mut App) {
+    pub fn reset_to_remote(id: u64, upstream: String, cx: &mut dyn Host) {
         Self::show_section(id, Section::Changes, cx);
         Self::run_history_op(
             id,
@@ -2216,7 +2234,7 @@ impl Dispatcher {
     }
 
     /// `Checkout Commit`: confirm unless the user opted out.
-    pub fn request_checkout_commit(id: u64, sha: String, cx: &mut App) {
+    pub fn request_checkout_commit(id: u64, sha: String, cx: &mut dyn Host) {
         if Self::state(cx).read(cx).settings.confirm_checkout_commit {
             Self::show_popup(Popup::CheckoutCommit { repo: id, sha }, cx);
         } else {
@@ -2224,7 +2242,7 @@ impl Dispatcher {
         }
     }
 
-    pub fn checkout_commit(id: u64, sha: String, cx: &mut App) {
+    pub fn checkout_commit(id: u64, sha: String, cx: &mut dyn Host) {
         Self::run_history_op(
             id,
             "Could not checkout commit",
@@ -2235,7 +2253,7 @@ impl Dispatcher {
 
     /// GHD `_createTag`: the new tag joins `tagsToPush`.
     /// `message` is empty unless flag `823` shows the Message field.
-    pub fn create_tag(id: u64, name: String, sha: String, message: String, cx: &mut App) {
+    pub fn create_tag(id: u64, name: String, sha: String, message: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2243,7 +2261,7 @@ impl Dispatcher {
         let task = cx
             .background_executor()
             .spawn(async move { corvene_git::create_tag(git, &workdir, &name, &sha, &message) });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 match result {
@@ -2261,7 +2279,7 @@ impl Dispatcher {
     }
 
     /// GHD `_deleteTag` (only unpushed tags are offered): it leaves `tagsToPush`.
-    pub fn delete_tag(id: u64, name: String, cx: &mut App) {
+    pub fn delete_tag(id: u64, name: String, cx: &mut dyn Host) {
         let tag = name.clone();
         Self::update_tags_to_push(id, cx, |tags| tags.retain(|t| *t != tag));
         Self::run_history_op(
@@ -2274,7 +2292,7 @@ impl Dispatcher {
 
     /// `224-alias-when-adding`: give the repository at `path` this alias once
     /// it is added (by New / Add / Clone); an empty alias does nothing.
-    pub fn alias_when_added(path: &Path, alias: String, cx: &mut App) {
+    pub fn alias_when_added(path: &Path, alias: String, cx: &mut dyn Host) {
         let alias = alias.trim().to_string();
         if alias.is_empty() {
             return;
@@ -2288,7 +2306,7 @@ impl Dispatcher {
 
     /// Remove and return the alias waiting for `path` (see
     /// [`Dispatcher::alias_when_added`]).
-    fn take_pending_alias(path: &Path, cx: &mut App) -> Option<String> {
+    fn take_pending_alias(path: &Path, cx: &mut dyn Host) -> Option<String> {
         Self::state(cx).update(cx, |s, _| {
             let ix = s
                 .pending_aliases
@@ -2299,7 +2317,7 @@ impl Dispatcher {
     }
 
     /// GHD `changeRepositoryAlias` / `removeRepositoryAlias` (`None`).
-    pub fn change_repository_alias(id: u64, alias: Option<String>, cx: &mut App) {
+    pub fn change_repository_alias(id: u64, alias: Option<String>, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
                 repo.alias = alias.filter(|a| !a.is_empty());
@@ -2310,7 +2328,11 @@ impl Dispatcher {
     }
 
     /// Edit the repository's persisted `tagsToPush` (`storeTagsToPush`).
-    pub(crate) fn update_tags_to_push(id: u64, cx: &mut App, edit: impl FnOnce(&mut Vec<String>)) {
+    pub(crate) fn update_tags_to_push(
+        id: u64,
+        cx: &mut dyn Host,
+        edit: impl FnOnce(&mut Vec<String>),
+    ) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
                 edit(&mut repo.tags_to_push);
@@ -2322,7 +2344,7 @@ impl Dispatcher {
 
     /// `Undo Commit…` from history: warn about the commit's tags (flag
     /// `819`), then about local changes.
-    pub fn request_undo_commit(id: u64, cx: &mut App) {
+    pub fn request_undo_commit(id: u64, cx: &mut dyn Host) {
         let tags = Self::undo_warning_tags(id, cx);
         if !tags.is_empty() {
             return Self::show_popup(
@@ -2338,7 +2360,7 @@ impl Dispatcher {
     }
 
     /// The Changes view's Undo button: the tag warning (flag `819`) only.
-    pub fn request_undo_last_commit(id: u64, cx: &mut App) {
+    pub fn request_undo_last_commit(id: u64, cx: &mut dyn Host) {
         let tags = Self::undo_warning_tags(id, cx);
         if tags.is_empty() {
             return Self::undo_commit(id, cx);
@@ -2354,7 +2376,7 @@ impl Dispatcher {
     }
 
     /// Flag `819`: HEAD's tags, empty when the flag is off.
-    fn undo_warning_tags(id: u64, cx: &App) -> Vec<String> {
+    fn undo_warning_tags(id: u64, cx: &dyn Host) -> Vec<String> {
         {
             let s = Self::state(cx).read(cx);
             s.flags
@@ -2370,7 +2392,7 @@ impl Dispatcher {
     }
 
     /// The local-changes half of [`Self::request_undo_commit`].
-    pub fn request_undo_commit_after_tags(id: u64, cx: &mut App) {
+    pub fn request_undo_commit_after_tags(id: u64, cx: &mut dyn Host) {
         let (confirm, overlap_only, in_process) = {
             let s = Self::state(cx).read(cx);
             (
@@ -2402,7 +2424,7 @@ impl Dispatcher {
         let task = cx.background_executor().spawn(async move {
             corvene_git::get_changed_files(git, &workdir, "HEAD", in_process)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let changed = task.await;
             cx.update(|cx| {
                 let overlap = match changed {
@@ -2426,7 +2448,7 @@ impl Dispatcher {
     }
 
     /// `_startAmendingRepository`: switch to Changes and load the message.
-    pub fn start_amending(id: u64, sha: String, cx: &mut App) {
+    pub fn start_amending(id: u64, sha: String, cx: &mut dyn Host) {
         let Some(commit) = Self::commit_by_sha(id, &sha, cx) else {
             return;
         };
@@ -2440,14 +2462,14 @@ impl Dispatcher {
     }
 
     /// `_stopAmendingRepository`
-    pub fn stop_amending(id: u64, cx: &mut App) {
+    pub fn stop_amending(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).commit_to_amend = None;
             cx.notify();
         });
     }
 
-    pub fn show_section(id: u64, section: Section, cx: &mut App) {
+    pub fn show_section(id: u64, section: Section, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if rs.section != section {
@@ -2462,7 +2484,11 @@ impl Dispatcher {
 
     // ---- branches (`_createBranch`, `_checkoutBranch`, rename/delete, merge, stash) ----
 
-    pub(crate) fn branch_by_name(id: u64, name: &str, cx: &App) -> Option<corvene_models::Branch> {
+    pub(crate) fn branch_by_name(
+        id: u64,
+        name: &str,
+        cx: &dyn Host,
+    ) -> Option<corvene_models::Branch> {
         let s = Self::state(cx).read(cx);
         let branches = &s.repo_states.get(&id)?.info.as_ref()?.branches;
         branches
@@ -2478,7 +2504,7 @@ impl Dispatcher {
         name: String,
         start_point: Option<String>,
         unborn: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -2510,7 +2536,7 @@ impl Dispatcher {
             s.repo_state_mut(id).checkout_target = Some(branch_name);
             cx.notify();
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
@@ -2530,7 +2556,7 @@ impl Dispatcher {
         id: u64,
         name: String,
         explicit: Option<UncommittedChangesStrategy>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some(branch) = Self::branch_by_name(id, &name, cx) else {
             return;
@@ -2678,7 +2704,7 @@ impl Dispatcher {
             s.foldout = None;
             cx.notify();
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let (result, submodule_error, pop_error) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
@@ -2703,7 +2729,7 @@ impl Dispatcher {
     /// changed now) and the askpass environment for cloning new ones.
     pub(crate) fn submodule_update_plan(
         id: u64,
-        cx: &App,
+        cx: &dyn Host,
     ) -> Option<(Vec<String>, Option<corvene_git::AskpassEnv>)> {
         let s = Self::state(cx).read(cx);
         if !s.flags.bool(crate::flags::ids::SUBMODULES_FOLLOW_CHECKOUT) {
@@ -2724,7 +2750,7 @@ impl Dispatcher {
         Some((skip, Self::askpass_env(cx)))
     }
 
-    pub fn rename_branch(id: u64, old: String, new: String, cx: &mut App) {
+    pub fn rename_branch(id: u64, old: String, new: String, cx: &mut dyn Host) {
         Self::run_history_op(
             id,
             "Could not rename branch",
@@ -2735,7 +2761,7 @@ impl Dispatcher {
 
     /// `_deleteBranch`: checks out the default branch first when deleting the
     /// current one, like GHD.
-    pub fn delete_branch(id: u64, name: String, include_remote: bool, cx: &mut App) {
+    pub fn delete_branch(id: u64, name: String, include_remote: bool, cx: &mut dyn Host) {
         let Some(branch) = Self::branch_by_name(id, &name, cx) else {
             return;
         };
@@ -2858,7 +2884,7 @@ impl Dispatcher {
 
     /// The "Deleted branch" banner's Undo (`861-undo-delete-branch`):
     /// recreate `branch` at the commit it pointed at.
-    pub fn restore_deleted_branch(id: u64, branch: String, sha: String, cx: &mut App) {
+    pub fn restore_deleted_branch(id: u64, branch: String, sha: String, cx: &mut dyn Host) {
         let restored = branch.clone();
         Self::run_history_op_then(
             id,
@@ -2873,7 +2899,7 @@ impl Dispatcher {
 
     /// Delete Branch dialog warnings (`860-delete-branch-warnings`): commits
     /// only this branch has, and a stash recorded for it.
-    pub fn preview_delete_branch(id: u64, name: String, cx: &mut App) {
+    pub fn preview_delete_branch(id: u64, name: String, cx: &mut dyn Host) {
         let Some(branch) = Self::branch_by_name(id, &name, cx) else {
             return;
         };
@@ -2935,7 +2961,7 @@ impl Dispatcher {
             }
         });
         Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).delete_branch_preview = None);
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let preview = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -2948,7 +2974,7 @@ impl Dispatcher {
     }
 
     /// Merge dialog preview: how many commits `branch` would bring in.
-    pub fn preview_merge(id: u64, branch: String, cx: &mut App) {
+    pub fn preview_merge(id: u64, branch: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2968,7 +2994,7 @@ impl Dispatcher {
                 corvene_git::determine_mergeability(git, &workdir, &current, &branch).ok();
             (count, mergeability)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let (count, mergeability) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -2991,7 +3017,7 @@ impl Dispatcher {
     /// `updateBranchWithContributionTargetBranch`), which may be behind its
     /// remote; with the flag on, its remote is fetched first and the
     /// remote-tracking branch is merged.
-    pub fn update_from_default_branch(id: u64, cx: &mut App) {
+    pub fn update_from_default_branch(id: u64, cx: &mut dyn Host) {
         let (default, fetch_first) = {
             let s = Self::state(cx).read(cx);
             (
@@ -3040,7 +3066,7 @@ impl Dispatcher {
     ///
     /// Deviation (`859-update-from-default-rebases`): with `pull.rebase` set
     /// the current branch is rebased onto it (GHD always merges).
-    fn update_from_branch(id: u64, branch: String, cx: &mut App) {
+    fn update_from_branch(id: u64, branch: String, cx: &mut dyn Host) {
         let rebase = {
             let s = Self::state(cx).read(cx);
             s.flags.bool(crate::flags::ids::UPDATE_FROM_DEFAULT_REBASES)
@@ -3054,7 +3080,7 @@ impl Dispatcher {
     }
 
     /// Branch › Stash All Changes (`createStashForCurrentBranch`).
-    pub fn stash_all_changes(id: u64, cx: &mut App) {
+    pub fn stash_all_changes(id: u64, cx: &mut dyn Host) {
         let current = Self::state(cx)
             .read(cx)
             .repo_states
@@ -3085,7 +3111,7 @@ impl Dispatcher {
     // ---- stash viewer (`_selectStashedFile`, `popStash`, `dropStash`) ----
 
     /// The "Stashed Changes" row / View › Toggle Stashed Changes.
-    pub fn toggle_stash_view(id: u64, cx: &mut App) {
+    pub fn toggle_stash_view(id: u64, cx: &mut dyn Host) {
         let show = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if rs.stash.is_none() {
@@ -3122,7 +3148,7 @@ impl Dispatcher {
     /// GHD `GitStore.loadFilesForCurrentStashEntry`: the current stash's
     /// files, once per stash; the first is selected and, while the stash
     /// is showing, its diff loaded.
-    fn load_stash_files(id: u64, cx: &mut App) {
+    fn load_stash_files(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -3150,7 +3176,7 @@ impl Dispatcher {
         let task = cx
             .background_executor()
             .spawn(async move { corvene_git::stashed_files(git, &workdir, &sha_for_task) });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 let load = Self::state(cx).update(cx, |s, cx| {
@@ -3179,7 +3205,7 @@ impl Dispatcher {
         .detach();
     }
 
-    pub fn select_stash_file(id: u64, path: String, cx: &mut App) {
+    pub fn select_stash_file(id: u64, path: String, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).stash_selected_file = Some(path);
             cx.notify();
@@ -3187,7 +3213,7 @@ impl Dispatcher {
         Self::load_stash_diff(id, cx);
     }
 
-    fn load_stash_diff(id: u64, cx: &mut App) {
+    fn load_stash_diff(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -3230,7 +3256,7 @@ impl Dispatcher {
             .flatten();
             (diff, (contents, old))
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let (result, (contents, old)) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -3262,7 +3288,7 @@ impl Dispatcher {
     }
 
     /// Restore: `git stash pop`, then the files show up in Changes.
-    pub fn pop_stash(id: u64, cx: &mut App) {
+    pub fn pop_stash(id: u64, cx: &mut dyn Host) {
         let Some(name) = Self::state(cx)
             .read(cx)
             .repo_states
@@ -3281,7 +3307,7 @@ impl Dispatcher {
     }
 
     /// Discard: confirm unless the user opted out (`askForConfirmationOnDiscardStash`).
-    pub fn request_drop_stash(id: u64, cx: &mut App) {
+    pub fn request_drop_stash(id: u64, cx: &mut dyn Host) {
         if Self::state(cx).read(cx).settings.confirm_discard_stash {
             Self::show_popup(Popup::ConfirmDiscardStash { repo: id }, cx);
         } else {
@@ -3289,7 +3315,7 @@ impl Dispatcher {
         }
     }
 
-    pub fn drop_stash(id: u64, cx: &mut App) {
+    pub fn drop_stash(id: u64, cx: &mut dyn Host) {
         let Some(name) = Self::state(cx)
             .read(cx)
             .repo_states
@@ -3307,7 +3333,7 @@ impl Dispatcher {
         );
     }
 
-    pub fn set_commit_summary_expanded(id: u64, expanded: bool, cx: &mut App) {
+    pub fn set_commit_summary_expanded(id: u64, expanded: bool, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).commit_summary_expanded = expanded;
             cx.notify();
@@ -3315,7 +3341,7 @@ impl Dispatcher {
     }
 
     /// Toggle the include checkbox of one file (`_changeFileIncluded`).
-    pub fn toggle_file_included(id: u64, path: String, cx: &mut App) {
+    pub fn toggle_file_included(id: u64, path: String, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(status) = s.repo_state_mut(id).status.as_mut() {
                 if let Some(f) = status.files.iter_mut().find(|f| f.path == path) {
@@ -3332,7 +3358,7 @@ impl Dispatcher {
     }
 
     /// Gutter click: toggle one diff line (`withToggleLineSelection`).
-    pub fn toggle_diff_line(id: u64, path: String, line: u32, cx: &mut App) {
+    pub fn toggle_diff_line(id: u64, path: String, line: u32, cx: &mut dyn Host) {
         Self::update_selection(id, &path, cx, |sel| sel.toggled(line));
     }
 
@@ -3343,7 +3369,7 @@ impl Dispatcher {
         from: u32,
         len: u32,
         selected: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::update_selection(id, &path, cx, |sel| sel.with_range(from, len, selected));
     }
@@ -3351,7 +3377,7 @@ impl Dispatcher {
     fn update_selection(
         id: u64,
         path: &str,
-        cx: &mut App,
+        cx: &mut dyn Host,
         edit: impl FnOnce(&corvene_models::DiffSelection) -> corvene_models::DiffSelection,
     ) {
         Self::state(cx).update(cx, |s, cx| {
@@ -3369,7 +3395,7 @@ impl Dispatcher {
 
     /// GHD `onIncludeChanged(files, include)`: the header checkbox applies to
     /// the files currently visible through the filter.
-    pub fn set_files_included(id: u64, paths: Vec<String>, include: bool, cx: &mut App) {
+    pub fn set_files_included(id: u64, paths: Vec<String>, include: bool, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(status) = s.repo_state_mut(id).status.as_mut() {
                 for f in status.files.iter_mut().filter(|f| paths.contains(&f.path)) {
@@ -3385,7 +3411,7 @@ impl Dispatcher {
     }
 
     /// Filter Options popover checkbox.
-    pub fn toggle_filter_option(id: u64, option: crate::state::FilterOption, cx: &mut App) {
+    pub fn toggle_filter_option(id: u64, option: crate::state::FilterOption, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             let f = &mut s.repo_state_mut(id).file_list_filter;
             let on = !f.get(option);
@@ -3395,7 +3421,7 @@ impl Dispatcher {
     }
 
     /// "Clear filters" (the text box is cleared by the view).
-    pub fn clear_filter_options(id: u64, cx: &mut App) {
+    pub fn clear_filter_options(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).file_list_filter = Default::default();
             cx.notify();
@@ -3403,7 +3429,7 @@ impl Dispatcher {
     }
 
     /// Header checkbox (`_changeIncludeAllFiles`).
-    pub fn toggle_include_all(id: u64, cx: &mut App) {
+    pub fn toggle_include_all(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(status) = s.repo_state_mut(id).status.as_mut() {
                 let select_all = status.include_all() != Some(true);
@@ -3420,8 +3446,8 @@ impl Dispatcher {
     }
 
     /// Native folder picker → `add_repository` (GHD `AddRepository` shortcut).
-    pub fn prompt_add_repository(cx: &mut App) {
-        let receiver = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+    pub fn prompt_add_repository(cx: &mut dyn Host) {
+        let receiver = cx.prompt_for_paths(crate::host::PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
@@ -3434,9 +3460,9 @@ impl Dispatcher {
                 .into(),
             ),
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let picked = match receiver.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Some(paths) => paths.into_iter().next(),
                 _ => None,
             };
             if let Some(path) = picked {
@@ -3451,7 +3477,7 @@ impl Dispatcher {
     /// `221-add-license`: write the named license template to `LICENSE` in
     /// the repository's worktree, filled in like Create a New Repository
     /// does. An existing license file is never replaced.
-    pub fn add_license(repo: u64, license: String, cx: &mut App) {
+    pub fn add_license(repo: u64, license: String, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (Some(git), Some(repository)) = (
             state.read(cx).git.clone(),
@@ -3487,7 +3513,7 @@ impl Dispatcher {
             );
             crate::templates::write_license(&dir, &text)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
                 Ok(_) => Self::refresh_repository(repo, cx),
@@ -3509,7 +3535,7 @@ impl Dispatcher {
         gitignore: Option<String>,
         license: Option<String>,
         keep_existing: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let state = Self::state(cx);
         let Some(git) = state.read(cx).git.clone() else {
@@ -3560,7 +3586,7 @@ impl Dispatcher {
                 },
             )
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
                 Ok(path) => Self::add_repository(path, cx),
@@ -3579,7 +3605,7 @@ impl Dispatcher {
         url: String,
         path: PathBuf,
         default_branch: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::clone_repository_with(url, path, default_branch, None, cx);
     }
@@ -3591,7 +3617,7 @@ impl Dispatcher {
         path: PathBuf,
         default_branch: Option<String>,
         depth: Option<u32>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let state = Self::state(cx);
         let Some(git) = state.read(cx).git.clone() else {
@@ -3637,8 +3663,8 @@ impl Dispatcher {
             )
         });
         // Progress pump: poll the channel on the foreground at ~30 Hz while cloning.
-        let pump_state = state.clone();
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        let pump_state = state;
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             loop {
                 let mut latest = None;
                 while let Ok(p) = rx.try_recv() {
@@ -3669,7 +3695,7 @@ impl Dispatcher {
         })
         .detach();
 
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -3715,7 +3741,7 @@ impl Dispatcher {
     /// Stop the running clone (`234-clone-cancel`; GHD cannot: removing the
     /// cloning repository leaves `git clone` running). git removes the
     /// directory it created; the view says "Cancelling…" until it exits.
-    pub fn cancel_clone(cx: &mut App) {
+    pub fn cancel_clone(cx: &mut dyn Host) {
         if !Self::state(cx)
             .read(cx)
             .flags
@@ -3735,7 +3761,7 @@ impl Dispatcher {
 
     /// Open a link. With a `511-browser` application set, web links open in
     /// it (`open -a <app> <url>`); other schemes keep the system handler.
-    pub fn open_url(url: &str, cx: &mut App) {
+    pub fn open_url(url: &str, cx: &mut dyn Host) {
         let browser = Self::state(cx)
             .read(cx)
             .flags
@@ -3757,7 +3783,7 @@ impl Dispatcher {
     /// Android: the system page where the user grants "All files access",
     /// so repositories on shared storage can be used in place.
     #[cfg(target_os = "android")]
-    pub fn request_all_files_access(cx: &mut App) {
+    pub fn request_all_files_access(cx: &mut dyn Host) {
         let _ = cx;
         if let Some(bridge) = corvene_platform::android::bridge() {
             bridge.request_all_files_access();
@@ -3767,18 +3793,18 @@ impl Dispatcher {
     /// Native folder picker → `Some(path)` on the foreground.
     pub fn pick_directory(
         prompt: &str,
-        cx: &mut App,
-        on_pick: impl FnOnce(Option<PathBuf>, &mut App) + 'static,
+        cx: &mut dyn Host,
+        on_pick: impl FnOnce(Option<PathBuf>, &mut dyn Host) + 'static,
     ) {
-        let receiver = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+        let receiver = cx.prompt_for_paths(crate::host::PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some(prompt.to_string().into()),
+            prompt: Some(prompt.to_string()),
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let picked = match receiver.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Some(paths) => paths.into_iter().next(),
                 _ => None,
             };
             cx.update(|cx| on_pick(picked, cx));
@@ -3790,7 +3816,7 @@ impl Dispatcher {
 
     pub(crate) fn repo_context(
         id: u64,
-        cx: &App,
+        cx: &dyn Host,
     ) -> Option<(Arc<corvene_git::GitBinary>, std::path::PathBuf)> {
         let s = Self::state(cx).read(cx);
         let git = s.git.clone()?;
@@ -3798,7 +3824,7 @@ impl Dispatcher {
         Some((git, workdir))
     }
 
-    pub fn commit(id: u64, summary: String, description: String, cx: &mut App) {
+    pub fn commit(id: u64, summary: String, description: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -3916,7 +3942,7 @@ impl Dispatcher {
             )
             .map(|sha| (sha, rewrites_pushed))
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -3964,7 +3990,7 @@ impl Dispatcher {
     pub fn update_commit_options(
         id: u64,
         edit: impl FnOnce(&mut corvene_models::RepoCommitOptions),
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
@@ -3975,14 +4001,14 @@ impl Dispatcher {
         });
     }
 
-    pub fn undo_commit(id: u64, cx: &mut App) {
+    pub fn undo_commit(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
         let task = cx
             .background_executor()
             .spawn(async move { corvene_git::undo_last_commit(git, &workdir) });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -3999,7 +4025,7 @@ impl Dispatcher {
     }
 
     /// Discard the given paths' changes (after the confirmation prompt).
-    pub fn discard_changes(id: u64, paths: Vec<String>, cx: &mut App) {
+    pub fn discard_changes(id: u64, paths: Vec<String>, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4029,7 +4055,7 @@ impl Dispatcher {
         let task = cx.background_executor().spawn(async move {
             corvene_git::discard_changes(git, &workdir, &files, move_to_trash, clean_submodules)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -4048,7 +4074,7 @@ impl Dispatcher {
     /// Switch Branch › "Discard my changes" (`865-switch-branch-discard`):
     /// discard every change (new files to the Trash), then check `branch`
     /// out. A failed discard stops before the checkout.
-    pub fn discard_all_and_checkout(id: u64, branch: String, cx: &mut App) {
+    pub fn discard_all_and_checkout(id: u64, branch: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4069,7 +4095,7 @@ impl Dispatcher {
                 corvene_git::discard_changes(git, &workdir, &files, move_to_trash, clean_submodules)
             }
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
                 Err(err) => {
@@ -4090,7 +4116,7 @@ impl Dispatcher {
     }
 
     /// GHD `onDiscardChangesFromFiles`: confirm first unless the user opted out.
-    pub fn request_discard_changes(id: u64, paths: Vec<String>, cx: &mut App) {
+    pub fn request_discard_changes(id: u64, paths: Vec<String>, cx: &mut dyn Host) {
         if paths.is_empty() {
             return;
         }
@@ -4122,7 +4148,7 @@ impl Dispatcher {
 
     /// Corvene `723-discard-confirm-snooze`: the confirmation is snoozed for
     /// this repository.
-    fn discard_confirm_snoozed(id: u64, cx: &App) -> bool {
+    fn discard_confirm_snoozed(id: u64, cx: &dyn Host) -> bool {
         let s = Self::state(cx).read(cx);
         s.flags.number(crate::flags::ids::DISCARD_CONFIRM_SNOOZE) > 0
             && s.repo_states
@@ -4133,7 +4159,7 @@ impl Dispatcher {
 
     /// Corvene `723-discard-confirm-snooze`: skip the confirmation for the
     /// flag's number of minutes.
-    pub fn snooze_discard_confirm(id: u64, cx: &mut App) {
+    pub fn snooze_discard_confirm(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, _| {
             let minutes = s.flags.number(crate::flags::ids::DISCARD_CONFIRM_SNOOZE);
             let Ok(minutes) = u64::try_from(minutes) else {
@@ -4150,7 +4176,7 @@ impl Dispatcher {
         id: u64,
         path: String,
         selection: corvene_models::DiffSelection,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if Self::state(cx).read(cx).settings.confirm_discard_changes
             && !Self::discard_confirm_snoozed(id, cx)
@@ -4174,7 +4200,7 @@ impl Dispatcher {
         id: u64,
         path: String,
         selection: corvene_models::DiffSelection,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -4210,7 +4236,7 @@ impl Dispatcher {
 
     /// Diff Settings › Hide Whitespace Changes, per tab
     /// (`_setHideWhitespaceInChangesDiff` / `…HistoryDiff`); reloads the diff.
-    pub fn set_hide_whitespace_in_diff(history: bool, hide: bool, cx: &mut App) {
+    pub fn set_hide_whitespace_in_diff(history: bool, hide: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| {
             if history {
                 s.hide_whitespace_in_history_diff = hide;
@@ -4229,22 +4255,22 @@ impl Dispatcher {
     }
 
     /// Diff Settings › Diff display (`_setShowSideBySideDiff`).
-    pub fn set_show_side_by_side_diff(show: bool, cx: &mut App) {
+    pub fn set_show_side_by_side_diff(show: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.show_side_by_side_diff = show);
     }
 
     /// Modified-image diff tab (`_changeImageDiffType`).
-    pub fn set_image_diff_type(kind: corvene_models::ImageDiffType, cx: &mut App) {
+    pub fn set_image_diff_type(kind: corvene_models::ImageDiffType, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.image_diff_type = kind);
     }
 
     /// `onOpenSubmodule`: add the submodule as a repository of its own.
-    pub fn open_submodule(path: PathBuf, cx: &mut App) {
+    pub fn open_submodule(path: PathBuf, cx: &mut dyn Host) {
         Self::add_repository(path, cx);
     }
 
     /// "Ignore File / Folder" menu items: paths are escaped before writing.
-    pub fn ignore_files(id: u64, paths: Vec<String>, cx: &mut App) {
+    pub fn ignore_files(id: u64, paths: Vec<String>, cx: &mut dyn Host) {
         let patterns = paths
             .iter()
             .map(|p| corvene_git::escape_gitignore_pattern(p))
@@ -4254,7 +4280,7 @@ impl Dispatcher {
 
     /// Corvene `714-copy-diff`: the changes of `paths` as a patch on the
     /// clipboard (`corvene_git::working_directory_patch`).
-    pub fn copy_diff(id: u64, paths: Vec<String>, cx: &mut App) {
+    pub fn copy_diff(id: u64, paths: Vec<String>, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4291,10 +4317,10 @@ impl Dispatcher {
         let task = cx.background_executor().spawn(async move {
             corvene_git::working_directory_patch(git, &workdir, &files, base)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
-                Ok(patch) => cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(patch)),
+                Ok(patch) => cx.write_to_clipboard(patch),
                 Err(err) => Self::show_error("Could not copy the diff", &err, cx),
             });
         })
@@ -4303,7 +4329,12 @@ impl Dispatcher {
 
     /// Corvene `715-assume-unchanged`: mark `paths` assume-unchanged, or with
     /// `paths: None` clear the mark from every file that has it; then refresh.
-    pub fn set_assume_unchanged(id: u64, paths: Option<Vec<String>>, assume: bool, cx: &mut App) {
+    pub fn set_assume_unchanged(
+        id: u64,
+        paths: Option<Vec<String>>,
+        assume: bool,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4314,7 +4345,7 @@ impl Dispatcher {
             };
             corvene_git::set_assume_unchanged(git, &workdir, &paths, assume)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
@@ -4327,7 +4358,7 @@ impl Dispatcher {
     }
 
     /// Append raw patterns (e.g. `*.log`) to the root `.gitignore`, then refresh.
-    pub fn ignore_patterns(id: u64, patterns: Vec<String>, cx: &mut App) {
+    pub fn ignore_patterns(id: u64, patterns: Vec<String>, cx: &mut dyn Host) {
         let Some((_git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4338,7 +4369,7 @@ impl Dispatcher {
         let task = cx.background_executor().spawn(async move {
             corvene_git::append_ignore_rules(&workdir, &patterns, skip_existing)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
@@ -4352,7 +4383,12 @@ impl Dispatcher {
 
     /// "Ignore File In" (flag `ignore-file-targets`): ignore one path from
     /// another ignore file than the root `.gitignore`, then refresh.
-    pub fn ignore_file_in(id: u64, path: String, target: corvene_git::IgnoreTarget, cx: &mut App) {
+    pub fn ignore_file_in(
+        id: u64,
+        path: String,
+        target: corvene_git::IgnoreTarget,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4364,7 +4400,7 @@ impl Dispatcher {
         let task = cx.background_executor().spawn(async move {
             corvene_git::append_ignore_rules_to(git, &workdir, &target, &patterns, skip_existing)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
@@ -4379,7 +4415,7 @@ impl Dispatcher {
     /// Repository Settings › Ignored Files › "Edit global ignore file" (flag
     /// `edit-global-ignore-file`): create the excludes file if needed and
     /// open it in the external editor.
-    pub fn edit_global_ignore_file(id: u64, cx: &mut App) {
+    pub fn edit_global_ignore_file(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4394,7 +4430,7 @@ impl Dispatcher {
             }
             Ok::<_, String>(path)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
                 Ok(path) => Self::open_in_editor(path, cx),
@@ -4406,7 +4442,7 @@ impl Dispatcher {
 
     // ---- sign-in (GHD `SignInStore`) ----
 
-    pub(crate) fn set_sign_in_step(step: SignInStep, cx: &mut App) {
+    pub(crate) fn set_sign_in_step(step: SignInStep, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(si) = s.sign_in.as_mut() {
                 si.step = step;
@@ -4418,7 +4454,7 @@ impl Dispatcher {
     /// OAuth device flow against GitHub.com, or a GitHub Enterprise host
     /// with an OAuth app (`oauth_client_id`). Runs on its own thread;
     /// progress is pumped to the foreground.
-    pub fn sign_in_device_flow(endpoint: corvene_github::Endpoint, cx: &mut App) {
+    pub fn sign_in_device_flow(endpoint: corvene_github::Endpoint, cx: &mut dyn Host) {
         let client_id = Self::oauth_client_id(&endpoint, cx);
         let cancel = Arc::new(AtomicBool::new(false));
         Self::state(cx).update(cx, |s, cx| {
@@ -4507,7 +4543,7 @@ impl Dispatcher {
             })
             .ok();
 
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             loop {
                 if cancel.load(Ordering::SeqCst) {
                     break;
@@ -4529,9 +4565,7 @@ impl Dispatcher {
                                 // so the code goes along on the clipboard
                                 #[cfg(target_os = "android")]
                                 {
-                                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
-                                        code.user_code.clone(),
-                                    ));
+                                    cx.write_to_clipboard(code.user_code.clone());
                                     corvene_platform::android::toast(&format!(
                                         "Code {} copied. Paste it on the page.",
                                         code.user_code
@@ -4565,7 +4599,7 @@ impl Dispatcher {
     /// The OAuth client ID a sign-in on `endpoint` uses: the one entered for
     /// that GitHub Enterprise host, else the build's (`OAuthApp::built_in`).
     /// `None`: a GHES host nobody registered an app for (PAT only).
-    pub fn oauth_client_id(endpoint: &corvene_github::Endpoint, cx: &App) -> Option<String> {
+    pub fn oauth_client_id(endpoint: &corvene_github::Endpoint, cx: &dyn Host) -> Option<String> {
         if !endpoint.is_dotcom()
             && let Some(id) = Self::state(cx)
                 .read(cx)
@@ -4585,7 +4619,7 @@ impl Dispatcher {
         endpoint: &corvene_github::Endpoint,
         client_id: String,
         client_secret: String,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if endpoint.is_dotcom() {
             return;
@@ -4624,7 +4658,11 @@ impl Dispatcher {
     }
 
     /// Personal access token (GHES, or the fallback link on GitHub.com).
-    pub fn sign_in_with_token(endpoint: corvene_github::Endpoint, token: String, cx: &mut App) {
+    pub fn sign_in_with_token(
+        endpoint: corvene_github::Endpoint,
+        token: String,
+        cx: &mut dyn Host,
+    ) {
         Self::state(cx).update(cx, |s, cx| {
             s.sign_in = Some(SignInState {
                 endpoint: endpoint.api_base.clone(),
@@ -4642,7 +4680,7 @@ impl Dispatcher {
         endpoint: corvene_github::Endpoint,
         token: String,
         scopes: Vec<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::finish_sign_in(endpoint, token, scopes, cx);
     }
@@ -4652,7 +4690,7 @@ impl Dispatcher {
         endpoint: corvene_github::Endpoint,
         token: String,
         scopes: Vec<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::set_sign_in_step(SignInStep::Verifying, cx);
         let task = cx.background_executor().spawn({
@@ -4666,7 +4704,7 @@ impl Dispatcher {
                 Ok::<Account, corvene_github::GitHubError>(account)
             }
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
                 Ok(account) => {
@@ -4700,7 +4738,7 @@ impl Dispatcher {
 
     /// `AccountsStore.refresh` at launch: re-read every account's profile
     /// (name, avatar, e-mails, plan). A failure keeps the stored account.
-    pub fn refresh_accounts(cx: &mut App) {
+    pub fn refresh_accounts(cx: &mut dyn Host) {
         let accounts = Self::state(cx).read(cx).accounts.clone();
         for account in accounts {
             let task = cx.background_executor().spawn(async move {
@@ -4718,7 +4756,7 @@ impl Dispatcher {
                     }
                 }
             });
-            cx.spawn(async move |cx: &mut AsyncApp| {
+            cx.spawn(async move |cx: &mut AsyncCtx| {
                 let Some(updated) = task.await else {
                     return;
                 };
@@ -4743,7 +4781,7 @@ impl Dispatcher {
         }
     }
 
-    pub fn cancel_sign_in(cx: &mut App) {
+    pub fn cancel_sign_in(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(si) = s.sign_in.take() {
                 si.cancel.store(true, Ordering::SeqCst);
@@ -4752,7 +4790,7 @@ impl Dispatcher {
         });
     }
 
-    pub fn sign_out(endpoint: String, cx: &mut App) {
+    pub fn sign_out(endpoint: String, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(account) = s.accounts.iter().find(|a| a.endpoint == endpoint).cloned() {
                 let _ = corvene_platform::keychain::delete_token(&account.host(), &account.login);
@@ -4766,14 +4804,14 @@ impl Dispatcher {
     // ---- welcome / identity ----
 
     /// `git config --global user.name/user.email` (GHD `ConfigureGitUser` save).
-    pub fn set_global_identity(name: String, email: String, cx: &mut App) {
+    pub fn set_global_identity(name: String, email: String, cx: &mut dyn Host) {
         let Some(git) = Self::state(cx).read(cx).git.clone() else {
             return;
         };
         let task = cx
             .background_executor()
             .spawn(async move { corvene_git::set_global_identity(git, &name, &email) });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             if let Err(err) = task.await {
                 cx.update(|cx| Self::show_error("Could not save Git identity", &err, cx));
             }
@@ -4781,12 +4819,12 @@ impl Dispatcher {
         .detach();
     }
 
-    pub fn complete_welcome(cx: &mut App) {
+    pub fn complete_welcome(cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.welcome_completed = true);
     }
 
     /// `onHighlightShas`: dim every history row except `shas` (empty = none).
-    pub fn set_highlighted_shas(id: u64, shas: Vec<String>, cx: &mut App) {
+    pub fn set_highlighted_shas(id: u64, shas: Vec<String>, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if rs.highlighted_shas != shas {
@@ -4797,7 +4835,7 @@ impl Dispatcher {
     }
 
     /// `dragAndDropManager.emitEnterDropTarget` / `emitLeaveDropTarget`.
-    pub fn set_drag_target(target: Option<crate::state::DropTarget>, cx: &mut App) {
+    pub fn set_drag_target(target: Option<crate::state::DropTarget>, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.drag_target != target {
                 s.drag_target = target;
@@ -4811,7 +4849,7 @@ impl Dispatcher {
     /// A failed save is logged; with `report-settings-save-errors` it is also
     /// shown (once while that error popup is up), where GitHub Desktop's
     /// `setItem` failures go unnoticed (desktop/desktop#5046).
-    pub fn update_settings(cx: &mut App, edit: impl FnOnce(&mut Settings)) {
+    pub fn update_settings(cx: &mut dyn Host, edit: impl FnOnce(&mut Settings)) {
         const TITLE: &str = "Could not save settings";
         let failed = Self::state(cx).update(cx, |s, cx| {
             edit(&mut s.settings);

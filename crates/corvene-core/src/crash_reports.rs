@@ -6,7 +6,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use gpui_kit::App;
+use crate::host::Host;
 use tracing::{debug, info};
 
 use crate::dispatcher::Dispatcher;
@@ -16,7 +16,7 @@ use crate::state::Popup;
 impl Dispatcher {
     /// At launch: look for reports newer than the previous launch, then
     /// record this launch.
-    pub fn check_crash_reports(cx: &mut App) {
+    pub fn check_crash_reports(cx: &mut dyn Host) {
         let (enabled, since) = {
             let s = Self::state(cx).read(cx);
             (
@@ -59,7 +59,7 @@ impl Dispatcher {
 
     /// Settings › Advanced › "Save crash reports locally" (and the
     /// `501-crash-reports` flag that offers it) take effect at once.
-    pub fn sync_crash_reports_setting(cx: &App) {
+    pub fn sync_crash_reports_setting(cx: &dyn Host) {
         let s = Self::state(cx).read(cx);
         corvene_platform::crash_reports::set_enabled(
             s.settings.save_crash_reports && s.flags.bool(crate::flags::ids::CRASH_REPORTS),

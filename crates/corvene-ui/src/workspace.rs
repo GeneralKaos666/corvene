@@ -543,7 +543,9 @@ impl Workspace {
                                     // `onTutorialCompletionAnnounced`, deferred:
                                     // it notifies AppState
                                     if step == TutorialStep::AllDone {
-                                        cx.defer(Dispatcher::mark_tutorial_completion_announced);
+                                        cx.defer(|cx| {
+                                            Dispatcher::mark_tutorial_completion_announced(cx)
+                                        });
                                     }
                                 },
                             )

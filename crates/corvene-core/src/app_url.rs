@@ -26,7 +26,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui_kit::App;
+use crate::host::Host;
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -276,8 +276,8 @@ impl Dispatcher {
     /// `focus_window` shows the (possibly hidden) window first.
     pub fn listen_for_app_urls(
         inbox: AppUrlInbox,
-        focus_window: impl Fn(&mut App) + 'static,
-        cx: &mut App,
+        focus_window: impl Fn(&mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let rx = inbox.rx;
         cx.spawn(async move |cx| {
@@ -294,7 +294,7 @@ impl Dispatcher {
     }
 
     /// GHD `dispatchURLAction` for a URL handed to Corvene by macOS.
-    pub fn handle_app_url(url: &str, cx: &mut App) {
+    pub fn handle_app_url(url: &str, cx: &mut dyn Host) {
         let action = parse_app_url(url);
         info!(?action, "URL action");
         match action {
@@ -316,7 +316,7 @@ impl Dispatcher {
     /// its parent is `url`. With `exact-repository-url-first` a repository
     /// that is `url` itself wins over a fork matching through its parent
     /// (GHD takes the first match in list order).
-    fn repository_matching_url(url: &str, cx: &App) -> Option<u64> {
+    fn repository_matching_url(url: &str, cx: &dyn Host) -> Option<u64> {
         let s = Self::state(cx).read(cx);
         if s.flags.bool(crate::flags::ids::EXACT_REPOSITORY_URL_FIRST)
             && let Some(exact) = s.repositories.iter().find(|r| {
@@ -346,7 +346,7 @@ impl Dispatcher {
         branch: Option<String>,
         pr: Option<String>,
         filepath: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if let Some(number) = pr.and_then(|pr| pr.parse::<u64>().ok()) {
             Self::open_pull_request_from_url(url, number, filepath, cx);
@@ -365,7 +365,7 @@ impl Dispatcher {
 
     /// GHD `openOrCloneRepository`: select the matching repository, else
     /// the clone dialog prefilled; `then` runs once the repository is known.
-    fn open_or_clone_repository(url: String, then: PendingOpenInDesktop, cx: &mut App) {
+    fn open_or_clone_repository(url: String, then: PendingOpenInDesktop, cx: &mut dyn Host) {
         if let Some(id) = Self::repository_matching_url(&url, cx) {
             Self::select_repository(id, cx);
             Self::complete_open_in_desktop(id, then, cx);
@@ -377,7 +377,7 @@ impl Dispatcher {
 
     /// GHD `_completeOpenInDesktop`: the clone of an `openRepo` action
     /// finished (called with the added repository).
-    pub(crate) fn resume_open_in_desktop(id: u64, cx: &mut App) {
+    pub(crate) fn resume_open_in_desktop(id: u64, cx: &mut dyn Host) {
         let pending = Self::state(cx).update(cx, |s, _| s.pending_open_in_desktop.take());
         if let Some(pending) = pending {
             Self::complete_open_in_desktop(id, pending, cx);
@@ -386,7 +386,7 @@ impl Dispatcher {
 
     /// The rest of `openBranchNameFromUrl` / `openPullRequestFromUrl` /
     /// `openRepositoryFromUrl` for the selected repository `id`.
-    fn complete_open_in_desktop(id: u64, pending: PendingOpenInDesktop, cx: &mut App) {
+    fn complete_open_in_desktop(id: u64, pending: PendingOpenInDesktop, cx: &mut dyn Host) {
         if let Some(pr) = pending.pull_request {
             Self::switch_to_pull_request(id, pr, cx);
         } else if let Some(branch) = pending.branch {
@@ -417,8 +417,8 @@ impl Dispatcher {
     /// `openBranchNameFromUrl` after `openOrCloneRepository`: fetch, then
     /// `checkoutLocalBranch` (a local or remote branch of that name, unless
     /// it is already checked out).
-    fn open_branch_when_loaded(id: u64, branch: String, cx: &mut App) {
-        let loaded = move |cx: &App| {
+    fn open_branch_when_loaded(id: u64, branch: String, cx: &mut dyn Host) {
+        let loaded = move |cx: &dyn Host| {
             Self::state(cx)
                 .read(cx)
                 .repo_states
@@ -448,9 +448,9 @@ impl Dispatcher {
 
     /// GHD `await this.appStore._fetch(…)`: fetch, then `then` once the
     /// fetch and the refresh after it are done (at once without a remote).
-    fn fetch_then(id: u64, cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
+    fn fetch_then(id: u64, cx: &mut dyn Host, then: impl FnOnce(&mut dyn Host) + 'static) {
         Self::fetch(id, false, cx);
-        let busy = move |cx: &App| {
+        let busy = move |cx: &dyn Host| {
             Self::state(cx)
                 .read(cx)
                 .repo_states
@@ -473,7 +473,7 @@ impl Dispatcher {
 
     /// GHD `checkoutLocalBranch`: only a branch Corvene knows (local, or a
     /// remote branch with that name), and only when it is not current.
-    fn checkout_local_branch(id: u64, branch: &str, cx: &mut App) {
+    fn checkout_local_branch(id: u64, branch: &str, cx: &mut dyn Host) {
         let target = {
             let s = Self::state(cx).read(cx);
             let Some(info) = s.repo_states.get(&id).and_then(|rs| rs.info.as_ref()) else {
@@ -509,7 +509,7 @@ impl Dispatcher {
         url: String,
         number: u64,
         filepath: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some(github) = corvene_models::github_from_remote(&url, &[]) else {
             warn!(%url, "not a GitHub repository URL");
@@ -563,7 +563,7 @@ impl Dispatcher {
     /// `x-corvene://importGitConfig/…`: ask before taking the settings (any
     /// application can send the link). Android only: elsewhere Corvene uses
     /// the system's git and its configuration.
-    fn offer_git_config(list: String, cx: &mut App) {
+    fn offer_git_config(list: String, cx: &mut dyn Host) {
         if !cfg!(target_os = "android") {
             warn!("git settings are only imported on Android");
             return;
@@ -574,7 +574,7 @@ impl Dispatcher {
 
     /// The Import button of that dialog: write `~/.gitconfig-imported` and
     /// include it from `~/.gitconfig`.
-    pub fn import_git_config(settings: Vec<(String, String)>, cx: &mut App) {
+    pub fn import_git_config(settings: Vec<(String, String)>, cx: &mut dyn Host) {
         use crate::git_config_import::{IMPORTED_FILE, render, with_include};
         let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
             return;
@@ -600,7 +600,7 @@ impl Dispatcher {
         );
     }
 
-    pub fn open_local_repository(path: PathBuf, cx: &mut App) {
+    pub fn open_local_repository(path: PathBuf, cx: &mut dyn Host) {
         // Android (`corvene <dir>` in Termux): say why a folder cannot be
         // opened instead of calling a readable-looking path "not found"
         #[cfg(target_os = "android")]

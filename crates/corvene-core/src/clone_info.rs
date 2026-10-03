@@ -26,9 +26,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host::Host;
 use corvene_github::{Client, Endpoint, RepositoryCloneInfo};
 use corvene_models::split_remote;
-use gpui_kit::App;
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
@@ -260,8 +260,8 @@ impl Dispatcher {
     pub fn resolve_clone_info(
         input: String,
         prefer_ssh: bool,
-        then: impl FnOnce(Result<CloneInfo, &'static str>, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(Result<CloneInfo, &'static str>, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let mut clients: Vec<(Candidate, Client)> = Vec::new();
         for account in &Self::state(cx).read(cx).accounts {

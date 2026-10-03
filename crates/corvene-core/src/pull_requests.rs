@@ -17,12 +17,12 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::host::{AsyncCtx, Host};
 use corvene_github::{ApiPullRequest, Client, GitHubError};
 use corvene_models::{
     Branch, BranchKind, GitHubRepository, PullRequest, PullRequestRef, Remote,
     clone_url_like_remote, url_matches_remote,
 };
-use gpui_kit::{App, AsyncApp};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -202,7 +202,7 @@ struct PullRequestBranch {
 
 impl Dispatcher {
     /// `_changeBranchesTab`
-    pub fn change_branches_tab(tab: BranchesTab, cx: &mut App) {
+    pub fn change_branches_tab(tab: BranchesTab, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.branches_tab != tab {
                 s.branches_tab = tab;
@@ -212,7 +212,7 @@ impl Dispatcher {
     }
 
     /// Load the persisted list (once) and refresh it if it is stale.
-    pub fn ensure_pull_requests(id: u64, cx: &mut App) {
+    pub fn ensure_pull_requests(id: u64, cx: &mut dyn Host) {
         Self::refresh_pull_requests(id, false, cx);
     }
 
@@ -220,7 +220,7 @@ impl Dispatcher {
     /// request, later ones ask for everything updated since the newest
     /// cached one and drop what closed. `force` skips the 2-minute throttle
     /// (the list's refresh button).
-    pub fn refresh_pull_requests(id: u64, force: bool, cx: &mut App) {
+    pub fn refresh_pull_requests(id: u64, force: bool, cx: &mut dyn Host) {
         let Some(target) = Self::state(cx)
             .read(cx)
             .repository(id)
@@ -352,13 +352,13 @@ impl Dispatcher {
 
     /// Launch: the window starts focused, so start the updater for the
     /// selected repository.
-    pub fn start_pull_request_updater(cx: &mut App) {
+    pub fn start_pull_request_updater(cx: &mut dyn Host) {
         APP_FOCUSED.store(true, Ordering::Relaxed);
         Self::restart_pull_request_updater(cx);
     }
 
     /// `_setAppFocusState`: the updater only runs while the app is focused.
-    pub fn set_app_focus_state(focused: bool, cx: &mut App) {
+    pub fn set_app_focus_state(focused: bool, cx: &mut dyn Host) {
         if APP_FOCUSED.swap(focused, Ordering::Relaxed) == focused {
             return;
         }
@@ -373,7 +373,7 @@ impl Dispatcher {
     /// updater and, while the app is focused, starts one for the selected
     /// repository. The first tick comes once the last refresh is two
     /// minutes old (`MaxPullRequestRefreshFrequency`), then every 30 minutes.
-    pub(crate) fn restart_pull_request_updater(cx: &mut App) {
+    pub(crate) fn restart_pull_request_updater(cx: &mut dyn Host) {
         let generation = UPDATER_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
         if !APP_FOCUSED.load(Ordering::Relaxed) {
             return;
@@ -385,7 +385,7 @@ impl Dispatcher {
             return;
         }
         let running = move || UPDATER_GENERATION.load(Ordering::Relaxed) == generation;
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let mut timeout = MAX_REFRESH_FREQUENCY;
             loop {
                 // `scheduleTick`: due = timeout − time since the last refresh
@@ -415,7 +415,7 @@ impl Dispatcher {
 
     /// `getLastRefreshed`: `None` when `id` has no GitHub repository,
     /// `Some(None)` when its pull requests were never refreshed.
-    fn pull_requests_last_refreshed(id: u64, cx: &App) -> Option<Option<Instant>> {
+    fn pull_requests_last_refreshed(id: u64, cx: &dyn Host) -> Option<Option<Instant>> {
         let s = Self::state(cx).read(cx);
         let gh = s.repository(id)?.non_fork_github()?;
         Some(
@@ -426,7 +426,7 @@ impl Dispatcher {
     }
 
     /// `_showPullRequestByPR`: the pull request page in the browser.
-    pub fn open_pull_request(pr: &PullRequest, cx: &mut App) {
+    pub fn open_pull_request(pr: &PullRequest, cx: &mut dyn Host) {
         if let Some(url) = pr.html_url() {
             Self::open_url(&url, cx);
         }
@@ -435,10 +435,10 @@ impl Dispatcher {
     /// "Switch to Pull Request" in the notification dialogs: close the
     /// dialog, `selectRepository`, then `checkoutPullRequest` once the
     /// repository's branches and remotes are loaded.
-    pub fn switch_to_pull_request(id: u64, pr: PullRequest, cx: &mut App) {
+    pub fn switch_to_pull_request(id: u64, pr: PullRequest, cx: &mut dyn Host) {
         Self::close_popup(cx);
         Self::select_repository(id, cx);
-        let loaded = move |cx: &App| {
+        let loaded = move |cx: &dyn Host| {
             Self::state(cx)
                 .read(cx)
                 .repo_states
@@ -468,7 +468,7 @@ impl Dispatcher {
     }
 
     /// `_showPullRequest`: the current branch's pull request in the browser.
-    pub fn show_pull_request(id: u64, cx: &mut App) {
+    pub fn show_pull_request(id: u64, cx: &mut dyn Host) {
         let pr = Self::state(cx).read(cx).current_pull_request(id).cloned();
         if let Some(pr) = pr {
             Self::open_pull_request(&pr, cx);
@@ -477,7 +477,7 @@ impl Dispatcher {
 
     /// `_checkoutPullRequest`: find the pull request's branch
     /// (`find_pull_request_branch`), then check it out like any other.
-    pub fn checkout_pull_request(id: u64, pr: PullRequest, cx: &mut App) {
+    pub fn checkout_pull_request(id: u64, pr: PullRequest, cx: &mut dyn Host) {
         Self::find_pull_request_branch(id, pr, cx, move |result, cx| match result {
             Ok(branch) => Self::checkout_branch(id, branch.name, None, cx),
             Err(message) => Self::show_error("Could not check out the pull request", message, cx),
@@ -489,7 +489,7 @@ impl Dispatcher {
     /// onto its branch, found like a checkout would (fetching a fork remote
     /// and creating `pr/<n>` when needed). GHD only logs when the branch
     /// cannot be determined; Corvene also says so.
-    pub fn cherry_pick_to_pull_request(id: u64, pr: PullRequest, cx: &mut App) {
+    pub fn cherry_pick_to_pull_request(id: u64, pr: PullRequest, cx: &mut dyn Host) {
         Self::find_pull_request_branch(id, pr, cx, move |result, cx| match result {
             Ok(branch) => Self::cherry_pick_to_branch(id, branch.name, cx),
             Err(message) => {
@@ -519,8 +519,8 @@ impl Dispatcher {
     fn find_pull_request_branch(
         id: u64,
         pr: PullRequest,
-        cx: &mut App,
-        on_found: impl FnOnce(Result<Branch, String>, &mut App) + 'static,
+        cx: &mut dyn Host,
+        on_found: impl FnOnce(Result<Branch, String>, &mut dyn Host) + 'static,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -666,8 +666,8 @@ impl Dispatcher {
     fn find_headless_pull_request_branch(
         id: u64,
         pr: PullRequest,
-        cx: &mut App,
-        on_found: impl FnOnce(Result<Branch, String>, &mut App) + 'static,
+        cx: &mut dyn Host,
+        on_found: impl FnOnce(Result<Branch, String>, &mut dyn Host) + 'static,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -745,7 +745,7 @@ impl Dispatcher {
     }
 
     /// `pruneForkedRemotes`: drop Desktop-added fork remotes nothing uses.
-    fn prune_forked_remotes(id: u64, cx: &mut App) {
+    fn prune_forked_remotes(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -774,7 +774,7 @@ impl Dispatcher {
 
     /// An API call answered 401: the token was revoked (`InvalidatedToken`).
     /// The account is signed out and the user offered to sign in again.
-    pub(crate) fn token_invalidated(api_base: &str, cx: &mut App) {
+    pub(crate) fn token_invalidated(api_base: &str, cx: &mut dyn Host) {
         let account = Self::state(cx).read(cx).account_for(api_base).cloned();
         let Some(account) = account else {
             return;

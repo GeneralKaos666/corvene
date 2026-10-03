@@ -12,7 +12,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use gpui_kit::{App, Image, ImageFormat};
+use crate::host::{AsyncCtx, Host};
+use corvene_platform::app_icons::AppIcon;
 use tracing::{error, info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -133,18 +134,11 @@ pub fn pull_request_url(
 
 /// Flag `513-integration-app-icons`: the icons of the applications at
 /// these paths, keyed by path (blocking).
-fn app_icons<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> HashMap<PathBuf, Arc<Image>> {
+fn app_icons<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> HashMap<PathBuf, Arc<AppIcon>> {
     paths
         .filter_map(|path| {
             let icon = corvene_platform::app_icons::icon(path)?;
-            let format = match icon.format {
-                corvene_platform::app_icons::IconFormat::Png => ImageFormat::Png,
-                corvene_platform::app_icons::IconFormat::Svg => ImageFormat::Svg,
-            };
-            Some((
-                path.clone(),
-                Arc::new(Image::from_bytes(format, icon.bytes)),
-            ))
+            Some((path.clone(), Arc::new(icon)))
         })
         .collect()
 }
@@ -155,7 +149,7 @@ impl Dispatcher {
     /// Probe LaunchServices for every known editor and shell (background),
     /// then remember them for the menus and Settings › Integrations, with
     /// their icons under flag `513-integration-app-icons`.
-    pub fn detect_integrations(cx: &mut App) {
+    pub fn detect_integrations(cx: &mut dyn Host) {
         let flags = &Self::state(cx).read(cx).flags;
         let extras = flags.bool(crate::flags::ids::EXTRA_EDITORS);
         let with_icons = flags.bool(crate::flags::ids::INTEGRATION_APP_ICONS);
@@ -196,7 +190,12 @@ impl Dispatcher {
     /// Flag `811`: History › Open with Default Program opens `path` as it
     /// is at `sha`, written to a read-only file under the temporary
     /// directory, rather than today's working copy.
-    pub fn open_commit_file_with_default_program(id: u64, sha: String, path: String, cx: &mut App) {
+    pub fn open_commit_file_with_default_program(
+        id: u64,
+        sha: String,
+        path: String,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -219,14 +218,14 @@ impl Dispatcher {
     }
 
     /// Repository › Open in <Editor> (`_openInExternalEditor`).
-    pub fn open_in_editor(path: PathBuf, cx: &mut App) {
+    pub fn open_in_editor(path: PathBuf, cx: &mut dyn Host) {
         Self::open_in_editor_at(path, None, cx);
     }
 
     /// `open_in_editor` at a 1-based line where the editor supports it
     /// (the diff's "Open in <Editor> at Line N", flag
     /// `diff-open-in-editor-at-line`); a custom editor opens the file.
-    pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut App) {
+    pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut dyn Host) {
         let (editors, selected, custom, workspace_file) = {
             let s = Self::state(cx).read(cx);
             (
@@ -301,7 +300,7 @@ impl Dispatcher {
         );
     }
 
-    fn show_editor_error(err: editors::EditorError, cx: &mut App) {
+    fn show_editor_error(err: editors::EditorError, cx: &mut dyn Host) {
         warn!(message = %err.message, "external editor");
         Self::show_popup(
             Popup::ExternalEditorError {
@@ -314,7 +313,7 @@ impl Dispatcher {
     }
 
     /// Repository › Open in <Shell> (`_openShell`).
-    pub fn open_in_shell(path: &Path, cx: &mut App) {
+    pub fn open_in_shell(path: &Path, cx: &mut dyn Host) {
         let (shells, selected, custom) = {
             let s = Self::state(cx).read(cx);
             (
@@ -394,7 +393,7 @@ impl Dispatcher {
     /// Repository › Show in Finder (`revealInFileManager`), and every Reveal
     /// in Finder item. With a `510-file-manager` application set, it opens
     /// the folder (a file's parent folder) with `open -a <app>` instead.
-    pub fn show_in_finder(path: &Path, cx: &mut App) {
+    pub fn show_in_finder(path: &Path, cx: &mut dyn Host) {
         let app = Self::state(cx)
             .read(cx)
             .flags
@@ -438,7 +437,7 @@ impl Dispatcher {
     /// copy the file picker made) as the bundled ssh client's key. An
     /// encrypted key asks for its passphrase (`Popup::SshKeyPassphrase`).
     #[cfg(target_os = "android")]
-    pub fn import_ssh_key(path: PathBuf, passphrase: Option<String>, cx: &mut App) {
+    pub fn import_ssh_key(path: PathBuf, passphrase: Option<String>, cx: &mut dyn Host) {
         use corvene_platform::android::SshImportError;
         let wrong = passphrase.as_ref().is_some_and(|p| !p.is_empty());
         let file = path.clone();
@@ -460,7 +459,7 @@ impl Dispatcher {
     /// Android, Options › Integrations: create the SSH key the bundled ssh
     /// client uses (`corvene_platform::android::create_ssh_key`).
     #[cfg(target_os = "android")]
-    pub fn create_ssh_key(cx: &mut App) {
+    pub fn create_ssh_key(cx: &mut dyn Host) {
         spawn_bg(
             cx,
             corvene_platform::android::create_ssh_key,
@@ -475,7 +474,7 @@ impl Dispatcher {
     /// Android: a changed file's "Share…", the system's share sheet (GHD has
     /// no Android build).
     #[cfg(target_os = "android")]
-    pub fn share_file(path: PathBuf, cx: &mut App) {
+    pub fn share_file(path: PathBuf, cx: &mut dyn Host) {
         if let Some(bridge) = corvene_platform::android::bridge()
             && let Err(err) = bridge.share_path(&path)
         {
@@ -486,7 +485,7 @@ impl Dispatcher {
     /// Repository › Open With… (`_openWithSystemDialog`): pick an application,
     /// then `open -a <app> <repository>`. Also a changed file's "Open With…"
     /// (Corvene `713-open-file-with`), whose error names the file.
-    pub fn open_with(path: PathBuf, cx: &mut App) {
+    pub fn open_with(path: PathBuf, cx: &mut dyn Host) {
         // Android: the system's chooser lists the applications that open it
         #[cfg(target_os = "android")]
         if let Some(bridge) = corvene_platform::android::bridge() {
@@ -500,15 +499,15 @@ impl Dispatcher {
         } else {
             ("Unable to Open File", "the file")
         };
-        let receiver = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
+        let receiver = cx.prompt_for_paths(crate::host::PathPromptOptions {
             files: true,
             directories: false,
             multiple: false,
             prompt: Some("Open".into()),
         });
-        cx.spawn(async move |cx: &mut gpui_kit::AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let app = match receiver.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Some(paths) => paths.into_iter().next(),
                 _ => None,
             };
             if let Some(app) = app
@@ -528,7 +527,7 @@ impl Dispatcher {
 
     // ---- GitHub URLs (`_openInBrowser` callers) ----
 
-    fn github_and_branch(id: u64, cx: &App) -> Option<(GitHubRepository, Option<String>)> {
+    fn github_and_branch(id: u64, cx: &dyn Host) -> Option<(GitHubRepository, Option<String>)> {
         let s = Self::state(cx).read(cx);
         let gh = s.repository(id)?.github.clone()?;
         let branch = s
@@ -542,7 +541,7 @@ impl Dispatcher {
 
     /// Repository › View on GitHub; with `262-view-on-remote` a repository
     /// that is not on GitHub opens its default remote's web page instead.
-    pub fn view_on_github(id: u64, cx: &mut App) {
+    pub fn view_on_github(id: u64, cx: &mut dyn Host) {
         if let Some((gh, _)) = Self::github_and_branch(id, cx) {
             Self::open_url(&gh.html_url, cx);
         } else if let Some(url) = Self::non_github_remote_web_url(id, cx) {
@@ -553,7 +552,7 @@ impl Dispatcher {
     /// Repository › View Upstream on GitHub (Corvene addition, flag
     /// `321-view-upstream-on-github`): the parent of a fork. Nothing happens
     /// for a repository that is not a fork.
-    pub fn view_upstream_on_github(id: u64, cx: &mut App) {
+    pub fn view_upstream_on_github(id: u64, cx: &mut dyn Host) {
         let url = Self::github_and_branch(id, cx).and_then(|(gh, _)| gh.parent.map(|p| p.html_url));
         if let Some(url) = url {
             Self::open_url(&url, cx);
@@ -562,7 +561,7 @@ impl Dispatcher {
 
     /// The default remote's web page (`remote_web_url`) of a loaded
     /// repository that is not on GitHub, when `262-view-on-remote` is on.
-    pub fn non_github_remote_web_url(id: u64, cx: &App) -> Option<String> {
+    pub fn non_github_remote_web_url(id: u64, cx: &dyn Host) -> Option<String> {
         let s = Self::state(cx).read(cx);
         if !s.flags.bool(crate::flags::ids::VIEW_ON_REMOTE) || s.repository(id)?.github.is_some() {
             return None;
@@ -577,7 +576,7 @@ impl Dispatcher {
     /// `getNonForkGitHubRepository`). GitHub answers `/issues/new/choose`
     /// with the plain new-issue form when the repository has no templates,
     /// so, as in GHD, nothing is checked locally.
-    pub fn create_issue(id: u64, cx: &mut App) {
+    pub fn create_issue(id: u64, cx: &mut dyn Host) {
         let url = Self::state(cx)
             .read(cx)
             .repository(id)
@@ -589,7 +588,7 @@ impl Dispatcher {
     }
 
     /// Branch › Compare on GitHub.
-    pub fn compare_on_github(id: u64, cx: &mut App) {
+    pub fn compare_on_github(id: u64, cx: &mut dyn Host) {
         if let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) {
             Self::open_url(
                 &format!("{}/compare/{}", gh.html_url, encode_component(&branch)),
@@ -599,7 +598,7 @@ impl Dispatcher {
     }
 
     /// Branch › View Branch on GitHub.
-    pub fn view_branch_on_github(id: u64, cx: &mut App) {
+    pub fn view_branch_on_github(id: u64, cx: &mut dyn Host) {
         if let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) {
             Self::open_url(
                 &format!("{}/tree/{}", gh.html_url, encode_component(&branch)),
@@ -611,7 +610,7 @@ impl Dispatcher {
     /// Branch › Create Pull Request. An unpublished branch is pushed first
     /// (GHD `_createPullRequest` → `_publishBranch`), then the compare page
     /// opens; with an open pull request the menu shows it instead.
-    pub fn create_pull_request(id: u64, cx: &mut App) {
+    pub fn create_pull_request(id: u64, cx: &mut dyn Host) {
         if Self::state(cx).read(cx).current_pull_request(id).is_some() {
             Self::show_pull_request(id, cx);
             return;
@@ -621,7 +620,7 @@ impl Dispatcher {
 
     /// `_createPullRequest(repository, baseBranch)`: an unpublished branch
     /// or unpushed commits ask `PushBranchCommits` first.
-    pub fn create_pull_request_with_base(id: u64, base: Option<String>, cx: &mut App) {
+    pub fn create_pull_request_with_base(id: u64, base: Option<String>, cx: &mut dyn Host) {
         let Some((_, Some(branch))) = Self::github_and_branch(id, cx) else {
             return;
         };
@@ -658,7 +657,7 @@ impl Dispatcher {
     pub fn push_branch_commits_and_create_pull_request(
         id: u64,
         base: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         use crate::flags::ids;
         use crate::remote::PushOutcome;
@@ -697,7 +696,7 @@ impl Dispatcher {
     }
 
     /// `_openCreatePullRequestInBrowser`
-    pub fn open_create_pull_request_in_browser(id: u64, base: Option<String>, cx: &mut App) {
+    pub fn open_create_pull_request_in_browser(id: u64, base: Option<String>, cx: &mut dyn Host) {
         let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) else {
             return;
         };
@@ -719,7 +718,7 @@ impl Dispatcher {
 
     /// Settings › Git › Hooks: (re)load the login-shell environment for git
     /// subprocesses, or drop it when the option is off.
-    pub fn refresh_hook_env(cx: &mut App) {
+    pub fn refresh_hook_env(cx: &mut dyn Host) {
         let (enabled, cache) = {
             let s = Self::state(cx).read(cx).settings.clone();
             (s.enable_git_hook_env, s.cache_git_hook_env)
@@ -748,7 +747,7 @@ impl Dispatcher {
 
     /// Show Settings on `tab`, refresh the installed editors/shells and read the
     /// global git config in the background (`isLoadingGitConfig`).
-    pub fn open_preferences(tab: PreferencesTab, cx: &mut App) {
+    pub fn open_preferences(tab: PreferencesTab, cx: &mut dyn Host) {
         Self::close_foldout(cx);
         Self::state(cx).update(cx, |s, cx| {
             s.global_git = None;
@@ -792,7 +791,7 @@ impl Dispatcher {
 
     /// Settings › Save: persist the settings, then write the global git
     /// identity and default branch when they changed.
-    pub fn save_preferences(save: PreferencesSave, cx: &mut App) {
+    pub fn save_preferences(save: PreferencesSave, cx: &mut dyn Host) {
         let PreferencesSave {
             settings,
             name,
@@ -845,7 +844,7 @@ impl Dispatcher {
 
     /// Show Repository Settings on `tab`; the remote, `.gitignore` and git
     /// config are read in the background.
-    pub fn open_repository_settings(id: u64, tab: RepositorySettingsTab, cx: &mut App) {
+    pub fn open_repository_settings(id: u64, tab: RepositorySettingsTab, cx: &mut dyn Host) {
         Self::close_foldout(cx);
         Self::state(cx).update(cx, |s, cx| {
             s.repo_settings = None;
@@ -898,7 +897,7 @@ impl Dispatcher {
     }
 
     /// Repository Settings › Save.
-    pub fn save_repository_settings(id: u64, save: RepositorySettingsSave, cx: &mut App) {
+    pub fn save_repository_settings(id: u64, save: RepositorySettingsSave, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             Self::close_popup(cx);
             return;
@@ -1007,7 +1006,7 @@ impl Dispatcher {
 
     /// Repository › Remove…: confirm first unless the prompt is turned off
     /// or the repository is missing (GHD `App.removeRepository`).
-    pub fn request_remove_repository(id: u64, cx: &mut App) {
+    pub fn request_remove_repository(id: u64, cx: &mut dyn Host) {
         let s = Self::state(cx).read(cx);
         let missing = s.repository(id).is_some_and(|r| r.missing);
         let confirm = s.settings.confirm_repository_removal && !missing;
@@ -1021,7 +1020,7 @@ impl Dispatcher {
 
     /// Remove from the list and move the directory to the Trash
     /// (`_removeRepository` with `moveToTrash`).
-    pub fn remove_repository_and_trash(id: u64, cx: &mut App) {
+    pub fn remove_repository_and_trash(id: u64, cx: &mut dyn Host) {
         let path = Self::state(cx)
             .read(cx)
             .repository(id)
@@ -1050,7 +1049,7 @@ impl Dispatcher {
 
     /// Settings › Git › "edit your global Git config file": open `~/.gitconfig`
     /// in the external editor (GHD opens it with the selected editor too).
-    pub fn edit_global_git_config(cx: &mut App) {
+    pub fn edit_global_git_config(cx: &mut dyn Host) {
         let Some(home) = dirs_home() else { return };
         let path = home.join(".gitconfig");
         if !path.exists()

@@ -85,6 +85,7 @@ impl CreateForkDialog {
         Dispatcher::create_fork(
             self.repo,
             move |error, cx| {
+                let Some(cx) = cx.gpui_app() else { return };
                 weak.update(cx, |this, cx| {
                     this.loading = false;
                     this.error = error;

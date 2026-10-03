@@ -6,8 +6,8 @@
 
 use std::collections::HashMap;
 
+use crate::host::{AsyncCtx, Host};
 use corvene_models::{AheadBehind, Commit, Mergeability};
-use gpui_kit::{App, AsyncApp};
 use tracing::warn;
 
 use crate::dispatcher::Dispatcher;
@@ -82,7 +82,7 @@ impl CompareState {
 
 impl Dispatcher {
     /// `updateCompareForm({ showBranchList })`
-    pub fn set_compare_branch_list_visible(id: u64, visible: bool, cx: &mut App) {
+    pub fn set_compare_branch_list_visible(id: u64, visible: bool, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if rs.compare.show_branch_list != visible {
@@ -97,7 +97,7 @@ impl Dispatcher {
 
     /// Ahead/behind counters for the compare branch list, one `rev-list
     /// --left-right --count` per branch.
-    fn load_compare_counts(id: u64, cx: &mut App) {
+    fn load_compare_counts(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -145,7 +145,7 @@ impl Dispatcher {
                 .collect::<HashMap<String, AheadBehind>>();
             (counts, tags)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let (counts, tags) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -160,7 +160,7 @@ impl Dispatcher {
     }
 
     /// `executeCompare({ kind: Compare, branch, comparisonMode })`
-    pub fn compare_to_branch(id: u64, branch: String, mode: ComparisonMode, cx: &mut App) {
+    pub fn compare_to_branch(id: u64, branch: String, mode: ComparisonMode, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -205,7 +205,7 @@ impl Dispatcher {
             };
             Ok::<_, corvene_git::GitError>(Some((ahead_behind, commits, merge_status)))
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 let select = Self::state(cx).update(cx, |s, cx| {
@@ -252,7 +252,7 @@ impl Dispatcher {
     }
 
     /// The Behind / Ahead tabs.
-    pub fn set_comparison_mode(id: u64, mode: ComparisonMode, cx: &mut App) {
+    pub fn set_comparison_mode(id: u64, mode: ComparisonMode, cx: &mut dyn Host) {
         let branch = Self::state(cx)
             .read(cx)
             .repo_states
@@ -264,7 +264,7 @@ impl Dispatcher {
     }
 
     /// `executeCompare({ kind: History })`: back to the branch's history.
-    pub fn exit_compare(id: u64, cx: &mut App) {
+    pub fn exit_compare(id: u64, cx: &mut dyn Host) {
         let was_comparing = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             let was = rs.compare.is_comparing();
@@ -286,7 +286,7 @@ impl Dispatcher {
     }
 
     /// After a refresh: re-run an active comparison and forget the cached counters.
-    pub(crate) fn refresh_compare(id: u64, cx: &mut App) {
+    pub(crate) fn refresh_compare(id: u64, cx: &mut dyn Host) {
         let active = Self::state(cx).update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
             rs.compare.counts_loaded = false;
@@ -304,7 +304,7 @@ impl Dispatcher {
     pub fn compare_merge_action(
         id: u64,
         kind: corvene_models::MultiCommitOperationKind,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if Self::refuse_merge_while_conflicted(id, cx) {
             return;

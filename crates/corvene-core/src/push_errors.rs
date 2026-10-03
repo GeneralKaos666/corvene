@@ -10,8 +10,8 @@
 //! ([`plain_remote_error`], [`plain_clone_error`]); GHD shows git's text
 //! (desktop#1325, desktop#13187).
 
+use crate::host::Host;
 use corvene_models::{BypassReason, SecretLocation, SecretScanResult};
-use gpui_kit::App;
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
@@ -27,7 +27,7 @@ impl Dispatcher {
         reason: BypassReason,
         secrets: Vec<SecretScanResult>,
         mut bypassed: Vec<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some(github) = Self::state(cx)
             .read(cx)
