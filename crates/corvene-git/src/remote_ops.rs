@@ -525,7 +525,18 @@ pub fn pull_with_rebase(git: Arc<GitBinary>, workdir: &Path) -> bool {
     })
 }
 
+/// `git config --get <key>` inside `workdir`. Read in-process from the
+/// cached gitoxide handle (every configuration file, includes resolved, the
+/// last value wins as with git); git itself only when gitoxide cannot open
+/// the repository. Status asks on every refresh, before it can start.
 pub fn config_value(git: Arc<GitBinary>, workdir: &Path, key: &str) -> Option<String> {
+    if let Ok(repo) = crate::handle::open(workdir) {
+        return repo
+            .config_snapshot()
+            .string(key)
+            .map(|v| v.to_string().trim().to_string())
+            .filter(|s| !s.is_empty());
+    }
     GitCommand::new(git)
         .args(["config", "--get", key])
         .current_dir(workdir)
