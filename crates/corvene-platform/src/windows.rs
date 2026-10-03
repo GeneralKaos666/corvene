@@ -5,8 +5,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use windows::Win32::UI::WindowsAndMessaging::{
-    SPI_GETFONTSMOOTHING, SPI_GETFONTSMOOTHINGTYPE, SPI_GETHIGHCONTRAST,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    SPI_GETCLIENTAREAANIMATION, SPI_GETFONTSMOOTHING, SPI_GETFONTSMOOTHINGTYPE,
+    SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
 };
 
 /// Corvene is a GUI program: a console program it starts would open a
@@ -36,6 +36,22 @@ pub fn high_contrast() -> bool {
         )
     };
     read.is_ok() && info.dwFlags.contains(HCF_HIGHCONTRASTON)
+}
+
+/// Settings › Accessibility › Visual effects › Animation effects
+/// (`SPI_GETCLIENTAREAANIMATION`); on when it can't be read.
+pub fn client_area_animation() -> bool {
+    let mut on = 1i32;
+    // SAFETY: the call writes one BOOL to the pointer it is given
+    let read = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut on).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    read.is_err() || on != 0
 }
 
 /// Whether ClearType is on (Chromium draws subpixel text then, grayscale

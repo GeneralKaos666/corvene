@@ -2586,6 +2586,21 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// Honour the system's Reduce Motion setting.
+    SYSTEM_REDUCE_MOTION = 643 "system-reduce-motion" {
+        title: "Follow the system's Reduce Motion",
+        summary: "With Reduce Motion on (macOS Accessibility › Display, Windows' Animation \
+                  effects off, GNOME's Reduce Animation), spinners stand still and the mouse \
+                  wheel scrolls without easing.",
+        ghd_behaviour: "Animates regardless of the system setting.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3318)],
+        code: &["crates/corvene/src/main.rs", "crates/corvene-platform/src/accessibility.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

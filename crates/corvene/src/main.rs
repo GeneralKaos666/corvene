@@ -215,8 +215,16 @@ pub(crate) fn main() {
                 .bool(corvene_core::flags::ids::CALENDAR_RELATIVE_DATES),
         );
         corvene_ui::widgets::sync_hover_while_typing(cx);
+        let mut last_reduce_motion_flag = sync_reduce_motion(cx);
         cx.observe(&state, move |state, cx| {
             corvene_ui::widgets::sync_hover_while_typing(cx);
+            let reduce_motion_flag = state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::SYSTEM_REDUCE_MOTION);
+            if reduce_motion_flag != last_reduce_motion_flag {
+                last_reduce_motion_flag = sync_reduce_motion(cx);
+            }
             Dispatcher::sync_crash_reports_setting(cx);
             // accounts or Settings › Notifications changed: (un)subscribe
             Dispatcher::sync_alive_subscriptions(cx);
@@ -719,6 +727,9 @@ pub(crate) fn main() {
                 .update(cx, |_, window, cx| {
                     ws.update(cx, |_, cx| {
                         cx.observe_window_activation(window, |_, window, cx| {
+                            if window.is_window_active() {
+                                sync_reduce_motion(cx);
+                            }
                             let theme = APPLIED_THEME.with(|t| t.get());
                             if window.is_window_active()
                                 && theme == ThemeSetting::System
@@ -1128,6 +1139,19 @@ fn resolve_theme(setting: ThemeSetting, cx: &App) -> corvene_ui::theme::GhdTheme
         .map(|s| corvene_ui::theme::ThemeVariants::of(&s.read(cx).flags))
         .unwrap_or_default();
     resolve_theme_with(setting, high_contrast, variants, cx)
+}
+
+/// `643-system-reduce-motion`: spinners and smooth scrolling follow the
+/// system's Reduce Motion setting (read again whenever the window is
+/// activated). Returns the flag's value.
+fn sync_reduce_motion(cx: &mut App) -> bool {
+    let on = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+        s.read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::SYSTEM_REDUCE_MOTION)
+    });
+    cx.set_reduce_motion(on && corvene_platform::accessibility::reduce_motion());
+    on
 }
 
 /// `resolve_theme` before the app state exists: with `high_contrast` off a
