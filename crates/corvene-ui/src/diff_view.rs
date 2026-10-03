@@ -26,6 +26,10 @@
 //! Deviation (`751-diff-font-size`): the rows' font size can be set (9–16 px
 //! in the 20 px rows); GHD's is fixed at 11 px.
 //!
+//! Deviation (`758-wide-hunk-handle`): in the unified diff the whole
+//! old-line-number column can act as the hunk handle (GHD: only the 16 px
+//! strip; the new-number column keeps selecting single lines).
+//!
 //! Deviation (`757-diff-line-height`): the rows' height can be set (14–32
 //! px); GHD's is fixed at 20 px.
 //!
@@ -2534,6 +2538,11 @@ impl DiffView {
                 s.read(cx)
                     .flags
                     .bool(corvene_core::flags::ids::DIFF_SHOW_WHITESPACE)
+            }),
+            wide_hunk_handle: AppState::try_global(cx).is_some_and(|s| {
+                s.read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::WIDE_HUNK_HANDLE)
             }),
         });
         let rows = self.rows.clone();

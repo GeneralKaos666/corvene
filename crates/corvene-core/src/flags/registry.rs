@@ -3163,6 +3163,23 @@ registry! {
         code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// The old-line-number column selects the whole hunk.
+    WIDE_HUNK_HANDLE = 758 "wide-hunk-handle" {
+        title: "Wide hunk handle",
+        summary: "In the unified diff of the Changes tab, clicking the old line number column \
+                  ticks or unticks the whole block of changes, like the thin handle strip to its \
+                  left; the new line number column still selects single lines (and drags \
+                  ranges).",
+        ghd_behaviour: "Only the 16 px strip selects a block; both number columns select single \
+                        lines.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20945)],
+        code: &["crates/corvene-ui/src/diff_view_rows.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

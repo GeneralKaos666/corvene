@@ -161,6 +161,8 @@ pub struct RowContext {
     pub text_bounds: TextBounds,
     /// `748-diff-show-whitespace`: marks spaces and tabs in the text.
     pub show_whitespace: bool,
+    /// `758-wide-hunk-handle`: the old-number column toggles the group.
+    pub wide_hunk_handle: bool,
 }
 
 impl RowContext {
@@ -1024,7 +1026,53 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
                     }),
             )
         })
-        .child(number(row.old).border_r_1().border_color(num_border))
+        .child({
+            let old_number = number(row.old).border_r_1().border_color(num_border);
+            // `758-wide-hunk-handle`: the old-number column toggles the
+            // whole group, like the 16 px handle strip
+            match row
+                .group
+                .filter(|_| ctx.wide_hunk_handle && selectable && changed)
+            {
+                Some((start, len)) => {
+                    let kind = ctx
+                        .groups
+                        .get(&start)
+                        .copied()
+                        .unwrap_or(DiffSelectionType::None);
+                    let (repo, path) = (ctx.repo, ctx.path.clone());
+                    let (view, view_for_hint) = (ctx.view.clone(), ctx.view.clone());
+                    old_number
+                        .id(("diff-old-number", abs as usize))
+                        .on_hover(move |hovered: &bool, _, cx| {
+                            let next = if *hovered { Some(start) } else { None };
+                            view.update(cx, |this, cx| this.set_hovered_group(next, cx))
+                                .ok();
+                        })
+                        .on_mouse_down(MouseButton::Left, move |ev, _, cx| {
+                            cx.stop_propagation();
+                            if hide_whitespace {
+                                view_for_hint
+                                    .update(cx, |this, cx| {
+                                        this.show_whitespace_hint(ev.position, cx)
+                                    })
+                                    .ok();
+                                return;
+                            }
+                            Dispatcher::set_diff_lines(
+                                repo,
+                                path.clone(),
+                                start,
+                                len,
+                                kind != DiffSelectionType::All,
+                                cx,
+                            )
+                        })
+                        .into_any_element()
+                }
+                None => old_number.into_any_element(),
+            }
+        })
         .child(number(row.new));
 
     el = el.child(gutter).child(content);
