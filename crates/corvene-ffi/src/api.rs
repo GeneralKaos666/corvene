@@ -10,9 +10,10 @@ use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 
 use crate::runtime::Services;
 use crate::vm::{
-    BannerVm, BranchesVm, ChangesVm, CommitDetailVm, DesignStyleVm, DiffHeaderVm, DiffRowVm,
-    HistoryVm, PopupVm, RepoListVm, SessionVm, SettingsVm, ThemeVm, banner, branches, changes,
-    commit_detail, diff_header, diff_rows, history, popup, repo_list, session, settings,
+    BannerVm, BranchesVm, ChangesVm, CommitDetailVm, ConflictsVm, DesignStyleVm, DiffHeaderVm,
+    DiffRowVm, HistoryVm, McoVm, PopupVm, PullRequestsVm, RepoListVm, ResolutionVm, SessionVm,
+    SettingsVm, ThemeVm, banner, branches, changes, commit_detail, conflicts, diff_header,
+    diff_rows, history, mco, popup, pull_requests, repo_list, session, settings,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -619,5 +620,104 @@ impl Corvene {
     pub fn reorder_commits(&self, repo: u64, to_move: Vec<String>, before: Option<String>) {
         self.loop_
             .post(move |host| Dispatcher::reorder_commits(repo, to_move, before, false, host));
+    }
+
+    // ---- the operation in flight and its conflicts ----
+
+    pub async fn mco(&self, repo: u64) -> Option<McoVm> {
+        self.loop_
+            .query(move |host| mco(host.state_ref(), repo))
+            .await
+    }
+
+    pub async fn conflicts(&self, repo: u64) -> Option<ConflictsVm> {
+        self.loop_
+            .query(move |host| conflicts(host.state_ref(), repo))
+            .await
+    }
+
+    /// Moves the wizard to `step`: "choose-branch", "warn-force-push",
+    /// "show-progress", "show-conflicts", "hide-conflicts", "confirm-abort".
+    pub fn set_mco_step(&self, repo: u64, step: String) {
+        use corvene_core::mco::McoStep;
+        let step = match step.as_str() {
+            "choose-branch" => McoStep::ChooseBranch,
+            "warn-force-push" => McoStep::WarnForcePush,
+            "show-progress" => McoStep::ShowProgress,
+            "show-conflicts" => McoStep::ShowConflicts,
+            "hide-conflicts" => McoStep::HideConflicts,
+            "confirm-abort" => McoStep::ConfirmAbort,
+            _ => return,
+        };
+        self.loop_
+            .post(move |host| Dispatcher::set_mco_step(repo, step, host));
+    }
+
+    pub fn show_conflicts(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::show_conflicts(repo, host));
+    }
+
+    pub fn hide_conflicts(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::hide_conflicts(repo, host));
+    }
+
+    /// Ours / Theirs for a conflicted file; `None` goes back to manual.
+    pub fn set_manual_resolution(&self, repo: u64, path: String, resolution: Option<ResolutionVm>) {
+        let resolution = resolution.map(|r| match r {
+            ResolutionVm::Ours => corvene_models::ManualConflictResolution::Ours,
+            ResolutionVm::Theirs => corvene_models::ManualConflictResolution::Theirs,
+        });
+        self.loop_
+            .post(move |host| Dispatcher::set_manual_resolution(repo, path, resolution, host));
+    }
+
+    pub fn continue_after_conflicts(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::continue_after_conflicts(repo, host));
+    }
+
+    /// History › Cherry-pick…: starts the flow for the selected commits.
+    pub fn start_cherry_pick(&self, repo: u64, shas: Vec<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::start_cherry_pick_flow(repo, shas, host));
+    }
+
+    pub fn cherry_pick_to_branch(&self, repo: u64, target: String) {
+        self.loop_
+            .post(move |host| Dispatcher::cherry_pick_to_branch(repo, target, host));
+    }
+
+    pub fn cherry_pick_to_new_branch(&self, repo: u64, name: String, start_point: Option<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::cherry_pick_to_new_branch(repo, name, start_point, host));
+    }
+
+    pub fn squash(&self, repo: u64, to_squash: Vec<String>, onto: String, message: String) {
+        self.loop_
+            .post(move |host| Dispatcher::squash(repo, to_squash, onto, message, false, host));
+    }
+
+    // ---- pull requests ----
+
+    pub async fn pull_requests(&self, repo: u64) -> Option<PullRequestsVm> {
+        self.loop_
+            .query(move |host| pull_requests(host.state_ref(), repo))
+            .await
+    }
+
+    pub fn checkout_pull_request(&self, repo: u64, number: u64) {
+        self.loop_.post(move |host| {
+            let pr = host
+                .state_ref()
+                .pull_requests_for(repo)
+                .iter()
+                .find(|pr| pr.number == number)
+                .cloned();
+            if let Some(pr) = pr {
+                Dispatcher::checkout_pull_request(repo, pr, host);
+            }
+        });
     }
 }
