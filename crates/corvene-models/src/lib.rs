@@ -39,6 +39,10 @@ pub struct Repository {
     /// deleted from the history context menu.
     #[serde(default)]
     pub tags_to_push: Vec<String>,
+    /// Corvene (flag `267-pinned-repositories`): listed in the repository
+    /// list's Pinned group.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// GHD `ICommitOptions`: `skipCommitHooks`, `signOffCommits`, `allowEmptyCommit`.
@@ -66,6 +70,7 @@ impl Repository {
             main_worktree_path: None,
             is_tutorial_repository: false,
             tags_to_push: Vec::new(),
+            pinned: false,
         }
     }
 

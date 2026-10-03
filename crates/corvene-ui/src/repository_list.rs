@@ -200,6 +200,23 @@ impl RepositoryFoldout {
         let key = |k: String| collapsible.then_some(k);
 
         let mut groups: Vec<Group> = Vec::new();
+        // Corvene (`267-pinned-repositories`): the pinned repositories, by
+        // name, above Recent (they stay in their owner groups too)
+        if !filtering
+            && state
+                .flags
+                .bool(corvene_core::flags::ids::PINNED_REPOSITORIES)
+        {
+            let pinned: Vec<_> = state
+                .sorted_repositories()
+                .into_iter()
+                .filter(|r| r.pinned)
+                .map(|r| (r.clone(), Vec::new()))
+                .collect();
+            if !pinned.is_empty() {
+                groups.push(Group::new("Pinned", key(":pinned".into()), pinned));
+            }
+        }
         if !filtering {
             // Corvene (`209-recent-repositories-count`; GHD shows 3)
             let shown = usize::try_from(
@@ -696,6 +713,17 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
         items.push(MenuItem::new(
             mac_or("Remove Alias", "Remove alias"),
             move |_, cx| Dispatcher::change_repository_alias(id, None, cx),
+        ));
+    }
+    // Corvene (`267-pinned-repositories`)
+    if state
+        .flags
+        .bool(corvene_core::flags::ids::PINNED_REPOSITORIES)
+    {
+        let pinned = repo.pinned;
+        items.push(MenuItem::new(
+            if pinned { "Unpin" } else { "Pin" },
+            move |_, cx| Dispatcher::set_repository_pinned(id, !pinned, cx),
         ));
     }
     items.extend([

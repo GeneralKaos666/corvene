@@ -2297,6 +2297,17 @@ impl Dispatcher {
         });
     }
 
+    /// Corvene (`267-pinned-repositories`): pin or unpin a repository.
+    pub fn set_repository_pinned(id: u64, pinned: bool, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
+                repo.pinned = pinned;
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
     /// Edit the repository's persisted `tagsToPush` (`storeTagsToPush`).
     pub(crate) fn update_tags_to_push(id: u64, cx: &mut App, edit: impl FnOnce(&mut Vec<String>)) {
         Self::state(cx).update(cx, |s, cx| {

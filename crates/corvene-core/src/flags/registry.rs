@@ -1425,6 +1425,22 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/persistence.rs"],
     },
 
+    /// Pin repositories to the top of the repository list.
+    PINNED_REPOSITORIES = 267 "pinned-repositories" {
+        title: "Pinned repositories",
+        summary: "The repository list's context menu offers Pin and Unpin; pinned repositories are \
+                  listed by name in a Pinned group above Recent (and stay in their owner groups). \
+                  The group is hidden while the list is filtered.",
+        ghd_behaviour: "Only the three most recently opened repositories are listed above the \
+                        owner groups; there is no way to keep a repository at the top.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22751)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
