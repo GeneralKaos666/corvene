@@ -4,66 +4,42 @@
 //! counts `from...to` in a background worker (`getAheadBehind(repository,
 //! revSymmetricDifference(from, to))`), caches the result per repository
 //! and range, and calls back unless the request was disposed first. It feeds
-//! the compare branch list. Corvene's counterpart:
-//!
-//! - the count is `corvene_git::symmetric_ahead_behind(git, path, from,
-//!   to)` ([`wait_for_ahead_behind`]);
-//! - the cache is the repository's `CompareState::branch_counts`, keyed by
-//!   the other branch's name (`to`) relative to the current branch
-//!   (`from`), so a new store is `CompareState::default()` and
-//!   `tryGetAheadBehind` is a lookup in it ([`try_get_ahead_behind`]);
-//! - only `Dispatcher::load_compare_counts` (needs a gpui `App`) fills that
-//!   cache, one `symmetric_ahead_behind` per branch, with no way to cancel a
-//!   request: [`get_ahead_behind`] is a stand-in for the store's
-//!   cancellable, caching request.
+//! the compare branch list. It is
+//! `corvene_core::ahead_behind_store::AheadBehindStore`
+//! (`AppState::ahead_behind`, which `Dispatcher::load_compare_counts` asks
+//! for every branch): its callbacks run on the thread that owns the store,
+//! at once for a cached range and otherwise from `poll` / `wait` once the
+//! background worker has counted the range, so the test's
+//! `waitForAheadBehind` subscribes and then `wait`s.
 
 use std::path::Path;
 
 use corvene_core::AheadBehind;
-use corvene_core::compare::CompareState;
+use corvene_core::ahead_behind_store::{AheadBehindStore, Disposable};
 use corvene_test_support::{
     Tree, TreeEntry, create_branch, exec, git, make_commit, setup_empty_repository, switch_to,
 };
 
-/// GitHub Desktop's `AheadBehindStore`: Corvene's cache of counts.
-type AheadBehindStore = CompareState;
-
-/// The `IDisposable` GitHub Desktop's `getAheadBehind` returns.
-struct Disposable;
-
-impl Disposable {
-    fn dispose(self) {
-        unimplemented!("Corvene's ahead/behind requests cannot be cancelled")
-    }
-}
-
-/// Stand-in for GitHub Desktop's `AheadBehindStore.getAheadBehind(repository,
-/// from, to, callback)`: count in the background, cache the result and call
-/// `callback` unless the returned handle was disposed first. Corvene fills
-/// `CompareState::branch_counts` only from `Dispatcher::load_compare_counts`
-/// (needs a gpui `App`) and cannot cancel it; replace this with a gpui-free
-/// call once there is one and remove the `#[ignore]`s.
+/// GitHub Desktop's `AheadBehindStore.getAheadBehind(repository, from, to,
+/// callback)`.
 fn get_ahead_behind(
-    _store: &mut AheadBehindStore,
-    _repo: &Path,
-    _from: &str,
-    _to: &str,
-    _callback: impl FnOnce(AheadBehind) + 'static,
+    store: &mut AheadBehindStore,
+    repo: &Path,
+    from: &str,
+    to: &str,
+    callback: impl FnOnce(AheadBehind) + 'static,
 ) -> Disposable {
-    unimplemented!(
-        "no gpui-free, cancellable ahead/behind request (Dispatcher::load_compare_counts)"
-    )
+    store.get_ahead_behind(git(), repo, from, to, callback)
 }
 
-/// GitHub Desktop's `tryGetAheadBehind(repository, from, to)`: the cached
-/// count, if any. Corvene caches per repository by the other branch, `to`.
+/// GitHub Desktop's `tryGetAheadBehind(repository, from, to)`.
 fn try_get_ahead_behind(
     store: &AheadBehindStore,
-    _repo: &Path,
-    _from: &str,
+    repo: &Path,
+    from: &str,
     to: &str,
 ) -> Option<AheadBehind> {
-    store.branch_counts.get(to).copied()
+    store.try_get_ahead_behind(repo, from, to)
 }
 
 /// The test's `getSHA(repo)`: `git rev-parse HEAD`.
@@ -71,23 +47,27 @@ fn get_sha(repo: &Path) -> String {
     exec(["rev-parse", "HEAD"], repo).stdout.trim().to_string()
 }
 
-/// The test's `waitForAheadBehind(store, repo, from, to)`: the count the
-/// store's worker makes for `from...to`, `symmetric_ahead_behind`. It does
-/// not go through Corvene's cache, which nothing outside the dispatcher
-/// fills (see the module docs).
+/// The test's `waitForAheadBehind(store, repo, from, to)`: subscribe to
+/// `from...to` and wait for the callback (`wait` blocks until the worker has
+/// counted every requested range).
 fn wait_for_ahead_behind(
-    _store: &mut AheadBehindStore,
+    store: &mut AheadBehindStore,
     repo: &Path,
     from: &str,
     to: &str,
 ) -> Option<AheadBehind> {
-    corvene_git::symmetric_ahead_behind(git(), repo, from, to)
-        .unwrap_or_else(|err| panic!("ahead/behind for range {from}...{to}: {err}"))
+    let result = std::rc::Rc::new(std::cell::Cell::new(None));
+    let slot = result.clone();
+    get_ahead_behind(store, repo, from, to, move |ahead_behind| {
+        slot.set(Some(ahead_behind))
+    });
+    store.wait();
+    result.get()
 }
 
 /// `beforeEach`: `store = new AheadBehindStore()`.
 fn store() -> AheadBehindStore {
-    CompareState::default()
+    AheadBehindStore::new()
 }
 
 // GHD: unit/ahead-behind-store-test.ts › AheadBehindStore › tryGetAheadBehind › returns undefined for uncached range
@@ -143,7 +123,6 @@ fn calculates_ahead_behind_for_diverged_branches() {
 
 // GHD: unit/ahead-behind-store-test.ts › AheadBehindStore › getAheadBehind › returns cached result on subsequent calls
 #[test]
-#[ignore = "ghd: missing: no gpui-free ahead/behind cache; counts reach CompareState::branch_counts only through Dispatcher::load_compare_counts (needs a gpui App), symmetric_ahead_behind caches nothing, so tryGetAheadBehind finds None"]
 fn returns_cached_result_on_subsequent_calls() {
     let mut store = store();
     let repo = setup_empty_repository();
@@ -178,7 +157,6 @@ fn returns_cached_result_on_subsequent_calls() {
 
 // GHD: unit/ahead-behind-store-test.ts › AheadBehindStore › getAheadBehind › supports aborting via disposable
 #[test]
-#[ignore = "ghd: missing: no cancellable ahead/behind request; Dispatcher::load_compare_counts (needs a gpui App) returns no handle to dispose (GHD AheadBehindStore.getAheadBehind returns an IDisposable)"]
 fn supports_aborting_via_disposable() {
     let mut store = store();
     let repo = setup_empty_repository();

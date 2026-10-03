@@ -1,9 +1,24 @@
 //! Typed accessors over the generic `corvene_store::Store`.
+//!
+//! GHD keeps each preference in its own `localStorage` key and reads it with
+//! a fallback (`lib/local-storage.ts` `getBoolean` and friends), so one
+//! unreadable value only resets that preference: [`StoreExt::settings`] does
+//! the same for the fields of the stored `settings` record
+//! ([`settings_from_value`]).
+//!
+//! Accounts load as in GHD's `AccountsStore.loadFromStore`
+//! (`lib/stores/accounts-store.ts`): a `*.ghe.com` account still on the
+//! `/api/v3` endpoint is moved to the `api.` subdomain and the migrated list
+//! is saved (`getMigratedGHEAccounts`). The GitHub repositories of the
+//! repository list get the same move when they load (GHD matches them to
+//! the accounts again on selection, which Corvene does not do yet), so they
+//! keep matching their account.
 
 use std::path::PathBuf;
 
 use corvene_store::{Result, Store};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use corvene_models::{Account, Repository, SyntaxHighlighter, ThemeSetting};
 
@@ -325,6 +340,107 @@ impl Default for Settings {
     }
 }
 
+/// The stored `settings` record as [`Settings`]: a field whose value cannot
+/// be read (`"welcome_completed": "a"`) falls back to its default and the
+/// other fields are kept, as GHD's per-key `getBoolean` / `getNumber` reads
+/// do; a record that is not an object gives the defaults.
+pub fn settings_from_value(value: serde_json::Value) -> Settings {
+    if let Ok(settings) = serde_json::from_value::<Settings>(value.clone()) {
+        return settings;
+    }
+    let serde_json::Value::Object(stored) = value else {
+        warn!("ignoring unreadable settings");
+        return Settings::default();
+    };
+    // every field has a default, so each key can be tried on its own
+    let readable: serde_json::Map<String, serde_json::Value> = stored
+        .into_iter()
+        .filter(|(key, value)| {
+            let single = serde_json::Value::Object(serde_json::Map::from_iter([(
+                key.clone(),
+                value.clone(),
+            )]));
+            let ok = serde_json::from_value::<Settings>(single).is_ok();
+            if !ok {
+                warn!(key, "ignoring an unreadable setting");
+            }
+            ok
+        })
+        .collect();
+    serde_json::from_value(serde_json::Value::Object(readable)).unwrap_or_default()
+}
+
+/// GHD `markWelcomeFlowComplete` (`lib/welcome.ts`): record in the stored
+/// settings that the welcome flow was shown (`Settings::welcome_completed`,
+/// GHD's `has-shown-welcome-flow`). A failure is logged.
+pub fn mark_welcome_flow_complete(store: &Store) {
+    let saved = store.settings().and_then(|mut settings| {
+        settings.welcome_completed = true;
+        store.save_settings(&settings)
+    });
+    if let Err(err) = saved {
+        warn!(%err, "could not record that the welcome flow was shown");
+    }
+}
+
+/// GHD `getMigratedGHEAccounts`: `accounts` with every `*.ghe.com`
+/// endpoint whose host does not start with `api.` moved to
+/// `https://api.<host>/` (`getEnterpriseAPIURL`), or `None` when none had
+/// to move.
+pub fn migrated_ghe_accounts(accounts: &[Account]) -> Option<Vec<Account>> {
+    let mut migrated = false;
+    let accounts = accounts
+        .iter()
+        .map(|account| {
+            let mut account = account.clone();
+            if let Some(endpoint) = migrated_ghe_endpoint(&account.endpoint) {
+                account.endpoint = endpoint;
+                migrated = true;
+            }
+            account
+        })
+        .collect();
+    migrated.then_some(accounts)
+}
+
+/// `endpoint` moved as in [`migrated_ghe_accounts`], or `None` when it
+/// stays.
+fn migrated_ghe_endpoint(endpoint: &str) -> Option<String> {
+    // `URL.hostname` is lowercased
+    let host = corvene_github::endpoint::endpoint_host(endpoint)?.to_ascii_lowercase();
+    (corvene_github::endpoint::is_ghe(endpoint) && !host.starts_with("api."))
+        .then(|| corvene_github::endpoint::get_enterprise_api_url(endpoint))
+}
+
+/// `repositories` whose GitHub repository (or its parent) is on a
+/// `*.ghe.com` `/api/v3` endpoint, moved as in [`migrated_ghe_accounts`];
+/// `None` when none had to move.
+pub fn migrated_ghe_repositories(repositories: &[Repository]) -> Option<Vec<Repository>> {
+    fn migrate(gh: &mut corvene_models::GitHubRepository) -> bool {
+        let mut migrated = false;
+        if let Some(endpoint) = migrated_ghe_endpoint(&gh.endpoint) {
+            gh.endpoint = endpoint;
+            migrated = true;
+        }
+        if let Some(parent) = gh.parent.as_mut() {
+            migrated |= migrate(parent);
+        }
+        migrated
+    }
+    let mut migrated = false;
+    let repositories = repositories
+        .iter()
+        .map(|repository| {
+            let mut repository = repository.clone();
+            if let Some(gh) = repository.github.as_mut() {
+                migrated |= migrate(gh);
+            }
+            repository
+        })
+        .collect();
+    migrated.then_some(repositories)
+}
+
 /// Keys are namespaced strings; values JSON. Add a key here, never ad hoc.
 pub trait StoreExt {
     fn settings(&self) -> Result<Settings>;
@@ -360,7 +476,10 @@ pub trait StoreExt {
 
 impl StoreExt for Store {
     fn settings(&self) -> Result<Settings> {
-        Ok(self.get("settings")?.unwrap_or_default())
+        Ok(self
+            .get::<serde_json::Value>("settings")?
+            .map(settings_from_value)
+            .unwrap_or_default())
     }
 
     fn save_settings(&self, settings: &Settings) -> Result<()> {
@@ -376,7 +495,15 @@ impl StoreExt for Store {
     }
 
     fn repositories(&self) -> Result<Vec<Repository>> {
-        Ok(self.get("repositories")?.unwrap_or_default())
+        let repositories: Vec<Repository> = self.get("repositories")?.unwrap_or_default();
+        // see the module doc
+        let Some(migrated) = migrated_ghe_repositories(&repositories) else {
+            return Ok(repositories);
+        };
+        if let Err(err) = self.save_repositories(&migrated) {
+            warn!(%err, "could not save the migrated GitHub Enterprise repositories");
+        }
+        Ok(migrated)
     }
 
     fn save_repositories(&self, repos: &[Repository]) -> Result<()> {
@@ -407,8 +534,17 @@ impl StoreExt for Store {
         self.set("ui.selected_repository", &id)
     }
 
+    /// `AccountsStore.loadFromStore`: the stored accounts, `*.ghe.com`
+    /// ones migrated (and saved) as in [`migrated_ghe_accounts`].
     fn accounts(&self) -> Result<Vec<Account>> {
-        Ok(self.get("accounts")?.unwrap_or_default())
+        let accounts: Vec<Account> = self.get("accounts")?.unwrap_or_default();
+        let Some(migrated) = migrated_ghe_accounts(&accounts) else {
+            return Ok(accounts);
+        };
+        if let Err(err) = self.save_accounts(&migrated) {
+            warn!(%err, "could not save the migrated GitHub Enterprise accounts");
+        }
+        Ok(migrated)
     }
 
     fn generic_logins(&self) -> Result<std::collections::HashMap<String, String>> {
@@ -457,6 +593,61 @@ mod tests {
             .insert("commit-templates".into(), Value::Bool(false));
         store.save_flags(&flags).unwrap();
         assert_eq!(store.flags().unwrap(), flags);
+    }
+
+    #[test]
+    fn unreadable_settings_fall_back_one_by_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_in(dir.path()).unwrap();
+        store
+            .set(
+                "settings",
+                &serde_json::json!({ "welcome_completed": "a", "sidebar_width": 300.0 }),
+            )
+            .unwrap();
+        let settings = store.settings().unwrap();
+        assert!(!settings.welcome_completed);
+        assert_eq!(settings.sidebar_width, 300.0);
+        mark_welcome_flow_complete(&store);
+        assert!(store.settings().unwrap().welcome_completed);
+        assert_eq!(store.settings().unwrap().sidebar_width, 300.0);
+    }
+
+    #[test]
+    fn ghe_com_endpoints_move_to_the_api_subdomain() {
+        let account = Account {
+            endpoint: "https://whatever.ghe.com/api/v3".into(),
+            id: 1,
+            login: "joan".into(),
+            name: None,
+            avatar_url: None,
+            emails: Vec::new(),
+            scopes: Vec::new(),
+            plan: None,
+            private_primary_email: false,
+        };
+        let migrated = migrated_ghe_accounts(std::slice::from_ref(&account)).unwrap();
+        assert_eq!(migrated[0].endpoint, "https://api.whatever.ghe.com/");
+        // the keychain key and remote matching keep the web host
+        assert_eq!(migrated[0].host(), account.host());
+        assert!(migrated_ghe_accounts(&migrated).is_none());
+        let mut repository = Repository::new(1, "/r");
+        repository.github = corvene_models::github_from_remote(
+            "https://whatever.ghe.com/o/n.git",
+            &["whatever.ghe.com".into()],
+        );
+        assert_eq!(
+            repository.github.as_ref().map(|gh| gh.endpoint.as_str()),
+            Some("https://api.whatever.ghe.com/")
+        );
+        if let Some(gh) = repository.github.as_mut() {
+            gh.endpoint = "https://whatever.ghe.com/api/v3".into();
+        }
+        let moved = migrated_ghe_repositories(&[repository]).unwrap();
+        assert_eq!(
+            moved[0].github.as_ref().map(|gh| gh.endpoint.as_str()),
+            Some("https://api.whatever.ghe.com/")
+        );
     }
 
     #[test]

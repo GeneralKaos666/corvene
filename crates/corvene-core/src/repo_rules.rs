@@ -281,8 +281,14 @@ impl Dispatcher {
                         .repo_rules_for_branch(&owner, &name, &branch_for_load)
                         .unwrap_or_default();
                     if !rules.is_empty() {
-                        let gpg = corvene_git::config_value(git, &workdir, "commit.gpgsign")
-                            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+                        // `getBooleanConfigValue`: `yes`, `on` and `1` sign too
+                        let gpg = corvene_git::boolean_config_value(
+                            git,
+                            &workdir,
+                            "commit.gpgsign",
+                            false,
+                        )
+                        .unwrap_or(false);
                         info = parse_repo_rules(&rules, &rulesets, gpg);
                     }
                 }

@@ -5,45 +5,19 @@
 //! dialog's description: the target commit's body, then each squashed
 //! commit's summary and body, all trimmed and without their
 //! `Co-Authored-By` trailers (`Commit.bodyNoCoAuthors`), joined by blank
-//! lines. Corvene builds that text inline in `Dispatcher::request_squash`
-//! (`corvene-core/src/mco.rs`), from `rs.commits` of the repository state,
-//! so there is nothing to call with the cases' commits, and
-//! `corvene_models::Commit` has no trailers. The cases call a stand-in and
-//! are ignored until a function exists.
-//!
-//! [`TestCommit`] is GitHub Desktop's `Commit` as the test builds it: a
-//! `corvene_models::Commit` plus the trailers it is given, which Corvene's
-//! `Commit` cannot hold yet.
+//! lines. It is `corvene_core::mco::get_squashed_commit_description`, which
+//! `Dispatcher::request_squash` calls; GitHub Desktop's `Commit` is
+//! `corvene_models::Commit` with its `trailers`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use corvene_models::{Commit, CommitIdentity};
-
-/// GitHub Desktop's `ITrailer` (`{ token, value }`).
-type Trailer = (String, String);
-
-/// GitHub Desktop's `Commit`: Corvene's `Commit` and the trailers GitHub
-/// Desktop's carries (see the module doc).
-struct TestCommit {
-    #[allow(dead_code)]
-    commit: Commit,
-    #[allow(dead_code)]
-    trailers: Vec<Trailer>,
-}
-
-/// Stand-in for GitHub Desktop's `getSquashedCommitDescription(commits,
-/// squashOnto)`. Replace it with the Corvene function once there is one
-/// (then `TestCommit` becomes `Commit`) and remove the `#[ignore]`s.
-fn get_squashed_commit_description(_commits: &[TestCommit], _squash_onto: &TestCommit) -> String {
-    unimplemented!(
-        "Corvene builds the squashed description inline in Dispatcher::request_squash; no function takes commits"
-    )
-}
+use corvene_core::mco::get_squashed_commit_description;
+use corvene_models::{Commit, CommitIdentity, Trailer};
 
 /// The test file's `buildTestCommit(summary, body, trailers)`: `new
 /// Commit('test', 'test', summary, body, author, author, [], trailers, [])`
 /// with the author `new CommitIdentity('test', 'test', new Date())`.
-fn build_test_commit(summary: &str, body: &str, trailers: &[Trailer]) -> TestCommit {
+fn build_test_commit(summary: &str, body: &str, trailers: &[Trailer]) -> Commit {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -54,17 +28,15 @@ fn build_test_commit(summary: &str, body: &str, trailers: &[Trailer]) -> TestCom
         seconds: now,
         offset: 0,
     };
-    TestCommit {
-        commit: Commit {
-            sha: "test".to_string(),
-            summary: summary.to_string(),
-            body: body.to_string(),
-            author: author.clone(),
-            committer: author,
-            parents: Vec::new(),
-            tags: Vec::new(),
-        },
+    Commit {
+        sha: "test".to_string(),
+        summary: summary.to_string(),
+        body: body.to_string(),
+        author: author.clone(),
+        committer: author,
+        parents: Vec::new(),
         trailers: trailers.to_vec(),
+        tags: Vec::new(),
     }
 }
 
@@ -75,7 +47,6 @@ fn mock_co_author_trailers() -> Vec<Trailer> {
 
 // GHD: unit/squashed-commit-description-test.ts › getSquashedCommitDescription › builds squashed commit descriptions - no coauthors provided
 #[test]
-#[ignore = "ghd: missing: getSquashedCommitDescription (lib/squash/squashed-commit-description.ts) is inline in Dispatcher::request_squash (corvene-core/src/mco.rs), not callable; corvene_models::Commit has no trailers"]
 fn builds_squashed_commit_descriptions_no_coauthors_provided() {
     let commits = [
         build_test_commit("summary1", "desc1", &[]),
@@ -90,7 +61,6 @@ fn builds_squashed_commit_descriptions_no_coauthors_provided() {
 
 // GHD: unit/squashed-commit-description-test.ts › getSquashedCommitDescription › builds squashed commit descriptions that do not include coauthors
 #[test]
-#[ignore = "ghd: missing: getSquashedCommitDescription (lib/squash/squashed-commit-description.ts) is inline in Dispatcher::request_squash (corvene-core/src/mco.rs), not callable; corvene_models::Commit has no trailers"]
 fn builds_squashed_commit_descriptions_that_do_not_include_coauthors() {
     let mock_co_author_trailers = mock_co_author_trailers();
     let commits = [
@@ -106,7 +76,6 @@ fn builds_squashed_commit_descriptions_that_do_not_include_coauthors() {
 
 // GHD: unit/squashed-commit-description-test.ts › getSquashedCommitDescription › builds squashed commit descriptions with whitespace trimmed
 #[test]
-#[ignore = "ghd: missing: getSquashedCommitDescription (lib/squash/squashed-commit-description.ts) is inline in Dispatcher::request_squash (corvene-core/src/mco.rs), not callable; corvene_models::Commit has no trailers"]
 fn builds_squashed_commit_descriptions_with_whitespace_trimmed() {
     let mock_co_author_trailers = mock_co_author_trailers();
     let commits = [

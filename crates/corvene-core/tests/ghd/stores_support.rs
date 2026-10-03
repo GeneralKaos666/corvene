@@ -45,6 +45,7 @@ pub fn app_state() -> TestAppState {
     let dir = corvene_test_support::create_temp_directory();
     let store = Store::open_in(dir.path()).expect("open the store");
     let flags = github_desktop_flags();
+    let sign_in_accounts = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let state = AppState {
         store: Arc::new(store),
         settings: Default::default(),
@@ -60,11 +61,14 @@ pub fn app_state() -> TestAppState {
         repo_states: HashMap::new(),
         accounts: Vec::new(),
         foldout: None,
-        popup: None,
-        cloning: None,
+        popups: Default::default(),
+        cloning: Default::default(),
+        ahead_behind: Default::default(),
+        branch_pruner_generation: 0,
         pending_aliases: Vec::new(),
-        sign_in: None,
-        retry_after_sign_in: None,
+        sign_in_store: corvene_core::sign_in::SignInStore::new(sign_in_accounts.clone()),
+        sign_in_accounts,
+        authentication: None,
         watcher: None,
         watched_repo: None,
         banner: None,

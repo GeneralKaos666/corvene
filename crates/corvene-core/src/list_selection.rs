@@ -9,6 +9,13 @@
 //!
 //! Deviation: [`extend_keeping`] keeps ⌘-clicked rows on ⇧-click
 //! (`707-shift-click-keeps-selection`).
+//!
+//! Deviation: ↑ in a list with no selected row selects the last selectable
+//! row ([`find_next_selectable_row`] with `row: None`); GHD's
+//! `List.moveSelection` passes `row: -1`, from which `findNextSelectableRow`
+//! starts at the last row and steps once more, so it selects the
+//! second-to-last one. (GHD's filter box ↑, `FilterList.onKeyDown`, passes
+//! `row: 0` instead and lands on the last row, as Corvene does.)
 
 /// `createSelectionBetween`: the rows from `from` to `to` inclusive, in the
 /// direction of travel (so `from` comes first).
@@ -25,19 +32,59 @@ pub fn selection_between(order: &[String], from: usize, to: usize) -> Vec<String
     }
 }
 
-/// `moveSelection` (`findNextSelectableRow`, which wraps by default): the
-/// row `delta` away from `current`, wrapping around the ends of a list of
-/// `len` rows; with nothing selected, ↓ starts at the first row and ↑ at
-/// the last. `None` for an empty list.
-pub fn step_index(len: usize, current: Option<usize>, delta: isize) -> Option<usize> {
-    if len == 0 {
+/// GHD `findNextSelectableRow(rowCount, { direction, row, wrap },
+/// canSelectRow)` (`ui/lib/list/selection.ts`): the next row in the
+/// direction of `delta` (its sign: up when negative) from `row` that
+/// `can_select_row` accepts, wrapping around the ends when `wrap` is set.
+/// `row: None` (or a row outside the list) is GHD's `-1`, no selected row or
+/// the filter box above the list: ↓ starts at the first row, ↑ at the last
+/// (GHD: the second-to-last, see the module doc). `None` for an empty list,
+/// when no other row can be selected, or (without `wrap`) at the edge.
+pub fn find_next_selectable_row(
+    row_count: usize,
+    row: Option<usize>,
+    delta: isize,
+    wrap: bool,
+    can_select_row: impl Fn(usize) -> bool,
+) -> Option<usize> {
+    if row_count == 0 {
         return None;
     }
-    Some(match current {
-        Some(i) => (i as isize + delta).rem_euclid(len as isize) as usize,
-        None if delta < 0 => len - 1,
-        None => 0,
-    })
+    let len = row_count as isize;
+    let up = delta < 0;
+    let step = if up { -1 } else { 1 };
+    let given = row.filter(|&r| r < row_count).map(|r| r as isize);
+    // a row outside the list starts past the end the move comes from (GHD's
+    // special case for ↓ from row -1; Corvene's for ↑, see the module doc),
+    // so the first step lands on the first / last row
+    let mut current = given.unwrap_or(if up { len } else { -1 });
+    for _ in 0..row_count {
+        current += step;
+        if current >= len {
+            if !wrap {
+                break;
+            }
+            current = 0;
+        } else if current < 0 {
+            if !wrap {
+                break;
+            }
+            current = len - 1;
+        }
+        if Some(current) != given && can_select_row(current as usize) {
+            return Some(current as usize);
+        }
+    }
+    None
+}
+
+/// `moveSelection` (`findNextSelectableRow`, which wraps by default) on a
+/// list whose rows are all selectable: the row after `current` in the
+/// direction of `delta`, wrapping around the ends; with nothing selected, ↓
+/// starts at the first row and ↑ at the last. `None` for an empty list or
+/// when `current` is the only row.
+pub fn step_index(len: usize, current: Option<usize>, delta: isize) -> Option<usize> {
+    find_next_selectable_row(len, current, delta, true, |_| true)
 }
 
 /// `addSelection`: move the end of the selection one row up (`delta < 0`) or
@@ -55,10 +102,7 @@ pub fn extend_selection(
         .last()
         .and_then(|last| order.iter().position(|p| p == last))
         .unwrap_or(origin);
-    let next = end.checked_add_signed(delta)?;
-    if next >= order.len() {
-        return None;
-    }
+    let next = find_next_selectable_row(order.len(), Some(end), delta, false, |_| true)?;
     Some(selection_between(order, origin, next))
 }
 
@@ -103,6 +147,35 @@ mod tests {
         // GHD wraps around the ends
         assert_eq!(step_index(3, Some(2), 1), Some(0));
         assert_eq!(step_index(3, Some(0), -1), Some(2));
+        // the only row stays selected (GHD returns null)
+        assert_eq!(step_index(1, Some(0), 1), None);
+        assert_eq!(step_index(1, None, -1), Some(0));
+    }
+
+    #[test]
+    fn next_selectable_row_skips_rows_and_stops_without_wrap() {
+        let not_first = |row: usize| row != 0;
+        assert_eq!(
+            find_next_selectable_row(5, None, 1, true, not_first),
+            Some(1)
+        );
+        assert_eq!(
+            find_next_selectable_row(5, Some(1), -1, true, not_first),
+            Some(4)
+        );
+        assert_eq!(
+            find_next_selectable_row(5, Some(4), 1, false, |_| true),
+            None
+        );
+        assert_eq!(
+            find_next_selectable_row(5, Some(0), -1, false, |_| true),
+            None
+        );
+        assert_eq!(
+            find_next_selectable_row(5, Some(2), 1, true, |_| false),
+            None
+        );
+        assert_eq!(find_next_selectable_row(0, None, 1, true, |_| true), None);
     }
 
     fn order() -> Vec<String> {

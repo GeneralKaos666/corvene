@@ -7,15 +7,11 @@
 //! cleared to none when `clearPartialState`), the files are sorted by
 //! `caseInsensitiveCompare`, the selected files that are gone are dropped
 //! (the first file is selected when none is left), and the diff is kept
-//! only when the same single file stays selected. Corvene does these steps
-//! in two places and has no function taking a previous state and a status:
-//! `corvene_git::get_status(git, path, previous)` carries the previous
-//! selections over by path and sorts, on the output of `git status` it runs
-//! itself; `Dispatcher::refresh_repository` (needs a gpui `App`) keeps or
-//! replaces `RepositoryState::selected_file(s)` and drops the diff. Nothing
-//! clears partial selections (a commit refreshes with the previous status).
-//! [`update_changed_files`] is a stand-in returning the updated
-//! `RepositoryState`.
+//! only when the same single file stays selected. It is
+//! `corvene_core::changes_state::update_changed_files`, returning the
+//! updated `RepositoryState` (`Dispatcher::refresh_repository` applies every
+//! status it reads with its in-place form, `apply_changed_files`, with
+//! `clear_partial_state` set after a commit).
 //!
 //! - `IChangesState` is Corvene's `RepositoryState`: `workingDirectory` →
 //!   `status`, `selection.selectedFileIDs` → `selected_files` (with the
@@ -35,26 +31,13 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use corvene_core::changes_state::update_changed_files;
 use corvene_core::state::RepositoryState;
 use corvene_core::{
     Diff, DiffSelection, DiffSelectionType, FileStatusKind, GitStatusEntry,
     WorkingDirectoryFileChange, WorkingDirectoryStatus,
 };
 use corvene_test_support::{from_files, working_directory_file_change};
-
-/// Stand-in for GitHub Desktop's `updateChangedFiles(state, status,
-/// clearPartialState)`: the changes state after merging `status` into
-/// `state`. Replace it with a gpui-free Corvene function once there is one
-/// and remove the `#[ignore]`s.
-fn update_changed_files(
-    _state: &RepositoryState,
-    _status: &WorkingDirectoryStatus,
-    _clear_partial_state: bool,
-) -> RepositoryState {
-    unimplemented!(
-        "no gpui-free updateChangedFiles (corvene_git::get_status + Dispatcher::refresh_repository)"
-    )
-}
 
 /// `new WorkingDirectoryFileChange(path, { kind: Modified | New }, selection)`,
 /// with the porcelain columns git reports for that kind (`A.` / `.M`).
@@ -157,7 +140,6 @@ fn partially_selected_setup() -> (WorkingDirectoryFileChange, WorkingDirectorySt
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › workingDirectory › clears partial selection on file when clearPartialState is true
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (selection carry-over is inside corvene_git::get_status, selection in Dispatcher::refresh_repository) and nothing clears partial selections (no clearPartialState)"]
 fn clears_partial_selection_on_file_when_clear_partial_state_is_true() {
     let (partially_selected_file, old_working_directory) = partially_selected_setup();
     let prev_state = create_state(Some(old_working_directory.clone()), None);
@@ -175,7 +157,6 @@ fn clears_partial_selection_on_file_when_clear_partial_state_is_true() {
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › workingDirectory › preserves partial selection on file when clearPartialState is false
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (selection carry-over is inside corvene_git::get_status, selection in Dispatcher::refresh_repository)"]
 fn preserves_partial_selection_on_file_when_clear_partial_state_is_false() {
     let (partially_selected_file, old_working_directory) = partially_selected_setup();
     let prev_state = create_state(Some(old_working_directory.clone()), None);
@@ -193,7 +174,6 @@ fn preserves_partial_selection_on_file_when_clear_partial_state_is_false() {
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › workingDirectory › does not return same working directory object
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (selection carry-over is inside corvene_git::get_status, selection in Dispatcher::refresh_repository)"]
 fn does_not_return_same_working_directory_object() {
     let old_working_directory = from_files(files());
     let prev_state = create_state(Some(old_working_directory.clone()), None);
@@ -209,7 +189,6 @@ fn does_not_return_same_working_directory_object() {
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › selectedFileIDs › selects the first file if none found in state
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (the first-file selection is inline in Dispatcher::refresh_repository, which needs a gpui App)"]
 fn selects_the_first_file_if_none_found_in_state() {
     let files = files();
     let prev_state = create_state(None, None);
@@ -227,7 +206,6 @@ fn selects_the_first_file_if_none_found_in_state() {
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › selectedFileIDs › remembers previous selection if file is found in status
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (keeping the selection is inline in Dispatcher::refresh_repository, which needs a gpui App)"]
 fn remembers_previous_selection_if_file_is_found_in_status() {
     let files = files();
     let first_file = files[0].path.clone();
@@ -250,7 +228,6 @@ fn remembers_previous_selection_if_file_is_found_in_status() {
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › selectedFileIDs › clears selection if no files found in status
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (dropping gone files from the selection is inline in Dispatcher::refresh_repository, which needs a gpui App)"]
 fn clears_selection_if_no_files_found_in_status() {
     let files = files();
     let first_file = files[0].path.clone();
@@ -272,7 +249,6 @@ fn clears_selection_if_no_files_found_in_status() {
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › diff › clears diff if selected file is not in previous state
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (the diff is dropped inline in Dispatcher::refresh_repository, which needs a gpui App)"]
 fn clears_diff_if_selected_file_is_not_in_previous_state() {
     let working_directory = from_files(files());
 
@@ -295,7 +271,6 @@ fn clears_diff_if_selected_file_is_not_in_previous_state() {
 
 // GHD: unit/stores/updates/update-changed-files-test.ts › updateChangedFiles › diff › returns same diff if selected file from previous state is found
 #[test]
-#[ignore = "ghd: missing: no gpui-free updateChangedFiles (the diff is kept inline in Dispatcher::refresh_repository, which needs a gpui App)"]
 fn returns_same_diff_if_selected_file_from_previous_state_is_found() {
     let files = files();
     let working_directory = from_files(files.clone());

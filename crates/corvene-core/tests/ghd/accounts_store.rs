@@ -3,8 +3,8 @@
 //! `AccountsStore` is `crate::accounts_support::AccountsStore` (see there):
 //! `getAll` is `StoreExt::accounts`, the read `Dispatcher::init` does at
 //! launch, over a `corvene_store::Store` in a temporary directory, and
-//! `addAccount` is a stand-in for the account handling in
-//! `Dispatcher::finish_sign_in`.
+//! `addAccount` is `corvene_core::accounts::add_account`, which
+//! `Dispatcher::finish_sign_in` calls.
 //!
 //! The persisted `users` JSON uses Corvene's field names (`avatar_url`) and
 //! leaves out `token`, which Corvene never writes to the store (it lives in
@@ -22,7 +22,6 @@ fn accounts_store() -> AccountsStore {
 
 // GHD: unit/accounts-store-test.ts › AccountsStore › adding a new user › contains the added user
 #[test]
-#[ignore = "ghd: missing: no gpui-free AccountsStore.addAccount (lib/stores/accounts-store.ts); Corvene adds accounts in Dispatcher::finish_sign_in"]
 fn contains_the_added_user() {
     let accounts_store = accounts_store();
     let new_account_login = "joan";
@@ -43,7 +42,6 @@ fn contains_the_added_user() {
 
 // GHD: unit/accounts-store-test.ts › AccountsStore › loading persisted users › migrates .ghe.com users still using /api/v3 to api. subdomain
 #[test]
-#[ignore = "ghd: bug: loading keeps endpoint https://whatever.ghe.com/api/v3 (read and persisted); GHD migrates *.ghe.com accounts to https://api.whatever.ghe.com/ and saves it (AccountsStore.getMigratedGHEAccounts)"]
 fn migrates_ghe_com_users_still_using_api_v3_to_api_subdomain() {
     let _accounts_store = accounts_store();
     let data_store = InMemoryStore::new();

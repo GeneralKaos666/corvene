@@ -3,31 +3,21 @@
 //! GitHub Desktop's `findUpstreamRemote(parent, remotes)`
 //! (`lib/stores/helpers/find-upstream-remote.ts`) is the remote named
 //! `UpstreamRemoteName` (`upstream`) when it points at the fork's parent
-//! (`repositoryMatchesRemote`), else `null`; the git store keeps it as
-//! `upstreamRemote` and `addUpstreamRemoteIfNeeded` asks it first. Corvene
-//! has `corvene_core::UPSTREAM_REMOTE_NAME` and
-//! `corvene_models::url_matches_remote` (GHD `urlMatchesRemote` /
-//! `repositoryMatchesRemote`) but no function that finds the upstream
-//! remote: `Dispatcher::add_upstream_remote_if_needed` checks whether any
-//! remote points at the parent instead. [`find_upstream_remote`] stands in
-//! for it.
+//! (`repositoryMatchesRemote`), else `null`; `addUpstreamRemoteIfNeeded`
+//! asks it first. Corvene's is `corvene_core::forks::find_upstream_remote`
+//! (with `corvene_core::UPSTREAM_REMOTE_NAME`), which
+//! `Dispatcher::add_upstream_remote_if_needed` asks the same way.
 //!
 //! `helpers/github-repo-builder.ts` `gitHubRepoFixture` is
 //! `corvene_test_support::git_hub_repo_fixture`.
 
 use corvene_core::UPSTREAM_REMOTE_NAME;
-use corvene_models::{GitHubRepository, Remote};
+use corvene_core::forks::find_upstream_remote;
+use corvene_models::Remote;
 use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
-
-/// Stand-in for GitHub Desktop's `findUpstreamRemote(parent, remotes)`
-/// (`lib/stores/helpers/find-upstream-remote.ts`).
-fn find_upstream_remote(_parent: &GitHubRepository, _remotes: &[Remote]) -> Option<Remote> {
-    unimplemented!("Corvene has no findUpstreamRemote (lib/stores/helpers/find-upstream-remote.ts)")
-}
 
 // GHD: unit/find-upstream-remote-test.ts › findUpstreamRemote › finds the upstream
 #[test]
-#[ignore = "ghd: missing: Corvene has no findUpstreamRemote (lib/stores/helpers/find-upstream-remote.ts), only UPSTREAM_REMOTE_NAME and url_matches_remote"]
 fn finds_the_upstream() {
     let parent = git_hub_repo_fixture(GitHubRepoFixtureOptions {
         owner: "somsubhra",

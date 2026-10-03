@@ -3,31 +3,24 @@
 //! GitHub Desktop's `RepositoriesStore` (`lib/stores/repositories-store.ts`)
 //! adds, reads and changes repository rows in IndexedDB
 //! (`TestRepositoriesDatabase`). Corvene keeps the repository list in
-//! `AppState::repositories`, persisted whole by
-//! `corvene_store::Store`'s `StoreExt::save_repositories` and read back by
-//! `StoreExt::repositories`; every change to it happens inside a
-//! `Dispatcher` method that needs a gpui `App`:
-//!
-//! - `addRepository(path, gitDir)`: `Dispatcher::add_repository_then`
-//!   (which also probes the path with `open_repository`, so it cannot add
-//!   the made-up paths these cases use);
-//! - `setGitHubRepository(repository, gitHubRepository)`: the dispatcher
-//!   sets `Repository::github` (`add_repository_then`,
-//!   `refresh_github_repository`);
-//! - `switchWorktree(repository, path, isMissing, gitDir, mainWorktreePath)`:
-//!   `Dispatcher::switch_worktree` (`apply_worktree_path`);
-//! - `updateRepositoryPath(repository, path, gitDir, mainWorktreePath,
-//!   clearMainWorktreePath)`: `Dispatcher::relocate_repository`.
+//! `AppState::repositories`, saved whole by `corvene_store::Store`'s
+//! `StoreExt::save_repositories` and read back by `StoreExt::repositories`;
+//! `corvene_core::repositories_store::RepositoriesStore` borrows the list and
+//! the store and makes every change (the dispatcher reaches it through
+//! `AppState::repositories_store`).
 //!
 //! [`RepositoriesStore`] maps each method: `getAll` is
 //! `StoreExt::repositories` on a store in a temporary directory (GitHub
-//! Desktop's `new TestRepositoriesDatabase()` + `reset()`),
-//! `upsertGitHubRepository(endpoint, apiRepo)` is the API conversion
-//! `corvene_github::Client::convert` (Corvene keeps no table of GitHub
-//! repositories to upsert into), and the others are stand-ins. The case
-//! that compares GitHub repository database ids is skipped
-//! (`tools/ghd-tests/skips/stores.tsv`): Corvene embeds the GitHub
-//! repository in each `Repository` and has no such id.
+//! Desktop's `new TestRepositoriesDatabase()` + `reset()`), the changes go
+//! through Corvene's `RepositoriesStore` over the list read back from that
+//! store, and `upsertGitHubRepository(endpoint, apiRepo)` is the API
+//! conversion `corvene_github::Client::convert` (Corvene keeps no table of
+//! GitHub repositories to upsert into). Corvene records no `gitDir` (its
+//! missing-worktree recovery reads the main worktree path only), so the
+//! `gitDir` arguments are not passed on. The case that compares GitHub
+//! repository database ids is skipped (`tools/ghd-tests/skips/stores.tsv`):
+//! Corvene embeds the GitHub repository in each `Repository` and has no such
+//! id.
 //!
 //! The `apiRepo` object is deserialised from the same JSON fields as
 //! GitHub Desktop's `IAPIFullRepository` literal.
@@ -35,6 +28,7 @@
 use std::path::{Path, PathBuf};
 
 use corvene_core::persistence::StoreExt;
+use corvene_core::repositories_store::RepositoriesStore as CoreRepositoriesStore;
 use corvene_core::{GitHubRepository, Repository};
 use corvene_github::api::ApiRepository;
 use corvene_github::{Client, Endpoint};
@@ -57,12 +51,18 @@ impl RepositoriesStore {
         Self { store, _dir: dir }
     }
 
-    /// Stand-in for `addRepository(path, gitDir)`: persist a new
-    /// repository at `path` and return it. Corvene adds repositories in
-    /// `Dispatcher::add_repository_then` (needs a gpui `App`); replace this
-    /// once there is a gpui-free call and remove the `#[ignore]`s.
-    fn add_repository(&self, _path: &str, _git_dir: &Path) -> Repository {
-        unimplemented!("no gpui-free add_repository (Dispatcher::add_repository_then)")
+    /// Corvene's `RepositoriesStore` over the stored list.
+    fn changes<T>(&self, change: impl FnOnce(&mut CoreRepositoriesStore<'_>) -> T) -> T {
+        let mut repositories = self.get_all();
+        change(&mut CoreRepositoriesStore::new(
+            &self.store,
+            &mut repositories,
+        ))
+    }
+
+    /// `addRepository(path, gitDir)`.
+    fn add_repository(&self, path: &str, _git_dir: &Path) -> Repository {
+        self.changes(|store| store.add_repository(Path::new(path)))
     }
 
     /// `getAll()`.
@@ -79,44 +79,57 @@ impl RepositoriesStore {
         Client::new(Endpoint::from_api_base(endpoint), "").convert(api_repo.clone())
     }
 
-    /// Stand-in for `setGitHubRepository(repository, gitHubRepository)`:
-    /// persist the association and return the updated repository. Corvene
-    /// sets `Repository::github` inside the dispatcher (needs a gpui `App`).
+    /// `setGitHubRepository(repository, gitHubRepository)`.
     fn set_github_repository(
         &self,
-        _repository: Repository,
-        _github_repository: GitHubRepository,
+        repository: Repository,
+        github_repository: GitHubRepository,
     ) -> Repository {
-        unimplemented!("no gpui-free set_github_repository")
+        self.changes(|store| store.set_github_repository(&repository, github_repository))
     }
 
-    /// Stand-in for `switchWorktree(repository, worktreePath, isMissing,
-    /// worktreeGitDir, mainWorktreePath)`: persist the new path and the main
-    /// worktree path (kept when `None`) and return the updated repository.
-    /// Corvene does it in `Dispatcher::switch_worktree` (needs a gpui `App`).
+    /// `switchWorktree(repository, worktreePath, isMissing, worktreeGitDir,
+    /// mainWorktreePath)`: the main worktree path is kept when `None`.
     fn switch_worktree(
         &self,
-        _repository: &Repository,
-        _worktree_path: &str,
-        _is_missing: bool,
+        repository: &Repository,
+        worktree_path: &str,
+        is_missing: bool,
         _worktree_git_dir: &Path,
-        _main_worktree_path: Option<&str>,
+        main_worktree_path: Option<&str>,
     ) -> Repository {
-        unimplemented!("no gpui-free switch_worktree (Dispatcher::switch_worktree)")
+        self.changes(|store| {
+            store
+                .switch_worktree(
+                    repository,
+                    Path::new(worktree_path),
+                    is_missing,
+                    main_worktree_path.map(Path::new),
+                )
+                .repository
+        })
     }
 
-    /// Stand-in for `updateRepositoryPath(repository, path, gitDir,
-    /// mainWorktreePath, clearMainWorktreePath)`. Corvene relocates in
-    /// `Dispatcher::relocate_repository` (needs a gpui `App`).
+    /// `updateRepositoryPath(repository, path, gitDir, mainWorktreePath,
+    /// missing)`. (The last argument is GitHub Desktop's `missing`; its test
+    /// passes `true` where the main worktree cannot be resolved, which
+    /// `mainWorktreePath: undefined` already clears.)
     fn update_repository_path(
         &self,
-        _repository: &Repository,
-        _path: &str,
+        repository: &Repository,
+        path: &str,
         _git_dir: Option<&Path>,
-        _main_worktree_path: Option<&str>,
-        _clear_main_worktree_path: bool,
+        main_worktree_path: Option<&str>,
+        missing: bool,
     ) -> Repository {
-        unimplemented!("no gpui-free update_repository_path (Dispatcher::relocate_repository)")
+        self.changes(|store| {
+            store.update_repository_path(
+                repository,
+                Path::new(path),
+                main_worktree_path.map(Path::new),
+                missing,
+            )
+        })
     }
 }
 
@@ -160,7 +173,6 @@ const ENDPOINT: &str = "https://api.github.com";
 
 // GHD: unit/repositories-store-test.ts › RepositoriesStore › adding a new repository › contains the added repository
 #[test]
-#[ignore = "ghd: missing: no gpui-free RepositoriesStore.addRepository; Corvene adds in Dispatcher::add_repository_then (needs a gpui App, and probes the path with open_repository)"]
 fn contains_the_added_repository() {
     let repositories_store = RepositoriesStore::new();
     let repo_path = "/some/cool/path";
@@ -172,7 +184,6 @@ fn contains_the_added_repository() {
 
 // GHD: unit/repositories-store-test.ts › RepositoriesStore › getting all repositories › returns multiple repositories
 #[test]
-#[ignore = "ghd: missing: no gpui-free RepositoriesStore.addRepository; Corvene adds in Dispatcher::add_repository_then (needs a gpui App, and probes the path with open_repository)"]
 fn returns_multiple_repositories() {
     let repositories_store = RepositoriesStore::new();
     repositories_store.add_repository("/some/cool/path", Path::new("/some/cool/path/.git"));
@@ -184,7 +195,6 @@ fn returns_multiple_repositories() {
 
 // GHD: unit/repositories-store-test.ts › RepositoriesStore › updating a GitHub repository › adds a new GitHub repository
 #[test]
-#[ignore = "ghd: missing: no gpui-free RepositoriesStore.addRepository / setGitHubRepository; Corvene adds and sets Repository::github inside the Dispatcher (needs a gpui App)"]
 fn adds_a_new_github_repository() {
     let repositories_store = RepositoriesStore::new();
     let api_repo = api_repo();
@@ -215,7 +225,6 @@ fn worktree_git_dir() -> PathBuf {
 
 // GHD: unit/repositories-store-test.ts › RepositoriesStore › switching worktrees › persists the main worktree path
 #[test]
-#[ignore = "ghd: missing: no gpui-free RepositoriesStore.addRepository / switchWorktree; Corvene switches in Dispatcher::switch_worktree (needs a gpui App), taking the main worktree from the last refresh"]
 fn persists_the_main_worktree_path() {
     let repositories_store = RepositoriesStore::new();
     let repository = repositories_store.add_repository(MAIN_PATH, &join(MAIN_PATH, ".git"));
@@ -238,7 +247,6 @@ fn persists_the_main_worktree_path() {
 
 // GHD: unit/repositories-store-test.ts › RepositoriesStore › switching worktrees › keeps the main worktree path when switching between worktrees
 #[test]
-#[ignore = "ghd: missing: no gpui-free RepositoriesStore.addRepository / switchWorktree; Corvene switches in Dispatcher::switch_worktree (needs a gpui App), taking the main worktree from the last refresh"]
 fn keeps_the_main_worktree_path_when_switching_between_worktrees() {
     let repositories_store = RepositoriesStore::new();
     let repository = repositories_store.add_repository(MAIN_PATH, &join(MAIN_PATH, ".git"));
@@ -283,7 +291,6 @@ fn on_worktree(repositories_store: &RepositoriesStore) -> Repository {
 
 // GHD: unit/repositories-store-test.ts › RepositoriesStore › relocating a repository › updates the main worktree path
 #[test]
-#[ignore = "ghd: missing: no gpui-free RepositoriesStore.updateRepositoryPath; Corvene relocates in Dispatcher::relocate_repository (needs a gpui App), which always clears main_worktree_path until the next refresh"]
 fn updates_the_main_worktree_path() {
     let repositories_store = RepositoriesStore::new();
     // Relocating moves the whole repository, so the previously recorded main
@@ -309,7 +316,6 @@ fn updates_the_main_worktree_path() {
 
 // GHD: unit/repositories-store-test.ts › RepositoriesStore › relocating a repository › clears the main worktree path when it cannot be resolved
 #[test]
-#[ignore = "ghd: missing: no gpui-free RepositoriesStore.updateRepositoryPath; Corvene relocates in Dispatcher::relocate_repository (needs a gpui App)"]
 fn clears_the_main_worktree_path_when_it_cannot_be_resolved() {
     let repositories_store = RepositoriesStore::new();
     // Better to fall back to the git dir lookup than to keep pointing at a

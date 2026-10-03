@@ -561,6 +561,17 @@ impl Popup {
             _ => None,
         }
     }
+
+    /// GHD `popup.type`: which kind of popup this is (its variant).
+    pub fn popup_type(&self) -> crate::popup_manager::PopupType {
+        std::mem::discriminant(self)
+    }
+
+    /// A GHD `PopupType.Error` popup: errors may repeat on the popup stack
+    /// and stay on top (`IndexLockExists` is flag `265`'s error dialog).
+    pub fn is_error(&self) -> bool {
+        matches!(self, Self::Error { .. } | Self::IndexLockExists { .. })
+    }
 }
 
 /// GHD `UnreachableCommitsTab`.
@@ -693,9 +704,11 @@ impl RetryAction {
     }
 }
 
-/// Where a sign-in is (GHD `SignInState`), driven by `Dispatcher::sign_in_*`.
+/// How far an authentication flow (device code, browser, personal access
+/// token) is, driven by `Dispatcher::sign_in_*`: Corvene's detail of GHD's
+/// Authentication step (`AppState::sign_in_store` has the step itself).
 #[derive(Clone, Debug, PartialEq)]
-pub enum SignInStep {
+pub enum AuthenticationStep {
     /// Asking GitHub for a device code.
     Requesting,
     /// Show the code; poll until the user authorises in the browser.
@@ -713,11 +726,12 @@ pub enum SignInStep {
     Error(String),
 }
 
+/// An authentication flow in progress (`AppState::authentication`).
 #[derive(Clone, Debug)]
-pub struct SignInState {
+pub struct AuthenticationFlow {
     /// API base, e.g. `https://api.github.com`.
     pub endpoint: String,
-    pub step: SignInStep,
+    pub step: AuthenticationStep,
     pub cancel: Arc<std::sync::atomic::AtomicBool>,
     /// The browser flow in progress (`SignInStore.oauthState`): CSRF state
     /// and PKCE verifier the callback must match.
@@ -732,15 +746,24 @@ pub struct PendingWebFlow {
     pub loopback: Option<Arc<corvene_github::auth::LoopbackListener>>,
 }
 
-impl PartialEq for SignInState {
+impl PartialEq for AuthenticationFlow {
     fn eq(&self, other: &Self) -> bool {
         self.endpoint == other.endpoint && self.step == other.step
     }
 }
 
-/// An in-flight `git clone` shown in the content area (`CloningRepository`).
+/// GHD `CloningRepositoryID`: clone ids start high enough never to collide
+/// with a repository id.
+static NEXT_CLONE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000_000);
+
+/// An in-flight `git clone` shown in the content area (GHD
+/// `CloningRepository` with its `ICloneProgress`), kept in
+/// `AppState::cloning` (`crate::cloning_repositories_store`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CloneState {
+    /// GHD `CloningRepository.id`: unique per clone, so several clones can
+    /// run and be told apart.
+    pub id: u64,
     pub url: String,
     pub path: PathBuf,
     pub description: String,
@@ -748,6 +771,42 @@ pub struct CloneState {
     pub value: Option<f32>,
     /// Stops the clone (`234-clone-cancel`, `Dispatcher::cancel_clone`).
     pub cancel: corvene_git::CancelToken,
+}
+
+impl CloneState {
+    /// GHD `new CloningRepository(path, url)`: a clone with a new id that
+    /// has not reported any progress yet.
+    pub fn new(path: PathBuf, url: String) -> Self {
+        Self {
+            id: NEXT_CLONE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            url,
+            path,
+            description: String::new(),
+            value: None,
+            cancel: corvene_git::CancelToken::new(),
+        }
+    }
+
+    /// GHD `CloningRepository.name` (`Path.basename(url, '.git')`): the
+    /// repository name the cloning view shows ("Cloning desktop").
+    pub fn name(&self) -> String {
+        basename_without(&self.url, ".git")
+    }
+}
+
+/// Node's `path.basename(path, ext)`: the last component (trailing
+/// separators ignored) without `ext` when it ends with it and is more than
+/// it.
+fn basename_without(path: &str, ext: &str) -> String {
+    let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+    let trimmed = path.trim_end_matches(separators);
+    let base = trimmed
+        .rfind(separators)
+        .map_or(trimmed, |ix| &trimmed[ix + 1..]);
+    match base.strip_suffix(ext) {
+        Some(stem) if !stem.is_empty() => stem.to_string(),
+        _ => base.to_string(),
+    }
 }
 
 /// What deleting a branch would lose (`860-delete-branch-warnings`).
@@ -827,6 +886,13 @@ pub struct RepositoryState {
     pub refresh_pending: bool,
     /// When the running refresh started.
     pub refresh_started: Option<Instant>,
+    /// GHD `clearPartialState`: the next status a refresh reads drops
+    /// partial line selections (set after a commit and when Hide Whitespace
+    /// changes in Changes; `crate::changes_state::apply_changed_files`).
+    pub clear_partial_state: bool,
+    /// The branch pruner waits for the refresh in progress (it reads the
+    /// default branch and the branches the refresh loads).
+    pub prune_after_refresh: bool,
     /// Filter Options popover state (`IFileListFilterState` minus the text).
     pub file_list_filter: FileListFilter,
 
@@ -859,6 +925,12 @@ pub struct RepositoryState {
     pub commit_to_amend: Option<corvene_models::Commit>,
     /// Bumped when amending starts so the form loads the commit's message.
     pub amend_nonce: u64,
+    /// GHD `IChangesState.commitMessage`: the message the dispatcher hands
+    /// to the commit form (Undo Commit's, `git_store::undo_commit`); the
+    /// form loads it when `commit_message_nonce` changes. Corvene's form
+    /// keeps what is typed itself, so this does not follow the typing.
+    pub commit_message: CommitMessage,
+    pub commit_message_nonce: u64,
 
     // ---- branches (`IBranchesState`) ----
     /// `recentBranches` (reflog checkouts, newest first).
@@ -1013,6 +1085,22 @@ impl FileListFilter {
     }
 }
 
+/// GHD `ICommitMessage`: a commit message for the commit form.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommitMessage {
+    pub summary: String,
+    pub description: Option<String>,
+}
+
+impl CommitMessage {
+    pub fn new(summary: impl Into<String>, description: Option<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            description,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LastCommit {
     pub sha: String,
@@ -1062,15 +1150,27 @@ pub struct AppState {
     pub repo_states: HashMap<u64, RepositoryState>,
     pub accounts: Vec<Account>,
     pub foldout: Option<Foldout>,
-    pub popup: Option<Popup>,
-    pub cloning: Option<CloneState>,
+    /// The open popups (GHD `PopupManager`); [`AppState::popup`] is the one
+    /// shown.
+    pub popups: crate::popup_manager::PopupManager,
+    /// GHD `CloningRepositoriesStore`: the clones in progress.
+    pub cloning: crate::cloning_repositories_store::CloningRepositoriesStore,
+    /// GHD `AheadBehindStore`: ahead/behind counts of commit ranges, cached
+    /// by repository and tip shas (the compare branch list).
+    pub ahead_behind: crate::ahead_behind_store::AheadBehindStore,
+    /// Bumped by `Dispatcher::start_background_pruner`, so the previous
+    /// repository's pruning timer stops (GHD `currentBranchPruner`).
+    pub branch_pruner_generation: u64,
     /// `224-alias-when-adding`: aliases typed in New / Add / Clone, applied
     /// when the repository at that (resolved) path is added.
     pub pending_aliases: Vec<(PathBuf, String)>,
-    pub sign_in: Option<SignInState>,
-    /// What to retry once the sign-in dialog opened by a re-authorization
-    /// prompt succeeds (`beginBrowserBasedSignIn` → `performRetry`).
-    pub retry_after_sign_in: Option<(u64, RetryAction)>,
+    /// GHD `SignInStore`: the sign-in dialog's step.
+    pub sign_in_store: crate::sign_in::SignInStore,
+    /// The accounts `sign_in_store` reads (`AppState::accounts`, copied in
+    /// by the dispatcher before each sign-in step).
+    pub sign_in_accounts: std::rc::Rc<std::cell::RefCell<Vec<Account>>>,
+    /// The authentication flow in progress.
+    pub authentication: Option<AuthenticationFlow>,
     /// Watcher for the selected repository's worktree.
     pub watcher: Option<crate::watcher::RepoWatcher>,
     pub watched_repo: Option<u64>,
@@ -1140,6 +1240,11 @@ impl AppState {
     /// `103-product-name`: what the Welcome flow and the tutorial call the app.
     pub fn product_name(&self) -> &str {
         self.flags.text(crate::flags::ids::PRODUCT_NAME)
+    }
+
+    /// GHD `currentPopup`: the popup on top of the stack, the one shown.
+    pub fn popup(&self) -> Option<&Popup> {
+        self.popups.current_popup().map(|p| &p.popup)
     }
 }
 
@@ -1236,6 +1341,18 @@ impl AppState {
 
     pub fn repo_state_mut(&mut self, id: u64) -> &mut RepositoryState {
         self.repo_states.entry(id).or_default()
+    }
+
+    /// GHD `GitStoreCache.remove(repository)`: forget the repository's
+    /// state, so the next [`Self::repo_state_mut`] starts afresh
+    /// (`Dispatcher::remove_repository`).
+    pub fn remove_repo_state(&mut self, id: u64) {
+        self.repo_states.remove(&id);
+    }
+
+    /// GHD `RepositoriesStore`: the repository list and its persistence.
+    pub fn repositories_store(&mut self) -> crate::repositories_store::RepositoriesStore<'_> {
+        crate::repositories_store::RepositoriesStore::new(&self.store, &mut self.repositories)
     }
 
     /// Repositories ordered for the foldout: alphabetical by display name.

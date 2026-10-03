@@ -18,7 +18,6 @@ use gpui_kit::App;
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
-use crate::persistence::StoreExt;
 use crate::remote::spawn_bg;
 use crate::state::Popup;
 
@@ -79,28 +78,28 @@ impl Dispatcher {
         );
     }
 
-    /// Repoint the repository entry (persisted) and refresh + rewatch it.
+    /// Repoint the repository entry (persisted, GHD
+    /// `RepositoriesStore.switchWorktree`) and refresh + rewatch it. When
+    /// another entry already has `path`, that one is selected instead.
     fn apply_worktree_path(id: u64, path: PathBuf, cx: &mut App) {
-        let changed = Self::state(cx).update(cx, |s, cx| {
+        let switched = Self::state(cx).update(cx, |s, cx| {
+            // the main worktree from the last refresh; `None` keeps the
+            // recorded one
             let main = s
                 .repo_states
                 .get(&id)
                 .and_then(|rs| rs.worktrees.iter().find(|w| w.kind == WorktreeType::Main))
                 .map(|w| w.path.clone());
-            let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) else {
-                return false;
-            };
+            let repo = s.repository(id)?.clone();
             if repo.path == path {
-                return false;
+                return None;
             }
             info!(id, path = %path.display(), "switching worktree");
-            if let Some(main) = main {
-                repo.main_worktree_path = Some(main);
-            }
-            repo.missing = false;
-            repo.path = path;
-            if let Err(err) = s.store.save_repositories(&s.repositories) {
-                warn!(%err, "could not persist repository path");
+            let result =
+                s.repositories_store()
+                    .switch_worktree(&repo, &path, false, main.as_deref());
+            if result.existing_repository {
+                return Some(Err(result.repository.id));
             }
             // force the file watcher onto the new directory
             if s.watched_repo == Some(id) {
@@ -108,11 +107,17 @@ impl Dispatcher {
                 s.watcher = None;
             }
             cx.notify();
-            true
+            Some(Ok(()))
         });
-        if changed {
-            Self::refresh_repository(id, cx);
-            Self::start_watching(id, cx);
+        match switched {
+            Some(Ok(())) => {
+                Self::refresh_repository(id, cx);
+                Self::start_watching(id, cx);
+            }
+            // GHD `_switchWorktree` selects the repository `switchWorktree`
+            // returned
+            Some(Err(existing)) => Self::select_repository(existing, cx),
+            None => {}
         }
     }
 
@@ -160,7 +165,7 @@ impl Dispatcher {
             },
             move |result, cx| match result {
                 Ok(path) => {
-                    Self::close_popup(cx);
+                    Self::close_popups_where(|p| matches!(p, Popup::AddWorktree { .. }), cx);
                     Self::apply_worktree_path(id, path, cx);
                 }
                 Err(err) => Self::show_error("Could not create worktree", err, cx),
@@ -254,7 +259,7 @@ impl Dispatcher {
             },
             move |result, cx| match result {
                 Ok(()) => {
-                    Self::close_popup(cx);
+                    Self::close_popups_where(|p| matches!(p, Popup::RenameWorktree { .. }), cx);
                     let current = Self::state(cx)
                         .read(cx)
                         .repository(id)
@@ -286,12 +291,15 @@ impl Dispatcher {
                 .get(&id)
                 .and_then(|rs| rs.worktrees.iter().find(|w| w.kind == WorktreeType::Main))
                 .map(|w| w.path.clone());
-            let main = s
-                .repository(id)
-                .and_then(|r| r.main_worktree_path.clone())
-                .into_iter()
-                .chain(listed)
-                .find(|p| *p != missing_path && p.exists());
+            // `resolveMainWorktreePath` without a git dir (Corvene keeps
+            // none, so no git runs here); the last `git worktree list` stands
+            // in for GHD's git-dir fallback
+            let resolved = s.git.clone().zip(s.repository(id)).and_then(|(git, r)| {
+                corvene_git::resolve_main_worktree_path(git, r, None)
+                    .ok()
+                    .flatten()
+            });
+            let main = resolved.or_else(|| listed.filter(|p| *p != missing_path && p.exists()));
             let existing = main.as_ref().and_then(|main| {
                 s.repositories
                     .iter()

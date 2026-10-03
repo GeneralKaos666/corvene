@@ -114,7 +114,6 @@ fn parses_ssh_urls() {
 
 // GHD: unit/remote-parsing-test.ts › URL remote parsing › parses SSH URLs with custom username
 #[test]
-#[ignore = "ghd: bug: corvene_models::split_remote only takes scp-style URLs starting with git@, so niik@niik.ghe.com:hubot/repo.git falls back to the owner/name shorthand (no host), GHD parseRemote gives niik.ghe.com, hubot, repo (*.ghe.com hosts)"]
 fn parses_ssh_urls_with_custom_username() {
     let remote = parse_remote("niik@niik.ghe.com:hubot/repo.git");
     assert!(remote.is_some());
@@ -170,7 +169,6 @@ fn parses_ssh_urls_with_a_trailing_slash() {
 
 // GHD: unit/remote-parsing-test.ts › URL remote parsing › parses git URLs
 #[test]
-#[ignore = "ghd: bug: corvene_models::split_remote does not take git:<host>/<owner>/<name> URLs, so no host/owner/name is parsed (None), GHD parseRemote gives github.com, hubot, repo"]
 fn parses_git_urls() {
     let remote = parse_remote("git:github.com/hubot/repo.git");
     assert!(remote.is_some());
@@ -182,7 +180,6 @@ fn parses_git_urls() {
 
 // GHD: unit/remote-parsing-test.ts › URL remote parsing › parses git URLs without the git suffix
 #[test]
-#[ignore = "ghd: bug: corvene_models::split_remote does not take git:<host>/<owner>/<name> URLs, so no host/owner/name is parsed (None), GHD parseRemote gives github.com, hubot, repo"]
 fn parses_git_urls_without_the_git_suffix() {
     let remote = parse_remote("git:github.com/hubot/repo");
     assert!(remote.is_some());
@@ -194,7 +191,6 @@ fn parses_git_urls_without_the_git_suffix() {
 
 // GHD: unit/remote-parsing-test.ts › URL remote parsing › parses git URLs with a trailing slash
 #[test]
-#[ignore = "ghd: bug: corvene_models::split_remote does not take git:<host>/<owner>/<name> URLs, so no host/owner/name is parsed (None), GHD parseRemote gives github.com, hubot, repo"]
 fn parses_git_urls_with_a_trailing_slash() {
     let remote = parse_remote("git:github.com/hubot/repo/");
     assert!(remote.is_some());

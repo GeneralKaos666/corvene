@@ -16,16 +16,11 @@
 //!   pull requests by GitHub repository, so the repository is given the
 //!   GitHub repository its pull request belongs to (GitHub Desktop's has
 //!   none, its cache is keyed by the local repository).
-//! - `changesState.workingDirectory` / `showCoAuthoredBy`:
-//!   `RepositoryState::status` / `show_co_authored_by`. Corvene keeps the
-//!   commit message in the commit form's text inputs (`corvene-ui`), not in
-//!   the repository state, so `commitMessage` goes through the stand-ins
-//!   [`set_commit_message`] / [`commit_message`].
-//! - `compareState.formState` / `commitSHAs`: `RepositoryState::compare`'s
-//!   `form` / `commits` (whole commits, so a commit with that sha). The
-//!   compare branch filter text lives in the compare view's input, so
-//!   `filterText` goes through the stand-ins [`set_compare_filter_text`] /
-//!   [`compare_filter_text`].
+//! - `changesState.workingDirectory` / `commitMessage` / `showCoAuthoredBy`:
+//!   `RepositoryState::status` / `commit_message` / `show_co_authored_by`.
+//! - `compareState.formState` / `filterText` / `commitSHAs`:
+//!   `RepositoryState::compare`'s `form` / `filter_text` / `commits` (whole
+//!   commits, so a commit with that sha).
 //!
 //! - `gitHubRepoFixture({ name, owner })` is
 //!   `corvene_test_support::git_hub_repo_fixture`.
@@ -36,42 +31,15 @@ use std::path::PathBuf;
 
 use corvene_core::compare::CompareForm;
 use corvene_core::pull_requests::cache_key;
-use corvene_core::state::RepositoryState;
 use corvene_core::{
-    Commit, CommitIdentity, DiffSelection, FileStatus, FileStatusKind, GitHubRepository,
-    GitStatusEntry, PullRequest, PullRequestRef, Repository, WorkingDirectoryFileChange,
-    WorkingDirectoryStatus,
+    Commit, CommitIdentity, CommitMessage, DiffSelection, FileStatus, FileStatusKind,
+    GitHubRepository, GitStatusEntry, PullRequest, PullRequestRef, Repository,
+    WorkingDirectoryFileChange, WorkingDirectoryStatus,
 };
 
 use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
 
 use crate::stores_support::app_state;
-
-/// Stand-in for the `commitMessage` of GitHub Desktop's `IChangesState`
-/// (`updateChangesState(repository, () => ({ commitMessage }))`). Corvene's
-/// commit message lives in the commit form, not in `RepositoryState`;
-/// replace this once the repository state carries it and remove the
-/// `#[ignore]`.
-fn set_commit_message(_state: &mut RepositoryState, _summary: &str, _description: Option<&str>) {
-    unimplemented!("RepositoryState has no commit message")
-}
-
-/// Stand-in for reading `changesState.commitMessage.summary`.
-fn commit_message(_state: &RepositoryState) -> (String, Option<String>) {
-    unimplemented!("RepositoryState has no commit message")
-}
-
-/// Stand-in for the `filterText` of GitHub Desktop's `ICompareState`.
-/// Corvene's compare filter text lives in the compare view's input, not in
-/// `CompareState`; replace this once it does and remove the `#[ignore]`.
-fn set_compare_filter_text(_state: &mut RepositoryState, _filter_text: &str) {
-    unimplemented!("CompareState has no filter text")
-}
-
-/// Stand-in for reading `compareState.filterText`.
-fn compare_filter_text(_state: &RepositoryState) -> String {
-    unimplemented!("CompareState has no filter text")
-}
 
 /// `new Repository('/something/path', 1, null, false)`.
 fn repository() -> Repository {
@@ -133,7 +101,6 @@ fn can_update_branches_state_for_a_repository() {
 
 // GHD: unit/repository-state-cache-test.ts › RepositoryStateCache › can update changes state for a repository
 #[test]
-#[ignore = "ghd: missing: RepositoryState has no commit message (changesState.commitMessage); Corvene keeps it in the corvene-ui commit form inputs"]
 fn can_update_changes_state_for_a_repository() {
     let repository = repository();
     let files = vec![WorkingDirectoryFileChange {
@@ -162,7 +129,7 @@ fn can_update_changes_state_for_a_repository() {
         files,
         ..Default::default()
     });
-    set_commit_message(changes_state, summary, None);
+    changes_state.commit_message = CommitMessage::new(summary, None);
     changes_state.show_co_authored_by = true;
 
     let changes_state = cache.repo_state_mut(repository.id);
@@ -170,12 +137,11 @@ fn can_update_changes_state_for_a_repository() {
     assert_eq!(working_directory.include_all(), Some(true));
     assert_eq!(working_directory.files.len(), 1);
     assert!(changes_state.show_co_authored_by);
-    assert_eq!(commit_message(changes_state).0, summary);
+    assert_eq!(changes_state.commit_message.summary, summary);
 }
 
 // GHD: unit/repository-state-cache-test.ts › RepositoryStateCache › can update compare state for a repository
 #[test]
-#[ignore = "ghd: missing: CompareState has no filter text (compareState.filterText); Corvene keeps it in the corvene-ui compare branch list input"]
 fn can_update_compare_state_for_a_repository() {
     let repository = repository();
     let filter_text = "my-cool-branch";
@@ -185,12 +151,12 @@ fn can_update_compare_state_for_a_repository() {
     // cache.updateCompareState(repository, () => ({ formState: { kind: History }, filterText, commitSHAs }))
     let state = cache.repo_state_mut(repository.id);
     state.compare.form = CompareForm::History;
-    set_compare_filter_text(state, filter_text);
+    state.compare.filter_text = filter_text.to_string();
     state.compare.commits = vec![commit_with_sha("deadbeef")];
 
     let state = cache.repo_state_mut(repository.id);
     assert_eq!(state.compare.form, CompareForm::History);
-    assert_eq!(compare_filter_text(state), filter_text);
+    assert_eq!(state.compare.filter_text, filter_text);
     assert_eq!(state.compare.commits.len(), 1);
 }
 
@@ -209,6 +175,7 @@ fn commit_with_sha(sha: &str) -> Commit {
         author: identity.clone(),
         committer: identity,
         parents: Vec::new(),
+        trailers: Vec::new(),
         tags: Vec::new(),
     }
 }

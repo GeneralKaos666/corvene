@@ -7,19 +7,14 @@
 //!   non-empty `/`, `\` or `:` separated component without `.git`, `null` for
 //!   `..`, `.` and an empty name. Corvene's Clone dialog
 //!   (`crates/corvene-ui/src/dialogs/clone_repository.rs`, `derived_path`)
-//!   names that folder with `corvene_git::repository_name_from_url` (its doc:
-//!   GHD `getDefaultDir`) and does no other sanitizing, so that function
-//!   stands for `sanitizeCloneName` here: the last `/` or `:` separated
-//!   segment (`\` too, on Windows only) without `.git`, `None` when empty.
+//!   names that folder with `corvene_git::repository_name_from_url`, which is
+//!   `sanitizeCloneName`.
 //! - Node's `Path.join` / `Path.resolve` (the platform's rules) are
 //!   `std::path::Path::join` and [`resolve`] (`.` and `..` removed
 //!   lexically, as `resolve` does for an absolute path); `Path.win32.join` /
 //!   `Path.win32.resolve`, which the Windows case uses on every platform, are
 //!   [`win32_join`] / [`win32_resolve`] (the same for a drive-absolute
 //!   `C:\…` path). The containment check stays a string prefix check.
-//!
-//! `#[rustfmt::skip]` keeps the Windows-only ignores on one line, the form
-//! `tools/ghd-tests/check.py` reads.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -82,8 +77,6 @@ fn returns_a_simple_name_unchanged() {
 
 // GHD: unit/clone-path-safety-test.ts › sanitizeCloneName › extracts last component from backslash-separated traversal
 #[test]
-#[rustfmt::skip]
-#[cfg_attr(not(windows), ignore = "ghd: bug: repository_name_from_url splits on backslash only on Windows: returns the whole input, GHD sanitizeCloneName gives 'foo'")]
 fn extracts_last_component_from_backslash_separated_traversal() {
     assert_eq!(
         sanitize_clone_name("x..\\..\\..\\..\\foo").as_deref(),
@@ -93,7 +86,6 @@ fn extracts_last_component_from_backslash_separated_traversal() {
 
 // GHD: unit/clone-path-safety-test.ts › sanitizeCloneName › rejects names that resolve to .. or empty
 #[test]
-#[ignore = "ghd: bug: repository_name_from_url(\"..\") is Some(\"..\") (clone folder <dir>/..), GHD sanitizeCloneName gives null"]
 fn rejects_names_that_resolve_to_dot_dot_or_empty() {
     assert_eq!(sanitize_clone_name(".."), None);
     assert_eq!(sanitize_clone_name(""), None);
@@ -147,8 +139,6 @@ fn traversal_payload_clone_path_stays_contained_posix() {
 
 // GHD: unit/clone-path-safety-test.ts › clone path derivation with sanitizeCloneName › traversal payload clone path stays contained (Windows)
 #[test]
-#[rustfmt::skip]
-#[cfg_attr(not(windows), ignore = "ghd: bug: off Windows repository_name_from_url keeps the backslash parts of the name, which escape the base under Windows path rules; GHD sanitizeCloneName gives '.ssh'")]
 fn traversal_payload_clone_path_stays_contained_windows() {
     let result = parse_repository_identifier("https://evil.com/owner/x..\\..\\..\\.\\.ssh.git");
     assert!(result.is_some());

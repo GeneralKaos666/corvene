@@ -1,13 +1,20 @@
 //! Application state and the dispatcher that drives backends.
 //! Mirrors GitHub Desktop's `AppStore` / `Dispatcher` / `RepositoryStateCache`.
 
+pub mod accounts;
 pub mod acknowledgements;
+pub mod ahead_behind_store;
 pub mod alive;
 pub mod app_location;
 pub mod app_url;
 pub mod autocomplete;
+pub mod avatar_users;
 pub mod avatars;
+pub mod banner_focus;
+pub mod branch_pruner;
+pub mod changes_state;
 pub mod clone_info;
+pub mod cloning_repositories_store;
 pub mod commit_status;
 pub mod compare;
 pub mod crash_reports;
@@ -19,6 +26,7 @@ pub mod flags;
 pub mod forks;
 pub mod ghd_import;
 pub mod git_config_import;
+pub mod git_store;
 #[cfg(any(target_os = "android", test))]
 pub mod headless;
 pub mod integrations;
@@ -27,8 +35,10 @@ pub mod markdown;
 pub mod mco;
 pub mod menu_state;
 pub mod notifications;
+pub mod offset_from;
 pub mod packs;
 pub mod persistence;
+pub mod popup_manager;
 pub mod portable_paths;
 pub mod pull_request_preview;
 pub mod pull_requests;
@@ -36,7 +46,10 @@ pub mod push_errors;
 pub mod release_notes;
 pub mod remote;
 pub mod repo_rules;
+pub mod repositories_store;
+pub mod round;
 pub mod samples;
+pub mod sign_in;
 pub mod state;
 pub mod templates;
 pub mod text_tokens;
@@ -52,6 +65,7 @@ pub use autocomplete::{
     DEFAULT_MAX_HITS, Issue, IssueCache, IssueHit, MentionableCache, MentionableUser, Trigger,
     TriggerKind, find_trigger, folder_completions, issues_matching, users_matching,
 };
+pub use avatar_users::{AvatarUser, get_avatar_users_for_commit};
 pub use avatars::{AvatarEntry, avatar_for_email, avatar_for_url};
 pub use commit_status::{CommitStatusStore, combined_status_summary, group_check_runs, status_key};
 pub use compare::{CompareForm, CompareState, ComparisonMode};
@@ -63,13 +77,15 @@ pub use forks::UPSTREAM_REMOTE_NAME;
 pub use integrations::{PreferencesSave, RepositorySettingsSave};
 pub use mco::{
     Banner, ConflictKind, ConflictState, McoConflicts, McoDetail, McoStep, McoUndo, MergePreview,
-    MultiCommitOperation, RebasePreview, conflicted_files, resolved_files, unmerged_files,
+    MultiCommitOperation, RebasePreview, conflicted_files, get_unique_coauthors_as_authors,
+    resolved_files, unmerged_files,
 };
 pub use packs::{OFFERED_PACKS, PackProgress, PacksState, offered_packs};
 pub use persistence::{
     CustomIntegration, DEFAULT_DATE_FORMAT, DEFAULT_NUMBER_FORMAT, DEFAULT_TIME_FORMAT, Settings,
     StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
 };
+pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
 pub use pull_request_preview::{MergeStatus, PullRequestPreview};
 pub use pull_requests::{
     BranchesTab, FORKED_REMOTE_PREFIX, PullRequestCache, PullRequestCaches, cache_key,
@@ -78,9 +94,9 @@ pub use pull_requests::{
 pub use remote::{ForcePushState, PushPullKind, PushPullProgress, RepoIndicator, host_of};
 pub use repo_rules::{append_trailers, failed_rules, rule_matches};
 pub use state::{
-    AppState, CloneState, DropTarget, FileListFilter, FilterOption, Foldout, GitConfigLocation,
-    GlobalGitConfig, LastCommit, Popup, PreferencesTab, RepositorySettingsData,
-    RepositorySettingsTab, RepositoryState, RetryAction, SignInState, SignInStep,
+    AppState, AuthenticationFlow, AuthenticationStep, CloneState, CommitMessage, DropTarget,
+    FileListFilter, FilterOption, Foldout, GitConfigLocation, GlobalGitConfig, LastCommit, Popup,
+    PreferencesTab, RepositorySettingsData, RepositorySettingsTab, RepositoryState, RetryAction,
     UnreachableCommitsTab,
 };
 pub use updater::{AvailableUpdate, PackageManager, UpdateState, UpdateStatus};

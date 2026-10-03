@@ -4,22 +4,16 @@
 //! (`lib/get-file-hash.ts`, the hex digest of a file on disk; GitHub
 //! Desktop hashes SSH keys and its bundle with it) is
 //! `corvene_packs::sha256_file(path)` (the hex sha256 of a file, used for
-//! the optional component packs). Corvene has no sha1 file hash, so
-//! `getFileHash(path, 'sha1')` is a stand-in ([`get_file_hash_sha1`]).
+//! the optional component packs); `getFileHash(path, 'sha1')` is
+//! `corvene_packs::get_file_hash(path, HashAlgorithm::Sha1)` (re-exported
+//! from `corvene_platform::file_hash`, which `sha256_file` calls).
 //! GitHub Desktop's rejection with `code: 'ENOENT'` is an `io::Error` of
 //! kind `NotFound`.
 
 use std::path::Path;
 
-use corvene_packs::sha256_file;
+use corvene_packs::{HashAlgorithm, get_file_hash, sha256_file};
 use corvene_test_support::write_file;
-
-/// Stand-in for GitHub Desktop's `getFileHash(path, 'sha1')`
-/// (`lib/get-file-hash.ts`). Replace it with the Corvene function once
-/// there is one and remove the `#[ignore]`.
-fn get_file_hash_sha1(_path: &Path) -> std::io::Result<String> {
-    unimplemented!("Corvene has no sha1 file hash (corvene_packs::sha256_file only)")
-}
 
 /// `mkdtemp(path.join(tmpdir(), 'hash-test-'))`, removed when dropped
 /// (GitHub Desktop's `rm(dir, { recursive: true })`).
@@ -90,14 +84,13 @@ fn rejects_for_non_existent_file() {
 
 // GHD: unit/get-file-hash-test.ts › get-file-hash › supports sha1 algorithm
 #[test]
-#[ignore = "ghd: missing: Corvene has no sha1 file hash, corvene_packs::sha256_file is sha256 only (getFileHash(path, 'sha1'), lib/get-file-hash.ts)"]
 fn supports_sha1_algorithm() {
     let dir = mkdtemp();
     let file_path = dir.path().join("test-file.js");
 
     write_file(&file_path, "hello world");
 
-    let hash = get_file_hash_sha1(&file_path).expect("getFileHash");
+    let hash = get_file_hash(&file_path, HashAlgorithm::Sha1).expect("getFileHash");
 
     // SHA-1 of "hello world"
     assert_eq!(hash, "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed");

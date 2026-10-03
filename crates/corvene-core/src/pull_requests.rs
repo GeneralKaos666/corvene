@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use corvene_github::{ApiPullRequest, Client, GitHubError};
+use corvene_github::{ApiPullRequest, Client};
 use corvene_models::{
     Branch, BranchKind, GitHubRepository, PullRequest, PullRequestRef, Remote,
     clone_url_like_remote, url_matches_remote,
@@ -294,7 +294,7 @@ impl Dispatcher {
                             .collect();
                         (prs, full)
                     })
-                    .map_err(|err| (matches!(err, GitHubError::Auth(_)), err.to_string()))
+                    .map_err(|err| (err.is_token_invalidated(), err.to_string()))
             },
             move |result, cx| {
                 let auth_failed = Self::state(cx).update(cx, |s, cx| {

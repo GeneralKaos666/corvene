@@ -886,7 +886,8 @@ impl Dispatcher {
                 (result, status)
             },
             move |(result, status), cx| {
-                if let Some(status) = status {
+                if let Some(mut status) = status {
+                    status.sort_files();
                     Self::state(cx).update(cx, |s, cx| {
                         let rs = s.repo_state_mut(id);
                         rs.conflict_state =
@@ -1395,7 +1396,11 @@ impl Dispatcher {
                             let _ = s.store.save_repositories(&s.repositories);
                             cx.notify();
                         });
-                        Self::close_popup(cx);
+                        // the dialog, wherever it is in the popup stack
+                        Self::close_popups_where(
+                            |p| matches!(p, Popup::PublishRepository { .. }),
+                            cx,
+                        );
                         Self::refresh_repository(id, cx);
                         // push the current branch (and set its upstream)
                         Self::push_after_publish(id, cx);
@@ -1492,7 +1497,7 @@ impl Dispatcher {
                 }
             },
             move |needs_init, cx| {
-                if needs_init && Self::state(cx).read(cx).popup.is_none() {
+                if needs_init && Self::state(cx).read(cx).popup().is_none() {
                     Self::show_popup(Popup::InitializeLFS { repos: vec![id] }, cx);
                 }
             },

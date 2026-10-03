@@ -5,37 +5,19 @@
 //!   `openRepo` URL's `filepath`, as in GitHub Desktop); the cases pass one
 //!   segment, joined as Node's `path.join` does.
 //! - `encodePathAsUrl(...pathSegments)` is `pathToFileURL(Path.resolve(…))`,
-//!   the `file:` URL of a bundled image for GitHub Desktop's renderer.
-//!   Corvene embeds its images; its one file URI builder,
-//!   `corvene_platform::apps::file_uri`, exists on Linux only (the
-//!   FileManager1 reveal). The stand-in calls it there and is
-//!   unimplemented elsewhere.
+//!   the `file:` URL of a bundled image for GitHub Desktop's renderer:
+//!   `corvene_platform::file_url::encode_path_as_url(&segments)` (Corvene
+//!   embeds its images; its `file_uri` serves the Linux FileManager1
+//!   reveal).
 //!
 //! `process.cwd()` is the test binary's working directory (the crate
-//! directory under cargo). `#[rustfmt::skip]` keeps the macOS-only ignore
-//! on one line, the form `check.py` reads.
+//! directory under cargo).
 
 use std::path::{Path, PathBuf};
 
 use corvene_core::app_url::resolve_within;
-
-/// Stand-in for GitHub Desktop's `encodePathAsUrl(dirName, file)`
-/// (`lib/path.ts`): on Linux `corvene_platform::apps::file_uri` of the
-/// joined path (`Path.resolve` of an absolute directory and a file name).
-/// Replace it with a Corvene function on the other platforms once there is
-/// one and remove the `#[ignore]`s.
-#[allow(dead_code)]
-fn encode_path_as_url(dir_name: &str, file: &str) -> String {
-    #[cfg(target_os = "linux")]
-    {
-        corvene_platform::apps::file_uri(&Path::new(dir_name).join(file))
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (dir_name, file);
-        unimplemented!("Corvene has no encodePathAsUrl / file URI builder on this platform")
-    }
-}
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+use corvene_platform::file_url::encode_path_as_url;
 
 /// Node's `path.join` of the segments (no `.` or `..` collapsing needed for
 /// the cases' segments).
@@ -61,31 +43,27 @@ fn root() -> PathBuf {
 // GHD: unit/path-test.ts › path › encodePathAsUrl › normalizes path separators on Windows
 #[cfg(windows)]
 #[test]
-#[ignore = "ghd: missing: no encodePathAsUrl / file URI builder on Windows (lib/path.ts encodePathAsUrl)"]
 fn normalizes_path_separators_on_windows() {
     let dir_name = "C:/Users/shiftkey\\AppData\\Local\\GitHubDesktop\\app-1.0.4\\resources\\app";
-    let uri = encode_path_as_url(dir_name, "folder/file.html");
+    let uri = encode_path_as_url(&[dir_name, "folder/file.html"]);
     assert!(uri.starts_with("file:///C:/Users/shiftkey/AppData/Local/"));
 }
 
 // GHD: unit/path-test.ts › path › encodePathAsUrl › encodes spaces and hashes
 #[cfg(windows)]
 #[test]
-#[ignore = "ghd: missing: no encodePathAsUrl / file URI builder on Windows (lib/path.ts encodePathAsUrl)"]
 fn encodes_spaces_and_hashes_windows() {
     let dir_name = "C:/Users/The Kong #2\\AppData\\Local\\GitHubDesktop\\app-1.0.4\\resources\\app";
-    let uri = encode_path_as_url(dir_name, "index.html");
+    let uri = encode_path_as_url(&[dir_name, "index.html"]);
     assert!(uri.starts_with("file:///C:/Users/The%20Kong%20%232/"));
 }
 
 // GHD: unit/path-test.ts › path › encodePathAsUrl › encodes spaces and hashes #2
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
-#[rustfmt::skip]
-#[cfg_attr(not(target_os = "linux"), ignore = "ghd: missing: no encodePathAsUrl / file URI builder on macOS, corvene_platform::apps::file_uri is Linux-only (lib/path.ts encodePathAsUrl)")]
 fn encodes_spaces_and_hashes() {
     let dir_name = "/Users/The Kong #2/AppData/Local/GitHubDesktop/app-1.0.4/resources/app";
-    let uri = encode_path_as_url(dir_name, "index.html");
+    let uri = encode_path_as_url(&[dir_name, "index.html"]);
     assert!(uri.starts_with("file:///Users/The%20Kong%20%232/"));
 }
 
@@ -169,7 +147,6 @@ fn fails_for_paths_that_use_a_symlink_to_traverse_outside_of_the_root() {
 // GHD: unit/path-test.ts › path › resolveWithin › succeeds for paths that use a symlink to traverse outside of the root and then back again
 #[cfg(not(windows))]
 #[test]
-#[ignore = "ghd: bug: resolve_within returns the canonical path (/private/var/…/path-testXXX), GHD returns the joined path (<tempDir>/dangerzone/T/path-testXXX)"]
 fn succeeds_for_paths_that_use_a_symlink_to_traverse_outside_of_the_root_and_then_back_again() {
     let temp = mkdtemp_path_test();
     let temp_dir = temp.path();

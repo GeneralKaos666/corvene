@@ -1,39 +1,26 @@
 //! Port of GitHub Desktop's `app/test/unit/find-account-test.ts`.
 //!
 //! GitHub Desktop's `findAccountForRemoteURL(urlOrRepositoryAlias, accounts,
-//! canAccessRepository)` (`lib/find-account.ts`) has no stand-alone Corvene
-//! function: its account choice is the first half of
-//! `corvene_core::clone_info::resolve_with(input, candidates, lookup,
-//! strict_shorthand, prefer_ssh)`, which then returns the clone info that
-//! account's `lookup` answered (GitHub Desktop's `resolveCloneInfo` +
-//! `fetchRepositoryCloneInfo`). [`find_account_for_remote_url`] calls it the
-//! way `Dispatcher::resolve_clone_info` does:
-//!
-//! - every account becomes a `Candidate` (host and GitHub.com-ness from
-//!   `Endpoint::from_api_base`, `authenticated`), followed by the
-//!   unauthenticated GitHub.com candidate the dispatcher appends for
-//!   GitHub Desktop's `Account.anonymous()`;
-//! - `lookup` answers with the test's `canAccessRepository`, and its clone
-//!   URL names the candidate, so the result tells which account was chosen
-//!   (no URL from a candidate: no account);
-//! - `strict_shorthand` and `prefer_ssh` are the `github-desktop` preset's
-//!   values of `204-clone-shorthand-not-found` and `226-clone-prefers-ssh`.
+//! canAccessRepository)` (`lib/find-account.ts`) is
+//! `corvene_core::clone_info::find_account_for_remote_url(input, candidates,
+//! can_access)`, which picks the index of a `Candidate` the way
+//! `Dispatcher::resolve_clone_info` builds them (through
+//! `clone_info::resolve_with`): [`find_account_for_remote_url`] makes every
+//! account a `Candidate` (host and GitHub.com-ness from
+//! `Endpoint::from_api_base`, `authenticated`), followed by the
+//! unauthenticated GitHub.com candidate the dispatcher appends for GitHub
+//! Desktop's `Account.anonymous()`, and answers `can_access` with the test's
+//! `canAccessRepository`.
 //!
 //! `getDotComAPIEndpoint()` is `Endpoint::github_com().api_base` and
 //! `getEnterpriseAPIURL(url)` is `Endpoint::enterprise(url, false).api_base`
 //! (`314-enterprise-plain-http` is off in every preset).
 
 use corvene_core::Account;
-use corvene_core::clone_info::{Candidate, resolve_with};
-use corvene_core::flags::ids::{CLONE_PREFERS_SSH, CLONE_SHORTHAND_NOT_FOUND};
-use corvene_github::{Endpoint, RepositoryCloneInfo};
-
-use corvene_core::flags::github_desktop_flags;
+use corvene_core::clone_info::Candidate;
+use corvene_github::Endpoint;
 
 use crate::accounts_support::{get_dot_com_api_endpoint, get_enterprise_api_url, new_account};
-
-/// The clone URL prefix that names the candidate whose lookup answered.
-const CANDIDATE: &str = "candidate:";
 
 /// `Account.anonymous()`: `new Account('', getDotComAPIEndpoint(), '', [],
 /// '', -1, '', 'free')`. Corvene's ids are unsigned, so the id is 0.
@@ -42,9 +29,7 @@ fn anonymous() -> Account {
 }
 
 /// `findAccountForRemoteURL(urlOrRepositoryAlias, accounts,
-/// canAccessRepository)` through `clone_info::resolve_with` (see the module
-/// docs). Swap the body for a call to a Corvene `find_account_for_remote_url`
-/// once the account choice is a function of its own.
+/// canAccessRepository)` (see the module docs).
 fn find_account_for_remote_url(
     url_or_repository_alias: &str,
     accounts: &[Account],
@@ -63,24 +48,11 @@ fn find_account_for_remote_url(
             }
         })
         .collect();
-    let mut lookup = |ix: usize, owner: &str, name: &str, _ssh: bool| {
-        Ok(
-            can_access_repository(&all_accounts[ix], owner, name).then(|| RepositoryCloneInfo {
-                url: format!("{CANDIDATE}{ix}"),
-                default_branch: None,
-            }),
-        )
-    };
-    let flags = github_desktop_flags();
-    let info = resolve_with(
+    let ix = corvene_core::clone_info::find_account_for_remote_url(
         url_or_repository_alias,
         &candidates,
-        &mut lookup,
-        flags.bool(CLONE_SHORTHAND_NOT_FOUND),
-        flags.bool(CLONE_PREFERS_SSH),
-    )
-    .ok()?;
-    let ix: usize = info.url.strip_prefix(CANDIDATE)?.parse().ok()?;
+        &mut |ix, owner, name| can_access_repository(&all_accounts[ix], owner, name),
+    )?;
     Some(all_accounts[ix].clone())
 }
 
@@ -192,7 +164,6 @@ fn finds_the_account_for_github_endpoint() {
 
 // GHD: unit/find-account-test.ts › findAccountForRemoteURL › finds the account for GitHub Enterprise endpoint
 #[test]
-#[ignore = "ghd: missing: no findAccountForRemoteURL (lib/find-account.ts) apart from clone_info::resolve_with, which only takes the host's account (joel) when its lookup finds the repo; here it 404s, so REPOSITORY_NOT_FOUND, no account"]
 fn finds_the_account_for_github_enterprise_endpoint() {
     let account = find_account_for_remote_url(
         "https://github.mycompany.com/inkscape/inkscape.git",

@@ -10,18 +10,16 @@
 //! - `IChangesListItem` is [`ChangesListItem`]; Corvene's functions take its
 //!   `change` (`corvene_core::WorkingDirectoryFileChange`).
 //! - `applyFilterOptions` is `corvene_core::filter::matches_options`,
-//!   `getNoResultsMessage` is `corvene_core::filter::no_results_message`.
-//! - `isCommittingFileHiddenByFilter` is the private
-//!   `ChangesSidebar::committing_hidden_files` view method of `corvene-ui`
-//!   (it reads the GPUI entities), `hasActiveFilters` is inlined in the
-//!   changes view (`count_active() > 0 || text_active`), and `applyFilters`
-//!   has no counterpart: the changes view applies the filter text and
-//!   options even while View › Hide Changes Filter hides the filter box.
-//!   Those cases call stand-ins and are ignored.
+//!   `getNoResultsMessage` is `corvene_core::filter::no_results_message`,
+//!   `isCommittingFileHiddenByFilter`, `hasActiveFilters` and `applyFilters`
+//!   are the `corvene_core::filter` functions of the same names (the
+//!   changes view calls them with its filter text).
 
 use std::collections::HashMap;
 
-use corvene_core::filter::{matches_options, no_results_message};
+use corvene_core::filter::{
+    has_active_filters, is_committing_file_hidden_by_filter, matches_options, no_results_message,
+};
 use corvene_core::{
     DiffSelection, DiffSelectionType, FileListFilter, FileStatusKind, WorkingDirectoryFileChange,
 };
@@ -88,37 +86,13 @@ fn apply_filter_options(item: &ChangesListItem, filters: &FileListFilter) -> boo
     matches_options(filters, &item.change)
 }
 
-/// Stand-in for GitHub Desktop's `isCommittingFileHiddenByFilter(
-/// fileIdsIncludedInCommit, filteredItems, fileCount, filters)`
-/// (`ui/changes/filter-changes-logic.ts`). Replace it with a
-/// `corvene_core::filter` function once there is one and remove the
-/// `#[ignore]`s.
-fn is_committing_file_hidden_by_filter<V>(
-    _file_ids_included_in_commit: &[&str],
-    _filtered_items: &HashMap<String, V>,
-    _file_count: usize,
-    _filter_text: &str,
-    _filters: &FileListFilter,
-) -> bool {
-    unimplemented!(
-        "corvene_core::filter has no isCommittingFileHiddenByFilter (only the ChangesSidebar view method)"
-    )
-}
-
-/// Stand-in for GitHub Desktop's `hasActiveFilters(filters)`
-/// (`ui/changes/filter-changes-logic.ts`).
-fn has_active_filters(_filter_text: &str, _filters: &FileListFilter) -> bool {
-    unimplemented!("corvene_core::filter has no hasActiveFilters")
-}
-
-/// Stand-in for GitHub Desktop's `applyFilters(item, showChangesFilter,
-/// filters)` (`ui/changes/filter-changes-logic.ts`).
+/// `applyFilters(item, showChangesFilter, filters)`
 fn apply_filters(
-    _item: &ChangesListItem,
-    _show_changes_filter: bool,
-    _filters: &FileListFilter,
+    item: &ChangesListItem,
+    show_changes_filter: bool,
+    filters: &FileListFilter,
 ) -> bool {
-    unimplemented!("corvene_core::filter has no applyFilters (showChangesFilter bypass)")
+    corvene_core::filter::apply_filters(&item.change, show_changes_filter, filters)
 }
 
 /// `filteredItems`: the GitHub Desktop test maps each id to `{} as
@@ -240,7 +214,6 @@ fn should_match_excluded_files_when_excluded_filter_is_active() {
 
 // GHD: unit/filter-changes-logic-test.ts › filter-changes-logic › isCommittingFileHiddenByFilter › should return false when no filters are active
 #[test]
-#[ignore = "ghd: missing: corvene_core::filter has no isCommittingFileHiddenByFilter, only the private corvene-ui ChangesSidebar::committing_hidden_files (ui/changes/filter-changes-logic.ts)"]
 fn should_return_false_when_no_filters_are_active() {
     let filter_text = "";
     let filters = filter_options(false, false, false, false, false);
@@ -259,7 +232,6 @@ fn should_return_false_when_no_filters_are_active() {
 
 // GHD: unit/filter-changes-logic-test.ts › filter-changes-logic › isCommittingFileHiddenByFilter › should return true when committing files not in filtered list
 #[test]
-#[ignore = "ghd: missing: corvene_core::filter has no isCommittingFileHiddenByFilter, only the private corvene-ui ChangesSidebar::committing_hidden_files (ui/changes/filter-changes-logic.ts)"]
 fn should_return_true_when_committing_files_not_in_filtered_list() {
     let filter_text = "";
     let filters = filter_options(true, false, false, false, false);
@@ -278,7 +250,6 @@ fn should_return_true_when_committing_files_not_in_filtered_list() {
 
 // GHD: unit/filter-changes-logic-test.ts › filter-changes-logic › isCommittingFileHiddenByFilter › should return false when all files remain visible after filtering
 #[test]
-#[ignore = "ghd: missing: corvene_core::filter has no isCommittingFileHiddenByFilter, only the private corvene-ui ChangesSidebar::committing_hidden_files (ui/changes/filter-changes-logic.ts)"]
 fn should_return_false_when_all_files_remain_visible_after_filtering() {
     let filter_text = "src";
     let filters = filter_options(false, false, false, true, false);
@@ -345,7 +316,6 @@ fn should_format_three_or_more_filters_with_commas_and_and() {
 
 // GHD: unit/filter-changes-logic-test.ts › filter-changes-logic › hasActiveFilters › should return false when no text or filter options are active
 #[test]
-#[ignore = "ghd: missing: corvene_core::filter has no hasActiveFilters, the changes view inlines it (ui/changes/filter-changes-logic.ts)"]
 fn should_return_false_when_no_text_or_filter_options_are_active() {
     let filter_text = "";
     let filters = filter_options(false, false, false, false, false);
@@ -355,7 +325,6 @@ fn should_return_false_when_no_text_or_filter_options_are_active() {
 
 // GHD: unit/filter-changes-logic-test.ts › filter-changes-logic › hasActiveFilters › should return true when either text or filter options are active
 #[test]
-#[ignore = "ghd: missing: corvene_core::filter has no hasActiveFilters, the changes view inlines it (ui/changes/filter-changes-logic.ts)"]
 fn should_return_true_when_either_text_or_filter_options_are_active() {
     assert!(has_active_filters(
         "src",
@@ -370,7 +339,6 @@ fn should_return_true_when_either_text_or_filter_options_are_active() {
 
 // GHD: unit/filter-changes-logic-test.ts › filter-changes-logic › applyFilters › should bypass filter logic when the changes filter is hidden
 #[test]
-#[ignore = "ghd: missing: no applyFilters, corvene-ui ChangesSidebar::visible_files applies the filter options even while the changes filter is hidden (ui/changes/filter-changes-logic.ts)"]
 fn should_bypass_filter_logic_when_the_changes_filter_is_hidden() {
     let item = create_test_item(
         "deleted.txt",

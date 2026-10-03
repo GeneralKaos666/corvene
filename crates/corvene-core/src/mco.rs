@@ -8,6 +8,18 @@
 //! Deviation: while the repository is still conflicted, a new merge, rebase
 //! or update from the default branch is refused with an explanation (GHD
 //! starts it and shows git's error; `838-no-merge-while-conflicted`).
+//!
+//! Deviation: [`derive_conflict_state`] drops the manual resolutions when
+//! the kind of conflict changes between two status reads (a merge aborted
+//! and a cherry-pick started outside Corvene); GHD
+//! (`lib/stores/updates/changes-state.ts` `updateConflictState`) carries
+//! them over, marking same-named files of the new operation resolved.
+//!
+//! The status refresh reopens the conflicts dialog when GHD's
+//! `_triggerConflictsFlow` would ([`is_conflicts_flow`]), except that it
+//! leaves an operation's open progress dialog alone (the operation moves it
+//! to the conflicts step itself once git reports conflicts; GHD switches it
+//! on any status read that finds the conflict state).
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -15,7 +27,7 @@ use std::time::Duration;
 
 use corvene_git::{CherryPickResult, RebaseResult};
 use corvene_models::{
-    Commit, CommitOneLine, FileStatusKind, ManualConflictResolution, McoProgress, Mergeability,
+    Branch, BranchKind, Commit, CommitOneLine, ManualConflictResolution, McoProgress, Mergeability,
     MultiCommitOperationKind, Section, WorkingDirectoryFileChange, WorkingDirectoryStatus,
 };
 use gpui_kit::{App, AsyncApp};
@@ -108,12 +120,78 @@ impl MultiCommitOperation {
         self.detail.kind()
     }
 
+    /// The operation is waiting on its conflicts: one of GHD's
+    /// [`CONFLICT_STEPS`] or the dismissed conflicts dialog
+    /// (`HideConflicts`, which `conflictSteps` leaves out). The status
+    /// refresh ends such an operation once the conflicts are gone.
     pub fn in_conflict_step(&self) -> bool {
-        matches!(
-            self.step,
-            McoStep::ShowConflicts | McoStep::HideConflicts | McoStep::ConfirmAbort
-        )
+        self.step == McoStep::HideConflicts || CONFLICT_STEPS.contains(&self.step)
     }
+}
+
+/// GHD `conflictSteps` (`models/multi-commit-operation.ts`; Corvene has no
+/// Copilot conflict steps).
+pub const CONFLICT_STEPS: [McoStep; 2] = [McoStep::ShowConflicts, McoStep::ConfirmAbort];
+
+/// GHD `isConflictsFlow` (`lib/multi-commit-operation.ts`): the
+/// multi-commit operation dialog is open at one of [`CONFLICT_STEPS`].
+pub fn is_conflicts_flow(
+    is_multi_commit_operation_popup_open: bool,
+    multi_commit_operation_state: Option<&MultiCommitOperation>,
+) -> bool {
+    is_multi_commit_operation_popup_open
+        && multi_commit_operation_state.is_some_and(|m| CONFLICT_STEPS.contains(&m.step))
+}
+
+/// GHD `ChooseBranchStep` (`models/multi-commit-operation.ts`): what the
+/// choose-branch step of a rebase or cherry-pick starts from. Corvene's
+/// `McoStep::ChooseBranch` carries none of it; its dialog reads the
+/// branches from the repository state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChooseBranchStep {
+    pub kind: McoStep,
+    pub default_branch: Option<Branch>,
+    pub current_branch: Branch,
+    pub all_branches: Vec<Branch>,
+    pub recent_branches: Vec<Branch>,
+}
+
+/// Why a multi-commit operation cannot start.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum McoError {
+    #[error("Tip is not in a valid state, which is required to start the multi commit operation")]
+    TipNotValid,
+}
+
+/// GHD `getMultiCommitOperationChooseBranchStep(state)`
+/// (`lib/multi-commit-operation.ts`): the choose-branch step with the
+/// current branch (from a valid tip), the default branch, every branch and
+/// the recent ones (`branchesState`). An error when the tip is not a valid
+/// branch (GHD throws).
+pub fn get_multi_commit_operation_choose_branch_step(
+    state: &RepositoryState,
+) -> Result<ChooseBranchStep, McoError> {
+    let info = state.info.as_ref().ok_or(McoError::TipNotValid)?;
+    let current_branch = info.current_branch().ok_or(McoError::TipNotValid)?.clone();
+    // a local branch of that name first, as `branchesState` holds them
+    let find = |name: &str| {
+        info.branches
+            .iter()
+            .filter(|b| b.name == name)
+            .min_by_key(|b| b.kind != BranchKind::Local)
+            .cloned()
+    };
+    Ok(ChooseBranchStep {
+        kind: McoStep::ChooseBranch,
+        default_branch: state.default_branch.as_deref().and_then(find),
+        current_branch,
+        all_branches: info.branches.clone(),
+        recent_branches: state
+            .recent_branches
+            .iter()
+            .filter_map(|name| find(name))
+            .collect(),
+    })
 }
 
 /// `IMultiCommitOperationUndoState` plus what the undo needs to know.
@@ -136,6 +214,8 @@ pub enum ConflictKind {
         current_tip: String,
     },
     Rebase {
+        /// The tip while the rebase is conflicted (`currentTip`).
+        current_tip: String,
         target_branch: String,
         base_branch_tip: String,
         original_branch_tip: String,
@@ -151,25 +231,31 @@ pub struct ConflictState {
     pub manual_resolutions: BTreeMap<String, ManualConflictResolution>,
 }
 
-/// GHD `getConflictState`
+/// GHD `updateConflictState` / `getConflictState`
+/// (`lib/stores/updates/changes-state.ts`): a rebase (which needs the
+/// current tip), else a cherry-pick (which needs the current branch), else a
+/// merge (`MERGE_HEAD`, or `SQUASH_MSG` with conflicted files, on a branch
+/// with a tip). The resolutions of `previous` are kept while the kind stays
+/// the same (see the module doc).
 pub fn derive_conflict_state(
     status: &WorkingDirectoryStatus,
     previous: Option<&ConflictState>,
 ) -> Option<ConflictState> {
-    let kind = if status.merge_head_found || (status.squash_msg_found && status.has_conflicts()) {
-        ConflictKind::Merge {
-            current_branch: status.branch.clone()?,
-            current_tip: status.current_tip.clone()?,
-        }
-    } else if let Some(rebase) = &status.rebase_internal_state {
+    let kind = if let Some(rebase) = &status.rebase_internal_state {
         ConflictKind::Rebase {
+            current_tip: status.current_tip.clone()?,
             target_branch: rebase.target_branch.clone(),
             base_branch_tip: rebase.base_branch_tip.clone(),
             original_branch_tip: rebase.original_branch_tip.clone(),
         }
     } else if status.cherry_pick_head_found {
         ConflictKind::CherryPick {
-            target_branch: status.branch.clone().unwrap_or_default(),
+            target_branch: status.branch.clone()?,
+        }
+    } else if status.merge_head_found || (status.squash_msg_found && status.has_conflicts()) {
+        ConflictKind::Merge {
+            current_branch: status.branch.clone()?,
+            current_tip: status.current_tip.clone()?,
         }
     } else {
         return None;
@@ -189,12 +275,54 @@ pub fn derive_conflict_state(
     })
 }
 
+/// GHD `getSquashedCommitDescription(commits, squashOnto)`
+/// (`lib/squash/squashed-commit-description.ts`): the squash dialog's
+/// prefilled description. `squash_onto`'s body, then each of `commits`'
+/// summary and body (joined by a blank line even when the body is empty),
+/// all trimmed and without their `Co-Authored-By` trailers; blank parts
+/// dropped, the rest joined by blank lines.
+pub fn get_squashed_commit_description(commits: &[Commit], squash_onto: &Commit) -> String {
+    let commit_messages = commits
+        .iter()
+        .map(|c| format!("{}\n\n{}", c.summary.trim(), c.body_no_co_authors().trim()));
+    std::iter::once(squash_onto.body_no_co_authors().trim().to_string())
+        .chain(commit_messages)
+        .filter(|d| !d.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 /// GHD `getUnmergedFiles`
 pub fn unmerged_files(status: &WorkingDirectoryStatus) -> Vec<&WorkingDirectoryFileChange> {
     status
         .files
         .iter()
-        .filter(|f| f.status.kind == FileStatusKind::Conflicted)
+        .filter(|f| f.status.is_conflicted())
+        .collect()
+}
+
+/// GHD `getUniqueCoauthorsAsAuthors` (`lib/unique-coauthors-as-authors.ts`):
+/// the `Co-Authored-By` co-authors of `commits` as known authors without a
+/// login, the first of each name and email pair. GHD prefills the squash
+/// dialog's co-authors with the squashed commits' ones; Corvene's squash
+/// dialog has no co-authors field yet (`.docs/TODO.md`).
+pub fn get_unique_coauthors_as_authors(commits: &[Commit]) -> Vec<corvene_models::Author> {
+    let mut unique: Vec<corvene_models::GitAuthor> = Vec::new();
+    for author in commits.iter().flat_map(Commit::co_authors) {
+        if !unique
+            .iter()
+            .any(|a| a.email == author.email && a.name == author.name)
+        {
+            unique.push(author);
+        }
+    }
+    unique
+        .into_iter()
+        .map(|a| corvene_models::Author::Known {
+            name: a.name,
+            email: a.email,
+            username: None,
+        })
         .collect()
 }
 
@@ -378,29 +506,25 @@ impl Dispatcher {
 
     // ---- banners ----
 
-    /// `_setBanner`, auto-dismissed after the banner's timeout.
+    /// `_setBanner`. Its view (`corvene_ui::banner::BannerView`, GHD
+    /// `Banner`) focuses it and dismisses it `Banner::timeout()` after focus
+    /// leaves it (`crate::banner_focus`).
     pub fn set_banner(banner: Banner, cx: &mut App) {
-        let timeout = banner.timeout();
-        let nonce = Self::state(cx).update(cx, |s, cx| {
+        Self::state(cx).update(cx, |s, cx| {
             s.banner_nonce += 1;
             s.banner = Some(banner);
             cx.notify();
-            s.banner_nonce
         });
-        if let Some(timeout) = timeout {
-            cx.spawn(async move |cx: &mut AsyncApp| {
-                cx.background_executor().timer(timeout).await;
-                cx.update(|cx| {
-                    Self::state(cx).update(cx, |s, cx| {
-                        if s.banner_nonce == nonce {
-                            s.banner = None;
-                            cx.notify();
-                        }
-                    });
-                });
-            })
-            .detach();
-        }
+    }
+
+    /// GHD `Banner`'s dismissal timeout (`onDismissed`) for the banner shown
+    /// as `nonce`: it goes unless another banner has replaced it.
+    pub fn dismiss_banner(nonce: u64, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            if s.banner_nonce == nonce && s.banner.take().is_some() {
+                cx.notify();
+            }
+        });
     }
 
     pub fn clear_banner(cx: &mut App) {
@@ -498,28 +622,29 @@ impl Dispatcher {
         Self::show_popup(Popup::MultiCommitOperation { repo: id, flow }, cx);
     }
 
-    fn is_mco_popup(popup: &Option<Popup>, id: u64) -> bool {
-        matches!(popup, Some(Popup::MultiCommitOperation { repo, .. }) if *repo == id)
+    /// GHD `areTherePopupsOfType(PopupType.MultiCommitOperation)`, for
+    /// repository `id`.
+    fn is_mco_popup(popups: &crate::popup_manager::PopupManager, id: u64) -> bool {
+        popups
+            .all_popups()
+            .iter()
+            .any(|p| matches!(p.popup, Popup::MultiCommitOperation { repo, .. } if repo == id))
     }
 
     fn close_mco_popup(id: u64, cx: &mut App) {
-        Self::state(cx).update(cx, |s, cx| {
-            if Self::is_mco_popup(&s.popup, id) {
-                s.popup = None;
-                cx.notify();
-            }
-        });
+        Self::close_popups_where(
+            |p| matches!(p, Popup::MultiCommitOperation { repo, .. } if *repo == id),
+            cx,
+        );
     }
 
     /// `_endMultiCommitOperation` (+ closing its dialog).
     pub fn end_mco(id: u64, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).mco = None;
-            if Self::is_mco_popup(&s.popup, id) {
-                s.popup = None;
-            }
             cx.notify();
         });
+        Self::close_mco_popup(id, cx);
     }
 
     pub(crate) fn current_branch_and_tip_pub(
@@ -605,7 +730,8 @@ impl Dispatcher {
 
     /// Store a fresh status (from an operation's background task) and derive
     /// the conflict state from it, like `_loadStatus`.
-    fn apply_status(rs: &mut RepositoryState, status: WorkingDirectoryStatus) {
+    fn apply_status(rs: &mut RepositoryState, mut status: WorkingDirectoryStatus) {
+        status.sort_files();
         rs.conflict_state = derive_conflict_state(&status, rs.conflict_state.as_ref());
         rs.status = Some(status);
     }
@@ -892,8 +1018,20 @@ impl Dispatcher {
     /// branch list's "Rebase Current Branch onto…",
     /// `856-branch-menu-rebase-onto`).
     pub fn start_rebase_flow_onto(id: u64, base_branch: Option<String>, cx: &mut App) {
-        let Some((current, tip)) = Self::current_branch_and_tip(id, cx) else {
-            return;
+        // `showRebaseDialog` → `getMultiCommitOperationChooseBranchStep`
+        let step = {
+            let s = Self::state(cx).read(cx);
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            get_multi_commit_operation_choose_branch_step(rs)
+        };
+        let (current, tip) = match step {
+            Ok(step) => (step.current_branch.name, step.current_branch.tip),
+            Err(err) => {
+                warn!(id, %err, "cannot start the rebase flow");
+                return;
+            }
         };
         Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).rebase_preview = None);
         if let Some(base) = &base_branch {
@@ -1397,7 +1535,7 @@ impl Dispatcher {
             } => {
                 let conflicted: Vec<WorkingDirectoryFileChange> = files
                     .into_iter()
-                    .filter(|f| f.status.kind == FileStatusKind::Conflicted)
+                    .filter(|f| f.status.is_conflicted())
                     .collect();
                 Self::set_mco_step(id, McoStep::ShowProgress, cx);
                 spawn_bg(
@@ -1442,6 +1580,7 @@ impl Dispatcher {
                             &resolutions,
                             &commits,
                             keep_messages,
+                            None,
                             on_progress,
                         )
                         .unwrap_or_else(|e| RebaseResult::Error(e.to_string()));
@@ -1478,6 +1617,7 @@ impl Dispatcher {
                             &resolutions,
                             &one_line,
                             keep_messages,
+                            None,
                             on_progress,
                         )
                         .unwrap_or_else(|e| RebaseResult::Error(e.to_string()));
@@ -1938,24 +2078,20 @@ impl Dispatcher {
             let Some(onto_commit) = rs.commits.iter().find(|c| c.sha == onto) else {
                 return;
             };
-            // `getSquashedCommitDescription`: onto's body, then each squashed
-            // commit's summary + body, oldest first
-            let mut parts: Vec<String> = Vec::new();
-            if !onto_commit.body.trim().is_empty() {
-                parts.push(onto_commit.body.trim().to_string());
-            }
-            for c in rs.commits.iter().rev() {
-                if to_squash.contains(&c.sha) {
-                    let mut text = c.summary.clone();
-                    if !c.body.trim().is_empty() {
-                        text.push_str("\n\n");
-                        text.push_str(c.body.trim());
-                    }
-                    parts.push(text);
-                }
-            }
-            let (summary, description) =
-                draft.unwrap_or_else(|| (onto_commit.summary.clone(), parts.join("\n\n")));
+            // the squashed commits, oldest first
+            let squashed: Vec<Commit> = rs
+                .commits
+                .iter()
+                .rev()
+                .filter(|c| to_squash.contains(&c.sha))
+                .cloned()
+                .collect();
+            let (summary, description) = draft.unwrap_or_else(|| {
+                (
+                    onto_commit.summary.clone(),
+                    get_squashed_commit_description(&squashed, onto_commit),
+                )
+            });
             (last_retained, summary, description, to_squash.len() + 1)
         };
         spawn_bg(
@@ -2389,9 +2525,10 @@ impl Dispatcher {
         id: u64,
         rebase_snapshot: Option<corvene_git::RebaseSnapshot>,
         cherry_pick_snapshot: Option<corvene_git::CherryPickSnapshot>,
+        merge_head_branches: Option<Vec<String>>,
         cx: &mut App,
     ) {
-        let (conflict, mco, current, popup_open, banner_is_conflicts) = {
+        let (conflict, mco, current, popup_open, mco_popup_open, banner_is_conflicts) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
             (
@@ -2400,7 +2537,8 @@ impl Dispatcher {
                 rs.and_then(|r| r.info.as_ref())
                     .and_then(|i| i.current_branch())
                     .map(|b| (b.name.clone(), b.tip.clone())),
-                s.popup.is_some(),
+                s.popups.is_a_popup_open(),
+                Self::is_mco_popup(&s.popups, id),
                 matches!(s.banner, Some(Banner::ConflictsFound { .. })),
             )
         };
@@ -2431,7 +2569,12 @@ impl Dispatcher {
                     current.as_ref().and_then(|c| c.1.clone()),
                     None,
                     Some(current_branch.clone()),
-                    None,
+                    // `getMergeConflictsTheirBranch`: the one branch at
+                    // `MERGE_HEAD`, if exactly one
+                    match merge_head_branches.as_deref() {
+                        Some([theirs]) => Some(theirs.clone()),
+                        _ => None,
+                    },
                 ),
                 ConflictKind::Rebase {
                     target_branch,
@@ -2504,10 +2647,12 @@ impl Dispatcher {
             return;
         }
         // an operation we started: make sure the conflicts step is visible
+        // (`_triggerConflictsFlow`), leaving the operation's own progress
+        // dialog alone (see the module doc)
         if let Some(mco) = mco
-            && mco.step == McoStep::ShowProgress
-            && !popup_open
             && !banner_is_conflicts
+            && !is_conflicts_flow(mco_popup_open, Some(&mco))
+            && !(mco_popup_open && mco.step == McoStep::ShowProgress)
         {
             Self::set_mco_step(id, McoStep::ShowConflicts, cx);
             Self::show_mco_popup(id, cx);
@@ -2580,6 +2725,7 @@ mod tests {
                 author: who.clone(),
                 committer: who,
                 parents: Vec::new(),
+                trailers: Vec::new(),
                 tags: Vec::new(),
             }
         };

@@ -13,18 +13,14 @@
 //!   true / false) become the JSON `true` / `false` Corvene writes, the
 //!   non-numeric `'a'` stays the string `"a"`,
 //! - `hasShownWelcomeFlow()` is `StoreExt::settings(store)?.welcome_completed`
-//!   (`corvene_core::persistence`), the read Corvene makes at launch. GitHub
-//!   Desktop's `getBoolean` falls back to the default for that one key when
-//!   the stored value is not `'1'`/`'0'`/`'true'`/`'false'`; Corvene's
-//!   `StoreExt::settings` fails for the whole record instead, and only the
-//!   binary (`crates/corvene/src/main.rs`: `store.settings().unwrap_or_default()`,
-//!   unreachable from here) turns that into the defaults for every setting.
-//!   That fallback is not repeated here, so the non-numeric case is ignored,
-//! - `markWelcomeFlowComplete()` is `Dispatcher::complete_welcome`, which
-//!   needs a gpui `App`; there is no store-level entry point, so that case
-//!   calls a stand-in and is ignored.
+//!   (`corvene_core::persistence`), the read Corvene makes at launch. Like
+//!   GitHub Desktop's `getBoolean`, an unreadable stored value falls back to
+//!   the default for that one setting,
+//! - `markWelcomeFlowComplete()` is
+//!   `corvene_core::persistence::mark_welcome_flow_complete(store)`, which
+//!   `Dispatcher::complete_welcome` calls.
 
-use corvene_core::persistence::StoreExt;
+use corvene_core::persistence::{StoreExt, mark_welcome_flow_complete};
 use corvene_store::Store;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -52,20 +48,12 @@ fn stored_value(store: &Store) -> Option<Value> {
 }
 
 /// GitHub Desktop's `hasShownWelcomeFlow()`: the stored settings'
-/// `welcome_completed` (see the module doc for the binary's fallback).
+/// `welcome_completed`.
 fn has_shown_welcome_flow(store: &Store) -> bool {
     store
         .settings()
         .expect("StoreExt::settings")
         .welcome_completed
-}
-
-/// Stand-in for GitHub Desktop's `markWelcomeFlowComplete()`
-/// (`lib/welcome.ts`). Corvene's is `Dispatcher::complete_welcome(cx)`,
-/// which needs a gpui `App`; replace this with a store-level function once
-/// there is one and remove the `#[ignore]`.
-fn mark_welcome_flow_complete(_store: &Store) {
-    unimplemented!("Dispatcher::complete_welcome needs a gpui App; no store-level entry point")
 }
 
 // GHD: unit/welcome-test.ts › Welcome › hasShownWelcomeFlow › defaults to false when no value found
@@ -77,7 +65,6 @@ fn defaults_to_false_when_no_value_found() {
 
 // GHD: unit/welcome-test.ts › Welcome › hasShownWelcomeFlow › returns false for some non-numeric value
 #[test]
-#[ignore = "ghd: bug: StoreExt::settings fails on the non-boolean welcome_completed \"a\" (main.rs then resets every setting), GHD getBoolean gives false for that key only"]
 fn returns_false_for_some_non_numeric_value() {
     let (store, _dir) = fresh_store();
     set_stored_value(&store, json!("a"));
@@ -102,7 +89,6 @@ fn returns_true_when_one_found() {
 
 // GHD: unit/welcome-test.ts › Welcome › markWelcomeFlowComplete › sets localStorage to 1
 #[test]
-#[ignore = "ghd: missing: markWelcomeFlowComplete (lib/welcome.ts) is Dispatcher::complete_welcome, which needs a gpui App; no store-level function"]
 fn sets_local_storage_to_1() {
     let (store, _dir) = fresh_store();
     mark_welcome_flow_complete(&store);

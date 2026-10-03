@@ -9,23 +9,29 @@
 //! Corvene keeps the accounts in `AppState::accounts`, persisted whole under
 //! the key `accounts` of `corvene_store::Store` by `StoreExt::save_accounts`
 //! and read back at launch by `StoreExt::accounts` (`Dispatcher::init`);
-//! tokens live in the OS keychain (`corvene_platform::keychain`), which
-//! takes no injected store, so there is no `AsyncInMemoryStore` here.
+//! tokens go to a `corvene_core::accounts::SecureStore` (the OS keychain in
+//! the app).
 //!
 //! - [`InMemoryStore`] is a `corvene_store::Store` in a temporary directory,
 //!   with GitHub Desktop's `setItem` / `getItem` over JSON values;
+//! - [`AsyncInMemoryStore`] is GitHub Desktop's secure store helper of the
+//!   same name, a `SecureStore` in memory;
 //! - [`AccountsStore::get_all`] is `StoreExt::accounts`, the read
 //!   `Dispatcher::init` does (GitHub Desktop's `getAll` after
 //!   `loadFromStore`);
-//! - [`AccountsStore::add_account`] is a stand-in: Corvene adds an account in
-//!   `Dispatcher::finish_sign_in` (replace the account of the same endpoint,
-//!   `save_accounts`), inside a gpui update after fetching the user and
-//!   writing the keychain.
+//! - [`AccountsStore::add_account`] is `corvene_core::accounts::add_account`,
+//!   which `Dispatcher::finish_sign_in` calls on `AppState::accounts`;
+//! - [`AccountsStore`] is the sign-in store's `AccountsSource`
+//!   (`new SignInStore(accountsStore)`).
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use corvene_core::Account;
+use corvene_core::accounts::SecureStore;
 use corvene_core::persistence::StoreExt;
+use corvene_core::sign_in::AccountsSource;
 use corvene_github::Endpoint;
 use corvene_store::Store;
 use tempfile::TempDir;
@@ -66,16 +72,43 @@ impl InMemoryStore {
     }
 }
 
+/// GitHub Desktop's `AsyncInMemoryStore` (`ISecureStore`): tokens by
+/// (key, login) in memory.
+#[derive(Default)]
+pub struct AsyncInMemoryStore {
+    store: RefCell<HashMap<(String, String), String>>,
+}
+
+impl SecureStore for AsyncInMemoryStore {
+    fn set_item(&self, host: &str, login: &str, token: &str) -> Result<(), String> {
+        self.store
+            .borrow_mut()
+            .insert((host.to_string(), login.to_string()), token.to_string());
+        Ok(())
+    }
+
+    fn delete_item(&self, host: &str, login: &str) -> Result<(), String> {
+        self.store
+            .borrow_mut()
+            .remove(&(host.to_string(), login.to_string()));
+        Ok(())
+    }
+}
+
 /// GitHub Desktop's `AccountsStore` over an `InMemoryStore` (see the module
 /// docs).
 pub struct AccountsStore {
     data_store: InMemoryStore,
+    secure_store: AsyncInMemoryStore,
 }
 
 impl AccountsStore {
     /// `new AccountsStore(dataStore, new AsyncInMemoryStore())`.
     pub fn new(data_store: InMemoryStore) -> Self {
-        Self { data_store }
+        Self {
+            data_store,
+            secure_store: AsyncInMemoryStore::default(),
+        }
     }
 
     /// `getAll()`: the accounts as loaded from the data store.
@@ -83,13 +116,25 @@ impl AccountsStore {
         self.data_store.store.accounts().expect("read the accounts")
     }
 
-    /// Stand-in for `addAccount(account)`: store the token, replace the
-    /// account of the same endpoint, sort GitHub.com first and save. Corvene
-    /// does this in `Dispatcher::finish_sign_in` (needs a gpui `App`, the
-    /// network and the OS keychain); replace this once there is a gpui-free
-    /// call and remove the `#[ignore]`s.
-    pub fn add_account(&self, _account: Account) -> Option<Account> {
-        unimplemented!("no gpui-free AccountsStore.addAccount (Dispatcher::finish_sign_in)")
+    /// `addAccount(account)`: `corvene_core::accounts::add_account` on the
+    /// loaded accounts. The token went with [`new_account`] (Corvene's
+    /// `Account` has none), so an empty one is stored.
+    pub fn add_account(&self, account: Account) -> Option<Account> {
+        let mut accounts = self.get_all();
+        corvene_core::accounts::add_account(
+            &self.data_store.store,
+            &mut accounts,
+            account,
+            "",
+            &self.secure_store,
+        )
+        .ok()
+    }
+}
+
+impl AccountsSource for AccountsStore {
+    fn accounts(&self) -> Vec<Account> {
+        self.get_all()
     }
 }
 

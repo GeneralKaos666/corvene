@@ -1,41 +1,16 @@
 //! Port of GitHub Desktop's `app/test/unit/unique-coauthors-as-authors-test.ts`.
 //!
 //! GitHub Desktop's `getUniqueCoauthorsAsAuthors(commits)`
-//! (`lib/unique-coauthors-as-authors.ts`) collects the `Co-Authored-By`
-//! trailers of commits (`Commit.coAuthors`, parsed from `Commit.trailers`)
-//! as `KnownAuthor`s, one per distinct name and email; the squash flow
-//! prefills the squash dialog's co-authors with them. Corvene has neither:
-//! `corvene_models::Commit` keeps no trailers or co-authors and the squash
-//! dialog (`Dispatcher::request_squash`, `corvene-core/src/mco.rs`) starts
-//! without co-authors. The cases call a stand-in and are ignored until both
-//! exist.
-//!
-//! [`TestCommit`] is GitHub Desktop's `Commit` as the test builds it: a
-//! `corvene_models::Commit` plus the trailers it is given, which Corvene's
-//! `Commit` cannot hold yet. A `KnownAuthor` is `Author::Known`.
+//! (`lib/unique-coauthors-as-authors.ts`) is
+//! `corvene_core::get_unique_coauthors_as_authors`: the `Co-Authored-By`
+//! trailers of the commits (`Commit::co_authors`, parsed from
+//! `Commit::trailers`) as known authors, one per distinct name and email. A
+//! `KnownAuthor` is `Author::Known`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use corvene_models::{Author, Commit, CommitIdentity};
-
-/// GitHub Desktop's `ITrailer` (`{ token, value }`).
-type Trailer = (String, String);
-
-/// GitHub Desktop's `Commit`: Corvene's `Commit` and the trailers GitHub
-/// Desktop's carries (see the module doc).
-struct TestCommit {
-    #[allow(dead_code)]
-    commit: Commit,
-    #[allow(dead_code)]
-    trailers: Vec<Trailer>,
-}
-
-/// Stand-in for GitHub Desktop's `getUniqueCoauthorsAsAuthors(commits)`.
-/// Replace it with the Corvene function once commits carry their trailers
-/// (then `TestCommit` becomes `Commit`) and remove the `#[ignore]`s.
-fn get_unique_coauthors_as_authors(_commits: &[TestCommit]) -> Vec<Author> {
-    unimplemented!("Corvene has no getUniqueCoauthorsAsAuthors and its Commit has no trailers")
-}
+use corvene_core::get_unique_coauthors_as_authors;
+use corvene_models::{Author, Commit, CommitIdentity, Trailer};
 
 /// `KnownAuthor.name`.
 fn author_name(author: &Author) -> &str {
@@ -56,7 +31,7 @@ fn author_email(author: &Author) -> &str {
 /// The test file's `buildTestCommit(trailers)`: `new Commit('test', 'test',
 /// 'test', 'test', author, author, [], trailers, [])` with the author `new
 /// CommitIdentity('test', 'test', new Date())`.
-fn build_test_commit(trailers: &[Trailer]) -> TestCommit {
+fn build_test_commit(trailers: &[Trailer]) -> Commit {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -67,17 +42,15 @@ fn build_test_commit(trailers: &[Trailer]) -> TestCommit {
         seconds: now,
         offset: 0,
     };
-    TestCommit {
-        commit: Commit {
-            sha: "test".to_string(),
-            summary: "test".to_string(),
-            body: "test".to_string(),
-            author: author.clone(),
-            committer: author,
-            parents: Vec::new(),
-            tags: Vec::new(),
-        },
+    Commit {
+        sha: "test".to_string(),
+        summary: "test".to_string(),
+        body: "test".to_string(),
+        author: author.clone(),
+        committer: author,
+        parents: Vec::new(),
         trailers: trailers.to_vec(),
+        tags: Vec::new(),
     }
 }
 
@@ -88,7 +61,6 @@ fn build_test_co_author_trailer(email: &str, name: &str) -> Trailer {
 
 // GHD: unit/unique-coauthors-as-authors-test.ts › getUniqueCoauthorsAsAuthors › can returns empty array for no coauthors
 #[test]
-#[ignore = "ghd: missing: Corvene has no getUniqueCoauthorsAsAuthors (lib/unique-coauthors-as-authors.ts) and corvene_models::Commit has no trailers / coAuthors"]
 fn can_returns_empty_array_for_no_coauthors() {
     let trailers = [(
         "Signed-Off-By".to_string(),
@@ -107,7 +79,6 @@ fn can_returns_empty_array_for_no_coauthors() {
 
 // GHD: unit/unique-coauthors-as-authors-test.ts › getUniqueCoauthorsAsAuthors › gets coauthor from commit with coauthor
 #[test]
-#[ignore = "ghd: missing: Corvene has no getUniqueCoauthorsAsAuthors (lib/unique-coauthors-as-authors.ts) and corvene_models::Commit has no trailers / coAuthors"]
 fn gets_coauthor_from_commit_with_coauthor() {
     let email = "tidy-dev@github.com";
     let name = "tidy-dev";
@@ -123,7 +94,6 @@ fn gets_coauthor_from_commit_with_coauthor() {
 
 // GHD: unit/unique-coauthors-as-authors-test.ts › getUniqueCoauthorsAsAuthors › does not return duplicate authors
 #[test]
-#[ignore = "ghd: missing: Corvene has no getUniqueCoauthorsAsAuthors (lib/unique-coauthors-as-authors.ts) and corvene_models::Commit has no trailers / coAuthors"]
 fn does_not_return_duplicate_authors() {
     let email = "tidy-dev@github.com";
     let name = "tidy-dev";
@@ -144,7 +114,6 @@ fn does_not_return_duplicate_authors() {
 
 // GHD: unit/unique-coauthors-as-authors-test.ts › getUniqueCoauthorsAsAuthors › does not return duplicate authors when name is different and email is the same
 #[test]
-#[ignore = "ghd: missing: Corvene has no getUniqueCoauthorsAsAuthors (lib/unique-coauthors-as-authors.ts) and corvene_models::Commit has no trailers / coAuthors"]
 fn does_not_return_duplicate_authors_when_name_is_different_and_email_is_the_same() {
     let email = "tidy-dev@github.com";
     let name = "tidy-dev";
@@ -163,7 +132,6 @@ fn does_not_return_duplicate_authors_when_name_is_different_and_email_is_the_sam
 
 // GHD: unit/unique-coauthors-as-authors-test.ts › getUniqueCoauthorsAsAuthors › does not return duplicate authors when email is different and name is the same
 #[test]
-#[ignore = "ghd: missing: Corvene has no getUniqueCoauthorsAsAuthors (lib/unique-coauthors-as-authors.ts) and corvene_models::Commit has no trailers / coAuthors"]
 fn does_not_return_duplicate_authors_when_email_is_different_and_name_is_the_same() {
     let email = "tidy-dev@github.com";
     let other_email = "sergiou87@github.com";
@@ -183,7 +151,6 @@ fn does_not_return_duplicate_authors_when_email_is_different_and_name_is_the_sam
 
 // GHD: unit/unique-coauthors-as-authors-test.ts › getUniqueCoauthorsAsAuthors › can get multiple coauthors on multiple commits
 #[test]
-#[ignore = "ghd: missing: Corvene has no getUniqueCoauthorsAsAuthors (lib/unique-coauthors-as-authors.ts) and corvene_models::Commit has no trailers / coAuthors"]
 fn can_get_multiple_coauthors_on_multiple_commits() {
     let first_email = "tidy-dev@github.com";
     let first_name = "tidy-dev";

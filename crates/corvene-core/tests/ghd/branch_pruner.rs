@@ -1,22 +1,24 @@
 //! Port of GitHub Desktop's `app/test/unit/branch-pruner-test.ts`.
 //!
-//! Corvene has no branch pruner: nothing like GitHub Desktop's `BranchPruner`
-//! (`lib/stores/helpers/branch-pruner.ts`, which deletes local branches
-//! merged into the default branch whose upstream is gone, at most once a
-//! day, sparing reserved names, branches checked out in the last two weeks
-//! and branches checked out in a linked worktree) exists in `corvene-core`,
-//! and neither do its building blocks `getMergedBranches`,
-//! `getBranchCheckouts` or the last-prune date `RepositoriesStore` keeps
-//! per GitHub repository. The cases call the stand-in
-//! [`branch_pruner_run_once`] and are ignored until the pruner exists.
+//! GitHub Desktop's `BranchPruner` (`lib/stores/helpers/branch-pruner.ts`,
+//! which deletes local branches merged into the default branch whose
+//! upstream is gone, at most once a day, sparing reserved names, branches
+//! checked out in the last two weeks and branches checked out in a linked
+//! worktree) is `corvene_core::branch_pruner::BranchPruner`; its
+//! `runOnce()` is [`branch_pruner_run_once`]. The last prune date GitHub
+//! Desktop's `RepositoriesStore` keeps per GitHub repository is
+//! `corvene_core::repositories_store::last_prune_date`, which the
+//! dispatcher reads and hands to the pruner, as this port does with the
+//! date `setupRepository` stores.
 //!
 //! `helpers/repository-builder-branch-pruner.ts` `setupRepository` is
 //! [`setup_repository`]: the `corvene_models::Repository` of the path, with
 //! the API repository it upserts as `Repository::github` when
 //! `includesGhRepo`, the branches, remotes and tip `primeCaches` loads
-//! through a `GitStore` (Corvene's refresh: `corvene_git::open_repository`),
-//! and the last prune date, kept only for a GitHub repository as GitHub
-//! Desktop's `updateLastPruneDate` does. `createRepository` is
+//! through a `GitStore` (Corvene's refresh: `corvene_git::open_repository`,
+//! with `corvene_core::git_store::load_default_branch` for the default
+//! branch), and the last prune date, kept only for a GitHub repository as
+//! GitHub Desktop's `updateLastPruneDate` does. `createRepository` is
 //! `corvene_test_support::repository_builder_branch_pruner::create_repository`.
 //! `offsetFromNow(n, unit)` is `SystemTime::now()` moved by `n` units.
 
@@ -25,16 +27,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use corvene_core::branch_pruner::BranchPruner;
+use corvene_core::git_store::load_default_branch;
 use corvene_core::{GitHubRepository, Repository, RepositoryInfo, RepositoryPermission};
 use corvene_test_support::repository_builder_branch_pruner::create_repository as create_pruned_repository;
-use corvene_test_support::{TestRepo, exec, setup_fixture_repository};
+use corvene_test_support::{TestRepo, exec, git, setup_fixture_repository};
 
 const HOUR: Duration = Duration::from_secs(60 * 60);
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The state GitHub Desktop's `setupRepository` leaves in the
 /// `RepositoriesStore` and `RepositoryStateCache` for one repository.
-#[allow(dead_code)]
 struct PrunerRepository {
     repository: Repository,
     /// `branchesState` as `primeCaches` fills it.
@@ -82,12 +85,21 @@ fn setup_repository(
     }
 }
 
-/// Stand-in for `new BranchPruner(repository, gitStoreCache,
-/// repositoriesStore, repositoriesStateCache, onPruneCompleted).runOnce()`
-/// (`lib/stores/helpers/branch-pruner.ts`). Replace it with the Corvene
-/// pruner once there is one and remove the `#[ignore]`s.
-fn branch_pruner_run_once(_repository: &PrunerRepository) {
-    unimplemented!("Corvene has no BranchPruner")
+/// `new BranchPruner(repository, gitStoreCache, repositoriesStore,
+/// repositoriesStateCache, onPruneCompleted).runOnce()`
+/// (`lib/stores/helpers/branch-pruner.ts`), reading what `primeCaches`
+/// loaded: the branches, the default branch (`GitStore.defaultBranch`) and
+/// the last prune date.
+fn branch_pruner_run_once(repository: &PrunerRepository) {
+    let default_branch = load_default_branch(git(), &repository.info);
+    BranchPruner::new(
+        git(),
+        &repository.repository,
+        &repository.info.branches,
+        default_branch.as_deref(),
+        repository.last_prune_date,
+    )
+    .run_once();
 }
 
 /// `getBranchesFromGit(repository)`: the names `git branch` lists.
@@ -113,7 +125,6 @@ impl Drop for RemoveDirOnDrop {
 
 // GHD: unit/branch-pruner-test.ts › BranchPruner › does nothing on non GitHub repositories
 #[test]
-#[ignore = "ghd: missing: Corvene has no BranchPruner (lib/stores/helpers/branch-pruner.ts) nor getMergedBranches / getBranchCheckouts / a last prune date"]
 fn does_nothing_on_non_git_hub_repositories() {
     let path = setup_fixture_repository("branch-prune-tests");
 
@@ -128,7 +139,6 @@ fn does_nothing_on_non_git_hub_repositories() {
 
 // GHD: unit/branch-pruner-test.ts › BranchPruner › prunes for GitHub repository
 #[test]
-#[ignore = "ghd: missing: Corvene has no BranchPruner (lib/stores/helpers/branch-pruner.ts) nor getMergedBranches / getBranchCheckouts / a last prune date"]
 fn prunes_for_git_hub_repository() {
     let last_prune_date = SystemTime::now() - DAY;
 
@@ -152,7 +162,6 @@ fn prunes_for_git_hub_repository() {
 
 // GHD: unit/branch-pruner-test.ts › BranchPruner › does not prune if the last prune date is less than 24 hours ago
 #[test]
-#[ignore = "ghd: missing: Corvene has no BranchPruner (lib/stores/helpers/branch-pruner.ts) nor getMergedBranches / getBranchCheckouts / a last prune date"]
 fn does_not_prune_if_the_last_prune_date_is_less_than_24_hours_ago() {
     let last_prune_date = SystemTime::now() - 4 * HOUR;
     let path = setup_fixture_repository("branch-prune-tests");
@@ -167,7 +176,6 @@ fn does_not_prune_if_the_last_prune_date_is_less_than_24_hours_ago() {
 
 // GHD: unit/branch-pruner-test.ts › BranchPruner › does not prune if there is no default branch
 #[test]
-#[ignore = "ghd: missing: Corvene has no BranchPruner (lib/stores/helpers/branch-pruner.ts) nor getMergedBranches / getBranchCheckouts / a last prune date"]
 fn does_not_prune_if_there_is_no_default_branch() {
     let last_prune_date = SystemTime::now() - DAY;
     let repo_path = setup_fixture_repository("branch-prune-tests");
@@ -193,7 +201,6 @@ fn does_not_prune_if_there_is_no_default_branch() {
 
 // GHD: unit/branch-pruner-test.ts › BranchPruner › does not prune reserved branches
 #[test]
-#[ignore = "ghd: missing: Corvene has no BranchPruner (lib/stores/helpers/branch-pruner.ts) nor getMergedBranches / getBranchCheckouts / a last prune date"]
 fn does_not_prune_reserved_branches() {
     let last_prune_date = SystemTime::now() - DAY;
 
@@ -221,7 +228,6 @@ fn does_not_prune_reserved_branches() {
 
 // GHD: unit/branch-pruner-test.ts › BranchPruner › never prunes a branch that lacks an upstream
 #[test]
-#[ignore = "ghd: missing: Corvene has no BranchPruner (lib/stores/helpers/branch-pruner.ts) nor getMergedBranches / getBranchCheckouts / a last prune date"]
 fn never_prunes_a_branch_that_lacks_an_upstream() {
     let path = create_pruned_repository();
 
@@ -238,7 +244,6 @@ fn never_prunes_a_branch_that_lacks_an_upstream() {
 
 // GHD: unit/branch-pruner-test.ts › BranchPruner › does not prune branches checked out in a linked worktree
 #[test]
-#[ignore = "ghd: missing: Corvene has no BranchPruner (lib/stores/helpers/branch-pruner.ts) nor getMergedBranches / getBranchCheckouts / a last prune date"]
 fn does_not_prune_branches_checked_out_in_a_linked_worktree() {
     let last_prune_date = SystemTime::now() - DAY;
 

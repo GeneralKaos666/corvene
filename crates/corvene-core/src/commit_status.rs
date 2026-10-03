@@ -77,8 +77,8 @@ fn fetch_ref_checks_inner(
 ) -> (Option<Vec<RefCheck>>, bool) {
     let statuses = client.combined_ref_status(owner, name, git_ref);
     let check_runs = client.ref_check_runs(owner, name, git_ref, all_check_runs);
-    let auth_failed = matches!(&statuses, Err(corvene_github::GitHubError::Auth(_)))
-        || matches!(&check_runs, Err(corvene_github::GitHubError::Auth(_)));
+    let auth_failed = statuses.as_ref().is_err_and(|e| e.is_token_invalidated())
+        || check_runs.as_ref().is_err_and(|e| e.is_token_invalidated());
     let statuses = statuses.ok().flatten();
     let check_runs = check_runs.ok().flatten();
     if statuses.is_none() && check_runs.is_none() {
@@ -609,7 +609,12 @@ impl Dispatcher {
             move || {
                 let client = Client::new(endpoint, token);
                 let ids: HashSet<u64> = checks.iter().filter_map(|c| c.check_suite_id).collect();
-                let month_ago = std::time::SystemTime::now() - Duration::from_secs(30 * 24 * 3600);
+                // `offsetFromNow(-30, 'days')`
+                let month_ago = crate::offset_from::offset_from(
+                    std::time::SystemTime::now(),
+                    -30,
+                    crate::offset_from::Unit::Days,
+                );
                 let mut rerequestable: HashSet<u64> = HashSet::new();
                 for id in ids {
                     if let Ok(Some(suite)) = client.check_suite(&gh.owner, &gh.name, id)

@@ -4,12 +4,15 @@
 //! commits the current branch is behind / ahead of another branch, with the
 //! merge call to action.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use corvene_models::{AheadBehind, Commit, Mergeability};
 use gpui_kit::{App, AsyncApp};
 use tracing::warn;
 
+use crate::ahead_behind_store::Disposable;
 use crate::dispatcher::Dispatcher;
 
 /// `ComparisonMode`
@@ -36,6 +39,9 @@ pub enum CompareForm {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompareState {
     pub form: CompareForm,
+    /// `filterText`: the compare box's text (the compared branch's name
+    /// while comparing, empty in the plain history).
+    pub filter_text: String,
     /// `showBranchList`: the compare box is expanded into the branch list.
     pub show_branch_list: bool,
     /// The comparison commits (`commitSHAs` while in `Branch` mode).
@@ -47,6 +53,9 @@ pub struct CompareState {
     /// (`AheadBehindStore`), filled while the list is open.
     pub branch_counts: HashMap<String, AheadBehind>,
     pub counts_loaded: bool,
+    /// The `AppState::ahead_behind` requests filling `branch_counts`,
+    /// disposed when a newer load replaces them.
+    pub counts_requests: Vec<Disposable>,
     /// Flag `825`: the repository's tags, loaded with the counts, offered
     /// in the list while filtering.
     pub tags: Vec<String>,
@@ -56,12 +65,14 @@ impl Default for CompareState {
     fn default() -> Self {
         Self {
             form: CompareForm::History,
+            filter_text: String::new(),
             show_branch_list: false,
             commits: Vec::new(),
             loading: false,
             merge_status: None,
             branch_counts: HashMap::new(),
             counts_loaded: false,
+            counts_requests: Vec::new(),
             tags: Vec::new(),
         }
     }
@@ -81,6 +92,17 @@ impl CompareState {
 }
 
 impl Dispatcher {
+    /// `updateCompareForm({ filterText })`: the compare box was edited.
+    pub fn set_compare_filter_text(id: u64, filter_text: String, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            let rs = s.repo_state_mut(id);
+            if rs.compare.filter_text != filter_text {
+                rs.compare.filter_text = filter_text;
+                cx.notify();
+            }
+        });
+    }
+
     /// `updateCompareForm({ showBranchList })`
     pub fn set_compare_branch_list_visible(id: u64, visible: bool, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
@@ -95,13 +117,18 @@ impl Dispatcher {
         }
     }
 
-    /// Ahead/behind counters for the compare branch list, one `rev-list
-    /// --left-right --count` per branch.
+    /// Ahead/behind counters for the compare branch list: GHD's
+    /// `AheadBehindStore.getAheadBehind(repository, currentTip, branchTip)`
+    /// for every other branch (`AppState::ahead_behind`, which caches them by
+    /// tip shas across refreshes and counts the rest one `rev-list
+    /// --left-right --count` at a time). The cached counts show at once and
+    /// the others together once all are counted; GHD's rows subscribe while
+    /// they are rendered and fill in one by one.
     fn load_compare_counts(id: u64, cx: &mut App) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let (current, branches, loaded, with_tags) = {
+        let (current_tip, branches, loaded, with_tags) = {
             let s = Self::state(cx).read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
                 return;
@@ -110,12 +137,15 @@ impl Dispatcher {
             let Some(current) = info.current_branch() else {
                 return;
             };
+            let Some(current_tip) = current.tip.clone() else {
+                return;
+            };
             (
-                current.full_name.clone(),
+                current_tip,
                 info.branches
                     .iter()
                     .filter(|b| b.full_name != current.full_name)
-                    .map(|b| (b.name.clone(), b.full_name.clone()))
+                    .filter_map(|b| Some((b.name.clone(), b.tip.clone()?)))
                     .collect::<Vec<_>>(),
                 rs.compare.counts_loaded,
                 s.flags.bool(crate::flags::ids::COMPARE_TAGS),
@@ -124,7 +154,35 @@ impl Dispatcher {
         if loaded {
             return;
         }
-        Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).compare.counts_loaded = true);
+        let counts: Rc<RefCell<HashMap<String, AheadBehind>>> = Rc::default();
+        // this load's own handle: a newer load disposes it with the requests
+        let load = Disposable::new();
+        let waiter = Self::state(cx).update(cx, |s, cx| {
+            let previous = std::mem::take(&mut s.repo_state_mut(id).compare.counts_requests);
+            for request in previous {
+                request.dispose();
+            }
+            let mut requests = vec![load.clone()];
+            for (name, tip) in branches {
+                let counts = counts.clone();
+                requests.push(s.ahead_behind.get_ahead_behind(
+                    git.clone(),
+                    &workdir,
+                    &current_tip,
+                    &tip,
+                    move |ab| {
+                        counts.borrow_mut().insert(name, ab);
+                    },
+                ));
+            }
+            let compare = &mut s.repo_state_mut(id).compare;
+            compare.counts_loaded = true;
+            compare.counts_requests = requests;
+            // the cached counts answered at once
+            compare.branch_counts = counts.borrow_mut().drain().collect();
+            cx.notify();
+            s.ahead_behind.waiter()
+        });
         let task = cx.background_executor().spawn(async move {
             let tags = if with_tags {
                 corvene_git::tag_names(&workdir).unwrap_or_else(|err| {
@@ -134,23 +192,20 @@ impl Dispatcher {
             } else {
                 Vec::new()
             };
-            let counts = branches
-                .into_iter()
-                .filter_map(|(name, full)| {
-                    corvene_git::symmetric_ahead_behind(git.clone(), &workdir, &current, &full)
-                        .ok()
-                        .flatten()
-                        .map(|ab| (name, ab))
-                })
-                .collect::<HashMap<String, AheadBehind>>();
-            (counts, tags)
+            waiter.wait_idle();
+            tags
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let (counts, tags) = task.await;
+            let tags = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
+                    // runs the callbacks of every counted range
+                    s.ahead_behind.poll();
+                    if load.disposed() {
+                        return;
+                    }
                     let compare = &mut s.repo_state_mut(id).compare;
-                    compare.branch_counts = counts;
+                    compare.branch_counts.extend(counts.borrow_mut().drain());
                     compare.tags = tags;
                     cx.notify();
                 });
@@ -218,6 +273,7 @@ impl Dispatcher {
                                 mode,
                                 ahead_behind,
                             };
+                            rs.compare.filter_text = branch.clone();
                             rs.compare.commits = commits;
                             rs.compare.merge_status = merge_status;
                             let first = rs.compare.commits.first().map(|c| c.sha.clone());
@@ -269,6 +325,7 @@ impl Dispatcher {
             let rs = s.repo_state_mut(id);
             let was = rs.compare.is_comparing();
             rs.compare.form = CompareForm::History;
+            rs.compare.filter_text.clear();
             rs.compare.commits.clear();
             rs.compare.merge_status = None;
             rs.compare.show_branch_list = false;

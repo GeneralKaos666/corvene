@@ -22,10 +22,9 @@
 //!   file.
 //! - GitHub Desktop's `ConflictState` objects are
 //!   `corvene_core::ConflictState` (`kind: 'merge'` → `ConflictKind::Merge`,
-//!   `kind: 'rebase'` → `ConflictKind::Rebase`) and `ManualConflictResolution`
-//!   maps are `BTreeMap`s. Corvene's `ConflictKind::Rebase` has no
-//!   `currentTip` (GitHub Desktop's `RebaseConflictState.currentTip`); the
-//!   cases that expect one read it through [`rebase_conflict_current_tip`].
+//!   `kind: 'rebase'` → `ConflictKind::Rebase`, whose `current_tip` is
+//!   `RebaseConflictState.currentTip`) and `ManualConflictResolution` maps
+//!   are `BTreeMap`s; [`rebase_conflict_current_tip`] reads `currentTip`.
 
 use std::collections::BTreeMap;
 
@@ -45,13 +44,14 @@ fn update_conflict_state(
     derive_conflict_state(status, state.conflict_state.as_ref())
 }
 
-/// Stand-in for GitHub Desktop's `RebaseConflictState.currentTip` (the tip
-/// while the rebase is conflicted, `getConflictState` in
-/// `lib/stores/updates/changes-state.ts`, which also returns `null` without
-/// one). Corvene's `ConflictKind::Rebase` has no such field; read it here
-/// once it does and remove the `#[ignore]`s.
-fn rebase_conflict_current_tip(_conflict_state: &ConflictState) -> Option<String> {
-    unimplemented!("corvene_core::ConflictKind::Rebase has no current_tip")
+/// GitHub Desktop's `RebaseConflictState.currentTip` (the tip while the
+/// rebase is conflicted, `getConflictState` in
+/// `lib/stores/updates/changes-state.ts`).
+fn rebase_conflict_current_tip(conflict_state: &ConflictState) -> Option<String> {
+    match &conflict_state.kind {
+        ConflictKind::Rebase { current_tip, .. } => Some(current_tip.clone()),
+        _ => None,
+    }
 }
 
 /// The test's `manualResolutions`: `foo` resolved with theirs.
@@ -124,12 +124,9 @@ fn merge_state(
 }
 
 /// GitHub Desktop's `{ kind: 'rebase', currentTip, manualResolutions,
-/// targetBranch, baseBranchTip, originalBranchTip }`. `current_tip` is
-/// dropped until `ConflictKind::Rebase` has the field (see
-/// [`rebase_conflict_current_tip`]); the tests pass GitHub Desktop's values
-/// so the fix only has to put it in.
+/// targetBranch, baseBranchTip, originalBranchTip }`.
 fn rebase_state(
-    _current_tip: &str,
+    current_tip: &str,
     manual_resolutions: BTreeMap<String, ManualConflictResolution>,
     target_branch: &str,
     base_branch_tip: &str,
@@ -137,6 +134,7 @@ fn rebase_state(
 ) -> ConflictState {
     ConflictState {
         kind: ConflictKind::Rebase {
+            current_tip: current_tip.into(),
             target_branch: target_branch.into(),
             base_branch_tip: base_branch_tip.into(),
             original_branch_tip: original_branch_tip.into(),
@@ -308,7 +306,6 @@ fn rebase_returns_null_when_no_rebase_head_file_found() {
 
 // GHD: unit/stores/updates/update-conflict-state-test.ts › updateConflictState › rebase conflicts › returns a value when status has REBASE_HEAD set and conflict present
 #[test]
-#[ignore = "ghd: missing: corvene_core ConflictKind::Rebase has no current_tip (GHD RebaseConflictState.currentTip, lib/stores/updates/changes-state.ts getConflictState)"]
 fn returns_a_value_when_status_has_rebase_head_set_and_conflict_present() {
     let prev_state = create_state(None);
     let status = create_status(StatusPick {
@@ -343,7 +340,6 @@ fn returns_a_value_when_status_has_rebase_head_set_and_conflict_present() {
 
 // GHD: unit/stores/updates/update-conflict-state-test.ts › updateConflictState › rebase conflicts › preserves manual resolutions when a rebase is detected
 #[test]
-#[ignore = "ghd: missing: corvene_core ConflictKind::Rebase has no current_tip (GHD RebaseConflictState.currentTip, lib/stores/updates/changes-state.ts getConflictState)"]
 fn preserves_manual_resolutions_when_a_rebase_is_detected() {
     let prev_state = create_state(Some(rebase_state(
         "old-sha",

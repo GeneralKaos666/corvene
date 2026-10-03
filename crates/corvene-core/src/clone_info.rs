@@ -80,7 +80,7 @@ pub fn local_source(input: &str) -> Option<PathBuf> {
 pub fn resolve_local(input: &str) -> Option<Result<CloneInfo, &'static str>> {
     let path = local_source(input)?;
     let found = matches!(
-        corvene_git::path_status(&path),
+        corvene_git::root_path_status(&path),
         corvene_git::PathStatus::Repository | corvene_git::PathStatus::Bare
     );
     Some(if !found {
@@ -169,6 +169,45 @@ pub fn resolve(
     resolve_with(input, candidates, lookup, true, false)
 }
 
+/// GHD `findAccountForRemoteURL(urlOrRepositoryAlias, accounts,
+/// canAccessRepository)` (`lib/find-account.ts`): the index of the
+/// candidate to use for `input`. A remote URL takes the account for its
+/// host without asking whether it can access the repository; otherwise
+/// (or without such an account) the first candidate that
+/// `can_access(index, owner, name)` answers yes for, in the order signed-in
+/// GitHub.com, Enterprise, anonymous GitHub.com (only those for the URL's
+/// host, when it names one). `None` when no candidate fits.
+pub fn find_account_for_remote_url(
+    input: &str,
+    candidates: &[Candidate],
+    can_access: &mut dyn FnMut(usize, &str, &str) -> bool,
+) -> Option<usize> {
+    let input = input.trim();
+    // 1. an account for the URL's host is always the best bet
+    if let Some((host, _)) = split_remote(input)
+        && let Some(ix) = candidates
+            .iter()
+            .position(|c| c.host.eq_ignore_ascii_case(&host))
+    {
+        return Some(ix);
+    }
+    // 2. the first account that can see `owner/name`
+    let id = parse_repository_identifier(input)?;
+    let rank = |c: &Candidate| match (c.is_dotcom, c.authenticated) {
+        (true, true) => 0,
+        (false, _) => 1,
+        (true, false) => 2,
+    };
+    let mut order: Vec<usize> = (0..candidates.len()).collect();
+    order.sort_by_key(|&ix| rank(&candidates[ix]));
+    order.into_iter().find(|&ix| {
+        id.hostname
+            .as_ref()
+            .is_none_or(|host| candidates[ix].host.eq_ignore_ascii_case(host))
+            && can_access(ix, &id.owner, &id.name)
+    })
+}
+
 /// `resolve`; with `strict_shorthand` off (the GHD value of
 /// `204-clone-shorthand-not-found`) an `owner/name` every account answers
 /// 404 for is handed to git as typed instead of failing here. `prefer_ssh`
@@ -193,64 +232,49 @@ pub fn resolve_with(
     // "Respect the user's preference if they provided an SSH URL"
     let ssh = prefer_ssh || input.starts_with("git@") || input.starts_with("ssh://");
 
-    // 1. an account for the URL's host
-    if let Some((host, _)) = split_remote(input)
-        && let Some(ix) = candidates
-            .iter()
-            .position(|c| c.host.eq_ignore_ascii_case(&host))
-    {
-        let Some(id) = identifier else {
-            return Ok(as_is());
-        };
-        return match lookup(ix, &id.owner, &id.name, ssh) {
-            Ok(Some(info)) => Ok(CloneInfo {
-                url: info.url,
-                default_branch: info.default_branch,
-            }),
-            Ok(None) => Err(REPOSITORY_NOT_FOUND),
-            // `.catch(err => ({ url }))`
-            Err(_) => Ok(as_is()),
-        };
+    // `canAccessRepository`; its answer doubles as the clone info GHD
+    // fetches right after, so the chosen account is not asked twice
+    let mut found: Option<RepositoryCloneInfo> = None;
+    let mut lookup_failed = false;
+    let account =
+        find_account_for_remote_url(input, candidates, &mut |ix, owner, name| match lookup(
+            ix, owner, name, ssh,
+        ) {
+            Ok(Some(info)) => {
+                found = Some(info);
+                true
+            }
+            Ok(None) => false,
+            Err(_) => {
+                lookup_failed = true;
+                false
+            }
+        });
+    let into_clone_info = |info: RepositoryCloneInfo| CloneInfo {
+        url: info.url,
+        default_branch: info.default_branch,
+    };
+    if let Some(info) = found {
+        return Ok(into_clone_info(info));
     }
-
-    // 2. the first account that can see `owner/name`: signed-in GitHub.com,
-    // then Enterprise, then anonymous GitHub.com
     let Some(id) = identifier else {
         return Ok(as_is());
     };
-    let rank = |c: &Candidate| match (c.is_dotcom, c.authenticated) {
-        (true, true) => 0,
-        (false, _) => 1,
-        (true, false) => 2,
-    };
-    let mut order: Vec<usize> = (0..candidates.len()).collect();
-    order.sort_by_key(|&ix| rank(&candidates[ix]));
-    let mut lookup_failed = false;
-    for ix in order {
-        if let Some(host) = &id.hostname
-            && !candidates[ix].host.eq_ignore_ascii_case(host)
-        {
-            continue;
+    match account {
+        // the account for the URL's host (`fetchRepositoryCloneInfo`)
+        Some(ix) => match lookup(ix, &id.owner, &id.name, ssh) {
+            Ok(Some(info)) => Ok(into_clone_info(info)),
+            Ok(None) => Err(REPOSITORY_NOT_FOUND),
+            // `.catch(err => ({ url }))`
+            Err(_) => Ok(as_is()),
+        },
+        // every account answered 404: not found (see the module doc); a
+        // lookup that failed otherwise (offline, rate limit) leaves it to git
+        None if id.hostname.is_none() && !lookup_failed && strict_shorthand => {
+            Err(REPOSITORY_NOT_FOUND)
         }
-        // `canAccessRepository`; its answer doubles as the clone info GHD
-        // fetches right after
-        match lookup(ix, &id.owner, &id.name, ssh) {
-            Ok(Some(info)) => {
-                return Ok(CloneInfo {
-                    url: info.url,
-                    default_branch: info.default_branch,
-                });
-            }
-            Ok(None) => {}
-            Err(_) => lookup_failed = true,
-        }
+        None => Ok(as_is()),
     }
-    // every account answered 404: not found (see the module doc); a lookup
-    // that failed otherwise (offline, rate limit) leaves it to git
-    if id.hostname.is_none() && !lookup_failed && strict_shorthand {
-        return Err(REPOSITORY_NOT_FOUND);
-    }
-    Ok(as_is())
 }
 
 impl Dispatcher {

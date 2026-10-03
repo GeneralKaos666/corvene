@@ -9,52 +9,19 @@
 //! comes first and only a confirmed path is revealed (`showItemInFolder`).
 //! Every platform operation is a dependency the cases replace.
 //!
-//! Corvene's Show in Finder is `Dispatcher::show_in_finder(path, cx)`
-//! (`crates/corvene-core/src/integrations.rs`): it reveals every path
-//! (`cx.reveal_path`, Linux `corvene_platform::apps::show_item_in_folder`)
-//! without opening a directory, checking for an application bundle or
-//! asking first, and it takes no dependencies (it needs a GPUI `App`).
-//! [`show_folder_contents`] stands in for GitHub Desktop's function; a
-//! rejected promise is `Err`. Dependencies that throw return `Err`.
+//! Corvene's is `corvene_core::integrations::show_folder_contents(path,
+//! dependencies)` with `ShowFolderContentsDependencies` (GitHub Desktop's
+//! `IShowFolderContentsDependencies`; `Dispatcher::show_repository` decides
+//! with the same logic and asks with a native alert). A rejected promise is
+//! `Err`; dependencies that throw return `Err`.
 
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-/// GitHub Desktop's `IFileInformation`.
-#[allow(dead_code)] // read by the real `showFolderContents`
-struct FileInformation {
-    is_directory: bool,
-}
-
-/// A dependency that takes a path and may fail with a message.
-type PathDependency<T> = Box<dyn Fn(&Path) -> Result<T, String>>;
-
-/// GitHub Desktop's `IShowFolderContentsDependencies`.
-#[allow(dead_code)] // read by the real `showFolderContents`
-struct ShowFolderContentsDependencies {
-    /// Whether the current platform is macOS.
-    is_darwin: bool,
-    /// Reads file information for the target path.
-    stat: PathDependency<FileInformation>,
-    /// Determines whether a path is a macOS application bundle.
-    is_application_bundle: PathDependency<bool>,
-    /// Requests confirmation before revealing a potentially executable path.
-    confirm_reveal: Box<dyn Fn() -> Result<bool, String>>,
-    /// Opens a directory directly in the platform file manager.
-    open_directory: Box<dyn Fn(&Path)>,
-    /// Reveals and selects a path in the platform file manager.
-    reveal_item: PathDependency<()>,
-}
-
-/// Stand-in for GitHub Desktop's `showFolderContents(path, dependencies)`
-/// (`ui/main-process-proxy.ts`).
-fn show_folder_contents(
-    _path: &Path,
-    _dependencies: &ShowFolderContentsDependencies,
-) -> Result<(), String> {
-    unimplemented!("Corvene has no showFolderContents (ui/main-process-proxy.ts)")
-}
+use corvene_core::integrations::{
+    FileInformation, ShowFolderContentsDependencies, show_folder_contents,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Calls {
@@ -101,7 +68,6 @@ fn calls(confirmations: u32, opens: u32, reveals: u32) -> Calls {
 
 // GHD: unit/main-process-proxy-test.ts › showFolderContents › opens a conclusively safe directory directly
 #[test]
-#[ignore = "ghd: missing: no showFolderContents (ui/main-process-proxy.ts); Dispatcher::show_in_finder always reveals, never opens a directory or checks for an app bundle"]
 fn opens_a_conclusively_safe_directory_directly() {
     let (calls_made, dependencies) = create_dependencies();
 
@@ -112,7 +78,6 @@ fn opens_a_conclusively_safe_directory_directly() {
 
 // GHD: unit/main-process-proxy-test.ts › showFolderContents › does nothing when the user cancels for an application bundle
 #[test]
-#[ignore = "ghd: missing: no showFolderContents (ui/main-process-proxy.ts); Dispatcher::show_in_finder always reveals, never opens a directory or checks for an app bundle"]
 fn does_nothing_when_the_user_cancels_for_an_application_bundle() {
     let (calls_made, mut dependencies) = create_dependencies();
     dependencies.is_application_bundle = Box::new(|_| Ok(true));
@@ -124,7 +89,6 @@ fn does_nothing_when_the_user_cancels_for_an_application_bundle() {
 
 // GHD: unit/main-process-proxy-test.ts › showFolderContents › reveals an application bundle after confirmation
 #[test]
-#[ignore = "ghd: missing: no showFolderContents (ui/main-process-proxy.ts); Dispatcher::show_in_finder always reveals, never opens a directory or checks for an app bundle"]
 fn reveals_an_application_bundle_after_confirmation() {
     let (test_calls, mut dependencies) = create_dependencies();
     dependencies.is_application_bundle = Box::new(|_| Ok(true));
@@ -141,7 +105,6 @@ fn reveals_an_application_bundle_after_confirmation() {
 
 // GHD: unit/main-process-proxy-test.ts › showFolderContents › handles a failed reveal after confirmation
 #[test]
-#[ignore = "ghd: missing: no showFolderContents (ui/main-process-proxy.ts); Dispatcher::show_in_finder always reveals, never opens a directory or checks for an app bundle"]
 fn handles_a_failed_reveal_after_confirmation() {
     let (test_calls, mut dependencies) = create_dependencies();
     dependencies.is_application_bundle = Box::new(|_| Ok(true));
@@ -163,7 +126,6 @@ fn handles_a_failed_reveal_after_confirmation() {
 
 // GHD: unit/main-process-proxy-test.ts › showFolderContents › does nothing when confirmation fails
 #[test]
-#[ignore = "ghd: missing: no showFolderContents (ui/main-process-proxy.ts); Dispatcher::show_in_finder always reveals, never opens a directory or checks for an app bundle"]
 fn does_nothing_when_confirmation_fails() {
     let (test_calls, mut dependencies) = create_dependencies();
     dependencies.is_application_bundle = Box::new(|_| Ok(true));
@@ -180,7 +142,6 @@ fn does_nothing_when_confirmation_fails() {
 
 // GHD: unit/main-process-proxy-test.ts › showFolderContents › warns when application metadata cannot be read
 #[test]
-#[ignore = "ghd: missing: no showFolderContents (ui/main-process-proxy.ts); Dispatcher::show_in_finder always reveals, never opens a directory or checks for an app bundle"]
 fn warns_when_application_metadata_cannot_be_read() {
     let (calls_made, mut dependencies) = create_dependencies();
     dependencies.is_application_bundle = Box::new(|_| Err("metadata unavailable".to_string()));
@@ -192,7 +153,6 @@ fn warns_when_application_metadata_cannot_be_read() {
 
 // GHD: unit/main-process-proxy-test.ts › showFolderContents › warns when file information cannot be read
 #[test]
-#[ignore = "ghd: missing: no showFolderContents (ui/main-process-proxy.ts); Dispatcher::show_in_finder always reveals, never opens a directory or checks for an app bundle"]
 fn warns_when_file_information_cannot_be_read() {
     let (calls_made, mut dependencies) = create_dependencies();
     dependencies.stat = Box::new(|_| Err("file information unavailable".to_string()));

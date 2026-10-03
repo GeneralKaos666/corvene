@@ -275,10 +275,18 @@ impl Dispatcher {
             while let Ok(progress) = rx.recv().await {
                 cx.update(|cx| {
                     Self::state(cx).update(cx, |s, cx| {
-                        if let Some(Popup::CreateTutorialRepository { progress: p, .. }) =
-                            &mut s.popup
+                        // `updatePopup({ ...currentPopup, progress })`
+                        if let Some(current) = s.popups.current_popup()
+                            && let Popup::CreateTutorialRepository { account, .. } = &current.popup
                         {
-                            *p = Some(progress);
+                            let updated = crate::popup_manager::StackedPopup {
+                                id: current.id,
+                                popup: Popup::CreateTutorialRepository {
+                                    account: account.clone(),
+                                    progress: Some(progress),
+                                },
+                            };
+                            s.popups.update_popup(updated);
                             cx.notify();
                         }
                     })
@@ -287,12 +295,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 // `finally { _closePopup(CreateTutorialRepository) }`
-                if matches!(
-                    Self::state(cx).read(cx).popup,
-                    Some(Popup::CreateTutorialRepository { .. })
-                ) {
-                    Self::close_popup(cx);
-                }
+                Self::close_popup_if(|p| matches!(p, Popup::CreateTutorialRepository { .. }), cx);
                 match result {
                     Ok(github) => Self::add_tutorial_repository(path, github, cx),
                     Err(message) => {

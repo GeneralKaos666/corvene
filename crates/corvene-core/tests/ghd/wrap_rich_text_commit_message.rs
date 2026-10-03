@@ -4,10 +4,10 @@
 //! (`lib/wrap-rich-text-commit-message.ts`) tokenizes a commit's summary and
 //! body and moves whatever goes past 72 characters (`MaxSummaryLength`) of
 //! the summary to the start of the body, with an ellipsis on both sides;
-//! the History tab's expandable commit summary shows the result. Corvene
-//! shows the whole summary (`corvene-ui/src/selected_commit.rs`) and has no
-//! such function, so the cases call a stand-in and are ignored until it
-//! exists.
+//! the History tab's expandable commit summary shows the result. It is
+//! `corvene_core::text_tokens::wrap_rich_text_commit_message`, which the
+//! History tab's summary (`corvene-ui/src/selected_commit.rs`, through
+//! `corvene_core::markdown::commit_summary_rich_text`) shows.
 //!
 //! The tokenizer is Corvene's port of `Tokenizer`
 //! (`corvene_core::text_tokens::tokenize`, whose repository is
@@ -17,7 +17,7 @@
 //! tokenizer gets no emoji here (`new Map()`); none of the texts has an
 //! emoji shortcode.
 
-use corvene_core::text_tokens::{Token, TokenRepository};
+use corvene_core::text_tokens::{Token, TokenRepository, wrap_rich_text_commit_message};
 use corvene_models::Repository;
 use corvene_test_support::{GitHubRepoFixtureOptions, git_hub_repo_fixture};
 
@@ -36,19 +36,6 @@ fn tokenizer() -> Option<TokenRepository> {
     TokenRepository::of(&repo)
 }
 
-/// Stand-in for GitHub Desktop's `wrapRichTextCommitMessage(summaryText,
-/// bodyText, tokenizer)` with the default `maxSummaryLength` (72): the
-/// summary tokens and the body tokens. Replace it with the Corvene function
-/// once there is one (tokenizing with `text_tokens::tokenize(text,
-/// tokenizer)`) and remove the `#[ignore]`s.
-fn wrap_rich_text_commit_message(
-    _summary_text: &str,
-    _body_text: &str,
-    _tokenizer: Option<&TokenRepository>,
-) -> (Vec<Token>, Vec<Token>) {
-    unimplemented!("Corvene has no wrapRichTextCommitMessage")
-}
-
 /// The describe's `wrap(summary, body = '')` helper.
 fn wrap(summary: &str, body: &str) -> (Vec<Token>, Vec<Token>) {
     wrap_rich_text_commit_message(summary, body, tokenizer().as_ref())
@@ -56,7 +43,6 @@ fn wrap(summary: &str, body: &str) -> (Vec<Token>, Vec<Token>) {
 
 // GHD: unit/wrap-rich-text-commit-message-test.ts › wrapRichTextCommitMessage › doesn't wrap at exactly 72 chars
 #[test]
-#[ignore = "ghd: missing: Corvene has no wrapRichTextCommitMessage (lib/wrap-rich-text-commit-message.ts); the commit summary is shown whole"]
 fn doesnt_wrap_at_exactly_72_chars() {
     let summary_text = "weshouldnothardwrapthislongsummarywhichisexactly72charactersyeswetotally";
     let (summary, body) = wrap(summary_text, "");
@@ -70,7 +56,6 @@ fn doesnt_wrap_at_exactly_72_chars() {
 
 // GHD: unit/wrap-rich-text-commit-message-test.ts › wrapRichTextCommitMessage › hard wraps text longer than 72 chars
 #[test]
-#[ignore = "ghd: missing: Corvene has no wrapRichTextCommitMessage (lib/wrap-rich-text-commit-message.ts); the commit summary is shown whole"]
 fn hard_wraps_text_longer_than_72_chars() {
     let summary_text =
         "weshouldabsolutelyhardwrapthislongsummarywhichexceeds72charactersyeswetotallyshould";
@@ -92,7 +77,6 @@ fn hard_wraps_text_longer_than_72_chars() {
 
 // GHD: unit/wrap-rich-text-commit-message-test.ts › wrapRichTextCommitMessage › hard wraps text longer than 72 chars and joins it with the body
 #[test]
-#[ignore = "ghd: missing: Corvene has no wrapRichTextCommitMessage (lib/wrap-rich-text-commit-message.ts); the commit summary is shown whole"]
 fn hard_wraps_text_longer_than_72_chars_and_joins_it_with_the_body() {
     let summary_text =
         "weshouldabsolutelyhardwrapthislongsummarywhichexceeds72charactersyeswetotallyshould";
@@ -115,7 +99,6 @@ fn hard_wraps_text_longer_than_72_chars_and_joins_it_with_the_body() {
 
 // GHD: unit/wrap-rich-text-commit-message-test.ts › wrapRichTextCommitMessage › handles summaries which are exactly 72 chars after link shortening
 #[test]
-#[ignore = "ghd: missing: Corvene has no wrapRichTextCommitMessage (lib/wrap-rich-text-commit-message.ts); the commit summary is shown whole"]
 fn handles_summaries_which_are_exactly_72_chars_after_link_shortening() {
     let summary_text = "This issue summary should be exactly 72 chars including the issue no: https://github.com/niik/commit-summary-wrap-tests/issues/1";
     let (summary, body) = wrap(summary_text, "");
@@ -134,7 +117,6 @@ fn handles_summaries_which_are_exactly_72_chars_after_link_shortening() {
 
 // GHD: unit/wrap-rich-text-commit-message-test.ts › wrapRichTextCommitMessage › takes issue link shortening into consideration
 #[test]
-#[ignore = "ghd: missing: Corvene has no wrapRichTextCommitMessage (lib/wrap-rich-text-commit-message.ts); the commit summary is shown whole"]
 fn takes_issue_link_shortening_into_consideration() {
     let summary_text = "This issue link should be shortened to well under 72 characters: https://github.com/niik/commit-summary-wrap-tests/issues/1";
     let (summary, body) = wrap(summary_text, "");
@@ -157,7 +139,6 @@ fn takes_issue_link_shortening_into_consideration() {
 
 // GHD: unit/wrap-rich-text-commit-message-test.ts › wrapRichTextCommitMessage › handles multiple links
 #[test]
-#[ignore = "ghd: missing: Corvene has no wrapRichTextCommitMessage (lib/wrap-rich-text-commit-message.ts); the commit summary is shown whole"]
 fn handles_multiple_links() {
     let summary_text = "Multiple links are fine https://github.com/niik/commit-summary-wrap-tests/issues/1 https://github.com/niik/commit-summary-wrap-tests/issues/2 https://github.com/niik/commit-summary-wrap-tests/issues/3 https://github.com/niik/commit-summary-wrap-tests/issues/4";
     let (summary, body) = wrap(summary_text, "");
@@ -171,7 +152,6 @@ fn handles_multiple_links() {
 
 // GHD: unit/wrap-rich-text-commit-message-test.ts › wrapRichTextCommitMessage › wraps links properly
 #[test]
-#[ignore = "ghd: missing: Corvene has no wrapRichTextCommitMessage (lib/wrap-rich-text-commit-message.ts); the commit summary is shown whole"]
 fn wraps_links_properly() {
     let summary_text = "Link should be truncated but open our release notes https://desktop.github.com/release-notes/";
     let (summary, body) = wrap(summary_text, "");

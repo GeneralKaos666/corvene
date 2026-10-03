@@ -444,7 +444,7 @@ impl MenuInputs {
             }
         });
         Self {
-            popup_open: state.popup.is_some(),
+            popup_open: state.popups.is_a_popup_open(),
             // `AppState` has no hidden-window state (⌘W hides the window in
             // the UI layer only): treat the window as open.
             window_open: true,
@@ -1085,6 +1085,7 @@ mod tests {
         let tip = valid("feature", None);
         let conflict = ConflictState {
             kind: ConflictKind::Rebase {
+                current_tip: "c".into(),
                 target_branch: "feature".into(),
                 base_branch_tip: "a".into(),
                 original_branch_tip: "b".into(),
