@@ -522,6 +522,19 @@ pub fn toolbar_models(
 }
 
 /// Flag `257`: the Pull button's tooltip lists the incoming commits.
+/// An ahead / behind count: with the thousands separator under
+/// `272-grouped-ahead-behind-counts`, else GHD's plain digits.
+pub(crate) fn ahead_behind_count(n: u32, state: &AppState) -> String {
+    if state
+        .flags
+        .bool(corvene_core::flags::ids::GROUPED_AHEAD_BEHIND_COUNTS)
+    {
+        crate::format::format_count(u64::from(n))
+    } else {
+        n.to_string()
+    }
+}
+
 fn incoming_tooltip(
     behind: u32,
     repo_state: Option<&corvene_core::RepositoryState>,
@@ -540,7 +553,7 @@ fn incoming_tooltip(
     let mut lines = vec![if behind == 1 {
         "1 commit to pull:".to_string()
     } else {
-        format!("{behind} commits to pull:")
+        format!("{} commits to pull:", ahead_behind_count(behind, state))
     }];
     lines.extend(summaries.iter().map(|s| format!("• {s}")));
     let more = behind as usize - summaries.len().min(behind as usize);
@@ -751,6 +764,13 @@ pub fn toolbar_button(
             )
         })
         .when_some(model.badge, |d, ab| {
+            let (ahead, behind) = {
+                let s = AppState::global(cx).read(cx);
+                (
+                    ahead_behind_count(ab.ahead, s),
+                    ahead_behind_count(ab.behind, s),
+                )
+            };
             // `.ahead-behind` pill: 13 px tall (darwin; elsewhere no height
             // is set and the 16 px octicons make it 16), radius 8, 9 px text
             d.child(
@@ -768,11 +788,11 @@ pub fn toolbar_button(
                     .text_size(FONT_SIZE_XS())
                     .line_height(zpx(11.))
                     .when(ab.ahead > 0, |d| {
-                        d.child(format!("{}", ab.ahead))
+                        d.child(ahead)
                             .child(octicon(Octicon::ArrowUp, text).size(zpx(9.)))
                     })
                     .when(ab.behind > 0, |d| {
-                        d.child(format!("{}", ab.behind))
+                        d.child(behind)
                             .child(octicon(Octicon::ArrowDown, text).size(zpx(9.)))
                     }),
             )

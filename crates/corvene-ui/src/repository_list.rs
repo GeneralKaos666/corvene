@@ -427,8 +427,13 @@ impl RepositoryFoldout {
         if has_changes {
             label.push_str(", uncommitted changes");
         }
+        let count = |n: u32| crate::toolbar::ahead_behind_count(n, self.state.read(cx));
         if let Some(ab) = ahead_behind {
-            label.push_str(&format!(", {} ahead, {} behind", ab.ahead, ab.behind));
+            label.push_str(&format!(
+                ", {} ahead, {} behind",
+                count(ab.ahead),
+                count(ab.behind)
+            ));
         }
         div()
             .id(("repo-row", id))
@@ -563,7 +568,7 @@ impl RepositoryFoldout {
                             let tooltip = format!(
                                 "The currently checked out branch is{}{}{}its tracked branch.",
                                 if ab.behind > 0 {
-                                    format!(" {} behind ", commit_grammar(ab.behind))
+                                    format!(" {} behind ", commit_grammar(ab.behind, &count))
                                 } else {
                                     String::new()
                                 },
@@ -573,7 +578,7 @@ impl RepositoryFoldout {
                                     ""
                                 },
                                 if ab.ahead > 0 {
-                                    format!(" {} ahead of ", commit_grammar(ab.ahead))
+                                    format!(" {} ahead of ", commit_grammar(ab.ahead, &count))
                                 } else {
                                     String::new()
                                 },
@@ -1249,12 +1254,13 @@ pub fn step_repository(order: &[u64], current: Option<u64>, step: isize) -> Opti
     order.get(next as usize).copied()
 }
 
-/// GHD `commitGrammar`: "1 commit" / "N commits".
-fn commit_grammar(n: u32) -> String {
+/// GHD `commitGrammar`: "1 commit" / "N commits" (N through `count`,
+/// `272-grouped-ahead-behind-counts`).
+fn commit_grammar(n: u32, count: &dyn Fn(u32) -> String) -> String {
     if n == 1 {
         "1 commit".to_string()
     } else {
-        format!("{n} commits")
+        format!("{} commits", count(n))
     }
 }
 

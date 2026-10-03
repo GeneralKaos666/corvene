@@ -1508,6 +1508,21 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/persistence.rs"],
     },
 
+    /// Ahead / behind counts with a thousands separator.
+    GROUPED_AHEAD_BEHIND_COUNTS = 272 "grouped-ahead-behind-counts" {
+        title: "Thousands separators in ahead/behind counts",
+        summary: "The push/pull button's ahead/behind badge, its commits-to-pull tooltip and the \
+                  repository list's ahead/behind tooltip and screen reader label write counts \
+                  with the thousands separator from Appearance › Formatting (1,234).",
+        ghd_behaviour: "Counts are plain digits (1234) whatever the number format.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1245)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
