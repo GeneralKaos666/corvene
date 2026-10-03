@@ -468,6 +468,17 @@ pub(crate) fn main() {
                 Dispatcher::request_remove_repository(id, cx);
             }
         });
+        on_menu_action(cx, |_: &MoveToSharedStorage, cx| {
+            if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                Dispatcher::show_popup(
+                    Popup::MoveToSharedStorage {
+                        repo: id,
+                        then: corvene_core::AfterSharedStorageMove::Nothing,
+                    },
+                    cx,
+                );
+            }
+        });
         on_menu_action(cx, |_: &OpenFlags, cx| Dispatcher::open_flags(None, cx));
         // Corvene (`610-diff-mode-shortcut`): Diff Settings › Unified / Split
         on_menu_action(cx, |_: &ToggleDiffDisplayMode, cx| {
@@ -1450,6 +1461,27 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         // the sign-in dialog (device flow by default, browser flow link)
         ("sign-in", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx),
         ("sign-in-enterprise", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx),
+        // `GenericGitAuthentication` after a failed fetch (`:user` with the
+        // login known, so only the password is asked for)
+        (name @ ("generic-git-auth" | "generic-git-auth:user"), Some(id)) => {
+            Dispatcher::show_popup(
+                Popup::GenericGitAuthentication {
+                    repo: id,
+                    remote_url: "https://git.example.com/octocat/spoon-knife.git".into(),
+                    host: "git.example.com".into(),
+                    username: name.ends_with(":user").then(|| "octocat".into()),
+                    retry: corvene_core::RetryAction::Fetch,
+                },
+                cx,
+            )
+        }
+        ("ssh-key-passphrase", _) => Dispatcher::show_popup(
+            Popup::SshKeyPassphrase {
+                path: "/Users/octocat/.ssh/id_ed25519".into(),
+                wrong: false,
+            },
+            cx,
+        ),
         ("test-notifications", Some(id)) => {
             Dispatcher::show_popup(Popup::TestNotifications { repo: id }, cx)
         }

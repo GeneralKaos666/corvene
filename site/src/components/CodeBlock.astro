@@ -1,0 +1,50 @@
+---
+/**
+ * A command to copy: `<CodeBlock code="brew install …" />`. Multi-line
+ * commands pass `code` with "\n"; `prompt={false}` hides the "$".
+ */
+interface Props {
+  code: string;
+  prompt?: boolean;
+  class?: string;
+}
+const { code, prompt = true, class: className = "" } = Astro.props;
+---
+
+<div class={`code-block ${className}`}>
+  {prompt && <span class="prompt" aria-hidden="true">$</span>}
+  <pre tabindex="0"><code>{code}</code></pre>
+  <button
+    type="button"
+    class="copy-button inline-flex shrink-0 items-center gap-1.5 rounded-md border border-edge bg-canvas-overlay px-2.5 py-1 font-sans text-[11px] font-medium text-fg transition-colors hover:border-edge-hover hover:bg-canvas-hover"
+    data-code={code}
+    aria-label="Copy to clipboard"
+  >
+    <svg class="h-3.5 w-3.5 text-fg-muted" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path>
+      <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path>
+    </svg>
+    <span>Copy</span>
+  </button>
+</div>
+
+<script>
+  // One delegated handler for every code block on the page.
+  document.addEventListener("click", async (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>(".copy-button");
+    if (!button) return;
+    const code = button.dataset.code ?? "";
+    const label = button.querySelector("span");
+    try {
+      await navigator.clipboard.writeText(code);
+      if (label) label.textContent = "Copied";
+      button.setAttribute("aria-label", "Copied");
+      window.setTimeout(() => {
+        if (label) label.textContent = "Copy";
+        button.setAttribute("aria-label", "Copy to clipboard");
+      }, 2000);
+    } catch {
+      if (label) label.textContent = "Copy failed";
+    }
+  });
+</script>

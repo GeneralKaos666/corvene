@@ -1,0 +1,65 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import CodeBlock from "../../components/CodeBlock.astro";
+import { BREW_COMMAND } from "../../lib/github";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<DocsLayout
+  currentSlug="quickstart"
+  title="Quickstart"
+  description="Install Corvene, sign in, add your repositories and bring over what GitHub Desktop already knows."
+>
+  <h2 id="install">1. Install</h2>
+  <p>On macOS and Linux the quickest route is Homebrew. The cask clears macOS's quarantine flag, so Gatekeeper never asks:</p>
+  <CodeBlock code={BREW_COMMAND} />
+  <p>
+    Everything else (Windows, .deb, .rpm, AppImage, Flatpak, snap, Android) is on the
+    <a href={`${base}/#downloads`}>downloads list</a>, with details per platform on the
+    <a href={`${base}/docs/installation`}>installation page</a>.
+  </p>
+
+  <h2 id="launch">2. First launch</h2>
+  <p>
+    Open Corvene from Applications, the start menu or your launcher. The Welcome flow is GitHub Desktop's: sign in to
+    GitHub.com or GitHub Enterprise, or skip and work with local repositories only.
+  </p>
+  <p>
+    If GitHub Desktop is installed on this machine, Corvene offers to import its repository list, aliases included,
+    both on the "Let's get started!" page and later from
+    <strong>File › Import Repositories from GitHub Desktop…</strong> (flag <code>206-import-from-github-desktop</code>).
+    Accounts are not imported: sign in once more so the token lands in Corvene's own keychain entry.
+  </p>
+
+  <h2 id="sign-in">3. Sign in</h2>
+  <ol>
+    <li>Open <strong>Corvene › Settings…</strong> (<kbd>⌘,</kbd>; <strong>File › Options…</strong> on Windows and Linux).</li>
+    <li>On the <strong>Accounts</strong> tab click <strong>Sign in</strong> next to GitHub.com or GitHub Enterprise.</li>
+    <li>Your browser opens GitHub's authorization page; Corvene receives the token through its <code>x-corvene-auth://</code> link.</li>
+    <li>The token is stored in the macOS Keychain, the Windows Credential Manager or the Linux Secret Service keyring.</li>
+  </ol>
+
+  <h2 id="repositories">4. Add repositories</h2>
+  <p>Open the repository list with the toolbar button or <kbd>⌘T</kbd> and use its <strong>Add</strong> menu, or the shortcuts:</p>
+  <ul>
+    <li><kbd>⌘O</kbd> adds a repository already on disk.</li>
+    <li><kbd>⇧⌘O</kbd> clones one from your GitHub account, a URL or an <code>owner/name</code> shorthand.</li>
+    <li><kbd>⌘N</kbd> creates a new repository.</li>
+  </ul>
+  <p>
+    From here on it is GitHub Desktop: select files in <strong>Changes</strong>, write a summary, commit, push. Branches
+    live under the <strong>Current Branch</strong> button, pull requests on its second tab.
+  </p>
+
+  <div class="note note-accent">
+    <svg class="text-accent" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z" />
+    </svg>
+    <p>
+      <strong>Command line tool.</strong> <strong>Corvene › Install Command Line Tool…</strong> (under File on Linux) links
+      <code>corvene</code> into <code>/usr/local/bin</code>, falling back to <code>~/.local/bin</code>. Then
+      <code>corvene .</code> opens the current repository. The .deb, .rpm and tarball already put it in <code>/usr/bin</code>.
+    </p>
+  </div>
+</DocsLayout>

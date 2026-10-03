@@ -1,0 +1,137 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+import DocsNav from "../components/DocsNav.astro";
+import { DOC_ITEMS, docHref } from "../data/docs";
+import { REPO_URL } from "../lib/github";
+import { lastModified } from "../lib/git";
+import { breadcrumbLd, pageUrl, techArticleLd, type SiteContext } from "../lib/seo";
+
+interface Props {
+  currentSlug: string;
+  title: string;
+  description: string;
+}
+
+const { currentSlug, title, description } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+const currentIndex = DOC_ITEMS.findIndex((d) => d.slug === currentSlug);
+const prevDoc = currentIndex > 0 ? DOC_ITEMS[currentIndex - 1] : null;
+const nextDoc = currentIndex >= 0 && currentIndex < DOC_ITEMS.length - 1 ? DOC_ITEMS[currentIndex + 1] : null;
+const current = DOC_ITEMS[currentIndex];
+const sourceFile = currentSlug === "overview" ? "index" : currentSlug;
+
+const root = new URL(base, Astro.site).toString().replace(/\/$/, "");
+const page = pageUrl(Astro.url.pathname, Astro.site);
+const ctx: SiteContext = { root, page };
+const modified = lastModified(new URL(`../pages/docs/${sourceFile}.astro`, import.meta.url));
+const image = `${root}/icon/Corvene-1024.png`;
+const jsonLd = [
+  breadcrumbLd([
+    { name: "Corvene", url: `${root}/` },
+    { name: "Docs", url: `${root}/docs/` },
+    ...(currentSlug === "overview" ? [] : [{ name: title, url: page }]),
+  ]),
+  techArticleLd(ctx, { title, description, modified, image }),
+];
+const modifiedLabel = modified.toLocaleDateString("en", { year: "numeric", month: "long", day: "numeric" });
+---
+
+<BaseLayout
+  title={`${title} · Corvene Docs`}
+  description={description}
+  type="article"
+  modified={modified}
+  image={image}
+  imageAlt="The Corvene app icon"
+  jsonLd={jsonLd}
+>
+  <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+    <div class="grid grid-cols-1 items-start gap-8 lg:grid-cols-12 lg:gap-12">
+      <aside class="lg:sticky lg:top-24 lg:col-span-3">
+        <!-- On phones the navigation folds into a disclosure above the article -->
+        <details class="group lg:hidden">
+          <summary class="btn-default flex w-full cursor-pointer list-none items-center justify-between text-sm [&::-webkit-details-marker]:hidden">
+            <span class="truncate">
+              <span class="text-fg-muted">Docs:</span> {current?.title ?? title}
+            </span>
+            <svg class="h-4 w-4 shrink-0 text-fg-muted transition-transform group-open:rotate-180" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z" />
+            </svg>
+          </summary>
+          <nav aria-label="Documentation" class="card mt-2 p-3">
+            <DocsNav currentSlug={currentSlug} />
+          </nav>
+        </details>
+
+        <nav aria-label="Documentation" class="hidden lg:block">
+          <DocsNav currentSlug={currentSlug} />
+          <div class="mt-8 border-t border-edge-muted pt-6 text-xs text-fg-muted">
+            <p class="leading-relaxed">Found a mistake or a gap?</p>
+            <a href={`${REPO_URL}/issues`} target="_blank" rel="noopener noreferrer" class="mt-1 inline-block text-accent hover:underline">
+              Open an issue on GitHub
+            </a>
+          </div>
+        </nav>
+      </aside>
+
+      <article class="min-w-0 lg:col-span-9 xl:col-span-8">
+        <nav aria-label="Breadcrumb" class="mb-6 text-sm text-fg-muted">
+          <ol class="flex items-center gap-2">
+            <li><a href={`${base}/docs/`} class="hover:text-fg">Docs</a></li>
+            <li aria-hidden="true">/</li>
+            <li><span class="text-fg">{current?.title ?? title}</span></li>
+          </ol>
+        </nav>
+
+        <header class="border-b border-edge-muted pb-6">
+          <h1 class="font-display text-3xl font-extrabold tracking-tight text-fg sm:text-4xl">{title}</h1>
+          <p class="mt-3 text-base leading-relaxed text-fg-muted sm:text-lg">{description}</p>
+        </header>
+
+        <div class="docs-prose mt-8">
+          <slot />
+        </div>
+
+        <footer class="mt-14 border-t border-edge-muted pt-8">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-fg-muted">
+            <span>
+              Last updated <time datetime={modified.toISOString()}>{modifiedLabel}</time>
+            </span>
+            <a
+              href={`${REPO_URL}/edit/main/site/src/pages/docs/${sourceFile}.astro`}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="hover:text-fg hover:underline"
+            >
+              Edit this page on GitHub
+            </a>
+          </div>
+
+          <nav aria-label="Pagination" class="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {
+              prevDoc ? (
+                <a href={docHref(base, prevDoc.slug)} class="card group p-4 transition-colors hover:border-edge-hover hover:bg-canvas-subtle">
+                  <div class="eyebrow mb-1 text-[10px] text-fg-muted">← Previous</div>
+                  <div class="text-sm font-semibold text-fg group-hover:text-accent">{prevDoc.title}</div>
+                </a>
+              ) : (
+                <div />
+              )
+            }
+            {
+              nextDoc ? (
+                <a href={docHref(base, nextDoc.slug)} class="card group p-4 transition-colors hover:border-edge-hover hover:bg-canvas-subtle sm:text-right">
+                  <div class="eyebrow mb-1 text-[10px] text-fg-muted">Next →</div>
+                  <div class="text-sm font-semibold text-fg group-hover:text-accent">{nextDoc.title}</div>
+                </a>
+              ) : (
+                <div />
+              )
+            }
+          </nav>
+        </footer>
+      </article>
+    </div>
+  </div>
+</BaseLayout>

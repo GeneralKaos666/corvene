@@ -1,0 +1,58 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import CodeBlock from "../../components/CodeBlock.astro";
+import { REPO_URL } from "../../lib/github";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<DocsLayout
+  currentSlug="building"
+  title="Building from source"
+  description="The toolchain, the Linux build dependencies, the checks CI runs and the Android build."
+>
+  <h2 id="prerequisites">Prerequisites</h2>
+  <ul>
+    <li>Stable Rust via <a href="https://rustup.rs" target="_blank" rel="noopener noreferrer">rustup</a>; <code>rust-toolchain.toml</code> picks the channel and components (rustfmt and clippy).</li>
+    <li><code>git</code> 2.38 or newer on your <code>PATH</code>.</li>
+    <li>macOS: the Xcode Command Line Tools. A full Xcode is not needed; development builds compile the Metal shaders at launch.</li>
+  </ul>
+
+  <h2 id="run">Build and run</h2>
+  <CodeBlock code={"git clone " + REPO_URL + ".git\ncd corvene\ncargo run -p corvene"} />
+
+  <h2 id="linux">Linux build dependencies</h2>
+  <p>Debian and Ubuntu package names; other distributions have the same libraries under their own names:</p>
+  <CodeBlock
+    code="sudo apt install clang mold pkg-config libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libfontconfig-dev libfreetype-dev libvulkan-dev"
+  />
+
+  <h2 id="checks">The checks CI runs</h2>
+  <p>Formatting, clippy with warnings as errors, and the test suite must pass on every push:</p>
+  <CodeBlock code={"cargo fmt --check\ncargo clippy --all-targets -- -D warnings\ncargo test --workspace"} />
+  <p>
+    Changes to a view are compared against GitHub Desktop with the <a href={`${base}/docs/parity`}>parity harness</a>, and
+    performance work against the budgets on the <a href={`${base}/docs/benchmarks`}>performance page</a>.
+  </p>
+
+  <h2 id="full">The Full edition</h2>
+  <p>
+    <code>cargo build --release -p corvene --features full</code> compiles every tree-sitter grammar into the binary. It
+    takes considerably longer and the result is about 170 MB larger.
+  </p>
+
+  <h2 id="android">Android</h2>
+  <p>
+    <code>packaging/android/build.sh</code> builds the APK with the Android SDK and NDK and, on the first run, cross-builds
+    what the app bundles: git, curl, OpenSSL, OpenSSH and Git LFS. <code>ABIS=arm64-v8a</code> limits it to one
+    architecture; <code>play</code> instead of <code>foss</code> selects the Google Play flavour. See the README for the
+    environment variables it expects.
+  </p>
+
+  <h2 id="layout">Finding your way around</h2>
+  <p>
+    The crates and their responsibilities are on the <a href={`${base}/docs/architecture`}>architecture page</a>. GitHub
+    Desktop's dialog, foldout and menu names are kept as Rust type names, so <code>ConfirmDiscardChanges</code> in GitHub
+    Desktop's source is <code>dialogs::confirm_discard_changes</code> here.
+  </p>
+</DocsLayout>

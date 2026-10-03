@@ -92,6 +92,7 @@ impl Dispatcher {
             foldout: None,
             popup,
             cloning: None,
+            shared_storage_move: None,
             pending_aliases: Vec::new(),
             sign_in: None,
             retry_after_sign_in: None,
@@ -3755,10 +3756,11 @@ impl Dispatcher {
     }
 
     /// Android: the system page where the user grants "All files access",
-    /// so repositories on shared storage can be used in place.
-    #[cfg(target_os = "android")]
+    /// so repositories on shared storage can be used in place. Nothing
+    /// elsewhere.
     pub fn request_all_files_access(cx: &mut App) {
         let _ = cx;
+        #[cfg(target_os = "android")]
         if let Some(bridge) = corvene_platform::android::bridge() {
             bridge.request_all_files_access();
         }
@@ -5064,7 +5066,7 @@ fn exclude_new_untracked(
 
 /// Node's `path.resolve(path)`: made absolute against the current directory,
 /// with `.` and `..` components folded lexically (symlinks untouched).
-fn resolve_path(path: &std::path::Path) -> PathBuf {
+pub(crate) fn resolve_path(path: &std::path::Path) -> PathBuf {
     use std::path::Component;
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let mut out = PathBuf::new();
@@ -5233,12 +5235,12 @@ mod replace_diff_tests {
 
 /// Android: what a repository outside the app-private filesystem needs
 /// before git will work in it. Shared storage belongs to another user id
-/// (git's "dubious ownership") and keeps neither file modes nor symbolic
-/// links; a folder imported through the Storage Access Framework arrived
-/// without its file modes. Failures are left for the commands that follow to
-/// report.
+/// (git's "dubious ownership"), keeps neither file modes nor symbolic
+/// links and folds case; a folder imported through the Storage Access
+/// Framework arrived without its file modes. Failures are left for the
+/// commands that follow to report.
 #[cfg(target_os = "android")]
-fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
+pub(crate) fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
     if !path.join(".git").exists() {
         return;
     }
@@ -5249,7 +5251,10 @@ fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
             let _ = corvene_git::add_safe_directory(git.clone(), path);
         }
         let _ = corvene_git::set_local_config_value(git.clone(), path, "core.symlinks", "false");
-        let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
+        let _ = corvene_git::set_local_config_value(git.clone(), path, "core.filemode", "false");
+        if crate::shared_storage::folds_case(&path.join(".git")) {
+            let _ = corvene_git::set_local_config_value(git, path, "core.ignorecase", "true");
+        }
     } else if imported {
         let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
     }

@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-03",
+  "repo": "tools/perf/fixture.py big",
+  "ghd": {
+    "version": "3.6.6",
+    "select file (click)": {
+      "median_ms": 113,
+      "p90_ms": 3289,
+      "min_ms": 56,
+      "n": 15
+    },
+    "next file (\u2193)": {
+      "median_ms": 67,
+      "p90_ms": 108,
+      "min_ms": 45,
+      "n": 25
+    },
+    "open 5k-line diff": {
+      "median_ms": 3277,
+      "p90_ms": 4855,
+      "min_ms": 2645,
+      "n": 5
+    }
+  },
+  "gitkraken": {
+    "version": "12.6.0",
+    "select file (click)": {
+      "median_ms": 90,
+      "p90_ms": 210,
+      "min_ms": 66,
+      "n": 15
+    },
+    "open 5k-line diff": {
+      "median_ms": 101,
+      "p90_ms": 116,
+      "min_ms": 65,
+      "n": 5
+    }
+  },
+  "note": "medians of five rounds; apps_latency.py over CDP; load average 17-40 (other builds running)"
+}

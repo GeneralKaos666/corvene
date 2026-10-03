@@ -612,12 +612,7 @@ fn launch_android(
     };
     if let Some(program) = editor.bundle_id.strip_prefix(TERMUX_PREFIX) {
         if !crate::android::is_shared_storage(target) {
-            return Err(error(
-                "Termux cannot reach a repository in Corvene's private storage. \
-                 Clone or add it on shared storage (a folder under /storage/emulated/0, \
-                 with \"All files access\") to work on it in both."
-                    .to_string(),
-            ));
+            return Err(error(crate::android::TERMUX_PRIVATE_STORAGE.to_string()));
         }
         let (program, arguments, dir) = termux_command(program, target, target.is_dir(), line);
         return bridge.run_termux(&program, &arguments, &dir).map_err(error);

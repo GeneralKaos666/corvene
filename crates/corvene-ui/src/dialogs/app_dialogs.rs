@@ -386,6 +386,9 @@ impl Render for ConfirmRemoveRepositoryDialog {
 
 /// `ExternalEditorError` / `OpenShellFailed`: error dialogs whose secondary
 /// button opens Settings › Integrations (or the suggested editor's site).
+/// On Android, when Termux could not reach a repository in Corvene's own
+/// storage, the secondary button is "Move to shared storage…" instead
+/// (`Popup::MoveToSharedStorage`; Settings cannot fix that).
 pub struct IntegrationErrorDialog {
     popup: Popup,
 }
@@ -393,6 +396,29 @@ pub struct IntegrationErrorDialog {
 impl IntegrationErrorDialog {
     pub fn new(popup: Popup) -> Self {
         Self { popup }
+    }
+}
+
+/// The "Move to shared storage…" button for `offer`.
+fn move_to_shared_storage_button(
+    id: &'static str,
+    offer: &corvene_core::SharedStorageMove,
+) -> DialogButton {
+    let offer = offer.clone();
+    DialogButton {
+        id,
+        label: mac_or("Move to Shared Storage…", "Move to shared storage…").into(),
+        primary: false,
+        disabled: false,
+        on_click: Box::new(move |_, cx| {
+            Dispatcher::show_popup(
+                Popup::MoveToSharedStorage {
+                    repo: offer.repo,
+                    then: offer.then.clone(),
+                },
+                cx,
+            )
+        }),
     }
 }
 
@@ -409,8 +435,11 @@ impl Render for IntegrationErrorDialog {
                 message,
                 suggest_default_editor,
                 open_preferences,
+                move_to_shared_storage,
             } => {
-                let secondary = if *suggest_default_editor {
+                let secondary = if let Some(offer) = move_to_shared_storage {
+                    Some(move_to_shared_storage_button("editor-error-move", offer))
+                } else if *suggest_default_editor {
                     Some(DialogButton {
                         id: "editor-error-download",
                         label: format!(
@@ -451,18 +480,24 @@ impl Render for IntegrationErrorDialog {
                     secondary,
                 )
             }
-            Popup::ShellError { message } => (
+            Popup::ShellError {
+                message,
+                move_to_shared_storage,
+            } => (
                 "dialog-shell-error",
                 mac_or("Unable to Open Shell", "Unable to open shell"),
                 message.clone(),
-                Some(DialogButton {
-                    id: "shell-error-settings",
-                    label: mac_or("Open Settings", "Open options").into(),
-                    primary: false,
-                    disabled: false,
-                    on_click: Box::new(|_, cx| {
-                        Dispatcher::open_preferences(PreferencesTab::Integrations, cx)
-                    }),
+                Some(match move_to_shared_storage {
+                    Some(offer) => move_to_shared_storage_button("shell-error-move", offer),
+                    None => DialogButton {
+                        id: "shell-error-settings",
+                        label: mac_or("Open Settings", "Open options").into(),
+                        primary: false,
+                        disabled: false,
+                        on_click: Box::new(|_, cx| {
+                            Dispatcher::open_preferences(PreferencesTab::Integrations, cx)
+                        }),
+                    },
                 }),
             ),
             _ => ("dialog-integration-error", "Error", String::new(), None),

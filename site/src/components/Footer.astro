@@ -1,0 +1,83 @@
+---
+import { REPO_URL, RELEASES_URL } from "../lib/github";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+const columns = [
+  {
+    title: "Product",
+    links: [
+      { href: `${base}/#download`, label: "Download" },
+      { href: `${base}/#features`, label: "Features" },
+      { href: `${base}/#benchmarks`, label: "Benchmarks" },
+      { href: RELEASES_URL, label: "Releases and changelog", external: true },
+    ],
+  },
+  {
+    title: "Documentation",
+    links: [
+      { href: `${base}/docs/`, label: "Overview" },
+      { href: `${base}/docs/quickstart`, label: "Quickstart" },
+      { href: `${base}/docs/installation`, label: "Installation" },
+      { href: `${base}/docs/flags`, label: "Flags" },
+    ],
+  },
+  {
+    title: "Project",
+    links: [
+      { href: REPO_URL, label: "Source on GitHub", external: true },
+      { href: `${REPO_URL}/issues`, label: "Report an issue", external: true },
+      { href: `${base}/docs/building`, label: "Build from source" },
+      { href: `${REPO_URL}/blob/main/NOTICE`, label: "Third-party notices", external: true },
+    ],
+  },
+];
+---
+
+<footer class="mt-24 border-t border-edge bg-canvas-inset px-4 py-14 text-fg-muted sm:px-6 lg:px-8">
+  <div class="mx-auto grid max-w-7xl grid-cols-2 gap-10 md:grid-cols-5">
+    <div class="col-span-2 space-y-4">
+      <a href={`${base}/`} class="flex items-center gap-2.5">
+        <img src={`${base}/icon/Corvene-256.png`} alt="" width="28" height="28" class="h-7 w-7 object-contain" />
+        <span class="text-lg font-bold text-fg">Corvene</span>
+      </a>
+      <p class="max-w-sm text-sm leading-relaxed">
+        A fast, low-memory recreation of GitHub Desktop written in Rust, rendered with GPUI and backed by gitoxide and the git command line.
+      </p>
+      <p class="max-w-sm text-xs leading-relaxed text-fg-subtle">
+        Released under the <a href={`${REPO_URL}/blob/main/LICENSE`} class="text-accent hover:underline">MIT License</a>.
+        Corvene is an independent project and is not affiliated with, sponsored by or endorsed by GitHub, Inc.
+        GitHub and GitHub Desktop are trademarks of GitHub, Inc.
+      </p>
+    </div>
+
+    {
+      columns.map((column) => (
+        <div class="space-y-3">
+          <h2 class="eyebrow text-fg">{column.title}</h2>
+          <ul class="space-y-2 text-sm">
+            {column.links.map((link) => (
+              <li>
+                <a
+                  href={link.href}
+                  target={link.external ? "_blank" : undefined}
+                  rel={link.external ? "noopener noreferrer" : undefined}
+                  class="transition-colors hover:text-fg"
+                >
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="mx-auto mt-10 flex max-w-7xl flex-col items-start justify-between gap-3 border-t border-edge-muted pt-8 text-xs text-fg-subtle sm:flex-row sm:items-center">
+    <p>© {new Date().getFullYear()} Corvene contributors.</p>
+    <p>
+      The UI follows <a href="https://github.com/desktop/desktop" class="hover:text-fg-muted" target="_blank" rel="noopener noreferrer">GitHub Desktop 3.6.6</a>.
+    </p>
+  </div>
+</footer>

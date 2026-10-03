@@ -40,6 +40,19 @@ pub fn path_status(path: &Path) -> PathStatus {
 
 /// Whether `dir` already has a `README.md` that "Initialize this repository
 /// with a README" would replace (GHD `readMeExists`).
+/// `git update-index -q --refresh`: records the files' current stat data in
+/// the index, so the first status after the files were copied or moved does
+/// not re-read every one of them. Modified files make git exit 1, which is
+/// not a failure here.
+pub fn refresh_index(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
+    GitCommand::new(git)
+        .args(["update-index", "-q", "--refresh"])
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .run()?;
+    Ok(())
+}
+
 pub fn readme_exists(dir: &Path) -> bool {
     dir.join("README.md").exists()
 }

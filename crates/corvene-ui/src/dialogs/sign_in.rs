@@ -20,7 +20,7 @@ use crate::dialog::{DialogButton, dialog};
 use crate::icons::{Octicon, octicon};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
-use crate::widgets::{button, labeled, primary_button, text_box};
+use crate::widgets::{button, labeled, password_text_box, primary_button, text_box};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Step {
@@ -436,7 +436,7 @@ impl Render for SignInDialog {
                     )
                     .child(labeled(
                         "Personal access token",
-                        text_box("sign-in-token", &self.token, None, window, cx),
+                        password_text_box("sign-in-token", &self.token, window, cx),
                         cx,
                     ))
                     .when_some(sign_in_error, |d, m| {
@@ -496,13 +496,7 @@ impl Render for SignInDialog {
                     ))
                     .child(labeled(
                         "Client secret",
-                        text_box(
-                            "sign-in-client-secret",
-                            &self.client_secret,
-                            None,
-                            window,
-                            cx,
-                        ),
+                        password_text_box("sign-in-client-secret", &self.client_secret, window, cx),
                         cx,
                     ))
                     .into_any_element(),

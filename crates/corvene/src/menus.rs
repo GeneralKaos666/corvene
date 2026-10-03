@@ -92,8 +92,16 @@ pub fn install(cx: &mut App, options: &MenuOptions) {
             FetchAllRepositories,
         ));
     }
+    repository.push(MenuItem::action(l("Remove…", "&Remove…"), RemoveRepository));
+    // Android: a repository in Corvene's own storage can move to shared
+    // storage, where Termux reaches it (`corvene_core::shared_storage`)
+    if cfg!(target_os = "android") {
+        repository.push(MenuItem::action(
+            "&Move to shared storage…",
+            MoveToSharedStorage,
+        ));
+    }
     repository.extend([
-        MenuItem::action(l("Remove…", "&Remove…"), RemoveRepository),
         MenuItem::separator(),
         MenuItem::action(l("View on GitHub", "&View on GitHub"), ViewOnGitHub),
     ]);

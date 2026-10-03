@@ -63,6 +63,9 @@ pub trait Bridge: Send + Sync {
     fn share_path(&self, path: &Path) -> Result<(), String>;
     /// Opens a Termux session in `dir` (Termux's `RUN_COMMAND` intent).
     fn open_termux(&self, dir: &Path) -> Result<(), String>;
+    /// The root of shared storage (`Environment.getExternalStorageDirectory`,
+    /// `/storage/emulated/0` for the primary user).
+    fn shared_storage_dir(&self) -> Option<PathBuf>;
     /// Runs `program` (a name in Termux's `bin`) with `arguments` in a new
     /// Termux session in `dir`.
     fn run_termux(&self, program: &str, arguments: &[String], dir: &Path) -> Result<(), String>;
@@ -223,6 +226,13 @@ pub fn repositories_dir() -> PathBuf {
 pub fn is_shared_storage(path: &Path) -> bool {
     path.starts_with("/storage") || path.starts_with("/sdcard") || path.starts_with("/mnt")
 }
+
+/// Why "Open in Termux" (the shell and the Termux editors) refuses a
+/// repository in Corvene's own storage; the dialog that shows it offers to
+/// move the repository (`Dispatcher::move_to_shared_storage`).
+pub const TERMUX_PRIVATE_STORAGE: &str = "Termux cannot reach a repository in Corvene's own \
+     storage. Move the repository to shared storage (a folder under /storage/emulated/0) to \
+     work on it in both.";
 
 static IMPORTED: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
 

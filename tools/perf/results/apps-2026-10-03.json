@@ -1,0 +1,168 @@
+{
+  "machine": "Apple M2",
+  "macos": "26.4",
+  "date": "2026-10-03",
+  "apps": {
+    "corvene": {
+      "name": "Corvene",
+      "samples": [
+        {
+          "run": 1,
+          "load_1m": 12.3,
+          "window_ms": 236,
+          "log_window_ms": 203
+        },
+        {
+          "run": 2,
+          "load_1m": 15.1,
+          "window_ms": 348,
+          "log_window_ms": 292
+        },
+        {
+          "run": 3,
+          "load_1m": 11.6,
+          "window_ms": 525,
+          "log_window_ms": 448
+        },
+        {
+          "run": 4,
+          "load_1m": 12.9,
+          "window_ms": 289,
+          "log_window_ms": 248
+        },
+        {
+          "run": 5,
+          "load_1m": 8.6,
+          "window_ms": 231,
+          "log_window_ms": 195
+        }
+      ],
+      "window_ms_median": 289,
+      "window_ms_min": 231,
+      "first_contentful_paint_ms_median": null,
+      "first_contentful_paint_ms_min": null,
+      "log_window_ms_median": 248,
+      "memory": {
+        "processes": 1,
+        "rss_mb": 108.9,
+        "footprint_mb": 51.0,
+        "load_1m": 8.5
+      },
+      "installed_size_mb": 30.7
+    },
+    "ghd": {
+      "name": "GitHub Desktop",
+      "samples": [
+        {
+          "run": 1,
+          "load_1m": 12.0,
+          "window_ms": 2243,
+          "renderer_start_ms": 1127,
+          "first_paint_ms": 2299,
+          "first_contentful_paint_ms": 2299
+        },
+        {
+          "run": 2,
+          "load_1m": 13.8,
+          "window_ms": 3098,
+          "renderer_start_ms": 1293,
+          "first_paint_ms": 3157,
+          "first_contentful_paint_ms": 3157
+        },
+        {
+          "run": 3,
+          "load_1m": 12.4,
+          "window_ms": 2504,
+          "renderer_start_ms": 783,
+          "first_paint_ms": 2559,
+          "first_contentful_paint_ms": 2559
+        },
+        {
+          "run": 4,
+          "load_1m": 10.4,
+          "window_ms": 1782,
+          "renderer_start_ms": 484,
+          "first_paint_ms": 1828,
+          "first_contentful_paint_ms": 1828
+        },
+        {
+          "run": 5,
+          "load_1m": 9.0,
+          "window_ms": 4236,
+          "renderer_start_ms": 1614,
+          "first_paint_ms": 4286,
+          "first_contentful_paint_ms": 4286
+        }
+      ],
+      "window_ms_median": 2504,
+      "window_ms_min": 1782,
+      "first_contentful_paint_ms_median": 2559,
+      "first_contentful_paint_ms_min": 1828,
+      "log_window_ms_median": null,
+      "memory": {
+        "processes": 4,
+        "rss_mb": 485.9,
+        "footprint_mb": 175.1,
+        "load_1m": 9.6
+      },
+      "installed_size_mb": 681
+    },
+    "gitkraken": {
+      "name": "GitKraken",
+      "samples": [
+        {
+          "run": 1,
+          "load_1m": 13.1,
+          "window_ms": 6277,
+          "renderer_start_ms": 3383,
+          "first_paint_ms": 3887,
+          "first_contentful_paint_ms": 5823
+        },
+        {
+          "run": 2,
+          "load_1m": 12.4,
+          "window_ms": 5433,
+          "renderer_start_ms": 2721,
+          "first_paint_ms": 3249,
+          "first_contentful_paint_ms": 5033
+        },
+        {
+          "run": 3,
+          "load_1m": 15.3,
+          "window_ms": 4874,
+          "renderer_start_ms": 2255,
+          "first_paint_ms": 2763,
+          "first_contentful_paint_ms": 4495
+        },
+        {
+          "run": 4,
+          "load_1m": 9.0,
+          "window_ms": 2958,
+          "renderer_start_ms": 1341,
+          "first_paint_ms": 1649,
+          "first_contentful_paint_ms": 2685
+        },
+        {
+          "run": 5,
+          "load_1m": 9.6,
+          "window_ms": 4140,
+          "renderer_start_ms": 1724,
+          "first_paint_ms": 2128,
+          "first_contentful_paint_ms": 3780
+        }
+      ],
+      "window_ms_median": 4874,
+      "window_ms_min": 2958,
+      "first_contentful_paint_ms_median": 4495,
+      "first_contentful_paint_ms_min": 2685,
+      "log_window_ms_median": null,
+      "memory": {
+        "processes": 7,
+        "rss_mb": 1025.5,
+        "footprint_mb": 575.2,
+        "load_1m": 11.7
+      },
+      "installed_size_mb": 633
+    }
+  }
+}

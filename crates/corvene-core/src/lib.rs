@@ -38,6 +38,7 @@ pub mod release_notes;
 pub mod remote;
 pub mod repo_rules;
 pub mod samples;
+pub mod shared_storage;
 pub mod state;
 pub mod templates;
 pub mod text_tokens;
@@ -78,10 +79,11 @@ pub use pull_requests::{
 };
 pub use remote::{ForcePushState, PushPullKind, PushPullProgress, RepoIndicator, host_of};
 pub use repo_rules::{append_trailers, failed_rules, rule_matches};
+pub use shared_storage::{SharedStorageAccess, SharedStorageDestination};
 pub use state::{
-    AppState, CloneState, DropTarget, FileListFilter, FilterOption, Foldout, GitConfigLocation,
-    GlobalGitConfig, LastCommit, Popup, PreferencesTab, RepositorySettingsData,
-    RepositorySettingsTab, RepositoryState, RetryAction, SignInState, SignInStep,
-    UnreachableCommitsTab,
+    AfterSharedStorageMove, AppState, CloneState, DropTarget, FileListFilter, FilterOption,
+    Foldout, GitConfigLocation, GlobalGitConfig, LastCommit, Popup, PreferencesTab,
+    RepositorySettingsData, RepositorySettingsTab, RepositoryState, RetryAction, SharedStorageMove,
+    SharedStorageMoveStage, SharedStorageMoveState, SignInState, SignInStep, UnreachableCommitsTab,
 };
 pub use updater::{AvailableUpdate, PackageManager, UpdateState, UpdateStatus};

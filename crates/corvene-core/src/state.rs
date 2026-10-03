@@ -506,10 +506,23 @@ pub enum Popup {
         message: String,
         suggest_default_editor: bool,
         open_preferences: bool,
+        /// Android: the editor runs in Termux, which cannot reach the
+        /// repository in Corvene's own storage; "Move to shared storage…"
+        /// replaces the Settings button.
+        move_to_shared_storage: Option<SharedStorageMove>,
     },
     /// `OpenShellFailed`
     ShellError {
         message: String,
+        /// Android: as for `ExternalEditorError`.
+        move_to_shared_storage: Option<SharedStorageMove>,
+    },
+    /// Android (no GHD equivalent): copies a repository from Corvene's own
+    /// storage to a folder on shared storage and uses it from there
+    /// (`dialogs::move_to_shared_storage`).
+    MoveToSharedStorage {
+        repo: u64,
+        then: AfterSharedStorageMove,
     },
     /// `UnreachableCommits`: which selected commits the range diff covers.
     UnreachableCommits {
@@ -564,6 +577,7 @@ impl Popup {
             | Self::SquashCommitMessage { repo, .. }
             | Self::RepositorySettings { repo, .. }
             | Self::ConfirmRemoveRepository { repo, .. }
+            | Self::MoveToSharedStorage { repo, .. }
             | Self::UnreachableCommits { repo, .. } => Some(*repo),
             _ => None,
         }
@@ -755,6 +769,55 @@ pub struct CloneState {
     pub value: Option<f32>,
     /// Stops the clone (`234-clone-cancel`, `Dispatcher::cancel_clone`).
     pub cancel: corvene_git::CancelToken,
+}
+
+/// Android: a repository in Corvene's own storage that Termux could not
+/// reach, and what runs again once it was moved to shared storage
+/// (`Popup::MoveToSharedStorage`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedStorageMove {
+    pub repo: u64,
+    pub then: AfterSharedStorageMove,
+}
+
+/// What `Dispatcher::move_to_shared_storage` runs at the new location.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AfterSharedStorageMove {
+    Nothing,
+    /// "Open in Termux" at the repository root.
+    OpenShell,
+    /// A Termux editor on `relative` (to the repository root), at `line`.
+    OpenEditor {
+        relative: PathBuf,
+        line: Option<u32>,
+    },
+}
+
+/// A move to shared storage in progress (`AppState::shared_storage_move`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedStorageMoveState {
+    pub repo: u64,
+    pub destination: PathBuf,
+    pub stage: SharedStorageMoveStage,
+    /// Stops the copy; the partial copy is removed.
+    pub cancel: corvene_git::CancelToken,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SharedStorageMoveStage {
+    /// `done` of `total` files and folders copied.
+    Copying { done: u64, total: u64 },
+    /// git is reading the copy (configuration, index refresh, open).
+    Checking,
+    /// The move stopped; the dialog shows why and offers the form again.
+    Failed(String),
+}
+
+impl SharedStorageMoveStage {
+    /// No more progress will come.
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
 }
 
 /// What deleting a branch would lose (`860-delete-branch-warnings`).
@@ -1071,6 +1134,8 @@ pub struct AppState {
     pub foldout: Option<Foldout>,
     pub popup: Option<Popup>,
     pub cloning: Option<CloneState>,
+    /// Android: a repository being moved to shared storage.
+    pub shared_storage_move: Option<SharedStorageMoveState>,
     /// `224-alias-when-adding`: aliases typed in New / Add / Clone, applied
     /// when the repository at that (resolved) path is added.
     pub pending_aliases: Vec<(PathBuf, String)>,
