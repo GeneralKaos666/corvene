@@ -35,6 +35,8 @@ pub struct KeymapFlags {
     pub navigation_shortcuts: bool,
     /// `801-history-review-mode`: ⌃⌘S hides History's lists.
     pub history_review_mode: bool,
+    /// `447-extra-zoom-inputs`: ⌘+ / ⇧⌘= (and the keypad's +) zoom in too.
+    pub extra_zoom_inputs: bool,
 }
 
 impl KeymapFlags {
@@ -49,6 +51,7 @@ impl KeymapFlags {
             copy_path_shortcuts: flags.bool(ids::COPY_PATH_SHORTCUTS),
             navigation_shortcuts: flags.bool(ids::NAVIGATION_SHORTCUTS),
             history_review_mode: flags.bool(ids::HISTORY_REVIEW_MODE),
+            extra_zoom_inputs: flags.bool(ids::EXTRA_ZOOM_INPUTS),
         }
     }
 }
@@ -309,6 +312,15 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
     }
     if flags.history_review_mode {
         bindings.push(KeyBinding::new(CTRL_CMD_S, ToggleHistoryReviewMode, MENU));
+    }
+    if flags.extra_zoom_inputs {
+        // macOS delivers ⇧⌘= as `cmd-+`; the keypad's + and - arrive as the
+        // plain characters (GPUI has no keypad key names), so ⌘- covers
+        // keypad minus already
+        bindings.extend([
+            KeyBinding::new("secondary-+", ZoomIn, None),
+            KeyBinding::new("shift-secondary-=", ZoomIn, None),
+        ]);
     }
     if flags.open_file_shortcuts {
         for context in ["ChangesList", "CommitFileList"] {

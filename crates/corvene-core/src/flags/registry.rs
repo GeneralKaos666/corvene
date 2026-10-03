@@ -2170,6 +2170,20 @@ registry! {
         ],
     },
 
+    /// More ways to zoom.
+    EXTRA_ZOOM_INPUTS = 447 "extra-zoom-inputs" {
+        title: "More zoom shortcuts",
+        summary: "⌘+ (⇧⌘=) and the keypad's + zoom in as ⌘= does, and ⌘ + mouse wheel (Ctrl \
+                  on Windows and Linux) zooms in and out.",
+        ghd_behaviour: "Only ⌘=, ⌘- and ⌘0 zoom.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3913)],
+        code: &["crates/corvene-ui/src/keymap.rs", "crates/corvene-ui/src/workspace.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

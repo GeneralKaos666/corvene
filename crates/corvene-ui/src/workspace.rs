@@ -2,6 +2,8 @@
 //!
 //! Deviation: `407-smaller-minimum-sizes` lowers the sidebar minimum from
 //! GHD's 220 px (`ui/app.tsx` `sidebarWidth`) to 120 px.
+//! `447-extra-zoom-inputs`: ⌘ / Ctrl + mouse wheel zooms; GHD only zooms
+//! from the View menu's shortcuts (`main-process/menu/build-default-menu.ts`).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -883,6 +885,47 @@ impl Workspace {
     }
 }
 
+thread_local! {
+    /// Trackpad pixels scrolled with ⌘ / Ctrl held since the last zoom step.
+    static WHEEL_ZOOM_PIXELS: Cell<f32> = const { Cell::new(0.) };
+}
+
+/// `447-extra-zoom-inputs`: ⌘ / Ctrl + wheel zooms in (up) and out (down).
+/// A capture-phase listener painted before the content, so the scroll views
+/// under the pointer never see those wheel events. A mouse wheel notch is one
+/// step; a trackpad steps every 40 px.
+fn wheel_zoom_listener(workspace: WeakEntity<Workspace>) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |_, _, window, _| {
+            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _, cx| {
+                if phase != DispatchPhase::Capture || !event.modifiers.secondary() {
+                    return;
+                }
+                cx.stop_propagation();
+                let step = match event.delta {
+                    ScrollDelta::Lines(lines) => lines.y.signum() as i32,
+                    ScrollDelta::Pixels(pixels) => WHEEL_ZOOM_PIXELS.with(|acc| {
+                        let total = acc.get() + f32::from(pixels.y);
+                        if total.abs() >= 40. {
+                            acc.set(0.);
+                            total.signum() as i32
+                        } else {
+                            acc.set(total);
+                            0
+                        }
+                    }),
+                };
+                if step != 0 {
+                    workspace.update(cx, |w, cx| w.zoom(step, cx)).ok();
+                }
+            });
+        },
+    )
+    .absolute()
+    .size_0()
+}
+
 impl Workspace {
     /// View › Zoom In (+1) / Zoom Out (-1) / Reset Zoom (0): GHD's
     /// `zoom(ZoomDirection)` steps through `ZoomInFactors`, persists the
@@ -1096,11 +1139,19 @@ impl Render for Workspace {
         if self.state.read(cx).popup.is_some() {
             key_context.add("Popup");
         }
+        let wheel_zoom = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::EXTRA_ZOOM_INPUTS);
         div()
             .id("workspace")
             .key_context(key_context)
             .track_focus(&self.focus_handle)
             .relative()
+            .when(wheel_zoom, |d| {
+                d.child(wheel_zoom_listener(cx.entity().downgrade()))
+            })
             .size_full()
             .flex()
             .flex_col()
