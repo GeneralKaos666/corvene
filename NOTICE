@@ -8,7 +8,9 @@ Copyright (c) GitHub, Inc. and licensed under the MIT License.
 The illustrations in assets/illustrations/ come from GitHub Desktop's
 app/static/common/ folder under the same license (ghd_high_contrast.svg
 is Corvene's recolouring of ghd_dark.svg). None of GitHub's logos (the
-files in GitHub Desktop's app/static/logos/) are included.
+files in GitHub Desktop's app/static/logos/) are included. The test
+fixtures in crates/corvene-test-support/fixtures/ are GitHub Desktop's
+app/test/fixtures/ (release 3.6.6), also under the MIT License.
 
 Corvene is not affiliated with, sponsored by or endorsed by GitHub, Inc.
 GITHUB®, the GITHUB® logo design, the INVERTOCAT logo design, OCTOCAT®

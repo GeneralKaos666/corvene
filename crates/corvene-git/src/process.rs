@@ -36,6 +36,8 @@ pub struct GitCommand {
     env: Vec<(OsString, OsString)>,
     /// Exit codes that are not failures (e.g. `diff --exit-code` → 1).
     ok_codes: Vec<i32>,
+    /// Every exit code counts as success ([`GitCommand::allow_any_exit_code`]).
+    any_code: bool,
     /// Bytes written to git's stdin (`commit -F -`, `update-index --stdin`).
     stdin: Option<Vec<u8>>,
     /// Variables removed from the inherited environment (`GIT_SEQUENCE_EDITOR`).
@@ -207,6 +209,7 @@ impl GitCommand {
             cwd: None,
             env: Vec::new(),
             ok_codes: vec![0],
+            any_code: false,
             stdin: None,
             env_removed: Vec::new(),
             cancel: None,
@@ -259,6 +262,19 @@ impl GitCommand {
     pub fn allow_exit_code(mut self, code: i32) -> Self {
         self.ok_codes.push(code);
         self
+    }
+
+    /// Return [`GitOutput`] for whatever code git exits with, so the caller
+    /// reads `status` itself (dugite's `exec`, which the ported GitHub
+    /// Desktop tests assert on). A process killed by a signal, without an
+    /// exit code, is still an error.
+    pub fn allow_any_exit_code(mut self) -> Self {
+        self.any_code = true;
+        self
+    }
+
+    fn exit_ok(&self, code: Option<i32>) -> bool {
+        code.is_some_and(|c| self.any_code || self.ok_codes.contains(&c))
     }
 
     fn command(&self) -> Command {
@@ -360,7 +376,7 @@ impl GitCommand {
             ms = started.elapsed().as_millis(),
             "git finished"
         );
-        if code.is_some_and(|c| self.ok_codes.contains(&c)) {
+        if self.exit_ok(code) {
             Ok(GitOutput {
                 status: output.status,
                 stdout: output.stdout,
@@ -472,7 +488,7 @@ impl GitCommand {
         };
         let code = status.code();
         debug!(git = %args, code, ms = started.elapsed().as_millis(), "git finished (streamed)");
-        if code.is_some_and(|c| self.ok_codes.contains(&c)) {
+        if self.exit_ok(code) {
             Ok(GitOutput {
                 status,
                 stdout,
