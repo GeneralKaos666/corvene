@@ -4301,6 +4301,21 @@ registry! {
         code: &["crates/corvene-ui/src/selected_commit.rs", "crates/corvene-core/src/autocomplete.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// No GitHub links for commits that are not on any remote.
+    UNPUBLISHED_COMMIT_LINKS = 891 "unpublished-commit-links" {
+        title: "No GitHub links for unpublished commits",
+        summary: "\"View on GitHub\" (and Copy Commit URL and the commit details' SHA link) are \
+                  disabled for a commit that no remote-tracking branch contains, such as one \
+                  made on a detached HEAD or not pushed yet, since GitHub does not have it.",
+        ghd_behaviour: "Every commit links to GitHub, which answers 404 for unpublished ones.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1478)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

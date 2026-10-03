@@ -742,6 +742,9 @@ pub struct RepositoryState {
     /// (`HEAD..upstream`, newest first, at most [`INCOMING_COMMITS_LIMIT`]),
     /// for the Pull button's tooltip (flag `257`).
     pub incoming_commits: Vec<String>,
+    /// `891-unpublished-commit-links`: HEAD's commits no remote-tracking
+    /// branch contains (`None`: not known, or the flag is off).
+    pub unpublished_commits: Option<std::collections::HashSet<String>>,
     /// Incremented after every successful commit so the form can clear itself.
     pub commit_nonce: u64,
     /// `723-discard-confirm-snooze`: discarding (not all changes) skips the

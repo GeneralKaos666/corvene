@@ -1615,24 +1615,43 @@ impl Dispatcher {
                 Self::history_first_parent(s),
             )
         };
+        // `891-unpublished-commit-links`: which of them no remote has
+        let unpublished_git = {
+            let s = state.read(cx);
+            s.flags
+                .bool(crate::flags::ids::UNPUBLISHED_COMMIT_LINKS)
+                .then(|| s.git.clone())
+                .flatten()
+        };
         state.update(cx, |s, _| s.repo_state_mut(id).commits_loading = true);
         let task = cx.background_executor().spawn(async move {
-            corvene_git::get_commits_with(
+            let unpublished = unpublished_git.and_then(|git| {
+                corvene_git::local_only_commits(git, &workdir, "HEAD", UNPUBLISHED_COMMITS_LIMIT)
+                    .ok()
+                    .filter(|shas| shas.len() < UNPUBLISHED_COMMITS_LIMIT)
+                    .map(|shas| shas.into_iter().collect::<std::collections::HashSet<_>>())
+            });
+            let commits = corvene_git::get_commits_with(
                 &workdir,
                 "HEAD",
                 skip,
                 corvene_git::COMMIT_BATCH_SIZE,
                 first_parent,
-            )
+            );
+            (commits, unpublished)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let result = task.await;
+            let (result, unpublished) = task.await;
             cx.update(|cx| {
                 let mut rewritten = Vec::new();
                 let reselect = Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
                     rs.commits_loading = false;
                     let mut changed = true;
+                    if rs.unpublished_commits != unpublished {
+                        rs.unpublished_commits = unpublished;
+                        cx.notify();
+                    }
                     match result {
                         Ok(batch) => {
                             if more {
@@ -5052,6 +5071,10 @@ fn compute_working_diff(
         (Arc::new(diff), contents.map(Arc::new), old.map(Arc::new))
     })
 }
+
+/// `891-unpublished-commit-links`: with this many local-only commits or more
+/// none is marked (links stay as in GHD).
+const UNPUBLISHED_COMMITS_LIMIT: usize = 10_000;
 
 /// The changed files of one commit or of a contiguous range (oldest first).
 fn compute_changeset(

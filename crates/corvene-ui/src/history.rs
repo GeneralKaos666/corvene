@@ -1060,11 +1060,17 @@ impl HistorySidebar {
     ) {
         let (html_url, is_head, busy, copy_items, revert_no_commit, unpushed, checkout_head) = {
             let s = self.state.read(cx);
+            let rs = s.repo_states.get(&id);
+            // `891-unpublished-commit-links`: no remote has the commit, so
+            // there is nothing to view on GitHub
+            let unpublished = rs
+                .and_then(|r| r.unpublished_commits.as_ref())
+                .is_some_and(|shas| shas.contains(&commit.sha));
             let html_url = s
                 .repository(id)
                 .and_then(|r| r.github.as_ref())
+                .filter(|_| !unpublished)
                 .map(|g| g.html_url.clone());
-            let rs = s.repo_states.get(&id);
             let comparing = rs.is_some_and(|r| r.compare.is_comparing());
             let is_head = !comparing
                 && rs

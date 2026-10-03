@@ -509,9 +509,15 @@ impl SelectedCommitView {
         let extras = s
             .flags
             .bool(corvene_core::flags::ids::COMMIT_DETAILS_EXTRAS);
+        // `891-unpublished-commit-links`: not for a commit no remote has
+        let unpublished = rs
+            .unpublished_commits
+            .as_ref()
+            .is_some_and(|shas| shas.contains(&commit.sha));
         let commit_url = extras
             .then(|| s.repository(id).and_then(|r| r.github.as_ref()))
             .flatten()
+            .filter(|_| !unpublished)
             .map(|g| format!("{}/commit/{}", g.html_url, commit.sha));
         // GHD `RichText`: emoji, `#123`, `@name` and links; `804` adds `code`
         // spans and (GitHub repositories) SHAs
