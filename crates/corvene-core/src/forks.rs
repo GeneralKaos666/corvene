@@ -301,7 +301,7 @@ impl Dispatcher {
             move || corvene_git::set_remote_url(git, &workdir, UPSTREAM_REMOTE_NAME, &parent_url),
             move |result, cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not update the upstream remote", err.to_string(), cx);
+                    Self::show_error("Could not update the upstream remote", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             },

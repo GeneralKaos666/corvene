@@ -122,6 +122,8 @@ pub struct DialogButton {
 /// between 400 and 600 px.
 fn ghd_dialog_width(id: &str) -> Option<f32> {
     Some(match id {
+        // `#app-error.raw-git-error`: room for 80-column git output
+        "dialog-git-error" => 750.,
         "dialog-conflicts" | "create-fork" | "clone-repository" => 500.,
         "dialog-confirm-abort"
         | "dialog-push-needs-pull"

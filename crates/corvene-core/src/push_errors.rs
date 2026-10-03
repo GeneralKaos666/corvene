@@ -101,8 +101,8 @@ pub fn missing_remote_branch(stderr: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-/// A plain-language explanation for a failed pull or fetch, followed by
-/// git's message; `None` when there is nothing better to say.
+/// A plain-language explanation for a failed pull or fetch (the error dialog
+/// shows git's message after it); `None` when there is nothing better to say.
 pub fn plain_remote_error(err: &corvene_git::GitError) -> Option<String> {
     let corvene_git::GitError::Failed { stderr, .. } = err else {
         return None;
@@ -111,12 +111,12 @@ pub fn plain_remote_error(err: &corvene_git::GitError) -> Option<String> {
     Some(format!(
         "The branch \"{branch}\" no longer exists on the remote, so there is nothing to pull. \
          It may have been deleted after a merge. Push to publish it again, or switch to \
-         another branch.\n\n{err}"
+         another branch."
     ))
 }
 
 /// A plain-language explanation for a clone into `path` that failed because
-/// the folder (or its parent) is not writable, followed by the error.
+/// the folder (or its parent) is not writable (the caller appends the error).
 pub fn plain_clone_error(err: &corvene_git::GitError, path: &std::path::Path) -> Option<String> {
     let denied = match err {
         corvene_git::GitError::Spawn(io) | corvene_git::GitError::Io(io) => {
@@ -134,7 +134,7 @@ pub fn plain_clone_error(err: &corvene_git::GitError, path: &std::path::Path) ->
         let folder = path.parent().unwrap_or(path);
         format!(
             "You do not have permission to create a folder in \"{}\". Choose a location you \
-             can write to, such as a folder in your home directory.\n\n{err}",
+             can write to, such as a folder in your home directory.",
             folder.display()
         )
     })
@@ -326,7 +326,7 @@ error: failed to push some refs to 'https://github.com/octocat/hello.git'
             text.starts_with("The branch \"patch-1\" no longer exists"),
             "{text}"
         );
-        assert!(text.contains("no such ref was fetched"));
+        assert!(!text.contains("no such ref was fetched"));
 
         let path = std::path::Path::new("/Applications/repo");
         let denied = corvene_git::GitError::Spawn(std::io::Error::from(

@@ -1420,6 +1420,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "corvene-core",
+ "corvene-git",
  "corvene-github",
  "corvene-highlight",
  "corvene-platform",

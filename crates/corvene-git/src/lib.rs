@@ -8,6 +8,7 @@ pub mod config;
 pub mod detect;
 pub mod diff;
 pub mod error;
+pub mod git_errors;
 pub mod handle;
 pub mod history_ops;
 pub mod hook_env;
@@ -54,6 +55,10 @@ pub use diff::{
     submodule_diff, working_directory_diff, working_directory_patch, working_file_lines,
 };
 pub use error::{GitError, dubious_ownership_path};
+pub use git_errors::{
+    GitErrorDetails, GitFailure, KnownGitError, display_command, files_that_would_be_overwritten,
+    git_error_details, known_git_error,
+};
 pub use history_ops::{
     ResetMode, checkout_commit, cherry_pick_no_commit, create_tag, delete_tag, format_patches,
     reset_to, revert_commit, revert_commits_no_commit, revert_file_in_commit,

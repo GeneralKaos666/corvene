@@ -13,8 +13,8 @@ use tracing::{error, info, warn};
 
 use crate::persistence::{Settings, StoreExt, UncommittedChangesStrategy};
 use crate::state::{
-    AppState, CloneState, Foldout, LastCommit, Popup, RepositoryState, RetryAction, SignInState,
-    SignInStep,
+    AppState, CloneState, ErrorMessage, Foldout, LastCommit, Popup, RepositoryState, RetryAction,
+    SignInState, SignInStep,
 };
 use corvene_models::{
     Account, DiffSelectionType, Repository, Section, WorkingDirectoryFileChange, github_from_remote,
@@ -325,7 +325,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not remove the lock file", err.to_string(), cx);
+                    Self::show_error("Could not remove the lock file", &err, cx);
                 }
                 if let Some(id) = selected {
                     Self::refresh_repository(id, cx);
@@ -355,11 +355,12 @@ impl Dispatcher {
         });
     }
 
-    pub fn show_error(title: impl Into<String>, message: impl Into<String>, cx: &mut App) {
+    pub fn show_error(title: impl Into<String>, message: impl Into<ErrorMessage>, cx: &mut App) {
         let message = message.into();
+        let full = message.full_text();
         // any git call refused for an unsafe repository switches that
         // repository to the "Trust Repository" view instead
-        if let Some(path) = corvene_git::dubious_ownership_path(&message)
+        if let Some(path) = corvene_git::dubious_ownership_path(&full)
             && Self::mark_unsafe_repository(path, cx)
         {
             return;
@@ -370,22 +371,24 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::REMOVE_STALE_INDEX_LOCK)
-            && let Some(lock) = corvene_git::index_lock_path(&message)
+            && let Some(lock) = corvene_git::index_lock_path(&full)
         {
             Self::show_popup(
                 Popup::IndexLockExists {
                     title: title.into(),
-                    message,
+                    message: full,
                     lock,
                 },
                 cx,
             );
             return;
         }
+        let ErrorMessage { text: message, git } = message;
         Self::show_popup(
             Popup::Error {
                 title: title.into(),
                 message,
+                git,
             },
             cx,
         );
@@ -441,7 +444,7 @@ impl Dispatcher {
                     cx.notify();
                 });
                 if let Err(err) = result {
-                    Self::show_error("Could not trust the repository", err.to_string(), cx);
+                    Self::show_error("Could not trust the repository", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -598,7 +601,7 @@ impl Dispatcher {
                     ),
                     cx,
                 ),
-                Err(err) => Self::show_error("Could not add repository", err.to_string(), cx),
+                Err(err) => Self::show_error("Could not add repository", &err, cx),
             });
         })
         .detach();
@@ -1977,7 +1980,7 @@ impl Dispatcher {
             cx.update(|cx| {
                 let ok = result.is_ok();
                 if let Err(err) = result {
-                    Self::show_error(error_title, err.to_string(), cx);
+                    Self::show_error(error_title, &err, cx);
                 }
                 Self::refresh_repository(id, cx);
                 if ok {
@@ -2127,7 +2130,7 @@ impl Dispatcher {
                         cx.reveal_path(first);
                     }
                 }
-                Err(err) => Self::show_error("Could not create patch files", err.to_string(), cx),
+                Err(err) => Self::show_error("Could not create patch files", &err, cx),
             });
         })
         .detach();
@@ -2240,7 +2243,7 @@ impl Dispatcher {
                             tags.push(tag);
                         }
                     }),
-                    Err(err) => Self::show_error("Could not create tag", err.to_string(), cx),
+                    Err(err) => Self::show_error("Could not create tag", &err, cx),
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -2502,7 +2505,7 @@ impl Dispatcher {
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
                 if let Err(err) = result {
-                    Self::show_error("Could not create branch", err.to_string(), cx);
+                    Self::show_error("Could not create branch", &err, cx);
                 }
                 Self::show_section(id, Section::Changes, cx);
                 Self::refresh_repository(id, cx);
@@ -2670,13 +2673,13 @@ impl Dispatcher {
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
                 if let Err(err) = result {
-                    Self::show_error("Could not switch branch", err.to_string(), cx);
+                    Self::show_error("Could not switch branch", &err, cx);
                 }
                 if let Some(err) = submodule_error {
-                    Self::show_error("Could not update submodules", err.to_string(), cx);
+                    Self::show_error("Could not update submodules", &err, cx);
                 }
                 if let Some(err) = pop_error {
-                    Self::show_error("Could not restore stash", err.to_string(), cx);
+                    Self::show_error("Could not restore stash", &err, cx);
                 }
                 Self::show_section(id, Section::Changes, cx);
                 Self::refresh_repository(id, cx);
@@ -3553,7 +3556,7 @@ impl Dispatcher {
                 Ok(path) => Self::add_repository(path, cx),
                 Err(err) => {
                     Self::take_pending_alias(&failed_path, cx);
-                    Self::show_error("Could not create repository", err.to_string(), cx)
+                    Self::show_error("Could not create repository", &err, cx)
                 }
             });
         })
@@ -3674,16 +3677,23 @@ impl Dispatcher {
                     Err(err) => {
                         let flags = &Self::state(cx).read(cx).flags;
                         // `255-plain-language-remote-errors`
-                        let error = flags
+                        let explanation = flags
                             .bool(crate::flags::ids::PLAIN_LANGUAGE_REMOTE_ERRORS)
                             .then(|| crate::push_errors::plain_clone_error(&err, &path))
-                            .flatten()
-                            .unwrap_or_else(|| err.to_string());
+                            .flatten();
                         // `235-clone-failure-keeps-input`: back to the dialog
                         if flags.bool(crate::flags::ids::CLONE_FAILURE_KEEPS_INPUT) {
+                            let error = match explanation {
+                                Some(explanation) => format!("{explanation}\n\n{err}"),
+                                None => err.to_string(),
+                            };
                             Self::show_popup(Popup::CloneRepositoryRetry { url, path, error }, cx)
                         } else {
-                            Self::show_error("Clone failed", error, cx)
+                            Self::show_error(
+                                "Clone failed",
+                                ErrorMessage::explained(&err, explanation),
+                                cx,
+                            )
                         }
                     }
                 }
@@ -3929,7 +3939,7 @@ impl Dispatcher {
                 });
                 let committed = result.is_ok();
                 if let Err(err) = result {
-                    Self::show_error("Could not commit", err.to_string(), cx);
+                    Self::show_error("Could not commit", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
                 if committed && push_after {
@@ -3970,7 +3980,7 @@ impl Dispatcher {
                     cx.notify();
                 });
                 if let Err(err) = result {
-                    Self::show_error("Could not undo commit", err.to_string(), cx);
+                    Self::show_error("Could not undo commit", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4017,7 +4027,7 @@ impl Dispatcher {
                     cx.notify();
                 });
                 if let Err(err) = result {
-                    Self::show_error("Could not discard changes", err.to_string(), cx);
+                    Self::show_error("Could not discard changes", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4053,7 +4063,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| match result {
                 Err(err) => {
-                    Self::show_error("Could not discard changes", err.to_string(), cx);
+                    Self::show_error("Could not discard changes", &err, cx);
                     Self::refresh_repository(id, cx);
                 }
                 // nothing is left to stash, and `MoveToNewBranch` never
@@ -4275,7 +4285,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| match result {
                 Ok(patch) => cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(patch)),
-                Err(err) => Self::show_error("Could not copy the diff", err.to_string(), cx),
+                Err(err) => Self::show_error("Could not copy the diff", &err, cx),
             });
         })
         .detach();
@@ -4298,7 +4308,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not update the index", err.to_string(), cx);
+                    Self::show_error("Could not update the index", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4322,7 +4332,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not update .gitignore", err.to_string(), cx);
+                    Self::show_error("Could not update .gitignore", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4348,7 +4358,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not update the ignore file", err.to_string(), cx);
+                    Self::show_error("Could not update the ignore file", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4755,9 +4765,7 @@ impl Dispatcher {
             .spawn(async move { corvene_git::set_global_identity(git, &name, &email) });
         cx.spawn(async move |cx: &mut AsyncApp| {
             if let Err(err) = task.await {
-                cx.update(|cx| {
-                    Self::show_error("Could not save Git identity", err.to_string(), cx)
-                });
+                cx.update(|cx| Self::show_error("Could not save Git identity", &err, cx));
             }
         })
         .detach();

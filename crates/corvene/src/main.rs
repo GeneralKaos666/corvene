@@ -419,6 +419,10 @@ pub(crate) fn main() {
         //   ready / Homebrew / package manager state: the banner, plus About or
         //   the Release Notes with "Install and Restart")
         //   flags[:<search>] (Corvene › Flags…, with the search box prefilled)
+        //   git-error[:raw|:known|:push|:plain] (the error dialog for a failed pull:
+        //   a merge blocked by local changes, an output nobody has words for, a
+        //   failure GHD describes, a push a protected branch rejected, or an error
+        //   git did not produce)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1145,6 +1149,68 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
     let selected = corvene_core::AppState::global(cx).read(cx).selected;
     match (popup, selected) {
         ("import-ghd", _) => Dispatcher::show_popup(Popup::ImportFromGitHubDesktop, cx),
+        (other, _) if other == "git-error" || other.starts_with("git-error:") => {
+            let (title, err) = match other.strip_prefix("git-error:") {
+                Some("raw") => (
+                    "Could not push",
+                    corvene_git::GitError::Failed {
+                        args: "-c credential.helper=manager push --progress origin main:main"
+                            .into(),
+                        code: Some(128),
+                        stderr: "fatal: unable to access 'https://github.com/octocat/spoon-knife.git/': \
+                                 Failed to connect to github.com port 443 after 75004 ms: \
+                                 Couldn't connect to server"
+                            .into(),
+                    },
+                ),
+                Some("known") => (
+                    "Could not merge",
+                    corvene_git::GitError::Failed {
+                        args: "merge --no-ff topic".into(),
+                        code: Some(128),
+                        stderr: "fatal: refusing to merge unrelated histories".into(),
+                    },
+                ),
+                Some("push") => (
+                    "Could not push",
+                    corvene_git::GitError::Failed {
+                        args: "push --progress origin main:main".into(),
+                        code: Some(1),
+                        stderr: "remote: error: GH006: Protected branch update failed for refs/heads/main.\n\
+                                 remote: \n\
+                                 remote: - Changes must be made through a pull request.\n\
+                                 remote: - 2 of 2 required status checks are expected.\n\
+                                 To github.com:octocat/spoon-knife.git\n \
+                                 ! [remote rejected] main -> main (protected branch hook declined)\n\
+                                 error: failed to push some refs to 'github.com:octocat/spoon-knife.git'"
+                            .into(),
+                    },
+                ),
+                Some("plain") => (
+                    "Could not pull",
+                    corvene_git::GitError::Gix("The repository has no remotes.".into()),
+                ),
+                _ => (
+                    "Could not pull",
+                    corvene_git::GitError::Failed {
+                        args: "-c rebase.backend=merge pull --ff --recurse-submodules --progress origin"
+                            .into(),
+                        code: Some(1),
+                        stderr: "Updating e9455681..1f7e3d4e\n\
+                                 error: Your local changes to the following files would be overwritten by merge:\n\
+                                 \tcrates/corvene-platform/src/editors.rs\n\
+                                 \tcrates/corvene-ui/src/dialogs/preferences.rs\n\
+                                 \tcrates/corvene-ui/src/menu_bar.rs\n\
+                                 \tcrates/corvene-ui/src/views_menu.rs\n\
+                                 \tcrates/corvene-ui/src/widgets.rs\n\
+                                 Please commit your changes or stash them before you merge.\n\
+                                 Aborting"
+                            .into(),
+                    },
+                ),
+            };
+            Dispatcher::show_error(title, &err, cx)
+        }
         (other, _) if other == "flags" || other.starts_with("flags:") => {
             Dispatcher::open_flags(other.strip_prefix("flags:").map(str::to_string), cx)
         }

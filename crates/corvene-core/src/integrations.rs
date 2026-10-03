@@ -832,7 +832,7 @@ impl Dispatcher {
             },
             move |result, cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not save Git configuration", err.to_string(), cx);
+                    Self::show_error("Could not save Git configuration", &err, cx);
                 }
                 if let Some(id) = selected {
                     Self::refresh_repository(id, cx);

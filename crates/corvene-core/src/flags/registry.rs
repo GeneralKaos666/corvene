@@ -1912,6 +1912,25 @@ registry! {
         code: &["crates/corvene/src/menus.rs", "crates/corvene-platform/src/cli.rs"],
     },
 
+    /// Git error dialogs show the command, its exit code and output.
+    GIT_ERROR_DIALOG = 415 "git-error-dialog" {
+        title: "Structured git error dialogs",
+        summary: "When a git command fails, the error dialog leads with a plain sentence (GitHub \
+                  Desktop's description where it has one, else git's first error line), lists \
+                  what git named (files that would be overwritten or conflict, rejected refs, \
+                  the server's messages, hints, the path or URL at fault), and keeps git's raw \
+                  output in a monospace box under the command that ran (without the -c options \
+                  Corvene adds) and its exit code, collapsed while the details stand in for it.",
+        ghd_behaviour: "Shows its description alone for the errors it recognises; otherwise \
+                        git's raw output in monospace, with no command or exit code.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/dialogs/simple.rs", "crates/corvene-git/src/git_errors.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.
