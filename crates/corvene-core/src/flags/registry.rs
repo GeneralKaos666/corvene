@@ -1537,6 +1537,22 @@ registry! {
         code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// No "Publish repository" before the repository has loaded.
+    NO_PUBLISH_BEFORE_LOAD = 274 "no-publish-before-load" {
+        title: "No Publish repository while loading",
+        summary: "Until a newly selected repository has been read, the push/pull button is a \
+                  disabled blank button instead of \"Publish repository\", which a repository \
+                  with a remote never needs.",
+        ghd_behaviour: "Briefly offers \"Publish this repository to GitHub\" for every repository \
+                        while it loads, including cloned ones.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[Upstream::issue(4107)],
+        code: &["crates/corvene-ui/src/toolbar.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

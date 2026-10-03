@@ -433,6 +433,17 @@ pub fn toolbar_models(
             spin: true,
             ..base
         }
+    } else if info.is_none()
+        && state
+            .flags
+            .bool(corvene_core::flags::ids::NO_PUBLISH_BEFORE_LOAD)
+    {
+        // Corvene (`274-no-publish-before-load`): the remotes are unknown
+        // until the repository is read, so no "Publish repository" yet
+        ToolbarButtonModel {
+            disabled: true,
+            ..base
+        }
     } else if !has_remote {
         ToolbarButtonModel {
             icon: Octicon::Upload,
