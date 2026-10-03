@@ -245,13 +245,19 @@ pub fn undo_last_commit(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
 /// submodule entry with changes inside also has its modified files checked
 /// out and its untracked (not ignored) files moved to the Trash, so the entry
 /// goes away; GHD leaves such a submodule dirty.
+///
+/// A new file the Trash refuses is deleted, or with `keep_untrashable` (GHD
+/// `askForConfirmationOnDiscardChangesPermanently`) left alone and returned,
+/// so the caller can ask before [`delete_worktree_paths`] removes it for good.
 pub fn discard_changes(
     git: Arc<GitBinary>,
     workdir: &Path,
     files: &[WorkingDirectoryFileChange],
     move_to_trash: bool,
     clean_submodules: bool,
-) -> Result<()> {
+    keep_untrashable: bool,
+) -> Result<Vec<String>> {
+    let mut untrashable: Vec<String> = Vec::new();
     let mut tracked: Vec<&str> = Vec::new();
     if clean_submodules {
         for file in files {
@@ -269,7 +275,11 @@ pub fn discard_changes(
         match file.status.kind {
             FileStatusKind::New | FileStatusKind::Untracked => {
                 let full = workdir.join(&file.path);
-                if !move_to_trash || !trashed(&full) {
+                if move_to_trash && keep_untrashable {
+                    if !trashed(&full) && full.symlink_metadata().is_ok() {
+                        untrashable.push(file.path.clone());
+                    }
+                } else if !move_to_trash || !trashed(&full) {
                     let _ = std::fs::remove_file(&full).or_else(|_| std::fs::remove_dir_all(&full));
                 }
             }
@@ -297,6 +307,25 @@ pub fn discard_changes(
             .current_dir(workdir)
             .stdin(list)
             .run()?;
+    }
+    Ok(untrashable)
+}
+
+/// Delete worktree paths (files or folders) for good: the new files
+/// [`discard_changes`] could not move to the Trash, once the user agreed.
+pub fn delete_worktree_paths(workdir: &Path, paths: &[String]) -> Result<()> {
+    for path in paths {
+        let full = workdir.join(path);
+        let removed = if full.is_dir() && !full.is_symlink() {
+            std::fs::remove_dir_all(&full)
+        } else {
+            std::fs::remove_file(&full)
+        };
+        match removed {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
     }
     Ok(())
 }
@@ -356,6 +385,21 @@ fn discard_inside_submodule(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn delete_worktree_paths_removes_files_and_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "a").unwrap();
+        std::fs::create_dir_all(dir.path().join("d/e")).unwrap();
+        std::fs::write(dir.path().join("d/e/f.txt"), "f").unwrap();
+        delete_worktree_paths(
+            dir.path(),
+            &["a.txt".to_string(), "d".to_string(), "gone.txt".to_string()],
+        )
+        .unwrap();
+        assert!(!dir.path().join("a.txt").exists());
+        assert!(!dir.path().join("d").exists());
+    }
 
     fn repo() -> (tempfile::TempDir, Arc<GitBinary>) {
         let dir = tempfile::tempdir().unwrap();
@@ -470,7 +514,7 @@ mod tests {
         std::fs::write(path.join("a.txt"), "dirty\n").unwrap();
         std::fs::write(path.join("new.txt"), "x\n").unwrap();
         let status = crate::get_status(git.clone(), path, None).unwrap();
-        discard_changes(git.clone(), path, &status.files, false, false).unwrap();
+        discard_changes(git.clone(), path, &status.files, false, false, false).unwrap();
         assert_eq!(
             std::fs::read_to_string(path.join("a.txt")).unwrap(),
             "one\n"
@@ -521,9 +565,9 @@ mod tests {
         .unwrap();
         assert!(hidden.files.is_empty());
         // GHD behaviour: the submodule stays dirty
-        discard_changes(git.clone(), path, &status.files, false, false).unwrap();
+        discard_changes(git.clone(), path, &status.files, false, false, false).unwrap();
         assert!(sub.join("junk.txt").exists());
-        discard_changes(git.clone(), path, &status.files, false, true).unwrap();
+        discard_changes(git.clone(), path, &status.files, false, true, false).unwrap();
         // the submodule's clone has the machine's `core.autocrlf`
         assert_eq!(
             std::fs::read_to_string(sub.join("lib.txt"))

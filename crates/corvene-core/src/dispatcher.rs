@@ -4312,12 +4312,24 @@ impl Dispatcher {
         let flags = &Self::state(cx).read(cx).flags;
         let clean_submodules = flags.bool(crate::flags::ids::DISCARD_SUBMODULE_CHANGES);
         let move_to_trash = !flags.bool(crate::flags::ids::DISCARD_SKIPS_TRASH);
+        // GHD `askForConfirmationOnDiscardChangesPermanently`
+        let keep_untrashable = Self::state(cx)
+            .read(cx)
+            .settings
+            .confirm_discard_changes_permanently;
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).discarding = true;
             cx.notify();
         });
         let task = cx.background_executor().spawn(async move {
-            corvene_git::discard_changes(git, &workdir, &files, move_to_trash, clean_submodules)
+            corvene_git::discard_changes(
+                git,
+                &workdir,
+                &files,
+                move_to_trash,
+                clean_submodules,
+                keep_untrashable,
+            )
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = task.await;
@@ -4326,8 +4338,37 @@ impl Dispatcher {
                     s.repo_state_mut(id).discarding = false;
                     cx.notify();
                 });
+                match result {
+                    Err(err) => Self::show_error("Could not discard changes", err.to_string(), cx),
+                    Ok(untrashable) => Self::confirm_delete_untrashable(id, untrashable, cx),
+                }
+                Self::refresh_repository(id, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// GHD `DiscardChangesError` → `DiscardChangesRetry`: new files the Trash
+    /// refused are kept until the user agrees to delete them for good.
+    fn confirm_delete_untrashable(id: u64, paths: Vec<String>, cx: &mut App) {
+        if !paths.is_empty() {
+            Self::show_popup(Popup::ConfirmDeleteUntrashable { repo: id, paths }, cx);
+        }
+    }
+
+    /// `DiscardChangesRetry` › Permanently Discard Changes.
+    pub fn delete_untrashable(id: u64, paths: Vec<String>, cx: &mut App) {
+        let Some((_git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let task = cx
+            .background_executor()
+            .spawn(async move { corvene_git::delete_worktree_paths(&workdir, &paths) });
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            let result = task.await;
+            cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not discard changes", err.to_string(), cx);
+                    Self::show_error("Could not delete files", err.to_string(), cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4352,11 +4393,23 @@ impl Dispatcher {
         let flags = &Self::state(cx).read(cx).flags;
         let clean_submodules = flags.bool(crate::flags::ids::DISCARD_SUBMODULE_CHANGES);
         let move_to_trash = !flags.bool(crate::flags::ids::DISCARD_SKIPS_TRASH);
+        // GHD `askForConfirmationOnDiscardChangesPermanently`
+        let keep_untrashable = Self::state(cx)
+            .read(cx)
+            .settings
+            .confirm_discard_changes_permanently;
         let task = cx.background_executor().spawn(async move {
             if files.is_empty() {
-                Ok(())
+                Ok(Vec::new())
             } else {
-                corvene_git::discard_changes(git, &workdir, &files, move_to_trash, clean_submodules)
+                corvene_git::discard_changes(
+                    git,
+                    &workdir,
+                    &files,
+                    move_to_trash,
+                    clean_submodules,
+                    keep_untrashable,
+                )
             }
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
@@ -4366,9 +4419,14 @@ impl Dispatcher {
                     Self::show_error("Could not discard changes", err.to_string(), cx);
                     Self::refresh_repository(id, cx);
                 }
+                // `DiscardChangesRetry`: files are left, so no checkout yet
+                Ok(untrashable) if !untrashable.is_empty() => {
+                    Self::confirm_delete_untrashable(id, untrashable, cx);
+                    Self::refresh_repository(id, cx);
+                }
                 // nothing is left to stash, and `MoveToNewBranch` never
                 // touches the existing stash
-                Ok(()) => Self::checkout_branch(
+                Ok(_) => Self::checkout_branch(
                     id,
                     branch,
                     Some(UncommittedChangesStrategy::MoveToNewBranch),

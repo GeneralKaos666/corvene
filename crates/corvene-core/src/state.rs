@@ -103,6 +103,12 @@ pub enum Popup {
     AddLicense {
         repo: u64,
     },
+    /// `DiscardChangesRetry`: new files a discard could not move to the
+    /// Trash; delete them permanently?
+    ConfirmDeleteUntrashable {
+        repo: u64,
+        paths: Vec<String>,
+    },
     /// Corvene addition (flag 778): the changes file menu's "Ignore with
     /// Pattern…", prefilled with `pattern`.
     IgnoreWithPattern {
@@ -495,7 +501,9 @@ impl Popup {
             | Self::SquashCommitMessage { repo, .. }
             | Self::RepositorySettings { repo, .. }
             | Self::ConfirmRemoveRepository { repo, .. }
-            | Self::UnreachableCommits { repo, .. } => Some(*repo),
+            | Self::UnreachableCommits { repo, .. }
+            | Self::ConfirmDeleteUntrashable { repo, .. }
+            | Self::IgnoreWithPattern { repo, .. } => Some(*repo),
             _ => None,
         }
     }

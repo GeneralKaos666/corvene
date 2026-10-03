@@ -10,6 +10,7 @@ mod change_repository_alias;
 mod ci_check_run_rerun;
 pub(crate) mod clone_repository;
 mod confirm_commit_to_default_branch;
+mod confirm_delete_untrashable;
 mod crash_report_found;
 mod create_repository;
 mod discard_changes;
@@ -539,6 +540,14 @@ impl DialogHost {
             Popup::RemoveRepositories { ticked } => cx
                 .new(|cx| {
                     remove_repositories::RemoveRepositoriesDialog::new(state, *ticked, window, cx)
+                })
+                .into(),
+            Popup::ConfirmDeleteUntrashable { repo, paths } => cx
+                .new(|_| {
+                    confirm_delete_untrashable::ConfirmDeleteUntrashableDialog::new(
+                        *repo,
+                        paths.clone(),
+                    )
                 })
                 .into(),
             Popup::IgnoreWithPattern { repo, pattern } => cx
