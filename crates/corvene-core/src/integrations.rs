@@ -280,17 +280,27 @@ pub fn encode_component(s: &str) -> String {
 /// set up for its own work names itself on both sides and falls back to its
 /// own default branch as the base. GHD leaves the refs bare, and GitHub's
 /// `pull/new` page on a fork then proposes merging into the parent.
+///
+/// Deviation (`332-pr-url-owner-branch-refs`, `owner_refs`): the prefixes are
+/// `owner:` instead of `owner:name:`. Older GitHub Enterprise Server compare
+/// pages do not know the three-part form and report "nothing to compare";
+/// an owner has at most one fork in a network, so `owner:` is unambiguous.
 pub fn pull_request_url(
     gh: &GitHubRepository,
     compare: &str,
     base: Option<&str>,
     contributing_to_parent: bool,
     own_fork_targets_itself: bool,
+    owner_refs: bool,
 ) -> String {
     let own_fork = own_fork_targets_itself && !contributing_to_parent && gh.parent.is_some();
-    let self_prefix = format!("{}:{}:", gh.owner, gh.name);
+    let prefix = |owner: &str, name: &str| match owner_refs {
+        true => format!("{owner}:"),
+        false => format!("{owner}:{name}:"),
+    };
+    let self_prefix = prefix(&gh.owner, &gh.name);
     let base_prefix = match (&gh.parent, contributing_to_parent) {
-        (Some(parent), true) => format!("{}:{}:", parent.owner, parent.name),
+        (Some(parent), true) => prefix(&parent.owner, &parent.name),
         _ if own_fork => self_prefix.clone(),
         _ => String::new(),
     };
@@ -1068,12 +1078,13 @@ impl Dispatcher {
         let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) else {
             return;
         };
-        let (contributing_to_parent, own_fork_targets_itself) = {
+        let (contributing_to_parent, own_fork_targets_itself, owner_refs) = {
             let s = Self::state(cx).read(cx);
             (
                 s.repository(id)
                     .is_some_and(|r| r.is_fork_contributing_to_parent()),
                 s.flags.bool(crate::flags::ids::FORK_OWN_PR_TARGET),
+                s.flags.bool(crate::flags::ids::PR_URL_OWNER_BRANCH_REFS),
             )
         };
         // the base is a remote branch name in the dialog; GitHub wants it bare
@@ -1089,6 +1100,7 @@ impl Dispatcher {
                 base.as_deref(),
                 contributing_to_parent,
                 own_fork_targets_itself,
+                owner_refs,
             ),
             cx,
         );
@@ -1630,42 +1642,55 @@ mod tests {
     #[test]
     fn pull_request_urls() {
         assert_eq!(
-            pull_request_url(&gh(false), "feat/one", None, false, false),
+            pull_request_url(&gh(false), "feat/one", None, false, false, false),
             "https://github.com/octocat/hello/pull/new/feat%2Fone"
         );
         assert_eq!(
-            pull_request_url(&gh(false), "feat", Some("develop"), false, false),
+            pull_request_url(&gh(false), "feat", Some("develop"), false, false, false),
             "https://github.com/octocat/hello/pull/new/develop...feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, true, false),
+            pull_request_url(&gh(true), "feat", None, true, false, false),
             "https://github.com/me/hello/pull/new/me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", Some("main"), true, false),
+            pull_request_url(&gh(true), "feat", Some("main"), true, false, false),
             "https://github.com/me/hello/pull/new/octocat:hello:main...me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, false, false),
+            pull_request_url(&gh(true), "feat", None, false, false, false),
             "https://github.com/me/hello/pull/new/feat"
         );
         // `372`: a fork for its own work targets itself
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, false, true),
+            pull_request_url(&gh(true), "feat", None, false, true, false),
             "https://github.com/me/hello/pull/new/me:hello:main...me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(true), "feat", Some("dev"), false, true),
+            pull_request_url(&gh(true), "feat", Some("dev"), false, true, false),
             "https://github.com/me/hello/pull/new/me:hello:dev...me:hello:feat"
         );
         // contributing to the parent and non-forks are unchanged by the flag
         assert_eq!(
-            pull_request_url(&gh(true), "feat", None, true, true),
+            pull_request_url(&gh(true), "feat", None, true, true, false),
             "https://github.com/me/hello/pull/new/me:hello:feat"
         );
         assert_eq!(
-            pull_request_url(&gh(false), "feat", None, false, true),
+            pull_request_url(&gh(false), "feat", None, false, true, false),
             "https://github.com/octocat/hello/pull/new/feat"
+        );
+        // `332`: owner-only prefixes
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", Some("main"), true, false, true),
+            "https://github.com/me/hello/pull/new/octocat:main...me:feat"
+        );
+        assert_eq!(
+            pull_request_url(&gh(true), "feat", None, false, true, true),
+            "https://github.com/me/hello/pull/new/me:main...me:feat"
+        );
+        assert_eq!(
+            pull_request_url(&gh(false), "feat", Some("dev"), false, false, true),
+            "https://github.com/octocat/hello/pull/new/dev...feat"
         );
     }
 }

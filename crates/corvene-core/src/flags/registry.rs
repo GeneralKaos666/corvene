@@ -2239,6 +2239,23 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/app_url.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// The pull request compare URL names forks by owner only.
+    PR_URL_OWNER_BRANCH_REFS = 332 "pr-url-owner-branch-refs" {
+        title: "Compare URLs older GitHub Enterprise understands",
+        summary: "Create Pull Request on a fork opens the compare page with owner:branch refs \
+                  (octocat:main...me:feature) instead of owner:repository:branch, which older \
+                  GitHub Enterprise Server versions do not understand. An owner has at most one \
+                  fork in a network, so the short form names the same branches.",
+        ghd_behaviour: "owner:repository:branch refs, for which older GitHub Enterprise Server \
+                        compare pages say there is nothing to compare.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16269)],
+        code: &["crates/corvene-core/src/integrations.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
