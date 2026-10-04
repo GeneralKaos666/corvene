@@ -4432,14 +4432,15 @@ registry! {
     COMMIT_FILES_MULTI_SELECT = 810 "commit-files-multi-select" {
         title: "Multi-select a commit's files",
         summary: "The History file list selects several files with ⌘-click and ⇧-click; right-clicking \
-                  the selection offers Copy File Paths and Copy Relative File Paths (one per line). \
-                  The diff shows the last clicked file.",
+                  the selection offers Copy File Paths and Copy Relative File Paths (one per line) \
+                  and opens the ones still on disk in the editor or with their default programs \
+                  (up to 25). The diff shows the last clicked file.",
         ghd_behaviour: "One file at a time.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
-        upstream: &[Upstream::issue(15525), Upstream::issue(20467)],
+        upstream: &[Upstream::issue(15525), Upstream::issue(20467), Upstream::issue(15989)],
         code: &["crates/corvene-ui/src/selected_commit.rs"],
     },
 

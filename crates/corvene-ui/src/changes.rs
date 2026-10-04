@@ -4697,7 +4697,7 @@ impl Render for ChangesSidebar {
 
 /// `712-open-multiple-files`: "Open N Files in <editor>" / "… with Default
 /// Program" for a multi-selection; disabled past [`MAX_BULK_OPEN`].
-fn open_many_items(files: &[PathBuf], editor_label: &str) -> Vec<MenuItem> {
+pub(crate) fn open_many_items(files: &[PathBuf], editor_label: &str) -> Vec<MenuItem> {
     let n = files.len();
     let enabled = (1..=MAX_BULK_OPEN).contains(&n);
     let default = files.to_vec();

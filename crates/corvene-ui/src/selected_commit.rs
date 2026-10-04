@@ -1014,7 +1014,8 @@ fn open_commit_file_menu(
     let Some(repo) = state.repository(id) else {
         return;
     };
-    // flag `810`: a multi-selection copies all its paths
+    // flag `810`: a multi-selection copies all its paths and opens the
+    // files still on disk (`712-open-multiple-files`' bulk items)
     if multi.len() > 1 && multi.iter().any(|p| p == path) {
         let full = multi
             .iter()
@@ -1022,7 +1023,32 @@ fn open_commit_file_menu(
             .collect::<Vec<_>>()
             .join("\n");
         let relative = multi.join("\n");
-        let items = vec![
+        let on_disk: Vec<std::path::PathBuf> = {
+            let files = multi.iter().map(|p| repo.path.join(p));
+            // past the cap the items are disabled anyway: skip the disk checks
+            if multi.len() > crate::changes::MAX_BULK_OPEN {
+                files.collect()
+            } else {
+                files.filter(|f| f.exists()).collect()
+            }
+        };
+        let editor_label = state.editor_label();
+        let open = match on_disk.as_slice() {
+            [one] => {
+                let default = one.clone();
+                vec![
+                    crate::changes::open_all_in_editor_item(
+                        labels::open_in(&editor_label),
+                        on_disk.clone(),
+                    ),
+                    MenuItem::new(labels::OPEN_WITH_DEFAULT_PROGRAM, move |_, cx| {
+                        cx.open_with_system(&default)
+                    }),
+                ]
+            }
+            files => crate::changes::open_many_items(files, &editor_label),
+        };
+        let mut items = vec![
             MenuItem::new(
                 mac_or("Copy File Paths", "Copy file paths"),
                 move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(full.clone())),
@@ -1032,6 +1058,10 @@ fn open_commit_file_menu(
                 move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(relative.clone())),
             ),
         ];
+        if !on_disk.is_empty() {
+            items.push(MenuItem::separator());
+            items.extend(open);
+        }
         crate::native_menu::show_context_menu(items, position, window, cx);
         return;
     }
