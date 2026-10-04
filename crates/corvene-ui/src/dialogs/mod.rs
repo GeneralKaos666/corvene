@@ -464,6 +464,9 @@ impl DialogHost {
             Popup::ConfirmDiscardStash { repo } => {
                 cx.new(|_| ConfirmDiscardStashDialog::new(*repo)).into()
             }
+            Popup::MoveChangesToWorktree { repo } => cx
+                .new(|_| worktree_dialogs::MoveChangesToWorktreeDialog::new(state, *repo))
+                .into(),
             Popup::DropKeptStash { repo, stash } => cx
                 .new(|_| DropKeptStashDialog::new(*repo, stash.clone()))
                 .into(),

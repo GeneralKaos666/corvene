@@ -646,6 +646,11 @@ pub(crate) fn main() {
                 Dispatcher::start_pull_request(id, cx);
             }
         });
+        on_menu_action(cx, move |_: &MoveChangesToWorktree, cx| {
+            if let Some((id, _)) = selected_path(cx) {
+                Dispatcher::show_move_changes_to_worktree(id, cx);
+            }
+        });
         on_menu_action(cx, move |_: &RequestReviewers, cx| {
             if let Some((id, _)) = selected_path(cx) {
                 Dispatcher::show_request_reviewers(id, cx);

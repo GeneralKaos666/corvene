@@ -31,6 +31,11 @@
 //! stash can be restored onto the current branch
 //! ([`Dispatcher::restore_stash_from_branch`]); GHD restores a stash only on
 //! the branch it was made on.
+//!
+//! Deviation (`283-move-changes-to-worktree`): the changes can be moved to
+//! another worktree of the repository
+//! ([`Dispatcher::move_changes_to_worktree`]); GHD 3.6's worktree switch
+//! leaves them where they are.
 
 use std::path::PathBuf;
 
@@ -517,6 +522,104 @@ impl Dispatcher {
                     Err(err) => Self::show_error("Could not restore stash", &err, cx),
                 }
                 Self::show_section(id, corvene_models::Section::Changes, cx);
+                Self::refresh_repository(id, cx);
+            },
+        );
+    }
+
+    /// `283-move-changes-to-worktree`: Move Changes to Worktree… (changes
+    /// list menu, Branch menu).
+    pub fn show_move_changes_to_worktree(id: u64, cx: &mut App) {
+        let ready = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .is_some_and(|r| r.changed_files() > 0 && r.worktrees.len() > 1);
+        if ready {
+            Self::show_popup(Popup::MoveChangesToWorktree { repo: id }, cx);
+        }
+    }
+
+    /// `283-move-changes-to-worktree`: stash every change here (a Desktop
+    /// stash named after the target's branch), restore it in the worktree
+    /// at `target` (stashes are shared by a repository's worktrees), then
+    /// switch to it when `switch`. Refused while `target` has changes of
+    /// its own. A conflicted restore keeps the stash there (`774`); any other
+    /// failure after stashing keeps it too, and says so.
+    pub fn move_changes_to_worktree(id: u64, target: PathBuf, switch: bool, cx: &mut App) {
+        let Some((git, source)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let (label, guard) = {
+            let s = Self::state(cx).read(cx);
+            let rs = s.repo_states.get(&id);
+            let target_branch = rs
+                .and_then(|r| r.worktrees.iter().find(|w| w.path == target))
+                .and_then(|w| w.branch.as_deref())
+                .map(|b| b.strip_prefix("refs/heads/").unwrap_or(b).to_string());
+            let current = rs
+                .and_then(|r| r.info.as_ref())
+                .and_then(|i| i.current_branch())
+                .map(|b| b.name.clone());
+            (
+                target_branch.or(current).unwrap_or_else(|| "HEAD".into()),
+                s.flags
+                    .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED),
+            )
+        };
+        let options = Self::stash_pop_options(cx);
+        let there = target.clone();
+        spawn_bg(
+            cx,
+            move || -> Result<Option<(StashPop, StashEntry, Vec<String>)>, corvene_git::GitError> {
+                let name = there
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| there.display().to_string());
+                if !corvene_git::get_status(git.clone(), &there)?.files.is_empty() {
+                    return Err(corvene_git::GitError::Gix(format!(
+                        "The worktree {name} has uncommitted changes. Commit, stash or discard \
+                         them there first."
+                    )));
+                }
+                if guard {
+                    corvene_git::ensure_no_modified_assume_unchanged(git.clone(), &source)?;
+                }
+                if !corvene_git::create_desktop_stash(git.clone(), &source, &label, false)? {
+                    return Ok(None);
+                }
+                let entry =
+                    corvene_git::get_last_desktop_stash_entry_for_branch(git.clone(), &source, &label)?
+                        .ok_or_else(|| {
+                            corvene_git::GitError::Gix("The new stash entry could not be found.".into())
+                        })?;
+                let pop = corvene_git::pop_stash_entry_with(git.clone(), &there, &entry.sha, options)
+                    .map_err(|err| {
+                        corvene_git::GitError::Gix(format!(
+                            "Your changes were stashed but could not be restored in {name}; they \
+                             are kept in the stash list. {err}"
+                        ))
+                    })?;
+                let files = if pop == StashPop::Conflicted {
+                    corvene_git::unmerged_paths(git, &there).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                Ok(Some((pop, entry, files)))
+            },
+            move |result, cx| {
+                match result {
+                    Ok(Some((pop, entry, files))) => {
+                        if pop == StashPop::Conflicted {
+                            Self::note_stash_pop(id, target.clone(), Some((entry, files)), cx);
+                        }
+                        if switch {
+                            Self::switch_worktree(id, target, cx);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => Self::show_error("Could not move the changes", &err, cx),
+                }
                 Self::refresh_repository(id, cx);
             },
         );

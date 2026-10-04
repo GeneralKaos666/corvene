@@ -56,6 +56,8 @@
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
 //!   pattern before it is added to `.gitignore` (`768-ignore-custom-pattern`).
 //! - a file menu can stash the selected files (`777-stash-selected-files`).
+//! - the list menu can move the changes to another worktree
+//!   (`283-move-changes-to-worktree`).
 //! - conflicts left by restoring a stash replace the commit form with a list
 //!   of the files to resolve (`774-stash-conflict-flow`,
 //!   `crate::stash_conflicts`).
@@ -2718,7 +2720,7 @@ impl ChangesSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (id, confirm, paths, openable, assume_unchanged, has_stash, can_stash) = {
+        let (id, confirm, paths, openable, assume_unchanged, has_stash, can_stash, move_changes) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
             let Some(rs) = s.selected_state() else { return };
@@ -2762,6 +2764,10 @@ impl ChangesSidebar {
                 s.flags.bool(corvene_core::flags::ids::ASSUME_UNCHANGED),
                 rs.desktop_stash().is_some(),
                 can_stash,
+                // `283-move-changes-to-worktree`: enabled with another worktree
+                s.flags
+                    .bool(corvene_core::flags::ids::MOVE_CHANGES_TO_WORKTREE)
+                    .then_some(rs.worktrees.len() > 1),
             )
         };
         let has_changes = !paths.is_empty();
@@ -2786,6 +2792,15 @@ impl ChangesSidebar {
             )
             .enabled(has_changes && can_stash),
         ];
+        if let Some(other_worktree) = move_changes {
+            items.push(
+                MenuItem::new(
+                    mac_or("Move Changes to Worktree…", "Move changes to worktree…"),
+                    move |_, cx| Dispatcher::show_move_changes_to_worktree(id, cx),
+                )
+                .enabled(has_changes && can_stash && other_worktree),
+            );
+        }
         if let Some(files) = openable {
             items.push(MenuItem::separator());
             items.push(open_all_in_editor_item(

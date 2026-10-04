@@ -1763,6 +1763,24 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// The changes can move to another worktree.
+    MOVE_CHANGES_TO_WORKTREE = 283 "move-changes-to-worktree" {
+        title: "Move changes to another worktree",
+        summary: "Branch › Move Changes to Worktree… (also in the changes list's menu) picks \
+                  another worktree of the repository that has no changes of its own: the \
+                  changes are stashed here and restored there, and Corvene switches to it \
+                  unless unticked. When restoring conflicts, the stash is kept and the \
+                  conflicts are resolved in that worktree.",
+        ghd_behaviour: "Switching worktrees leaves the changes where they are; moving them \
+                        takes a stash and the command line.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22756)],
+        code: &["crates/corvene-core/src/stash_flows.rs", "crates/corvene-ui/src/dialogs/worktree_dialogs.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

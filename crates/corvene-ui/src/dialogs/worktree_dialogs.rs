@@ -1,5 +1,7 @@
 //! Worktree dialogs (GHD `ui/worktrees/*-dialog.tsx`): Add Worktree,
 //! Rename Worktree, Delete Worktree and Delete Worktree Failed.
+//! Move Changes to Worktree is a Corvene addition
+//! (`283-move-changes-to-worktree`).
 //! The Add Worktree "Branch Name" box autocompletes branch names
 //! (`ui/autocompletion/branch-autocompletion-provider.tsx`).
 
@@ -21,7 +23,7 @@ use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::mono_font;
 use crate::theme::sizes::*;
-use crate::widgets::{Inline, button, checkbox, labeled, paragraph, text_box};
+use crate::widgets::{Inline, button, checkbox, labeled, paragraph, radio, text_box};
 
 /// GHD `sanitizedRepositoryName`: the folder name for a worktree name.
 fn sanitized_folder_name(name: &str) -> String {
@@ -649,6 +651,164 @@ impl Render for DeleteWorktreeFailedDialog {
             }
             .into_buttons(),
             dismiss,
+            window,
+            cx,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Corvene addition (`283-move-changes-to-worktree`): pick another worktree
+/// of the repository; the changes are stashed here and restored there.
+pub struct MoveChangesToWorktreeDialog {
+    state: Entity<AppState>,
+    repo: u64,
+    selected: Option<PathBuf>,
+    switch: bool,
+}
+
+impl MoveChangesToWorktreeDialog {
+    pub fn new(state: Entity<AppState>, repo: u64) -> Self {
+        Self {
+            state,
+            repo,
+            selected: None,
+            switch: true,
+        }
+    }
+}
+
+impl Render for MoveChangesToWorktreeDialog {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
+        let t = cx.ghd().clone();
+        let (others, changed) = {
+            let s = self.state.read(cx);
+            let current = s.repository(self.repo).map(|r| r.path.clone());
+            let rs = s.repo_states.get(&self.repo);
+            (
+                rs.map(|r| {
+                    r.worktrees
+                        .iter()
+                        .filter(|w| Some(&w.path) != current.as_ref() && !w.is_prunable)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+                rs.map(|r| r.changed_files()).unwrap_or(0),
+            )
+        };
+        if self
+            .selected
+            .as_ref()
+            .is_none_or(|p| !others.iter().any(|w| &w.path == p))
+        {
+            self.selected = others.first().map(|w| w.path.clone());
+        }
+        let rows = others.iter().enumerate().map(|(i, w)| {
+            let selected = self.selected.as_ref() == Some(&w.path);
+            let path = w.path.clone();
+            div()
+                .id(("move-changes-worktree", i))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(SPACING_HALF())
+                .py(zpx(3.))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.selected = Some(path.clone());
+                    cx.notify();
+                }))
+                .child(radio(("move-changes-worktree-radio", i), selected, cx))
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(w.display_name()),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_color(t.text_secondary)
+                        .child(w.description()),
+                )
+        });
+        let files = if changed == 1 {
+            "1 changed file".to_string()
+        } else {
+            format!("{changed} changed files")
+        };
+        let content = div()
+            .w(crate::theme::fit_width(408.))
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .child(format!(
+                "Your {files} will be stashed here and restored in the worktree you pick. \
+                 That worktree must have no changes of its own."
+            ))
+            .child(
+                div()
+                    .id("move-changes-worktrees")
+                    .flex()
+                    .flex_col()
+                    .max_h(zpx(200.))
+                    .overflow_y_scroll()
+                    .children(rows)
+                    .with_scrollbar(),
+            )
+            .child(
+                div()
+                    .id("move-changes-switch")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING_HALF())
+                    .cursor_pointer()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.switch = !this.switch;
+                        cx.notify();
+                    }))
+                    .child(checkbox(
+                        "move-changes-switch-checkbox",
+                        self.switch,
+                        false,
+                        cx,
+                    ))
+                    .child(mac_or(
+                        "Switch to the Worktree Afterwards",
+                        "Switch to the worktree afterwards",
+                    )),
+            );
+        let (repo, target, switch) = (self.repo, self.selected.clone(), self.switch);
+        dialog(
+            "move-changes-to-worktree",
+            mac_or("Move Changes to Worktree", "Move changes to worktree"),
+            content,
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
+                    id: "move-changes-cancel",
+                    label: "Cancel".into(),
+                    disabled: false,
+                    on_click: Box::new(close),
+                },
+                ok: GroupButtonSpec {
+                    id: "move-changes-ok",
+                    label: mac_or("Move Changes", "Move changes").into(),
+                    disabled: target.is_none(),
+                    on_click: Box::new(move |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        if let Some(target) = &target {
+                            Dispatcher::move_changes_to_worktree(repo, target.clone(), switch, cx);
+                        }
+                    }),
+                },
+            }
+            .into_buttons(),
+            close,
             window,
             cx,
         )

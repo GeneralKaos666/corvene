@@ -104,6 +104,8 @@ gpui_kit::actions!(
         FetchAllTags,
         // Branch › Request Reviewers… (`336-request-reviewers`)
         RequestReviewers,
+        // Branch › Move Changes to Worktree… (`283-move-changes-to-worktree`)
+        MoveChangesToWorktree,
         RemoveRepository,
         // Android only (no GHD equivalent): Repository › Move to shared storage…
         MoveToSharedStorage,

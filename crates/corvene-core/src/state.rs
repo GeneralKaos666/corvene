@@ -459,6 +459,11 @@ pub enum Popup {
     ConfirmDiscardStash {
         repo: u64,
     },
+    /// Corvene (`283-move-changes-to-worktree`): pick the worktree the
+    /// changes move to.
+    MoveChangesToWorktree {
+        repo: u64,
+    },
     /// Corvene (`774-stash-conflict-flow`): every conflict a restore left is
     /// resolved; drop the entry git kept?
     DropKeptStash {
@@ -623,6 +628,7 @@ impl Popup {
             | Self::MergeBranch { repo, .. }
             | Self::ConfirmDiscardStash { repo, .. }
             | Self::DropKeptStash { repo, .. }
+            | Self::MoveChangesToWorktree { repo, .. }
             | Self::MultiCommitOperation { repo, .. }
             | Self::LocalChangesOverwritten { repo, .. }
             | Self::PushBranchCommits { repo, .. }

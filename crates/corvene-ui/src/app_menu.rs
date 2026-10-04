@@ -111,6 +111,10 @@ pub struct MenuExtras {
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
     /// branch has a pull request).
     pub request_reviewers: bool,
+    /// Flag `283-move-changes-to-worktree`: Branch › Move Changes to
+    /// Worktree…, enabled with changes and another worktree (set by
+    /// [`MenuLabelsEvent::of`]).
+    pub move_changes_to_worktree: Option<bool>,
     /// Flag `414-linux-install-cli` (the item is always there on macOS).
     pub install_cli: bool,
     /// Flag `269-bulk-remove-repositories`.
@@ -137,6 +141,7 @@ impl MenuExtras {
             fetch_all: flags.bool(ids::FETCH_ALL_REPOSITORIES),
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
+            move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
             // Windows: the installer puts the command line tool on the PATH
             // (GHD has no menu item for it there either)
             install_cli: !cfg!(any(target_os = "android", windows))
@@ -159,6 +164,14 @@ impl MenuLabelsEvent {
                 s.selected_state()
                     .is_some_and(|rs| rs.last_commit.is_some()),
             );
+        }
+        // `283-move-changes-to-worktree`: with changes and another worktree
+        if extras.move_changes_to_worktree.is_some() {
+            extras.move_changes_to_worktree = Some(s.selected_state().is_some_and(|rs| {
+                rs.changed_files() > 0
+                    && rs.worktrees.len() > 1
+                    && rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
+            }));
         }
         let labels = Self {
             selected_shell: Some(s.shell_label()),
@@ -600,6 +613,17 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             DiscardAllChanges,
         ),
         item(stash_all_label, StashAllChanges),
+    ];
+    if let Some(enabled) = extras.move_changes_to_worktree {
+        branch.push(MenuItemConstructorOptions {
+            enabled: Some(enabled),
+            ..item(
+                l("Move Changes to Worktree…", "Move changes to wor&ktree…"),
+                MoveChangesToWorktree,
+            )
+        });
+    }
+    branch.extend([
         separator(),
         item(
             l_owned(
@@ -636,7 +660,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             l("View Branch on GitHub", "View branch on GitHub"),
             ViewBranchOnGitHub,
         ),
-    ];
+    ]);
     // same as Toggle Full Screen: a macOS-only separator
     if cfg!(target_os = "macos") {
         branch.push(separator());
@@ -828,6 +852,7 @@ mod tests {
                     fetch_all: true,
                     fetch_tags: true,
                     request_reviewers: true,
+                    move_changes_to_worktree: Some(true),
                     install_cli: true,
                     show_remove_repositories: true,
                     undo_last_commit: Some(true),
