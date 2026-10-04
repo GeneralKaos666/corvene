@@ -114,7 +114,18 @@ impl Category {
         }
     }
 
-    /// `of_block(2)` is Repository.
+    /// The second block a full category continues in (`1100` for
+    /// Repository); its flags are listed with the category's own.
+    pub const fn overflow_block(self) -> Option<u16> {
+        match self {
+            Category::Repository => Some(1100),
+            Category::HistoryAndBranches => Some(1200),
+            Category::ChangesAndDiffs => Some(1300),
+            _ => None,
+        }
+    }
+
+    /// `of_block(2)` is Repository, and so is its overflow block 11.
     pub const fn of_block(hundreds: u16) -> Option<Category> {
         Some(match hundreds {
             1 => Category::Appearance,
@@ -127,6 +138,10 @@ impl Category {
             8 => Category::HistoryAndBranches,
             9 => Category::Performance,
             10 => Category::Experimental,
+            // overflow blocks of categories whose first block is full
+            11 => Category::Repository,
+            12 => Category::HistoryAndBranches,
+            13 => Category::ChangesAndDiffs,
             _ => return None,
         })
     }

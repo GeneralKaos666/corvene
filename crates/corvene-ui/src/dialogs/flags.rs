@@ -409,6 +409,8 @@ impl FlagsDialog {
                 hidden += 1;
             }
         }
+        // a category's overflow block (1100, …) joins its first block
+        flat.sort_by_key(|(def, _)| Category::ALL.iter().position(|c| *c == def.category()));
         let mut items = Vec::with_capacity(flat.len() + Category::ALL.len());
         let mut ix = 0;
         while ix < flat.len() {

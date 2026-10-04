@@ -3,7 +3,9 @@
 //! the behaviour it controls and `.docs/flags.md` is generated from
 //! this file.
 //!
-//! Rules: the id's hundreds digit is the category block, ids are never
+//! Rules: the id's hundreds digit is the category block (a full block
+//! continues in its category's overflow block: 1100 Repository, 1200 History
+//! & branches, 1300 Changes & diffs), ids are never
 //! reused (move a deleted flag's id and slug to [`RETIRED`]), "on" means the
 //! Corvene deviation is active, and every preset gets an explicit value.
 //! `max` is `corvene` plus the extras most people would want; an extra that
@@ -5718,6 +5720,12 @@ registry! {
         upstream: &[],
         code: &["crates/corvene-extensions/src/tsbuild", "crates/corvene-core/src/extensions.rs"],
     },
+
+    // ---- 1100 Repository (overflow) ----
+
+    // ---- 1200 History & branches (overflow) ----
+
+    // ---- 1300 Changes & diffs (overflow) ----
 }
 
 /// Ids and slugs that once existed; never reused.
@@ -5768,8 +5776,9 @@ mod tests {
             assert!(seen.insert(def.id), "duplicate id {}", def.id.0);
             let category = Category::of_block(def.id.0 / 100)
                 .unwrap_or_else(|| panic!("{} is outside every category block", def.id.0));
+            let within = |block: u16| (block + 1..block + 100).contains(&def.id.0);
             assert!(
-                (category.block() + 1..category.block() + 100).contains(&def.id.0),
+                within(category.block()) || category.overflow_block().is_some_and(within),
                 "{} must be within its block",
                 def.id.0
             );
