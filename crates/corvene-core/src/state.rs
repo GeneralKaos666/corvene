@@ -1096,6 +1096,9 @@ pub struct RepositoryState {
     pub merge_preview: Option<crate::mco::MergePreview>,
     /// Delete Branch dialog warnings (`860-delete-branch-warnings`).
     pub delete_branch_preview: Option<DeleteBranchPreview>,
+    /// `899-tags-in-branch-list`: every tag (name, commit), read when the
+    /// branch list opens.
+    pub branch_list_tags: Option<Arc<Vec<(String, String)>>>,
     /// Delete Branches confirmation marks (`895-bulk-delete-branches`).
     pub delete_branches_preview: Option<crate::delete_branches::DeleteBranchesPreview>,
     /// `pullRequestState`: the Preview Pull Request dialog's data.

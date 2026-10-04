@@ -1098,6 +1098,11 @@ pub(crate) fn main() {
         on_menu_action(cx, move |_: &FetchAllRepositories, cx| {
             Dispatcher::fetch_all_repositories(cx);
         });
+        on_menu_action(cx, move |_: &FetchAllTags, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::fetch_all_tags(id, cx);
+            }
+        });
         Dispatcher::start_background_tasks(cx);
         Dispatcher::refresh_accounts(cx);
         // Alive subscriptions for pull request notifications (GHD AliveStore)

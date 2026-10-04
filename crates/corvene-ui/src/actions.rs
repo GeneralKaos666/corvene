@@ -100,6 +100,8 @@ gpui_kit::actions!(
         Pull,
         Fetch,
         FetchAllRepositories,
+        // Repository › Fetch All Tags (`899-tags-in-branch-list`)
+        FetchAllTags,
         RemoveRepository,
         // Android only (no GHD equivalent): Repository › Move to shared storage…
         MoveToSharedStorage,

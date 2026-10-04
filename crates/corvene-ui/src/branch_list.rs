@@ -29,6 +29,8 @@
 //! Deviation (`854-branch-list-stash-icon`): a local branch with a Desktop
 //! stash shows the stash icon after its name (GHD `branch-list-item.tsx` does
 //! not).
+//! Deviation (`899-tags-in-branch-list`): with a filter typed, matching tags
+//! follow the branches in a Tags group; choosing one checks out its commit.
 //! Deviation (`898-branch-list-folders`): Other Branches sharing a prefix
 //! before the first `/` sit under collapsible folder rows (flat while
 //! filtering).
@@ -297,6 +299,50 @@ fn checkout_branch_row(id: u64, name: String, current: bool, cx: &mut App) {
         return;
     }
     Dispatcher::checkout_branch(id, name, None, cx)
+}
+
+/// Flag `899-tags-in-branch-list`: a Tags group row is a tag dressed as a
+/// branch (`refs/tags/<name>`, its commit as the tip); its commit.
+fn tag_commit(branch: &Branch) -> Option<&str> {
+    branch
+        .full_name
+        .starts_with("refs/tags/")
+        .then_some(branch.tip.as_deref())
+        .flatten()
+}
+
+/// A click (or Enter) on a row: a tag's commit is checked out (after the
+/// detached HEAD confirmation), a branch as [`checkout_branch_row`] does.
+fn pick_row(id: u64, branch: &Branch, current: bool, cx: &mut App) {
+    match tag_commit(branch) {
+        Some(sha) => {
+            Dispatcher::close_foldout(cx);
+            Dispatcher::request_checkout_commit(id, sha.to_string(), cx);
+        }
+        None => checkout_branch_row(id, branch.name.clone(), current, cx),
+    }
+}
+
+/// Flag `899-tags-in-branch-list`: the tags matching `query`, as branch
+/// rows ([`tag_commit`]) in a Tags group.
+fn tags_group(tags: &[(String, String)], query: &str) -> Option<BranchGroup> {
+    let branches: Vec<Branch> = tags
+        .iter()
+        .filter(|(name, _)| fuzzy_score(query, name).is_some())
+        .map(|(name, sha)| Branch {
+            name: name.clone(),
+            kind: BranchKind::Remote,
+            full_name: format!("refs/tags/{name}"),
+            tip: Some(sha.clone()),
+            upstream: None,
+            tip_time: None,
+            remote_name: None,
+        })
+        .collect();
+    (!branches.is_empty()).then_some(BranchGroup {
+        title: "Tags",
+        branches,
+    })
 }
 
 /// Flag `848-branch-list-sort-by-date`: Other Branches newest first.
@@ -726,6 +772,13 @@ impl BranchFoldout {
             if !pinned.is_empty() {
                 groups = group_pinned(groups, pinned);
             }
+            // `899-tags-in-branch-list`: after the branches
+            if !query.is_empty()
+                && s.flags.bool(corvene_core::flags::ids::TAGS_IN_BRANCH_LIST)
+                && let Some(tags) = rs.branch_list_tags.as_deref()
+            {
+                groups.extend(tags_group(tags, &query));
+            }
             if s.flags
                 .bool(corvene_core::flags::ids::BRANCH_UPSTREAM_GONE_GROUP)
             {
@@ -801,7 +854,7 @@ impl BranchFoldout {
                     .and_then(|i| i.current_branch())
                     .is_some_and(|b| b.name == branch.name)
             };
-            checkout_branch_row(id, branch.name.clone(), current, cx);
+            pick_row(id, branch, current, cx);
         } else if branches.is_empty() && !query.is_empty() {
             Dispatcher::close_foldout(cx);
             Dispatcher::show_popup(
@@ -973,6 +1026,15 @@ impl BranchFoldout {
         self.multi_anchor = None;
         self.highlighted = None;
         self.pr_highlighted = None;
+        // `899-tags-in-branch-list`: the tags as they are now
+        let tags = {
+            let s = self.state.read(cx);
+            s.selected
+                .filter(|_| s.flags.bool(corvene_core::flags::ids::TAGS_IN_BRANCH_LIST))
+        };
+        if let Some(id) = tags {
+            Dispatcher::load_branch_list_tags(id, cx);
+        }
         let input = if self.pull_requests_tab_shown(cx) {
             &self.pr_filter
         } else {
@@ -1207,6 +1269,7 @@ impl BranchFoldout {
             .flatten();
         let t = cx.ghd();
         let name = branch.name.clone();
+        let is_tag = tag_commit(branch).is_some();
         // the keyboard row (GHD `FilterList` moves its selection, focusing
         // the list) replaces the pointer / current-branch selection
         let keyboard = self.highlighted.is_some();
@@ -1279,7 +1342,7 @@ impl BranchFoldout {
                 !(selected && (focused || crate::widgets::selection_keeps_colour_on_hover(cx))),
                 move |d| d.hover(move |s| s.bg(list_hover)),
             )
-            .when(!current, move |d| {
+            .when(!current && !is_tag, move |d| {
                 let target_name = branch_name_for_target.clone();
                 d.drag_over::<crate::history::CommitDrag>(move |s, _, _, _| {
                     s.bg(hover_bg).text_color(hover_text)
@@ -1296,6 +1359,7 @@ impl BranchFoldout {
             })
             .on_click(cx.listener({
                 let local = branch.kind == BranchKind::Local;
+                let picked = branch.clone();
                 move |this, ev: &ClickEvent, _, cx| {
                     // `895-bulk-delete-branches`: ⌘ / ⇧-click select
                     let m = ev.modifiers();
@@ -1312,7 +1376,7 @@ impl BranchFoldout {
                         return;
                     }
                     this.multi_selected.clear();
-                    checkout_branch_row(id, name.clone(), current, cx)
+                    pick_row(id, &picked, current, cx)
                 }
             }))
             // GHD `generateBranchContextMenuItems`
@@ -1321,6 +1385,10 @@ impl BranchFoldout {
                 let this = cx.entity().downgrade();
                 move |ev: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
+                    // `899-tags-in-branch-list`: a tag row has no menu
+                    if tag_commit(&branch).is_some() {
+                        return;
+                    }
                     use crate::context_menu::{IS_MAC, MenuItem, mac_or};
                     // `895-bulk-delete-branches`: the menu of a multi-selection
                     let multi = this
@@ -1497,7 +1565,7 @@ impl BranchFoldout {
                 let target = branch.name.clone();
                 move |drag: &crate::history::CommitDrag, _, cx| {
                     Dispatcher::set_drag_target(None, cx);
-                    if current || drag.repo != id {
+                    if current || is_tag || drag.repo != id {
                         return;
                     }
                     Dispatcher::close_foldout(cx);
@@ -1507,7 +1575,9 @@ impl BranchFoldout {
             })
             .child(
                 octicon(
-                    if distinguish_remote && !current {
+                    if is_tag {
+                        Octicon::Tag
+                    } else if distinguish_remote && !current {
                         // `850-branch-list-local-remote-icons`
                         match (branch.kind, branch.upstream.is_some()) {
                             (BranchKind::Remote, _) => Octicon::Server,

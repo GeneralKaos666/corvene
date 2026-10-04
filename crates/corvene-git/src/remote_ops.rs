@@ -776,6 +776,23 @@ fn fetch_progress(on_progress: ProgressFn<'_>) -> impl FnMut(GitProgressEvent) +
     }
 }
 
+/// `git fetch --tags <remote>`: every tag of `remote`, not only those
+/// pointing into fetched history (Corvene, Repository › Fetch All Tags,
+/// `899-tags-in-branch-list`). A separate command: adding `--tags` to the
+/// normal fetch makes it fail as a whole when a local tag differs from the
+/// remote's ("would clobber existing tag").
+pub fn fetch_tags(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+    askpass: Option<&AskpassEnv>,
+) -> Result<()> {
+    remote_operation(git, workdir, remote, askpass)
+        .args(["fetch", "--tags", "--no-recurse-submodules", remote])
+        .run()?;
+    Ok(())
+}
+
 /// GHD `fetchRefspec`
 pub fn fetch_refspec(
     git: Arc<GitBinary>,

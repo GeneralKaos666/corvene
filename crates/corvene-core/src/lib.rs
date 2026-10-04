@@ -12,6 +12,7 @@ pub mod avatar_users;
 pub mod avatars;
 pub mod banner_focus;
 pub mod branch_pruner;
+pub mod branch_tags;
 pub mod changes_state;
 pub mod clone_info;
 pub mod cloning_repositories_store;

@@ -5807,6 +5807,23 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs"],
     },
 
+    /// Tags in the branch list's filter results, and Fetch All Tags.
+    TAGS_IN_BRANCH_LIST = 899 "tags-in-branch-list" {
+        title: "Tags in the branch list",
+        summary: "Typing in the branch list's filter also lists the matching tags in a Tags \
+                  group; choosing one checks out its commit (detached HEAD, after the usual \
+                  confirmation). Repository › Fetch All Tags fetches every tag of the remote \
+                  (git fetch --tags), not only those pointing into fetched history.",
+        ghd_behaviour: "Tags cannot be checked out from the branch list, and fetching brings only \
+                        the tags of fetched commits.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20299)],
+        code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-core/src/branch_tags.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-ui/src/app_menu.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
