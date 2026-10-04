@@ -1,0 +1,34 @@
+# Editor + ktlint settings (from WMKeyboard). detekt's `formatting` rules read
+# their options from here, so this file is part of the lint configuration.
+# No auto-formatter runs; the values describe the style the code follows.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{kt,kts}]
+max_line_length = 140
+ij_kotlin_allow_trailing_comma = true
+ij_kotlin_allow_trailing_comma_on_call_site = true
+ij_kotlin_imports_layout = *
+ij_kotlin_name_count_to_use_star_import = 2147483647
+ij_kotlin_name_count_to_use_star_import_for_members = 2147483647
+ktlint_code_style = android_studio
+# Composable functions are PascalCase; ktlint's function-naming rule would
+# otherwise flag every screen and key row in the UI.
+ktlint_function_naming_ignore_when_annotated_with = Composable,Test
+
+[*.{xml,yml,yaml,toml,json}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[{Makefile,*.mk}]
+indent_style = tab

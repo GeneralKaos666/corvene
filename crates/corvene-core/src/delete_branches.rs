@@ -10,8 +10,8 @@
 
 use std::collections::HashMap;
 
+use crate::host::{AsyncCtx, Host};
 use corvene_models::{Branch, BranchKind};
-use gpui_kit::{App, AsyncApp};
 
 use crate::Dispatcher;
 use crate::mco::Banner;
@@ -61,7 +61,7 @@ pub fn failure_summary(failures: &[(String, String)]) -> String {
 
 impl Dispatcher {
     /// Fills `RepositoryState::delete_branches_preview` for `names`.
-    pub fn preview_delete_branches(id: u64, names: Vec<String>, cx: &mut App) {
+    pub fn preview_delete_branches(id: u64, names: Vec<String>, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -135,7 +135,7 @@ impl Dispatcher {
         Self::state(cx).update(cx, |s, _| {
             s.repo_state_mut(id).delete_branches_preview = None
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let preview = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -151,7 +151,7 @@ impl Dispatcher {
     /// with its remote branch when its flag is set; failures are reported
     /// together and the deleted local branches get one Undo banner
     /// (`861-undo-delete-branch`). The current branch is skipped.
-    pub fn delete_branches(id: u64, branches: Vec<(String, bool)>, cx: &mut App) {
+    pub fn delete_branches(id: u64, branches: Vec<(String, bool)>, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -237,7 +237,7 @@ impl Dispatcher {
             }
             (deleted, failures)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let (deleted, failures) = task.await;
             cx.update(|cx| {
                 if !failures.is_empty() {
@@ -272,7 +272,7 @@ impl Dispatcher {
 
     /// The "Deleted N branches" banner's Undo: recreate every branch at the
     /// commit it pointed at.
-    pub fn restore_deleted_branches(id: u64, branches: Vec<(String, String)>, cx: &mut App) {
+    pub fn restore_deleted_branches(id: u64, branches: Vec<(String, String)>, cx: &mut dyn Host) {
         let count = branches.len();
         Self::run_history_op_then(
             id,

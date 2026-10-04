@@ -492,6 +492,7 @@ impl CloneRepositoryDialog {
                     cx,
                 ),
                 Err(message) => {
+                    let Some(cx) = cx.gpui_app() else { return };
                     weak.update(cx, |this, cx| {
                         this.resolving = false;
                         this.resolve_error = Some(message);

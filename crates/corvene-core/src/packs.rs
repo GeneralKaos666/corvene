@@ -9,9 +9,9 @@
 
 use std::collections::HashMap;
 
+use crate::host::{AsyncCtx, Host};
 use corvene_models::SyntaxHighlighter;
 use corvene_packs::{InstalledPack, PackError, PackKind, PackManifest};
-use gpui_kit::{App, AsyncApp};
 use tracing::{error, info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -139,7 +139,7 @@ fn deactivate(kind: PackKind) {
 
 impl Dispatcher {
     /// At launch: find the installed packs the flags offer and activate them.
-    pub fn load_installed_packs(cx: &mut App) {
+    pub fn load_installed_packs(cx: &mut dyn Host) {
         let offered: Vec<PackKind> = {
             let s = Self::state(cx).read(cx);
             offered_packs(&s.flags)
@@ -156,7 +156,7 @@ impl Dispatcher {
 
     /// Activate the installed ones of `kinds` (in the background); honours
     /// `CORVENE_INSTALL_PACK` for them afterwards.
-    fn load_packs(kinds: Vec<PackKind>, cx: &mut App) {
+    fn load_packs(kinds: Vec<PackKind>, cx: &mut dyn Host) {
         let wanted = kinds.clone();
         spawn_bg(
             cx,
@@ -192,7 +192,7 @@ impl Dispatcher {
 
     /// `105-tree-sitter-highlighting` turned on: load the grammar packs
     /// already on disk.
-    pub(crate) fn load_tree_sitter_packs(cx: &mut App) {
+    pub(crate) fn load_tree_sitter_packs(cx: &mut dyn Host) {
         let kinds: Vec<PackKind> = [PackKind::TreeSitterAll, PackKind::TreeSitterRest]
             .into_iter()
             .filter(|kind| {
@@ -206,7 +206,7 @@ impl Dispatcher {
     }
 
     /// Fetch the manifest (Settings › Advanced opening, Retry).
-    pub fn refresh_packs_manifest(cx: &mut App) {
+    pub fn refresh_packs_manifest(cx: &mut dyn Host) {
         let state = Self::state(cx);
         if state.read(cx).packs.manifest_loading {
             return;
@@ -233,7 +233,7 @@ impl Dispatcher {
 
     /// Download, verify and install `kind` from the manifest (fetching the
     /// manifest first when needed), then activate it.
-    pub fn install_pack(kind: PackKind, cx: &mut App) {
+    pub fn install_pack(kind: PackKind, cx: &mut dyn Host) {
         #[cfg(target_os = "android")]
         if matches!(kind, PackKind::TreeSitterAll | PackKind::TreeSitterRest)
             && corvene_packs::store_delivered(PackKind::TreeSitterAll)
@@ -312,8 +312,7 @@ impl Dispatcher {
         });
         let (tx, rx) = async_channel::unbounded::<(u64, Option<u64>)>();
         cx.spawn({
-            let state = state.clone();
-            async move |cx: &mut AsyncApp| {
+            async move |cx: &mut AsyncCtx| {
                 while let Ok((received, total)) = rx.recv().await {
                     state.update(cx, |s, cx| {
                         if let Some(p) = s.packs.progress.get_mut(&kind) {
@@ -368,7 +367,7 @@ impl Dispatcher {
     /// progress shows like a download's, and once installed it is loaded
     /// like a pack.
     #[cfg(target_os = "android")]
-    fn install_play_grammars(cx: &mut App) {
+    fn install_play_grammars(cx: &mut dyn Host) {
         use corvene_platform::android::GrammarModuleEvent;
         const KIND: PackKind = PackKind::TreeSitterAll;
         let state = Self::state(cx);
@@ -398,7 +397,7 @@ impl Dispatcher {
             corvene_platform::android::set_grammar_module_handler(move |event| {
                 let _ = tx.try_send(event);
             });
-            cx.spawn(async move |cx: &mut AsyncApp| {
+            cx.spawn(async move |cx: &mut AsyncCtx| {
                 while let Ok(event) = rx.recv().await {
                     cx.update(|cx| match event {
                         GrammarModuleEvent::Progress { received, total } => {
@@ -434,7 +433,7 @@ impl Dispatcher {
     }
 
     /// Remove `kind` from disk and fall back to the compiled-in data.
-    pub fn uninstall_pack(kind: PackKind, cx: &mut App) {
+    pub fn uninstall_pack(kind: PackKind, cx: &mut dyn Host) {
         spawn_bg(
             cx,
             move || {

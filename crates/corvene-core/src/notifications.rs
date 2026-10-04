@@ -20,9 +20,9 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::host::{AsyncCtx, Host};
 use corvene_github::api::{ApiIssueComment, ApiPullRequestReview, ApiPullRequestReviewState};
 use corvene_models::{CheckConclusion, PullRequest, RefCheck};
-use gpui_kit::{App, AsyncApp};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
@@ -214,13 +214,16 @@ impl Dispatcher {
     /// GHD `initializeRendererNotificationHandler`: route notification clicks
     /// to [`Dispatcher::notification_clicked`]; `focus_window` brings the
     /// (possibly hidden) window forward first (`focusWindow`).
-    pub fn listen_for_notification_clicks(focus_window: impl Fn(&mut App) + 'static, cx: &mut App) {
+    pub fn listen_for_notification_clicks(
+        focus_window: impl Fn(&mut dyn Host) + 'static,
+        cx: &mut dyn Host,
+    ) {
         let (tx, rx) =
             async_channel::unbounded::<corvene_platform::notifications::NotificationClick>();
         corvene_platform::notifications::install_click_handler(move |click| {
             let _ = tx.try_send(click);
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             while let Ok(click) = rx.recv().await {
                 cx.update(|cx| {
                     focus_window(cx);
@@ -236,7 +239,7 @@ impl Dispatcher {
 
     /// A click on a notification whose `userInfo` carried `payload` (GHD
     /// `onNotificationEventReceived` for notifications of earlier sessions).
-    pub fn notification_payload_clicked(payload: &str, cx: &mut App) {
+    pub fn notification_payload_clicked(payload: &str, cx: &mut dyn Host) {
         match serde_json::from_str::<PullRequestNotification>(payload) {
             Ok(notification) => Self::notification_clicked(notification, cx),
             Err(err) => warn!(%err, "unreadable notification payload"),
@@ -245,7 +248,7 @@ impl Dispatcher {
 
     /// A pull request event for the user (GHD `handleAliveEvent`), shown
     /// only while Settings › Notifications › "Enable notifications" is on.
-    pub fn notify_pull_request_event(notification: PullRequestNotification, cx: &mut App) {
+    pub fn notify_pull_request_event(notification: PullRequestNotification, cx: &mut dyn Host) {
         if !Self::state(cx).read(cx).settings.notifications_enabled {
             debug!("notifications are disabled");
             return;
@@ -263,14 +266,14 @@ impl Dispatcher {
     /// GHD `simulateAliveEvent` (Test Notifications): the event goes through
     /// the same path without the Settings gate, which in GHD only switches
     /// the Alive subscription.
-    pub fn simulate_pull_request_event(notification: PullRequestNotification, cx: &mut App) {
+    pub fn simulate_pull_request_event(notification: PullRequestNotification, cx: &mut dyn Host) {
         Self::post_pull_request_event(notification, cx);
     }
 
     /// GHD `isValidRepositoryForEvent` + `showNotification`: only events of
     /// the selected repository are shown (any listed repository's with
     /// `337-notifications-all-repositories`).
-    fn post_pull_request_event(notification: PullRequestNotification, cx: &mut App) {
+    fn post_pull_request_event(notification: PullRequestNotification, cx: &mut dyn Host) {
         let s = Self::state(cx).read(cx);
         if s.selected != Some(notification.repo)
             && !s
@@ -309,7 +312,7 @@ impl Dispatcher {
     /// The notification's click callback (GHD `onPullRequestReviewSubmitNotification`,
     /// `onPullRequestCommentNotification`, `onChecksFailedNotification`):
     /// select the repository when none is, then open the matching dialog.
-    pub fn notification_clicked(notification: PullRequestNotification, cx: &mut App) {
+    pub fn notification_clicked(notification: PullRequestNotification, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let repo = {
             let s = state.read(cx);

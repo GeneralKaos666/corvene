@@ -1,0 +1,36 @@
+[package]
+name = "corvene-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene's engine for the Android app: the dispatcher behind a UniFFI interface"
+
+[lib]
+name = "corvene_ffi"
+crate-type = ["cdylib", "lib"]
+
+# `cargo run -p corvene-ffi --bin uniffi-bindgen -- generate --library …`:
+# the generator is built from the same `uniffi` as the library.
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+corvene-core = { path = "../corvene-core", default-features = false, features = ["local-host"] }
+corvene-git.workspace = true
+corvene-github.workspace = true
+corvene-highlight.workspace = true
+corvene-models.workspace = true
+corvene-platform.workspace = true
+corvene-store.workspace = true
+uniffi = { version = "0.32", features = ["cli"] }
+async-channel = "2"
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
+log = "0.4"
+jni = "0.22"
+ndk-context = "0.1"

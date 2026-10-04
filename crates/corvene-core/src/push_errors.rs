@@ -14,8 +14,8 @@
 //! explains a non-origin remote whose repository is gone
 //! ([`plain_missing_remote_repository`], desktop#3715).
 
+use crate::host::Host;
 use corvene_models::{BypassReason, SecretLocation, SecretScanResult};
-use gpui_kit::App;
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
@@ -31,7 +31,7 @@ impl Dispatcher {
         reason: BypassReason,
         secrets: Vec<SecretScanResult>,
         mut bypassed: Vec<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some(github) = Self::state(cx)
             .read(cx)

@@ -218,6 +218,25 @@ const BACKGROUND_FETCHES: &[SelectOption] = &[
     },
 ];
 
+const DESIGN_STYLES: &[SelectOption] = &[
+    SelectOption {
+        value: "auto",
+        label: "The style chosen in Settings › Appearance",
+    },
+    SelectOption {
+        value: "github-mobile",
+        label: "GitHub Mobile",
+    },
+    SelectOption {
+        value: "github-desktop",
+        label: "GitHub Desktop",
+    },
+    SelectOption {
+        value: "material",
+        label: "Material",
+    },
+];
+
 const SIGN_IN_FLOWS: &[SelectOption] = &[
     SelectOption {
         value: "auto",
@@ -517,6 +536,24 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(7256)],
         code: &["crates/corvene-ui/src/widgets.rs", "crates/corvene-core/src/avatars.rs"],
+    },
+
+    /// Which design language the Android app draws with.
+    DESIGN_STYLE = 113 "design-style" {
+        title: "Design style (Android)",
+        summary: "The Android app draws as GitHub for Android (Primer colours over Material \
+                  components, Inter, Octicons, a bottom navigation bar), as GitHub Desktop (its \
+                  tokens, toolbar and density), or as Material 3 with the device's dynamic colours. \
+                  Auto follows Settings › Appearance › Design style; a value here pins it for a \
+                  session (screenshot tests, the parity harness).",
+        ghd_behaviour: "No Android app.",
+        nature: Nature::Feature,
+        kind: Kind::Select { options: DESIGN_STYLES },
+        corvene: Value::text("auto"), ghd: Value::text("github-desktop"),
+        familiar: Value::text("auto"), max: Value::text("auto"),
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ffi/src/vm/settings.rs", "android/core/design"],
     },
 
     // ---- 200 Repository ----

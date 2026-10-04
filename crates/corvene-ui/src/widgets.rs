@@ -597,6 +597,33 @@ thread_local! {
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
+thread_local! {
+    // Decoded integration icons by application path (flag `513`).
+    static INTEGRATION_ICONS: std::cell::RefCell<std::collections::HashMap<std::path::PathBuf, Arc<Image>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// The GPUI image of an application icon the core loaded with the
+/// integrations, decoded once per path.
+pub fn integration_icon(
+    path: &std::path::Path,
+    icon: &corvene_platform::app_icons::AppIcon,
+) -> Arc<Image> {
+    INTEGRATION_ICONS.with(|icons| {
+        icons
+            .borrow_mut()
+            .entry(path.to_path_buf())
+            .or_insert_with(|| {
+                let format = match icon.format {
+                    corvene_platform::app_icons::IconFormat::Png => ImageFormat::Png,
+                    corvene_platform::app_icons::IconFormat::Svg => ImageFormat::Svg,
+                };
+                Arc::new(Image::from_bytes(format, icon.bytes.clone()))
+            })
+            .clone()
+    })
+}
+
 /// Android: the launcher icon of the application `key` names (a package, or
 /// "package/class" for one activity), for a list of applications. `None`
 /// elsewhere.

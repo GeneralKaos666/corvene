@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
+use crate::host::Host;
 pub use corvene_platform::ghd_import::GhdRepository;
-use gpui_kit::App;
 
 use crate::dispatcher::{Dispatcher, same_path};
 use crate::remote::spawn_bg;
@@ -23,8 +23,8 @@ impl Dispatcher {
     /// Corvene could add (working trees still on disk that it does not list
     /// yet).
     pub fn find_ghd_repositories(
-        cx: &mut App,
-        done: impl FnOnce(Vec<GhdRepository>, &mut App) + 'static,
+        cx: &mut dyn Host,
+        done: impl FnOnce(Vec<GhdRepository>, &mut dyn Host) + 'static,
     ) {
         let known: Vec<PathBuf> = Self::state(cx)
             .read(cx)
@@ -48,11 +48,11 @@ impl Dispatcher {
     /// Add `repos` one after another (each is probed like Add Local
     /// Repository, so one that fails shows the usual error and ends the
     /// run), carrying GHD's alias over; the first one ends up selected.
-    pub fn import_ghd_repositories(repos: Vec<GhdRepository>, cx: &mut App) {
+    pub fn import_ghd_repositories(repos: Vec<GhdRepository>, cx: &mut dyn Host) {
         Self::import_next(repos, None, cx);
     }
 
-    fn import_next(mut repos: Vec<GhdRepository>, first: Option<u64>, cx: &mut App) {
+    fn import_next(mut repos: Vec<GhdRepository>, first: Option<u64>, cx: &mut dyn Host) {
         if repos.is_empty() {
             if let Some(first) = first {
                 Self::select_repository(first, cx);

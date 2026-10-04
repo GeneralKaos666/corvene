@@ -12,9 +12,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host::Host;
 use corvene_git::open_repository;
 use corvene_models::{BranchKind, WorktreeType};
-use gpui_kit::App;
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -52,7 +52,7 @@ pub fn worktree_location(
 
 impl Dispatcher {
     /// GHD `_switchWorktree`: point the repository at `path` and reload it.
-    pub fn switch_worktree(id: u64, path: PathBuf, cx: &mut App) {
+    pub fn switch_worktree(id: u64, path: PathBuf, cx: &mut dyn Host) {
         let probe = path.clone();
         spawn_bg(
             cx,
@@ -90,7 +90,7 @@ impl Dispatcher {
         id: u64,
         path: PathBuf,
         info: Option<corvene_models::RepositoryInfo>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let switched = Self::state(cx).update(cx, |s, cx| {
             // the main worktree from the last refresh; `None` keeps the
@@ -153,7 +153,7 @@ impl Dispatcher {
     /// GHD `AddWorktreeDialog.onSubmit`: create the worktree for `branch`
     /// (checked out if it exists locally or on a remote, created otherwise)
     /// and switch to it.
-    pub fn add_worktree(id: u64, path: PathBuf, branch: String, cx: &mut App) {
+    pub fn add_worktree(id: u64, path: PathBuf, branch: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -203,7 +203,7 @@ impl Dispatcher {
     }
 
     /// GHD `_requestDeleteWorktree`: confirm unless the user opted out.
-    pub fn request_delete_worktree(id: u64, path: PathBuf, cx: &mut App) {
+    pub fn request_delete_worktree(id: u64, path: PathBuf, cx: &mut dyn Host) {
         if Self::state(cx).read(cx).settings.confirm_worktree_removal {
             Self::show_popup(Popup::DeleteWorktree { repo: id, path }, cx);
         } else {
@@ -213,7 +213,7 @@ impl Dispatcher {
 
     /// GHD `_deleteWorktree`: switch to the main worktree first when the
     /// current one is being removed; a failure offers `--force`.
-    pub fn delete_worktree(id: u64, path: PathBuf, force: bool, cx: &mut App) {
+    pub fn delete_worktree(id: u64, path: PathBuf, force: bool, cx: &mut dyn Host) {
         let (current, main) = {
             let s = Self::state(cx).read(cx);
             let Some(repo) = s.repository(id) else { return };
@@ -275,7 +275,7 @@ impl Dispatcher {
     }
 
     /// GHD `_moveWorktree` (Rename…): the current worktree follows its new path.
-    pub fn move_worktree(id: u64, old: PathBuf, new: PathBuf, cx: &mut App) {
+    pub fn move_worktree(id: u64, old: PathBuf, new: PathBuf, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -312,7 +312,7 @@ impl Dispatcher {
     /// the last `git worktree list`), or select the repository entry that
     /// already points there. With no main worktree to go to, the repository
     /// is marked missing as before.
-    pub(crate) fn recover_missing_worktree(id: u64, missing_path: PathBuf, cx: &mut App) {
+    pub(crate) fn recover_missing_worktree(id: u64, missing_path: PathBuf, cx: &mut dyn Host) {
         let (main, existing) = {
             let s = Self::state(cx).read(cx);
             let listed = s
@@ -370,7 +370,7 @@ impl Dispatcher {
     }
 
     /// `_updateRepositoryMissing(repository, true)`.
-    fn mark_missing(id: u64, cx: &mut App) {
+    fn mark_missing(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).error = Some("repository is missing".into());
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {

@@ -39,6 +39,17 @@ impl Child {
         self.pid as u32
     }
 
+    /// `std::process::Child::kill`: SIGKILL; the caller still waits.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    pub fn kill(&mut self) -> io::Result<()> {
+        // SAFETY: signalling our own child by pid
+        if unsafe { libc::kill(self.pid, libc::SIGKILL) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         drop(self.stdin.take());
         let mut status: c_int = 0;

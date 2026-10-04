@@ -570,7 +570,9 @@ impl Workspace {
                                     // `onTutorialCompletionAnnounced`, deferred:
                                     // it notifies AppState
                                     if step == TutorialStep::AllDone {
-                                        cx.defer(Dispatcher::mark_tutorial_completion_announced);
+                                        cx.defer(|cx| {
+                                            Dispatcher::mark_tutorial_completion_announced(cx)
+                                        });
                                     }
                                 },
                             )
@@ -648,7 +650,11 @@ impl Workspace {
                                             Dispatcher::open_in_editor(path.clone(), cx);
                                         },
                                     )
-                                    .icon(s.app_icons.get(&e.path).cloned())
+                                    .icon(
+                                        s.app_icons.get(&e.path).map(|icon| {
+                                            crate::widgets::integration_icon(&e.path, icon)
+                                        }),
+                                    )
                                 })
                                 .collect::<Vec<_>>()
                         })

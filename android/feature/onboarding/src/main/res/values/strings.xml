@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onb_welcome_title">Welcome to Corvene</string>
+    <string name="onb_welcome_body">Clone, change, commit and push your repositories on GitHub and any other Git host, from your phone.</string>
+    <string name="onb_get_started">Get started</string>
+    <string name="onb_step">Step %1$d of %2$d</string>
+    <string name="onb_sign_in_title">Sign in</string>
+    <string name="onb_sign_in_body">Sign in to GitHub.com to clone your repositories, publish new ones and see pull requests.</string>
+    <string name="onb_sign_in_browser">Sign in with browser</string>
+    <string name="onb_sign_in_enterprise">Sign in to GitHub Enterprise</string>
+    <string name="onb_skip">Skip this step</string>
+    <string name="onb_continue">Continue</string>
+    <string name="onb_back">Back</string>
+    <string name="onb_cancel">Cancel</string>
+    <string name="onb_requesting">Contacting %1$s…</string>
+    <string name="onb_verifying">Checking your account…</string>
+    <string name="onb_device_code_title">Enter this code on GitHub</string>
+    <string name="onb_device_code_body">Open %1$s, sign in if asked, and enter the code. Corvene continues by itself once you authorize it.</string>
+    <string name="onb_copy_code">Copy code</string>
+    <string name="onb_open_github">Open %1$s</string>
+    <string name="onb_waiting">Waiting for authorization…</string>
+    <string name="onb_browser_title">Continue in your browser</string>
+    <string name="onb_browser_body">Sign in on the page that opened and authorize Corvene; the app comes back by itself.</string>
+    <string name="onb_open_again">Open the page again</string>
+    <string name="onb_error_title">Could not sign in</string>
+    <string name="onb_try_again">Try again</string>
+    <string name="onb_signed_in">Signed in as %1$s</string>
+    <string name="onb_signed_in_on">on %1$s</string>
+    <string name="onb_enterprise_title">GitHub Enterprise</string>
+    <string name="onb_enterprise_host">Enterprise address</string>
+    <string name="onb_enterprise_host_hint">github.example.com</string>
+    <string name="onb_enterprise_token">Personal access token</string>
+    <string name="onb_enterprise_token_caption">A classic token with the repo, user and workflow scopes.</string>
+    <string name="onb_enterprise_sign_in">Sign in</string>
+    <string name="onb_configure_title">Configure Git</string>
+    <string name="onb_configure_body">This is used to identify the commits you create. Anyone will be able to see this information if you publish commits.</string>
+    <string name="onb_name">Name</string>
+    <string name="onb_email">Email</string>
+    <string name="onb_finish">Finish</string>
+    <string name="onb_copied">Code copied</string>
+</resources>

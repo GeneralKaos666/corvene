@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window under Compose: Primer's canvas, no action bar. -->
+    <style name="Theme.Corvene" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/app_window_background</item>
+    </style>
+
+    <!-- core-splashscreen: the launcher icon on the canvas until the engine
+         has answered its first query (MainActivity.keepOnScreenCondition). -->
+    <style name="Theme.Corvene.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/app_window_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Corvene</item>
+    </style>
+</resources>

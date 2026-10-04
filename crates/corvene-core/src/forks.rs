@@ -29,11 +29,11 @@
 //! handled as a plain git repository (re-adding it matches it again); GHD's
 //! `repositoryWithRefreshedGitHubRepository` keeps the stale record forever.
 
+use crate::host::Host;
 use corvene_github::Client;
 use corvene_models::{
     ForkContributionTarget, GitHubRepository, Remote, clone_url_like_remote, url_matches_remote,
 };
-use gpui_kit::App;
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -67,7 +67,7 @@ impl Dispatcher {
     /// `repositoryWithRefreshedGitHubRepository`: re-read the repository's
     /// API record (parent, default branch, `permissions`) with the account
     /// for its endpoint and persist it. A failed request keeps what is stored.
-    pub fn refresh_github_repository(id: u64, cx: &mut App) {
+    pub fn refresh_github_repository(id: u64, cx: &mut dyn Host) {
         let Some(github) = Self::state(cx)
             .read(cx)
             .repository(id)
@@ -135,7 +135,7 @@ impl Dispatcher {
     }
 
     /// `_showCreateForkDialog`: only with an account for the repository.
-    pub fn show_create_fork_dialog(id: u64, cx: &mut App) {
+    pub fn show_create_fork_dialog(id: u64, cx: &mut dyn Host) {
         let ok = {
             let s = Self::state(cx).read(cx);
             s.repository(id)
@@ -154,8 +154,8 @@ impl Dispatcher {
     /// then ask how the fork will be used. `then` gets the API error, if any.
     pub fn create_fork(
         id: u64,
-        then: impl FnOnce(Option<String>, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(Option<String>, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             then(Some("The repository is not available.".into()), cx);
@@ -243,7 +243,11 @@ impl Dispatcher {
     }
 
     /// `_updateRepositoryWorkflowPreferences({ forkContributionTarget })`
-    pub fn set_fork_contribution_target(id: u64, target: ForkContributionTarget, cx: &mut App) {
+    pub fn set_fork_contribution_target(
+        id: u64,
+        target: ForkContributionTarget,
+        cx: &mut dyn Host,
+    ) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
                 repo.fork_contribution_target = Some(target);
@@ -259,7 +263,7 @@ impl Dispatcher {
     /// parent unless its `upstream` remote already points there
     /// ([`find_upstream_remote`]; with `fork-remotes-keep-ssh`, also at the
     /// parent's SSH URL) or the name is taken by something else.
-    pub(crate) fn add_upstream_remote_if_needed(id: u64, cx: &mut App) {
+    pub(crate) fn add_upstream_remote_if_needed(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -331,7 +335,7 @@ impl Dispatcher {
 
     /// `UpstreamAlreadyExists` › Update (`updateExistingUpstreamRemote`):
     /// point `upstream` at the parent's clone URL.
-    pub fn update_existing_upstream_remote(id: u64, cx: &mut App) {
+    pub fn update_existing_upstream_remote(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -374,7 +378,7 @@ impl Dispatcher {
     }
 
     /// `UpstreamAlreadyExists` › Ignore: never check this repository again.
-    pub fn ignore_existing_upstream_remote(id: u64, cx: &mut App) {
+    pub fn ignore_existing_upstream_remote(id: u64, cx: &mut dyn Host) {
         let result = Self::state(cx)
             .read(cx)
             .store

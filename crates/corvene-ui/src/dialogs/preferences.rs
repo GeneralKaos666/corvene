@@ -624,7 +624,9 @@ impl PreferencesDialog {
             if cfg!(target_os = "android") {
                 crate::widgets::app_icon(key)
             } else {
-                s.app_icons.get(path).cloned()
+                s.app_icons
+                    .get(path)
+                    .map(|icon| crate::widgets::integration_icon(path, icon))
             }
         };
         let editor_icons: Vec<_> = s

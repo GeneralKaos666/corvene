@@ -27,6 +27,7 @@ impl ImportGitHubDesktopDialog {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let weak = cx.weak_entity();
         Dispatcher::find_ghd_repositories(cx, move |repos, cx| {
+            let Some(cx) = cx.gpui_app() else { return };
             weak.update(cx, |this, cx| {
                 this.found = Some(repos.into_iter().map(|r| (r, true)).collect());
                 cx.notify();

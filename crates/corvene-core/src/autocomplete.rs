@@ -19,8 +19,8 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::time::{Duration, Instant};
 
+use crate::host::Host;
 use corvene_models::{Author, GitHubRepository, UnknownAuthorState};
-use gpui_kit::App;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -340,7 +340,7 @@ pub fn authors_matching(
 impl Dispatcher {
     /// `770-co-authors-from-history`: read the repository's recent commit
     /// authors once per session.
-    pub fn load_recent_authors(id: u64, cx: &mut App) {
+    pub fn load_recent_authors(id: u64, cx: &mut dyn Host) {
         let start = Self::state(cx).update(cx, |s, _| {
             if !s.flags.bool(crate::flags::ids::CO_AUTHORS_FROM_HISTORY) {
                 return false;
@@ -378,7 +378,7 @@ impl Dispatcher {
 
     pub(crate) fn api_for(
         github: &GitHubRepository,
-        cx: &App,
+        cx: &dyn Host,
     ) -> Option<(corvene_github::Endpoint, String, String)> {
         let s = Self::state(cx).read(cx);
         let account = s.account_for(&github.endpoint)?;
@@ -395,7 +395,7 @@ impl Dispatcher {
     /// GHD `refreshIssues`, throttled to once a minute per repository: the
     /// first fetch takes every open issue, later ones ask for everything
     /// updated since the newest cached issue and prune what closed.
-    pub fn refresh_issues(github: &GitHubRepository, cx: &mut App) {
+    pub fn refresh_issues(github: &GitHubRepository, cx: &mut dyn Host) {
         let key = cache_key(github);
         let since = {
             let mut skip = false;
@@ -502,7 +502,7 @@ impl Dispatcher {
     }
 
     /// GHD `updateMentionables`, throttled to once every ten minutes.
-    pub fn refresh_mentionables(github: &GitHubRepository, cx: &mut App) {
+    pub fn refresh_mentionables(github: &GitHubRepository, cx: &mut dyn Host) {
         let key = cache_key(github);
         let skip = Self::state(cx).update(cx, |s, cx| {
             let store = s.store.clone();
@@ -585,7 +585,7 @@ impl Dispatcher {
     }
 
     /// GHD `_setShowCoAuthoredBy` (the "Add Co-Authors" toggle, per repository).
-    pub fn set_show_co_authored_by(id: u64, show: bool, cx: &mut App) {
+    pub fn set_show_co_authored_by(id: u64, show: bool, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).show_co_authored_by = show;
             cx.notify();
@@ -593,7 +593,7 @@ impl Dispatcher {
     }
 
     /// GHD `_setCoAuthors`.
-    pub fn set_co_authors(id: u64, authors: Vec<Author>, cx: &mut App) {
+    pub fn set_co_authors(id: u64, authors: Vec<Author>, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).co_authors = authors;
             cx.notify();
@@ -607,9 +607,9 @@ impl Dispatcher {
         id: u64,
         github: &GitHubRepository,
         username: String,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
-        fn mark_error(id: u64, username: &str, cx: &mut App) {
+        fn mark_error(id: u64, username: &str, cx: &mut dyn Host) {
             Dispatcher::state(cx).update(cx, |s, cx| {
                 for a in &mut s.repo_state_mut(id).co_authors {
                     if let Author::Unknown { username: u, state } = a
@@ -672,7 +672,7 @@ impl Dispatcher {
 
     /// The signed-in login for a repository's endpoint (excluded from `@`
     /// completions, as on dotcom).
-    pub fn own_login_for(github: &GitHubRepository, cx: &App) -> Option<String> {
+    pub fn own_login_for(github: &GitHubRepository, cx: &dyn Host) -> Option<String> {
         Self::state(cx)
             .read(cx)
             .account_for(&github.endpoint)

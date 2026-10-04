@@ -1,0 +1,21 @@
+Corvene for Android bundles the following third-party works besides those
+listed in the repository's NOTICE (the Rust engine, the bundled git).
+
+Inter 4.1 (core/design/src/main/res/font/cvd_inter_variable.ttf)
+  Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  SIL Open Font License 1.1: core/design/licenses/Inter-OFL.txt
+
+JetBrains Mono 2.304, NL cut (core/design/src/main/res/font/cvd_jetbrains_mono_*.ttf)
+  Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+  SIL Open Font License 1.1: core/design/licenses/JetBrainsMono-OFL.txt
+
+Octicons (core/design/src/main/res/drawable/cvd_oct_*.xml, converted by tools/octicons/gen.py)
+  Copyright (c) 2023 GitHub Inc. (https://github.com/primer/octicons)
+  MIT License
+
+Primer primitives colour values (core/design/.../Palettes.kt, tools/tokens/gen.py)
+  Copyright (c) 2018 GitHub Inc. (https://github.com/primer/primitives)
+  MIT License
+
+JNA 5.19.1 (net.java.dev.jna:jna, linked as a library)
+  Dual-licensed LGPL 2.1 or later / Apache License 2.0; used under Apache 2.0.
