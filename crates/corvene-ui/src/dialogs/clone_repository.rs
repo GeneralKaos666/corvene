@@ -36,6 +36,11 @@
 //! Deviation (`226-clone-prefers-ssh`): repositories picked from the list
 //! and `owner/name` shorthands can clone over SSH.
 //!
+//! Deviation (`293-clone-multiple`): ⌘/⇧-click picks several repositories
+//! on the GitHub tabs; the local path then names a parent folder, every
+//! destination in it is checked first, and `Dispatcher::clone_repositories`
+//! clones them one after the other (GHD clones one at a time).
+//!
 //! Deviation (`330-clone-path-validation`): the local path expands a leading
 //! `~/`, must be absolute, and a missing folder must be creatable (its
 //! nearest existing parent is a writable folder); GHD only checks that the
@@ -51,7 +56,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::cloneable_repositories::{
-    AccountPickerState, ListStyle, account_picker, account_popover, group_rows, no_items,
+    AccountPickerState, CloneRow, ListStyle, account_picker, account_popover, group_rows, no_items,
     refresh_button, repository_list,
 };
 use crate::context_menu::mac_or;
@@ -109,6 +114,12 @@ pub struct CloneRepositoryDialog {
     /// `231-clone-offer-add-existing`: the local path is already a
     /// repository, offered to be added instead.
     existing_repo: Option<PathBuf>,
+    /// `293-clone-multiple`: the clone URLs picked with ⌘/⇧-click, in
+    /// order; two or more make the local path a parent folder.
+    multi: Vec<String>,
+    /// `293-clone-multiple`: the destinations that already exist and are
+    /// not empty (or that two picks share).
+    multi_conflicts: Vec<String>,
 }
 
 thread_local! {
@@ -205,6 +216,8 @@ impl CloneRepositoryDialog {
             picker,
             shallow: false,
             existing_repo: None,
+            multi: Vec::new(),
+            multi_conflicts: Vec::new(),
             clone_error: None,
             alias: cx.new(|cx| InputState::new(window, cx).placeholder("optional")),
         };
@@ -294,6 +307,7 @@ impl CloneRepositoryDialog {
         }
         self.picker.open = false;
         self.selected_repo = None;
+        self.multi.clear();
         self.ensure_loaded(cx);
         cx.notify();
     }
@@ -316,6 +330,11 @@ impl CloneRepositoryDialog {
     fn set_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
         self.tab = tab;
         self.resolve_error = None;
+        if !self.multi.is_empty() {
+            self.multi.clear();
+            self.derive_path(window, cx);
+            self.validate(cx);
+        }
         self.picker.open = false;
         let handle = if tab == Tab::Url {
             self.url.read(cx).focus_handle(cx)
@@ -348,9 +367,14 @@ impl CloneRepositoryDialog {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::CLONE_LOCAL_SOURCES);
-        let derived = derived_path(&base, &url, with_owner, local_ok)
-            .display()
-            .to_string();
+        // `293-clone-multiple`: the parent folder of the clones
+        let derived = if self.multi_active() {
+            base.clone()
+        } else {
+            derived_path(&base, &url, with_owner, local_ok)
+        }
+        .display()
+        .to_string();
         if derived != current {
             self.last_derived = derived.clone();
             self.path
@@ -361,6 +385,28 @@ impl CloneRepositoryDialog {
     /// `validatePath`: nothing to say while the path is still the default and
     /// no URL was entered; otherwise `validateEmptyFolder`.
     fn validate(&mut self, cx: &App) {
+        // `293-clone-multiple`: every destination in the parent folder
+        if self.multi_active() {
+            self.existing_repo = None;
+            let parent = self.path.read(cx).value().trim().to_string();
+            self.path_error = parent
+                .is_empty()
+                .then_some("Choose the folder to clone the repositories into.");
+            let targets = self.multi_targets(cx);
+            let mut seen: Vec<&PathBuf> = Vec::new();
+            self.multi_conflicts = targets
+                .iter()
+                .filter_map(|(_, path)| {
+                    let shared = seen.contains(&path);
+                    seen.push(path);
+                    (shared || validate_empty_folder(path).is_some())
+                        .then(|| path.display().to_string())
+                })
+                .collect();
+            self.multi_conflicts.dedup();
+            return;
+        }
+        self.multi_conflicts.clear();
         let raw = self.path.read(cx).value().trim().to_string();
         let url_empty = self.url.read(cx).value().trim().is_empty();
         let strict = self
@@ -442,9 +488,144 @@ impl CloneRepositoryDialog {
         Some((url, PathBuf::from(path)))
     }
 
+    /// `293-clone-multiple`: two or more repositories are picked.
+    fn multi_active(&self) -> bool {
+        self.multi.len() > 1
+    }
+
+    /// `293-clone-multiple`: each picked clone URL with its folder in the
+    /// parent folder (`<parent>/<name>`, `<parent>/<owner>/<name>` with
+    /// `230-clone-path-includes-owner`).
+    fn multi_targets(&self, cx: &App) -> Vec<(String, PathBuf)> {
+        let raw = self.path.read(cx).value().trim().to_string();
+        if raw.is_empty() {
+            return Vec::new();
+        }
+        let flags = &self.state.read(cx).flags;
+        let parent = if flags.bool(corvene_core::flags::ids::CLONE_PATH_VALIDATION) {
+            expand_home(&raw, &dirs_home())
+        } else {
+            PathBuf::from(raw)
+        };
+        let with_owner = flags.bool(corvene_core::flags::ids::CLONE_PATH_INCLUDES_OWNER);
+        self.multi
+            .iter()
+            // (a list's clone URL; a local one in a test fixture names its folder too)
+            .map(|url| (url.clone(), derived_path(&parent, url, with_owner, true)))
+            .collect()
+    }
+
+    /// A list row clicked: with `293-clone-multiple`, ⌘-click (Ctrl-click
+    /// elsewhere) adds or removes a repository and ⇧-click picks the range
+    /// from the last plain pick; a plain click picks one (GHD).
+    fn click_repository(
+        &mut self,
+        repo: &GitHubRepository,
+        modifiers: Modifiers,
+        rows: &[CloneRow],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let multiple = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CLONE_MULTIPLE);
+        let url = repo.clone_url.clone();
+        if multiple && modifiers.secondary() {
+            let mut set: Vec<String> = if self.multi.is_empty() {
+                self.selected_repo.iter().cloned().collect()
+            } else {
+                self.multi.clone()
+            };
+            match set.iter().position(|u| *u == url) {
+                Some(ix) => {
+                    set.remove(ix);
+                }
+                None => set.push(url),
+            }
+            self.set_multi(set, window, cx);
+        } else if multiple
+            && modifiers.shift
+            && let Some(anchor) = self.selected_repo.clone()
+        {
+            let urls: Vec<&String> = rows
+                .iter()
+                .filter_map(|r| match r {
+                    CloneRow::Item(repo, _) => Some(&repo.clone_url),
+                    CloneRow::Header(_) => None,
+                })
+                .collect();
+            let (Some(a), Some(b)) = (
+                urls.iter().position(|u| **u == anchor),
+                urls.iter().position(|u| **u == url),
+            ) else {
+                return self.click_repository(repo, Modifiers::default(), rows, window, cx);
+            };
+            let mut set: Vec<String> = urls[a.min(b)..=a.max(b)]
+                .iter()
+                .map(|u| (*u).clone())
+                .collect();
+            // the anchor stays the first pick
+            if let Some(ix) = set.iter().position(|u| *u == anchor) {
+                let anchor = set.remove(ix);
+                set.insert(0, anchor);
+            }
+            self.set_multi(set, window, cx);
+        } else {
+            let was_multi = self.multi_active();
+            self.multi.clear();
+            self.select_repository(repo, window, cx);
+            if was_multi {
+                self.derive_path(window, cx);
+                self.validate(cx);
+            }
+        }
+    }
+
+    /// `293-clone-multiple`: the picks after a ⌘/⇧-click; one pick is the
+    /// plain single selection again.
+    fn set_multi(&mut self, set: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        match set.len() {
+            0 => {
+                self.multi.clear();
+                self.selected_repo = None;
+                self.url.update(cx, |s, cx| s.set_value("", window, cx));
+            }
+            1 => {
+                self.multi.clear();
+                let url = set[0].clone();
+                self.selected_repo = Some(url.clone());
+                self.url.update(cx, |s, cx| s.set_value(url, window, cx));
+            }
+            _ => {
+                if self.selected_repo.as_ref().is_none_or(|s| !set.contains(s)) {
+                    self.selected_repo = set.first().cloned();
+                }
+                self.multi = set;
+            }
+        }
+        self.derive_path(window, cx);
+        self.validate(cx);
+        cx.notify();
+    }
+
     /// GHD `clone`: `resolveCloneInfo`, then clone or show the error.
     fn submit(&mut self, cx: &mut Context<Self>) {
         if self.path_error.is_some() || self.resolving {
+            return;
+        }
+        // `293-clone-multiple`: one clone after the other
+        if self.multi_active() {
+            if !self.multi_conflicts.is_empty() {
+                return;
+            }
+            let flags = &self.state.read(cx).flags;
+            let prefer_ssh = flags.bool(corvene_core::flags::ids::CLONE_PREFERS_SSH);
+            let depth =
+                (self.shallow && flags.bool(corvene_core::flags::ids::SHALLOW_CLONE)).then_some(1);
+            let items = self.multi_targets(cx);
+            Dispatcher::clone_repositories(items, prefer_ssh, depth, cx);
             return;
         }
         let Some((_, path)) = self.clone_target(cx) else {
@@ -520,6 +701,24 @@ impl CloneRepositoryDialog {
             ),
             None => return,
         };
+        // `293-clone-multiple`: the filter drops the picks it hides
+        if !self.multi.is_empty() && !query.trim().is_empty() {
+            let visible: Vec<String> = self
+                .multi
+                .iter()
+                .filter(|url| {
+                    rows.iter()
+                        .any(|r| matches!(r, CloneRow::Item(repo, _) if repo.clone_url == **url))
+                })
+                .cloned()
+                .collect();
+            if visible.len() != self.multi.len() {
+                self.set_multi(visible, window, cx);
+            }
+            if self.multi_active() {
+                return;
+            }
+        }
         match crate::cloneable_repositories::filtered_selection(
             &rows,
             &query,
@@ -630,11 +829,21 @@ impl CloneRepositoryDialog {
                 .map(|note| div().mt(SPACING()).child(note)),
             )
             .children(add_existing)
+            .when(self.multi_active(), |d| {
+                let t = cx.ghd();
+                d.child(div().mt(SPACING()).text_color(t.text_secondary).child(format!(
+                    "{} repositories selected; each is cloned into its own folder here, one after \
+                     the other.",
+                    self.multi.len()
+                )))
+            })
             .when(
-                self.state
-                    .read(cx)
-                    .flags
-                    .bool(corvene_core::flags::ids::ALIAS_WHEN_ADDING),
+                !self.multi_active()
+                    && self
+                        .state
+                        .read(cx)
+                        .flags
+                        .bool(corvene_core::flags::ids::ALIAS_WHEN_ADDING),
                 |d| {
                     d.child(div().mt(SPACING()).child(labeled(
                         "Alias",
@@ -655,7 +864,13 @@ impl CloneRepositoryDialog {
             .items_end()
             .gap(SPACING())
             .child(labeled(
-                mac_or("Local Path", "Local path"),
+                // `293-clone-multiple`: each repository goes into its own
+                // folder in this one
+                if self.multi_active() {
+                    mac_or("Parent Folder", "Parent folder")
+                } else {
+                    mac_or("Local Path", "Local path")
+                },
                 text_box("clone-path", &self.path, None, window, cx),
                 cx,
             ))
@@ -733,19 +948,28 @@ impl CloneRepositoryDialog {
             )
         } else {
             let weak = cx.weak_entity();
+            let rows = Rc::new(rows);
+            let clicked_rows = rows.clone();
             repository_list(
                 "clone-repository-list",
-                Rc::new(rows),
-                self.selected_repo.clone(),
+                rows,
+                if self.multi.is_empty() {
+                    self.selected_repo.iter().cloned().collect()
+                } else {
+                    self.multi.clone()
+                },
                 ListStyle {
                     inset: 10.,
                     small_headers: true,
                     zoom: 1.,
                     focused: true,
                 },
-                Rc::new(move |repo, window, cx| {
-                    weak.update(cx, |this, cx| this.select_repository(repo, window, cx))
-                        .ok();
+                Rc::new(move |repo, modifiers, window, cx| {
+                    let rows = clicked_rows.clone();
+                    weak.update(cx, |this, cx| {
+                        this.click_repository(repo, modifiers, &rows, window, cx)
+                    })
+                    .ok();
                 }),
             )
         };
@@ -958,8 +1182,13 @@ fn dirs_home() -> PathBuf {
 
 impl Render for CloneRepositoryDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let can_clone =
-            self.path_error.is_none() && !self.resolving && self.clone_target(cx).is_some();
+        let can_clone = self.path_error.is_none()
+            && !self.resolving
+            && if self.multi_active() {
+                self.multi_conflicts.is_empty()
+            } else {
+                self.clone_target(cx).is_some()
+            };
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let this = cx.entity();
         let selected = match self.tab {
@@ -973,9 +1202,16 @@ impl Render for CloneRepositoryDialog {
             Tab::Enterprise => self.account_tab(true, window, cx),
             Tab::Url => self.url_tab(window, cx).into_any_element(),
         };
-        let error: Option<SharedString> = self
-            .resolve_error
-            .map(SharedString::from)
+        // `293-clone-multiple`: the destinations in the way
+        let conflicts = (!self.multi_conflicts.is_empty()).then(|| {
+            SharedString::from(format!(
+                "These folders already exist and are not empty (or two repositories would share \
+                 one): {}",
+                self.multi_conflicts.join(", ")
+            ))
+        });
+        let error: Option<SharedString> = conflicts
+            .or_else(|| self.resolve_error.map(SharedString::from))
             .or_else(|| self.clone_error.as_ref().map(|(e, _, _)| e.clone()))
             .or_else(|| self.path_error.map(SharedString::from));
         // signed out, the account tabs are only a call to action: no footer
@@ -1058,7 +1294,17 @@ impl Render for CloneRepositoryDialog {
                     },
                     ok: GroupButtonSpec {
                         id: "clone-ok",
-                        label: "Clone".into(),
+                        // `293-clone-multiple`
+                        label: if self.multi_active() {
+                            if cfg!(target_os = "macos") {
+                                format!("Clone {} Repositories", self.multi.len())
+                            } else {
+                                format!("Clone {} repositories", self.multi.len())
+                            }
+                            .into()
+                        } else {
+                            "Clone".into()
+                        },
                         disabled: !can_clone,
                         on_click: Box::new(move |_, cx| {
                             if can_clone {

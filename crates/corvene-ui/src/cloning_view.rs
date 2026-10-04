@@ -3,6 +3,9 @@
 //!
 //! Deviation (flag `234-clone-cancel`): a Cancel button stops the clone; GHD
 //! has none.
+//!
+//! Deviation (flag `293-clone-multiple`): a clone of several says "Cloning 2
+//! of 5" under the title.
 
 use corvene_core::{CloneState, Dispatcher};
 use gpui_kit::prelude::*;
@@ -50,6 +53,16 @@ pub fn cloning_view(clone: &CloneState, cancellable: bool, cx: &App) -> impl Int
                                 .child(format!("Cloning {}", clone.name())),
                         ),
                 )
+                // Corvene (`293-clone-multiple`): the clone's place in the queue
+                .when_some(clone.queue, |d, (ix, total)| {
+                    d.child(
+                        div()
+                            .mb(SPACING())
+                            .text_size(FONT_SIZE())
+                            .text_color(t.text_secondary)
+                            .child(format!("Cloning {ix} of {total}")),
+                    )
+                })
                 .child(
                     // `progress`: 10 px track, text-colour fill
                     div()

@@ -906,6 +906,9 @@ pub struct CloneState {
     pub value: Option<f32>,
     /// Stops the clone (`234-clone-cancel`, `Dispatcher::cancel_clone`).
     pub cancel: corvene_git::CancelToken,
+    /// Corvene (`293-clone-multiple`): this clone's place in the queue of
+    /// several and the queue's length ("Cloning 2 of 5").
+    pub queue: Option<(usize, usize)>,
 }
 
 impl CloneState {
@@ -919,6 +922,7 @@ impl CloneState {
             description: String::new(),
             value: None,
             cancel: corvene_git::CancelToken::new(),
+            queue: None,
         }
     }
 

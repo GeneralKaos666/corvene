@@ -57,8 +57,8 @@ fn ACCOUNT_ROW_HEIGHT() -> Pixels {
     zpx(47.)
 }
 
-/// A picked repository (a list row clicked).
-pub type OnRepository = Rc<dyn Fn(&GitHubRepository, &mut Window, &mut App)>;
+/// A picked repository (a list row clicked, with the click's modifiers).
+pub type OnRepository = Rc<dyn Fn(&GitHubRepository, Modifiers, &mut Window, &mut App)>;
 /// A picked account (a popover row clicked).
 pub type OnAccount = Rc<dyn Fn(&Account, &mut Window, &mut App)>;
 /// The popover closed.
@@ -424,10 +424,12 @@ pub fn no_items(
 
 /// The `SectionFilterList` rows: group headers and repositories (icon,
 /// highlighted `owner/name`, "Archived" badge); clicking one selects it.
+/// `selected`: the clone URLs drawn selected (several with
+/// `293-clone-multiple`).
 pub fn repository_list(
     id: &'static str,
     rows: Rc<Vec<CloneRow>>,
-    selected: Option<String>,
+    selected: Vec<String>,
     style: ListStyle,
     on_select: OnRepository,
 ) -> AnyElement {
@@ -460,7 +462,7 @@ pub fn repository_list(
                         .child(title.clone())
                         .into_any_element(),
                     CloneRow::Item(repo, positions) => {
-                        let is_selected = selected.as_deref() == Some(repo.clone_url.as_str());
+                        let is_selected = selected.contains(&repo.clone_url);
                         let (selected_bg, selected_fg) = if style.focused {
                             (t.box_selected_active_background, t.box_selected_active_text)
                         } else {
@@ -492,7 +494,9 @@ pub fn repository_list(
                             // the selection keeps its colour under the pointer
                             // (GHD's list has focus after the click)
                             .when(!is_selected, move |d| d.hover(move |s| s.bg(hover_bg)))
-                            .on_click(move |_, window, cx| on_select(&repo_for_click, window, cx))
+                            .on_click(move |ev: &ClickEvent, window, cx| {
+                                on_select(&repo_for_click, ev.modifiers(), window, cx)
+                            })
                             .child(octicon(
                                 icon,
                                 if is_selected { selected_fg } else { t.text },

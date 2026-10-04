@@ -1986,6 +1986,24 @@ registry! {
         code: &["crates/corvene-ui/src/cloneable_repositories.rs", "crates/corvene-ui/src/dialogs/clone_repository.rs", "crates/corvene-ui/src/no_repositories.rs"],
     },
 
+    /// Clone several repositories from the clone lists at once.
+    CLONE_MULTIPLE = 293 "clone-multiple" {
+        title: "Clone several repositories at once",
+        summary: "On Clone a Repository's GitHub tabs, ⌘-click adds repositories to the selection \
+                  and ⇧-click picks a range. With more than one picked, the local path is a parent \
+                  folder (each repository goes into its own folder in it, all checked before \
+                  starting) and the repositories are cloned one after the other (\"Cloning 2 of \
+                  5\"); each is added as it finishes, Cancel stops the rest, and failures are \
+                  reported together.",
+        ghd_behaviour: "One repository per clone.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3849)],
+        code: &["crates/corvene-ui/src/dialogs/clone_repository.rs", "crates/corvene-ui/src/cloneable_repositories.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/cloning_view.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

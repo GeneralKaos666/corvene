@@ -371,14 +371,14 @@ impl NoRepositoriesView {
             repository_list(
                 "nr-repository-list",
                 Rc::new(rows),
-                self.selected.as_ref().map(|r| r.clone_url.clone()),
+                self.selected.iter().map(|r| r.clone_url.clone()).collect(),
                 ListStyle {
                     inset: 10.,
                     small_headers: false,
                     zoom: z,
                     focused: self.list_focus.is_focused(window),
                 },
-                Rc::new(move |repo, window, cx| {
+                Rc::new(move |repo, _, window, cx| {
                     let repo = repo.clone();
                     weak.update(cx, |this, cx| {
                         window.focus(&this.list_focus, cx);

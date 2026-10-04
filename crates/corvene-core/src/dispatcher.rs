@@ -4984,15 +4984,179 @@ impl Dispatcher {
         depth: Option<u32>,
         cx: &mut dyn Host,
     ) {
+        if Self::state(cx).read(cx).git.is_none() {
+            Self::show_error("Git is not available", "Install git and retry.", cx);
+            return;
+        }
+        Self::close_popup(cx);
+        let (failed_url, failed_path) = (url.clone(), path.clone());
+        Self::start_clone(
+            url,
+            path,
+            default_branch,
+            depth,
+            None,
+            move |outcome, cx| match outcome {
+                CloneOutcome::Added | CloneOutcome::Cancelled => {}
+                CloneOutcome::SubmodulesFailed(err) => Self::show_error(
+                    "Some submodules could not be cloned",
+                    submodules_failed_message(&err),
+                    cx,
+                ),
+                CloneOutcome::Failed(err) => {
+                    Self::show_clone_error(failed_url, failed_path, err, cx)
+                }
+            },
+            cx,
+        );
+    }
+
+    /// A clone failed: `235-clone-failure-keeps-input` reopens the dialog,
+    /// else GHD's "Clone failed" error.
+    fn show_clone_error(url: String, path: PathBuf, err: GitError, cx: &mut dyn Host) {
+        let flags = &Self::state(cx).read(cx).flags;
+        // `255-plain-language-remote-errors`
+        let explanation = flags
+            .bool(crate::flags::ids::PLAIN_LANGUAGE_REMOTE_ERRORS)
+            .then(|| crate::push_errors::plain_clone_error(&err, &path))
+            .flatten();
+        // `235-clone-failure-keeps-input`: back to the dialog
+        if flags.bool(crate::flags::ids::CLONE_FAILURE_KEEPS_INPUT) {
+            let error = match explanation {
+                Some(explanation) => format!("{explanation}\n\n{err}"),
+                None => err.to_string(),
+            };
+            Self::show_popup(Popup::CloneRepositoryRetry { url, path, error }, cx)
+        } else {
+            Self::show_error(
+                "Clone failed",
+                ErrorMessage::explained(&err, explanation),
+                cx,
+            )
+        }
+    }
+
+    /// Corvene (`293-clone-multiple`): clone `items` (what the Clone
+    /// dialog's URL field would hold, and the destination) one after the
+    /// other, each resolved like a single clone (`resolve_clone_info`); the
+    /// cloning view says "Cloning 2 of 5". Each finished clone is added as it
+    /// completes, Cancel stops the queue, and the failures are reported
+    /// together at the end. GHD clones one repository at a time.
+    pub fn clone_repositories(
+        items: Vec<(String, PathBuf)>,
+        prefer_ssh: bool,
+        depth: Option<u32>,
+        cx: &mut dyn Host,
+    ) {
+        if Self::state(cx).read(cx).git.is_none() {
+            Self::show_error("Git is not available", "Install git and retry.", cx);
+            return;
+        }
+        Self::close_popup(cx);
+        Self::clone_queue_step(
+            std::rc::Rc::new(items),
+            0,
+            prefer_ssh,
+            depth,
+            Vec::new(),
+            cx,
+        );
+    }
+
+    fn clone_queue_step(
+        items: std::rc::Rc<Vec<(String, PathBuf)>>,
+        ix: usize,
+        prefer_ssh: bool,
+        depth: Option<u32>,
+        mut failures: Vec<String>,
+        cx: &mut dyn Host,
+    ) {
+        let Some((input, path)) = items.get(ix).cloned() else {
+            if !failures.is_empty() {
+                Self::show_error(
+                    "Some repositories could not be cloned",
+                    failures.join("\n\n"),
+                    cx,
+                );
+            }
+            return;
+        };
+        let total = items.len();
+        let name = corvene_git::repository_name_from_url(&input).unwrap_or_else(|| input.clone());
+        Self::resolve_clone_info(
+            input,
+            prefer_ssh,
+            move |resolved, cx| {
+                let info = match resolved {
+                    Ok(info) => info,
+                    Err(message) => {
+                        Self::take_pending_alias(&path, cx);
+                        failures.push(format!("{name}: {message}"));
+                        return Self::clone_queue_step(
+                            items,
+                            ix + 1,
+                            prefer_ssh,
+                            depth,
+                            failures,
+                            cx,
+                        );
+                    }
+                };
+                Self::start_clone(
+                    info.url,
+                    path,
+                    info.default_branch,
+                    depth,
+                    Some((ix + 1, total)),
+                    move |outcome, cx| {
+                        match outcome {
+                            CloneOutcome::Added => {}
+                            // the rest of the queue stops too
+                            CloneOutcome::Cancelled => {
+                                if !failures.is_empty() {
+                                    Self::show_error(
+                                        "Some repositories could not be cloned",
+                                        failures.join("\n\n"),
+                                        cx,
+                                    );
+                                }
+                                return;
+                            }
+                            CloneOutcome::SubmodulesFailed(_) => failures.push(format!(
+                                "{name}: cloned, but some of its submodules could not be cloned"
+                            )),
+                            CloneOutcome::Failed(err) => failures.push(format!("{name}: {err}")),
+                        }
+                        Self::clone_queue_step(items, ix + 1, prefer_ssh, depth, failures, cx);
+                    },
+                    cx,
+                );
+            },
+            cx,
+        );
+    }
+
+    /// Run one clone: progress into `AppState::cloning` (`queue`: its place
+    /// in a `293-clone-multiple` queue), the repository added when it is
+    /// done, then `then` with the outcome.
+    fn start_clone(
+        url: String,
+        path: PathBuf,
+        default_branch: Option<String>,
+        depth: Option<u32>,
+        queue: Option<(usize, usize)>,
+        then: impl FnOnce(CloneOutcome, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
+    ) {
         let state = Self::state(cx);
         let Some(git) = state.read(cx).git.clone() else {
             Self::show_error("Git is not available", "Install git and retry.", cx);
             return;
         };
-        Self::close_popup(cx);
         // GHD `new CloningRepository(path, url)`
         let mut clone = CloneState::new(path.clone(), url.clone());
         clone.description = "Cloning…".into();
+        clone.queue = queue;
         let clone_id = clone.id;
         let cancel = clone.cancel.clone();
         state.update(cx, |s, cx| {
@@ -5074,57 +5238,33 @@ impl Dispatcher {
                 // Corvene (`285-clone-keeps-repo-on-submodule-failure`): the
                 // repository was cloned and only a submodule failed; GHD
                 // drops it
-                if kept
-                    && let Err(err) = &result
+                let keep = kept
                     && Self::state(cx)
                         .read(cx)
                         .flags
-                        .bool(crate::flags::ids::CLONE_KEEPS_REPO_ON_SUBMODULE_FAILURE)
-                {
-                    let message = ErrorMessage::explained(
-                        err,
-                        Some(
-                            "The repository was cloned and added, but some of its submodules \
-                             could not be cloned. Fix their URLs or access and run \
-                             git submodule update --init --recursive in the repository."
-                                .to_string(),
-                        ),
-                    );
-                    Self::add_repository_then(path, cx, Self::resume_open_in_desktop);
-                    Self::show_error("Some submodules could not be cloned", message, cx);
-                    return;
-                }
-                if result.is_err() {
-                    Self::take_pending_alias(&path, cx);
-                }
-                match result {
-                    // an `openRepo` URL waiting for this clone continues
-                    Ok(()) => Self::add_repository_then(path, cx, Self::resume_open_in_desktop),
-                    // git removed what it created
-                    Err(corvene_git::GitError::Cancelled(_)) => info!("clone cancelled"),
-                    Err(err) => {
-                        let flags = &Self::state(cx).read(cx).flags;
-                        // `255-plain-language-remote-errors`
-                        let explanation = flags
-                            .bool(crate::flags::ids::PLAIN_LANGUAGE_REMOTE_ERRORS)
-                            .then(|| crate::push_errors::plain_clone_error(&err, &path))
-                            .flatten();
-                        // `235-clone-failure-keeps-input`: back to the dialog
-                        if flags.bool(crate::flags::ids::CLONE_FAILURE_KEEPS_INPUT) {
-                            let error = match explanation {
-                                Some(explanation) => format!("{explanation}\n\n{err}"),
-                                None => err.to_string(),
-                            };
-                            Self::show_popup(Popup::CloneRepositoryRetry { url, path, error }, cx)
-                        } else {
-                            Self::show_error(
-                                "Clone failed",
-                                ErrorMessage::explained(&err, explanation),
-                                cx,
-                            )
-                        }
+                        .bool(crate::flags::ids::CLONE_KEEPS_REPO_ON_SUBMODULE_FAILURE);
+                let outcome = match result {
+                    Err(err) if keep => {
+                        Self::add_repository_then(path, cx, Self::resume_open_in_desktop);
+                        CloneOutcome::SubmodulesFailed(err)
                     }
-                }
+                    // an `openRepo` URL waiting for this clone continues
+                    Ok(()) => {
+                        Self::add_repository_then(path, cx, Self::resume_open_in_desktop);
+                        CloneOutcome::Added
+                    }
+                    // git removed what it created
+                    Err(corvene_git::GitError::Cancelled(_)) => {
+                        info!("clone cancelled");
+                        Self::take_pending_alias(&path, cx);
+                        CloneOutcome::Cancelled
+                    }
+                    Err(err) => {
+                        Self::take_pending_alias(&path, cx);
+                        CloneOutcome::Failed(err)
+                    }
+                };
+                then(outcome, cx);
             });
         })
         .detach();
@@ -6759,6 +6899,32 @@ fn trust_failure_message(path: &Path, suggested: Option<&str>) -> String {
          in the form it sees, not the one it printed.\n\nAdd the value Git suggests instead:\n\n\
          git config --global --add safe.directory '{value}'\n\nor, if you trust every \
          repository on this computer, use '*' as the value."
+    )
+}
+
+/// How a clone ended ([`Dispatcher::start_clone`]).
+enum CloneOutcome {
+    /// Cloned and added.
+    Added,
+    /// `285-clone-keeps-repo-on-submodule-failure`: cloned and added, a
+    /// submodule failed.
+    SubmodulesFailed(GitError),
+    /// Stopped (`234-clone-cancel`); git removed what it created.
+    Cancelled,
+    Failed(GitError),
+}
+
+/// Corvene (`285-clone-keeps-repo-on-submodule-failure`): the error after a
+/// clone whose submodules failed.
+fn submodules_failed_message(err: &GitError) -> ErrorMessage {
+    ErrorMessage::explained(
+        err,
+        Some(
+            "The repository was cloned and added, but some of its submodules could not be \
+             cloned. Fix their URLs or access and run git submodule update --init --recursive \
+             in the repository."
+                .to_string(),
+        ),
     )
 }
 
