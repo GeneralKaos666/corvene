@@ -927,6 +927,108 @@ pub fn pull_merge_started(workdir: &Path, since: SystemTime) -> bool {
             .any(|name| dir.join(name).exists())
 }
 
+/// Corvene (`1101-push-size-tooltip`): roughly what a push of HEAD to its
+/// upstream sends, from the objects git would consider for the pack.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PushSize {
+    /// The objects' uncompressed size; the pack git sends is compressed and
+    /// deltified, so usually smaller.
+    pub bytes: u64,
+    /// What the Git LFS pointers among the new files name (uploaded by
+    /// git-lfs unless the server has it already).
+    pub lfs_bytes: u64,
+    pub lfs_files: usize,
+}
+
+/// [`PushSize`]: `rev-list --objects HEAD --not @{upstream}` sized by
+/// `cat-file --batch-check`, and the small blobs read with `cat-file
+/// --batch` for Git LFS pointers.
+pub fn push_size(git: Arc<GitBinary>, workdir: &Path) -> Result<PushSize> {
+    let listed = GitCommand::new(git.clone())
+        .args([
+            "rev-list",
+            "--objects",
+            "HEAD",
+            "--not",
+            "@{upstream}",
+            "--",
+        ])
+        .current_dir(workdir)
+        .run()?
+        .stdout_string()?;
+    let ids: Vec<&str> = listed
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    let mut size = PushSize::default();
+    if ids.is_empty() {
+        return Ok(size);
+    }
+    let checked = GitCommand::new(git.clone())
+        .args([
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        ])
+        .stdin(format!("{}\n", ids.join("\n")))
+        .current_dir(workdir)
+        .run()?
+        .stdout_string()?;
+    let mut small_blobs = Vec::new();
+    for line in checked.lines() {
+        let mut parts = line.split(' ');
+        let (Some(id), Some(kind), Some(bytes)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        let Ok(bytes) = bytes.parse::<u64>() else {
+            continue;
+        };
+        size.bytes += bytes;
+        if kind == "blob" && bytes <= 1024 {
+            small_blobs.push(id.to_string());
+        }
+    }
+    if small_blobs.is_empty() {
+        return Ok(size);
+    }
+    let contents = GitCommand::new(git)
+        .args(["cat-file", "--batch"])
+        .stdin(format!("{}\n", small_blobs.join("\n")))
+        .current_dir(workdir)
+        .run()?
+        .stdout;
+    for blob in batch_contents(&contents) {
+        if let Some(pointer) = crate::lfs::lfs_pointer(blob) {
+            size.lfs_bytes += pointer.size;
+            size.lfs_files += 1;
+        }
+    }
+    Ok(size)
+}
+
+/// The contents of `git cat-file --batch` output (`<id> <type> <size>\n`,
+/// the bytes, `\n` per object; `<id> missing\n` for none).
+fn batch_contents(mut out: &[u8]) -> Vec<&[u8]> {
+    let mut contents = Vec::new();
+    while let Some(end) = out.iter().position(|b| *b == b'\n') {
+        let header = String::from_utf8_lossy(&out[..end]);
+        out = &out[end + 1..];
+        let Some(len) = header
+            .rsplit(' ')
+            .next()
+            .and_then(|n| n.parse::<usize>().ok())
+            .filter(|_| !header.ends_with(" missing"))
+        else {
+            continue;
+        };
+        let Some(body) = out.get(..len) else {
+            break;
+        };
+        contents.push(body);
+        out = out.get(len + 1..).unwrap_or_default();
+    }
+    contents
+}
+
 /// GHD `IPushProgress` (`models/progress.ts`): what [`push_with_progress`]
 /// reports.
 #[derive(Clone, Debug, PartialEq)]
@@ -1505,6 +1607,63 @@ pub fn install_lfs_hooks(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn push_size_counts_new_objects_and_lfs_pointers() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let run = |cwd: &Path, args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(cwd)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        let remote = dir.path().join("remote.git");
+        let work = dir.path().join("work");
+        run(
+            dir.path(),
+            &["init", "-q", "--bare", "-b", "main", "remote.git"],
+        );
+        run(dir.path(), &["clone", "-q", "remote.git", "work"]);
+        for args in [
+            ["config", "commit.gpgsign", "false"],
+            ["config", "user.name", "T"],
+            ["config", "user.email", "t@example.com"],
+        ] {
+            run(&work, &args);
+        }
+        std::fs::write(work.join("a.txt"), "a\n").unwrap();
+        run(&work, &["add", "."]);
+        run(&work, &["commit", "-q", "-m", "a"]);
+        run(&work, &["push", "-q", "-u", "origin", "main"]);
+        let git = Arc::new(crate::find_git().unwrap());
+        assert_eq!(push_size(git.clone(), &work).unwrap(), PushSize::default());
+        std::fs::write(work.join("big.bin"), vec![b'x'; 5000]).unwrap();
+        std::fs::write(
+            work.join("lfs.bin"),
+            format!(
+                "version https://git-lfs.github.com/spec/v1\noid sha256:{}\nsize 123456\n",
+                "a".repeat(64)
+            ),
+        )
+        .unwrap();
+        run(&work, &["add", "."]);
+        run(&work, &["commit", "-q", "-m", "b"]);
+        let size = push_size(git, &work).unwrap();
+        assert!(size.bytes > 5000, "{size:?}");
+        assert_eq!((size.lfs_bytes, size.lfs_files), (123_456, 1));
+        let _ = remote;
+    }
+
+    #[test]
+    fn batch_contents_splits_objects() {
+        let out = b"aaa blob 3\nabc\nbbb missing\nccc blob 0\n\nddd blob 2\nxy\n";
+        assert_eq!(batch_contents(out), vec![&b"abc"[..], &b""[..], &b"xy"[..]]);
+    }
 
     #[test]
     fn pull_merge_started_reads_the_git_dir() {

@@ -1808,6 +1808,51 @@ pub fn with_fixed_width_tooltip(
     directed_tooltip(el, text.into(), direction, TOOLTIP_DELAY, true)
 }
 
+/// [`with_directed_tooltip`] whose text follows the app state while it is
+/// shown (`text` runs again whenever [`AppState`](corvene_core::AppState)
+/// changes): for contents that load once the pointer is over the element
+/// (`1101-push-size-tooltip`). A plain tooltip keeps the text it was built
+/// with until it closes.
+pub fn with_live_directed_tooltip(
+    el: Stateful<Div>,
+    text: impl Fn(&App) -> SharedString + 'static,
+    direction: TooltipDirection,
+) -> Stateful<Div> {
+    let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
+    let probe = bounds.clone();
+    let text = std::rc::Rc::new(text);
+    el.relative()
+        .child(
+            canvas(move |b, _, _| probe.set(b), |_, _, _, _| {})
+                .absolute()
+                .size_full(),
+        )
+        .tooltip(move |_, cx| {
+            let state = corvene_core::AppState::global(cx);
+            let anchor = Some((bounds.get(), direction));
+            let text = text.clone();
+            cx.new(|cx| {
+                let follow = text.clone();
+                cx.observe(&state, move |this: &mut TextTooltip, _, cx| {
+                    let text = follow(cx);
+                    if this.text != text {
+                        this.text = text;
+                        cx.notify();
+                    }
+                })
+                .detach();
+                TextTooltip {
+                    text: text(cx),
+                    bold: None,
+                    anchor,
+                    fixed_width: false,
+                }
+            })
+            .into()
+        })
+        .tooltip_show_delay(TOOLTIP_DELAY)
+}
+
 fn directed_tooltip(
     el: Stateful<Div>,
     text: SharedString,

@@ -34,6 +34,8 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! The push button's tooltip can say how much a push sends
+//! (`1101-push-size-tooltip`).
 //! Repository › Pull All Repositories fetches every repository and
 //! fast-forwards the branches that are only behind
 //! (`299-pull-all-repositories`).
@@ -108,6 +110,16 @@ pub struct NetworkCancel {
     pub background: bool,
     /// When it started: a pull that went on to merge cannot be stopped.
     pub started: SystemTime,
+}
+
+/// Corvene (`1101-push-size-tooltip`): the push size worked out for one
+/// branch tip and upstream tip.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PushSizeEstimate {
+    pub head: String,
+    pub upstream: String,
+    /// `None` while it is being worked out (or when that failed).
+    pub size: Option<corvene_git::PushSize>,
 }
 
 /// How long the push/pull button says "Cancelled" after a stop.
@@ -1678,6 +1690,95 @@ impl Dispatcher {
         } else {
             Self::push(id, true, None, cx);
         }
+    }
+
+    // ---- push size (`1101-push-size-tooltip`) ----
+
+    /// The current branch's tip and its upstream's, the key of a
+    /// [`PushSizeEstimate`].
+    fn push_size_key(s: &crate::state::AppState, id: u64) -> Option<(String, String)> {
+        let info = s.repo_states.get(&id)?.info.as_ref()?;
+        let branch = info.current_branch()?;
+        let upstream = branch.upstream.as_deref()?;
+        let upstream_tip = info
+            .branches
+            .iter()
+            .find(|b| b.full_name == upstream)?
+            .tip
+            .clone()?;
+        Some((branch.tip.clone()?, upstream_tip))
+    }
+
+    /// The push button's size note: `None` while the flag is off or the
+    /// branch has no upstream, `Some(None)` until the size is known.
+    pub fn push_size_for(
+        s: &crate::state::AppState,
+        id: u64,
+    ) -> Option<Option<corvene_git::PushSize>> {
+        if !s.flags.bool(crate::flags::ids::PUSH_SIZE_TOOLTIP) {
+            return None;
+        }
+        let (head, upstream) = Self::push_size_key(s, id)?;
+        let estimate = s.repo_states.get(&id)?.push_size.as_ref();
+        Some(
+            estimate
+                .filter(|e| e.head == head && e.upstream == upstream)
+                .and_then(|e| e.size),
+        )
+    }
+
+    /// Work out the push size for the current tips (on hovering the push
+    /// button), unless it is known or being worked out already.
+    pub fn load_push_size(id: u64, cx: &mut dyn Host) {
+        let key = {
+            let s = Self::state(cx).read(cx);
+            if !s.flags.bool(crate::flags::ids::PUSH_SIZE_TOOLTIP) {
+                return;
+            }
+            let Some(key) = Self::push_size_key(s, id) else {
+                return;
+            };
+            let current = s.repo_states.get(&id).and_then(|r| r.push_size.as_ref());
+            if current.is_some_and(|e| (&e.head, &e.upstream) == (&key.0, &key.1)) {
+                return;
+            }
+            key
+        };
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let (head, upstream) = key;
+        Self::state(cx).update(cx, |s, _| {
+            s.repo_state_mut(id).push_size = Some(PushSizeEstimate {
+                head: head.clone(),
+                upstream: upstream.clone(),
+                size: None,
+            });
+        });
+        spawn_bg(
+            cx,
+            move || corvene_git::push_size(git, &workdir),
+            move |result, cx| {
+                let size = match result {
+                    Ok(size) => size,
+                    Err(err) => {
+                        debug!(id, %err, "could not work out the push size");
+                        return;
+                    }
+                };
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    if let Some(estimate) = rs
+                        .push_size
+                        .as_mut()
+                        .filter(|e| e.head == head && e.upstream == upstream)
+                    {
+                        estimate.size = Some(size);
+                        cx.notify();
+                    }
+                });
+            },
+        );
     }
 
     // ---- publish ----

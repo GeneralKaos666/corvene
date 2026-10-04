@@ -1265,6 +1265,8 @@ pub struct RepositoryState {
     pub network_cancel: Option<crate::remote::NetworkCancel>,
     /// When the push/pull button's Stop was used, for its "Cancelled" note.
     pub network_cancelled_at: Option<Instant>,
+    /// Corvene `1101-push-size-tooltip`: the push button's size note.
+    pub push_size: Option<crate::remote::PushSizeEstimate>,
     pub last_fetched: Option<std::time::SystemTime>,
     /// Corvene (`288-dead-remote-indicator`): the last fetch said the remote
     /// repository does not exist (deleted, renamed or no access); the

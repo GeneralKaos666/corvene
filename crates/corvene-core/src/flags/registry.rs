@@ -6953,6 +6953,21 @@ registry! {
 
     // ---- 1100 Repository (overflow) ----
 
+    /// The Push button's tooltip says how much the push sends.
+    PUSH_SIZE_TOOLTIP = 1101 "push-size-tooltip" {
+        title: "Push size in the Push tooltip",
+        summary: "Hovering the Push button shows roughly how much the push sends: the size of \
+                  the new commits' files and folders (before git compresses them), and the \
+                  Git LFS files among them, e.g. \"≈ 12 MiB to push (10 MiB in Git LFS)\".",
+        ghd_behaviour: "The Push button has no tooltip.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18736)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.

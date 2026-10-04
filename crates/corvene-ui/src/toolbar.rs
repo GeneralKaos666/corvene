@@ -14,6 +14,8 @@
 //! `push-pull-button.tsx` has none).
 //! While a fetch, pull or push runs, a Stop button takes the ▾'s place
 //! (`295-cancel-network-operations`; GHD only disables the button).
+//! The Push button's tooltip can say roughly how much the push sends
+//! (`1101-push-size-tooltip`; GHD has no tooltip there).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -71,6 +73,9 @@ pub struct ToolbarButtonModel {
     /// Corvene (`295-cancel-network-operations`): the push/pull button shows
     /// a Stop button for the running operation.
     pub cancel: bool,
+    /// Corvene (`1101-push-size-tooltip`): hovering works out the push size
+    /// its tooltip names.
+    pub load_push_size: bool,
 }
 
 /// Which toolbar button a resize handle belongs to.
@@ -213,6 +218,7 @@ pub fn toolbar_models(
             tooltip_fixed_width: false,
             drag: None,
             cancel: false,
+            load_push_size: false,
         }
     });
 
@@ -274,6 +280,7 @@ pub fn toolbar_models(
             })
             .map(|r| (r.path.clone(), r.name().into())),
         cancel: false,
+        load_push_size: false,
     };
 
     // `currentPullRequest`: the icon becomes the PR icon and the badge shows
@@ -420,6 +427,7 @@ pub fn toolbar_models(
         tooltip_fixed_width: false,
         drag: None,
         cancel: false,
+        load_push_size: false,
     };
 
     // Push/Pull (`PushPullButton.renderButton`)
@@ -466,6 +474,7 @@ pub fn toolbar_models(
         tooltip_fixed_width: false,
         drag: None,
         cancel: false,
+        load_push_size: false,
     };
     let push_pull = if repo.is_none() {
         ToolbarButtonModel {
@@ -574,12 +583,16 @@ pub fn toolbar_models(
                         ..base
                     }
                 } else {
+                    // Corvene (`1101-push-size-tooltip`)
+                    let push_size = repo.and_then(|r| Dispatcher::push_size_for(state, r.id));
                     ToolbarButtonModel {
                         icon: Octicon::ArrowUp,
                         description: last_fetched,
                         title: format!("Push {remote_name}").into(),
                         badge: Some(ab),
                         arrow: true,
+                        load_push_size: push_size.is_some(),
+                        tooltip: push_size.map(push_size_tooltip),
                         ..base
                     }
                 }
@@ -607,6 +620,23 @@ pub fn toolbar_models(
     buttons.push(branch);
     buttons.push(push_pull);
     buttons
+}
+
+/// `1101-push-size-tooltip`: "≈ 1.2 MiB to push (340 MiB in Git LFS)".
+fn push_size_tooltip(size: Option<corvene_git::PushSize>) -> SharedString {
+    let Some(size) = size else {
+        return "Working out how much to push…".into();
+    };
+    let bytes = |n: u64| crate::format::format_bytes(i64::try_from(n).unwrap_or(i64::MAX), 1);
+    let total = format!(
+        "≈ {} to push",
+        bytes(size.bytes.saturating_add(size.lfs_bytes))
+    );
+    if size.lfs_files == 0 {
+        total.into()
+    } else {
+        format!("{total} ({} in Git LFS)", bytes(size.lfs_bytes)).into()
+    }
 }
 
 /// Flag `257`: the Pull button's tooltip lists the incoming commits.
@@ -773,6 +803,14 @@ pub fn toolbar_button(
             })
         })
         .when(ring, |d| d.child(focus_visible_ring(cx)))
+        // Corvene (`1101-push-size-tooltip`)
+        .when(model.load_push_size, |d| {
+            d.on_hover(|hovered, _, cx| {
+                if *hovered && let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                    Dispatcher::load_push_size(id, cx);
+                }
+            })
+        })
         // Corvene (`426-drag-repository-out`)
         .when_some(model.drag, |d, (path, name)| {
             crate::repository_drag::draggable(d, path, name)
@@ -928,6 +966,16 @@ pub fn toolbar_button(
             }))
         });
     let button = match model.tooltip {
+        // Corvene (`1101-push-size-tooltip`): the size arrives after hovering
+        Some(_) if model.load_push_size => crate::widgets::with_live_directed_tooltip(
+            button,
+            |cx| {
+                let s = corvene_core::AppState::global(cx).read(cx);
+                let size = s.selected.and_then(|id| Dispatcher::push_size_for(s, id));
+                push_size_tooltip(size.flatten())
+            },
+            crate::widgets::TooltipDirection::South,
+        ),
         Some(tip) if model.tooltip_fixed_width => crate::widgets::with_fixed_width_tooltip(
             button,
             tip,
