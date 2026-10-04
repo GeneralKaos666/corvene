@@ -973,4 +973,17 @@ impl Corvene {
             }
         });
     }
+
+    /// `CICheckRunRerun` › Re-run: the checks of the open dialog.
+    pub fn rerun_checks(&self, failed_only: bool) {
+        self.loop_.post(move |host| {
+            let Some(corvene_core::state::Popup::CICheckRunRerun { github, checks, .. }) =
+                host.state_ref().popup.clone()
+            else {
+                return;
+            };
+            Dispatcher::close_popup(host);
+            Dispatcher::rerequest_check_suites(github, checks, failed_only, |_, _| {}, host);
+        });
+    }
 }

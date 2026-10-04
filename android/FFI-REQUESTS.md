@@ -125,3 +125,20 @@ Kotlin does meanwhile.
   `dropStash`, `ignoreFiles`, `startAmending`, `stopAmending`,
   `setHideWhitespaceInDiff`, `RepoListVm.groups`, `RepoVm.owner/fork/private/alias`,
   `appVisible`, `ready`, start-up background tasks (886e67b8, 5cabc4ef).
+
+## Provided by the FFI (2026-10-04, 5928af22 + d3b5263e + later)
+
+- `commitDiffRows(repo, generation, start, count)`, `setDiffLines(repo, path, from, len, selected)`,
+  `submitGenericAuth(username, password)`, `retryPopupAction()`, `stashAndRetry()`,
+  `publishRepository(repo, name, description, private, endpoint, org?)`, `rerunChecks(failedOnly)`,
+  `updateUpstreamRemote(repo, update)`.
+- Dialog entry points (GHD's own popups, confirmation settings respected): `requestDeleteBranch`,
+  `requestRenameBranch`, `requestCreateBranch(repo, targetSha?, initialName)`, `requestCreateTag`,
+  `requestMerge(repo, squash)`, `requestPublishRepository`, `requestCheckoutCommit`,
+  `requestResetToCommit`, `confirmOrForcePush`, `requestDropStash`, `requestUndoCommit`,
+  `requestDiscardChanges(repo, paths)`, `requestRemoveRepository`, `startRebaseFlow(repo, base?)`,
+  `startRebaseWith(repo, base, forcePushChecked)`, `endMco`, `requestAbortMco`,
+  `undoDeleteBranch()`, `discardAllAndCheckout(repo, branch)`, `updateFromDefault(repo)`.
+- `HistoryVm.compare: CompareVm? {branch, mode, ahead, behind, mergeStatus, mergeConflicts}`,
+  `BannerVm.repo/fields` (typed key/values like PopupVm), `ChangesVm/BranchesVm.stashOnCurrentBranch`,
+  `RepoVm.htmlUrl`.
