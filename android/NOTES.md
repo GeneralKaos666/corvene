@@ -188,3 +188,27 @@ measured yet: M-A0 ran fossDebug only.
 - The SAF "Add repository" picker was not driven (it is a system activity; this
   session does not tap outside the app). `FolderResolver` is covered for `primary:`
   with all-files access and reports other providers as unsupported.
+
+## M-A1 phone run (2026-10-04, CPH2481, debug build, GitHub Mobile style, dark)
+
+- Cold `am start -W` TotalTime over 5 runs: 1133, 1069, 1066, 1382, 1004 ms (median 1069).
+- Changes list: 4 files with status icons, include checkboxes, filter chips, count, commit panel: OK.
+- Diff of `main.rs`: syntax colours (keyword/string/macro) render after the TokenClass fix
+  (2513bcc8). Found and fixed on the Rust side: the hunk header showed twice and every line
+  index was off by one per hunk, so the line toggle hit the wrong line (69107442, rebuilt after).
+- Styles: GitHub Desktop toolbar (captions truncate to "Curr d…" at 360 dp: shorten or hide
+  captions on compact), Material, GitHub Mobile. Branch chip truncates "main" to "m…" on
+  compact in the Mobile/Material chrome (chip too narrow).
+- Commit from the sheet: first attempt failed with the engine's "Could not commit" dialog
+  (git: Author identity unknown; the fresh store has no identity): the dialog body is empty
+  (the `message` field is not rendered, only "Show details"). After `git config --global
+  user.*` the commit landed (`git log` shows it) and Undo reverted it with the changes staged.
+  With the keyboard up the sheet moves, so the Commit button sits at y≈1218 not 2232.
+- Undo bar shows HEAD's commit ("Add main.rs", made from the CLI) even before any in-app
+  commit and again after Undo: check where `lastCommit*` comes from.
+- Landscape (800×360 dp = medium width): the chrome (app bar + branch row + tabs + chips +
+  undo bar) fills the height; no file rows visible; tapping where the list was did nothing.
+  Needs a short-height layout (collapse the branch row and chips, hide the undo bar when the
+  list is short), as the GPUI app's `theme::short` does.
+- Error dialog from the engine (`popup()` kind Error) displays and closes.
+- New FFI since the agent's run: `setGlobalIdentity(name, email)` (706be347) for Configure Git.
