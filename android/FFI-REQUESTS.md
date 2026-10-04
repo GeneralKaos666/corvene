@@ -142,3 +142,15 @@ Kotlin does meanwhile.
 - `HistoryVm.compare: CompareVm? {branch, mode, ahead, behind, mergeStatus, mergeConflicts}`,
   `BannerVm.repo/fields` (typed key/values like PopupVm), `ChangesVm/BranchesVm.stashOnCurrentBranch`,
   `RepoVm.htmlUrl`.
+- Settings + Flags (68baf3d0): `SettingsVm` now also has the confirm_* booleans, showCommitLengthWarning,
+  commitSpellcheckEnabled, historyFirstParent, uncommittedChangesStrategy ("ask"/"stash"/"move"),
+  externalEditor, shell, cloneDir; `setSetting(key, value)` (snake_case key, "true"/"false" or text);
+  `suspend flags(): FlagsVm` (preset, presets, categories, flags[ident, slug, id, title, summary,
+  ghdBehaviour, category, nature, kind, options, min/max/unit, value, valueLabel, isOn, overridden,
+  presetValue, ghdValue, restart, restartPending, available]), `setFlagBySlug(slug, text)` (throws
+  CoreException with the reason), `resetFlag(slug)`, `applyPreset("github-desktop"|"familiar"|"corvene"|"max")`,
+  `resetAllFlags()`, `relaunch()`.
+- Repository settings (c1a405bf): `openRepositorySettings(repo, "remote"|"ignored"|"git")`,
+  `suspend repositorySettings(): RepositorySettingsVm?`, `saveRepositorySettings(repo, remoteName?,
+  remoteUrl?, gitignore?, gitConfigLocation?, name?, email?, autocrlf?)`, `openGlobalGitConfig()`,
+  `suspend globalGitConfig(): GlobalGitConfigVm?`.
