@@ -183,8 +183,8 @@ impl AddExistingRepositoryDialog {
         let status = self.status(cx);
         match (self.resolved_path(cx), status) {
             (Some(path), Some(PathStatus::Repository)) => {
-                // GHD `_addRepositories`: a subdirectory adds its repository
-                let path = corvene_git::top_level_working_directory(&path).unwrap_or(path);
+                // a subdirectory adds its repository (`Dispatcher::add_repository`
+                // resolves the top level, as GHD `_addRepositories`)
                 Dispatcher::close_popup(cx);
                 if self
                     .state
@@ -214,7 +214,6 @@ fn add_several(paths: Vec<PathBuf>, cx: &mut App) {
         .partition(|p| corvene_git::path_status(p) == PathStatus::Repository);
     Dispatcher::close_popup(cx);
     for path in repos {
-        let path = corvene_git::top_level_working_directory(&path).unwrap_or(path);
         Dispatcher::add_repository(path, cx);
     }
     if !others.is_empty() {

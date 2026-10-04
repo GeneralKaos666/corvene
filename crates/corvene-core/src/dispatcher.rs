@@ -692,6 +692,10 @@ impl Dispatcher {
         #[cfg(target_os = "android")]
         let git = state.read(cx).git.clone();
         let probe = cx.background_executor().spawn(async move {
+            // GHD `_addRepositories`: a subdirectory of a working directory
+            // adds the repository (`getRepositoryType`'s
+            // `topLevelWorkingDirectory`)
+            let path = corvene_git::top_level_working_directory(&path).unwrap_or(path);
             #[cfg(target_os = "android")]
             if let Some(git) = git {
                 android_prepare_repository(git, &path);
