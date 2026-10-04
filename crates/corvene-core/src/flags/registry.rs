@@ -1969,6 +1969,23 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/worktrees.rs", "crates/corvene-core/src/state.rs"],
     },
 
+    /// The clone lists can show one owner's repositories.
+    CLONE_OWNER_PICKER = 292 "clone-owner-picker" {
+        title: "Clone: pick an owner",
+        summary: "Clone a Repository's GitHub tabs and the \"Let's get started!\" page have an \
+                  owner menu beside the filter box (All Owners, your account, each organization) \
+                  that narrows the repository list to one owner's repositories; the choice is \
+                  remembered per account.",
+        ghd_behaviour: "Every repository the account can access is listed, grouped by owner; \
+                        only the filter narrows it.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18533)],
+        code: &["crates/corvene-ui/src/cloneable_repositories.rs", "crates/corvene-ui/src/dialogs/clone_repository.rs", "crates/corvene-ui/src/no_repositories.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

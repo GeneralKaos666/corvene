@@ -183,6 +183,9 @@ pub struct Settings {
     /// the user collapsed (`Group::key` in `corvene-ui`'s repository list).
     #[serde(default)]
     pub collapsed_repository_groups: Vec<String>,
+    /// Corvene `292-clone-owner-picker`: the owner the clone lists show per
+    /// account (`<endpoint>|<login>` → owner login); missing = all owners.
+    pub clone_owner_filter: HashMap<String, String>,
 }
 
 /// GHD `ICustomIntegration`: an executable (or macOS app bundle) plus its
@@ -361,6 +364,7 @@ impl Default for Settings {
             custom_shell: None,
             use_custom_shell: false,
             collapsed_repository_groups: Vec::new(),
+            clone_owner_filter: HashMap::new(),
         }
     }
 }

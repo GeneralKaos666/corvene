@@ -514,10 +514,7 @@ impl CloneRepositoryDialog {
         let query = self.filter.read(cx).value().to_string();
         let rows = match self.state.read(cx).api_repositories.get(&account.endpoint) {
             Some(repos) => group_rows(
-                &crate::cloneable_repositories::without_hidden_owners(
-                    repos,
-                    &crate::cloneable_repositories::hidden_owners(cx),
-                ),
+                &crate::cloneable_repositories::visible_repositories(repos, &account, cx),
                 &account.login,
                 &crate::cloneable_repositories::filter_query(&query, cx),
             ),
@@ -704,10 +701,7 @@ impl CloneRepositoryDialog {
                 repos
                     .map(|r| {
                         group_rows(
-                            &crate::cloneable_repositories::without_hidden_owners(
-                                r,
-                                &crate::cloneable_repositories::hidden_owners(cx),
-                            ),
+                            &crate::cloneable_repositories::visible_repositories(r, &account, cx),
                             &account.login,
                             &crate::cloneable_repositories::filter_query(
                                 &self.filter.read(cx).value(),
@@ -718,6 +712,14 @@ impl CloneRepositoryDialog {
                     .unwrap_or_default(),
             )
         };
+        let owner_picker = self
+            .state
+            .read(cx)
+            .api_repositories
+            .get(&account.endpoint)
+            .and_then(|repos| {
+                crate::cloneable_repositories::owner_picker("clone-owner", &account, repos, cx)
+            });
         let query = self.filter.read(cx).value().trim().to_string();
         let list: AnyElement = if rows.is_empty() {
             no_items(
@@ -818,6 +820,8 @@ impl CloneRepositoryDialog {
                         window,
                         cx,
                     ))
+                    // Corvene (`292-clone-owner-picker`)
+                    .children(owner_picker)
                     .child(refresh_button("clone-refresh", &account, loading, cx)),
             )
             .child(

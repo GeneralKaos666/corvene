@@ -296,10 +296,7 @@ impl NoRepositoriesView {
         let query = self.filter.read(cx).value().to_string();
         let rows = match self.state.read(cx).api_repositories.get(&account.endpoint) {
             Some(repos) => group_rows(
-                &crate::cloneable_repositories::without_hidden_owners(
-                    repos,
-                    &crate::cloneable_repositories::hidden_owners(cx),
-                ),
+                &crate::cloneable_repositories::visible_repositories(repos, &account, cx),
                 &account.login,
                 &crate::cloneable_repositories::filter_query(&query, cx),
             ),
@@ -347,10 +344,7 @@ impl NoRepositoriesView {
                 repos
                     .map(|r| {
                         group_rows(
-                            &crate::cloneable_repositories::without_hidden_owners(
-                                r,
-                                &crate::cloneable_repositories::hidden_owners(cx),
-                            ),
+                            &crate::cloneable_repositories::visible_repositories(r, account, cx),
                             &account.login,
                             &crate::cloneable_repositories::filter_query(
                                 &self.filter.read(cx).value(),
@@ -499,6 +493,18 @@ impl NoRepositoriesView {
                                 window,
                                 cx,
                             ))
+                            // Corvene (`292-clone-owner-picker`)
+                            .children(
+                                self.state
+                                    .read(cx)
+                                    .api_repositories
+                                    .get(&account.endpoint)
+                                    .and_then(|repos| {
+                                        crate::cloneable_repositories::owner_picker(
+                                            "nr-owner", account, repos, cx,
+                                        )
+                                    }),
+                            )
                             .child(
                                 refresh_button("nr-refresh", account, loading, cx).px(SPACING()),
                             ),

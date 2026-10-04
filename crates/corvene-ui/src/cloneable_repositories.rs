@@ -15,6 +15,10 @@
 //! Deviation (`228-clone-default-account`): the account picker can start
 //! on a chosen account instead of the first one signed in.
 //!
+//! Deviation (`292-clone-owner-picker`): an owner menu beside the filter
+//! narrows the list to one user's or organization's repositories,
+//! remembered per account.
+//!
 //! Callers own the state (filter text box, selected clone URL, picked
 //! account, popover open) and wrap the pieces in their own layout; the two
 //! places differ only in insets and the list's frame.
@@ -32,7 +36,9 @@ use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
-use crate::widgets::{IconButtonA11y, avatar_image, avatar_lookup_url, button, link_button};
+use crate::widgets::{
+    GhdTooltip, IconButtonA11y, avatar_image, avatar_lookup_url, button, link_button,
+};
 
 /// GHD `cloneable-repository-filter-list.tsx` group title for the
 /// signed-in user's own repositories.
@@ -89,6 +95,119 @@ pub fn without_hidden_owners(
         .filter(|r| !hidden.contains(&r.owner.to_lowercase()))
         .cloned()
         .collect()
+}
+
+/// The repositories the clone lists show for `account`: without the
+/// `229-hidden-clone-owners`, and only the owner `292-clone-owner-picker`
+/// picked for the account.
+pub fn visible_repositories(
+    repos: &[GitHubRepository],
+    account: &Account,
+    cx: &App,
+) -> Vec<GitHubRepository> {
+    let mut repos = without_hidden_owners(repos, &hidden_owners(cx));
+    if let Some(owner) = picked_owner(&repos, account, cx) {
+        repos.retain(|r| r.owner == owner);
+    }
+    repos
+}
+
+/// `292-clone-owner-picker`: the settings key of an account's pick.
+fn owner_key(account: &Account) -> String {
+    format!("{}|{}", account.endpoint, account.login)
+}
+
+/// `292-clone-owner-picker`: the owner picked for `account`, while it still
+/// has repositories in `repos`.
+fn picked_owner(repos: &[GitHubRepository], account: &Account, cx: &App) -> Option<String> {
+    let s = corvene_core::AppState::global(cx).read(cx);
+    if !s.flags.bool(corvene_core::flags::ids::CLONE_OWNER_PICKER) {
+        return None;
+    }
+    let owner = s.settings.clone_owner_filter.get(&owner_key(account))?;
+    repos
+        .iter()
+        .any(|r| r.owner == *owner)
+        .then(|| owner.clone())
+}
+
+/// `292-clone-owner-picker`: the owners of `repos` (hidden ones left out),
+/// the account's own login first, then by name ignoring case.
+pub fn owners(repos: &[GitHubRepository], login: &str) -> Vec<String> {
+    let mut owners: Vec<String> = repos.iter().map(|r| r.owner.clone()).collect();
+    owners.sort_by_key(|o| (!o.eq_ignore_ascii_case(login), o.to_lowercase()));
+    owners.dedup();
+    owners
+}
+
+/// `292-clone-owner-picker`: "All Owners ▾" (or the picked owner) beside
+/// the filter box; a menu of the account's owners narrows the list to one.
+/// `None` with the flag off or fewer than two owners.
+pub fn owner_picker(
+    id: &'static str,
+    account: &Account,
+    repos: &[GitHubRepository],
+    cx: &App,
+) -> Option<Stateful<Div>> {
+    let flags = &corvene_core::AppState::global(cx).read(cx).flags;
+    if !flags.bool(corvene_core::flags::ids::CLONE_OWNER_PICKER) {
+        return None;
+    }
+    let shown = without_hidden_owners(repos, &hidden_owners(cx));
+    let owners = owners(&shown, &account.login);
+    if owners.len() < 2 {
+        return None;
+    }
+    let picked = picked_owner(&shown, account, cx);
+    let t = cx.ghd();
+    let key = owner_key(account);
+    let label: SharedString = picked
+        .clone()
+        .unwrap_or_else(|| mac_or("All Owners", "All owners").to_string())
+        .into();
+    Some(
+        button(id, "", cx)
+            .flex_none()
+            .gap(zpx(5.))
+            .max_w(zpx(160.))
+            .ghd_tooltip("Show the repositories of one owner")
+            .child(div().min_w_0().truncate().child(label))
+            .child(octicon(Octicon::TriangleDown, t.secondary_button_text).size(zpx(12.)))
+            .on_click(move |ev: &ClickEvent, window, cx| {
+                use crate::context_menu::MenuItem;
+                let pick = |owner: Option<String>| {
+                    let key = key.clone();
+                    move |_: &mut Window, cx: &mut App| {
+                        let key = key.clone();
+                        let owner = owner.clone();
+                        Dispatcher::update_settings(cx, move |s| match owner {
+                            Some(owner) => {
+                                s.clone_owner_filter.insert(key, owner);
+                            }
+                            None => {
+                                s.clone_owner_filter.remove(&key);
+                            }
+                        });
+                    }
+                };
+                let mut items = vec![
+                    MenuItem::checkbox(
+                        mac_or("All Owners", "All owners"),
+                        picked.is_none(),
+                        pick(None),
+                    ),
+                    MenuItem::separator(),
+                ];
+                items.extend(owners.iter().map(|owner| {
+                    MenuItem::checkbox(
+                        owner.clone(),
+                        picked.as_deref() == Some(owner.as_str()),
+                        pick(Some(owner.clone())),
+                    )
+                }));
+                crate::native_menu::show_context_menu(items, ev.position(), window, cx);
+            }),
+    )
 }
 
 /// `groupRepositories` + `SectionFilterList`'s filter: "Your Repositories"
