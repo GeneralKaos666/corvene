@@ -1286,6 +1286,11 @@ impl HistorySidebar {
             .repo_states
             .get(&id)
             .is_some_and(|r| r.history_filter.is_active());
+        let reset_modes = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::RESET_MODES);
         Dispatcher::select_commit(id, commit.sha.clone(), cx);
         let sha = commit.sha.clone();
         let weak = cx.weak_entity();
@@ -1303,12 +1308,52 @@ impl HistorySidebar {
                 move |_, cx| Dispatcher::request_undo_commit(id, cx),
             ));
         }
-        items.extend([
+        // `888-reset-modes`: Soft / Mixed / Hard instead of GHD's mixed reset
+        let reset = if reset_modes {
+            let item = |label: &'static str, mode: corvene_git::ResetMode| {
+                let sha = sha.clone();
+                MenuItem::new(label, move |_, cx| match mode {
+                    corvene_git::ResetMode::Soft => {
+                        Dispatcher::soft_reset_to_commit(id, sha.clone(), cx)
+                    }
+                    corvene_git::ResetMode::Mixed => {
+                        Dispatcher::request_reset_to_commit(id, sha.clone(), cx)
+                    }
+                    corvene_git::ResetMode::Hard => {
+                        Dispatcher::request_hard_reset_to_commit(id, sha.clone(), cx)
+                    }
+                })
+            };
+            MenuItem::submenu(
+                mac_or("Reset to Commit", "Reset to commit"),
+                vec![
+                    item(
+                        mac_or("Soft (Keep Changes Staged)", "Soft (keep changes staged)"),
+                        corvene_git::ResetMode::Soft,
+                    ),
+                    item(
+                        mac_or(
+                            "Mixed (Keep Changes Unstaged)…",
+                            "Mixed (keep changes unstaged)…",
+                        ),
+                        corvene_git::ResetMode::Mixed,
+                    ),
+                    item(
+                        mac_or("Hard (Discard Changes)…", "Hard (discard changes)…"),
+                        corvene_git::ResetMode::Hard,
+                    ),
+                ],
+            )
+            .enabled(!is_head)
+        } else {
             MenuItem::new(mac_or("Reset to Commit…", "Reset to commit…"), {
                 let sha = sha.clone();
                 move |_, cx| Dispatcher::request_reset_to_commit(id, sha.clone(), cx)
             })
-            .enabled(!is_head),
+            .enabled(!is_head)
+        };
+        items.extend([
+            reset,
             MenuItem::new(mac_or("Checkout Commit", "Checkout commit"), {
                 let sha = sha.clone();
                 move |_, cx| Dispatcher::request_checkout_commit(id, sha.clone(), cx)

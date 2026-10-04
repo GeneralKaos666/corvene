@@ -329,16 +329,21 @@ pub enum Popup {
         sha: String,
     },
     /// Corvene addition (`261-reset-to-remote`): confirm resetting the
-    /// current branch to its upstream (`reset --hard`).
+    /// current branch to its upstream (`reset --hard`), or to a commit
+    /// (`888-reset-modes`' Hard reset).
     ResetToRemote {
         repo: u64,
         branch: String,
-        /// Short name (`origin/main`).
+        /// Short name (`origin/main`), or the commit's short sha.
         upstream: String,
-        /// Commits on the branch but not on the upstream.
+        /// Commits on the branch but not on the upstream (that the reset drops).
         ahead: usize,
         /// Uncommitted changes will be discarded too.
         dirty: bool,
+        /// `888-reset-modes`: the commit a Hard reset goes to (`None`: the upstream).
+        commit: Option<String>,
+        /// `888-reset-modes`: the changed files whose changes are discarded.
+        files: Vec<String>,
     },
     /// `ConfirmCheckoutCommit`: detached HEAD warning.
     CheckoutCommit {

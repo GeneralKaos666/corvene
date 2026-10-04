@@ -9,7 +9,9 @@
 //! remote too, after a confirmation (flag `826`). Create a Tag notes when
 //! the account can only read the GitHub repository, so the tag cannot be
 //! pushed there (flag `884-tag-push-permission-note`); GHD says nothing until
-//! the push fails.
+//! the push fails. Reset to Commit › Hard confirms in the reset-to-remote
+//! dialog, naming the commits and changed files it discards (flag
+//! `888-reset-modes`).
 
 use corvene_core::{AppState, Dispatcher, UnreachableCommitsTab};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
@@ -76,13 +78,18 @@ impl Render for ResetToCommitDialog {
 }
 
 /// Corvene addition (`261-reset-to-remote`): confirm resetting the current
-/// branch to its upstream.
+/// branch to its upstream, or (`888-reset-modes`) hard-resetting it to a
+/// commit.
 pub struct ResetToRemoteDialog {
     repo: u64,
     branch: String,
     upstream: String,
     ahead: usize,
     dirty: bool,
+    /// `888-reset-modes`: the commit to reset to, instead of the upstream.
+    commit: Option<String>,
+    /// `888-reset-modes`: the changed files the reset discards.
+    files: Vec<String>,
 }
 
 impl ResetToRemoteDialog {
@@ -93,36 +100,83 @@ impl ResetToRemoteDialog {
             upstream,
             ahead,
             dirty,
+            commit: None,
+            files: Vec::new(),
         }
+    }
+
+    /// `888-reset-modes`: a Hard reset to `commit`, discarding `files`' changes.
+    pub fn for_commit(mut self, commit: Option<String>, files: Vec<String>) -> Self {
+        self.commit = commit;
+        self.files = files;
+        self
+    }
+}
+
+/// `888-reset-modes`: "a.txt, b.txt and 3 more files" (the first few names).
+fn name_files(files: &[String]) -> String {
+    const SHOWN: usize = 3;
+    let names: Vec<&str> = files
+        .iter()
+        .take(SHOWN)
+        .map(|f| f.rsplit('/').next().unwrap_or(f))
+        .collect();
+    match files.len() {
+        0 => String::new(),
+        n if n <= SHOWN => match names.as_slice() {
+            [only] => only.to_string(),
+            [init @ .., last] => format!("{} and {last}", init.join(", ")),
+            [] => String::new(),
+        },
+        n => format!(
+            "{} and {} more {}",
+            names.join(", "),
+            n - SHOWN,
+            if n - SHOWN == 1 { "file" } else { "files" }
+        ),
     }
 }
 
 impl Render for ResetToRemoteDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
-        let (repo, upstream) = (self.repo, self.upstream.clone());
+        let (repo, upstream, commit) = (self.repo, self.upstream.clone(), self.commit.clone());
         let mut lost = Vec::new();
         if self.ahead > 0 {
-            lost.push(if self.ahead == 1 {
-                "1 commit that is not on the remote".to_string()
-            } else {
-                format!("{} commits that are not on the remote", self.ahead)
+            lost.push(match (self.ahead, commit.is_some()) {
+                (1, false) => "1 commit that is not on the remote".to_string(),
+                (n, false) => format!("{n} commits that are not on the remote"),
+                (1, true) => "1 commit".to_string(),
+                (n, true) => format!("{n} commits"),
             });
         }
         if self.dirty {
-            lost.push("all uncommitted changes".to_string());
+            lost.push(if self.files.is_empty() {
+                "all uncommitted changes".to_string()
+            } else {
+                format!("the uncommitted changes to {}", name_files(&self.files))
+            });
         }
-        let mut text = format!("{} will be reset to match {}.", self.branch, self.upstream);
+        let mut text = if commit.is_some() {
+            format!("{} will be reset to commit {}.", self.branch, self.upstream)
+        } else {
+            format!("{} will be reset to match {}.", self.branch, self.upstream)
+        };
         if !lost.is_empty() {
             text.push_str(&format!(
                 " This discards {}. Do you want to continue?",
                 lost.join(" and ")
             ));
         }
+        let title = if commit.is_some() {
+            mac_or("Hard Reset to Commit", "Hard reset to commit").to_string()
+        } else {
+            format!("Reset to {}", self.upstream)
+        };
         dialog_with_kind(
             "dialog-reset-to-remote",
             DialogKind::Warning,
-            format!("Reset to {}", self.upstream),
+            title,
             div().child(text),
             OkCancelButtonGroup {
                 destructive: true,
@@ -138,7 +192,15 @@ impl Render for ResetToRemoteDialog {
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
-                        Dispatcher::reset_to_remote(repo, upstream.clone(), cx);
+                        match &commit {
+                            Some(sha) => Dispatcher::reset_to_commit_with(
+                                repo,
+                                sha.clone(),
+                                corvene_git::ResetMode::Hard,
+                                cx,
+                            ),
+                            None => Dispatcher::reset_to_remote(repo, upstream.clone(), cx),
+                        }
                     }),
                 },
             }

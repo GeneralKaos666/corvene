@@ -337,6 +337,8 @@ impl DialogHost {
                 upstream,
                 ahead,
                 dirty,
+                commit,
+                files,
             } => cx
                 .new(|_| {
                     ResetToRemoteDialog::new(
@@ -346,6 +348,7 @@ impl DialogHost {
                         *ahead,
                         *dirty,
                     )
+                    .for_commit(commit.clone(), files.clone())
                 })
                 .into(),
             Popup::CheckoutCommit { repo, sha } => cx

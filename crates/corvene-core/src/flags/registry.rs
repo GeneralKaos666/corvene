@@ -5605,6 +5605,22 @@ registry! {
         code: &["crates/corvene-core/src/history_filter.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// Reset to Commit offers Soft, Mixed and Hard.
+    RESET_MODES = 888 "reset-modes" {
+        title: "Soft, mixed and hard reset",
+        summary: "History's Reset to Commit becomes a submenu: Soft keeps every change (the reset \
+                  commits' changes staged), Mixed is GitHub Desktop's reset (changes kept unstaged, \
+                  with its warning about changes in progress) and Hard discards everything after a \
+                  confirmation that names the commits and the changed files it throws away.",
+        ghd_behaviour: "Reset to Commit always runs a mixed reset (git reset <commit>).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21418)],
+        code: &["crates/corvene-ui/src/history.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

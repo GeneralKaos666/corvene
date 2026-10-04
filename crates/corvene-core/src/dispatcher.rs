@@ -2785,15 +2785,79 @@ impl Dispatcher {
     }
 
     pub fn reset_to_commit(id: u64, sha: String, cx: &mut App) {
+        Self::reset_to_commit_with(id, sha, corvene_git::ResetMode::Mixed, cx);
+    }
+
+    /// `reset [--soft | --hard] <sha>` (`888-reset-modes` picks the mode;
+    /// GHD always resets mixed).
+    pub fn reset_to_commit_with(id: u64, sha: String, mode: corvene_git::ResetMode, cx: &mut App) {
         Self::show_section(id, Section::Changes, cx);
         Self::run_history_op(
             id,
             "Could not reset to commit",
-            move |git, workdir| {
-                corvene_git::reset_to(git, &workdir, corvene_git::ResetMode::Mixed, &sha)
-            },
+            move |git, workdir| corvene_git::reset_to(git, &workdir, mode, &sha),
             cx,
         );
+    }
+
+    /// `888-reset-modes`: Reset to Commit › Soft keeps every change (the
+    /// commits' ones staged), so it needs no warning.
+    pub fn soft_reset_to_commit(id: u64, sha: String, cx: &mut App) {
+        Self::reset_to_commit_with(id, sha, corvene_git::ResetMode::Soft, cx);
+    }
+
+    /// `888-reset-modes`: Reset to Commit › Hard. Counts the commits it
+    /// drops, then confirms naming them and the uncommitted changes it
+    /// discards (the `261-reset-to-remote` dialog).
+    pub fn request_hard_reset_to_commit(id: u64, sha: String, cx: &mut App) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let (branch, files) = {
+            let s = Self::state(cx).read(cx);
+            let rs = s.repo_states.get(&id);
+            let branch = rs
+                .and_then(|r| r.info.as_ref())
+                .map(|info| match info.current_branch() {
+                    Some(b) => b.name.clone(),
+                    None => "HEAD".to_string(),
+                })
+                .unwrap_or_else(|| "HEAD".to_string());
+            // `reset --hard` leaves untracked files alone
+            let files: Vec<String> = rs
+                .and_then(|r| r.status.as_deref())
+                .map(|st| {
+                    st.files
+                        .iter()
+                        .filter(|f| f.status.kind != corvene_models::FileStatusKind::Untracked)
+                        .map(|f| f.path.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (branch, files)
+        };
+        let target = sha.clone();
+        let task = cx.background_executor().spawn(async move {
+            corvene_git::commits_ahead(git, &workdir, &target, "HEAD").unwrap_or(0)
+        });
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            let ahead = task.await;
+            cx.update(|cx| {
+                Self::show_popup(
+                    Popup::ResetToRemote {
+                        repo: id,
+                        branch,
+                        upstream: sha[..sha.len().min(7)].to_string(),
+                        ahead: ahead as usize,
+                        dirty: !files.is_empty(),
+                        commit: Some(sha),
+                        files,
+                    },
+                    cx,
+                )
+            });
+        })
+        .detach();
     }
 
     /// The push/pull foldout's "Reset to <upstream>" (`261-reset-to-remote`;
@@ -2821,6 +2885,8 @@ impl Dispatcher {
                     .and_then(|r| r.ahead_behind)
                     .map_or(0, |ab| ab.ahead as usize),
                 dirty: Self::working_directory_dirty(id, cx),
+                commit: None,
+                files: Vec::new(),
             }
         };
         Self::show_popup(popup, cx);
