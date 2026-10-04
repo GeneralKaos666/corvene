@@ -128,7 +128,8 @@ pub fn diff_header(s: &AppState, repo: u64) -> Option<DiffHeaderVm> {
     let (rows, hunks, added, deleted) = diff
         .and_then(|d| d.hunks())
         .map(|hunks| {
-            let rows = hunks.iter().map(|h| h.lines.len() + 1).sum::<usize>();
+            // a hunk's first line is its header
+            let rows = hunks.iter().map(|h| h.lines.len()).sum::<usize>();
             let added = hunks
                 .iter()
                 .flat_map(|h| h.lines.iter())
@@ -199,51 +200,40 @@ pub fn diff_rows(
     let start = start as usize;
     let end = start.saturating_add(count as usize);
 
-    // the rows in the window, with their unified-diff index
+    // the rows in the window; a hunk's first line is its header and the
+    // unified-diff index of a line is what the selection counts
     let mut rows = Vec::with_capacity(count as usize);
-    let mut index = 0usize;
     for hunk in hunks {
-        if index >= end {
-            break;
-        }
-        if index >= start {
-            rows.push(DiffRowVm {
-                index: u32::try_from(index).unwrap_or(u32::MAX),
-                kind: DiffRowKindVm::Hunk,
-                text: hunk.header.clone(),
-                old_line: None,
-                new_line: None,
-                selected: false,
-                no_trailing_newline: false,
-                spans: Vec::new(),
-            });
-        }
-        index += 1;
-        for line in &hunk.lines {
+        for (i, line) in hunk.lines.iter().enumerate() {
+            let index = hunk.unified_diff_start as usize + i;
+            if index < start {
+                continue;
+            }
             if index >= end {
                 break;
             }
-            if index >= start {
-                let kind = match line.kind {
-                    DiffLineKind::Context => DiffRowKindVm::Context,
-                    DiffLineKind::Add => DiffRowKindVm::Add,
-                    DiffLineKind::Delete => DiffRowKindVm::Delete,
-                    DiffLineKind::Hunk => DiffRowKindVm::Hunk,
-                };
-                let line_index = u32::try_from(index).unwrap_or(u32::MAX);
-                rows.push(DiffRowVm {
-                    index: line_index,
-                    kind,
-                    text: line.text.clone(),
-                    old_line: line.old_line,
-                    new_line: line.new_line,
-                    selected: matches!(kind, DiffRowKindVm::Add | DiffRowKindVm::Delete)
-                        && selection.is_selected(line_index),
-                    no_trailing_newline: line.no_trailing_newline,
-                    spans: Vec::new(),
-                });
-            }
-            index += 1;
+            let kind = match line.kind {
+                DiffLineKind::Context => DiffRowKindVm::Context,
+                DiffLineKind::Add => DiffRowKindVm::Add,
+                DiffLineKind::Delete => DiffRowKindVm::Delete,
+                DiffLineKind::Hunk => DiffRowKindVm::Hunk,
+            };
+            let line_index = u32::try_from(index).unwrap_or(u32::MAX);
+            rows.push(DiffRowVm {
+                index: line_index,
+                kind,
+                text: if kind == DiffRowKindVm::Hunk {
+                    hunk.header.clone()
+                } else {
+                    line.text.clone()
+                },
+                old_line: line.old_line,
+                new_line: line.new_line,
+                selected: matches!(kind, DiffRowKindVm::Add | DiffRowKindVm::Delete)
+                    && selection.is_selected(line_index),
+                no_trailing_newline: line.no_trailing_newline,
+                spans: Vec::new(),
+            });
         }
     }
     highlight(&path, &mut rows);

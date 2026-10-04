@@ -126,7 +126,7 @@ pub fn commit_detail(s: &AppState, repo: u64) -> Option<CommitDetailVm> {
     let (rows, added, deleted) = diff
         .and_then(|d| d.hunks())
         .map(|hunks| {
-            let rows = hunks.iter().map(|h| h.lines.len() + 1).sum::<usize>();
+            let rows = hunks.iter().map(|h| h.lines.len()).sum::<usize>();
             let lines = hunks.iter().flat_map(|h| h.lines.iter());
             let added = lines
                 .clone()
