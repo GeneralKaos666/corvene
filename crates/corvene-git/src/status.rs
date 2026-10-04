@@ -4,8 +4,8 @@
 //! `updateChangedFiles`).
 //!
 //! Deviations behind flags: [`StatusOptions`] (`respect-show-untracked-files`,
-//! `ignore-submodules`) and [`working_directory_line_stats`]
-//! (`changes-line-counts`).
+//! `ignore-submodules`, `1205-lfs-conflicts-pick-a-side`) and
+//! [`working_directory_line_stats`] (`changes-line-counts`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -36,6 +36,11 @@ pub struct StatusOptions {
     /// Read the status in-process with gitoxide (`status_gix.rs`), git
     /// only when that fails. Flag `906-in-process-status`.
     pub in_process: bool,
+    /// Conflicted files whose `filter` attribute is `lfs` are manual
+    /// conflicts (pick a side): git merges LFS pointer files as text, so
+    /// their conflict markers sit in the pointer, not in the file. Flag
+    /// `1205-lfs-conflicts-pick-a-side`; GHD offers the editor.
+    pub lfs_conflicts_manual: bool,
 }
 
 /// What `git status` leaves out about submodules.
@@ -92,7 +97,7 @@ pub fn get_status_with(
             parse_porcelain_v2(&out.stdout)
         }
     };
-    Ok(finish_status(git, workdir, status))
+    Ok(finish_status(git, workdir, status, options))
 }
 
 /// Flag `906-in-process-status`'s reader on its own: the status gitoxide
@@ -106,7 +111,7 @@ pub fn get_status_in_process(
 ) -> Option<WorkingDirectoryStatus> {
     let hide_untracked = hide_untracked(git.clone(), workdir, options);
     let status = crate::status_gix::status(workdir, options, hide_untracked)?;
-    Some(finish_status(git, workdir, status))
+    Some(finish_status(git, workdir, status, options))
 }
 
 /// `respect_show_untracked_files` and `status.showUntrackedFiles` says no.
@@ -129,6 +134,7 @@ fn finish_status(
     git: Arc<GitBinary>,
     workdir: &Path,
     mut status: WorkingDirectoryStatus,
+    options: StatusOptions,
 ) -> WorkingDirectoryStatus {
     let git_dir = crate::paths::git_dir(workdir);
     status.merge_head_found = git_dir.join("MERGE_HEAD").exists();
@@ -138,7 +144,7 @@ fn finish_status(
     status.squash_msg_found = git_dir.join("SQUASH_MSG").exists();
     status.rebase_internal_state = crate::rebase_ops::rebase_internal_state(workdir);
     if status.has_conflicts() {
-        apply_conflict_details(git, workdir, &mut status);
+        apply_conflict_details(git, workdir, &mut status, options.lfs_conflicts_manual);
     }
     // git's order (tracked before untracked, bytewise), as GHD `getStatus`
     // returns it; the changes list sorts them
@@ -339,10 +345,13 @@ pub fn parse_porcelain_v2(stdout: &[u8]) -> WorkingDirectoryStatus {
 /// `REBASE_HEAD` during a rebase and `HEAD` otherwise (conflicts from
 /// popping a stash, where an unborn `HEAD` just means no binary files). A
 /// failure during a merge or rebase drops all details, as GHD's does.
+/// With `lfs_manual` (flag `1205`) conflicted LFS files are manual too
+/// ([`lfs_paths`]).
 fn apply_conflict_details(
     git: Arc<GitBinary>,
     workdir: &Path,
     status: &mut WorkingDirectoryStatus,
+    lfs_manual: bool,
 ) {
     let conflicted: Vec<String> = status
         .files
@@ -362,6 +371,10 @@ fn apply_conflict_details(
         } else {
             binary_paths("HEAD").unwrap_or_default()
         };
+        let mut binary = binary;
+        if lfs_manual {
+            binary.extend(lfs_paths(git.clone(), workdir, &conflicted).unwrap_or_default());
+        }
         Ok((markers, binary))
     };
     let (markers, binary) = details().unwrap_or_else(|err| {
@@ -380,6 +393,37 @@ fn apply_conflict_details(
             None
         };
     }
+}
+
+/// The `paths` whose `filter` attribute is `lfs` (`check-attr --stdin -z
+/// filter`).
+pub fn lfs_paths(git: Arc<GitBinary>, workdir: &Path, paths: &[String]) -> Result<Vec<String>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stdin: Vec<u8> = Vec::new();
+    for path in paths {
+        stdin.extend_from_slice(path.as_bytes());
+        stdin.push(0);
+    }
+    let out = GitCommand::new(git)
+        .args(["check-attr", "--stdin", "-z", "filter"])
+        .current_dir(workdir)
+        .stdin(stdin)
+        .run()?;
+    Ok(parse_lfs_attributes(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// `check-attr -z filter` output: `<path> NUL filter NUL <value> NUL` per
+/// path; the paths whose value is `lfs`.
+pub fn parse_lfs_attributes(stdout: &str) -> Vec<String> {
+    let records: Vec<&str> = stdout.split('\0').collect();
+    let (records, _) = records.as_chunks::<3>();
+    records
+        .iter()
+        .filter(|[_, attribute, value]| *attribute == "filter" && *value == "lfs")
+        .map(|[path, _, _]| path.to_string())
+        .collect()
 }
 
 fn parse_header(rest: &str, status: &mut WorkingDirectoryStatus) {
@@ -540,6 +584,13 @@ pub fn map_status(code: &str, sub: &str, score: Option<u8>) -> Option<FileStatus
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lfs_attributes_name_the_lfs_paths() {
+        let out = "a.psd\0filter\0lfs\0b.txt\0filter\0unspecified\0c.bin\0filter\0lfs\0";
+        assert_eq!(parse_lfs_attributes(out), ["a.psd", "c.bin"]);
+        assert!(parse_lfs_attributes("").is_empty());
+    }
 
     #[test]
     fn parses_headers_and_entries() {

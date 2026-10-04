@@ -6272,6 +6272,23 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-core/src/stash_flows.rs"],
     },
 
+    /// Conflicted LFS files are resolved by picking a side.
+    LFS_CONFLICTS_PICK_A_SIDE = 1205 "lfs-conflicts-pick-a-side" {
+        title: "Pick a side for conflicted LFS files",
+        summary: "A conflicted file stored in Git LFS (filter=lfs in .gitattributes) is a \
+                  manual conflict in the conflicts dialog: Use the modified file from one \
+                  branch or the other. Git merges the small LFS pointer files as text, so the \
+                  conflict markers sit in the pointer and editing the file cannot resolve it.",
+        ghd_behaviour: "The file is offered as a text conflict to open in the editor, which \
+                        shows the pointer with conflict markers.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7166)],
+        code: &["crates/corvene-git/src/status.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 
