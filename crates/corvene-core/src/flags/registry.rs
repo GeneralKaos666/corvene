@@ -6238,6 +6238,22 @@ registry! {
         code: &["crates/corvene-ui/src/history.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-ui/src/dialogs/open_pull_request.rs"],
     },
 
+    /// Another branch's stash can be restored onto the current branch.
+    RESTORE_STASH_FROM_OTHER_BRANCH = 1204 "restore-stash-from-other-branch" {
+        title: "Restore another branch's stash",
+        summary: "In the branch list, the menu of a branch that has a stash has Restore Stash \
+                  Here: with no local changes, the stash is restored onto the current branch \
+                  and leaves the other branch. Conflicts are handled as for any restore.",
+        ghd_behaviour: "A stash can only be restored on the branch it was made on, after \
+                        switching to it.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13156)],
+        code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-core/src/stash_flows.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

@@ -26,6 +26,11 @@
 //! changes are present" can discard the files it lists and run the
 //! operation again ([`Dispatcher::discard_and_retry`]); GHD offers stashing
 //! only.
+//!
+//! Deviation (`1204-restore-stash-from-other-branch`): another branch's
+//! stash can be restored onto the current branch
+//! ([`Dispatcher::restore_stash_from_branch`]); GHD restores a stash only on
+//! the branch it was made on.
 
 use std::path::PathBuf;
 
@@ -461,6 +466,58 @@ impl Dispatcher {
                     Self::show_error("Could not discard changes", &err, cx);
                     Self::refresh_repository(id, cx);
                 }
+            },
+        );
+    }
+
+    /// `1204-restore-stash-from-other-branch` › Restore Stash Here: pop the
+    /// newest Desktop stash made on `branch` onto the current branch, as
+    /// Restore does (only with no local changes; a conflicted restore keeps
+    /// the entry under `774`).
+    pub fn restore_stash_from_branch(id: u64, branch: String, cx: &mut App) {
+        let has_changes = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .is_some_and(|r| r.changed_files() > 0);
+        if has_changes {
+            Self::show_error(
+                "Could not restore stash",
+                "Commit, stash or discard your changes before restoring another branch's stash.",
+                cx,
+            );
+            return;
+        }
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let options = Self::stash_pop_options(cx);
+        let path = workdir.clone();
+        spawn_bg(
+            cx,
+            move || {
+                let Some(entry) = corvene_git::get_last_desktop_stash_entry_for_branch(
+                    git.clone(),
+                    &workdir,
+                    &branch,
+                )?
+                else {
+                    return Err(corvene_git::GitError::Gix(format!(
+                        "\"{branch}\" has no stash any more; it may have been restored or discarded \
+                         already."
+                    )));
+                };
+                let pop =
+                    corvene_git::pop_stash_entry_with(git.clone(), &workdir, &entry.sha, options)?;
+                Ok(Self::kept_after_pop(git, &workdir, &entry, pop))
+            },
+            move |result, cx| {
+                match result {
+                    Ok(kept) => Self::note_stash_pop(id, path, kept, cx),
+                    Err(err) => Self::show_error("Could not restore stash", &err, cx),
+                }
+                Self::show_section(id, corvene_models::Section::Changes, cx);
+                Self::refresh_repository(id, cx);
             },
         );
     }

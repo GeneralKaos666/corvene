@@ -47,6 +47,9 @@
 //! Deviation (`895-bulk-delete-branches`): ⌘-click / ⇧-click select several
 //! local branches (GHD's list selects one row) and their context menu
 //! deletes them together.
+//! Deviation (`1204-restore-stash-from-other-branch`): the menu of a branch
+//! with a stash has Restore Stash Here (GHD restores a stash only on its own
+//! branch).
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -1556,6 +1559,30 @@ impl BranchFoldout {
                                 Dispatcher::update_branch_from_upstream(id, name.clone(), cx)
                             })
                         });
+                    // Corvene (`1204-restore-stash-from-other-branch`): another
+                    // branch's stash onto this one, with a clean working directory
+                    let restore_stash = {
+                        let s = AppState::global(cx).read(cx);
+                        (local
+                            && !current
+                            && s.flags
+                                .bool(corvene_core::flags::ids::RESTORE_STASH_FROM_OTHER_BRANCH))
+                        .then(|| s.repo_states.get(&id))
+                        .flatten()
+                        .filter(|r| r.stashed_branches.contains(&branch.name))
+                        .map(|r| r.changed_files() == 0)
+                    }
+                    .map(|clean| {
+                        let name = branch.name.clone();
+                        MenuItem::new(
+                            mac_or("Restore Stash Here", "Restore stash here"),
+                            move |_, cx| {
+                                Dispatcher::close_foldout(cx);
+                                Dispatcher::restore_stash_from_branch(id, name.clone(), cx)
+                            },
+                        )
+                        .enabled(clean)
+                    });
                     // Corvene (`897-pinned-branches`)
                     let pin = {
                         let s = AppState::global(cx).read(cx);
@@ -1635,6 +1662,15 @@ impl BranchFoldout {
                     })]);
                     if let Some(update) = update {
                         items.insert(2, update);
+                    }
+                    if let Some(restore_stash) = restore_stash {
+                        let at = items
+                            .iter()
+                            .position(|i| {
+                                matches!(i.kind, crate::context_menu::MenuItemKind::Separator)
+                            })
+                            .unwrap_or(items.len());
+                        items.insert(at, restore_stash);
                     }
                     if let Some(pin) = pin {
                         let at = items
