@@ -4954,7 +4954,7 @@ impl Dispatcher {
         let clone_path = path.clone();
         let clone_url = url.clone();
         let task = cx.background_executor().spawn(async move {
-            corvene_git::clone_with_options(
+            let result = corvene_git::clone_with_options(
                 git,
                 &clone_url,
                 &clone_path,
@@ -4963,7 +4963,12 @@ impl Dispatcher {
                 |p| {
                     let _ = tx.send(p);
                 },
-            )
+            );
+            // `285-clone-keeps-repo-on-submodule-failure`
+            let kept = result
+                .as_ref()
+                .is_err_and(|err| corvene_git::clone_failed_in_submodule(&clone_path, err));
+            (result, kept)
         });
         // Progress pump: poll the channel on the foreground at ~30 Hz while cloning.
         let pump_state = state;
@@ -4996,12 +5001,35 @@ impl Dispatcher {
         .detach();
 
         cx.spawn(async move |cx: &mut AsyncCtx| {
-            let result = task.await;
+            let (result, kept) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.cloning.remove_id(clone_id);
                     cx.notify();
                 });
+                // Corvene (`285-clone-keeps-repo-on-submodule-failure`): the
+                // repository was cloned and only a submodule failed; GHD
+                // drops it
+                if kept
+                    && let Err(err) = &result
+                    && Self::state(cx)
+                        .read(cx)
+                        .flags
+                        .bool(crate::flags::ids::CLONE_KEEPS_REPO_ON_SUBMODULE_FAILURE)
+                {
+                    let message = ErrorMessage::explained(
+                        err,
+                        Some(
+                            "The repository was cloned and added, but some of its submodules \
+                             could not be cloned. Fix their URLs or access and run \
+                             git submodule update --init --recursive in the repository."
+                                .to_string(),
+                        ),
+                    );
+                    Self::add_repository_then(path, cx, Self::resume_open_in_desktop);
+                    Self::show_error("Some submodules could not be cloned", message, cx);
+                    return;
+                }
                 if result.is_err() {
                     Self::take_pending_alias(&path, cx);
                 }

@@ -1849,6 +1849,23 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
+    /// A clone whose submodules fail is added anyway.
+    CLONE_KEEPS_REPO_ON_SUBMODULE_FAILURE = 285 "clone-keeps-repo-on-submodule-failure" {
+        title: "Keep a clone when a submodule fails",
+        summary: "When cloning succeeds but one of the repository's submodules cannot be cloned \
+                  (a moved or private submodule), the repository is added and selected anyway \
+                  and the error, titled \"Some submodules could not be cloned\", says how to \
+                  fetch them later.",
+        ghd_behaviour: "The clone fails as a whole: the repository is not added, although git \
+                        left it on disk, and adding it again means Add Local Repository.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3242)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

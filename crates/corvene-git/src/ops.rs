@@ -13,6 +13,11 @@
 //! ([`CloneOptions::updating_files_step`], flag
 //! `281-clone-updating-files-step`): `Updating files` counts as the
 //! checkout step, so the bar moves on to 100 %.
+//!
+//! Deviation ([`clone_failed_in_submodule`], flag
+//! `285-clone-keeps-repo-on-submodule-failure`): a clone that only failed in
+//! a submodule is kept; GHD `CloningRepositoriesStore.clone`
+//! (`lib/stores/cloning-repositories-store.ts`) drops it on any error.
 
 use std::path::{Component, MAIN_SEPARATOR_STR, Path, PathBuf};
 use std::sync::Arc;
@@ -530,9 +535,90 @@ pub fn clone_with_options(
     Ok(())
 }
 
+/// Corvene (`285-clone-keeps-repo-on-submodule-failure`): whether a failed `git
+/// clone --recurse-submodules` only failed in a submodule, so the
+/// repository itself is at `path`, cloned and checked out (git keeps it
+/// then; it removes what it created only when the clone itself fails).
+/// GHD `CloningRepositoriesStore.clone` drops the repository on any error.
+pub fn clone_failed_in_submodule(path: &Path, err: &GitError) -> bool {
+    let GitError::Failed { stderr, .. } = err else {
+        return false;
+    };
+    // "clone of '…' into submodule path '…' failed", "Unable to checkout
+    // '…' in submodule path '…'", "Fetched in submodule path '…'"
+    stderr.contains("submodule path")
+        && path.join(".git").exists()
+        && gix::open(path)
+            .ok()
+            .is_some_and(|repo| repo.head_id().is_ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_submodule_keeps_the_clone() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let run = |args: &[&str], cwd: &Path| {
+            GitCommand::new(git.clone())
+                .args([
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "protocol.file.allow=always",
+                ])
+                .args(args)
+                .current_dir(cwd)
+                .run()
+                .unwrap();
+        };
+        let sub = dir.path().join("sub");
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(&src).unwrap();
+        run(&["init", "-q"], &sub);
+        run(&["commit", "-q", "--allow-empty", "-m", "s"], &sub);
+        run(&["init", "-q"], &src);
+        run(&["submodule", "add", "-q", "../sub", "sub"], &src);
+        run(&["commit", "-q", "-m", "init"], &src);
+        let gone = dir.path().join("gone");
+        run(
+            &[
+                "config",
+                "-f",
+                ".gitmodules",
+                "submodule.sub.url",
+                gone.to_string_lossy().as_ref(),
+            ],
+            &src,
+        );
+        run(&["commit", "-q", "-am", "broken"], &src);
+        let dst = dir.path().join("dst");
+        let err = clone_with_options(
+            git.clone(),
+            src.to_string_lossy().as_ref(),
+            &dst,
+            &CloneOptions::default(),
+            None,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(clone_failed_in_submodule(&dst, &err), "{err}");
+        // a clone that failed itself leaves nothing to keep
+        let missing = dir.path().join("missing");
+        let err = clone_with_options(
+            git.clone(),
+            gone.to_string_lossy().as_ref(),
+            &missing,
+            &CloneOptions::default(),
+            None,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(!clone_failed_in_submodule(&missing, &err));
+    }
 
     #[test]
     fn explains_a_stale_core_worktree() {
