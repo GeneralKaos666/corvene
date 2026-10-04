@@ -29,6 +29,8 @@
 //! Deviation (`854-branch-list-stash-icon`): a local branch with a Desktop
 //! stash shows the stash icon after its name (GHD `branch-list-item.tsx` does
 //! not).
+//! Deviation (`897-pinned-branches`): Pin / Unpin in the context menu and a
+//! Pinned group below the default branch (hidden while filtering).
 //! Deviation (`896-branch-upstream-gone-group`): local branches whose
 //! upstream was deleted on the remote are grouped last under "Deleted on
 //! Remote" (GHD lists them among the others).
@@ -361,6 +363,46 @@ pub fn group_branches(
     groups
 }
 
+/// Flag `897-pinned-branches`: moves the branches named in `pinned` (in
+/// that order) out of Recent and Other into a Pinned group after the
+/// Default Branch group. The default branch stays in its own group.
+pub fn group_pinned(groups: Vec<BranchGroup>, pinned: &[String]) -> Vec<BranchGroup> {
+    let default_title = mac_or("Default Branch", "Default branch");
+    let mut found: Vec<Branch> = Vec::new();
+    let mut out: Vec<BranchGroup> = groups
+        .into_iter()
+        .map(|mut g| {
+            if g.title != default_title {
+                let (pin, rest): (Vec<Branch>, Vec<Branch>) = g
+                    .branches
+                    .into_iter()
+                    .partition(|b| pinned.contains(&b.name));
+                found.extend(pin);
+                g.branches = rest;
+            }
+            g
+        })
+        .filter(|g| !g.branches.is_empty())
+        .collect();
+    let mut ordered: Vec<Branch> = Vec::new();
+    for name in pinned {
+        if let Some(ix) = found.iter().position(|b| &b.name == name) {
+            ordered.push(found.remove(ix));
+        }
+    }
+    if !ordered.is_empty() {
+        let at = usize::from(out.first().is_some_and(|g| g.title == default_title));
+        out.insert(
+            at,
+            BranchGroup {
+                title: "Pinned",
+                branches: ordered,
+            },
+        );
+    }
+    out
+}
+
 /// Flag `896-branch-upstream-gone-group`: moves the local branches whose
 /// upstream is gone (configured, but its remote-tracking branch deleted)
 /// out of their groups into a "Deleted on Remote" group at the end; the
@@ -504,13 +546,27 @@ impl BranchFoldout {
         if remote_only {
             remote_group(&info.branches, &query, cx)
         } else {
-            let groups = group_branches(
+            let mut groups = group_branches(
                 &info.branches,
                 rs.default_branch.as_deref(),
                 &rs.recent_branches,
                 &query,
                 sort_by_date(cx),
             );
+            // `897-pinned-branches`, not while filtering
+            let pinned = s
+                .selected
+                .and_then(|id| s.repository(id))
+                .map(|r| r.pinned_branches.as_slice())
+                .filter(|p| {
+                    !p.is_empty()
+                        && query.is_empty()
+                        && s.flags.bool(corvene_core::flags::ids::PINNED_BRANCHES)
+                })
+                .unwrap_or_default();
+            if !pinned.is_empty() {
+                groups = group_pinned(groups, pinned);
+            }
             if s.flags
                 .bool(corvene_core::flags::ids::BRANCH_UPSTREAM_GONE_GROUP)
             {
@@ -518,6 +574,7 @@ impl BranchFoldout {
                 let keep: Vec<&str> = current
                     .into_iter()
                     .chain(rs.default_branch.as_deref())
+                    .chain(pinned.iter().map(String::as_str))
                     .collect();
                 group_upstream_gone(groups, &info.branches, &keep)
             } else {
@@ -1190,6 +1247,22 @@ impl BranchFoldout {
                                 Dispatcher::update_branch_from_upstream(id, name.clone(), cx)
                             })
                         });
+                    // Corvene (`897-pinned-branches`)
+                    let pin = {
+                        let s = AppState::global(cx).read(cx);
+                        s.flags
+                            .bool(corvene_core::flags::ids::PINNED_BRANCHES)
+                            .then(|| {
+                                s.repository(id)
+                                    .is_some_and(|r| r.pinned_branches.contains(&branch.name))
+                            })
+                    }
+                    .map(|pinned| {
+                        let name = branch.name.clone();
+                        MenuItem::new(if pinned { "Unpin" } else { "Pin" }, move |_, cx| {
+                            Dispatcher::set_branch_pinned(id, name.clone(), !pinned, cx)
+                        })
+                    });
                     let mut items = vec![
                         MenuItem::new("Rename…", move |_, cx| {
                             Dispatcher::close_foldout(cx);
@@ -1253,6 +1326,15 @@ impl BranchFoldout {
                     })]);
                     if let Some(update) = update {
                         items.insert(2, update);
+                    }
+                    if let Some(pin) = pin {
+                        let at = items
+                            .iter()
+                            .position(|i| {
+                                matches!(i.kind, crate::context_menu::MenuItemKind::Separator)
+                            })
+                            .unwrap_or(items.len());
+                        items.insert(at, pin);
                     }
                     crate::native_menu::show_context_menu(items, ev.position, window, cx);
                 }
@@ -1854,6 +1936,32 @@ mod tests {
             tip_time: None,
             remote_name: Some("origin".into()),
         }
+    }
+
+    #[::core::prelude::v1::test]
+    fn pinned_branches_follow_the_default_branch_in_pin_order() {
+        let all = vec![
+            local("main", None),
+            local("a", None),
+            local("b", None),
+            local("c", None),
+        ];
+        let groups = group_branches(&all, Some("main"), &["a".into()], "", false);
+        let groups = group_pinned(
+            groups,
+            &["c".into(), "a".into(), "main".into(), "gone".into()],
+        );
+        let names = |g: &BranchGroup| {
+            g.branches
+                .iter()
+                .map(|b| b.name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(groups.len(), 3);
+        assert_eq!(names(&groups[0]), ["main"]);
+        assert_eq!(groups[1].title, "Pinned");
+        assert_eq!(names(&groups[1]), ["c", "a"]);
+        assert_eq!(names(&groups[2]), ["b"]);
     }
 
     #[::core::prelude::v1::test]

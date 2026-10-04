@@ -5774,6 +5774,22 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs"],
     },
 
+    /// Branches pinned to a group at the top of the branch list.
+    PINNED_BRANCHES = 897 "pinned-branches" {
+        title: "Pinned branches",
+        summary: "The branch list's context menu offers Pin and Unpin; pinned branches (kept per \
+                  repository) are listed in a Pinned group below the default branch and above \
+                  Recent Branches instead of in their usual group. The group is hidden while the \
+                  list is filtered.",
+        ghd_behaviour: "Only the most recently checked out branches are listed above the others.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15767)],
+        code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

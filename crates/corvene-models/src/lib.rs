@@ -47,6 +47,10 @@ pub struct Repository {
     /// name) this repository opens in; `None` = the one in Settings.
     #[serde(default)]
     pub editor: Option<String>,
+    /// Corvene (flag `897-pinned-branches`): branch names listed in the
+    /// branch list's Pinned group.
+    #[serde(default)]
+    pub pinned_branches: Vec<String>,
 }
 
 /// GHD `ICommitOptions`: `skipCommitHooks`, `signOffCommits`, `allowEmptyCommit`.
@@ -76,6 +80,7 @@ impl Repository {
             tags_to_push: Vec::new(),
             pinned: false,
             editor: None,
+            pinned_branches: Vec::new(),
         }
     }
 

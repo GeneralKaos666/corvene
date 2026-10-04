@@ -3122,6 +3122,20 @@ impl Dispatcher {
         });
     }
 
+    /// Corvene (`897-pinned-branches`): pin or unpin a branch of a repository.
+    pub fn set_branch_pinned(id: u64, branch: String, pinned: bool, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
+                repo.pinned_branches.retain(|b| *b != branch);
+                if pinned {
+                    repo.pinned_branches.push(branch);
+                }
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
     /// `518-per-repo-editor`: the repository's own external editor (`None`:
     /// the one in Settings).
     pub fn set_repository_editor(id: u64, editor: Option<String>, cx: &mut App) {
@@ -3640,10 +3654,22 @@ impl Dispatcher {
     }
 
     pub fn rename_branch(id: u64, old: String, new: String, cx: &mut App) {
-        Self::run_history_op(
+        let (from, to) = (old.clone(), new.clone());
+        Self::run_history_op_then(
             id,
             "Could not rename branch",
             move |git, workdir| corvene_git::rename_branch(git, &workdir, &old, &new),
+            // `897-pinned-branches`: a pinned branch stays pinned
+            move |cx| {
+                Self::state(cx).update(cx, |s, _| {
+                    if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
+                        && let Some(pin) = repo.pinned_branches.iter_mut().find(|b| **b == from)
+                    {
+                        *pin = to;
+                        persist_repositories(s);
+                    }
+                })
+            },
             cx,
         );
     }
