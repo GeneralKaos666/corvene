@@ -106,6 +106,8 @@ pub struct MenuExtras {
     pub show_add_license: bool,
     /// Flag `247-fetch-all-repositories`.
     pub fetch_all: bool,
+    /// Flag `299-pull-all-repositories`.
+    pub pull_all: bool,
     /// Flag `899-tags-in-branch-list`: Repository › Fetch All Tags.
     pub fetch_tags: bool,
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
@@ -139,6 +141,7 @@ impl MenuExtras {
             show_main_window: flags.bool(ids::WINDOW_MENU_MAIN_WINDOW),
             show_add_license: flags.bool(ids::ADD_LICENSE),
             fetch_all: flags.bool(ids::FETCH_ALL_REPOSITORIES),
+            pull_all: flags.bool(ids::PULL_ALL_REPOSITORIES),
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
@@ -538,6 +541,12 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             FetchAllRepositories,
         ));
     }
+    if extras.pull_all {
+        repository.push(item(
+            l("Pull All Repositories", "Pull all r&epositories"),
+            PullAllRepositories,
+        ));
+    }
     repository.push(item(remove_repo_label, RemoveRepository));
     // Android: a repository in Corvene's own storage can move to shared
     // storage, where Termux reaches it (`corvene_core::shared_storage`)
@@ -850,6 +859,7 @@ mod tests {
                     show_main_window: true,
                     show_add_license: true,
                     fetch_all: true,
+                    pull_all: true,
                     fetch_tags: true,
                     request_reviewers: true,
                     move_changes_to_worktree: Some(true),

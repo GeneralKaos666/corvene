@@ -1242,25 +1242,51 @@ pub fn fast_forward_tracking_branches(
 /// `Ok(false)` when any of that does not hold. Corvene addition
 /// (desktop#16586: pull after a background fetch).
 pub fn fast_forward_if_only_behind(git: Arc<GitBinary>, workdir: &Path) -> Result<bool> {
+    Ok(fast_forward_outcome(git, workdir)? == FastForward::Done)
+}
+
+/// What [`fast_forward_outcome`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FastForward {
+    /// The branch caught up with its upstream.
+    Done,
+    /// Nothing to pull: the upstream has no commits the branch lacks.
+    UpToDate,
+    /// No upstream (or a detached HEAD).
+    NoUpstream,
+    /// A merge, rebase or cherry-pick is in progress.
+    OperationInProgress,
+    /// The branch and its upstream both have commits the other lacks.
+    Diverged,
+    /// Behind only, but the working directory has changes.
+    LocalChanges,
+}
+
+/// [`fast_forward_if_only_behind`], saying why nothing happened (Corvene,
+/// `299-pull-all-repositories`).
+pub fn fast_forward_outcome(git: Arc<GitBinary>, workdir: &Path) -> Result<FastForward> {
     let status = crate::get_status(git.clone(), workdir)?;
-    let only_behind = status
-        .ahead_behind
-        .is_some_and(|ab| ab.ahead == 0 && ab.behind > 0);
-    if !only_behind
-        || status.upstream.is_none()
-        || !status.files.is_empty()
-        || status.merge_head_found
-        || status.rebase_in_progress
-        || status.cherry_pick_head_found
-    {
-        return Ok(false);
+    if status.merge_head_found || status.rebase_in_progress || status.cherry_pick_head_found {
+        return Ok(FastForward::OperationInProgress);
+    }
+    let Some(ab) = status.ahead_behind.filter(|_| status.upstream.is_some()) else {
+        return Ok(FastForward::NoUpstream);
+    };
+    if ab.behind == 0 {
+        return Ok(FastForward::UpToDate);
+    }
+    if ab.ahead > 0 {
+        return Ok(FastForward::Diverged);
+    }
+    if !status.files.is_empty() {
+        return Ok(FastForward::LocalChanges);
     }
     GitCommand::new(git)
         .args(["merge", "--ff-only", "@{upstream}"])
         .env("GIT_REFLOG_ACTION", "pull")
         .current_dir(workdir)
         .run()?;
-    Ok(true)
+    Ok(FastForward::Done)
 }
 
 /// The local branch `name` once pointed at `upstream`'s current tip (it is

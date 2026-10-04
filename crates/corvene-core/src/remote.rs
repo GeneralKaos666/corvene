@@ -34,6 +34,9 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! Repository › Pull All Repositories fetches every repository and
+//! fast-forwards the branches that are only behind
+//! (`299-pull-all-repositories`).
 //! The hourly background fetch of a GitHub repository can be skipped while
 //! GitHub says nothing was pushed since the last one, with a real fetch at
 //! least every six hours (`298-background-fetch-skips-unchanged`; GHD
@@ -892,29 +895,57 @@ impl Dispatcher {
     /// time on a background thread, skipping those with a network operation
     /// running; failures are collected into one error.
     pub fn fetch_all_repositories(cx: &mut dyn Host) {
+        if Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FETCH_ALL_REPOSITORIES)
+        {
+            Self::sync_all_repositories(false, cx);
+        }
+    }
+
+    /// Repository › Pull All Repositories (`299-pull-all-repositories`; GHD
+    /// has none): Fetch All Repositories, then each checked-out branch that
+    /// is only behind its upstream, in a clean working directory, is
+    /// fast-forwarded. Nothing is merged or rebased, so nothing can conflict;
+    /// the repositories left as they were are listed in one dialog.
+    pub fn pull_all_repositories(cx: &mut dyn Host) {
+        if Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::PULL_ALL_REPOSITORIES)
+        {
+            Self::sync_all_repositories(true, cx);
+        }
+    }
+
+    /// Fetch (and with `pull` fast-forward) every listed repository.
+    fn sync_all_repositories(pull: bool, cx: &mut dyn Host) {
+        // one Fetch / Pull All at a time
         static RUNNING: AtomicBool = AtomicBool::new(false);
-        let (git, repos, use_helper, github_hosts, selected) = {
+        let (git, repos, busy, use_helper, github_hosts, selected) = {
             let s = Self::state(cx).read(cx);
-            if !s.flags.bool(crate::flags::ids::FETCH_ALL_REPOSITORIES) {
-                return;
-            }
             let Some(git) = s.git.clone() else { return };
             let use_helper = s.settings.use_external_credential_helper;
-            let repos: Vec<_> = s
-                .repositories
-                .iter()
-                .filter(|r| !r.missing)
-                .filter(|r| {
-                    !s.repo_states
-                        .get(&r.id)
-                        .is_some_and(|rs| rs.push_pull_in_progress)
-                })
+            let in_progress = |id: u64| {
+                s.repo_states
+                    .get(&id)
+                    .is_some_and(|rs| rs.push_pull_in_progress)
+            };
+            let listed = s.repositories.iter().filter(|r| !r.missing);
+            let busy: Vec<String> = listed
+                .clone()
+                .filter(|r| in_progress(r.id))
+                .map(|r| r.name())
+                .collect();
+            let repos: Vec<_> = listed
+                .filter(|r| !in_progress(r.id))
                 .map(|r| (r.id, r.name(), r.path.clone(), Self::fetch_options(s, r.id)))
                 .collect();
             let github_hosts: Vec<String> = std::iter::once("github.com".to_string())
                 .chain(s.accounts.iter().map(|a| a.host()))
                 .collect();
-            (git, repos, use_helper, github_hosts, s.selected)
+            (git, repos, busy, use_helper, github_hosts, s.selected)
         };
         if RUNNING.swap(true, Ordering::SeqCst) {
             return;
@@ -929,6 +960,8 @@ impl Dispatcher {
             cx,
             move || {
                 let mut failures = Vec::new();
+                // `299-pull-all-repositories`: the repositories left alone
+                let mut summary = PullAllSummary::default();
                 // `288-dead-remote-indicator`: (id, fetch error or `None`)
                 let mut outcomes = Vec::new();
                 for (id, name, path, options) in repos {
@@ -963,6 +996,12 @@ impl Dispatcher {
                                 skip_worktree_branches,
                             );
                             outcomes.push((id, None));
+                            if pull {
+                                summary.add(
+                                    name,
+                                    corvene_git::fast_forward_outcome(git.clone(), &info.workdir),
+                                );
+                            }
                         }
                         Err(err) => {
                             failures.push(format!("{name}: {err}"));
@@ -970,14 +1009,20 @@ impl Dispatcher {
                         }
                     }
                 }
-                (failures, outcomes)
+                (failures, summary, outcomes)
             },
-            move |(failures, outcomes), cx| {
+            move |(failures, mut summary, outcomes), cx| {
                 RUNNING.store(false, Ordering::SeqCst);
                 for (id, err) in outcomes {
                     Self::note_remote_not_found(id, err.as_ref(), cx);
                 }
-                if !failures.is_empty() {
+                if pull {
+                    summary.busy = busy;
+                    summary.failed.extend(failures);
+                    if let Some(message) = summary.message() {
+                        Self::show_error("Some repositories were not pulled", message, cx);
+                    }
+                } else if !failures.is_empty() {
                     Self::show_error(
                         "Could not fetch all repositories",
                         failures.join("\n\n"),
@@ -2212,6 +2257,65 @@ impl Dispatcher {
     }
 }
 
+/// `299-pull-all-repositories`: the repositories Pull All left as they
+/// were, by reason.
+#[derive(Debug, Default)]
+struct PullAllSummary {
+    diverged: Vec<String>,
+    local_changes: Vec<String>,
+    in_progress: Vec<String>,
+    /// Another network operation was running.
+    busy: Vec<String>,
+    /// "name: error" (the fetch or the fast-forward failed).
+    failed: Vec<String>,
+}
+
+impl PullAllSummary {
+    fn add(
+        &mut self,
+        name: String,
+        outcome: Result<corvene_git::FastForward, corvene_git::GitError>,
+    ) {
+        use corvene_git::FastForward;
+        match outcome {
+            Ok(FastForward::Diverged) => self.diverged.push(name),
+            Ok(FastForward::LocalChanges) => self.local_changes.push(name),
+            Ok(FastForward::OperationInProgress) => self.in_progress.push(name),
+            Ok(FastForward::Done | FastForward::UpToDate | FastForward::NoUpstream) => {}
+            Err(err) => self.failed.push(format!("{name}: {err}")),
+        }
+    }
+
+    /// The dialog's text, `None` when every repository was pulled.
+    fn message(&self) -> Option<String> {
+        let sections = [
+            (
+                "Both the branch and its upstream have new commits; pull these one at a time:",
+                &self.diverged,
+            ),
+            (
+                "Uncommitted changes; commit or stash them, then pull:",
+                &self.local_changes,
+            ),
+            (
+                "A merge, rebase or cherry-pick is in progress:",
+                &self.in_progress,
+            ),
+            ("Another fetch, pull or push was running:", &self.busy),
+            ("Could not be fetched or fast-forwarded:", &self.failed),
+        ];
+        let text: Vec<String> = sections
+            .iter()
+            .filter(|(_, names)| !names.is_empty())
+            .map(|(title, names)| {
+                let lines: Vec<String> = names.iter().map(|n| format!("• {n}")).collect();
+                format!("{title}\n{}", lines.join("\n"))
+            })
+            .collect();
+        (!text.is_empty()).then(|| text.join("\n\n"))
+    }
+}
+
 fn r_loading(cx: &dyn Host, id: u64) -> bool {
     Dispatcher::state(cx)
         .read(cx)
@@ -2257,6 +2361,22 @@ mod tests {
             Some(fetched + Duration::from_secs(60)),
             fetched
         ));
+    }
+
+    #[test]
+    fn pull_all_summary_lists_what_was_left() {
+        use corvene_git::FastForward;
+        let mut summary = PullAllSummary::default();
+        summary.add("a".into(), Ok(FastForward::Done));
+        summary.add("b".into(), Ok(FastForward::UpToDate));
+        assert_eq!(summary.message(), None);
+        summary.add("c".into(), Ok(FastForward::Diverged));
+        summary.add("d".into(), Ok(FastForward::LocalChanges));
+        summary.failed.push("e: boom".into());
+        let message = summary.message().unwrap();
+        assert!(message.contains("one at a time:\n• c"));
+        assert!(message.contains("then pull:\n• d"));
+        assert!(message.ends_with("fast-forwarded:\n• e: boom"));
     }
 
     #[test]

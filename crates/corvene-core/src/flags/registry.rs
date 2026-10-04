@@ -2109,6 +2109,23 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs"],
     },
 
+    /// Repository › Pull All Repositories.
+    PULL_ALL_REPOSITORIES = 299 "pull-all-repositories" {
+        title: "Repository › Pull All Repositories",
+        summary: "The Repository menu can pull every listed repository: each is fetched, and \
+                  its checked-out branch is fast-forwarded when it is only behind its upstream \
+                  and the working directory is clean. Nothing is merged or rebased, so nothing \
+                  can conflict; repositories left as they were (diverged, with changes, in the \
+                  middle of a merge, or failing) are listed in one dialog.",
+        ghd_behaviour: "Repositories are pulled one at a time.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20525), Upstream::issue(21151)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

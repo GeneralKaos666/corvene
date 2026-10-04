@@ -1125,6 +1125,9 @@ pub(crate) fn main() {
         on_menu_action(cx, move |_: &FetchAllRepositories, cx| {
             Dispatcher::fetch_all_repositories(cx);
         });
+        on_menu_action(cx, move |_: &PullAllRepositories, cx| {
+            Dispatcher::pull_all_repositories(cx);
+        });
         on_menu_action(cx, move |_: &FetchAllTags, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::fetch_all_tags(id, cx);

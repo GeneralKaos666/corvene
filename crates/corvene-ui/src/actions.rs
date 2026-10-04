@@ -100,6 +100,8 @@ gpui_kit::actions!(
         Pull,
         Fetch,
         FetchAllRepositories,
+        // Repository › Pull All Repositories (`299-pull-all-repositories`)
+        PullAllRepositories,
         // Repository › Fetch All Tags (`899-tags-in-branch-list`)
         FetchAllTags,
         // Branch › Request Reviewers… (`336-request-reviewers`)
