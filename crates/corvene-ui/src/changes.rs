@@ -77,6 +77,8 @@
 //!   (`114-resizable-commit-message`).
 //! - an untracked folder that is a repository has "Add as Submodule…"
 //!   (`785-embedded-repo-commit`, `corvene_core::commit_checks`).
+//! - the commit options gear has "Commit to New Branch…"
+//!   (`787-commit-to-new-branch`, `corvene_core::new_branch_flows`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -2065,6 +2067,39 @@ impl ChangesSidebar {
                     )
                 },
             ));
+        }
+        // Corvene: `787-commit-to-new-branch`, the changes committed on a new
+        // branch that is then published with a pull request
+        let new_branch = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::COMMIT_TO_NEW_BRANCH)
+                .then(|| {
+                    s.selected_state()
+                        .is_some_and(|rs| rs.commit_to_amend.is_none() && rs.mco.is_none())
+                        && !self.commit_disabled(cx)
+                })
+        };
+        if let Some(enabled) = new_branch {
+            let summary = self.summary_or_placeholder(cx);
+            let description = self.description.read(cx).value().to_string();
+            items.push(MenuItem::separator());
+            items.push(
+                MenuItem::new(
+                    mac_or("Commit to New Branch…", "Commit to new branch…"),
+                    move |_, cx| {
+                        Dispatcher::show_popup(
+                            Popup::CommitToNewBranch {
+                                repo: id,
+                                summary: summary.clone(),
+                                description: description.clone(),
+                            },
+                            cx,
+                        )
+                    },
+                )
+                .enabled(enabled),
+            );
         }
         // Corvene: `780-amend-from-commit-options`, History's Amend Commit…
         // (the same warnings) as a toggle

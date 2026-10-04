@@ -53,9 +53,9 @@ pub use branch_ops::{
     find_default_branch, get_branch_checkouts, get_branches_pointed_at,
     get_last_desktop_stash_entry_for_branch, get_merged_branches, get_stashes,
     is_local_changes_overwritten, last_desktop_stash_entry_index, merge_branch,
-    merge_branch_with_message, modified_assume_unchanged, parse_recent_branches, pop_stash_entry,
-    pop_stash_on_branch, recent_branches, remote_head, rename_branch, stashed_files,
-    update_submodules_after_checkout,
+    merge_branch_with_message, modified_assume_unchanged, move_branch_back, parse_recent_branches,
+    pop_stash_entry, pop_stash_on_branch, recent_branches, remote_head, rename_branch,
+    stashed_files, update_submodules_after_checkout,
 };
 pub use commit::{
     CommitAuthor, CommitOptions, RECEIVE_LIMIT, add_paths, assume_unchanged_paths, commit,

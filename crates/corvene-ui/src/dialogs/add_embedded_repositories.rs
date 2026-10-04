@@ -20,7 +20,7 @@ use crate::theme::sizes::*;
 pub struct AddEmbeddedRepositoriesDialog {
     repo: u64,
     repositories: Vec<EmbeddedRepository>,
-    commit: Option<(String, String)>,
+    commit: Option<(String, String, CommitChecks)>,
     dont_show_again: bool,
 }
 
@@ -28,7 +28,7 @@ impl AddEmbeddedRepositoriesDialog {
     pub fn new(
         repo: u64,
         repositories: Vec<EmbeddedRepository>,
-        commit: Option<(String, String)>,
+        commit: Option<(String, String, CommitChecks)>,
     ) -> Self {
         Self {
             repo,
@@ -152,13 +152,14 @@ impl Render for AddEmbeddedRepositoriesDialog {
                             });
                         }
                         match &commit {
-                            Some((summary, description)) => Dispatcher::commit_with(
+                            Some((summary, description, checks)) => Dispatcher::commit_with(
                                 repo,
                                 summary.clone(),
                                 description.clone(),
                                 CommitChecks {
                                     allow_oversized: true,
                                     embedded: Some(repositories.clone()),
+                                    ..checks.clone()
                                 },
                                 cx,
                             ),

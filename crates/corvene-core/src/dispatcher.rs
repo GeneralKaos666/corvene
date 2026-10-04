@@ -4988,9 +4988,14 @@ impl Dispatcher {
         id: u64,
         summary: String,
         description: String,
-        embedded: Vec<corvene_git::EmbeddedRepository>,
+        checks: crate::commit_checks::CommitChecks,
         cx: &mut dyn Host,
     ) {
+        let embedded = checks.embedded.unwrap_or_default();
+        // Corvene (`787-commit-to-new-branch`): publish and open a pull
+        // request once the commit landed
+        let publish =
+            checks.after == crate::new_branch_flows::AfterCommit::PublishAndOpenPullRequest;
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -5193,7 +5198,19 @@ impl Dispatcher {
                     Self::show_error("Could not commit", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
-                if committed && push_after {
+                let branch = Self::state(cx)
+                    .read(cx)
+                    .repo_states
+                    .get(&id)
+                    .and_then(|rs| rs.info.as_ref())
+                    .and_then(|i| i.current_branch())
+                    .map(|b| b.name.clone());
+                if committed
+                    && publish
+                    && let Some(branch) = branch
+                {
+                    Self::publish_and_open_pull_request(id, branch, cx);
+                } else if committed && push_after {
                     Self::push(id, false, None, cx);
                 }
             });

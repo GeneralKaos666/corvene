@@ -16,6 +16,8 @@
 //! remote" checkbox and hides it for the remote's default branch
 //! (`870-delete-remote-names-upstream`).
 //! Create and Rename refuse `head` in any case (`846-reject-head-branch-name`).
+//! Create a Branch also names the branch of "Commit to New Branch…" and
+//! "Create Branch from Commits…" (`787-commit-to-new-branch`).
 //! Rename Branch focuses the name box, not the close button
 //! (`872-rename-branch-focuses-name`).
 //! Create a Branch can prefill a name prefix (`845-branch-name-prefix`).
@@ -362,6 +364,26 @@ pub struct CreateBranchDialog {
     other_branch: Option<String>,
     /// Cherry-pick › New Branch: "Cherry-pick to New Branch" / "Create Branch and Cherry-pick".
     cherry_pick: bool,
+    /// `787-commit-to-new-branch`: what the new branch is for.
+    purpose: Purpose,
+    /// `787-commit-to-new-branch`: "Remove them from <branch>" (unticked
+    /// until the user asks).
+    remove_from_current: bool,
+}
+
+/// `787-commit-to-new-branch`: what OK does with the branch name.
+type NameThen = Box<dyn Fn(String, &mut App)>;
+
+/// `787-commit-to-new-branch`: the Create a Branch dialog's other uses.
+enum Purpose {
+    Branch,
+    /// The commit form's "Commit to New Branch…".
+    Commit {
+        summary: String,
+        description: String,
+    },
+    /// History's "Create Branch from Commits…".
+    FromCommits(corvene_core::new_branch_flows::FromCommitsPlan),
 }
 
 impl CreateBranchDialog {
@@ -424,6 +446,110 @@ impl CreateBranchDialog {
             other_focus: cx.focus_handle(),
             other_branch: None,
             cherry_pick: false,
+            purpose: Purpose::Branch,
+            remove_from_current: false,
+        }
+    }
+
+    /// `787-commit-to-new-branch`: "Commit to New Branch…": the branch
+    /// starts at `HEAD` with the changes and the commit lands there.
+    pub fn new_for_commit(
+        state: Entity<AppState>,
+        repo: u64,
+        summary: String,
+        description: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(state, repo, None, String::new(), window, cx);
+        this.purpose = Purpose::Commit {
+            summary,
+            description,
+        };
+        this
+    }
+
+    /// `787-commit-to-new-branch`: History's "Create Branch from Commits…".
+    pub fn new_from_commits(
+        state: Entity<AppState>,
+        repo: u64,
+        plan: corvene_core::new_branch_flows::FromCommitsPlan,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self::new(state, repo, None, String::new(), window, cx);
+        this.purpose = Purpose::FromCommits(plan);
+        this
+    }
+
+    /// `787-commit-to-new-branch`: what the dialog says instead of the start
+    /// point choice (the branch always starts at `HEAD`).
+    fn purpose_description(&self, cx: &mut Context<Self>) -> Option<Vec<AnyElement>> {
+        let github = self
+            .state
+            .read(cx)
+            .repository(self.repo)
+            .is_some_and(|r| r.github.is_some());
+        let then = if github {
+            " Then the branch is published and its pull request page opens."
+        } else {
+            " Then the branch is published."
+        };
+        match &self.purpose {
+            Purpose::Branch => None,
+            Purpose::Commit { .. } => Some(vec![
+                div()
+                    .child(format!(
+                        "Your changes are committed on the new branch, which starts at your \
+                         current commit.{then}"
+                    ))
+                    .into_any_element(),
+            ]),
+            Purpose::FromCommits(plan) => {
+                let n = plan.commits.len();
+                let mut parts = vec![
+                    div()
+                        .child(format!(
+                            "The new branch starts at the newest of the {n} selected commits, so \
+                             it has them all.{then}"
+                        ))
+                        .into_any_element(),
+                ];
+                if let Some(back) = &plan.move_back {
+                    let ticked = self.remove_from_current;
+                    let weak = cx.weak_entity();
+                    parts.push(
+                        crate::widgets::checkbox_row(
+                            "create-branch-remove-commits",
+                            ticked,
+                            format!("Remove the {n} commits from {}", back.branch),
+                            move |value, _, cx| {
+                                weak.update(cx, |this, cx| {
+                                    this.remove_from_current = value;
+                                    cx.notify();
+                                })
+                                .ok();
+                            },
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                    if ticked {
+                        let short = &back.target[..back.target.len().min(7)];
+                        parts.push(
+                            div()
+                                .text_color(cx.ghd().text_secondary)
+                                .child(format!(
+                                    "{} goes back to commit {short}. The commits stay on the new \
+                                     branch; none of them has been pushed.",
+                                    back.branch
+                                ))
+                                .into_any_element(),
+                        );
+                    }
+                }
+                Some(parts)
+            }
         }
     }
 
@@ -508,7 +634,9 @@ impl Render for CreateBranchDialog {
         // Where the branch starts from (`renderBranchDescription`).
         let mut description: Vec<AnyElement> = Vec::new();
         let mut start_point: Option<String> = None;
-        if let Some((summary, short)) = &target_commit {
+        if let Some(purpose) = self.purpose_description(cx) {
+            description.extend(purpose);
+        } else if let Some((summary, short)) = &target_commit {
             description.push(
                 div()
                     .child(format!(
@@ -736,13 +864,71 @@ crate::branch_list::sort_by_date(cx),
             })
             .children(description);
         let name_for_ok = name.clone();
+        // `787-commit-to-new-branch`
+        let then: Option<NameThen> = match &self.purpose {
+            Purpose::Branch => None,
+            Purpose::Commit {
+                summary,
+                description,
+            } => {
+                let (summary, description) = (summary.clone(), description.clone());
+                Some(Box::new(move |name, cx| {
+                    Dispatcher::commit_to_new_branch(
+                        repo,
+                        name,
+                        summary.clone(),
+                        description.clone(),
+                        cx,
+                    )
+                }))
+            }
+            Purpose::FromCommits(plan) => {
+                let commits = plan.commits.clone();
+                let move_back = plan.move_back.clone().filter(|_| self.remove_from_current);
+                Some(Box::new(move |name, cx| {
+                    Dispatcher::create_branch_from_commits(
+                        repo,
+                        name,
+                        commits.clone(),
+                        move_back.clone(),
+                        cx,
+                    )
+                }))
+            }
+        };
+        let (title, ok_label): (&'static str, SharedString) = match &self.purpose {
+            Purpose::Commit { .. } => (
+                mac_or("Commit to New Branch", "Commit to new branch"),
+                mac_or("Create Branch and Commit", "Create branch and commit").into(),
+            ),
+            Purpose::FromCommits(_) if self.remove_from_current => (
+                mac_or("Create Branch from Commits", "Create branch from commits"),
+                mac_or(
+                    "Create Branch and Move Commits",
+                    "Create branch and move commits",
+                )
+                .into(),
+            ),
+            Purpose::FromCommits(_) => (
+                mac_or("Create Branch from Commits", "Create branch from commits"),
+                mac_or("Create Branch", "Create branch").into(),
+            ),
+            Purpose::Branch if cherry_pick => (
+                mac_or("Cherry-pick to New Branch", "Cherry-pick to new branch"),
+                mac_or(
+                    "Create Branch and Cherry-pick",
+                    "Create branch and cherry-pick",
+                )
+                .into(),
+            ),
+            Purpose::Branch => (
+                mac_or("Create a Branch", "Create a branch"),
+                mac_or("Create Branch", "Create branch").into(),
+            ),
+        };
         dialog(
             "dialog-create-branch",
-            if cherry_pick {
-                mac_or("Cherry-pick to New Branch", "Cherry-pick to new branch")
-            } else {
-                mac_or("Create a Branch", "Create a branch")
-            },
+            title,
             content,
             vec![
                 DialogButton {
@@ -754,19 +940,16 @@ crate::branch_list::sort_by_date(cx),
                 },
                 DialogButton {
                     id: "create-branch-ok",
-                    label: if cherry_pick {
-                        mac_or(
-                            "Create Branch and Cherry-pick",
-                            "Create branch and cherry-pick",
-                        )
-                        .into()
-                    } else {
-                        mac_or("Create Branch", "Create branch").into()
-                    },
+                    label: ok_label,
                     primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if disabled {
+                            return;
+                        }
+                        if let Some(then) = &then {
+                            Dispatcher::close_popup(cx);
+                            then(name_for_ok.clone(), cx);
                             return;
                         }
                         if cherry_pick {

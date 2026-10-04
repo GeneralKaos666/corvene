@@ -4722,6 +4722,27 @@ registry! {
         code: &["crates/corvene-git/src/status_gix.rs", "crates/corvene-git/src/diff.rs"],
     },
 
+    /// Commit to a new branch / move the newest commits to one.
+    COMMIT_TO_NEW_BRANCH = 787 "commit-to-new-branch" {
+        title: "Commit to a new branch",
+        summary: "The commit form's gear menu has \"Commit to New Branch…\": after a name, a \
+                  branch is created at the current commit with the changes, they are committed \
+                  there, the branch is published and its Create Pull Request page opens (GitHub \
+                  repositories). Selecting the current branch's newest commits in History offers \
+                  \"Create Branch from N Commits…\" (branch, publish, pull request), whose \
+                  \"Remove the commits from <branch>\" box, offered only for commits that were \
+                  never pushed, also moves the old branch back to before them.",
+        ghd_behaviour: "Create the branch first (Branch › New Branch, bringing the changes), \
+                        commit, publish, then Create Pull Request; commits made on the wrong \
+                        branch are moved with the command line.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14933)],
+        code: &["crates/corvene-core/src/new_branch_flows.rs", "crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

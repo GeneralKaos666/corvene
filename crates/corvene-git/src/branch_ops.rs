@@ -18,6 +18,57 @@ use crate::git_errors::KnownGitError;
 use crate::process::GitCommand;
 use crate::remote_ops::AskpassEnv;
 
+/// Corvene `787-commit-to-new-branch` (History › Create Branch from
+/// Commits…, "Remove them from <branch>"): move `branch`, which is not
+/// checked out in any worktree, back to `target`, after `commits` (the
+/// branch's newest ones) were put on a new branch. Refuses, touching
+/// nothing, when the branch is checked out in a worktree, when it no longer
+/// points at `expected_tip`, or when a remote-tracking branch has one of
+/// `commits` (it was pushed: rewriting would diverge from the remote). The
+/// move is `update-ref` with `expected_tip` as the old value, so a branch
+/// that moved meanwhile is left alone.
+pub fn move_branch_back(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch: &str,
+    target: &str,
+    expected_tip: &str,
+    commits: &[String],
+    reason: &str,
+) -> Result<()> {
+    let full = format!("refs/heads/{branch}");
+    let worktrees = GitCommand::new(git.clone())
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(workdir)
+        .run()?
+        .stdout_string()?;
+    if worktrees
+        .lines()
+        .any(|line| line.strip_prefix("branch ") == Some(full.as_str()))
+    {
+        return Err(GitError::Gix(format!(
+            "{branch} is checked out in a worktree, so its commits were not removed from it."
+        )));
+    }
+    // the commits only this repository has: none may be on a remote
+    let local_only = GitCommand::new(git.clone())
+        .args(["rev-list", expected_tip, "--not", "--remotes"])
+        .current_dir(workdir)
+        .run()?
+        .stdout_string()?;
+    let local_only: std::collections::HashSet<&str> = local_only.lines().collect();
+    if commits.iter().any(|sha| !local_only.contains(sha.as_str())) {
+        return Err(GitError::Gix(format!(
+            "Some of the commits have been pushed, so they were not removed from {branch}."
+        )));
+    }
+    GitCommand::new(git)
+        .args(["update-ref", "-m", reason, &full, target, expected_tip])
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
 /// `createBranch`: `git branch [--no-track] <name> [<start point>]`.
 pub fn create_branch(
     git: Arc<GitBinary>,
@@ -932,6 +983,47 @@ mod tests {
         run(&["add", "."]);
         run(&["commit", "-q", "-m", "first"]);
         (dir, Arc::new(crate::find_git().unwrap()))
+    }
+
+    #[test]
+    fn moving_a_branch_back_keeps_pushed_and_moved_branches() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let base = run(&["rev-parse", "HEAD"]);
+        for n in ["b", "c"] {
+            std::fs::write(path.join(format!("{n}.txt")), n).unwrap();
+            run(&["add", "."]);
+            run(&["commit", "-q", "-m", n]);
+        }
+        let tip = run(&["rev-parse", "HEAD"]);
+        let commits: Vec<String> = run(&["rev-list", &format!("{base}..{tip}")])
+            .lines()
+            .map(String::from)
+            .collect();
+        run(&["checkout", "-q", "-b", "feature"]);
+        // a stale tip: nothing moves
+        assert!(move_branch_back(git.clone(), path, "main", &base, &base, &commits, "m").is_err());
+        assert_eq!(run(&["rev-parse", "main"]), tip);
+        // pushed (a remote-tracking ref has them): nothing moves
+        run(&["update-ref", "refs/remotes/origin/main", &tip]);
+        assert!(move_branch_back(git.clone(), path, "main", &base, &tip, &commits, "m").is_err());
+        run(&["update-ref", "-d", "refs/remotes/origin/main"]);
+        // checked out (here): nothing moves
+        assert!(
+            move_branch_back(git.clone(), path, "feature", &base, &tip, &commits, "m").is_err()
+        );
+        move_branch_back(git, path, "main", &base, &tip, &commits, "moved").unwrap();
+        assert_eq!(run(&["rev-parse", "main"]), base);
+        assert_eq!(run(&["rev-parse", "feature"]), tip);
     }
 
     #[test]

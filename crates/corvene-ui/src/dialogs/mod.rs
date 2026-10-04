@@ -318,6 +318,7 @@ impl DialogHost {
                 summary,
                 description,
                 lfs_patterns,
+                checks,
             } => cx
                 .new(|_| {
                     OversizedFilesDialog::new(
@@ -326,7 +327,29 @@ impl DialogHost {
                         summary.clone(),
                         description.clone(),
                         lfs_patterns.clone(),
+                        checks.clone(),
                     )
+                })
+                .into(),
+            Popup::CommitToNewBranch {
+                repo,
+                summary,
+                description,
+            } => cx
+                .new(|cx| {
+                    CreateBranchDialog::new_for_commit(
+                        state,
+                        *repo,
+                        summary.clone(),
+                        description.clone(),
+                        window,
+                        cx,
+                    )
+                })
+                .into(),
+            Popup::CreateBranchFromCommits { repo, plan } => cx
+                .new(|cx| {
+                    CreateBranchDialog::new_from_commits(state, *repo, plan.clone(), window, cx)
                 })
                 .into(),
             Popup::AddEmbeddedRepositories {

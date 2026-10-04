@@ -30,6 +30,7 @@ pub struct OversizedFilesDialog {
     summary: String,
     description: String,
     lfs_patterns: Vec<String>,
+    checks: CommitChecks,
 }
 
 impl OversizedFilesDialog {
@@ -39,6 +40,7 @@ impl OversizedFilesDialog {
         summary: String,
         description: String,
         lfs_patterns: Vec<String>,
+        checks: CommitChecks,
     ) -> Self {
         Self {
             repo,
@@ -46,6 +48,7 @@ impl OversizedFilesDialog {
             summary,
             description,
             lfs_patterns,
+            checks,
         }
     }
 }
@@ -117,8 +120,12 @@ impl Render for OversizedFilesDialog {
                              goes into the commit with the files.",
                 ))
             });
-        let (repo, summary, description) =
-            (self.repo, self.summary.clone(), self.description.clone());
+        let (repo, summary, description, checks) = (
+            self.repo,
+            self.summary.clone(),
+            self.description.clone(),
+            self.checks.clone(),
+        );
         let buttons = OkCancelButtonGroup {
             destructive: true,
             cancel: GroupButtonSpec {
@@ -135,7 +142,7 @@ impl Render for OversizedFilesDialog {
                     Dispatcher::close_popup(cx);
                     let checks = CommitChecks {
                         allow_oversized: true,
-                        ..CommitChecks::default()
+                        ..checks.clone()
                     };
                     Dispatcher::commit_with(repo, summary.clone(), description.clone(), checks, cx);
                 }),

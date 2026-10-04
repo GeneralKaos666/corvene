@@ -316,15 +316,30 @@ pub enum Popup {
         summary: String,
         description: String,
         lfs_patterns: Vec<String>,
+        /// The commit's checks so far (Commit Anyway goes on with them).
+        checks: crate::commit_checks::CommitChecks,
     },
     /// Corvene `785-embedded-repo-commit`: untracked folders that are git
     /// repositories: add them as submodules (with an `origin`) or pointers?
-    /// `commit`: the summary and description of the commit that goes on
-    /// afterwards (`None` from the changes list's menu).
+    /// `commit`: the summary, description and checks of the commit that
+    /// goes on afterwards (`None` from the changes list's menu).
     AddEmbeddedRepositories {
         repo: u64,
         repositories: Vec<corvene_git::EmbeddedRepository>,
-        commit: Option<(String, String)>,
+        commit: Option<(String, String, crate::commit_checks::CommitChecks)>,
+    },
+    /// Corvene `787-commit-to-new-branch`: the commit form's "Commit to New
+    /// Branch…" (a name for the branch the changes are committed on).
+    CommitToNewBranch {
+        repo: u64,
+        summary: String,
+        description: String,
+    },
+    /// Corvene `787-commit-to-new-branch`: History › "Create Branch from
+    /// Commits…" for the current branch's newest commits.
+    CreateBranchFromCommits {
+        repo: u64,
+        plan: crate::new_branch_flows::FromCommitsPlan,
     },
     /// Corvene `732-confirm-commit-to-default-branch`: committing on the
     /// default branch; "Commit" goes on to `UnknownAuthors` when
@@ -629,6 +644,8 @@ impl Popup {
             | Self::UnknownAuthors { repo, .. }
             | Self::OversizedFiles { repo, .. }
             | Self::AddEmbeddedRepositories { repo, .. }
+            | Self::CommitToNewBranch { repo, .. }
+            | Self::CreateBranchFromCommits { repo, .. }
             | Self::ConfirmDiscardSelection { repo, .. }
             | Self::ResetToCommit { repo, .. }
             | Self::CheckoutCommit { repo, .. }

@@ -32,6 +32,8 @@ pub struct CommitChecks {
     /// to add as submodules (or pointers) in the commit, once asked; `None`
     /// before the check (or `Some(empty)` to skip it).
     pub embedded: Option<Vec<corvene_git::EmbeddedRepository>>,
+    /// Corvene `787-commit-to-new-branch`: what follows a successful commit.
+    pub after: crate::new_branch_flows::AfterCommit,
 }
 
 /// What the background check found.
@@ -60,10 +62,8 @@ impl Dispatcher {
         {
             checks.embedded = Some(Vec::new());
         }
-        if checks.allow_oversized
-            && let Some(embedded) = &checks.embedded
-        {
-            return Self::create_commit(id, summary, description, embedded.clone(), cx);
+        if checks.allow_oversized && checks.embedded.is_some() {
+            return Self::create_commit(id, summary, description, checks, cx);
         }
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -94,7 +94,9 @@ impl Dispatcher {
             return;
         }
         if paths.is_empty() {
-            return Self::create_commit(id, summary, description, Vec::new(), cx);
+            checks.allow_oversized = true;
+            checks.embedded = Some(Vec::new());
+            return Self::create_commit(id, summary, description, checks, cx);
         }
         let (suggest_lfs, hide_note) = {
             let s = Self::state(cx).read(cx);
@@ -144,6 +146,7 @@ impl Dispatcher {
                             summary,
                             description,
                             lfs_patterns: found.lfs_patterns,
+                            checks,
                         },
                         cx,
                     );
@@ -158,7 +161,7 @@ impl Dispatcher {
                             Popup::AddEmbeddedRepositories {
                                 repo: id,
                                 repositories: found.embedded,
-                                commit: Some((summary, description)),
+                                commit: Some((summary, description, checks)),
                             },
                             cx,
                         );

@@ -31,7 +31,8 @@
 //! label local branch tips and the default branch's remote tip (flag `890`);
 //! Edit Commit Message… rewords an unpushed commit (flag `892`); a commit of
 //! the compare view's Behind tab can be cherry-picked onto the current
-//! branch (flag `893`).
+//! branch (flag `893`); the current branch's newest commits can go to a new
+//! branch (Create Branch from N Commits…, flag `787`).
 
 use std::rc::Rc;
 
@@ -1269,7 +1270,7 @@ impl HistorySidebar {
             selection.clone(),
             selection.clone(),
         );
-        let (s5, s6) = (selection.clone(), selection);
+        let (s5, s6, s7) = (selection.clone(), selection.clone(), selection);
         let onto = commit.sha.clone();
         let mut items = vec![
             MenuItem::new(
@@ -1343,6 +1344,39 @@ impl HistorySidebar {
                 },
                 move |_, cx| create_patch_files(id, s6.clone(), cx),
             ));
+        }
+        // `787-commit-to-new-branch`: the current branch's newest commits
+        let from_commits = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::COMMIT_TO_NEW_BRANCH)
+                .then(|| {
+                    let rs = s.repo_states.get(&id)?;
+                    corvene_core::new_branch_flows::from_commits_plan(rs, &s7)
+                })
+                .flatten()
+        };
+        if let Some(plan) = from_commits {
+            items.push(MenuItem::separator());
+            items.push(
+                MenuItem::new(
+                    if IS_MAC {
+                        format!("Create Branch from {count} Commits…")
+                    } else {
+                        format!("Create branch from {count} commits…")
+                    },
+                    move |_, cx| {
+                        Dispatcher::show_popup(
+                            Popup::CreateBranchFromCommits {
+                                repo: id,
+                                plan: plan.clone(),
+                            },
+                            cx,
+                        )
+                    },
+                )
+                .enabled(!busy),
+            );
         }
         if copy_items {
             items.push(MenuItem::separator());

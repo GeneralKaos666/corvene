@@ -306,6 +306,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             summary,
             description,
             lfs_patterns,
+            ..
         } => {
             repo = Some(*r);
             f.put("summary", summary)
@@ -322,6 +323,19 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             f.opt("summary", commit.as_ref().map(|c| &c.0))
                 .opt("description", commit.as_ref().map(|c| &c.1))
                 .list("paths", repositories.iter().map(|r| &r.path));
+        }
+        Popup::CommitToNewBranch {
+            repo: r,
+            summary,
+            description,
+        } => {
+            repo = Some(*r);
+            f.put("summary", summary).put("description", description);
+        }
+        Popup::CreateBranchFromCommits { repo: r, plan } => {
+            repo = Some(*r);
+            f.put("removable", plan.move_back.is_some())
+                .list("commits", &plan.commits);
         }
         Popup::ConfirmCommitToDefaultBranch {
             repo: r,

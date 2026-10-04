@@ -42,6 +42,7 @@ pub mod list_selection;
 pub mod markdown;
 pub mod mco;
 pub mod menu_state;
+pub mod new_branch_flows;
 pub mod notifications;
 pub mod offset_from;
 pub mod packs;

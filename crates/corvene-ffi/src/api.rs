@@ -256,6 +256,7 @@ impl Corvene {
         let checks = corvene_core::commit_checks::CommitChecks {
             allow_oversized: true,
             embedded: Some(Vec::new()),
+            ..Default::default()
         };
         self.loop_
             .post(move |host| Dispatcher::commit_with(repo, summary, description, checks, host));
