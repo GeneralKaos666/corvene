@@ -3,7 +3,8 @@
 //! `GitStore.discardChanges` / `undoCommit` (`lib/stores/git-store.ts`).
 //!
 //! Deviation: [`discard_changes`] resets paths without naming `HEAD`, so it
-//! also works on an unborn branch. Corvene can put executable bits staged
+//! also works on an unborn branch, and moves the files to the Trash in
+//! batches instead of one call per file. Corvene can put executable bits staged
 //! with `update-index --chmod` back after the restage
 //! ([`staged_mode_changes`], `781-keep-staged-mode-changes`).
 
@@ -490,21 +491,36 @@ pub fn discard_changes(
             }
         }
     }
+    let on_disk = |file: &WorkingDirectoryFileChange| {
+        !file.status.submodule && file.status.kind != FileStatusKind::Deleted
+    };
+    let full_path =
+        |file: &WorkingDirectoryFileChange| workdir.join(file.path.trim_end_matches('/'));
+    // one batch instead of a Trash call per file (#7155)
+    let mut went_to_trash = if move_to_trash {
+        let paths: Vec<std::path::PathBuf> =
+            files.iter().filter(|f| on_disk(f)).map(full_path).collect();
+        trash_paths(&paths)
+    } else {
+        Vec::new()
+    }
+    .into_iter();
     let mut to_checkout: Vec<&str> = Vec::new();
     let mut to_reset: Vec<&str> = Vec::new();
     let mut submodules: Vec<&str> = Vec::new();
     for file in files {
         if file.status.submodule {
             submodules.push(&file.path);
-        } else if file.status.kind != FileStatusKind::Deleted {
-            let full = workdir.join(file.path.trim_end_matches('/'));
+        } else if on_disk(file) {
+            let full = full_path(file);
+            let trashed = move_to_trash && went_to_trash.next().unwrap_or(false);
             if move_to_trash && keep_untrashable {
-                if !trashed(&full) && full.symlink_metadata().is_ok() {
+                if !trashed && full.symlink_metadata().is_ok() {
                     // kept as it is until the user agrees to lose it
                     untrashable.push(file.path.clone());
                     continue;
                 }
-            } else if !move_to_trash || !trashed(&full) {
+            } else if !trashed {
                 let _ = std::fs::remove_file(&full).or_else(|_| std::fs::remove_dir_all(&full));
             }
         }
@@ -624,16 +640,51 @@ fn index_changes(
         .collect())
 }
 
-/// Whether `path` went to the Trash. Android has none, so the caller deletes.
-fn trashed(path: &Path) -> bool {
+/// How many paths go to the Trash in one call.
+#[cfg(not(target_os = "android"))]
+const TRASH_BATCH: usize = 200;
+
+/// The Trash as GHD reaches it (Electron's `shell.trashItem`): on macOS
+/// `NSFileManager trashItemAtURL:`, without the `trash` crate's default
+/// Finder round trip (an `osascript` per call, the Finder sound and an
+/// Automation prompt).
+#[cfg(not(target_os = "android"))]
+fn trash_context() -> trash::TrashContext {
+    #[allow(unused_mut)]
+    let mut context = trash::TrashContext::default();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        context.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    context
+}
+
+/// Moves `paths` to the Trash, [`TRASH_BATCH`] at a time, and says for each
+/// one whether it went (or is gone). A batch stops at its first failure, so
+/// a failed batch is retried one path at a time: a path that is no longer
+/// there went with the batch, the others are tried alone. GHD trashes one
+/// file at a time. Android has no Trash: nothing goes and the caller
+/// deletes.
+fn trash_paths(paths: &[std::path::PathBuf]) -> Vec<bool> {
     #[cfg(not(target_os = "android"))]
     {
-        trash::delete(path).is_ok()
+        let context = trash_context();
+        let mut went = Vec::with_capacity(paths.len());
+        for batch in paths.chunks(TRASH_BATCH) {
+            if context.delete_all(batch).is_ok() {
+                went.extend(std::iter::repeat_n(true, batch.len()));
+                continue;
+            }
+            for path in batch {
+                went.push(path.symlink_metadata().is_err() || context.delete(path).is_ok());
+            }
+        }
+        went
     }
     #[cfg(target_os = "android")]
     {
-        let _ = path;
-        false
+        vec![false; paths.len()]
     }
 }
 
@@ -665,10 +716,19 @@ fn discard_inside_submodule(
             .current_dir(submodule)
             .run()?;
         let text = String::from_utf8_lossy(&out.stdout);
-        for path in text.split('\0').filter(|p| !p.is_empty()) {
-            let full = submodule.join(path.trim_end_matches('/'));
-            if !move_to_trash || !trashed(&full) {
-                let _ = std::fs::remove_file(&full).or_else(|_| std::fs::remove_dir_all(&full));
+        let paths: Vec<std::path::PathBuf> = text
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(|path| submodule.join(path.trim_end_matches('/')))
+            .collect();
+        let went = if move_to_trash {
+            trash_paths(&paths)
+        } else {
+            vec![false; paths.len()]
+        };
+        for (full, went) in paths.iter().zip(went) {
+            if !went {
+                let _ = std::fs::remove_file(full).or_else(|_| std::fs::remove_dir_all(full));
             }
         }
     }
@@ -970,6 +1030,14 @@ mod tests {
         assert!(!path.join("new.txt").exists());
         let status = crate::get_status(git, path).unwrap();
         assert!(status.files.is_empty());
+    }
+
+    #[test]
+    #[cfg(not(target_os = "android"))]
+    fn trash_counts_missing_paths_as_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.txt");
+        assert_eq!(trash_paths(&[missing.clone(), missing]), vec![true, true]);
     }
 
     #[test]
