@@ -63,7 +63,10 @@ pub fn large_file_paths<S: AsRef<str>>(workdir: &Path, paths: &[S], limit: u64) 
     paths
         .iter()
         .map(AsRef::as_ref)
-        .filter(|path| std::fs::metadata(workdir.join(path)).is_ok_and(|meta| meta.len() > limit))
+        .filter(|path| {
+            std::fs::metadata(workdir.join(path))
+                .is_ok_and(|meta| meta.is_file() && meta.len() > limit)
+        })
         .map(str::to_string)
         .collect()
 }
