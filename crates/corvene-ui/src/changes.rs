@@ -61,6 +61,9 @@
 //! - conflicts left by restoring a stash replace the commit form with a list
 //!   of the files to resolve (`774-stash-conflict-flow`,
 //!   `crate::stash_conflicts`).
+//! - a message the amend, Undo Commit, the commit template or a commit puts
+//!   in the form can be taken back with ⌘Z
+//!   (`779-undoable-commit-message-replace`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -221,6 +224,10 @@ pub struct ChangesSidebar {
     summary_placeholder: SharedString,
     /// `766-persist-commit-drafts`: the repository the form's text belongs to.
     draft_repo: Option<u64>,
+    /// `779-undoable-commit-message-replace`: the text last put in a field
+    /// by [`Self::replace_message_field`]; its change event opens no
+    /// autocompletion.
+    programmatic_text: Option<(CommitField, String)>,
     /// The filtered list, rebuilt only when the status or a filter changes
     /// (every render and scroll frame reads it; 100,000 changed files are
     /// too many to filter and copy per frame).
@@ -554,10 +561,18 @@ impl ChangesSidebar {
             if amend_nonce != this.seen_amend_nonce {
                 this.seen_amend_nonce = amend_nonce;
                 if let Some(commit) = to_amend {
-                    this.summary
-                        .update(cx, |s, cx| s.set_value(commit.summary.clone(), window, cx));
-                    this.description
-                        .update(cx, |s, cx| s.set_value(commit.body.clone(), window, cx));
+                    this.replace_message_field(
+                        CommitField::Summary,
+                        commit.summary.clone(),
+                        window,
+                        cx,
+                    );
+                    this.replace_message_field(
+                        CommitField::Description,
+                        commit.body.clone(),
+                        window,
+                        cx,
+                    );
                     this.refresh_spelling(CommitField::Summary, cx);
                     this.refresh_spelling(CommitField::Description, cx);
                     cx.notify();
@@ -578,11 +593,13 @@ impl ChangesSidebar {
                 && seen.1 != message_nonce
                 && let Some(message) = message
             {
-                this.summary
-                    .update(cx, |s, cx| s.set_value(message.summary, window, cx));
-                this.description.update(cx, |s, cx| {
-                    s.set_value(message.description.unwrap_or_default(), window, cx)
-                });
+                this.replace_message_field(CommitField::Summary, message.summary, window, cx);
+                this.replace_message_field(
+                    CommitField::Description,
+                    message.description.unwrap_or_default(),
+                    window,
+                    cx,
+                );
                 this.refresh_spelling(CommitField::Summary, cx);
                 this.refresh_spelling(CommitField::Description, cx);
                 cx.notify();
@@ -688,6 +705,7 @@ impl ChangesSidebar {
             co_author_hint: None,
             summary_placeholder: "Summary (required)".into(),
             draft_repo: None,
+            programmatic_text: None,
             visible_cache: RefCell::new(None),
             selected_cache: RefCell::new(None),
             windows_names_cache: RefCell::new(None),
@@ -712,7 +730,14 @@ impl ChangesSidebar {
             }
             InputEvent::Change => {
                 self.refresh_spelling(field, cx);
-                self.open_autocomplete(field, cx);
+                // `779-undoable-commit-message-replace`: a replaced message is
+                // not typed text
+                let programmatic = self.programmatic_text.take().filter(|(f, _)| *f == field);
+                if programmatic
+                    .is_none_or(|(_, text)| text != self.field_text_and_caret(field, cx).0)
+                {
+                    self.open_autocomplete(field, cx);
+                }
             }
             InputEvent::Blur if self.autocomplete.as_ref().is_some_and(|(f, _)| *f == field) => {
                 self.autocomplete = None;
@@ -1642,9 +1667,8 @@ impl ChangesSidebar {
     /// Empty the commit form (GHD resets `commitMessage` after a commit); the
     /// next commit starts from the template again.
     fn clear_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.summary.update(cx, |s, cx| s.set_value("", window, cx));
-        self.description
-            .update(cx, |s, cx| s.set_value("", window, cx));
+        self.replace_message_field(CommitField::Summary, String::new(), window, cx);
+        self.replace_message_field(CommitField::Description, String::new(), window, cx);
         self.co_authors
             .update(cx, |s, cx| s.set_value("", window, cx));
         self.tag.update(cx, |s, cx| s.set_value("", window, cx));
@@ -1676,10 +1700,52 @@ impl ChangesSidebar {
         if text == description {
             return;
         }
-        self.description
-            .update(cx, |s, cx| s.set_value(text, window, cx));
+        self.replace_message_field(CommitField::Description, text, window, cx);
         self.refresh_spelling(CommitField::Description, cx);
         cx.notify();
+    }
+
+    /// Put `text` in the summary or description, as the amend, Undo Commit,
+    /// the commit template and the cleared form after a commit do. GHD sets
+    /// the field's value, which drops its undo history, as `set_value` does;
+    /// `779-undoable-commit-message-replace` makes it an edit ⌘Z takes back.
+    fn replace_message_field(
+        &mut self,
+        field: CommitField,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let undoable = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::UNDOABLE_COMMIT_MESSAGE_REPLACE);
+        if undoable {
+            if self.field_text_and_caret(field, cx).0 == text {
+                return;
+            }
+            self.programmatic_text = Some((field, text.clone()));
+        }
+        match field {
+            CommitField::Summary => self.summary.update(cx, |s, cx| {
+                if undoable {
+                    s.replace_all(text, window, cx)
+                } else {
+                    s.set_value(text, window, cx)
+                }
+            }),
+            CommitField::Description => self.description.update(cx, |s, cx| {
+                if undoable {
+                    s.replace_all(text, window, cx)
+                } else {
+                    s.set_value(text, window, cx)
+                }
+            }),
+            CommitField::CoAuthors => self
+                .co_authors
+                .update(cx, |s, cx| s.set_value(text, window, cx)),
+        }
     }
 
     pub fn focus_summary(&self, window: &mut Window, cx: &mut Context<Self>) {

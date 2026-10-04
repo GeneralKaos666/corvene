@@ -4555,6 +4555,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/mco_dialogs.rs", "crates/corvene-core/src/stash_flows.rs"],
     },
 
+    /// Programmatic commit message replacements keep the fields' undo history.
+    UNDOABLE_COMMIT_MESSAGE_REPLACE = 779 "undoable-commit-message-replace" {
+        title: "Undo a replaced commit message",
+        summary: "When Corvene puts a message in the commit form (starting to amend a commit, \
+                  Undo Commit, the commit template, emptying the form after a commit) the \
+                  replacement is an edit like typing: ⌘Z / Ctrl+Z brings the text that was \
+                  there back.",
+        ghd_behaviour: "The fields' undo history is dropped, so a draft overwritten by Amend \
+                        Commit is lost.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17822)],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
