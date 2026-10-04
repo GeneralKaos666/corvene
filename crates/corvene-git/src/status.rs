@@ -143,6 +143,8 @@ fn finish_status(
     status.cherry_pick_head_found = git_dir.join("CHERRY_PICK_HEAD").exists();
     status.squash_msg_found = git_dir.join("SQUASH_MSG").exists();
     status.rebase_internal_state = crate::rebase_ops::rebase_internal_state(workdir);
+    // git writes `amend` only at an `edit` stop that applied cleanly
+    status.rebase_edit_stop = git_dir.join("rebase-merge/amend").exists();
     if status.has_conflicts() {
         apply_conflict_details(git, workdir, &mut status, options.lfs_conflicts_manual);
     }

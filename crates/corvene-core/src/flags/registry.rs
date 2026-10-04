@@ -4620,6 +4620,22 @@ registry! {
         code: &["crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Commit or amend at a rebase's `edit` stop.
+    COMMIT_DURING_REBASE_EDIT = 782 "commit-during-rebase-edit" {
+        title: "Commit at a rebase's edit stop",
+        summary: "When an interactive rebase stops at an edit (and nothing is conflicted), the \
+                  changes list keeps the commit form, so the stopped commit can be amended or \
+                  new commits made, with a \"Continue rebase\" button under it.",
+        ghd_behaviour: "During any rebase the commit form gives way to a single \"Continue \
+                        rebase\" button, so an edit stop can only be continued.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10460)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/status.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

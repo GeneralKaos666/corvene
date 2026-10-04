@@ -1261,6 +1261,11 @@ pub struct WorkingDirectoryStatus {
     pub squash_msg_found: bool,
     #[serde(default)]
     pub rebase_internal_state: Option<RebaseInternalState>,
+    /// The rebase stopped at an `edit` (`.git/rebase-merge/amend` exists:
+    /// the commit was applied and can be amended), for Corvene's
+    /// `782-commit-during-rebase-edit`.
+    #[serde(default)]
+    pub rebase_edit_stop: bool,
     /// The index has an entry `files` leaves out: GHD `buildStatusMap`
     /// skips a file added to the index and then deleted from the working
     /// directory. A commit must reset the index first (GHD `unstageAll`),

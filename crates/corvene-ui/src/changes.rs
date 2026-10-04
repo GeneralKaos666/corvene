@@ -68,6 +68,9 @@
 //!   (`780-amend-from-commit-options`).
 //! - a submodule's menu has "Open Submodule in Corvene", which a double-click
 //!   does too (`284-open-submodule-from-changes`).
+//! - at a rebase's `edit` stop without conflicts the commit form stays, with
+//!   "Continue rebase" under it (`782-commit-during-rebase-edit`; GHD
+//!   `continue-rebase.tsx` replaces the form during any rebase).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -3262,14 +3265,20 @@ impl ChangesSidebar {
     }
 
     fn branch_name(&self, cx: &App) -> SharedString {
-        self.state
-            .read(cx)
-            .selected_state()
-            .and_then(|s| s.info.as_ref())
+        let rs = self.state.read(cx).selected_state();
+        rs.and_then(|s| s.info.as_ref())
             .and_then(|i| match &i.tip {
                 Tip::Valid { branch } => Some(branch.name.clone()),
                 Tip::Unborn { name } => Some(name.clone()),
-                _ => None,
+                // `782-commit-during-rebase-edit`: the branch being rebased
+                // (the form only shows during a rebase with the flag)
+                Tip::Detached { .. } => match rs?.conflict_state.as_ref()?.kind {
+                    corvene_core::ConflictKind::Rebase {
+                        ref target_branch, ..
+                    } => Some(target_branch.clone()),
+                    _ => None,
+                },
+                Tip::Unknown => None,
             })
             .unwrap_or_default()
             .into()
@@ -3577,7 +3586,9 @@ impl ChangesSidebar {
             }
             let id = s.selected?;
             let rs = s.selected_state()?;
-            if rs.commit_to_amend.is_some() {
+            // amending, or a rebase's own detached HEAD
+            // (`782-commit-during-rebase-edit`)
+            if rs.commit_to_amend.is_some() || rs.conflict_state.is_some() {
                 return None;
             }
             match &rs.info.as_ref()?.tip {
@@ -4366,7 +4377,10 @@ impl ChangesSidebar {
     /// GHD `ContinueRebase` (`#continue-rebase`): while a rebase is stopped
     /// on conflicts the commit form gives way to a single "Continue rebase"
     /// button, enabled once every conflict is resolved.
-    fn continue_rebase(&self, cx: &Context<Self>) -> Option<AnyElement> {
+    ///
+    /// `782-commit-during-rebase-edit`: at an `edit` stop without conflicts
+    /// the commit form stays and the button goes under it (`below_form`).
+    fn continue_rebase(&self, below_form: bool, cx: &Context<Self>) -> Option<AnyElement> {
         let t = cx.ghd();
         let s = self.state.read(cx);
         let id = s.selected?;
@@ -4377,6 +4391,13 @@ impl ChangesSidebar {
         }
         let status = rs.status.as_deref()?;
         let conflicted = corvene_core::conflicted_files(status, &conflict.manual_resolutions).len();
+        let edit_stop = conflicted == 0
+            && status.rebase_edit_stop
+            && s.flags
+                .bool(corvene_core::flags::ids::COMMIT_DURING_REBASE_EDIT);
+        if edit_stop != below_form {
+            return None;
+        }
         let untracked = status
             .files
             .iter()
@@ -4386,6 +4407,17 @@ impl ChangesSidebar {
             .as_ref()
             .is_some_and(|m| m.step == corvene_core::McoStep::ShowProgress);
         let enabled = conflicted == 0 && !in_progress;
+        let label = if in_progress {
+            "Rebasing"
+        } else {
+            "Continue rebase"
+        };
+        // under the commit form the Commit button stays the primary one
+        let button = match (below_form, enabled) {
+            (false, _) => primary_button("continue-rebase-button", label, !enabled, cx),
+            (true, true) => crate::widgets::button("continue-rebase-button", label, cx),
+            (true, false) => crate::widgets::button_disabled("continue-rebase-button", label, cx),
+        };
         Some(
             div()
                 .id("continue-rebase")
@@ -4393,25 +4425,12 @@ impl ChangesSidebar {
                 .flex()
                 .flex_col()
                 .p(SPACING())
+                .when(below_form, |d| d.pt(zpx(0.)))
                 .bg(t.box_alt_background)
-                .border_t_1()
-                .border_color(t.box_border)
-                .child(
-                    primary_button(
-                        "continue-rebase-button",
-                        if in_progress {
-                            "Rebasing"
-                        } else {
-                            "Continue rebase"
-                        },
-                        !enabled,
-                        cx,
-                    )
-                    .w_full()
-                    .when(enabled, |d| {
-                        d.on_click(move |_, _, cx| Dispatcher::continue_after_conflicts(id, cx))
-                    }),
-                )
+                .when(!below_form, |d| d.border_t_1().border_color(t.box_border))
+                .child(button.w_full().when(enabled, |d| {
+                    d.on_click(move |_, _, cx| Dispatcher::continue_after_conflicts(id, cx))
+                }))
                 .when(untracked, |d| {
                     d.child(
                         div()
@@ -4920,13 +4939,15 @@ impl Render for ChangesSidebar {
             .children(self.hidden_changes_warning(cx))
             .child(
                 match self
-                    .continue_rebase(cx)
+                    .continue_rebase(false, cx)
                     .or_else(|| crate::stash_conflicts::stash_conflicts_block(&self.state, cx))
                 {
                     Some(block) => block,
                     None => self.commit_form(window, cx).into_any_element(),
                 },
             )
+            // `782-commit-during-rebase-edit`
+            .children(self.continue_rebase(true, cx))
             .children(self.context_menu.clone())
             .children(self.filter_popover(cx))
     }
