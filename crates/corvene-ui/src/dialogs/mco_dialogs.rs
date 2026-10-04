@@ -1538,6 +1538,8 @@ impl Render for SquashCommitMessageDialog {
             self.onto.clone(),
             self.count,
         );
+        // `892-edit-commit-message`: no commits to squash edits `onto`'s message
+        let editing = to_squash.is_empty();
         let content = div()
             .w(crate::theme::fit_width(450.))
             .flex()
@@ -1573,7 +1575,16 @@ impl Render for SquashCommitMessageDialog {
                     ),
                 )
             });
-        let title = format!("Squash {count} Commits");
+        let title = if editing {
+            mac_or("Edit Commit Message", "Edit commit message").to_string()
+        } else {
+            format!("Squash {count} Commits")
+        };
+        let ok_label = if editing {
+            "Save".to_string()
+        } else {
+            title.clone()
+        };
         dialog(
             "dialog-squash-message",
             title.clone(),
@@ -1588,7 +1599,7 @@ impl Render for SquashCommitMessageDialog {
                 },
                 ok: GroupButtonSpec {
                     id: "squash-ok",
-                    label: title.into(),
+                    label: ok_label.into(),
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if disabled {
@@ -1596,6 +1607,10 @@ impl Render for SquashCommitMessageDialog {
                         }
                         let message = corvene_git::format_message(&summary, &description);
                         Dispatcher::close_popup(cx);
+                        if editing {
+                            Dispatcher::edit_commit_message(repo, onto.clone(), message, cx);
+                            return;
+                        }
                         Dispatcher::squash(
                             repo,
                             to_squash.clone(),

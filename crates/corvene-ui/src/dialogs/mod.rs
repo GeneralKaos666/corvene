@@ -521,8 +521,10 @@ impl DialogHost {
                         .and_then(|r| r.commits.iter().find(|c| c.sha == *onto))
                         .map(|c| c.body.trim().to_string())
                         .filter(|_| {
-                            s.flags
-                                .bool(corvene_core::flags::ids::SQUASH_KEEP_TARGET_MESSAGE)
+                            // not when editing one message (`892`)
+                            !to_squash.is_empty()
+                                && s.flags
+                                    .bool(corvene_core::flags::ids::SQUASH_KEEP_TARGET_MESSAGE)
                         })
                 };
                 cx.new(|cx| {

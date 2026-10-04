@@ -1012,6 +1012,91 @@ pub fn temp_file(prefix: &str, contents: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Corvene `892-edit-commit-message`: the todo list giving `sha` a new
+/// message (`reword`) and replaying the rest unchanged. `None` when `sha` is
+/// not among `commits`.
+pub fn reword_todo(commits: &[CommitOneLine], sha: &str) -> Option<String> {
+    commits.iter().any(|c| c.sha == sha).then(|| {
+        commits
+            .iter()
+            .map(|c| {
+                let action = if c.sha == sha { "reword" } else { "pick" };
+                format!("{action} {} {}\n", c.sha, c.summary)
+            })
+            .collect()
+    })
+}
+
+/// Corvene `892-edit-commit-message`: give commit `sha` (not HEAD) the
+/// message `message` with an interactive rebase from `last_retained_ref`
+/// (its parent, `None` for a root commit), GIT_EDITOR writing the message.
+/// Only the message changes, so nothing can conflict; local changes are
+/// stashed for the rebase and put back. A rebase that stops anyway is
+/// aborted.
+pub fn reword(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    sha: &str,
+    last_retained_ref: Option<&str>,
+    message: &str,
+    keep_messages: bool,
+) -> Result<()> {
+    // an interactive rebase would flatten them
+    if merge_commits_exist_after(git.clone(), workdir, last_retained_ref)? {
+        return Err(GitError::Gix(
+            "the branch has merge commits after this commit".into(),
+        ));
+    }
+    let commits = commits_to_replay(git.clone(), workdir, last_retained_ref)?;
+    let todo = reword_todo(&commits, sha)
+        .ok_or_else(|| GitError::Gix("the commit is not on the current branch".into()))?;
+    let todo_path = temp_file("reword-todo", &todo)?;
+    let message_path = temp_file("reword-message", message)?;
+    let message_arg = message_path.to_string_lossy().to_string();
+    let result = if message_arg.contains('"') {
+        RebaseResult::Error("temporary message path contains a quote".into())
+    } else {
+        rebase_interactive(
+            git.clone(),
+            workdir,
+            &todo_path,
+            last_retained_ref,
+            Some(&format!("cat \"{message_arg}\" >")),
+            &commits,
+            RebaseOptions {
+                keep_messages,
+                autostash: true,
+            },
+            |_| {},
+        )
+    };
+    let _ = std::fs::remove_file(&todo_path);
+    let _ = std::fs::remove_file(&message_path);
+    match result {
+        RebaseResult::CompletedWithoutError | RebaseResult::AlreadyUpToDate => Ok(()),
+        RebaseResult::Error(err) => Err(GitError::Gix(err)),
+        other => {
+            if rebase_head_set(workdir) || git_dir(workdir).join("rebase-merge").exists() {
+                abort_rebase(git, workdir)?;
+            }
+            Err(GitError::Gix(format!(
+                "the commit message could not be changed ({other:?})"
+            )))
+        }
+    }
+}
+
+/// Corvene `892-edit-commit-message`: HEAD's message only (`commit --amend
+/// --only -F -`), whatever is staged.
+pub fn reword_head(git: Arc<GitBinary>, workdir: &Path, message: &str) -> Result<()> {
+    GitCommand::new(git)
+        .args(["commit", "--amend", "--only", "--allow-empty", "-F", "-"])
+        .stdin(message.as_bytes().to_vec())
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
 /// GHD `squash`: squash `to_squash` onto `squash_onto` with `message`
 /// (summary line + body) via interactive rebase.
 #[allow(clippy::too_many_arguments)]
@@ -1398,6 +1483,16 @@ mod tests {
         assert!(editor.contains("cat \"/tmp/msg\" > \"$1\""));
         assert!(editor.contains("This is a combination of"));
         assert_eq!(squash_continue_editor(Path::new("/tmp/a\"b")), None);
+    }
+
+    #[test]
+    fn reword_todo_rewords_one_commit() {
+        let commits = vec![c("a1", "First"), c("b2", "Second"), c("c3", "Third")];
+        assert_eq!(
+            reword_todo(&commits, "b2").as_deref(),
+            Some("pick a1 First\nreword b2 Second\npick c3 Third\n")
+        );
+        assert_eq!(reword_todo(&commits, "zz"), None);
     }
 
     #[test]

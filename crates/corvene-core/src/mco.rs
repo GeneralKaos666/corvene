@@ -2763,6 +2763,95 @@ fn squash_draft_key<'a>(onto: &str, squashed: impl Iterator<Item = &'a String>) 
     key
 }
 
+impl Dispatcher {
+    /// `892-edit-commit-message`: History › Edit Commit Message… opens the
+    /// squash message dialog on the commit's message (no commits to squash
+    /// marks the edit), unless a merge commit follows it.
+    pub fn request_edit_commit_message(id: u64, sha: String, cx: &mut App) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let Some(commit) = Self::commit_by_sha(id, &sha, cx) else {
+            return;
+        };
+        let last_retained = commit.parents.first().cloned();
+        let summary = commit.summary.clone();
+        let description = commit.body.trim_end().to_string();
+        spawn_bg(
+            cx,
+            move || corvene_git::merge_commits_exist_after(git, &workdir, last_retained.as_deref()),
+            move |has_merges, cx| {
+                if has_merges.unwrap_or(false) {
+                    Self::show_error(
+                        "Unable to edit the commit message",
+                        "Editing a message replays every commit after it. A merge commit cannot exist among those commits.",
+                        cx,
+                    );
+                    return;
+                }
+                Self::show_popup(
+                    Popup::SquashCommitMessage {
+                        repo: id,
+                        to_squash: Vec::new(),
+                        onto: sha,
+                        summary,
+                        description,
+                        count: 0,
+                    },
+                    cx,
+                );
+            },
+        );
+    }
+
+    /// `892-edit-commit-message`: give commit `sha` `message`: an amend of
+    /// HEAD's message, else a `reword` interactive rebase; the rewritten
+    /// commit stays selected.
+    pub fn edit_commit_message(id: u64, sha: String, message: String, cx: &mut App) {
+        let (commit, is_head) = {
+            let s = Self::state(cx).read(cx);
+            let rs = s.repo_states.get(&id);
+            (
+                rs.and_then(|r| {
+                    r.commits
+                        .iter()
+                        .chain(r.visible_commits())
+                        .find(|c| c.sha == sha)
+                        .cloned()
+                }),
+                rs.and_then(|r| r.commits.first())
+                    .is_some_and(|c| c.sha == sha),
+            )
+        };
+        let Some(commit) = commit else { return };
+        let keep_messages = Self::rebase_keeps_messages(cx);
+        let summary = split_message(&message).0;
+        Self::state(cx).update(cx, |s, _| {
+            s.repo_state_mut(id).rewritten_selection = vec![(summary, Some(commit.author.seconds))];
+        });
+        let parent = commit.parents.first().cloned();
+        Self::run_history_op(
+            id,
+            "Could not edit the commit message",
+            move |git, workdir| {
+                if is_head {
+                    corvene_git::reword_head(git, &workdir, &message)
+                } else {
+                    corvene_git::reword(
+                        git,
+                        &workdir,
+                        &sha,
+                        parent.as_deref(),
+                        &message,
+                        keep_messages,
+                    )
+                }
+            },
+            cx,
+        );
+    }
+}
+
 /// A message's summary line and description (after the blank line).
 fn split_message(message: &str) -> (String, String) {
     let (summary, rest) = message.split_once('\n').unwrap_or((message, ""));

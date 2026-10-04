@@ -28,7 +28,8 @@
 //! `886`, `corvene_core::history_filter`); a file's history shows as a
 //! removable chip there (flag `887`); the compare view lists the files a
 //! merge of the compared branch would leave conflicted (flag `889`); rows
-//! label local branch tips and the default branch's remote tip (flag `890`).
+//! label local branch tips and the default branch's remote tip (flag `890`);
+//! Edit Commit Message… rewords an unpushed commit (flag `892`).
 
 use std::rc::Rc;
 
@@ -1379,6 +1380,34 @@ impl HistorySidebar {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::RESET_MODES);
+        // `892`: an unpushed non-merge commit with no merge above it
+        let edit_message = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::EDIT_COMMIT_MESSAGE)
+                .then(|| {
+                    let rs = s.repo_states.get(&id)?;
+                    let ix = rs.commits.iter().position(|c| c.sha == commit.sha)?;
+                    let tracked = rs
+                        .info
+                        .as_ref()
+                        .and_then(|i| i.current_branch())
+                        .is_some_and(|b| b.upstream.is_some());
+                    let unpushed = if tracked {
+                        ix < rs.ahead_behind.map_or(0, |ab| ab.ahead as usize)
+                    } else {
+                        rs.unpublished_commits
+                            .as_ref()
+                            .is_some_and(|shas| shas.contains(&commit.sha))
+                    };
+                    Some(
+                        unpushed
+                            && commit.parents.len() <= 1
+                            && !rs.commits[..ix].iter().any(|c| c.parents.len() > 1),
+                    )
+                })
+                .map(|enabled| enabled.unwrap_or(false))
+        };
         Dispatcher::select_commit(id, commit.sha.clone(), cx);
         let sha = commit.sha.clone();
         let weak = cx.weak_entity();
@@ -1395,6 +1424,15 @@ impl HistorySidebar {
                 mac_or("Undo Commit…", "Undo commit…"),
                 move |_, cx| Dispatcher::request_undo_commit(id, cx),
             ));
+        }
+        if let Some(enabled) = edit_message {
+            items.push(
+                MenuItem::new(mac_or("Edit Commit Message…", "Edit commit message…"), {
+                    let sha = sha.clone();
+                    move |_, cx| Dispatcher::request_edit_commit_message(id, sha.clone(), cx)
+                })
+                .enabled(enabled && !busy),
+            );
         }
         // `888-reset-modes`: Soft / Mixed / Hard instead of GHD's mixed reset
         let reset = if reset_modes {

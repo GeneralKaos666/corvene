@@ -128,10 +128,11 @@ pub use rebase_ops::{
     CherryPickResult, CherryPickSnapshot, RebaseOptions, RebaseResult, RebaseSnapshot,
     abort_cherry_pick, abort_rebase, abort_squash_merge, binary_paths, cherry_pick,
     cherry_pick_head_found, cherry_pick_snapshot, commits_between, commits_in_range,
-    conflict_marker_counts, continue_cherry_pick, continue_rebase, continue_squash_rebase, create_merge_commit,
-    determine_mergeability, merge_commits_exist_after, merge_head_set, merge_tree_conflicts, open_merge_tool, parse_merge_tree_names, rebase,
-    rebase_head_set, rebase_internal_state, rebase_snapshot, reorder, squash, squash_msg_set,
-    stage_manual_conflict_resolution, stash_tip,
+    conflict_marker_counts, continue_cherry_pick, continue_rebase, continue_squash_rebase,
+    create_merge_commit, determine_mergeability, merge_commits_exist_after, merge_head_set,
+    merge_tree_conflicts, open_merge_tool, parse_merge_tree_names, rebase, rebase_head_set,
+    rebase_internal_state, rebase_snapshot, reorder, reword, reword_head, reword_todo, squash,
+    squash_msg_set, stage_manual_conflict_resolution, stash_tip,
 };
 pub use refs::{delete_ref, format_as_local_ref, get_symbolic_ref};
 pub use remote_ops::{

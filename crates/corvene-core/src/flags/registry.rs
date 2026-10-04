@@ -5688,6 +5688,23 @@ registry! {
         code: &["crates/corvene-core/src/mco.rs", "crates/corvene-git/src/rebase_ops.rs"],
     },
 
+    /// History › Edit Commit Message… rewords an unpushed commit.
+    EDIT_COMMIT_MESSAGE = 892 "edit-commit-message" {
+        title: "Edit commit messages",
+        summary: "The History context menu of a commit that is not pushed yet (and is no merge, \
+                  with no merge after it) offers Edit Commit Message…: the squash message dialog \
+                  opens on its message and Save rewrites it (an amend for the newest commit, else \
+                  an interactive rebase that rewords it and replays the rest unchanged, local \
+                  changes stashed meanwhile). The edited commit stays selected.",
+        ghd_behaviour: "Only the newest commit's message can be changed, through Amend Commit.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5219)],
+        code: &["crates/corvene-ui/src/history.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/rebase_ops.rs", "crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
