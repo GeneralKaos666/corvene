@@ -2493,7 +2493,6 @@ fn first_parent_button(on: bool, comparing: bool, cx: &App) -> AnyElement {
     div()
         .id("history-first-parent")
         .icon_button_label(label)
-        .ghd_tooltip(label)
         .relative()
         .size(zpx(27.))
         .flex_none()
