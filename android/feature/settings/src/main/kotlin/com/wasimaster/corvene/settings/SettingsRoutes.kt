@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -115,19 +116,25 @@ private fun EngineSettingsRoute(section: SettingsSection, modifier: Modifier, co
     }
 }
 
-/** Settings › Git: `gitIdentity()` and `globalGitConfig()` in, `setGlobalIdentity` and `openGlobalGitConfig` out. */
+/**
+ * Settings › Git: `gitIdentity()` and `globalGitConfig()` (read on entry by
+ * `loadGlobalGitConfig`) in, `setGlobalIdentity`, `setDefaultBranch` and
+ * `openGlobalGitConfig` out.
+ */
 @Composable
 private fun GitRoute(modifier: Modifier, contentPadding: PaddingValues) {
     val core = LocalCore.current
+    LaunchedEffect(core) { core.dispatch { loadGlobalGitConfig() } }
     val identity by rememberCoreQuery { gitIdentity() }
     val global by rememberCoreQuery { globalGitConfig() }
     if (identity.loading) return Loading(modifier)
     GitScreen(
         name = identity.value?.name.orEmpty(),
         email = identity.value?.email.orEmpty(),
-        // the engine reads the global config's init.defaultBranch only for its Preferences popup; git's own default otherwise
+        // git's own default until the global config has been read
         defaultBranch = global.value?.defaultBranch ?: DEFAULT_BRANCH,
         onSave = { name, email -> core.dispatch { setGlobalIdentity(name, email) } },
+        onDefaultBranch = { name -> core.dispatch { setDefaultBranch(name) } },
         onEditConfig = { core.dispatch { openGlobalGitConfig() } },
         modifier = modifier,
         contentPadding = contentPadding,

@@ -66,7 +66,9 @@
     <string name="set_git_save">Save</string>
     <string name="set_git_saved">Saved to the global Git config</string>
     <string name="set_git_default_branch">Default branch</string>
-    <string name="set_git_default_branch_body">The branch new repositories start with: %1$s</string>
+    <string name="set_git_default_branch_body">The branch new repositories start with (init.defaultBranch of the global Git config).</string>
+    <string name="set_git_default_branch_other">Other…</string>
+    <string name="set_git_default_branch_name">Branch name</string>
     <string name="set_git_edit_config">Edit global Git config</string>
     <!-- Notifications -->
     <string name="set_notifications_enable">Enable notifications</string>
@@ -79,6 +81,7 @@
     <string name="set_prompts_confirm">Show a confirmation dialog before…</string>
     <string name="set_prompt_remove_repository">Removing repositories</string>
     <string name="set_prompt_discard">Discarding changes</string>
+    <string name="set_prompt_discard_permanently">Discarding changes permanently</string>
     <string name="set_prompt_discard_stash">Discarding stash</string>
     <string name="set_prompt_checkout_commit">Checking out a commit</string>
     <string name="set_prompt_force_push">Force pushing</string>
@@ -94,6 +97,9 @@
     <string name="set_background_updates">Background updates</string>
     <string name="set_indicators">Show status icons in the repository list</string>
     <string name="set_indicators_body">Periodically checks every repository for uncommitted changes and commits ahead or behind its upstream.</string>
+    <string name="set_credentials">Credentials</string>
+    <string name="set_credential_helper">Use Git Credential Manager</string>
+    <string name="set_credential_helper_body">Hands authentication to the credential helper configured in Git instead of Corvene\'s own accounts.</string>
     <string name="set_storage">Storage</string>
     <string name="set_all_files">All files access</string>
     <string name="set_all_files_granted">Granted: repositories on shared storage open in place</string>

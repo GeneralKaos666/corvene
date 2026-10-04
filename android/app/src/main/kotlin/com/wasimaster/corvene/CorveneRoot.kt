@@ -29,7 +29,7 @@ import com.wasimaster.corvene.platform.HostRequestHandler
  * is; then the navigation with the engine's dialogs over it.
  */
 @Composable
-fun CorveneRoot(onQuit: () -> Unit) {
+fun CorveneRoot(onQuit: () -> Unit, onRelaunch: () -> Unit) {
     val core = LocalCore.current
     val settings by rememberCoreQuery { settings() }
     val appearance = settings.value?.toAppearance() ?: return
@@ -44,7 +44,7 @@ fun CorveneRoot(onQuit: () -> Unit) {
         activity?.enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
     }
     CorveneTheme(style = appearance.style, colorMode = appearance.colorMode, highContrast = appearance.highContrast) {
-        HostRequestHandler(core, onQuit = onQuit)
+        HostRequestHandler(core, onQuit = onQuit, onRelaunch = onRelaunch)
         // test tags as resource ids: the macrobenchmarks find rows with UiAutomator
         Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
             if (settings.value?.welcomeCompleted == false) {

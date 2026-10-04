@@ -767,6 +767,13 @@ impl Dispatcher {
         if wants_manifest {
             Self::refresh_packs_manifest(cx);
         }
+        Self::load_global_git_config(cx);
+    }
+
+    /// Reads the global git identity and default branch in the background
+    /// into `AppState::global_git` (Settings › Git; the Android Settings
+    /// screen without the Preferences popup).
+    pub fn load_global_git_config(cx: &mut dyn Host) {
         let Some(git) = Self::state(cx).read(cx).git.clone() else {
             return;
         };
@@ -785,6 +792,28 @@ impl Dispatcher {
                     s.global_git = Some(config);
                     cx.notify();
                 });
+            },
+        );
+    }
+
+    /// Settings › Git › Default branch name, written on its own
+    /// (`init.defaultBranch`), then re-read.
+    pub fn set_global_default_branch(name: String, cx: &mut dyn Host) {
+        let Some(git) = Self::state(cx).read(cx).git.clone() else {
+            return;
+        };
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        spawn_bg(
+            cx,
+            move || corvene_git::set_default_branch(git, &name),
+            |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not set the default branch", &err, cx);
+                }
+                Self::load_global_git_config(cx);
             },
         );
     }

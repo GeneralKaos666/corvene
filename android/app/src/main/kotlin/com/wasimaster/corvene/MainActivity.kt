@@ -63,8 +63,11 @@ class MainActivity : ComponentActivity() {
         jank = JankMonitor.install(this)
         setContent {
             CompositionLocalProvider(LocalCore provides core) {
-                // the engine quits only to relaunch (a flag that needs a restart)
-                CorveneRoot(onQuit = { RelaunchActivity.relaunch(this) })
+                CorveneRoot(
+                    onQuit = { finishAffinity() },
+                    // a flag that needs a restart
+                    onRelaunch = { RelaunchActivity.relaunch(this) },
+                )
             }
         }
     }

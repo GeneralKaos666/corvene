@@ -70,6 +70,8 @@ pub struct SettingsVm {
     pub external_editor: Option<String>,
     pub shell: Option<String>,
     pub clone_dir: Option<String>,
+    pub confirm_discard_changes_permanently: bool,
+    pub use_external_credential_helper: bool,
 }
 
 pub fn settings(s: &AppState) -> SettingsVm {
@@ -115,5 +117,7 @@ pub fn settings(s: &AppState) -> SettingsVm {
             .clone_dir
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned()),
+        confirm_discard_changes_permanently: s.settings.confirm_discard_changes_permanently,
+        use_external_credential_helper: s.settings.use_external_credential_helper,
     }
 }

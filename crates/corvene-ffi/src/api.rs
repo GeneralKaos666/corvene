@@ -51,6 +51,8 @@ pub trait HostEvents: Send + Sync {
     /// The applications that open a text file, as "label\tpackage/class".
     fn view_apps(&self) -> Vec<String>;
     fn package_installed(&self, package: String) -> bool;
+    /// Start the process again (a flag that needs a restart was changed).
+    fn relaunch(&self);
 }
 
 /// What the Android side knows at start-up that the engine asks for later.
@@ -1154,9 +1156,21 @@ impl Corvene {
     }
 
     /// Loads the global git config for Settings › Git.
+    pub fn load_global_git_config(&self) {
+        self.loop_
+            .post(|host| Dispatcher::load_global_git_config(host));
+    }
+
+    /// Opens `~/.gitconfig` in an editor (desktop Settings › Git › Edit).
     pub fn open_global_git_config(&self) {
         self.loop_
             .post(|host| Dispatcher::edit_global_git_config(host));
+    }
+
+    /// Settings › Git › Default branch name (`init.defaultBranch`).
+    pub fn set_default_branch(&self, name: String) {
+        self.loop_
+            .post(move |host| Dispatcher::set_global_default_branch(name, host));
     }
 
     pub async fn global_git_config(&self) -> Option<GlobalGitConfigVm> {

@@ -127,7 +127,7 @@ class SettingsScreensTest {
     @Test
     fun `git saves the edited identity`() {
         val saved = mutableListOf<Pair<String, String>>()
-        show { GitScreen("Wasi", "old@example.com", "main", onSave = { n, e -> saved += n to e }, onEditConfig = {}) }
+        show { GitScreen("Wasi", "old@example.com", "main", onSave = { n, e -> saved += n to e }, onDefaultBranch = {}, onEditConfig = {}) }
         field(TAG_GIT_EMAIL).performTextReplacement("wasi@example.com ")
         compose.onNodeWithTag(TAG_GIT_SAVE).performClick()
         assertEquals(listOf("Wasi" to "wasi@example.com"), saved)

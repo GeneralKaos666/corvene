@@ -36,6 +36,8 @@ val SampleSettings = SettingsVm(
     externalEditor = null,
     shell = null,
     cloneDir = null,
+    confirmDiscardChangesPermanently = false,
+    useExternalCredentialHelper = false,
 )
 
 fun flag(

@@ -213,3 +213,14 @@ Kotlin does meanwhile.
   ("label\tpackage/class" per entry) and `packageInstalled(package): Boolean` — `HostEventsBridge` must
   implement them (route to OpenPath.share, Termux.open/run, OpenPath.viewWith, the installed viewers probe,
   PackageManager). The engine's own Share / Open in Termux / Open with now reach Kotlin through them.
+
+## Provided by the FFI (2026-10-04, M-A5 requests 42-44)
+
+- `SettingsVm.confirmDiscardChangesPermanently` and `useExternalCredentialHelper` (#42); the Prompts
+  and Advanced screens show their rows.
+- `loadGlobalGitConfig()` reads the global identity and `init.defaultBranch` into `globalGitConfig()`
+  without the Preferences popup; `setDefaultBranch(name)` writes `init.defaultBranch` and re-reads it
+  (an error dialog on failure) (#43). Settings › Git has GHD's main / master / Other… radios.
+- `HostEvents.relaunch()` (#44), raised by the engine's own relaunch (a flag that needs a restart);
+  `quit()` is now a real quit. **Breaking:** `HostEventsBridge` implements it (`HostRequest.Relaunch`
+  → RelaunchActivity; `HostRequest.Quit` → `finishAffinity`).

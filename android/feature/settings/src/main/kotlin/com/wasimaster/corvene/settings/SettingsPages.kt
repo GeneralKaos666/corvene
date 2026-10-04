@@ -46,6 +46,7 @@ import com.wasimaster.corvene.ffi.gen.SettingsVm
 /** The engine's `setSetting` keys (snake_case, as `crates/corvene-ffi/src/api.rs::set_setting` reads them). */
 object SettingKey {
     const val CONFIRM_DISCARD_CHANGES = "confirm_discard_changes"
+    const val CONFIRM_DISCARD_CHANGES_PERMANENTLY = "confirm_discard_changes_permanently"
     const val CONFIRM_CHECKOUT_COMMIT = "confirm_checkout_commit"
     const val CONFIRM_UNDO_COMMIT = "confirm_undo_commit"
     const val CONFIRM_DISCARD_STASH = "confirm_discard_stash"
@@ -54,6 +55,7 @@ object SettingKey {
     const val CONFIRM_COMMIT_FILTERED_CHANGES = "confirm_commit_filtered_changes"
     const val NOTIFICATIONS_ENABLED = "notifications_enabled"
     const val REPOSITORY_INDICATORS_ENABLED = "repository_indicators_enabled"
+    const val USE_EXTERNAL_CREDENTIAL_HELPER = "use_external_credential_helper"
     const val SHOW_DIFF_CHECK_MARKS = "show_diff_check_marks"
     const val UNDERLINE_LINKS = "underline_links"
     const val SHOW_COMMIT_LENGTH_WARNING = "show_commit_length_warning"
@@ -153,8 +155,9 @@ fun IntegrationsScreen(
 /**
  * Settings › Git (GHD's Author and Default branch sub-tabs): name and email
  * written to the global config with Save, the default branch new
- * repositories start with (read-only: the FFI has no setter yet), and the
- * global config file in the external editor.
+ * repositories start with (GHD's `main` / `master` / Other… radios, written
+ * to `init.defaultBranch` as soon as it is picked), and the global config
+ * file in the external editor.
  */
 @Composable
 fun GitScreen(
@@ -162,6 +165,7 @@ fun GitScreen(
     email: String,
     defaultBranch: String,
     onSave: (name: String, email: String) -> Unit,
+    onDefaultBranch: (String) -> Unit,
     onEditConfig: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
@@ -169,6 +173,8 @@ fun GitScreen(
     var editedName by rememberSaveable(name) { mutableStateOf(name) }
     var editedEmail by rememberSaveable(email) { mutableStateOf(email) }
     val changed = editedName.trim() != name.trim() || editedEmail.trim() != email.trim()
+    val suggested = defaultBranch in SUGGESTED_BRANCHES
+    var other by rememberSaveable(defaultBranch) { mutableStateOf(if (suggested) "" else defaultBranch) }
     SettingsPage(modifier.imePadding(), contentPadding) {
         Flash(
             stringResource(R.string.set_git_note),
@@ -204,10 +210,46 @@ fun GitScreen(
             }
         }
         ActionListGroupHeader(stringResource(R.string.set_git_default_branch), Modifier.padding(top = 8.dp))
-        ActionListItem(
-            defaultBranch,
-            description = stringResource(R.string.set_git_default_branch_body, defaultBranch),
-            leading = { Octicon(Octicons.GitBranch, null) },
+        Column(Modifier.selectableGroup()) {
+            SUGGESTED_BRANCHES.forEach { branch ->
+                RadioRow(
+                    branch,
+                    selected = defaultBranch == branch,
+                    onClick = { onDefaultBranch(branch) },
+                    modifier = Modifier.testTag("$TAG_DEFAULT_BRANCH$branch"),
+                )
+            }
+            RadioRow(
+                stringResource(R.string.set_git_default_branch_other),
+                selected = !suggested,
+                onClick = { if (other.isNotBlank()) onDefaultBranch(other.trim()) },
+                modifier = Modifier.testTag("${TAG_DEFAULT_BRANCH}other"),
+            )
+        }
+        Row(
+            Modifier.padding(horizontal = CorveneTheme.metrics.gutter).fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PrimerTextField(
+                other,
+                { other = it },
+                Modifier.weight(1f).testTag(TAG_DEFAULT_BRANCH_OTHER),
+                label = stringResource(R.string.set_git_default_branch_name),
+                singleLine = true,
+            )
+            PrimerButton(
+                stringResource(R.string.set_git_save),
+                { onDefaultBranch(other.trim()) },
+                Modifier.testTag(TAG_DEFAULT_BRANCH_SAVE),
+                enabled = other.isNotBlank() && other.trim() != defaultBranch && validBranchName(other.trim()),
+            )
+        }
+        Text(
+            stringResource(R.string.set_git_default_branch_body),
+            Modifier.padding(horizontal = CorveneTheme.metrics.gutter, vertical = 8.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = CorveneTheme.colors.textSecondary,
         )
         ActionListDivider()
         ActionListItem(
@@ -269,7 +311,6 @@ fun NotificationsScreen(
 /**
  * Settings › Prompts, as GHD 3.6.6 has it: the confirmations, what happens
  * to changes when switching branches, the commit length warning.
- * ("Discarding changes permanently" waits for its value in the view model.)
  */
 @Composable
 fun PromptsScreen(
@@ -283,6 +324,11 @@ fun PromptsScreen(
         listOf(
             Triple(R.string.set_prompt_remove_repository, SettingKey.CONFIRM_REPOSITORY_REMOVAL, settings.confirmRepositoryRemoval),
             Triple(R.string.set_prompt_discard, SettingKey.CONFIRM_DISCARD_CHANGES, settings.confirmDiscardChanges),
+            Triple(
+                R.string.set_prompt_discard_permanently,
+                SettingKey.CONFIRM_DISCARD_CHANGES_PERMANENTLY,
+                settings.confirmDiscardChangesPermanently,
+            ),
             Triple(R.string.set_prompt_discard_stash, SettingKey.CONFIRM_DISCARD_STASH, settings.confirmDiscardStash),
             Triple(R.string.set_prompt_checkout_commit, SettingKey.CONFIRM_CHECKOUT_COMMIT, settings.confirmCheckoutCommit),
             Triple(R.string.set_prompt_force_push, SettingKey.CONFIRM_FORCE_PUSH, settings.confirmForcePush),
@@ -320,8 +366,8 @@ fun PromptsScreen(
  * Settings › Advanced: GHD's background updates (status icons in the
  * repository list) and, where Android lets an app ask for it (the foss
  * build), All files access, which decides whether shared-storage
- * repositories open in place. ("Use Git Credential Manager" waits for its
- * value in the view model; usage stats are omitted, Corvene has none.)
+ * repositories open in place. GHD's "Use Git Credential Manager" stands for
+ * the external credential helper. (Usage stats are omitted, Corvene has none.)
  */
 @Composable
 fun AdvancedScreen(
@@ -340,6 +386,14 @@ fun AdvancedScreen(
             writer.toggle(SettingKey.REPOSITORY_INDICATORS_ENABLED),
             Modifier.testTag("$TAG_SETTING${SettingKey.REPOSITORY_INDICATORS_ENABLED}"),
             caption = stringResource(R.string.set_indicators_body),
+        )
+        ActionListGroupHeader(stringResource(R.string.set_credentials), Modifier.padding(top = 8.dp))
+        SwitchRow(
+            stringResource(R.string.set_credential_helper),
+            settings.useExternalCredentialHelper,
+            writer.toggle(SettingKey.USE_EXTERNAL_CREDENTIAL_HELPER),
+            Modifier.testTag("$TAG_SETTING${SettingKey.USE_EXTERNAL_CREDENTIAL_HELPER}"),
+            caption = stringResource(R.string.set_credential_helper_body),
         )
         if (allFiles != null) {
             ActionListGroupHeader(stringResource(R.string.set_storage), Modifier.padding(top = 8.dp))
@@ -457,6 +511,18 @@ fun LicensesScreen(text: String, modifier: Modifier = Modifier, contentPadding: 
 
 const val SOURCE_URL = "https://github.com/wasi-master/corvene"
 const val TAG_SETTING = "set_setting_"
+const val TAG_DEFAULT_BRANCH = "set_default_branch_"
+const val TAG_DEFAULT_BRANCH_OTHER = "set_default_branch_other_name"
+const val TAG_DEFAULT_BRANCH_SAVE = "set_default_branch_save"
+
+/** GHD's suggestions on the Default branch tab. */
+private val SUGGESTED_BRANCHES = listOf("main", "master")
+
+/** Enough of `git check-ref-format --branch` to keep the Save button honest; git has the last word. */
+internal fun validBranchName(name: String): Boolean =
+    name.isNotEmpty() && !name.startsWith("-") && !name.endsWith(".lock") && !name.endsWith("/") &&
+        name.none { it.isWhitespace() || it in "~^:?*[\\" || it.code < 0x20 || it.code == 0x7f } &&
+        ".." !in name && "@{" !in name && "//" !in name && name != "@"
 const val TAG_STRATEGY = "set_strategy_"
 const val TAG_EDITOR = "set_editor_"
 const val TAG_GIT_NAME = "set_git_name"

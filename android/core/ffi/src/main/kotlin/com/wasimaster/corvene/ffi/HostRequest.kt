@@ -28,6 +28,9 @@ sealed interface HostRequest {
 
     data object Quit : HostRequest
 
+    /** Start the process again (a flag that needs a restart changed). */
+    data object Relaunch : HostRequest
+
     /** The share sheet for a file. */
     data class SharePath(val path: String) : HostRequest
 

@@ -21,11 +21,12 @@ import com.wasimaster.corvene.ffi.HostRequest
  * (sign-in pages in a Custom Tab), the clipboard, toasts, the folder and file
  * pickers (each `pick_paths` answered exactly once with `pathsPicked`),
  * opening files and folders, notifications and their permission, all-files
- * access, the transfer service, bringing the app forward. Requests made
- * while no activity is up wait in [Core.hostRequests].
+ * access, the transfer service, bringing the app forward, quitting and
+ * relaunching (a flag that needs a restart). Requests made while no activity
+ * is up wait in [Core.hostRequests].
  */
 @Composable
-fun HostRequestHandler(core: Core, onQuit: () -> Unit) {
+fun HostRequestHandler(core: Core, onQuit: () -> Unit, onRelaunch: () -> Unit) {
     val context = LocalContext.current
     // the engine's request id survives the activity being recreated under the picker
     var pendingPick by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -63,6 +64,7 @@ fun HostRequestHandler(core: Core, onQuit: () -> Unit) {
                     HostRequest.RequestAllFilesAccess -> requestAllFilesAccess(context)
                     HostRequest.BringToFront -> bringToFront(context)
                     HostRequest.Quit -> onQuit()
+                    HostRequest.Relaunch -> onRelaunch()
                     is HostRequest.SharePath -> OpenPath.share(context, request.path)?.let { toast(context, it) }
                     is HostRequest.OpenTermux ->
                         (context as? android.app.Activity)?.let { Termux.open(it, request.dir)?.let { m -> toast(context, m) } }

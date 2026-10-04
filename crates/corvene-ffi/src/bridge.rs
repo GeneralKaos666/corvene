@@ -132,7 +132,7 @@ impl corvene_platform::android::Bridge for KotlinBridge {
     }
     fn toggle_full_screen(&self) {}
     fn relaunch(&self) {
-        self.events.quit();
+        self.events.relaunch();
     }
     fn bring_to_front(&self) {
         self.events.bring_to_front();

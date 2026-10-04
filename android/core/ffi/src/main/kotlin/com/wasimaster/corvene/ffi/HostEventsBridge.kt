@@ -40,6 +40,8 @@ internal class HostEventsBridge(
 
     override fun quit() = send(HostRequest.Quit)
 
+    override fun relaunch() = send(HostRequest.Relaunch)
+
     override fun sharePath(path: String) = send(HostRequest.SharePath(path))
 
     override fun openTermux(dir: String) = send(HostRequest.OpenTermux(dir))
