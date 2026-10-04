@@ -6,6 +6,10 @@
 //! is treated as paid until the launch refresh fills it in; GHD's accounts
 //! always carry it.
 //!
+//! A protected branch that takes the user's direct pushes is noted
+//! (`339-protected-branch-bypass-note`; GHD `isBranchPushable` only knows
+//! "pushable", so an admin bypass or a pull request rule without required
+//! approvals pushes without a word).
 //! A ruleset the user is `exempt` from is left out
 //! (`338-ruleset-exempt-bypass`; GHD `repo-rules.ts` treats every bypass mode
 //! but `always` as enforced, so exempt users cannot commit).
@@ -217,7 +221,7 @@ impl Dispatcher {
     /// `refreshBranchProtectionState`: push control + rulesets + branch
     /// rules for the current branch, throttled per branch.
     pub(crate) fn refresh_branch_protection(id: u64, cx: &mut dyn Host) {
-        let (github, branch, remote_url, prior_rulesets, rules_enabled, exempt_skips) = {
+        let (github, branch, remote_url, prior_rulesets, rules_enabled, exempt_skips, bypass_note) = {
             let s = Self::state(cx).read(cx);
             let Some(gh) = s.repository(id).and_then(|r| r.github.clone()) else {
                 return;
@@ -229,6 +233,7 @@ impl Dispatcher {
                 Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
                     rs.current_branch_protected = false;
+                    rs.current_branch_protection_bypassed = false;
                     rs.repo_rules = RepoRulesInfo::default();
                     cx.notify();
                 });
@@ -261,6 +266,8 @@ impl Dispatcher {
                 s.repo_rulesets.clone(),
                 rules_enabled,
                 s.flags.bool(crate::flags::ids::RULESET_EXEMPT_BYPASS),
+                s.flags
+                    .bool(crate::flags::ids::PROTECTED_BRANCH_BYPASS_NOTE),
             )
         };
         let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
@@ -286,6 +293,14 @@ impl Dispatcher {
                     .push_control(&owner, &name, &branch_for_load)
                     .map(|pc| !pc.is_pushable())
                     .unwrap_or(false);
+                // `339-protected-branch-bypass-note`: protected, yet pushable
+                let bypassed = bypass_note
+                    && !protected
+                    && client
+                        .branch(&owner, &name, &branch_for_load)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|b| b.protected);
                 let mut rulesets = prior_rulesets;
                 let mut info = RepoRulesInfo::default();
                 if dotcom && rules_enabled {
@@ -318,9 +333,9 @@ impl Dispatcher {
                         );
                     }
                 }
-                (protected, info, rulesets)
+                (protected, bypassed, info, rulesets)
             },
-            move |(protected, info, rulesets), cx| {
+            move |(protected, bypassed, info, rulesets), cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     s.repo_rulesets = rulesets;
                     let rs = s.repo_state_mut(id);
@@ -328,6 +343,7 @@ impl Dispatcher {
                         return;
                     }
                     rs.current_branch_protected = protected;
+                    rs.current_branch_protection_bypassed = bypassed;
                     rs.repo_rules = info;
                     cx.notify();
                 });

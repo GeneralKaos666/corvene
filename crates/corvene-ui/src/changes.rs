@@ -81,6 +81,9 @@
 //!   (`785-embedded-repo-commit`, `corvene_core::commit_checks`).
 //! - the commit options gear has "Commit to New Branch…"
 //!   (`787-commit-to-new-branch`, `corvene_core::new_branch_flows`).
+//! - a protected branch that takes the user's pushes gets a note above the
+//!   commit button (`339-protected-branch-bypass-note`; GHD `commit-warning`
+//!   shows the protected warning only for unpushable branches).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -502,6 +505,9 @@ struct RulesSnapshot {
     /// `aheadBehind === null`: the branch is unpublished.
     unpublished: bool,
     protected: bool,
+    /// `339-protected-branch-bypass-note`: protected, but the user's pushes
+    /// go through.
+    protection_bypassed: bool,
     info: corvene_core::RepoRulesInfo,
     message_failures: RepoRulesMetadataFailures,
     author_failures: RepoRulesMetadataFailures,
@@ -3592,6 +3598,9 @@ impl ChangesSidebar {
             branch,
             unpublished: rs.ahead_behind.is_none(),
             protected: rs.current_branch_protected,
+            protection_bypassed: rs.current_branch_protection_bypassed
+                && s.flags
+                    .bool(corvene_core::flags::ids::PROTECTED_BRANCH_BYPASS_NOTE),
             info,
             message_failures,
             author_failures,
@@ -4021,7 +4030,26 @@ impl ChangesSidebar {
                     .iter()
                     .find(|(_, e)| *e == RepoRuleEnforced::Bypass)
             })
-            .copied()?;
+            .copied();
+        // Corvene (`339-protected-branch-bypass-note`): a protected branch
+        // that takes the user's pushes gets a note, not a block (GHD says
+        // nothing)
+        let Some(warning) = warning else {
+            if !rules.protection_bypassed {
+                return None;
+            }
+            return Some(self.commit_warning(
+                Octicon::Alert,
+                t.dialog_warning,
+                message(vec![
+                    bold(branch.clone()),
+                    div()
+                        .child("is a protected branch. Your push may bypass its rules.")
+                        .into_any_element(),
+                ]),
+                cx,
+            ));
+        };
         let can_bypass = warning.1 == RepoRuleEnforced::Bypass;
         let (icon, color) = if can_bypass {
             (Octicon::Alert, t.dialog_warning)

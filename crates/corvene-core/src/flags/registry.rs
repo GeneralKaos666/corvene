@@ -2623,6 +2623,24 @@ registry! {
         code: &["crates/corvene-core/src/repo_rules.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// A protected branch that takes your pushes gets a note.
+    PROTECTED_BRANCH_BYPASS_NOTE = 339 "protected-branch-bypass-note" {
+        title: "Note when pushing past branch protection",
+        summary: "When the current branch is protected on GitHub but still takes your direct \
+                  pushes (you are an admin or on the bypass list, or its pull request rule \
+                  needs no approvals), a note above the Commit button says so: \"main is a \
+                  protected branch. Your push may bypass its rules.\" Committing stays \
+                  possible.",
+        ghd_behaviour: "Warns only about branches you cannot push to; a push that bypasses \
+                        the protection goes through without a word.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20522), Upstream::issue(20547)],
+        code: &["crates/corvene-core/src/repo_rules.rs", "crates/corvene-github/src/api.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

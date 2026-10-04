@@ -1210,6 +1210,10 @@ pub struct RepositoryState {
     pub upstream_checked: bool,
     /// `changesState.currentBranchProtected`
     pub current_branch_protected: bool,
+    /// Corvene `339-protected-branch-bypass-note`: the branch is protected on
+    /// GitHub but takes the user's direct pushes (an admin or bypass-list
+    /// exception, or a pull request rule without required approvals).
+    pub current_branch_protection_bypassed: bool,
     /// `changesState.currentRepoRulesInfo`
     pub repo_rules: corvene_models::RepoRulesInfo,
     /// Which branch the rules were fetched for, and when.

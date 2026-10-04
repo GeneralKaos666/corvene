@@ -1484,6 +1484,17 @@ impl Client {
             .unwrap_or_default())
     }
 
+    /// `GET repos/{owner}/{name}/branches/{branch}`: the branch as GitHub
+    /// knows it (its `protected` mark), `None` when it is not there (Corvene
+    /// `339-protected-branch-bypass-note`).
+    pub fn branch(&self, owner: &str, name: &str, branch: &str) -> Result<Option<ApiBranch>> {
+        let safe = encode_path_component(branch);
+        self.get_json_opt(
+            &format!("repos/{owner}/{name}/branches/{safe}"),
+            "application/vnd.github+json",
+        )
+    }
+
     /// `fetchAllRepoRulesets`
     pub fn repo_rulesets(
         &self,
