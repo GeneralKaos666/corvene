@@ -4483,6 +4483,23 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/stash_flows.rs", "crates/corvene-git/src/stash_ops.rs"],
     },
 
+    /// "Unable to … when changes are present" can discard the files and go on.
+    OVERWRITTEN_DISCARD_AND_CONTINUE = 778 "overwritten-discard-and-continue" {
+        title: "Discard changes and continue",
+        summary: "When a pull, cherry-pick, squash, reorder or rebase stops because of local \
+                  changes, the dialog listing the files has Discard Changes and Continue: those \
+                  files are discarded as Discard Changes does (new files go to the Trash) and \
+                  the operation runs again.",
+        ghd_behaviour: "The dialog offers Stash Changes and Continue (none when the branch \
+                        already has a stash) or Close.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17507)],
+        code: &["crates/corvene-ui/src/dialogs/mco_dialogs.rs", "crates/corvene-core/src/stash_flows.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

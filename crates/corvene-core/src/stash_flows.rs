@@ -21,6 +21,11 @@
 //! Deviation (`777-stash-selected-files`): the changes list's file menu
 //! stashes the selected files ([`Dispatcher::stash_selected_files`]) while
 //! the branch has no stash of its own; GHD stashes all changes or none.
+//!
+//! Deviation (`778-overwritten-discard-and-continue`): "Unable to … when
+//! changes are present" can discard the files it lists and run the
+//! operation again ([`Dispatcher::discard_and_retry`]); GHD offers stashing
+//! only.
 
 use std::path::PathBuf;
 
@@ -383,6 +388,80 @@ impl Dispatcher {
                     .map(|_| ())
             },
             cx,
+        );
+    }
+
+    /// `778-overwritten-discard-and-continue` › Discard Changes and
+    /// Continue: discard `paths` the usual way (new files to the Trash),
+    /// then run the operation again. A failed discard, or files the Trash
+    /// refused, stop before the retry.
+    pub fn discard_and_retry(
+        id: u64,
+        paths: Vec<String>,
+        retry: crate::state::RetryAction,
+        cx: &mut App,
+    ) {
+        Self::close_popup(cx);
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let (files, clean_submodules, move_to_trash, keep_untrashable) = {
+            let s = Self::state(cx).read(cx);
+            let wanted: std::collections::HashSet<&str> =
+                paths.iter().map(String::as_str).collect();
+            (
+                s.repo_states
+                    .get(&id)
+                    .and_then(|r| r.status.as_deref())
+                    .map(|st| {
+                        st.files
+                            .iter()
+                            .filter(|f| wanted.contains(f.path.as_str()))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                s.flags.bool(crate::flags::ids::DISCARD_SUBMODULE_CHANGES),
+                !s.flags.bool(crate::flags::ids::DISCARD_SKIPS_TRASH),
+                // GHD `askForConfirmationOnDiscardChangesPermanently`
+                s.settings.confirm_discard_changes_permanently,
+            )
+        };
+        spawn_bg(
+            cx,
+            move || {
+                if files.is_empty() {
+                    return Ok(Vec::new());
+                }
+                corvene_git::discard_changes(
+                    git,
+                    &workdir,
+                    &files,
+                    move_to_trash,
+                    clean_submodules,
+                    keep_untrashable,
+                )
+            },
+            move |result, cx| match result {
+                Ok(untrashable) if untrashable.is_empty() => Self::perform_retry(id, retry, cx),
+                // `DiscardChangesRetry`: files are left, so no retry yet
+                Ok(untrashable) => {
+                    Self::end_mco(id, cx);
+                    Self::show_popup(
+                        Popup::ConfirmDeleteUntrashable {
+                            repo: id,
+                            paths: untrashable,
+                        },
+                        cx,
+                    );
+                    Self::refresh_repository(id, cx);
+                }
+                Err(err) => {
+                    Self::end_mco(id, cx);
+                    Self::show_error("Could not discard changes", &err, cx);
+                    Self::refresh_repository(id, cx);
+                }
+            },
         );
     }
 

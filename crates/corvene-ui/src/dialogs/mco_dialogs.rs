@@ -20,7 +20,8 @@
 //! how many more there are (GHD lists them all,
 //! `local-changes-overwritten-dialog.tsx`). With a stash on the branch it
 //! can add the changes to it and continue (`776-stash-add-to-existing`;
-//! GHD offers only Close then).
+//! GHD offers only Close then), and it can discard the listed files and
+//! continue (`778-overwritten-discard-and-continue`).
 
 use corvene_core::{
     AppState, Dispatcher, ManualConflictResolution, McoStep, MultiCommitOperationKind, RetryAction,
@@ -1414,6 +1415,13 @@ impl Render for LocalChangesOverwrittenDialog {
                 .flags
                 .bool(corvene_core::flags::ids::STASH_ADD_TO_EXISTING);
         let retry = self.retry.clone();
+        // Corvene (`778-overwritten-discard-and-continue`)
+        let offer_discard = !self.files.is_empty()
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::OVERWRITTEN_DISCARD_AND_CONTINUE);
         let content = div()
             .flex()
             .flex_col()
@@ -1471,6 +1479,22 @@ impl Render for LocalChangesOverwrittenDialog {
             disabled: false,
             on_click: Box::new(close),
         }];
+        if offer_discard {
+            let (retry, files) = (retry.clone(), self.files.clone());
+            buttons.push(DialogButton {
+                id: "overwritten-discard",
+                label: mac_or(
+                    "Discard Changes and Continue",
+                    "Discard changes and continue",
+                )
+                .into(),
+                primary: false,
+                disabled: false,
+                on_click: Box::new(move |_, cx| {
+                    Dispatcher::discard_and_retry(repo, files.clone(), retry.clone(), cx)
+                }),
+            });
+        }
         if add_to_stash {
             let retry = retry.clone();
             buttons.push(DialogButton {
