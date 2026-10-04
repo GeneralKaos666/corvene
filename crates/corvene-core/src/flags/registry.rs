@@ -5758,6 +5758,22 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-ui/src/dialogs/delete_branches.rs", "crates/corvene-core/src/delete_branches.rs", "crates/corvene-ui/src/banner.rs"],
     },
 
+    /// Branches deleted on the remote grouped at the end of the branch list.
+    BRANCH_UPSTREAM_GONE_GROUP = 896 "branch-upstream-gone-group" {
+        title: "Group branches deleted on the remote",
+        summary: "Local branches whose upstream was deleted on the remote (and pruned by a fetch) \
+                  move out of Recent Branches and Other Branches into a \"Deleted on Remote\" \
+                  group at the end of the branch list, ready to be cleaned up. The current and \
+                  the default branch stay where they are.",
+        ghd_behaviour: "Such branches are listed among the others.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11396)],
+        code: &["crates/corvene-ui/src/branch_list.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

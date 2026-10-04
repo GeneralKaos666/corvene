@@ -29,6 +29,9 @@
 //! Deviation (`854-branch-list-stash-icon`): a local branch with a Desktop
 //! stash shows the stash icon after its name (GHD `branch-list-item.tsx` does
 //! not).
+//! Deviation (`896-branch-upstream-gone-group`): local branches whose
+//! upstream was deleted on the remote are grouped last under "Deleted on
+//! Remote" (GHD lists them among the others).
 //! Deviation (`895-bulk-delete-branches`): ⌘-click / ⇧-click select several
 //! local branches (GHD's list selects one row) and their context menu
 //! deletes them together.
@@ -358,6 +361,43 @@ pub fn group_branches(
     groups
 }
 
+/// Flag `896-branch-upstream-gone-group`: moves the local branches whose
+/// upstream is gone (configured, but its remote-tracking branch deleted)
+/// out of their groups into a "Deleted on Remote" group at the end; the
+/// branches named in `keep` (the current and the default branch) stay.
+pub fn group_upstream_gone(
+    groups: Vec<BranchGroup>,
+    all: &[Branch],
+    keep: &[&str],
+) -> Vec<BranchGroup> {
+    let gone = |b: &Branch| {
+        b.kind == BranchKind::Local
+            && !keep.contains(&b.name.as_str())
+            && corvene_core::delete_branches::upstream_gone(b, all)
+    };
+    let mut moved: Vec<Branch> = Vec::new();
+    let mut out: Vec<BranchGroup> = groups
+        .into_iter()
+        .map(|mut g| {
+            let (gone, rest): (Vec<Branch>, Vec<Branch>) =
+                g.branches.into_iter().partition(|b| gone(b));
+            moved.extend(gone);
+            g.branches = rest;
+            g
+        })
+        .filter(|g| !g.branches.is_empty())
+        .collect();
+    if !moved.is_empty() {
+        moved.sort_by_key(|b| b.name.to_lowercase());
+        moved.dedup_by(|a, b| a.name == b.name);
+        out.push(BranchGroup {
+            title: mac_or("Deleted on Remote", "Deleted on remote"),
+            branches: moved,
+        });
+    }
+    out
+}
+
 /// GHD `mergeRemoteAndLocalBranches` (`lib/stores/git-store.ts`, its
 /// `allBranches`): the local branches, then the remote branches no local
 /// branch tracks.
@@ -464,13 +504,25 @@ impl BranchFoldout {
         if remote_only {
             remote_group(&info.branches, &query, cx)
         } else {
-            group_branches(
+            let groups = group_branches(
                 &info.branches,
                 rs.default_branch.as_deref(),
                 &rs.recent_branches,
                 &query,
                 sort_by_date(cx),
-            )
+            );
+            if s.flags
+                .bool(corvene_core::flags::ids::BRANCH_UPSTREAM_GONE_GROUP)
+            {
+                let current = info.current_branch().map(|b| b.name.as_str());
+                let keep: Vec<&str> = current
+                    .into_iter()
+                    .chain(rs.default_branch.as_deref())
+                    .collect();
+                group_upstream_gone(groups, &info.branches, &keep)
+            } else {
+                groups
+            }
         }
     }
 
@@ -1773,5 +1825,61 @@ impl BranchFoldout {
                 )
                 .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn local(name: &str, upstream: Option<&str>) -> Branch {
+        Branch {
+            name: name.into(),
+            kind: BranchKind::Local,
+            full_name: format!("refs/heads/{name}"),
+            tip: None,
+            upstream: upstream.map(|u| format!("refs/remotes/origin/{u}")),
+            tip_time: None,
+            remote_name: None,
+        }
+    }
+
+    fn remote(name: &str) -> Branch {
+        Branch {
+            name: format!("origin/{name}"),
+            kind: BranchKind::Remote,
+            full_name: format!("refs/remotes/origin/{name}"),
+            tip: None,
+            upstream: None,
+            tip_time: None,
+            remote_name: Some("origin".into()),
+        }
+    }
+
+    #[::core::prelude::v1::test]
+    fn gone_branches_move_to_their_own_group_last() {
+        let all = vec![
+            local("main", Some("main")),
+            local("current", Some("current")),
+            local("kept", Some("kept")),
+            local("merged", Some("merged")),
+            local("unpublished", None),
+            remote("main"),
+            remote("kept"),
+        ];
+        let groups = group_branches(&all, Some("main"), &["merged".into()], "", false);
+        let groups = group_upstream_gone(groups, &all, &["current", "main"]);
+        let titles: Vec<&str> = groups.iter().map(|g| g.title).collect();
+        assert_eq!(titles.len(), 3);
+        assert_eq!(titles[0], mac_or("Default Branch", "Default branch"));
+        assert_eq!(titles[2], mac_or("Deleted on Remote", "Deleted on remote"));
+        let names = |g: &BranchGroup| {
+            g.branches
+                .iter()
+                .map(|b| b.name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&groups[1]), ["current", "kept", "unpublished"]);
+        assert_eq!(names(&groups[2]), ["merged"]);
     }
 }
