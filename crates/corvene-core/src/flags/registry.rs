@@ -4636,6 +4636,22 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/status.rs"],
     },
 
+    /// Amend mode can change the commit's author.
+    AMEND_AUTHOR = 783 "amend-author" {
+        title: "Change the author when amending",
+        summary: "While amending, the commit form shows the commit's author as an editable \
+                  \"Name <email>\" field (it replaces the 734 author line) with \"Reset to my \
+                  identity\": a changed author is passed as git commit --amend --author, the \
+                  reset as --reset-author (your identity and a new author date).",
+        ghd_behaviour: "An amended commit keeps its author.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20591)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

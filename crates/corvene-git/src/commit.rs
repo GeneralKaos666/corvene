@@ -23,6 +23,33 @@ pub struct CommitOptions {
     pub no_verify: bool,
     pub signoff: bool,
     pub allow_empty: bool,
+    /// Corvene `783-amend-author`: another author for the commit.
+    pub author: Option<CommitAuthor>,
+}
+
+/// Corvene `783-amend-author`: who an amended commit is by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommitAuthor {
+    /// `--author="Name <email>"` (the author date stays).
+    Given { name: String, email: String },
+    /// `--reset-author`: the committer's identity, with a new author date.
+    ResetToCommitter,
+}
+
+/// Corvene `783-amend-author`: a `Name <email>` author as typed, trimmed.
+pub fn parse_commit_author(text: &str) -> std::result::Result<(String, String), &'static str> {
+    const INVALID: &str = "Enter the author as Name <email>";
+    let text = text.trim();
+    let inner = text.strip_suffix('>').ok_or(INVALID)?;
+    let (name, email) = inner.rsplit_once('<').ok_or(INVALID)?;
+    let (name, email) = (name.trim(), email.trim());
+    if name.is_empty() || name.contains(['<', '>', '\n']) {
+        return Err(INVALID);
+    }
+    if email.is_empty() || email.contains(|c: char| c.is_whitespace() || c == '<' || c == '>') {
+        return Err(INVALID);
+    }
+    Ok((name.to_string(), email.to_string()))
 }
 
 /// `git reset -- .` (GHD `unstageAll`). On an unborn branch there is no HEAD
@@ -277,18 +304,25 @@ pub fn commit(
     message: &str,
     opts: &CommitOptions,
 ) -> Result<String> {
-    let mut args = vec!["commit", "-F", "-"];
+    let mut args = vec!["commit".to_string(), "-F".into(), "-".into()];
     if opts.amend {
-        args.push("--amend");
+        args.push("--amend".into());
     }
     if opts.no_verify {
-        args.push("--no-verify");
+        args.push("--no-verify".into());
     }
     if opts.signoff {
-        args.push("--signoff");
+        args.push("--signoff".into());
     }
     if opts.allow_empty {
-        args.push("--allow-empty");
+        args.push("--allow-empty".into());
+    }
+    match &opts.author {
+        Some(CommitAuthor::Given { name, email }) => {
+            args.push(format!("--author={name} <{email}>"))
+        }
+        Some(CommitAuthor::ResetToCommitter) => args.push("--reset-author".into()),
+        None => {}
     }
     let out = GitCommand::new(git)
         .args(args)
@@ -773,6 +807,65 @@ mod tests {
         // trusted modes: nothing to keep
         run(&["config", "core.fileMode", "true"]);
         assert!(staged_mode_changes(git, path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parses_commit_authors() {
+        assert_eq!(
+            parse_commit_author("  Ada Lovelace <ada@example.com> "),
+            Ok(("Ada Lovelace".to_string(), "ada@example.com".to_string()))
+        );
+        assert_eq!(
+            parse_commit_author("Ada<ada@x>"),
+            Ok(("Ada".to_string(), "ada@x".to_string()))
+        );
+        for bad in [
+            "",
+            "Ada",
+            "<ada@x>",
+            "Ada <>",
+            "Ada <a b@x>",
+            "Ada <ada@x",
+            "A<b> <c@d>",
+        ] {
+            assert!(parse_commit_author(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn amends_with_another_author_or_the_committer() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "a\n").unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
+        stage_files(git.clone(), path, &status.files).unwrap();
+        commit(git.clone(), path, "init\n", &CommitOptions::default()).unwrap();
+        let author = || {
+            let out = Command::new("git")
+                .args(["log", "-1", "--format=%an <%ae>"])
+                .current_dir(path)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let amend = |author: CommitAuthor| CommitOptions {
+            amend: true,
+            author: Some(author),
+            ..CommitOptions::default()
+        };
+        commit(
+            git.clone(),
+            path,
+            "init\n",
+            &amend(CommitAuthor::Given {
+                name: "Ada Lovelace".into(),
+                email: "ada@example.com".into(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(author(), "Ada Lovelace <ada@example.com>");
+        commit(git, path, "init\n", &amend(CommitAuthor::ResetToCommitter)).unwrap();
+        assert_eq!(author(), "T <t@example.com>");
     }
 
     #[test]

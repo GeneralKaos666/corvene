@@ -1084,6 +1084,9 @@ pub struct RepositoryState {
     pub commit_to_amend: Option<corvene_models::Commit>,
     /// Bumped when amending starts so the form loads the commit's message.
     pub amend_nonce: u64,
+    /// Corvene `783-amend-author`: the author the amended commit gets, when
+    /// the commit form's author field changed it.
+    pub amend_author: Option<corvene_git::CommitAuthor>,
     /// GHD `IChangesState.commitMessage`: the message the dispatcher hands
     /// to the commit form (Undo Commit's, `git_store::undo_commit`); the
     /// form loads it when `commit_message_nonce` changes. Corvene's form

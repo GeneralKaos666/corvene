@@ -3335,6 +3335,7 @@ impl Dispatcher {
             let rs = s.repo_state_mut(id);
             rs.commit_to_amend = Some(commit);
             rs.amend_nonce += 1;
+            rs.amend_author = None;
             cx.notify();
         });
     }
@@ -3342,8 +3343,22 @@ impl Dispatcher {
     /// `_stopAmendingRepository`
     pub fn stop_amending(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
-            s.repo_state_mut(id).commit_to_amend = None;
+            let rs = s.repo_state_mut(id);
+            rs.commit_to_amend = None;
+            rs.amend_author = None;
             cx.notify();
+        });
+    }
+
+    /// Corvene `783-amend-author`: the author the commit being amended
+    /// gets (`None` keeps its own).
+    pub fn set_amend_author(id: u64, author: Option<corvene_git::CommitAuthor>, cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            let rs = s.repo_state_mut(id);
+            if rs.amend_author != author {
+                rs.amend_author = author;
+                cx.notify();
+            }
         });
     }
 
@@ -4998,6 +5013,14 @@ impl Dispatcher {
             .repo_states
             .get(&id)
             .is_some_and(|rs| rs.commit_to_amend.is_some());
+        // Corvene (`783-amend-author`): the author field of an amend
+        let author = {
+            let s = Self::state(cx).read(cx);
+            s.repo_states
+                .get(&id)
+                .filter(|_| amend && s.flags.bool(crate::flags::ids::AMEND_AUTHOR))
+                .and_then(|rs| rs.amend_author.clone())
+        };
         if summary.trim().is_empty() || (files.is_empty() && !options.allow_empty_commit && !amend)
         {
             return;
@@ -5098,6 +5121,7 @@ impl Dispatcher {
                     no_verify: options.skip_commit_hooks,
                     signoff: options.sign_off_commits,
                     allow_empty: options.allow_empty_commit,
+                    author,
                 },
             )?;
             // `commit` returns git's abbreviated sha (GHD `parseCommitSHA`);
@@ -5130,6 +5154,7 @@ impl Dispatcher {
                             at: std::time::SystemTime::now(),
                         });
                         rs.commit_to_amend = None;
+                        rs.amend_author = None;
                         rs.co_authors.clear();
                         rs.commit_nonce += 1;
                         // GHD `refreshChangesSection({ clearPartialState:

@@ -71,6 +71,8 @@
 //! - at a rebase's `edit` stop without conflicts the commit form stays, with
 //!   "Continue rebase" under it (`782-commit-during-rebase-edit`; GHD
 //!   `continue-rebase.tsx` replaces the form during any rebase).
+//! - while amending, the commit's author is an editable `Name <email>` with
+//!   "Reset to my identity" (`783-amend-author`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -231,6 +233,10 @@ pub struct ChangesSidebar {
     summary_placeholder: SharedString,
     /// `766-persist-commit-drafts`: the repository the form's text belongs to.
     draft_repo: Option<u64>,
+    /// `783-amend-author`: the amended commit's author as `Name <email>`, and
+    /// that text as loaded (an unchanged field keeps the commit's author).
+    amend_author: Entity<InputState>,
+    amend_author_original: String,
     /// `779-undoable-commit-message-replace`: the text last put in a field
     /// by [`Self::replace_message_field`]; its change event opens no
     /// autocompletion.
@@ -580,6 +586,12 @@ impl ChangesSidebar {
                         window,
                         cx,
                     );
+                    // `783-amend-author`
+                    this.amend_author_original =
+                        format!("{} <{}>", commit.author.name, commit.author.email);
+                    let original = this.amend_author_original.clone();
+                    this.amend_author
+                        .update(cx, |s, cx| s.set_value(original, window, cx));
                     this.refresh_spelling(CommitField::Summary, cx);
                     this.refresh_spelling(CommitField::Description, cx);
                     cx.notify();
@@ -675,6 +687,23 @@ impl ChangesSidebar {
             this.on_input_event(CommitField::Description, ev, cx)
         })
         .detach();
+        // `783-amend-author`
+        let amend_author = cx.new(|cx| InputState::new(window, cx).placeholder("Name <email>"));
+        cx.subscribe(&amend_author, |this, input, ev: &InputEvent, cx| {
+            if !matches!(ev, InputEvent::Change) {
+                return;
+            }
+            let Some(id) = this.state.read(cx).selected else {
+                return;
+            };
+            let text = input.read(cx).value().to_string();
+            let author = (text.trim() != this.amend_author_original)
+                .then(|| corvene_git::parse_commit_author(&text).ok())
+                .flatten()
+                .map(|(name, email)| corvene_git::CommitAuthor::Given { name, email });
+            Dispatcher::set_amend_author(id, author, cx);
+        })
+        .detach();
         Self {
             filter,
             summary,
@@ -713,6 +742,8 @@ impl ChangesSidebar {
             summary_placeholder: "Summary (required)".into(),
             draft_repo: None,
             programmatic_text: None,
+            amend_author,
+            amend_author_original: String::new(),
             visible_cache: RefCell::new(None),
             selected_cache: RefCell::new(None),
             windows_names_cache: RefCell::new(None),
@@ -3683,6 +3714,104 @@ impl ChangesSidebar {
         ))
     }
 
+    /// `783-amend-author`: the author field shows while amending.
+    fn amending_with_author_field(&self, cx: &App) -> bool {
+        let s = self.state.read(cx);
+        s.flags.bool(corvene_core::flags::ids::AMEND_AUTHOR)
+            && s.selected_state()
+                .is_some_and(|rs| rs.commit_to_amend.is_some())
+    }
+
+    /// `783-amend-author`: the author field holds no valid `Name <email>`.
+    fn amend_author_invalid(&self, cx: &App) -> bool {
+        self.amending_with_author_field(cx)
+            && corvene_git::parse_commit_author(&self.amend_author.read(cx).value()).is_err()
+    }
+
+    /// `783-amend-author`: while amending, the amended commit's author as an
+    /// editable `Name <email>` and "Reset to my identity" (`--reset-author`).
+    fn amend_author_field(&self, window: &Window, cx: &Context<Self>) -> Option<AnyElement> {
+        if !self.amending_with_author_field(cx) {
+            return None;
+        }
+        let t = cx.ghd();
+        let s = self.state.read(cx);
+        let id = s.selected?;
+        let rs = s.selected_state()?;
+        let identity = rs.info.as_ref().and_then(|i| {
+            Some(format!(
+                "{} <{}>",
+                i.identity.name.as_deref()?,
+                i.identity.email.as_deref()?
+            ))
+        });
+        let reset = rs.amend_author == Some(corvene_git::CommitAuthor::ResetToCommitter);
+        let invalid = self.amend_author_invalid(cx);
+        let input = self.amend_author.clone();
+        Some(
+            div()
+                .id("amend-author")
+                .flex()
+                .flex_col()
+                .mb(SPACING_HALF())
+                // "Author" and the reset link, then the field full width
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .gap(SPACING_HALF())
+                        .mb(zpx(2.))
+                        .text_size(FONT_SIZE_SM())
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(t.text_secondary)
+                                .child("Author"),
+                        )
+                        .when_some(identity.filter(|_| !reset), |d, identity| {
+                            d.child(
+                                crate::widgets::link_button(
+                                    "amend-author-reset",
+                                    mac_or("Reset to My Identity", "Reset to my identity"),
+                                    cx,
+                                )
+                                .flex_none()
+                                .text_size(FONT_SIZE_SM())
+                                .on_click(move |_, window, cx| {
+                                    input.update(cx, |s, cx| {
+                                        s.set_value(identity.clone(), window, cx)
+                                    });
+                                    Dispatcher::set_amend_author(
+                                        id,
+                                        Some(corvene_git::CommitAuthor::ResetToCommitter),
+                                        cx,
+                                    );
+                                }),
+                            )
+                        }),
+                )
+                .child(crate::widgets::text_box(
+                    "amend-author-input",
+                    &self.amend_author,
+                    None,
+                    window,
+                    cx,
+                ))
+                .when(invalid, |d| {
+                    d.child(
+                        div()
+                            .pt(zpx(2.))
+                            .text_size(FONT_SIZE_SM())
+                            .text_color(t.dialog_error)
+                            .child("Enter the author as Name <email>"),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
     /// `734-commit-author-line`: the identity the next commit is made with.
     fn author_line(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let t = cx.ghd();
@@ -4169,6 +4298,7 @@ impl ChangesSidebar {
             || (!any_included && !allow_empty && !amending)
             || committing
             || self.has_repo_rule_failure(cx)
+            || self.amend_author_invalid(cx)
     }
 
     /// GHD `getButtonTooltip` for a disabled commit button.
@@ -4188,6 +4318,8 @@ impl ChangesSidebar {
             Some("Select one or more files to commit")
         } else if rs.is_some_and(|r| r.committing) {
             Some("Committing changes…")
+        } else if self.amend_author_invalid(cx) {
+            Some("Enter the author as Name <email>")
         } else {
             None
         }
@@ -4569,7 +4701,10 @@ impl ChangesSidebar {
             .when(self.committing_hidden_files(cx).is_none(), |d| {
                 d.border_t_1().border_color(t.box_border)
             })
-            .children(self.author_line(cx))
+            .children(
+                self.amend_author_field(window, cx)
+                    .or_else(|| self.author_line(cx)),
+            )
             .child(
                 // `.summary`: avatar + summary field
                 div()
