@@ -27,6 +27,7 @@ pub mod ghd_import;
 pub mod keychain;
 pub mod locale;
 pub mod notifications;
+pub mod proxy;
 pub mod services;
 pub mod shells;
 #[cfg(not(any(target_os = "macos", windows)))]

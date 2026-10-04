@@ -2006,6 +2006,15 @@ impl Dispatcher {
     /// Start the periodic background fetch and sidebar indicator refresh
     /// (`BackgroundFetcher`, `RepositoryIndicatorUpdater`). Call once.
     pub fn start_background_tasks(cx: &mut dyn Host) {
+        // the API's proxy falls back to git's `http.proxy` (GHD's requests
+        // go through Chromium's proxy resolution, `corvene_platform::proxy`)
+        if let Some(git) = Self::state(cx).read(cx).git.clone() {
+            spawn_bg(
+                cx,
+                move || corvene_git::global_config_value(git, "http.proxy"),
+                |proxy, _| corvene_platform::proxy::set_git_http_proxy(proxy),
+            );
+        }
         // Android: WorkManager wakes the process about once an hour, also
         // while its timers are frozen in the background
         #[cfg(target_os = "android")]
