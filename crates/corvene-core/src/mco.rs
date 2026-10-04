@@ -466,6 +466,12 @@ pub enum Banner {
         count: usize,
         raw: bool,
     },
+    /// Corvene (`294-follow-moved-repositories`): the folder of repository
+    /// `name` was moved; Corvene follows it to `path`.
+    RepositoryMoved {
+        name: String,
+        path: std::path::PathBuf,
+    },
     /// Corvene (`287-repository-list-backup`): the store at `path` could not
     /// be opened, so this session uses a temporary one.
     TemporaryStore {
@@ -485,6 +491,7 @@ impl Banner {
             | Banner::ReorderUndone { .. }
             | Banner::BranchRestored { .. }
             | Banner::BranchesRestored { .. } => Some(Duration::from_secs(5)),
+            Banner::RepositoryMoved { .. } => Some(Duration::from_secs(15)),
             Banner::SuccessfulCherryPick { .. }
             | Banner::SuccessfulSquash { .. }
             | Banner::SuccessfulReorder { .. }

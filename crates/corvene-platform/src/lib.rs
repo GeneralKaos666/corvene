@@ -12,6 +12,7 @@ pub mod android;
 pub mod app_icons;
 pub mod app_location;
 pub mod apps;
+pub mod bookmarks;
 pub mod cli;
 pub mod crash_reports;
 pub mod custom_integration;

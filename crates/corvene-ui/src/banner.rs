@@ -23,6 +23,9 @@
 //! the stored repository list could not be read (and were set aside) or the
 //! store could not be opened (GHD has neither case's message).
 //!
+//! Deviation (`294-follow-moved-repositories`): a banner names the new
+//! location of a repository whose moved folder Corvene followed.
+//!
 //! Deviation (`422-banner-as-toast`): [`banner_toast_frame`] floats the
 //! banner over the bottom-right corner instead of pushing the views down
 //! (GHD `ui/app.tsx` `renderBanner` puts it in the layout flow).
@@ -195,6 +198,13 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
         Banner::TemporaryStore { .. } => vec![t(
             "Corvene could not open its data, so nothing you change now is saved.",
         )],
+        Banner::RepositoryMoved { name, path } => vec![
+            b(name),
+            (
+                format!("\u{a0}was moved; it now opens from {}", path.display()),
+                false,
+            ),
+        ],
     }
 }
 

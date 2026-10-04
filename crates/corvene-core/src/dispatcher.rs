@@ -1125,7 +1125,11 @@ impl Dispatcher {
         // GHD `_refreshRepository`: a path that is gone may be a deleted
         // linked worktree; fall back to its main worktree before giving up
         if !path.exists() {
-            Self::recover_missing_worktree(id, path, cx);
+            // Corvene (`294-follow-moved-repositories`): the folder may have
+            // been moved
+            if !Self::follow_moved_repository(id, path.clone(), cx) {
+                Self::recover_missing_worktree(id, path, cx);
+            }
             return;
         }
         let started = Instant::now();
@@ -1636,6 +1640,8 @@ impl Dispatcher {
                 }
                 Self::load_commits(id, false, cx);
                 Self::refresh_compare(id, cx);
+                // `294-follow-moved-repositories`
+                Self::remember_repository_location(id, cx);
                 Self::subscribe_current_pull_request_status(id, cx);
                 Self::add_upstream_remote_if_needed(id, cx);
                 Self::refresh_branch_protection(id, cx);

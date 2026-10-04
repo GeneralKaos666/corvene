@@ -51,6 +51,15 @@ fn linux_only() -> Availability {
     }
 }
 
+/// A macOS-only extra (file bookmarks, Finder drags).
+fn macos_only() -> Availability {
+    if cfg!(target_os = "macos") {
+        Availability::Available
+    } else {
+        Availability::BuiltIn("Only the macOS version has this.")
+    }
+}
+
 /// Android's lists of applications always show their launcher icons.
 fn android_built_in() -> Availability {
     if cfg!(target_os = "android") {
@@ -2002,6 +2011,22 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(3849)],
         code: &["crates/corvene-ui/src/dialogs/clone_repository.rs", "crates/corvene-ui/src/cloneable_repositories.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/cloning_view.rs"],
+    },
+
+    /// A repository whose folder was moved is followed to its new place.
+    FOLLOW_MOVED_REPOSITORIES = 294 "follow-moved-repositories" {
+        title: "Follow moved repositories",
+        summary: "Corvene keeps a macOS bookmark of each repository's folder; when the folder is \
+                  moved or renamed (on the same disk), the repository opens from its new place \
+                  and a banner says where it is now, instead of showing \"Can't find\". A folder \
+                  moved to the Trash or deleted is not followed.",
+        ghd_behaviour: "The repository shows as missing; Locate… finds it again by hand.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: macos_only,
+        upstream: &[Upstream::issue(19408)],
+        code: &["crates/corvene-core/src/bookmarks.rs", "crates/corvene-platform/src/bookmarks.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
     // ---- 300 GitHub ----

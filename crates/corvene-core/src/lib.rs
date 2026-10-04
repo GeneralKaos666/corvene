@@ -12,6 +12,7 @@ pub mod autocomplete;
 pub mod avatar_users;
 pub mod avatars;
 pub mod banner_focus;
+pub mod bookmarks;
 pub mod branch_pruner;
 pub mod branch_tags;
 pub mod changes_state;

@@ -655,6 +655,9 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
         Banner::TemporaryStore { path } => {
             f.put("path", path.display());
         }
+        Banner::RepositoryMoved { name, path } => {
+            f.put("name", name).put("path", path.display());
+        }
         Banner::CherryPickUndone {
             target_branch,
             count,
