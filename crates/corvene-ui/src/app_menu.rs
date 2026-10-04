@@ -439,7 +439,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             separator(),
             MenuItemConstructorOptions {
                 enabled: Some(enabled),
-                ..item(l("Undo Last Commit", "Undo last &commit"), UndoLastCommit)
+                ..item(l("Undo Last Commit", "Undo &last commit"), UndoLastCommit)
             },
         ]);
     }

@@ -54,11 +54,15 @@ fn builds_a_grammar_from_a_local_tarball() {
     plan.tarball_url = format!("file://{}", tarball.display());
     let mut stages = Vec::new();
     let verify = |library: &Path| -> Result<(), String> {
-        let output = std::process::Command::new("nm")
-            .arg("-gU")
+        // GNU nm (binutils) and llvm-nm both take --defined-only; macOS's
+        // -U means something else to binutils. No nm (MSVC): nothing to check.
+        let Ok(output) = std::process::Command::new("nm")
+            .args(["-g", "--defined-only"])
             .arg(library)
             .output()
-            .map_err(|e| e.to_string())?;
+        else {
+            return Ok(());
+        };
         let symbols = String::from_utf8_lossy(&output.stdout);
         if symbols.contains("corvene_grammars_v1") && symbols.contains("tree_sitter_csv") {
             Ok(())

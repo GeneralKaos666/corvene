@@ -592,6 +592,123 @@ jobs:
           path: target/android/*
           compression-level: 0
 
+  # The Compose app (android/, com.wasimaster.corvene): Gradle builds
+  # corvene-ffi for all four ABIs through cargo-ndk, one APK per ABI plus a
+  # universal one for the foss and play flavours, and the play bundle, which
+  # stays a workflow artifact for Google Play. Signed with the same keystore
+  # as the legacy app when the secret is set, unsigned otherwise. The Full
+  # variant is the foss flavour with every grammar compiled in, per ABI. The
+  # release APK's parts must stay within android/app/apk-budget.txt.
+  android-compose:
+    name: build · sign (Android Compose, ${{ matrix.variant }})
+    needs: plan
+    if: ${{ !inputs.linux_release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.plan.outputs.variants) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    continue-on-error: true
+    env:
+      NDK_VERSION: 27.3.13750724
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-android-compose
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.variant == 'default' }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: install the NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      # the full variant compiles every grammar in
+      - uses: ./.github/actions/grammar-sources
+        if: matrix.variant == 'full'
+      - name: cache the bundled git
+        uses: actions/cache@v4
+        with:
+          path: packaging/android/app/src/main/jniLibs
+          key: android-git-4abi-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
+      - name: build and package
+        working-directory: android
+        env:
+          CORVENE_GITHUB_CLIENT_SECRET: ${{ secrets.CORVENE_GITHUB_CLIENT_SECRET }}
+          CORVENE_ANDROID_KEYSTORE_BASE64: ${{ secrets.CORVENE_ANDROID_KEYSTORE_BASE64 }}
+          CORVENE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.CORVENE_ANDROID_KEYSTORE_PASSWORD }}
+          CORVENE_ANDROID_KEY_ALIAS: ${{ secrets.CORVENE_ANDROID_KEY_ALIAS }}
+          CORVENE_ANDROID_KEY_PASSWORD: ${{ secrets.CORVENE_ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          [[ -n "$CORVENE_GITHUB_CLIENT_SECRET" ]] || unset CORVENE_GITHUB_CLIENT_SECRET
+          suffix=-unsigned
+          if [[ -n "$CORVENE_ANDROID_KEYSTORE_BASE64" ]]; then
+            umask 077
+            printf '%s' "$CORVENE_ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/corvene.jks"
+            export CORVENE_ANDROID_KEYSTORE="$RUNNER_TEMP/corvene.jks"
+            suffix=
+          fi
+          # the run number keeps versionCode growing from release to release
+          common=(--no-daemon -Pcorvene.uniffiBindgen=standalone -Pcorvene.splitApks=true
+                  "-Pcorvene.versionCode=$GITHUB_RUN_NUMBER")
+          out=app/build/outputs
+          mkdir -p "$RUNNER_TEMP/assets"
+          abis="arm64-v8a:arm64 armeabi-v7a:armv7 x86_64:x86_64 x86:x86"
+          copy_apks() { # <flavour> <asset prefix>
+            for abi in $abis; do
+              # x86 must not match x86_64: the ABI sits between dashes
+              apk="$(ls "$out/apk/$1/release/"*"-${abi%%:*}-release"*.apk | head -1)"
+              cp "$apk" "$RUNNER_TEMP/assets/$2-$VERSION-android-$1-${abi##*:}$suffix.apk"
+            done
+          }
+          if [[ "$VARIANT" == full ]]; then
+            ./gradlew "${common[@]}" -Pcorvene.rustFeatures=full :app:assembleFossRelease :app:checkElfAlignmentFossRelease
+            rm -f "$RUNNER_TEMP/corvene.jks"
+            copy_apks foss Corvene-Full
+          else
+            ./gradlew "${common[@]}" \
+              :app:assembleFossRelease :app:assemblePlayRelease :app:bundlePlayRelease \
+              :app:checkElfAlignmentFossRelease :app:checkElfAlignmentPlayRelease
+            rm -f "$RUNNER_TEMP/corvene.jks"
+            for flavour in foss play; do
+              copy_apks "$flavour" Corvene
+              universal="$(ls "$out/apk/$flavour/release/"*universal*.apk | head -1)"
+              cp "$universal" "$RUNNER_TEMP/assets/Corvene-$VERSION-android-$flavour-universal$suffix.apk"
+            done
+            cp "$out"/bundle/playRelease/*.aab "$RUNNER_TEMP/assets/Corvene-$VERSION-android-play$suffix.aab"
+          fi
+          ls -l "$RUNNER_TEMP/assets"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-android-compose-${{ matrix.variant }}
+          path: ${{ runner.temp }}/assets/*
+          if-no-files-found: error
+          compression-level: 0
+      # the budget (android/app/apk-budget.txt) is reported after the assets
+      # are up: over budget turns the job yellow, not the release empty
+      - name: APK size budget
+        if: matrix.variant == 'default'
+        continue-on-error: true
+        working-directory: android
+        run: ./gradlew --no-daemon -Pcorvene.uniffiBindgen=standalone -Pcorvene.splitApks=true "-Pcorvene.versionCode=$GITHUB_RUN_NUMBER" :app:checkApkSizeFossRelease
+
   # The tree-sitter packs `plan` found missing from the `packs` release, one
   # job per platform (macOS and Android build both architectures from one
   # runner, Linux builds each natively).
@@ -711,7 +828,7 @@ jobs:
   # Homebrew cask its version and hashes.
   publish:
     name: draft release · Homebrew cask
-    needs: [plan, macos-assets, linux, flatpak, snap, android, windows]
+    needs: [plan, macos-assets, linux, flatpak, snap, android, android-compose, windows]
     if: >-
       ${{ !cancelled() && needs.linux.result == 'success'
           && (inputs.linux_release || needs.macos-assets.result == 'success') }}

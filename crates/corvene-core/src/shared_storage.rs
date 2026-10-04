@@ -639,6 +639,8 @@ mod tests {
     }
 
     #[test]
+    // `report` is read on unix only (the symlink count)
+    #[cfg_attr(not(unix), allow(unused_variables))]
     fn copies_files_folders_and_links_as_text() {
         let root = temp_dir("copy");
         let source = root.join("src");

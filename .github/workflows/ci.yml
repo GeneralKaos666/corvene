@@ -265,3 +265,76 @@ jobs:
           name: corvene-android-legacy-debug
           path: packaging/android/app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
+
+  # The Compose app (android/, com.wasimaster.corvene): Gradle runs cargo-ndk
+  # for corvene-ffi (one ABI), generates the UniFFI bindings, runs every
+  # module's unit tests, detekt, Android Lint and the architecture rules, and
+  # packages the foss debug APK, whose parts are measured against the budget
+  # and whose libraries must be 16 KB aligned. The bundled git is the same
+  # as the legacy app's, from the same cache.
+  android-compose:
+    name: test · package (Android, Compose)
+    needs: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      NDK_VERSION: 27.3.13750724
+      ABIS: arm64-v8a
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-compose
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: install the NDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      - name: cache the bundled git
+        uses: actions/cache@v4
+        with:
+          path: packaging/android/app/src/main/jniLibs
+          key: android-git-${{ env.ABIS }}-${{ env.NDK_VERSION }}-${{ hashFiles('packaging/android/git/**') }}
+      - name: clippy (corvene-ffi, Android target)
+        run: >
+          cargo ndk -t arm64-v8a -P 26 clippy -p corvene-ffi --lib --
+          -D warnings -A clippy::missing_const_for_thread_local
+      # standalone bindgen: the bindings come from tools/uniffi-bindgen, not
+      # from a host build of the engine
+      - name: unit tests, static analysis, package (foss debug)
+        working-directory: android
+        run: >
+          ./gradlew --no-daemon -Pcorvene.uniffiBindgen=standalone
+          unitTests staticAnalysis
+          :app:assembleFossDebug :app:checkApkSizeFossDebug :app:checkElfAlignmentFossDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corvene-android-compose-debug
+          path: android/app/build/outputs/apk/foss/debug/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: corvene-android-compose-reports
+          path: |
+            android/**/build/reports/**
+            android/**/build/test-results/**
+          if-no-files-found: ignore

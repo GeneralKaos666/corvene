@@ -6,9 +6,10 @@
 
 total     40
 engine    18      # libcorvene_ffi.so + askpass (release Rust, stripped)
-git       17      # the bundled git, ssh, ssh-keygen, git-lfs. The design said ~14;
-                  # measured 16.6 (2026-10-04): git-lfs 5.0, git-remote-https 4.8
-                  # (a second copy of libcurl + git), git 2.7, ssh 2.5, ssh-keygen 2.4
+git       18      # the bundled git, ssh, ssh-keygen, git-lfs. The design said ~14;
+                  # measured 16.6 (2026-10-04), 17.7 (2026-10-05): git-lfs 5.0,
+                  # git-remote-https 4.8 (a second copy of libcurl + git), git 2.7,
+                  # ssh 2.5, ssh-keygen 2.4. Shrinking it is an M-A6 item.
 jna       0.5     # libjnidispatch.so
 dex       4       # after R8
 fonts     1.1     # Inter + JetBrains Mono

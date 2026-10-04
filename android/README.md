@@ -128,6 +128,20 @@ Generated files that are committed: `core/design/.../Palettes.kt`
 `res/drawable/cvd_oct_*.xml` (`python3 tools/octicons/gen.py`). The UniFFI
 bindings are never committed; Gradle generates them from the built library.
 
+
+## CI
+
+`.github/workflows/ci.yml` job `android-compose` (every push): clippy of `corvene-ffi` for
+`aarch64-linux-android`, then `./gradlew -Pcorvene.uniffiBindgen=standalone unitTests staticAnalysis
+:app:assembleFossDebug :app:checkApkSizeFossDebug :app:checkElfAlignmentFossDebug`; the foss debug APK
+is the `corvene-android-compose-debug` artifact, reports are uploaded on failure. `release.yml` job
+`android-compose` (tags, or on demand) builds all four ABIs with `-Pcorvene.splitApks=true` and
+`versionCode` = the run number: `Corvene-<version>-android-{foss,play}-{arm64,armv7,x86_64,x86,universal}.apk`,
+the play `.aab` (a workflow artifact), and the `full` variant (`-Pcorvene.rustFeatures=full`) as
+`Corvene-Full-<version>-android-foss-<abi>.apk`. Signed with the `CORVENE_ANDROID_*` secrets when set,
+`-unsigned` otherwise. The legacy GPUI app (`packaging/android`, `com.wasimaster.corvene.legacy`) has its
+own `android` jobs with `Corvene-Legacy-*` assets.
+
 ## Conventions
 
 Kotlin style per `.editorconfig` (WMKeyboard's, ktlint android_studio, 140
