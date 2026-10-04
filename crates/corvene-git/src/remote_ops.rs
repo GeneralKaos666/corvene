@@ -401,6 +401,43 @@ fn remote_command(git: Arc<GitBinary>, workdir: &Path, askpass: Option<&AskpassE
     }
 }
 
+/// GHD `envForRemoteOperation(remote.url)`: [`remote_command`] (the
+/// credentials) plus the system proxy for `remote`'s URL
+/// ([`proxy_env_for_remote`]).
+pub(crate) fn remote_operation(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+    askpass: Option<&AskpassEnv>,
+) -> GitCommand {
+    let proxy = proxy_env_for_remote(git.clone(), workdir, remote);
+    proxy.into_iter().fold(
+        remote_command(git, workdir, askpass),
+        |cmd, (key, value)| cmd.env(key, value),
+    )
+}
+
+/// The proxy variables for a remote operation on `remote`, a remote's name
+/// or a URL ([`crate::proxy::env_for_remote_operation`]). The URL is only
+/// read while a system proxy lookup is set.
+fn proxy_env_for_remote(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+) -> Vec<(String, String)> {
+    crate::proxy::env_for_remote_operation_with(|| Some(remote_url_for_proxy(git, workdir, remote)))
+}
+
+/// `remote`'s configured `remote.<name>.url` (GHD resolves the proxy for
+/// `remote.url`), else `remote` itself (a URL or path given directly).
+fn remote_url_for_proxy(git: Arc<GitBinary>, workdir: &Path, remote: &str) -> String {
+    if remote.contains("://") {
+        return remote.to_string();
+    }
+    config_value(git, workdir, &format!("remote.{remote}.url"))
+        .unwrap_or_else(|| remote.to_string())
+}
+
 /// Corvene (`submodules-follow-checkout` flag): `git submodule update
 /// --init --recursive` for every submodule recorded in the index except
 /// `skip` (those the caller saw changed before, whose work must not be moved
@@ -521,7 +558,7 @@ pub fn update_remote_head(
     remote: &str,
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
-    remote_command(git, workdir, askpass)
+    remote_operation(git, workdir, remote, askpass)
         .args(["remote", "set-head", "-a", remote])
         .allow_exit_code(1)
         .allow_exit_code(128)
@@ -560,7 +597,7 @@ pub fn prune_remote(
     remote: &str,
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
-    remote_command(git, workdir, askpass)
+    remote_operation(git, workdir, remote, askpass)
         .args(["remote", "prune", remote])
         .run()?;
     Ok(())
@@ -636,7 +673,7 @@ pub fn fetch_with(
         "--recurse-submodules=on-demand"
     });
     args.push(remote);
-    let cmd = remote_command(git, workdir, askpass).args(args);
+    let cmd = remote_operation(git, workdir, remote, askpass).args(args);
     run_with_progress(cmd, &mut parser, &mut fetch_progress(on_progress))?;
     Ok(())
 }
@@ -663,7 +700,7 @@ pub fn fetch_refspec(
     refspec: &str,
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
-    remote_command(git, workdir, askpass)
+    remote_operation(git, workdir, remote, askpass)
         .args(["fetch", remote, refspec])
         .allow_exit_code(128)
         .run()?;
@@ -683,7 +720,7 @@ pub fn fast_forward_branch_from_remote(
     local: &str,
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
-    remote_command(git, workdir, askpass)
+    remote_operation(git, workdir, remote, askpass)
         .args([
             "fetch".to_string(),
             remote.to_string(),
@@ -751,7 +788,7 @@ pub fn pull(
         "--recurse-submodules"
     });
     args.extend(["--progress", remote]);
-    let cmd = remote_command(git, workdir, askpass)
+    let cmd = remote_operation(git, workdir, remote, askpass)
         .args(&args)
         .env("GIT_EDITOR", ":");
     run_with_progress(cmd, &mut parser, &mut fetch_progress(on_progress))?;
@@ -850,7 +887,7 @@ pub fn push_with_progress(
         })
     };
     report(None, 0.);
-    let cmd = remote_command(git, workdir, askpass).args(&args);
+    let cmd = remote_operation(git, workdir, remote, askpass).args(&args);
     run_with_progress(cmd, &mut parser, &mut |event| {
         report(Some(event.text().to_string()), event.percent() as f32)
     })?;
@@ -870,7 +907,7 @@ pub fn fetch_tags_to_push(
     branch: &str,
     askpass: Option<&AskpassEnv>,
 ) -> Result<Vec<String>> {
-    let out = remote_command(git, workdir, askpass)
+    let out = remote_operation(git, workdir, remote, askpass)
         .args([
             "push",
             remote,
@@ -908,7 +945,7 @@ pub fn delete_remote_tag(
     tag: &str,
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
-    remote_command(git, workdir, askpass)
+    remote_operation(git, workdir, remote, askpass)
         .args(["push", remote, "--delete", &format!("refs/tags/{tag}")])
         .run()?;
     Ok(())
@@ -1462,6 +1499,24 @@ mod tests {
         assert!(
             fast_forward_branch_from_remote(git, &work, "origin", "main", "main", None).is_err()
         );
+    }
+
+    #[test]
+    fn the_proxy_is_resolved_for_the_remote_url() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q", "-b", "main"]);
+        run(
+            dir.path(),
+            &["remote", "add", "origin", "https://example.com/o/n.git"],
+        );
+        let url = |remote: &str| remote_url_for_proxy(git.clone(), dir.path(), remote);
+        assert_eq!(url("origin"), "https://example.com/o/n.git");
+        assert_eq!(
+            url("http://other.example/x.git"),
+            "http://other.example/x.git"
+        );
+        assert_eq!(url("/some/path"), "/some/path");
     }
 
     #[test]

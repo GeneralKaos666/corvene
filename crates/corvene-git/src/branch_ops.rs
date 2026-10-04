@@ -164,10 +164,9 @@ pub fn delete_remote_branch(
     remote: &str,
     name: &str,
 ) -> Result<()> {
-    let out = GitCommand::new(git.clone())
+    let out = crate::remote_ops::remote_operation(git.clone(), workdir, remote, None)
         .args(["push", remote])
         .arg(format!(":{name}"))
-        .current_dir(workdir)
         .expected_errors([KnownGitError::BranchDeletionFailed])
         .run()?;
     // a failed push only gets here as the expected error

@@ -9,7 +9,11 @@
 //! no system proxy lookup yet (`.docs/TODO.md` › Platform):
 //! [`set_system_proxy_resolver`] is where the platform plugs one in. Until
 //! it does, [`env_for_remote_operation`] adds nothing and git uses the proxy
-//! its environment and configuration name, as before.
+//! its environment and configuration name, as before. Clone and the remote
+//! operations of `remote_ops` (fetch, pull, push, tag pushes and deletes,
+//! `remote set-head`, `remote prune`) and `delete_remote_branch` apply it;
+//! checkout, revert and submodule updates (GHD
+//! `getFallbackUrlForProxyResolve`) do not yet.
 
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -159,6 +163,20 @@ pub fn env_for_remote_operation(remote_url: &str) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
+/// [`env_for_remote_operation`] for the URL `remote_url` gives, which is
+/// only asked for while a system proxy lookup is set (it may read the
+/// repository's configuration).
+pub fn env_for_remote_operation_with(
+    remote_url: impl FnOnce() -> Option<String>,
+) -> Vec<(String, String)> {
+    if system_proxy_resolver().is_none() {
+        return Vec::new();
+    }
+    remote_url()
+        .map(|url| env_for_remote_operation(&url))
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +196,12 @@ mod tests {
     fn no_resolver_no_variables() {
         set_system_proxy_resolver(None);
         assert!(env_for_remote_operation("https://github.com/a/b.git").is_empty());
+        // the remote's URL is not even read
+        let read = std::cell::Cell::new(false);
+        let env = env_for_remote_operation_with(|| {
+            read.set(true);
+            Some("https://github.com/a/b.git".to_string())
+        });
+        assert!(env.is_empty() && !read.get());
     }
 }
