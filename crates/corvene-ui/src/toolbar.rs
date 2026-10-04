@@ -14,6 +14,8 @@
 //! `push-pull-button.tsx` has none).
 //! While a fetch, pull or push runs, a Stop button takes the ▾'s place
 //! (`295-cancel-network-operations`; GHD only disables the button).
+//! A branch whose upstream was deleted on the remote shows Publish branch
+//! with an alert (`1209-current-branch-deleted-hint`; GHD shows Fetch).
 //! A branch that `push.default=current` pushes to a same-named remote branch
 //! shows Push / Pull / Fetch instead of Publish branch
 //! (`1103-implicit-upstream-push-default`).
@@ -548,6 +550,27 @@ pub fn toolbar_models(
                 disabled: true,
                 ..base
             },
+            // Corvene (`1209-current-branch-deleted-hint`): the upstream was
+            // deleted on the remote (GHD shows Fetch, while a click pushes)
+            Some(Tip::Valid { branch })
+                if let Some(gone) =
+                    repo.and_then(|r| Dispatcher::current_upstream_gone(state, r.id)) =>
+            {
+                ToolbarButtonModel {
+                    icon: Octicon::Alert,
+                    description: format!("Deleted on {gone}").into(),
+                    title: "Publish branch".into(),
+                    tooltip: Some(
+                        format!(
+                            "{} was deleted on {gone}. Publishing pushes it there again.",
+                            branch.name
+                        )
+                        .into(),
+                    ),
+                    arrow: true,
+                    ..base
+                }
+            }
             Some(Tip::Valid { .. }) if upstream.is_none() => ToolbarButtonModel {
                 icon: Octicon::Upload,
                 description: if is_github {

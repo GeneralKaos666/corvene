@@ -85,6 +85,8 @@
 //!   fails the repository rules warns instead of blocking the commit
 //!   (`340-message-rules-defer-to-hooks`; GHD `commit-message.tsx`
 //!   `hasRepoRuleFailure` blocks it).
+//! - a note under the commit button says when the branch's upstream was
+//!   deleted on the remote (`1209-current-branch-deleted-hint`).
 //! - a protected branch that takes the user's pushes gets a note above the
 //!   commit button (`339-protected-branch-bypass-note`; GHD `commit-warning`
 //!   shows the protected warning only for unpushable branches).
@@ -5203,7 +5205,34 @@ impl ChangesSidebar {
                     None => button,
                 }
             })
+            .children(self.upstream_gone_note(cx))
             .when_some(self.undo_bar(cx), |d, bar| d.child(bar))
+    }
+
+    /// Corvene (`1209-current-branch-deleted-hint`): under the commit
+    /// button, the current branch's upstream was deleted on the remote.
+    fn upstream_gone_note(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let t = cx.ghd();
+        let s = self.state.read(cx);
+        let remote = Dispatcher::current_upstream_gone(s, s.selected?)?;
+        let text = format!(
+            "{} was deleted on {remote}. Pushing publishes it again.",
+            self.branch_name(cx)
+        );
+        Some(
+            div()
+                .id("upstream-gone-note")
+                .mt(SPACING_HALF())
+                .flex()
+                .flex_row()
+                .items_start()
+                .gap(SPACING_HALF())
+                .text_size(FONT_SIZE_SM())
+                .text_color(t.text_secondary)
+                .child(octicon(Octicon::Alert, t.dialog_warning).flex_none())
+                .child(div().flex_1().min_w_0().child(text))
+                .into_any_element(),
+        )
     }
 }
 

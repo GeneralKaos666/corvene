@@ -1779,6 +1779,22 @@ impl Dispatcher {
         );
     }
 
+    /// Corvene (`1209-current-branch-deleted-hint`): the remote the current
+    /// branch's upstream was deleted from (its remote-tracking branch is
+    /// gone, as `git branch -vv` says "[gone]"), while the flag is on.
+    pub fn current_upstream_gone(s: &crate::state::AppState, id: u64) -> Option<String> {
+        if !s.flags.bool(crate::flags::ids::CURRENT_BRANCH_DELETED_HINT) {
+            return None;
+        }
+        let info = s.repo_states.get(&id)?.info.as_ref()?;
+        let branch = info.current_branch()?;
+        let upstream = branch.upstream.as_deref()?;
+        if info.branches.iter().any(|b| b.full_name == upstream) {
+            return None;
+        }
+        branch.upstream_remote_name().map(str::to_string)
+    }
+
     /// Corvene (`1103-implicit-upstream-push-default`): the current branch's
     /// implicit upstream (`origin/feature`) and ahead/behind counts against
     /// it, while the flag is on.

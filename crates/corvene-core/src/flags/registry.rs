@@ -7156,6 +7156,23 @@ registry! {
         code: &["crates/corvene-core/src/line_selection.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs"],
     },
 
+    /// Say when the current branch was deleted on the remote.
+    CURRENT_BRANCH_DELETED_HINT = 1209 "current-branch-deleted-hint" {
+        title: "Say when the current branch was deleted on the remote",
+        summary: "When the current branch's upstream no longer exists on the remote (deleted \
+                  there, e.g. after its pull request was merged, and pruned by a fetch), the \
+                  push/pull button reads Publish branch, \"Deleted on origin\", \
+                  with an alert icon, and a note under the Commit button says the same.",
+        ghd_behaviour: "The button reads Fetch origin as if nothing were wrong, while clicking \
+                        it pushes the branch again.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13254)],
+        code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/remote.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 
