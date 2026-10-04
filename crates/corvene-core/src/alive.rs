@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use corvene_github::alive::{AliveEvent, CommentSubtype};
 use corvene_github::api::ApiPullRequestReviewState;
 use corvene_github::{Client, Endpoint};
-use corvene_models::{Account, GitHubRepository, RefCheck};
+use corvene_models::{Account, GitHubRepository, PullRequest, RefCheck};
 use gpui_kit::{App, AsyncApp};
 use tracing::{debug, info, warn};
 
@@ -189,46 +189,70 @@ impl Dispatcher {
     /// `handleAliveEvent`: an event for the selected repository's cached
     /// pull request becomes a notification once its review / comment /
     /// checks are known.
+    ///
+    /// Deviation (`337-notifications-all-repositories`): an event of another
+    /// listed repository counts too; its pull request comes from that
+    /// repository's cache, else from the API.
     pub fn handle_alive_event(event: AliveEvent, data: AliveEventData, cx: &mut App) {
         let state = Self::state(cx);
-        let (id, github, pull_request, account, repo_path) = {
+        let (id, github, cached, account, repo_path) = {
             let s = state.read(cx);
-            let Some(id) = s.selected else {
-                debug!("Alive event without a selected repository");
-                return;
-            };
-            let Some(repo) = s.repository(id) else { return };
+            let all = s
+                .flags
+                .bool(crate::flags::ids::NOTIFICATIONS_ALL_REPOSITORIES);
+            let (owner, name) = event.repository();
             // `isValidRepositoryForEvent`: the repository the pull request
             // belongs to (a fork's parent when contributing upstream)
+            let matches = |id: u64| {
+                s.repository(id)
+                    .filter(|r| !r.missing)
+                    .and_then(|r| r.non_fork_github())
+                    .is_some_and(|gh| {
+                        gh.owner.eq_ignore_ascii_case(owner) && gh.name.eq_ignore_ascii_case(name)
+                    })
+            };
+            let id = match s.selected.filter(|id| matches(*id)) {
+                Some(id) => id,
+                None if all => {
+                    let Some(id) = s.repositories.iter().map(|r| r.id).find(|id| matches(*id))
+                    else {
+                        debug!(
+                            owner,
+                            name, "Alive event for a repository that is not listed"
+                        );
+                        return;
+                    };
+                    id
+                }
+                None => {
+                    debug!(
+                        owner,
+                        name, "Alive event for a repository that is not selected"
+                    );
+                    return;
+                }
+            };
+            let Some(repo) = s.repository(id) else { return };
             let Some(github) = repo.non_fork_github().cloned() else {
-                debug!("Alive event for a repository without a GitHub remote");
                 return;
             };
-            let (owner, name) = event.repository();
-            if !(github.owner.eq_ignore_ascii_case(owner) && github.name.eq_ignore_ascii_case(name))
-            {
-                debug!(
-                    owner,
-                    name, "Alive event for a repository that is not selected"
-                );
-                return;
-            }
-            // "If the PR is not in cache, it probably means the user didn't
-            // work on it recently, so we don't want to show a notification."
             let number = event.pull_request_number();
-            let Some(pull_request) = s
+            let cached = s
                 .pull_requests_for(id)
                 .iter()
                 .find(|pr| pr.number == number)
-                .cloned()
-            else {
+                .cloned();
+            // "If the PR is not in cache, it probably means the user didn't
+            // work on it recently, so we don't want to show a notification."
+            // (another repository's cache may just not be loaded yet)
+            if cached.is_none() && (!all || s.selected == Some(id)) {
                 debug!(number, "Alive event for a pull request that is not cached");
                 return;
-            };
+            }
             (
                 id,
                 github,
-                pull_request,
+                cached,
                 s.account_for(
                     &repo
                         .github
@@ -240,6 +264,66 @@ impl Dispatcher {
                 repo.path.clone(),
             )
         };
+        if let Some(pull_request) = cached {
+            Self::alive_event_for_pull_request(
+                event,
+                data,
+                id,
+                github,
+                pull_request,
+                account,
+                repo_path,
+                cx,
+            );
+            return;
+        }
+        // `337-notifications-all-repositories`: not cached here, so ask the API
+        let Some(client) = api_client(account.as_ref()) else {
+            return;
+        };
+        let (owner, name, number) = (
+            github.owner.clone(),
+            github.name.clone(),
+            event.pull_request_number(),
+        );
+        spawn_bg(
+            cx,
+            move || {
+                client
+                    .pull_request(&owner, &name, number)
+                    .map(|pr| crate::pull_requests::convert_pull_request(&client, pr))
+            },
+            move |result, cx| match result {
+                Ok((pull_request, true)) => Self::alive_event_for_pull_request(
+                    event,
+                    data,
+                    id,
+                    github,
+                    pull_request,
+                    account,
+                    repo_path,
+                    cx,
+                ),
+                Ok(_) => debug!(number, "Alive event for a closed pull request"),
+                Err(err) => warn!(%err, "could not fetch the pull request of the Alive event"),
+            },
+        );
+    }
+
+    /// The second half of `handleAliveEvent`: the notification for an event
+    /// of `pull_request`, once its review / comment / checks are known.
+    #[allow(clippy::too_many_arguments)]
+    fn alive_event_for_pull_request(
+        event: AliveEvent,
+        data: AliveEventData,
+        id: u64,
+        github: GitHubRepository,
+        pull_request: PullRequest,
+        account: Option<Account>,
+        repo_path: std::path::PathBuf,
+        cx: &mut App,
+    ) {
+        let state = Self::state(cx);
         // what the API lookups need, before `notify` takes ownership
         let (owner, name, number, git_ref) = (
             github.owner.clone(),

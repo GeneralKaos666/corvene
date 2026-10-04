@@ -268,9 +268,15 @@ impl Dispatcher {
     }
 
     /// GHD `isValidRepositoryForEvent` + `showNotification`: only events of
-    /// the selected repository are shown.
+    /// the selected repository are shown (any listed repository's with
+    /// `337-notifications-all-repositories`).
     fn post_pull_request_event(notification: PullRequestNotification, cx: &mut App) {
-        if Self::state(cx).read(cx).selected != Some(notification.repo) {
+        let s = Self::state(cx).read(cx);
+        if s.selected != Some(notification.repo)
+            && !s
+                .flags
+                .bool(crate::flags::ids::NOTIFICATIONS_ALL_REPOSITORIES)
+        {
             debug!(
                 repo = notification.repo,
                 "notification for a repository that is not selected"

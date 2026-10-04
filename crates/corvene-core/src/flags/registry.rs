@@ -2324,6 +2324,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/request_reviewers.rs", "crates/corvene-core/src/pull_requests.rs", "crates/corvene-github/src/api.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/toolbar.rs"],
     },
 
+    /// Pull request notifications for every listed repository.
+    NOTIFICATIONS_ALL_REPOSITORIES = 337 "notifications-all-repositories" {
+        title: "Notifications for every repository",
+        summary: "Pull request notifications (reviews, comments, failed checks) are shown for \
+                  every repository in the list, not only the selected one; the pull request is \
+                  looked up on GitHub when that repository's list is not loaded. Clicking one \
+                  switches to its repository.",
+        ghd_behaviour: "Only events of the selected repository's pull requests become \
+                        notifications.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14688), Upstream::issue(19139)],
+        code: &["crates/corvene-core/src/alive.rs", "crates/corvene-core/src/notifications.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
