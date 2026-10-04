@@ -117,8 +117,9 @@ pub use ops::{
     set_global_identity,
 };
 pub use patch::{
-    apply_patch_to_index, discard_changes_from_selection, format_patch,
-    format_patch_to_discard_changes, stage_partial_files,
+    PatchOptions, apply_patch_to_index, discard_changes_from_selection, format_patch,
+    format_patch_to_discard_changes, format_patch_to_discard_changes_with, format_patch_with,
+    stage_partial_files, stage_partial_files_with,
 };
 pub use paths::git_dir;
 pub use process::{

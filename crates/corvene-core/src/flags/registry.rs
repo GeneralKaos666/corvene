@@ -4743,6 +4743,25 @@ registry! {
         code: &["crates/corvene-core/src/new_branch_flows.rs", "crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-git/src/branch_ops.rs"],
     },
 
+    /// Partial commits place each hunk where it is in the index.
+    PARTIAL_COMMIT_HUNK_POSITIONS = 788 "partial-commit-hunk-positions" {
+        title: "Exact hunk positions in partial commits",
+        summary: "When only some lines of a file are committed (or discarded), each hunk of the \
+                  patch git applies says where it lands counting only the selected changes \
+                  above it. Git starts looking for a hunk at that line, so a hunk whose \
+                  surrounding lines also appear further down (blank lines, repeated blocks) \
+                  is no longer applied there, committing or discarding the wrong lines.",
+        ghd_behaviour: "The hunk position is taken from the full diff, which also counts the \
+                        changes left out above it; with repeated surrounding lines the selected \
+                        change can land at a later identical spot.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12604)],
+        code: &["crates/corvene-git/src/patch.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

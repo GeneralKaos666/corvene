@@ -1,16 +1,32 @@
 //! Partial staging - GHD `lib/patch-formatter.ts` (`formatPatch`) and
 //! `lib/git/apply.ts` (`applyPatchToIndex`).
+//!
+//! Deviation ([`PatchOptions`]): with `788-partial-commit-hunk-positions`
+//! a hunk's start on the produced side counts only the hunks the patch
+//! writes, not the changes left out of it.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use corvene_models::{
-    Diff, DiffHunk, DiffLineKind, DiffSelectionType, FileStatusKind, WorkingDirectoryFileChange,
+    Diff, DiffHunk, DiffLine, DiffLineKind, DiffSelectionType, FileStatusKind,
+    WorkingDirectoryFileChange,
 };
 
 use crate::detect::GitBinary;
 use crate::error::{GitError, Result};
 use crate::process::GitCommand;
+
+/// Corvene deviations in the partial patches; the default is GHD's patch.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PatchOptions {
+    /// `788-partial-commit-hunk-positions`: each hunk's start on the side
+    /// the patch produces counts only the hunks written before it. GHD
+    /// copies the start from the full diff, which also counts the changes
+    /// left out, so `git apply` (which starts looking for a hunk there)
+    /// can match its context at a later, identical spot.
+    pub exact_hunk_starts: bool,
+}
 
 fn format_patch_header(from: Option<&str>, to: Option<&str>) -> String {
     let from = from.map(|p| format!("a/{p}")).unwrap_or("/dev/null".into());
@@ -32,17 +48,44 @@ fn format_hunk_header(old_start: u32, old_count: u32, new_start: u32, new_count:
     format!("@@ -{before} +{after} @@\n")
 }
 
+/// Where a hunk starts on the side a patch produces, when the hunk starts at
+/// `start` (with `count` lines) on the side it applies to and the hunks
+/// before it changed the line count by `delta`. As in git's own headers, a
+/// side with no lines names the line before the hunk.
+fn shifted_start(start: u32, count: u32, delta: i64, produced_count: u32) -> u32 {
+    let unchanged_before = if count == 0 { start } else { start.saturating_sub(1) };
+    let before = u32::try_from((i64::from(unchanged_before) + delta).max(0)).unwrap_or(u32::MAX);
+    if produced_count == 0 { before } else { before + 1 }
+}
+
+fn push_line(buf: &mut Vec<u8>, marker: u8, line: &DiffLine) {
+    buf.push(marker);
+    buf.extend_from_slice(line.text.as_bytes());
+    buf.push(b'\n');
+}
+
 /// Build a unified diff containing only the selected additions/deletions of
 /// `file`, suitable for `git apply --cached --unidiff-zero`. Returns `None`
-/// when nothing is selected.
+/// when nothing is selected. GHD's patch ([`format_patch_with`]).
 pub fn format_patch(file: &WorkingDirectoryFileChange, hunks: &[DiffHunk]) -> Option<String> {
+    format_patch_with(file, hunks, PatchOptions::default())
+        .map(|patch| String::from_utf8_lossy(&patch).into_owned())
+}
+
+/// [`format_patch`] with Corvene's [`PatchOptions`].
+pub fn format_patch_with(
+    file: &WorkingDirectoryFileChange,
+    hunks: &[DiffHunk],
+    options: PatchOptions,
+) -> Option<Vec<u8>> {
     let is_new = matches!(
         file.status.kind,
         FileStatusKind::New | FileStatusKind::Untracked
     );
-    let mut patch = String::new();
+    let mut patch: Vec<u8> = Vec::new();
+    let mut delta = 0i64;
     for hunk in hunks {
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let mut old_count = 0u32;
         let mut new_count = 0u32;
         let mut any_change = false;
@@ -51,25 +94,18 @@ pub fn format_patch(file: &WorkingDirectoryFileChange, hunks: &[DiffHunk]) -> Op
             match line.kind {
                 DiffLineKind::Hunk => continue,
                 DiffLineKind::Context => {
-                    buf.push(' ');
-                    buf.push_str(&line.text);
-                    buf.push('\n');
+                    push_line(&mut buf, b' ', line);
                     old_count += 1;
                     new_count += 1;
                 }
                 DiffLineKind::Add | DiffLineKind::Delete
                     if file.selection.is_selected(absolute) =>
                 {
-                    buf.push(if line.kind == DiffLineKind::Add {
-                        '+'
-                    } else {
-                        '-'
-                    });
-                    buf.push_str(&line.text);
-                    buf.push('\n');
                     if line.kind == DiffLineKind::Add {
+                        push_line(&mut buf, b'+', line);
                         new_count += 1;
                     } else {
+                        push_line(&mut buf, b'-', line);
                         old_count += 1;
                     }
                     any_change = true;
@@ -80,27 +116,28 @@ pub fn format_patch(file: &WorkingDirectoryFileChange, hunks: &[DiffHunk]) -> Op
                 _ if is_new => continue,
                 // An unselected deletion stays in the file: context line.
                 DiffLineKind::Delete => {
-                    buf.push(' ');
-                    buf.push_str(&line.text);
-                    buf.push('\n');
+                    push_line(&mut buf, b' ', line);
                     old_count += 1;
                     new_count += 1;
                 }
             }
             if line.no_trailing_newline {
-                buf.push_str("\\ No newline at end of file\n");
+                buf.extend_from_slice(b"\\ No newline at end of file\n");
             }
         }
         if !any_change {
             continue;
         }
-        patch.push_str(&format_hunk_header(
-            hunk.old_start,
-            old_count,
-            hunk.new_start,
-            new_count,
-        ));
-        patch.push_str(&buf);
+        let new_start = if options.exact_hunk_starts {
+            shifted_start(hunk.old_start, old_count, delta, new_count)
+        } else {
+            hunk.new_start
+        };
+        delta += i64::from(new_count) - i64::from(old_count);
+        patch.extend_from_slice(
+            format_hunk_header(hunk.old_start, old_count, new_start, new_count).as_bytes(),
+        );
+        patch.extend_from_slice(&buf);
     }
     if patch.is_empty() {
         return None;
@@ -110,20 +147,35 @@ pub fn format_patch(file: &WorkingDirectoryFileChange, hunks: &[DiffHunk]) -> Op
     } else {
         format_patch_header(Some(&file.path), Some(&file.path))
     };
-    Some(header + &patch)
+    let mut out = header.into_bytes();
+    out.extend_from_slice(&patch);
+    Some(out)
 }
 
 /// GHD `formatPatchToDiscardChanges`: a patch that undoes the selected lines
 /// in the working copy (selected additions become deletions and vice versa,
-/// everything else is context). `None` when nothing is selected.
+/// everything else is context). `None` when nothing is selected. GHD's
+/// patch ([`format_patch_to_discard_changes_with`]).
 pub fn format_patch_to_discard_changes(
     path: &str,
     hunks: &[DiffHunk],
     selection: &corvene_models::DiffSelection,
 ) -> Option<String> {
-    let mut patch = String::new();
+    format_patch_to_discard_changes_with(path, hunks, selection, PatchOptions::default())
+        .map(|patch| String::from_utf8_lossy(&patch).into_owned())
+}
+
+/// [`format_patch_to_discard_changes`] with Corvene's [`PatchOptions`].
+pub fn format_patch_to_discard_changes_with(
+    path: &str,
+    hunks: &[DiffHunk],
+    selection: &corvene_models::DiffSelection,
+    options: PatchOptions,
+) -> Option<Vec<u8>> {
+    let mut patch: Vec<u8> = Vec::new();
+    let mut delta = 0i64;
     for hunk in hunks {
-        let mut buf = String::new();
+        let mut buf: Vec<u8> = Vec::new();
         let mut old_count = 0u32;
         let mut new_count = 0u32;
         let mut any_change = false;
@@ -132,29 +184,23 @@ pub fn format_patch_to_discard_changes(
             match line.kind {
                 DiffLineKind::Hunk => continue,
                 DiffLineKind::Context => {
-                    buf.push(' ');
-                    buf.push_str(&line.text);
-                    buf.push('\n');
+                    push_line(&mut buf, b' ', line);
                     old_count += 1;
                     new_count += 1;
                 }
                 DiffLineKind::Add | DiffLineKind::Delete if selection.is_selected(absolute) => {
                     if line.kind == DiffLineKind::Add {
-                        buf.push('-');
+                        push_line(&mut buf, b'-', line);
                         new_count += 1;
                     } else {
-                        buf.push('+');
+                        push_line(&mut buf, b'+', line);
                         old_count += 1;
                     }
-                    buf.push_str(&line.text);
-                    buf.push('\n');
                     any_change = true;
                 }
                 // An unselected addition is already in the working copy: context.
                 DiffLineKind::Add => {
-                    buf.push(' ');
-                    buf.push_str(&line.text);
-                    buf.push('\n');
+                    push_line(&mut buf, b' ', line);
                     old_count += 1;
                     new_count += 1;
                 }
@@ -162,37 +208,42 @@ pub fn format_patch_to_discard_changes(
                 DiffLineKind::Delete => continue,
             }
             if line.no_trailing_newline {
-                buf.push_str("\\ No newline at end of file\n");
+                buf.extend_from_slice(b"\\ No newline at end of file\n");
             }
         }
         if !any_change {
             continue;
         }
         // The working copy is the "old" side of this reverse patch.
-        patch.push_str(&format_hunk_header(
-            hunk.new_start,
-            new_count,
-            hunk.old_start,
-            old_count,
-        ));
-        patch.push_str(&buf);
+        let produced_start = if options.exact_hunk_starts {
+            shifted_start(hunk.new_start, new_count, delta, old_count)
+        } else {
+            hunk.old_start
+        };
+        delta += i64::from(old_count) - i64::from(new_count);
+        patch.extend_from_slice(
+            format_hunk_header(hunk.new_start, new_count, produced_start, old_count).as_bytes(),
+        );
+        patch.extend_from_slice(&buf);
     }
     if patch.is_empty() {
         return None;
     }
-    Some(format_patch_header(Some(path), Some(path)) + &patch)
+    let mut out = format_patch_header(Some(path), Some(path)).into_bytes();
+    out.extend_from_slice(&patch);
+    Some(out)
 }
 
 /// GHD `discardChangesFromSelection`: `git apply --unidiff-zero --whitespace=nowarn -`.
 pub fn discard_changes_from_selection(
     git: Arc<GitBinary>,
     workdir: &Path,
-    patch: &str,
+    patch: impl AsRef<[u8]>,
 ) -> Result<()> {
     GitCommand::new(git)
         .args(["apply", "--unidiff-zero", "--whitespace=nowarn", "-"])
         .current_dir(workdir)
-        .stdin(patch.as_bytes().to_vec())
+        .stdin(patch.as_ref().to_vec())
         .run()?;
     Ok(())
 }
@@ -203,9 +254,10 @@ pub fn apply_patch_to_index(
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
     diff: &Diff,
+    options: PatchOptions,
 ) -> Result<()> {
     recreate_rename_in_index(git.clone(), workdir, file)?;
-    apply_hunks_to_index(git, workdir, file, diff)
+    apply_hunks_to_index(git, workdir, file, diff, options)
 }
 
 /// Recreate a renamed file's rename in the (just reset) index: `git mv` by
@@ -256,6 +308,7 @@ fn apply_hunks_to_index(
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
     diff: &Diff,
+    options: PatchOptions,
 ) -> Result<()> {
     let hunks = match diff {
         Diff::Text { hunks, .. } | Diff::LargeText { hunks, .. } => hunks,
@@ -273,7 +326,7 @@ fn apply_hunks_to_index(
         }
         Diff::Empty => return Ok(()),
     };
-    let Some(patch) = format_patch(file, hunks) else {
+    let Some(patch) = format_patch_with(file, hunks, options) else {
         return Ok(());
     };
     GitCommand::new(git)
@@ -285,16 +338,27 @@ fn apply_hunks_to_index(
             "-",
         ])
         .current_dir(workdir)
-        .stdin(patch.into_bytes())
+        .stdin(patch)
         .run()?;
     Ok(())
 }
 
-/// Stage the partially-selected files by patch (GHD `stageFiles`, step 3).
+/// Stage the partially-selected files by patch (GHD `stageFiles`, step 3),
+/// with GHD's patch ([`stage_partial_files_with`]).
 pub fn stage_partial_files(
     git: Arc<GitBinary>,
     workdir: &Path,
     files: &[WorkingDirectoryFileChange],
+) -> Result<()> {
+    stage_partial_files_with(git, workdir, files, PatchOptions::default())
+}
+
+/// [`stage_partial_files`] with Corvene's [`PatchOptions`].
+pub fn stage_partial_files_with(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    files: &[WorkingDirectoryFileChange],
+    options: PatchOptions,
 ) -> Result<()> {
     for file in files
         .iter()
@@ -314,7 +378,7 @@ pub fn stage_partial_files(
             false,
             None,
         )?;
-        apply_hunks_to_index(git.clone(), workdir, file, &diff)?;
+        apply_hunks_to_index(git.clone(), workdir, file, &diff, options)?;
     }
     Ok(())
 }
@@ -372,6 +436,113 @@ mod tests {
             patch,
             "--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
         );
+    }
+
+    #[test]
+    fn exact_hunk_starts_count_only_written_hunks() {
+        let diff = crate::parse_unified(
+            "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,4 @@\n one\n+new1\n+new2\n two\n@@ -20,3 +22,2 @@\n p\n-q\n p\n@@ -30,2 +31,3 @@\n x\n+y\n z\n",
+        );
+        let Diff::Text { hunks, .. } = &diff else {
+            panic!("text diff expected")
+        };
+        // lines: 0 hunk,1 ctx,2 add,3 add,4 ctx | 5 hunk,6 ctx,7 del,8 ctx | 9 hunk,10 ctx,11 add,12 ctx
+        let sel = DiffSelection::none().with_line(7, true).with_line(11, true);
+        let f = file("f", FileStatusKind::Modified, sel.clone());
+        // GHD: the working copy's starts
+        let ghd = format_patch(&f, hunks).unwrap();
+        assert!(ghd.contains("@@ -20,3 +22,2 @@"), "{ghd}");
+        let exact = PatchOptions {
+            exact_hunk_starts: true,
+        };
+        let patch = String::from_utf8(format_patch_with(&f, hunks, exact).unwrap()).unwrap();
+        assert!(patch.contains("@@ -20,3 +20,2 @@"), "{patch}");
+        assert!(patch.contains("@@ -30,2 +29,3 @@"), "{patch}");
+        // discarding: the working copy is the old side, HEAD's starts move
+        let patch = String::from_utf8(
+            format_patch_to_discard_changes_with("f", hunks, &sel, exact).unwrap(),
+        )
+        .unwrap();
+        assert!(patch.contains("@@ -22,2 +22,3 @@"), "{patch}");
+        assert!(patch.contains("@@ -31,3 +32,2 @@"), "{patch}");
+        assert_eq!(shifted_start(0, 0, 0, 3), 1);
+        assert_eq!(shifted_start(5, 0, 2, 0), 7);
+    }
+
+    #[test]
+    fn exact_hunk_starts_stage_the_selected_spot() {
+        // #12604: unselected additions above a hunk whose lines repeat below
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "commit.gpgsign", "false"]);
+        let block = "p\np\np\nq\np\np\np\n";
+        let filler = |prefix: &str| -> String { (1..=11).map(|i| format!("{prefix}{i}\n")).collect() };
+        let head = format!("top\n{block}{}{block}{}{block}end\n", filler("f"), filler("g"));
+        std::fs::write(path.join("f.txt"), &head).unwrap();
+        run(&["add", "."]);
+        run(&["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-q", "-m", "init"]);
+        // 18 new lines at the top, the second block's q removed
+        let added: String = (1..=18).map(|i| format!("new{i}\n")).collect();
+        let second_q = head.match_indices("q\n").nth(1).unwrap().0;
+        let edited = format!("top\n{added}{}{}", &head[4..second_q], &head[second_q + 2..]);
+        std::fs::write(path.join("f.txt"), &edited).unwrap();
+        let git = Arc::new(crate::find_git().unwrap());
+        let staged_q_lines = |options: PatchOptions| -> Vec<usize> {
+            let mut status = crate::get_status(git.clone(), path).unwrap();
+            let diff = crate::working_directory_diff(
+                git.clone(),
+                path,
+                &status.files[0],
+                false,
+                false,
+                false,
+                None,
+            )
+            .unwrap();
+            let hunks = diff.hunks().unwrap();
+            let delete = hunks
+                .iter()
+                .flat_map(|h| {
+                    h.lines
+                        .iter()
+                        .enumerate()
+                        .map(move |(i, l)| (h.unified_diff_start + i as u32, l))
+                })
+                .find(|(_, l)| l.kind == DiffLineKind::Delete)
+                .unwrap()
+                .0;
+            status.files[0].selection = DiffSelection::none().with_line(delete, true);
+            crate::unstage_all(git.clone(), path).unwrap();
+            stage_partial_files_with(git.clone(), path, &status.files, options).unwrap();
+            let shown = Command::new("git")
+                .args(["show", ":f.txt"])
+                .current_dir(path)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&shown.stdout)
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| *l == "q")
+                .map(|(i, _)| i + 1)
+                .collect()
+        };
+        // GHD: the third block's q goes
+        assert_eq!(staged_q_lines(PatchOptions::default()), [5, 23]);
+        let exact = PatchOptions {
+            exact_hunk_starts: true,
+        };
+        assert_eq!(staged_q_lines(exact), [5, 40]);
     }
 
     #[test]

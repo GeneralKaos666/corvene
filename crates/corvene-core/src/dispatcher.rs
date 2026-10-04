@@ -5097,6 +5097,7 @@ impl Dispatcher {
                 .read(cx)
                 .flags
                 .bool(crate::flags::ids::KEEP_STAGED_MODE_CHANGES);
+        let patch_options = Self::patch_options(cx);
         let task = cx.background_executor().spawn(async move {
             corvene_git::hook_env::reload_if_uncached();
             // GHD recommends a force push after every amend; the flag only
@@ -5127,7 +5128,7 @@ impl Dispatcher {
             // as submodules or pointers (`update-index` skips their `Sub/`)
             corvene_git::add_embedded_repositories(git.clone(), &workdir, &embedded)?;
             corvene_git::stage_files(git.clone(), &workdir, &files)?;
-            corvene_git::stage_partial_files(git.clone(), &workdir, &files)?;
+            corvene_git::stage_partial_files_with(git.clone(), &workdir, &files, patch_options)?;
             if !modes.is_empty() {
                 // the files going into the commit (a deleted one has no mode)
                 let staged: std::collections::HashSet<&str> = files
@@ -5502,6 +5503,17 @@ impl Dispatcher {
         });
     }
 
+    /// The flags that change the partial patches git applies.
+    fn patch_options(cx: &mut dyn Host) -> corvene_git::PatchOptions {
+        Self::patch_options_of(&Self::state(cx).read(cx).flags)
+    }
+
+    fn patch_options_of(flags: &crate::flags::Flags) -> corvene_git::PatchOptions {
+        corvene_git::PatchOptions {
+            exact_hunk_starts: flags.bool(crate::flags::ids::PARTIAL_COMMIT_HUNK_POSITIONS),
+        }
+    }
+
     /// GHD `onDiscardChangesFromSelection` (diff gutter menu): confirm first
     /// unless the user opted out.
     pub fn request_discard_selection(
@@ -5548,7 +5560,12 @@ impl Dispatcher {
             let Some(hunks) = rs.diff.as_ref().and_then(|d| d.hunks()) else {
                 return;
             };
-            corvene_git::format_patch_to_discard_changes(&path, hunks, &selection)
+            corvene_git::format_patch_to_discard_changes_with(
+                &path,
+                hunks,
+                &selection,
+                Self::patch_options_of(&s.flags),
+            )
         };
         let Some(patch) = patch else { return };
         crate::remote::spawn_bg(
