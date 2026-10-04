@@ -251,8 +251,12 @@ impl Corvene {
     }
 
     pub fn commit(&self, repo: u64, summary: String, description: String) {
+        // the Compose app has no `OversizedFiles` dialog yet: commit as before
+        let checks = corvene_core::commit_checks::CommitChecks {
+            allow_oversized: true,
+        };
         self.loop_
-            .post(move |host| Dispatcher::commit(repo, summary, description, host));
+            .post(move |host| Dispatcher::commit_with(repo, summary, description, checks, host));
     }
 
     pub fn undo_commit(&self, repo: u64) {

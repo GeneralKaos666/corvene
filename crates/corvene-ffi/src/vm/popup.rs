@@ -300,6 +300,17 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
                 .put("description", description)
                 .list("usernames", usernames);
         }
+        Popup::OversizedFiles {
+            repo: r,
+            files,
+            summary,
+            description,
+        } => {
+            repo = Some(*r);
+            f.put("summary", summary)
+                .put("description", description)
+                .list("files", files);
+        }
         Popup::ConfirmCommitToDefaultBranch {
             repo: r,
             branch,

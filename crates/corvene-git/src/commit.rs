@@ -52,6 +52,22 @@ pub fn parse_commit_author(text: &str) -> std::result::Result<(String, String), 
     Ok((name.to_string(), email.to_string()))
 }
 
+/// GHD `ReceiveLimit` (`lib/large-files.ts`): GitHub.com refuses pushes of
+/// files over 100 MiB.
+pub const RECEIVE_LIMIT: u64 = 100 * 1024 * 1024;
+
+/// GHD `getLargeFilePaths` (`lib/large-files.ts`): the repository-relative
+/// `paths` whose working file is larger than `limit` bytes, in order (a
+/// path that cannot be read is left out, as GHD logs and skips it).
+pub fn large_file_paths<S: AsRef<str>>(workdir: &Path, paths: &[S], limit: u64) -> Vec<String> {
+    paths
+        .iter()
+        .map(AsRef::as_ref)
+        .filter(|path| std::fs::metadata(workdir.join(path)).is_ok_and(|meta| meta.len() > limit))
+        .map(str::to_string)
+        .collect()
+}
+
 /// `git reset -- .` (GHD `unstageAll`). On an unborn branch there is no HEAD
 /// to reset to, so fall back to clearing the index.
 pub fn unstage_all(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
@@ -807,6 +823,17 @@ mod tests {
         // trusted modes: nothing to keep
         run(&["config", "core.fileMode", "true"]);
         assert!(staged_mode_changes(git, path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn large_file_paths_are_the_files_over_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("small.txt"), "1234").unwrap();
+        std::fs::write(dir.path().join("big.bin"), "123456").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let paths = ["small.txt", "big.bin", "gone.bin", "sub/"];
+        assert_eq!(large_file_paths(dir.path(), &paths, 5), vec!["big.bin"]);
+        assert!(large_file_paths(dir.path(), &paths, RECEIVE_LIMIT).is_empty());
     }
 
     #[test]

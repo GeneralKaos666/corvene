@@ -4969,7 +4969,21 @@ impl Dispatcher {
         Some((git, workdir))
     }
 
+    /// The commit form's commit (GHD `onCreateCommit`), after the checks of
+    /// [`Self::commit_with`].
     pub fn commit(id: u64, summary: String, description: String, cx: &mut dyn Host) {
+        Self::commit_with(
+            id,
+            summary,
+            description,
+            crate::commit_checks::CommitChecks::default(),
+            cx,
+        );
+    }
+
+    /// GHD `commitIncludedChanges`: commit the included changes, once
+    /// [`Self::commit_with`]'s checks passed.
+    pub(crate) fn create_commit(id: u64, summary: String, description: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };

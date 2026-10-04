@@ -306,6 +306,14 @@ pub enum Popup {
         summary: String,
         description: String,
     },
+    /// `OversizedFiles`: included files over 100 MiB that Git LFS does not
+    /// track; "Commit Anyway" commits them.
+    OversizedFiles {
+        repo: u64,
+        files: Vec<String>,
+        summary: String,
+        description: String,
+    },
     /// Corvene `732-confirm-commit-to-default-branch`: committing on the
     /// default branch; "Commit" goes on to `UnknownAuthors` when
     /// `unknown_co_authors` is not empty.
@@ -607,6 +615,7 @@ impl Popup {
             | Self::PullRequestComment { repo, .. }
             | Self::PullRequestChecksFailed { repo, .. }
             | Self::UnknownAuthors { repo, .. }
+            | Self::OversizedFiles { repo, .. }
             | Self::ConfirmDiscardSelection { repo, .. }
             | Self::ResetToCommit { repo, .. }
             | Self::CheckoutCommit { repo, .. }

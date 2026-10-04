@@ -31,6 +31,7 @@ mod mco_dialogs;
 mod move_to_applications_folder;
 mod move_to_shared_storage;
 mod open_pull_request;
+mod oversized_files;
 mod preferences;
 mod pull_request_notifications;
 mod push_branch_commits;
@@ -84,6 +85,7 @@ pub use history_dialogs::{
 };
 pub use mco_dialogs::{LocalChangesOverwrittenDialog, McoDialog, SquashCommitMessageDialog};
 pub use open_pull_request::OpenPullRequestDialog;
+pub use oversized_files::OversizedFilesDialog;
 pub use preferences::PreferencesDialog;
 pub use pull_request_notifications::{
     PullRequestChecksFailedDialog, PullRequestCommentDialog, PullRequestReviewDialog,
@@ -303,6 +305,21 @@ impl DialogHost {
                     UnknownAuthorsDialog::new(
                         *repo,
                         usernames.clone(),
+                        summary.clone(),
+                        description.clone(),
+                    )
+                })
+                .into(),
+            Popup::OversizedFiles {
+                repo,
+                files,
+                summary,
+                description,
+            } => cx
+                .new(|_| {
+                    OversizedFilesDialog::new(
+                        *repo,
+                        files.clone(),
                         summary.clone(),
                         description.clone(),
                     )

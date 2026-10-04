@@ -1375,9 +1375,8 @@ pub fn is_tracked_by_lfs(git: Arc<GitBinary>, workdir: &Path, path: &str) -> Res
 }
 
 /// GHD `filesNotTrackedByLFS`: the repository-relative `paths` that
-/// [`is_tracked_by_lfs`] rejects, in order. GHD's caller, the commit flow's
-/// check for files over 100 MB (`OversizedFiles`), is not built yet
-/// (`.docs/TODO.md`).
+/// [`is_tracked_by_lfs`] rejects, in order, for the commit flow's check for
+/// files over 100 MB (`OversizedFiles`, `corvene_core::commit_checks`).
 pub fn files_not_tracked_by_lfs<S: AsRef<str>>(
     git: Arc<GitBinary>,
     workdir: &Path,
