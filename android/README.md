@@ -87,9 +87,12 @@ core/ffi         the engine: generated bindings (build/generated/uniffi), Core, 
 core/platform    HostRequestHandler (URLs, clipboard, toasts, folder picker), FolderResolver
 feature/repositories   RepositoryListScreen, RepositoryPicker (SelectPanel) (+ route, grouping, tests, screenshots)
 feature/changes  ChangesScreen (+ CommitPanel/CommitForm, filters), DiffScreen (+ DiffPager, DiffLineCache), routes
+feature/branches BranchSheet (groups, pull requests, menu), branch dialogs, sync button model/menu/controller, remote dialogs
+feature/history  HistoryScreen (+ CommitPager, compare, commit menu, multi-select), CommitDetailScreen, history dialogs
+feature/mco      ConflictsScreen, MultiCommitOperationRoute (choose branch, progress, abort), ChooseBranchSheet
 feature/settings AppearanceScreen (style cards, theme)
 app              CorveneApp (process lifecycle → appVisible/focus), MainActivity (splash, edge to edge), Navigation 3,
-                 CorveneScaffold (repository chrome, list-detail on medium/expanded), PopupHost
+                 CorveneScaffold (repository chrome, list-detail on medium/expanded), PopupHost (PopupDialog), BannerFlash
 tools/architecture     Konsist rules        tools/octicons/gen.py + icons.txt        tools/tokens/gen.py
 ```
 
@@ -104,5 +107,5 @@ Kotlin style per `.editorconfig` (WMKeyboard's, ktlint android_studio, 140
 columns), no auto-formatter. No ViewModel and no DI: the engine is the state,
 `Core` is wired explicitly and handed down with `LocalCore`; screens take view
 models and lambdas, routes query. Strings live in each module's `strings.xml`
-with its resource prefix (`cvd_`, `repo_`, `chg_`, `set_`, `plt_`, `app_`). Every task name
+with its resource prefix (`cvd_`, `repo_`, `chg_`, `br_`, `hist_`, `mco_`, `set_`, `plt_`, `app_`). Every task name
 carries the flavour (`testFossDebugUnitTest`); use the root aggregates.

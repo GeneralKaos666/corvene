@@ -49,6 +49,7 @@ import com.wasimaster.corvene.design.PrimerButtonVariant
 import com.wasimaster.corvene.design.PrimerTextField
 import com.wasimaster.corvene.design.Spinner
 import com.wasimaster.corvene.design.SpinnerSize
+import com.wasimaster.corvene.design.isShortHeight
 import com.wasimaster.corvene.ffi.gen.ChangesVm
 import com.wasimaster.corvene.ffi.gen.CommitFormVm
 
@@ -75,7 +76,8 @@ internal fun CommitPanel(changes: ChangesVm, actions: ChangesActions) {
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)),
     ) {
         HorizontalDivider(color = colors.borderMuted)
-        if (form.lastCommitSha != null) UndoBar(form, actions)
+        // a short window (phone landscape) gives the rows the Undo bar's height unless there are none
+        if (form.lastCommitSha != null && (!isShortHeight() || changes.files.isEmpty())) UndoBar(form, actions)
         if (changes.files.isNotEmpty()) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = CorveneTheme.metrics.gutter, vertical = 8.dp),

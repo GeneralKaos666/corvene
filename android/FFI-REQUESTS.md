@@ -66,6 +66,51 @@ Kotlin does meanwhile.
 19. **Image diffs.** `DiffKindVm::Image` carries no files; wanted old/new blob
     paths (temporary files) to draw them with Coil.
 
+## M-A2
+
+20. ~~Commit diff rows~~: done (`commitDiffRows`, 5928af22); History's file
+    diff is the read-only DiffScreen over them. Also used:
+    `submitGenericAuth`, `retryPopupAction`, `publishRepository`.
+    (`setDiffLines` is not wired yet: drag selection is M-A3+.)
+21. **Upstream checks** (`rerunChecks(repo, failedOnly)`) for `CICheckRunRerun`
+    and `updateUpstreamRemote(repo)` for `UpstreamAlreadyExists`: both dialogs
+    only inform and close.
+22. **The comparison in `HistoryVm`**: `compare: { branch, mode, ahead, behind }`.
+    Kotlin keeps the compared branch and mode itself and can count only the
+    mode on screen (`totalLoaded`).
+23. **A typed banner.** `BannerVm.text` is the Debug form; Kotlin reads its
+    fields with a regex (`bannerFields`). Wanted `fields: Vec<KeyValue>` like
+    `PopupVm` (our_branch, their_branch, count, description, branch, sha).
+24. **Request entry points that open GHD's popups** (respecting the
+    confirmation settings and "Do not show again"):
+    `requestDeleteBranch(repo, name)`, `requestRenameBranch`,
+    `requestCreateBranch(repo, targetSha?, initialName)`,
+    `requestCreateTag(repo, sha)`, `requestCheckoutCommit(repo, sha)`,
+    `requestResetToCommit(repo, sha)`, `confirmOrForcePush(repo)`,
+    `requestDropStash(repo)`, `requestUndoCommit(repo)`,
+    `startRebaseFlow(repo, base?)`, `startMergeFlow(repo, squash)`.
+    Meanwhile Kotlin shows the same dialog composables itself and calls the
+    confirmed action.
+25. **`endMco(repo)`**: dismissing the ChooseBranch step only closes the popup;
+    the operation state lingers until the next one starts.
+26. **`startRebase(repo, base, forcePushChecked)`**: WarnForcePush's Begin
+    cannot go on (the exported call passes false and would warn again); Begin
+    is disabled.
+27. **`stashAndRetry()`** for `LocalChangesOverwritten` (GHD's one button);
+    Kotlin offers Stash changes and Retry separately.
+28. **The current branch's stash.** `ChangesVm.stashCount` /
+    `BranchesVm.stashCount` count every stash, so the Changes banner says
+    "stashed changes on this branch" on feature-a for main's stash (phone run).
+    Wanted `stashOnCurrentBranch: bool` (GHD `desktop_stash` of the branch).
+29. **`undoDeleteBranch(repo)`** for the BranchDeleted banner's Undo (flag
+    861); disabled meanwhile.
+30. **`discardAllAndCheckout(repo, branch)`** for StashAndSwitchBranch's
+    "Discard my changes" (flag 865); not offered meanwhile.
+31. **Update from default** with `pull.rebase` (flag 859): Kotlin merges the
+    default branch; wanted `updateFromDefault(repo)`.
+32. **`RepoVm.htmlUrl`** for View on GitHub on Enterprise hosts; Kotlin builds
+    github.com URLs from `RepoVm.github`.
+
 ## Provided by the FFI (2026-10-04, 79678bd4)
 
 - `com.wasimaster.corvene.ffi.NativeContext` must exist in `:core:ffi` as

@@ -41,6 +41,15 @@ fun isCompactWidth(): Boolean = LocalConfiguration.current.screenWidthDp < COMPA
 private const val COMPACT_MAX_DP = 600
 
 /**
+ * True below 480 dp of height (a phone in landscape): chrome folds into one
+ * bar and secondary rows hide, so lists keep visible rows.
+ */
+@Composable
+fun isShortHeight(): Boolean = LocalConfiguration.current.screenHeightDp < SHORT_MAX_DP
+
+private const val SHORT_MAX_DP = 480
+
+/**
  * Primer's SelectPanel: pick from a filterable, grouped list (the repository
  * picker, the branch picker). A modal bottom sheet on compact widths, a popup
  * anchored under its parent on wider ones (place it in the trigger's Box).
@@ -48,6 +57,9 @@ private const val COMPACT_MAX_DP = 600
  * [onFilterChange] is set, the [items] ([ActionListGroupHeader] and
  * [ActionListItem] with `checked`), and an optional [footer] (links or
  * buttons). Single-select panels close themselves from the item's onClick.
+ * [titleActions] sit beside the title (GHD's "New Branch"), [tabs] under it
+ * (the branch picker's Branches | Pull Requests). [inline] draws the panel in
+ * place, without a sheet or popup (a destination of its own, screenshots).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,17 +72,33 @@ fun SelectPanel(
     filterPlaceholder: String = "",
     closeDescription: String = "",
     footer: (@Composable RowScope.() -> Unit)? = null,
+    titleActions: (@Composable RowScope.() -> Unit)? = null,
+    tabs: (@Composable () -> Unit)? = null,
+    inline: Boolean = false,
     items: LazyListScope.() -> Unit,
 ) {
     val colors = CorveneTheme.colors
-    if (isCompactWidth()) {
+    val parts = SelectPanelParts(
+        title,
+        onDismissRequest,
+        filter,
+        onFilterChange,
+        filterPlaceholder,
+        closeDescription,
+        footer,
+        titleActions,
+        tabs,
+    )
+    if (inline) {
+        Surface(modifier, color = colors.bgOverlay) { SelectPanelContent(parts, items) }
+    } else if (isCompactWidth()) {
         ModalBottomSheet(
             onDismissRequest = onDismissRequest,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = colors.bgOverlay,
             modifier = modifier,
         ) {
-            SelectPanelContent(title, onDismissRequest, filter, onFilterChange, filterPlaceholder, closeDescription, footer, items)
+            SelectPanelContent(parts, items)
         }
     } else {
         Popup(
@@ -85,25 +113,36 @@ fun SelectPanel(
                 border = BorderStroke(1.dp, colors.borderDefault),
                 shadowElevation = 8.dp,
             ) {
-                SelectPanelContent(title, onDismissRequest, filter, onFilterChange, filterPlaceholder, closeDescription, footer, items)
+                SelectPanelContent(parts, items)
             }
         }
     }
 }
 
+/** What [SelectPanel] draws around its items. */
+internal class SelectPanelParts(
+    val title: String,
+    val onDismissRequest: () -> Unit,
+    val filter: String,
+    val onFilterChange: ((String) -> Unit)?,
+    val filterPlaceholder: String,
+    val closeDescription: String,
+    val footer: (@Composable RowScope.() -> Unit)?,
+    val titleActions: (@Composable RowScope.() -> Unit)? = null,
+    val tabs: (@Composable () -> Unit)? = null,
+)
+
 /** The panel without its sheet or popup (previews and screenshot tests draw this). */
 @Composable
-internal fun SelectPanelContent(
-    title: String,
-    onDismissRequest: () -> Unit,
-    filter: String,
-    onFilterChange: ((String) -> Unit)?,
-    filterPlaceholder: String,
-    closeDescription: String,
-    footer: (@Composable RowScope.() -> Unit)?,
-    items: LazyListScope.() -> Unit,
-) {
+internal fun SelectPanelContent(parts: SelectPanelParts, items: LazyListScope.() -> Unit) {
     val colors = CorveneTheme.colors
+    val title = parts.title
+    val onDismissRequest = parts.onDismissRequest
+    val filter = parts.filter
+    val onFilterChange = parts.onFilterChange
+    val filterPlaceholder = parts.filterPlaceholder
+    val closeDescription = parts.closeDescription
+    val footer = parts.footer
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(start = CorveneTheme.metrics.gutter, end = 4.dp),
@@ -115,8 +154,10 @@ internal fun SelectPanelContent(
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
                 color = colors.textPrimary,
             )
+            parts.titleActions?.invoke(this)
             PrimerIconButton(Octicons.X, closeDescription, onDismissRequest, tint = OcticonTint.Secondary)
         }
+        parts.tabs?.invoke()
         if (onFilterChange != null) {
             FilterField(
                 filter,
@@ -164,13 +205,15 @@ private const val LIST_MAX_HEIGHT = 560
 private fun SelectPanelPreview() {
     DesignStyleSamples {
         SelectPanelContent(
-            title = "Repositories",
-            onDismissRequest = {},
-            filter = "",
-            onFilterChange = {},
-            filterPlaceholder = "Filter",
-            closeDescription = "Close",
-            footer = { PrimerButton("Add repository", {}, leadingIcon = Octicons.Plus) },
+            SelectPanelParts(
+                title = "Repositories",
+                onDismissRequest = {},
+                filter = "",
+                onFilterChange = {},
+                filterPlaceholder = "Filter",
+                closeDescription = "Close",
+                footer = { PrimerButton("Add repository", {}, leadingIcon = Octicons.Plus) },
+            ),
         ) {
             item { ActionListGroupHeader("Recent") }
             item { ActionListItem("corvene", checked = true, leading = { Octicon(Octicons.Repo, null) }) }

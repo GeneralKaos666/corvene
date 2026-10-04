@@ -42,6 +42,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
@@ -67,8 +70,11 @@ fun PrimerTextField(
     leadingIcon: OcticonIcon? = null,
     trailing: (@Composable () -> Unit)? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    password: Boolean = false,
 ) {
     val colors = CorveneTheme.colors
+    val transformation = if (password) PasswordVisualTransformation() else VisualTransformation.None
+    val keyboard = if (password) keyboardOptions.copy(keyboardType = KeyboardType.Password) else keyboardOptions
     val textStyle = if (monospace) CorveneTheme.textStyles.code else MaterialTheme.typography.bodyLarge
     if (LocalDesignStyle.current == DesignStyle.Material) {
         OutlinedTextField(
@@ -85,7 +91,8 @@ fun PrimerTextField(
             singleLine = singleLine,
             minLines = minLines,
             maxLines = maxLines,
-            keyboardOptions = keyboardOptions,
+            keyboardOptions = keyboard,
+            visualTransformation = transformation,
             colors = OutlinedTextFieldDefaults.colors(),
         )
         return
@@ -101,7 +108,8 @@ fun PrimerTextField(
             singleLine = singleLine,
             minLines = minLines,
             maxLines = maxLines,
-            keyboardOptions = keyboardOptions,
+            keyboardOptions = keyboard,
+            visualTransformation = transformation,
             textStyle = textStyle.copy(color = if (enabled) colors.textPrimary else colors.textDisabled),
             cursorBrush = SolidColor(colors.accent.fg),
             modifier = Modifier

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
@@ -22,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import com.wasimaster.corvene.changes.CommitDiffRoute
 import com.wasimaster.corvene.changes.DiffRoute
 import com.wasimaster.corvene.design.ActionMenu
 import com.wasimaster.corvene.design.ActionMenuItem
@@ -30,6 +32,7 @@ import com.wasimaster.corvene.design.Octicons
 import com.wasimaster.corvene.design.PrimerIconButton
 import com.wasimaster.corvene.design.PrimerTopAppBar
 import com.wasimaster.corvene.ffi.rememberCoreQuery
+import com.wasimaster.corvene.history.CommitDetailRoute
 import com.wasimaster.corvene.repositories.RepositoryListRoute
 import com.wasimaster.corvene.settings.AppearanceRoute
 
@@ -60,6 +63,7 @@ fun CorveneNavigation(modifier: Modifier = Modifier) {
                     id = key.id,
                     onBack = pop,
                     onOpenDiff = { backStack.add(Diff(key.id)) },
+                    onOpenCommit = { backStack.add(CommitDetail(key.id)) },
                     onOpenRepository = { id ->
                         // the switcher replaces the repository, it does not stack another
                         backStack.removeLastOrNull()
@@ -79,6 +83,33 @@ fun CorveneNavigation(modifier: Modifier = Modifier) {
                         backDescription = stringResource(R.string.app_back),
                     )
                     DiffRoute(
+                        key.id,
+                        Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+                        contentPadding = WindowInsets.navigationBars.asPaddingValues(),
+                    )
+                }
+            }
+            entry<CommitDetail> { key ->
+                AppScaffold(title = stringResource(R.string.app_commit_title), onBack = pop) { padding ->
+                    CommitDetailRoute(
+                        key.id,
+                        onOpenFile = { backStack.add(CommitDiff(key.id)) },
+                        modifier = Modifier.padding(top = padding.calculateTopPadding()),
+                        contentPadding = WindowInsets.navigationBars.asPaddingValues(),
+                    )
+                }
+            }
+            entry<CommitDiff> { key ->
+                val detail by rememberCoreQuery(key.id) { commitDetail(key.id.toULong()) }
+                val path = detail.value?.selectedFile.orEmpty()
+                Column(Modifier.fillMaxSize()) {
+                    PrimerTopAppBar(
+                        title = path.substringAfterLast('/'),
+                        subtitle = path.substringBeforeLast('/', "").takeIf { it.isNotEmpty() },
+                        onBack = pop,
+                        backDescription = stringResource(R.string.app_back),
+                    )
+                    CommitDiffRoute(
                         key.id,
                         Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
                         contentPadding = WindowInsets.navigationBars.asPaddingValues(),

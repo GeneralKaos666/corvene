@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,6 +37,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -118,11 +121,15 @@ data class SyncButtonModel(
  * title is the repository switcher ([repository] + chevron →
  * [onRepositoryClick]), then the branch chip and the sync button in a row,
  * then [tabs]. GitHub Desktop: GHD's toolbar (Current repository ▾ |
- * Current branch ▾ | push/pull) on the toolbar colour, then [tabs].
- * [repositoryAnchor] and [branchAnchor] draw inside the triggers' boxes,
- * where anchored pickers (popups on wide screens) belong.
+ * Current branch ▾ | push/pull) on the toolbar colour, then [tabs]; compact
+ * widths drop the toolbar's captions and keep the values.
+ * [repositoryAnchor], [branchAnchor] and [syncAnchor] draw inside the
+ * triggers' boxes, where anchored pickers and menus belong. A long press on
+ * the sync button runs [onSyncLongClick] (GHD's push/pull dropdown).
+ *
+ * Short windows (height < 480 dp, a phone in landscape) fold the branch row
+ * into the app bar, so the content below keeps its rows.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RepositoryTopChrome(
     repository: String,
@@ -135,94 +142,203 @@ fun RepositoryTopChrome(
     modifier: Modifier = Modifier,
     owner: String? = null,
     onBack: (() -> Unit)? = null,
+    onSyncLongClick: (() -> Unit)? = null,
     repositoryAnchor: @Composable () -> Unit = {},
     branchAnchor: @Composable () -> Unit = {},
+    syncAnchor: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {},
     tabs: @Composable () -> Unit = {},
 ) {
-    val colors = CorveneTheme.colors
-    if (LocalDesignStyle.current == DesignStyle.GitHubDesktop) {
-        Column(modifier.fillMaxWidth()) {
+    val slots = ChromeSlots(repositoryAnchor, branchAnchor, syncAnchor, actions)
+    when {
+        LocalDesignStyle.current == DesignStyle.GitHubDesktop -> Column(modifier.fillMaxWidth()) {
+            DesktopToolbar(repository, branch, sync, onRepositoryClick, onBranchClick, onSync, onSyncLongClick, labels, onBack, slots)
+            tabs()
+        }
+        isShortHeight() -> Column(modifier.fillMaxWidth().background(chromeBackground())) {
+            ShortBar(repository, branch, sync, onRepositoryClick, onBranchClick, onSync, onSyncLongClick, labels, onBack, slots)
+            tabs()
+        }
+        else -> Column(modifier.fillMaxWidth().background(chromeBackground())) {
+            MobileBar(repository, owner, onRepositoryClick, labels, onBack, slots)
             Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(colors.toolbarBg)
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .height(TOOLBAR_HEIGHT.dp),
+                Modifier.fillMaxWidth().padding(horizontal = CorveneTheme.metrics.gutter).padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (onBack != null) {
-                    PrimerIconButton(Octicons.ArrowLeft, labels.back, onBack, tint = OcticonTint.Primary)
+                // the chip is measured first (up to its cap); the sync button takes what is left and truncates
+                Box {
+                    BranchChip(branch ?: labels.noBranch, onBranchClick, labels.switchBranch)
+                    branchAnchor()
                 }
-                ToolbarButton(
-                    Octicons.Repo,
-                    labels.currentRepository,
-                    repository,
-                    true,
-                    onRepositoryClick,
-                    Modifier.weight(1f),
-                    repositoryAnchor,
-                )
-                ToolbarDivider()
-                ToolbarButton(
-                    Octicons.GitBranch,
-                    labels.currentBranch,
-                    branch ?: labels.noBranch,
-                    true,
-                    onBranchClick,
-                    Modifier.weight(1f),
-                    branchAnchor,
-                )
-                ToolbarDivider()
-                ToolbarButton(sync.icon, sync.title, sync.description.orEmpty(), false, onSync, Modifier.weight(1f), enabled = sync.enabled)
-                CompositionLocalProvider(LocalOcticonTint provides OcticonTint.Primary) { Row(content = actions) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    SyncButton(sync, onSync, onSyncLongClick)
+                    syncAnchor()
+                }
             }
             tabs()
         }
-        return
     }
-    val barBg = if (LocalDesignStyle.current == DesignStyle.Material) MaterialTheme.colorScheme.surface else colors.toolbarBg
-    Column(modifier.fillMaxWidth().background(barBg)) {
-        CompositionLocalProvider(LocalOcticonTint provides OcticonTint.Link) {
-            TopAppBar(
-                title = {
-                    Box {
-                        Row(
-                            Modifier.clickable(role = Role.Button, onClickLabel = labels.switchRepository, onClick = onRepositoryClick),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            RepositoryTitle(owner, repository, Modifier.weight(1f, fill = false))
-                            Octicon(Octicons.ChevronDown, null, tint = OcticonTint.Secondary)
-                        }
-                        repositoryAnchor()
-                    }
-                },
-                navigationIcon = {
-                    if (onBack != null) PrimerIconButton(Octicons.ArrowLeft, labels.back, onBack, tint = OcticonTint.Link)
-                },
-                actions = actions,
-                colors = barColors(),
-            )
-        }
+}
+
+/** The anchors and actions the three layouts place. */
+private class ChromeSlots(
+    val repositoryAnchor: @Composable () -> Unit,
+    val branchAnchor: @Composable () -> Unit,
+    val syncAnchor: @Composable () -> Unit,
+    val actions: @Composable RowScope.() -> Unit,
+)
+
+@Composable
+private fun chromeBackground() =
+    if (LocalDesignStyle.current == DesignStyle.Material) MaterialTheme.colorScheme.surface else CorveneTheme.colors.toolbarBg
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MobileBar(
+    repository: String,
+    owner: String?,
+    onRepositoryClick: () -> Unit,
+    labels: RepositoryChromeLabels,
+    onBack: (() -> Unit)?,
+    slots: ChromeSlots,
+) {
+    CompositionLocalProvider(LocalOcticonTint provides OcticonTint.Link) {
+        TopAppBar(
+            title = { RepositorySwitcher(repository, owner, onRepositoryClick, labels, slots.repositoryAnchor) },
+            navigationIcon = {
+                if (onBack != null) PrimerIconButton(Octicons.ArrowLeft, labels.back, onBack, tint = OcticonTint.Link)
+            },
+            actions = slots.actions,
+            colors = barColors(),
+        )
+    }
+}
+
+/** One 48 dp row: back, repository ▾, branch chip, sync, actions. */
+@Composable
+private fun ShortBar(
+    repository: String,
+    branch: String?,
+    sync: SyncButtonModel,
+    onRepositoryClick: () -> Unit,
+    onBranchClick: () -> Unit,
+    onSync: () -> Unit,
+    onSyncLongClick: (() -> Unit)?,
+    labels: RepositoryChromeLabels,
+    onBack: (() -> Unit)?,
+    slots: ChromeSlots,
+) {
+    CompositionLocalProvider(
+        LocalOcticonTint provides OcticonTint.Link,
+        LocalContentColor provides CorveneTheme.colors.toolbarText,
+    ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = CorveneTheme.metrics.gutter).padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .height(SHORT_BAR_HEIGHT.dp)
+                .padding(end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(Modifier.weight(1f, fill = false)) {
-                BranchChip(branch ?: labels.noBranch, onBranchClick, labels.switchBranch)
-                branchAnchor()
+            if (onBack != null) {
+                PrimerIconButton(Octicons.ArrowLeft, labels.back, onBack, tint = OcticonTint.Link)
+            } else {
+                Box(Modifier.width(8.dp))
             }
-            Box(Modifier.weight(1f))
-            PrimerButton(
-                sync.title,
-                onSync,
-                enabled = sync.enabled,
-                leadingIcon = sync.icon,
-            )
+            Box(Modifier.weight(1f, fill = false)) {
+                RepositorySwitcher(repository, null, onRepositoryClick, labels, slots.repositoryAnchor)
+            }
+            Box {
+                BranchChip(branch ?: labels.noBranch, onBranchClick, labels.switchBranch)
+                slots.branchAnchor()
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                SyncButton(sync, onSync, onSyncLongClick)
+                slots.syncAnchor()
+            }
+            Row(content = slots.actions)
         }
-        tabs()
+    }
+}
+
+@Composable
+private fun RepositorySwitcher(
+    repository: String,
+    owner: String?,
+    onClick: () -> Unit,
+    labels: RepositoryChromeLabels,
+    anchor: @Composable () -> Unit,
+) {
+    Box {
+        Row(
+            Modifier.clickable(role = Role.Button, onClickLabel = labels.switchRepository, onClick = onClick),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            RepositoryTitle(owner, repository, Modifier.weight(1f, fill = false))
+            Octicon(Octicons.ChevronDown, null, tint = OcticonTint.Secondary)
+        }
+        anchor()
+    }
+}
+
+@Composable
+private fun DesktopToolbar(
+    repository: String,
+    branch: String?,
+    sync: SyncButtonModel,
+    onRepositoryClick: () -> Unit,
+    onBranchClick: () -> Unit,
+    onSync: () -> Unit,
+    onSyncLongClick: (() -> Unit)?,
+    labels: RepositoryChromeLabels,
+    onBack: (() -> Unit)?,
+    slots: ChromeSlots,
+) {
+    val colors = CorveneTheme.colors
+    // GHD's captions ("Current repository") cost a line a phone cannot spare
+    val captions = !isCompactWidth()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(colors.toolbarBg)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .height(if (captions) TOOLBAR_HEIGHT.dp else TOOLBAR_HEIGHT_COMPACT.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onBack != null) {
+            PrimerIconButton(Octicons.ArrowLeft, labels.back, onBack, tint = OcticonTint.Primary)
+        }
+        ToolbarButton(
+            ToolbarButtonSpec(Octicons.Repo, labels.currentRepository.takeIf { captions }, repository, dropdown = captions),
+            onRepositoryClick,
+            Modifier.weight(1f),
+            anchor = slots.repositoryAnchor,
+        )
+        ToolbarDivider()
+        ToolbarButton(
+            ToolbarButtonSpec(Octicons.GitBranch, labels.currentBranch.takeIf { captions }, branch ?: labels.noBranch, dropdown = captions),
+            onBranchClick,
+            Modifier.weight(1f),
+            anchor = slots.branchAnchor,
+        )
+        ToolbarDivider()
+        ToolbarButton(
+            if (captions) {
+                ToolbarButtonSpec(sync.icon, sync.title, sync.description.orEmpty(), dropdown = false, progress = sync.progress)
+            } else {
+                ToolbarButtonSpec(sync.icon, null, sync.title, dropdown = false, progress = sync.progress)
+            },
+            onSync,
+            // on a phone the push/pull button gives way first, so the branch name stays readable
+            Modifier.weight(if (captions) 1f else SYNC_WEIGHT_COMPACT),
+            anchor = slots.syncAnchor,
+            enabled = sync.enabled,
+            onLongClick = onSyncLongClick,
+        )
+        CompositionLocalProvider(LocalOcticonTint provides OcticonTint.Primary) { Row(content = slots.actions) }
     }
 }
 
@@ -256,7 +372,7 @@ private fun BranchChip(name: String, onClick: () -> Unit, clickLabel: String) {
         color = colors.bgSubtle,
         contentColor = colors.textPrimary,
         border = BorderStroke(1.dp, colors.borderMuted),
-        modifier = Modifier.height(36.dp),
+        modifier = Modifier.height(36.dp).testTag(TAG_BRANCH_CHIP),
     ) {
         Row(
             Modifier.padding(horizontal = 12.dp),
@@ -276,40 +392,102 @@ private fun BranchChip(name: String, onClick: () -> Unit, clickLabel: String) {
     }
 }
 
+/**
+ * The push/pull button of the Mobile and Material chrome: a Default button
+ * that truncates its label before the branch chip gives way, takes a long
+ * press, and fills a progress line along its bottom while git runs.
+ */
+@Composable
+private fun SyncButton(sync: SyncButtonModel, onClick: () -> Unit, onLongClick: (() -> Unit)?) {
+    val colors = CorveneTheme.colors
+    val material = LocalDesignStyle.current == DesignStyle.Material
+    val shape = if (material) RoundedCornerShape(50) else RoundedCornerShape(CorveneTheme.metrics.cornerMedium)
+    val content = if (sync.enabled) colors.textPrimary else colors.textDisabled
+    Box(
+        Modifier
+            .height(36.dp)
+            .clip(shape)
+            .background(if (material) MaterialTheme.colorScheme.surfaceContainerHigh else colors.bgSubtle)
+            .border(1.dp, if (material) MaterialTheme.colorScheme.outlineVariant else colors.borderDefault, shape)
+            .combinedClickable(
+                enabled = sync.enabled || onLongClick != null,
+                role = Role.Button,
+                onLongClick = onLongClick,
+                onClick = { if (sync.enabled) onClick() },
+            )
+            .testTag(TAG_SYNC),
+    ) {
+        Row(
+            Modifier.fillMaxHeight().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OcticonColored(sync.icon, null, content)
+            Text(sync.title, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        val progress = sync.progress
+        if (progress != null) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth(progress.coerceIn(0f, 1f))
+                    .height(3.dp)
+                    .background(colors.success.emphasis),
+            )
+        }
+    }
+}
+
+/** What one GHD toolbar button shows: [label] is the caption line (none on compact widths). */
+private class ToolbarButtonSpec(
+    val icon: OcticonIcon,
+    val label: String?,
+    val value: String,
+    val dropdown: Boolean,
+    val progress: Float? = null,
+)
+
 @Composable
 private fun ToolbarButton(
-    icon: OcticonIcon,
-    label: String,
-    value: String,
-    dropdown: Boolean,
+    spec: ToolbarButtonSpec,
     onClick: () -> Unit,
     modifier: Modifier,
     anchor: @Composable () -> Unit = {},
     enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
 ) {
     val colors = CorveneTheme.colors
     Box(modifier.fillMaxHeight()) {
+        val progress = spec.progress
+        if (progress != null) {
+            // GHD fills the push/pull button behind its label
+            Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(colors.toolbarButtonHoverBg))
+        }
         Row(
             Modifier
                 .fillMaxHeight()
                 .fillMaxWidth()
-                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .combinedClickable(enabled = enabled || onLongClick != null, role = Role.Button, onLongClick = onLongClick) {
+                    if (enabled) onClick()
+                }
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OcticonColored(icon, null, if (enabled) colors.toolbarText else colors.toolbarTextSecondary)
+            OcticonColored(spec.icon, null, if (enabled) colors.toolbarText else colors.toolbarTextSecondary)
             Column(Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.labelSmall, color = colors.toolbarTextSecondary, maxLines = 1)
+                if (spec.label != null) {
+                    Text(spec.label, style = MaterialTheme.typography.labelSmall, color = colors.toolbarTextSecondary, maxLines = 1)
+                }
                 Text(
-                    value,
+                    spec.value,
                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                     color = if (enabled) colors.toolbarText else colors.toolbarTextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (dropdown) OcticonColored(Octicons.TriangleDown, null, colors.toolbarTextSecondary)
+            if (spec.dropdown) OcticonColored(Octicons.TriangleDown, null, colors.toolbarTextSecondary)
         }
         anchor()
     }
@@ -320,8 +498,16 @@ private fun ToolbarDivider() {
     VerticalDivider(Modifier.fillMaxHeight().width(1.dp), color = CorveneTheme.colors.toolbarButtonBorder)
 }
 
+/** Test tags of the chrome's triggers. */
+const val TAG_BRANCH_CHIP = "cvd_branch_chip"
+const val TAG_SYNC = "cvd_sync"
+
 private const val TOOLBAR_HEIGHT = 50
+private const val SYNC_WEIGHT_COMPACT = 0.8f
+private const val TOOLBAR_HEIGHT_COMPACT = 44
+private const val SHORT_BAR_HEIGHT = 48
 private const val BRANCH_MAX_WIDTH = 180
+
 
 internal val PreviewChromeLabels = RepositoryChromeLabels(
     currentRepository = "Current repository",

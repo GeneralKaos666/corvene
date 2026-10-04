@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -58,8 +59,10 @@ import com.wasimaster.corvene.design.PrimerButtonVariant
 import com.wasimaster.corvene.design.PrimerCheckbox
 import com.wasimaster.corvene.design.PrimerChip
 import com.wasimaster.corvene.design.PrimerDialog
+import com.wasimaster.corvene.design.PrimerIconButton
 import com.wasimaster.corvene.design.StateLabel
 import com.wasimaster.corvene.design.StateLabelState
+import com.wasimaster.corvene.design.isShortHeight
 import com.wasimaster.corvene.ffi.gen.ChangedFileVm
 import com.wasimaster.corvene.ffi.gen.ChangesVm
 import com.wasimaster.corvene.ffi.gen.FileStatusVm
@@ -101,6 +104,9 @@ fun ChangesScreen(
     modifier: Modifier = Modifier,
 ) {
     var discarding by rememberSaveable { mutableStateOf<String?>(null) }
+    // short windows (phone landscape) keep the chips behind the header's filter button
+    val short = isShortHeight()
+    var chipsOpen by rememberSaveable { mutableStateOf(false) }
     val files = remember(changes) { changes.visibleFiles() }
     val active = remember(changes) { changes.activeFilters() }
     val requestDiscard: (String) -> Unit = { path -> if (confirmDiscard) discarding = path else actions.discard(listOf(path)) }
@@ -126,8 +132,8 @@ fun ChangesScreen(
         if (changes.files.isEmpty()) {
             NoChanges(Modifier.weight(1f))
         } else {
-            FilterChips(active, actions)
-            ListHeader(changes, files.size)
+            if (!short || chipsOpen) FilterChips(active, actions)
+            ListHeader(changes, files.size, onFilter = if (short) ({ chipsOpen = !chipsOpen }) else null, filtered = active.isNotEmpty())
             LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag(TAG_FILES)) {
                 items(files, key = { it.path }, contentType = { "file" }) { file ->
                     FileRow(file, actions, onDiscard = { requestDiscard(file.path) })
@@ -197,7 +203,7 @@ private fun FilterOption.label(): Int = when (this) {
 }
 
 @Composable
-private fun ListHeader(changes: ChangesVm, shown: Int) {
+private fun ListHeader(changes: ChangesVm, shown: Int, onFilter: (() -> Unit)?, filtered: Boolean) {
     val colors = CorveneTheme.colors
     Row(
         Modifier.fillMaxWidth().padding(horizontal = CorveneTheme.metrics.gutter, vertical = 6.dp),
@@ -221,6 +227,15 @@ private fun ListHeader(changes: ChangesVm, shown: Int) {
                 StateLabelState.Closed,
                 icon = Octicons.Alert,
                 modifier = Modifier.testTag(TAG_CONFLICTS),
+            )
+        }
+        if (onFilter != null) {
+            PrimerIconButton(
+                Octicons.Filter,
+                stringResource(R.string.chg_filter_toggle),
+                onFilter,
+                Modifier.size(32.dp).testTag(TAG_FILTER_TOGGLE),
+                tint = if (filtered) OcticonTint.Link else OcticonTint.Secondary,
             )
         }
     }
@@ -372,3 +387,4 @@ const val TAG_STASH = "chg_stash"
 const val TAG_CONFLICTS = "chg_conflicts"
 const val TAG_EMPTY = "chg_empty"
 const val TAG_DISCARD_CONFIRM = "chg_discard_confirm"
+const val TAG_FILTER_TOGGLE = "chg_filter_toggle"

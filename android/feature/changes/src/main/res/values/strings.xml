@@ -92,4 +92,5 @@
     <string name="chg_diff_hide_whitespace">Hide whitespace changes</string>
     <string name="chg_line_include">Include this line</string>
     <string name="chg_line_exclude">Exclude this line</string>
+    <string name="chg_filter_toggle">Filter options</string>
 </resources>

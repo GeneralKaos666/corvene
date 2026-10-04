@@ -3,6 +3,165 @@
 Status, measurements and every place this build differs from
 `.docs/android/design-compose-app.md`. Newest milestone first.
 
+# M-A2 notes
+
+## Built
+
+- `:feature:branches` (`br_`): BranchSheet (SelectPanel: Branches | Pull requests
+  tabs for GitHub repositories, filter, "New branch", groups Default / Recent /
+  Other, remote branches without a local twin folded under "Remote branches",
+  current branch checked, relative tip time; tap = `checkoutBranch(…, null)`,
+  long press = menu: Rename, Merge <b> into <current>, Rebase <current> onto <b>,
+  Update from <default> (on the current branch), Compare in History, Delete),
+  pull request rows (draft/open StateLabel, Checkout = `checkoutPullRequest`),
+  BranchGroups + `sanitizeBranchName`, dialogs CreateBranch (default vs current
+  choice, from a commit), RenameBranch, DeleteBranch (+ remote switch),
+  StashAndSwitchBranch, ConfirmOverwriteStash, ConfirmSwitchBranch, sync:
+  `syncButtonModel` (Fetch origin · Last fetched, Pull n↓, Push n↑, Publish
+  branch / repository, the running operation with progress), `SyncMenu` (long
+  press: Fetch, Pull, Push / Publish branch, Force push with lease…),
+  `SyncController` (tap = the next step; force push asks first when
+  `confirmForcePush`), ConfirmForcePush, PublishRepository (accounts from
+  `session()` → `publishRepository`), GenericGitAuthentication (→
+  `submitGenericAuth`).
+- `:feature:history` (`hist_`): HistoryScreen (CommitPager: 100-commit windows of
+  `history(repo, start, count)`, LRU of 10, refresh after state changes,
+  `loadMoreCommits` 20 rows before the end once per count; rows avatar initials,
+  summary, author · relative time, tag Labels, merge icon; compare chip →
+  SelectPanel → `compareToBranch`, Behind | Ahead SegmentedControl, "Merge <b>
+  into <current>"; long press → menu: Select multiple, Revert, Cherry-pick…,
+  Create branch from commit, Create tag…, Checkout commit, Reset to commit…, Copy
+  SHA, View on GitHub (GitHub repos); multi-select mode: taps select the
+  contiguous range from the anchor → `selectCommits`, bar with Cherry-pick… and
+  Done), CommitDetailScreen (summary, body behind Show more, author + time, short
+  SHA + copy, n changed files +adds −dels, file rows with status icons →
+  `selectCommitFile`), CreateTag / ConfirmCheckoutCommit / WarningBeforeReset
+  dialogs.
+- `:feature:changes`: `CommitDiffRoute` (DiffScreen `readOnly` over
+  `commitDiffRows`: no include box, no line toggles, History's hide-whitespace).
+  Short windows: chips behind a filter button in the list header, Undo bar hidden
+  unless the list is empty.
+- `:feature:mco` (`mco_`): ConflictsScreen (per file Use ours | Use theirs
+  SegmentedControl → `setManualResolution`, the chosen side again unresolves,
+  Open in editor disabled, Abort / Continue), MultiCommitOperationRoute
+  (ChooseBranch sheet for rebase / cherry-pick + new branch, WarnForcePush,
+  non-dismissable progress, conflicts full screen (close = `hideConflicts`),
+  ConfirmAbort (Abort asks only when something was resolved)), ChooseBranchSheet,
+  NewBranchNameDialog.
+- `:app`: PopupHost → stateless `PopupDialog(popup, context, actions)` (one `when`,
+  Corvene's variant names plus GHD's where they differ) for Error,
+  DiscardChanges, DeleteBranch/DeleteRemoteBranch, RenameBranch, CreateBranch,
+  CreateTag, ConfirmForcePush, PushNeedsPull, UpstreamAlreadyExists,
+  StashAndSwitchBranch, ConfirmOverwriteStash, ConfirmSwitchBranch,
+  ConfirmDiscardStash, CheckoutCommit, WarnLocalChangesBeforeUndo,
+  ResetToCommit, UnknownAuthors, LocalChangesOverwritten,
+  ConfirmRemoveRepository, ExternalEditorError, ShellError,
+  CommitConflictsWarning, HookFailed, MergeBranch, MultiCommitOperation,
+  CICheckRunRerun, PullRequestChecksFailed, GenericGitAuthentication,
+  PublishRepository; anything else the generic dialog. `CorePopupActions` =
+  `closePopup` then the action, as GHD's dialogs. BannerFlash under the tabs
+  (all `Banner` kinds, View conflicts → `showConflicts`, dismissed per nonce).
+  CorveneScaffold: branch sheet, sync controller (tap / long press / dialogs),
+  History tab live (compact: list → CommitDetail → CommitDiff destinations;
+  medium/expanded: list | commit files over the file diff), Create branch from
+  a commit.
+- `:core:design`: TopChrome (sync button with long press, progress line and an
+  anchor; branch chip measured first so `main` never truncates, the sync label
+  gives way; Desktop compact drops the captions and the dropdown arrows and
+  narrows the sync button; height < 480 dp folds everything into one 48 dp bar),
+  `isShortHeight()`, SelectPanel `titleActions` / `tabs` / `inline`,
+  PrimerDialog `dismissible`, PrimerTextField `password`, SegmentedControl
+  `fill`, 6 Octicons (tag, git-compare, git-pull-request-draft/-closed,
+  repo-push, versions; gen.py wraps lines over 140 columns).
+- `:core:common` `relativeTime`, `:core:platform` `writeClipboard` / `openUrl`.
+
+## Deviations (and why)
+
+- **Dialogs opened from Kotlin**: the FFI exports the confirmed actions only
+  (`deleteBranch`, `checkoutCommit`, `resetToCommit`, `push(force)`, …), not
+  GHD's request entry points that open the popup. The branch panel and the
+  commit menu show the same dialog composables PopupHost uses and then call the
+  action (FFI-REQUESTS #24). Checkout commit and reset always confirm; force
+  push follows `confirmForcePush`.
+- **Long press on a commit** opens the menu; its "Select multiple" starts range
+  selection (GHD: shift/cmd-click). Non-contiguous selection is not offered.
+- **Compare counts**: the line under Behind | Ahead counts the commits of the
+  mode shown (`totalLoaded`); the other mode's count needs the comparison in
+  the view model (FFI-REQUESTS #22). The comparison branch/mode is Kotlin state.
+- **PushNeedsPull** offers Pull (primary) and Fetch (GHD has Fetch only).
+- **LocalChangesOverwritten**: "Stash changes" and "Retry" are two buttons
+  (GHD's single "Stash changes and continue" needs `stashAndRetry`, #27).
+- **WarnForcePush**: Begin is disabled (`startRebase` cannot pass
+  force_push_checked, so it would warn again, #26).
+- **Closing ChooseBranch** sends `closePopup` only; the engine's operation state
+  stays until the next one starts (`endMco`, #25).
+- **Banner fields** are parsed from the Debug text (`bannerFields`, #23);
+  BranchDeleted's Undo is disabled (#29).
+- **Branch rows**: remote branches whose local twin exists are hidden (GHD);
+  the rest sit in a collapsed "Remote branches" group (Corvene).
+- **Update from default** = `mergeBranch(default)`; GHD rebases instead when
+  `pull.rebase` is set (flag 859, not exposed).
+- **Copy SHA** writes the clipboard from Kotlin; the toast only below Android 13
+  (13+ shows its own confirmation).
+- **View on GitHub** builds `https://github.com/<owner/name>/commit/<sha>`:
+  Enterprise hosts need the repository's html URL (#34).
+- **Tests in :app**: `corvene.screenshots` applied to :app; Robolectric runs
+  with `@Config(application = Application::class)` so the engine never loads.
+  Dialog screenshots use `captureScreenRoboImage` (dialogs are windows).
+
+## Verification (2026-10-04)
+
+- `:app:assembleFossDebug -Pcorvene.abis=arm64-v8a`: OK (52 MB APK).
+- `unitTests staticAnalysis verifyRoborazziFossDebug`: BUILD SUCCESSFUL, 177
+  tests (new: BranchSheetTest 8, StashAndSwitchBranchDialogTest, BranchGroupsTest 3,
+  HistoryScreenTest 6, CommitDetailScreenTest, CommitPagerTest 3,
+  ConflictsScreenTest 3, ChangesShortHeightTest, PopupDialogTest 28 kinds,
+  BannerFieldsTest; screenshots: branch_sheet ×6, history ×6 + compare +
+  expanded, commit_detail ×6, conflicts ×6, popup stash/delete/discard ×6 each).
+- Disk: the shared disk filled during the work (117 MB free): the host bindgen
+  build under `build/cargo/debug` and old app/ffi intermediates were deleted;
+  Gradle's file lock was left held by a wedged daemon and had to be killed.
+  `CARGO_INCREMENTAL=0` keeps the Android dev build's incremental cache off the disk.
+
+## M-A2 phone run (2026-10-04, CPH2481, fossDebug, GitHub Mobile style, dark)
+
+- Cold `am start -W` TotalTime: 1365, 1137, 1140, 1181, 1210 ms (median 1181).
+- Seed (`run-as`, git from the new nativeLibraryDir: the `files/git/bin`
+  symlinks still pointed at the previous install's path until the app starts,
+  so the script repoints them and sets `GIT_EXEC_PATH`): feature-a (2 commits),
+  feature-b and main each changing `conflict.txt`, tag v0.1.0 on the first commit.
+- Branch chip shows `main` / `topic-from-phone` in full at 360 dp; the sync
+  button truncates first ("Publish re…").
+- Checkout feature-a with 5 changes → StashAndSwitchBranch → "Leave my changes on
+  main" → `git branch --show-current` = feature-a, `stash@{0}: On main:
+  !!GitHub_Desktop<main>` (m-a2-stash-prompt, m-a2-after-switch).
+- New branch from the sheet: "topic from phone" → caption "Will be created as
+  topic-from-phone" → created and checked out (m-a2-create-typed).
+- History list, commit detail, Copy SHA (system clipboard chip), the commit's
+  file diff over `commitDiffRows`, commit menu, compare Behind/Ahead + merge
+  button (m-a2-history, -commit-detail, -commit-diff, -commit-menu,
+  -compare-behind, -compare-ahead).
+- On main: long press feature-a → "Merge feature-a into main" → banner
+  "Successfully merged feature-a into main", `git log` shows the merge commit
+  (m-a2-branch-menu, m-a2-merged).
+- On feature-b: long press main → "Rebase feature-b onto main" → conflicts screen
+  (conflict.txt) → Use ours → Continue rebase → banner "Successfully rebased
+  feature-b onto main"; `git log`: feature-b = main's tip (the commit became
+  empty and was dropped), status clean (m-a2-rebase-result, -resolved-ours,
+  -rebase-done).
+- Stash Restore on main brings the 5 files back (m-a2-restored).
+- Landscape (800×360 dp): one 48 dp bar (back, demo ▾, main chip, Publish
+  repository, ⋯), tabs, list header with the filter button, 2 file rows, commit
+  bar; no Undo bar (m-a2-landscape-changes). Rotation restored to the user's lock.
+- Branch sheet in all three styles (m-a2-branch-sheet-mobile, -desktop,
+  -material). Desktop at 360 dp truncated `main` to "m…" in the three-button
+  toolbar: fixed after the run (compact drops the dropdown arrows, sync button
+  0.8 weight); not re-checked on the phone.
+- Found: the Changes stash banner ("You have stashed changes on this branch")
+  shows on feature-a for main's stash (`ChangesVm.stashCount` counts every
+  stash, #28).
+- Not run on the phone: sync actions (the demo has no remote), the fast variant.
+
 # M-A1 notes
 
 ## Built

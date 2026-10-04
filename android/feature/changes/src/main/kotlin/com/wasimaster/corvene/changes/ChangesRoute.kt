@@ -21,6 +21,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.wasimaster.corvene.design.CorveneTheme
 import com.wasimaster.corvene.design.ProgressBar
 import com.wasimaster.corvene.ffi.LocalCore
+import com.wasimaster.corvene.ffi.gen.DiffHeaderVm
+import com.wasimaster.corvene.ffi.gen.IncludeVm
 import com.wasimaster.corvene.ffi.rememberCoreQuery
 import kotlinx.coroutines.flow.drop
 
@@ -119,5 +121,64 @@ fun DiffRoute(repo: Long, modifier: Modifier = Modifier, contentPadding: Padding
         Box(modifier.fillMaxSize()) { ProgressBar(null, Modifier.align(Alignment.TopCenter)) }
     } else {
         DiffScreen(value, pager, cache, settings.value?.hideWhitespaceInChangesDiff ?: false, actions, modifier, contentPadding)
+    }
+}
+
+/**
+ * The selected commit's selected file (History) wired to the engine: the
+ * commit detail for its generation and counts, rows from `commitDiffRows`,
+ * read-only (no include box, no line toggles). [contentPadding] as for
+ * [DiffRoute].
+ */
+@Composable
+fun CommitDiffRoute(repo: Long, modifier: Modifier = Modifier, contentPadding: PaddingValues = PaddingValues()) {
+    val core = LocalCore.current
+    val id = repo.toULong()
+    val detail by rememberCoreQuery(repo) { commitDetail(id) }
+    val settings by rememberCoreQuery { settings() }
+    val value = detail.value
+    val header = value?.let {
+        DiffHeaderVm(
+            repo = id,
+            path = it.selectedFile,
+            kind = it.diffKind,
+            generation = it.diffGeneration,
+            rowCount = it.diffRowCount,
+            hunkCount = 0u,
+            linesAdded = it.diffLinesAdded,
+            linesDeleted = it.diffLinesDeleted,
+            include = IncludeVm.NONE,
+        )
+    }
+    val generation = header?.generation
+    val rows = header?.rowCount?.toInt() ?: 0
+    val pager = remember(repo, generation, rows) {
+        generation?.let { gen ->
+            DiffPager(gen.toLong(), rows) { start, count -> core.query { commitDiffRows(id, gen, start.toUInt(), count.toUInt()) } }
+        }
+    }
+    val cache = remember { DiffLineCache() }
+    val actions = remember(core) {
+        object : DiffActions {
+            override fun toggleFileIncluded() = Unit
+
+            override fun toggleLine(index: Int) = Unit
+
+            override fun setHideWhitespace(hide: Boolean) = core.dispatch { setHideWhitespaceInDiff(true, hide) }
+        }
+    }
+    if (header == null) {
+        Box(modifier.fillMaxSize()) { ProgressBar(null, Modifier.align(Alignment.TopCenter)) }
+    } else {
+        DiffScreen(
+            header,
+            pager,
+            cache,
+            settings.value?.hideWhitespaceInHistoryDiff ?: false,
+            actions,
+            modifier,
+            contentPadding,
+            readOnly = true,
+        )
     }
 }

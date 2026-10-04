@@ -36,7 +36,8 @@ import androidx.compose.ui.window.DialogProperties
  * [confirmButton] at the end. [fullScreenOnCompact] takes the whole screen on
  * compact widths (forms, Primer's narrow-viewport rule), with the confirm
  * button in the header. Tapping outside dismisses unless [dismissOnOutside]
- * is false (unsaved input).
+ * is false (unsaved input). A dialog that is not [dismissible] (progress)
+ * has no close button and ignores Back.
  */
 @Composable
 fun PrimerDialog(
@@ -45,6 +46,7 @@ fun PrimerDialog(
     modifier: Modifier = Modifier,
     fullScreenOnCompact: Boolean = false,
     dismissOnOutside: Boolean = true,
+    dismissible: Boolean = true,
     closeDescription: String = "",
     confirmButton: (@Composable () -> Unit)? = null,
     dismissButton: (@Composable () -> Unit)? = null,
@@ -54,12 +56,22 @@ fun PrimerDialog(
     Dialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(
-            dismissOnClickOutside = dismissOnOutside,
+            dismissOnBackPress = dismissible,
+            dismissOnClickOutside = dismissOnOutside && dismissible,
             usePlatformDefaultWidth = !fullScreen,
             decorFitsSystemWindows = !fullScreen,
         ),
     ) {
-        PrimerDialogSurface(title, onDismissRequest, modifier, fullScreen, closeDescription, confirmButton, dismissButton, content)
+        PrimerDialogSurface(
+            title,
+            onDismissRequest.takeIf { dismissible },
+            modifier,
+            fullScreen,
+            closeDescription,
+            confirmButton,
+            dismissButton,
+            content,
+        )
     }
 }
 
@@ -67,7 +79,7 @@ fun PrimerDialog(
 @Composable
 internal fun PrimerDialogSurface(
     title: String,
-    onDismissRequest: () -> Unit,
+    onDismissRequest: (() -> Unit)?,
     modifier: Modifier,
     fullScreen: Boolean,
     closeDescription: String,
@@ -94,7 +106,9 @@ internal fun PrimerDialogSurface(
                 Modifier.fillMaxWidth().padding(start = if (fullScreen) 4.dp else 16.dp, end = 4.dp, top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (fullScreen) PrimerIconButton(Octicons.X, closeDescription, onDismissRequest, tint = OcticonTint.Link)
+                if (fullScreen && onDismissRequest != null) {
+                    PrimerIconButton(Octicons.X, closeDescription, onDismissRequest, tint = OcticonTint.Link)
+                }
                 Text(
                     title,
                     Modifier.weight(1f).padding(vertical = 12.dp),
@@ -103,7 +117,7 @@ internal fun PrimerDialogSurface(
                 )
                 if (fullScreen) {
                     confirmButton?.invoke()
-                } else if (!material) {
+                } else if (!material && onDismissRequest != null) {
                     PrimerIconButton(Octicons.X, closeDescription, onDismissRequest, tint = OcticonTint.Secondary)
                 }
             }

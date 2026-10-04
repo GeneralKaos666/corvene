@@ -21,3 +21,11 @@ data class Diff(val id: Long) : NavKey
 /** Settings › Appearance. */
 @Serializable
 data object AppearanceSettings : NavKey
+
+/** The selected commit on its own screen (compact widths; wider ones show it beside History). */
+@Serializable
+data class CommitDetail(val id: Long) : NavKey
+
+/** The selected commit's selected file (compact widths). */
+@Serializable
+data class CommitDiff(val id: Long) : NavKey

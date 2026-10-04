@@ -98,6 +98,8 @@ interface DiffActions {
  * the unified diff, its rows paged from the engine by [pager] and highlighted
  * through [cache]. Lines wrap by default on compact widths (GitHub Mobile)
  * and scroll sideways together otherwise. Non-text diffs show a notice.
+ * [readOnly] (a commit's file in History) drops the include box and the
+ * line toggles.
  */
 @Composable
 fun DiffScreen(
@@ -108,12 +110,13 @@ fun DiffScreen(
     actions: DiffActions,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    readOnly: Boolean = false,
 ) {
     val compact = isCompactWidth()
     var wrap by rememberSaveable { mutableStateOf(compact) }
     var showLarge by rememberSaveable(header.generation) { mutableStateOf(false) }
     Column(modifier.fillMaxSize().background(CorveneTheme.diff.canvas)) {
-        DiffHeaderRow(header, wrap, { wrap = it }, hideWhitespace, actions, showSplit = !compact)
+        DiffHeaderRow(header, wrap, { wrap = it }, hideWhitespace, actions, showSplit = !compact, readOnly = readOnly)
         val path = header.path
         when {
             path == null -> Notice(Octicons.FileDiff, stringResource(R.string.chg_diff_none), null, contentPadding)
@@ -143,7 +146,7 @@ fun DiffScreen(
                 stringResource(R.string.chg_diff_large_body),
                 contentPadding,
             ) { PrimerButton(stringResource(R.string.chg_diff_show), { showLarge = true }) }
-            pager != null -> DiffRows(pager, cache, wrap, actions, contentPadding)
+            pager != null -> DiffRows(pager, cache, wrap, actions, contentPadding, readOnly)
         }
     }
 }
@@ -156,6 +159,7 @@ private fun DiffHeaderRow(
     hideWhitespace: Boolean,
     actions: DiffActions,
     showSplit: Boolean,
+    readOnly: Boolean,
 ) {
     val colors = CorveneTheme.colors
     var menu by remember { mutableStateOf(false) }
@@ -166,7 +170,9 @@ private fun DiffHeaderRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             val path = header.path
-            if (path != null) {
+            if (path != null && readOnly) {
+                FilePath(path, Modifier.weight(1f).padding(start = 8.dp), style = CorveneTheme.textStyles.codeSmall)
+            } else if (path != null) {
                 PrimerCheckbox(
                     header.include.toToggleable(),
                     onClick = actions::toggleFileIncluded,
@@ -241,7 +247,14 @@ private fun Notice(
 }
 
 @Composable
-private fun DiffRows(pager: DiffPager, cache: DiffLineCache, wrap: Boolean, actions: DiffActions, contentPadding: PaddingValues) {
+private fun DiffRows(
+    pager: DiffPager,
+    cache: DiffLineCache,
+    wrap: Boolean,
+    actions: DiffActions,
+    contentPadding: PaddingValues,
+    readOnly: Boolean,
+) {
     val listState = rememberLazyListState()
     LaunchedEffect(pager, listState) {
         snapshotFlow { listState.firstVisibleItemIndex to (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) }
@@ -287,6 +300,7 @@ private fun DiffRows(pager: DiffPager, cache: DiffLineCache, wrap: Boolean, acti
                         if (wrap) null else rowHeight,
                         if (wrap) null else offset,
                         labels,
+                        readOnly,
                         onToggle = { actions.toggleLine(row.index.toInt()) },
                     )
                 }
@@ -306,9 +320,10 @@ private fun DiffRow(
     height: Dp?,
     offset: MutableFloatState?,
     labels: RowLabels,
+    readOnly: Boolean,
     onToggle: () -> Unit,
 ) {
-    val changeable = row.kind == DiffRowKindVm.ADD || row.kind == DiffRowKindVm.DELETE
+    val changeable = !readOnly && (row.kind == DiffRowKindVm.ADD || row.kind == DiffRowKindVm.DELETE)
     val (bg, gutterBg, sign, signColor) = when (row.kind) {
         DiffRowKindVm.ADD -> RowLook(palette.addBg, palette.addGutterBg, "+", palette.addSign)
         DiffRowKindVm.DELETE -> RowLook(palette.delBg, palette.delGutterBg, "−", palette.delSign)

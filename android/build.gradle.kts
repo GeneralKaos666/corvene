@@ -9,13 +9,17 @@ plugins {
 dependencies {
     listOf(
         ":app", ":core:common", ":core:design", ":core:ffi", ":core:platform",
-        ":feature:repositories", ":feature:changes", ":feature:settings",
+        ":feature:repositories", ":feature:changes", ":feature:branches", ":feature:history", ":feature:mco", ":feature:settings",
     )
         .forEach { "kover"(project(it)) }
 }
 
 /** The Android modules, by path. Task names carry the flavour: `testFossDebugUnitTest`. */
-val androidModules = listOf(":core:common", ":core:design", ":core:ffi", ":core:platform", ":feature:repositories", ":feature:changes", ":feature:settings", ":app")
+val androidModules = listOf(
+    ":core:common", ":core:design", ":core:ffi", ":core:platform",
+    ":feature:repositories", ":feature:changes", ":feature:branches", ":feature:history", ":feature:mco", ":feature:settings",
+    ":app",
+)
 
 // Every unit test (Robolectric, Compose, Roborazzi captures, Konsist), under one name.
 tasks.register("unitTests") {

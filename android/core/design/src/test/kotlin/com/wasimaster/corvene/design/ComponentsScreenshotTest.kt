@@ -117,7 +117,7 @@ class ComponentsScreenshotTest {
     }
 
     private val overlays: @Composable () -> Unit = {
-        SelectPanelContent("Repositories", {}, "", {}, "Filter", "Close", { PrimerButton("Add repository", {}) }) {
+        SelectPanelContent(SelectPanelParts("Repositories", {}, "", {}, "Filter", "Close", { PrimerButton("Add repository", {}) })) {
             item { ActionListGroupHeader("Recent") }
             item { ActionListItem("corvene", checked = true) }
             item { ActionListItem("desktop", checked = false) }

@@ -2,6 +2,7 @@ plugins {
     id("corvene.android.application")
     id("corvene.android.compose")
     id("corvene.rust")
+    id("corvene.screenshots")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
@@ -19,6 +20,9 @@ dependencies {
     implementation(project(":core:platform"))
     implementation(project(":feature:repositories"))
     implementation(project(":feature:changes"))
+    implementation(project(":feature:branches"))
+    implementation(project(":feature:history"))
+    implementation(project(":feature:mco"))
     implementation(project(":feature:settings"))
 
     implementation(libs.androidx.core.ktx)
@@ -36,4 +40,5 @@ dependencies {
     implementation(libs.androidx.profileinstaller)
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

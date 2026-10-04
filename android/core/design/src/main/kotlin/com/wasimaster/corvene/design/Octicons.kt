@@ -44,8 +44,19 @@ object Octicons {
     val Gear = OcticonIcon("gear", R.drawable.cvd_oct_gear_16, R.drawable.cvd_oct_gear_24)
     val GitBranch = OcticonIcon("git-branch", R.drawable.cvd_oct_git_branch_16, R.drawable.cvd_oct_git_branch_24)
     val GitCommit = OcticonIcon("git-commit", R.drawable.cvd_oct_git_commit_16, R.drawable.cvd_oct_git_commit_24)
+    val GitCompare = OcticonIcon("git-compare", R.drawable.cvd_oct_git_compare_16, R.drawable.cvd_oct_git_compare_24)
     val GitMerge = OcticonIcon("git-merge", R.drawable.cvd_oct_git_merge_16, R.drawable.cvd_oct_git_merge_24)
     val GitPullRequest = OcticonIcon("git-pull-request", R.drawable.cvd_oct_git_pull_request_16, R.drawable.cvd_oct_git_pull_request_24)
+    val GitPullRequestClosed = OcticonIcon(
+        "git-pull-request-closed",
+        R.drawable.cvd_oct_git_pull_request_closed_16,
+        R.drawable.cvd_oct_git_pull_request_closed_24,
+    )
+    val GitPullRequestDraft = OcticonIcon(
+        "git-pull-request-draft",
+        R.drawable.cvd_oct_git_pull_request_draft_16,
+        R.drawable.cvd_oct_git_pull_request_draft_24,
+    )
     val Globe = OcticonIcon("globe", R.drawable.cvd_oct_globe_16, R.drawable.cvd_oct_globe_24)
     val History = OcticonIcon("history", R.drawable.cvd_oct_history_16, R.drawable.cvd_oct_history_24)
     val Info = OcticonIcon("info", R.drawable.cvd_oct_info_16, R.drawable.cvd_oct_info_24)
@@ -65,6 +76,7 @@ object Octicons {
     val Repo = OcticonIcon("repo", R.drawable.cvd_oct_repo_16, R.drawable.cvd_oct_repo_24)
     val RepoForked = OcticonIcon("repo-forked", R.drawable.cvd_oct_repo_forked_16, R.drawable.cvd_oct_repo_forked_24)
     val RepoLocked = OcticonIcon("repo-locked", R.drawable.cvd_oct_repo_locked_16, R.drawable.cvd_oct_repo_locked_24)
+    val RepoPush = OcticonIcon("repo-push", R.drawable.cvd_oct_repo_push_16, R.drawable.cvd_oct_repo_push_24)
     val Rows = OcticonIcon("rows", R.drawable.cvd_oct_rows_16, R.drawable.cvd_oct_rows_24)
     val ScreenFull = OcticonIcon("screen-full", R.drawable.cvd_oct_screen_full_16, R.drawable.cvd_oct_screen_full_24)
     val Search = OcticonIcon("search", R.drawable.cvd_oct_search_16, R.drawable.cvd_oct_search_24)
@@ -74,12 +86,14 @@ object Octicons {
     val Stop = OcticonIcon("stop", R.drawable.cvd_oct_stop_16, R.drawable.cvd_oct_stop_24)
     val Sun = OcticonIcon("sun", R.drawable.cvd_oct_sun_16, R.drawable.cvd_oct_sun_24)
     val Sync = OcticonIcon("sync", R.drawable.cvd_oct_sync_16, R.drawable.cvd_oct_sync_24)
+    val Tag = OcticonIcon("tag", R.drawable.cvd_oct_tag_16, R.drawable.cvd_oct_tag_24)
     val ThreeBars = OcticonIcon("three-bars", R.drawable.cvd_oct_three_bars_16, R.drawable.cvd_oct_three_bars_24)
     val Trash = OcticonIcon("trash", R.drawable.cvd_oct_trash_16, R.drawable.cvd_oct_trash_24)
     val TriangleDown = OcticonIcon("triangle-down", R.drawable.cvd_oct_triangle_down_16, R.drawable.cvd_oct_triangle_down_24)
     val Undo = OcticonIcon("undo", R.drawable.cvd_oct_undo_16, R.drawable.cvd_oct_undo_24)
     val Unfold = OcticonIcon("unfold", R.drawable.cvd_oct_unfold_16, R.drawable.cvd_oct_unfold_24)
     val Upload = OcticonIcon("upload", R.drawable.cvd_oct_upload_16, R.drawable.cvd_oct_upload_24)
+    val Versions = OcticonIcon("versions", R.drawable.cvd_oct_versions_16, R.drawable.cvd_oct_versions_24)
     val X = OcticonIcon("x", R.drawable.cvd_oct_x_16, R.drawable.cvd_oct_x_24)
     val XCircle = OcticonIcon("x-circle", R.drawable.cvd_oct_x_circle_16, R.drawable.cvd_oct_x_circle_24)
 }

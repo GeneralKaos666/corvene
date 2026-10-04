@@ -26,6 +26,9 @@ class ArchitectureTest {
             "core/platform" to setOf("common", "ffi"),
             "feature/repositories" to setOf("common", "design", "ffi", "platform"),
             "feature/changes" to setOf("common", "design", "ffi", "platform"),
+            "feature/branches" to setOf("common", "design", "ffi", "platform"),
+            "feature/history" to setOf("common", "design", "ffi", "platform"),
+            "feature/mco" to setOf("common", "design", "ffi", "platform"),
             "feature/settings" to setOf("common", "design", "ffi", "platform"),
         )
         val problems = mutableListOf<String>()

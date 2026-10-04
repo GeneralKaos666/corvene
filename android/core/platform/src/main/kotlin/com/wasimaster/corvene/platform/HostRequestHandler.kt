@@ -1,8 +1,6 @@
 package com.wasimaster.corvene.platform
 
 import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
@@ -41,7 +39,7 @@ fun HostRequestHandler(core: Core, onQuit: () -> Unit) {
             CorveneTrace.section(CorveneTrace.HOST_REQUEST) {
                 when (request) {
                     is HostRequest.OpenUrl -> openUrl(context, request.url)
-                    is HostRequest.WriteClipboard -> copy(context, request.text)
+                    is HostRequest.WriteClipboard -> writeClipboard(context, request.text)
                     is HostRequest.Toast -> Toast.makeText(context, request.message, Toast.LENGTH_LONG).show()
                     is HostRequest.PickPaths -> {
                         pendingPick = request.request.toLong()
@@ -61,15 +59,11 @@ fun HostRequestHandler(core: Core, onQuit: () -> Unit) {
     }
 }
 
-private fun openUrl(context: Context, url: String) {
+/** Opens [url] in the app that handles it (the browser), or says there is none. */
+fun openUrl(context: Context, url: String) {
     try {
         context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (_: ActivityNotFoundException) {
         Toast.makeText(context, context.getString(R.string.plt_no_app_for_url, url), Toast.LENGTH_LONG).show()
     }
-}
-
-private fun copy(context: Context, text: String) {
-    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
-    clipboard.setPrimaryClip(ClipData.newPlainText("Corvene", text))
 }

@@ -41,8 +41,11 @@ fold
 gear
 git-branch
 git-commit
+git-compare
 git-merge
 git-pull-request
+git-pull-request-closed
+git-pull-request-draft
 globe
 history
 info
@@ -62,6 +65,7 @@ plus-circle
 repo
 repo-forked
 repo-locked
+repo-push
 rows
 screen-full
 search
@@ -71,11 +75,13 @@ stack
 stop
 sun
 sync
+tag
 three-bars
 trash
 triangle-down
 undo
 unfold
 upload
+versions
 x
 x-circle

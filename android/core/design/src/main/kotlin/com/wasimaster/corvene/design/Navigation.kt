@@ -43,10 +43,17 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Primer's SegmentedControl: 2–5 text segments, applied at once (Unified /
- * Split). Material draws M3's segmented buttons.
+ * Split). Material draws M3's segmented buttons. [fill] shares the width
+ * equally (a control as wide as its row).
  */
 @Composable
-fun SegmentedControl(options: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun SegmentedControl(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    fill: Boolean = false,
+) {
     val colors = CorveneTheme.colors
     if (LocalDesignStyle.current == DesignStyle.Material) {
         SingleChoiceSegmentedButtonRow(modifier) {
@@ -55,7 +62,8 @@ fun SegmentedControl(options: List<String>, selectedIndex: Int, onSelect: (Int) 
                     selected = index == selectedIndex,
                     onClick = { onSelect(index) },
                     shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                ) { Text(label) }
+                    modifier = if (fill) Modifier.weight(1f) else Modifier,
+                ) { Text(label, maxLines = 1) }
             }
         }
         return
@@ -75,6 +83,7 @@ fun SegmentedControl(options: List<String>, selectedIndex: Int, onSelect: (Int) 
             val inner = RoundedCornerShape(CorveneTheme.metrics.cornerMedium - 1.dp)
             Box(
                 Modifier
+                    .then(if (fill) Modifier.weight(1f) else Modifier)
                     .fillMaxHeight()
                     .clip(inner)
                     .then(if (selected) Modifier.background(colors.bgDefault).border(1.dp, colors.borderDefault, inner) else Modifier)

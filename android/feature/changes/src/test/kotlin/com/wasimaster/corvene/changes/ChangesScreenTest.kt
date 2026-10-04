@@ -24,9 +24,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
 
-/** The Changes list against fixed view models; the actions record what it sends. */
+/** The Changes list against fixed view models (a portrait phone); the actions record what it sends. */
 @RunWith(AndroidJUnit4::class)
+@Config(qualifiers = "w360dp-h640dp")
 class ChangesScreenTest {
 
     @get:Rule
@@ -168,5 +170,31 @@ class CommitFormTest {
     fun `a running commit disables commit`() {
         show(included = 1, summary = "Fix it", committing = true)
         compose.onNodeWithTag(TAG_COMMIT).assertIsNotEnabled()
+    }
+}
+
+/** A short window (phone landscape): the chips hide behind the filter button, the Undo bar gives way to the rows. */
+@RunWith(AndroidJUnit4::class)
+@Config(qualifiers = "w800dp-h360dp")
+class ChangesShortHeightTest {
+
+    @get:Rule
+    val compose = createComposeRule()
+
+    @Test
+    fun `chips behind the filter button and no undo bar while there are files`() {
+        compose.setContent {
+            CorveneTheme(DesignStyle.GitHubMobile, ColorMode.Light, highContrast = false, dynamicColor = false) {
+                ChangesScreen(
+                    SampleChanges.copy(form = SampleForm.copy(lastCommitSha = "abc", lastCommitSummary = "Test commit")),
+                    true,
+                    NoChangesActions,
+                )
+            }
+        }
+        compose.onNodeWithTag("${TAG_FILTER}new").assertDoesNotExist()
+        compose.onNodeWithTag(TAG_UNDO).assertDoesNotExist()
+        compose.onNodeWithTag(TAG_FILTER_TOGGLE).performClick()
+        compose.onNodeWithTag("${TAG_FILTER}new").assertExists()
     }
 }
