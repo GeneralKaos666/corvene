@@ -375,7 +375,9 @@ pub fn parse_raw_log_with_numstat(stdout: &[u8], sha: &str) -> ChangesetData {
         if let Some(raw) = field.strip_prefix(':') {
             // ":100644 100644 5716ca5 db3c77d M" or "R100"
             let status = raw.split(' ').nth(4).unwrap_or("");
-            let (letter, score) = status.split_at(1);
+            // the status letter, then the score; a malformed entry may have
+            // no status at all
+            let (letter, score) = status.split_at(status.chars().next().map_or(0, char::len_utf8));
             let score = score.parse::<u8>().ok();
             let first = fields.next().unwrap_or("").to_string();
             let (path, old_path) = if matches!(letter, "R" | "C") {
@@ -825,5 +827,16 @@ mod tests {
         assert_eq!(data.files[0].old_path.as_deref(), Some("old.txt"));
         assert_eq!(data.files[0].status.kind, FileStatusKind::Renamed);
         assert_eq!(data.files[0].status.score, Some(100));
+    }
+
+    #[test]
+    fn a_raw_entry_without_a_status_does_not_panic() {
+        let data = parse_raw_log_with_numstat(b":100644 100644 abc def\0a.txt\0", "sha");
+        assert_eq!(data.files.len(), 1);
+        assert_eq!(data.files[0].path, "a.txt");
+        assert_eq!(data.files[0].status.kind, FileStatusKind::Modified);
+        assert_eq!(data.files[0].status.score, None);
+        let data = parse_raw_log_with_numstat(b":100644 100644 abc def \0a.txt\0", "sha");
+        assert_eq!(data.files.len(), 1);
     }
 }
