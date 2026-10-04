@@ -5,12 +5,16 @@
 //! Deviation: an account stored before Corvene read the plan (`plan: None`)
 //! is treated as paid until the launch refresh fills it in; GHD's accounts
 //! always carry it.
+//!
+//! A ruleset the user is `exempt` from is left out
+//! (`338-ruleset-exempt-bypass`; GHD `repo-rules.ts` treats every bypass mode
+//! but `always` as enforced, so exempt users cannot commit).
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::host::Host;
-use corvene_github::{ApiRepoRule, Client};
+use corvene_github::{ApiRepoRule, ApiRepoRuleset, Client};
 use corvene_models::{
     Account, GitHubRepository, RepoRuleEnforced, RepoRulesInfo, RepoRulesMetadataFailure,
     RepoRulesMetadataFailures, RepoRulesMetadataRule, RuleOperator, Tip,
@@ -118,7 +122,9 @@ pub fn failed_rules(rules: &[RepoRulesMetadataRule], text: &str) -> RepoRulesMet
     failures
 }
 
-/// `parseRepoRules`
+/// `parseRepoRules`. A ruleset that does not apply to the user
+/// ([`RepoRuleEnforced::No`], `338-ruleset-exempt-bypass`) is skipped like an
+/// unknown one.
 pub fn parse_repo_rules(
     rules: &[ApiRepoRule],
     rulesets: &HashMap<u64, RepoRuleEnforced>,
@@ -135,7 +141,11 @@ pub fn parse_repo_rules(
         })
     };
     for rule in rules {
-        let Some(enforced) = rulesets.get(&rule.ruleset_id).copied() else {
+        let Some(enforced) = rulesets
+            .get(&rule.ruleset_id)
+            .copied()
+            .filter(|e| *e != RepoRuleEnforced::No)
+        else {
             continue;
         };
         match rule.kind.as_str() {
@@ -192,11 +202,22 @@ fn remote_branch_name(
     }
 }
 
+/// How each cached ruleset applies to the user (`ruleset.current_user_can_bypass`).
+fn enforced_rulesets(
+    rulesets: &HashMap<u64, ApiRepoRuleset>,
+    exempt_skips: bool,
+) -> HashMap<u64, RepoRuleEnforced> {
+    rulesets
+        .iter()
+        .map(|(id, ruleset)| (*id, ruleset.enforced_for(exempt_skips)))
+        .collect()
+}
+
 impl Dispatcher {
     /// `refreshBranchProtectionState`: push control + rulesets + branch
     /// rules for the current branch, throttled per branch.
     pub(crate) fn refresh_branch_protection(id: u64, cx: &mut dyn Host) {
-        let (github, branch, remote_url, prior_rulesets, rules_enabled) = {
+        let (github, branch, remote_url, prior_rulesets, rules_enabled, exempt_skips) = {
             let s = Self::state(cx).read(cx);
             let Some(gh) = s.repository(id).and_then(|r| r.github.clone()) else {
                 return;
@@ -239,6 +260,7 @@ impl Dispatcher {
                 remote_url,
                 s.repo_rulesets.clone(),
                 rules_enabled,
+                s.flags.bool(crate::flags::ids::RULESET_EXEMPT_BYPASS),
             )
         };
         let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
@@ -273,7 +295,7 @@ impl Dispatcher {
                                 continue;
                             }
                             if let Ok(Some(ruleset)) = client.repo_ruleset(&owner, &name, r.id) {
-                                rulesets.insert(r.id, ruleset.enforced());
+                                rulesets.insert(r.id, ruleset);
                             }
                         }
                     }
@@ -289,7 +311,11 @@ impl Dispatcher {
                             false,
                         )
                         .unwrap_or(false);
-                        info = parse_repo_rules(&rules, &rulesets, gpg);
+                        info = parse_repo_rules(
+                            &rules,
+                            &enforced_rulesets(&rulesets, exempt_skips),
+                            gpg,
+                        );
                     }
                 }
                 (protected, info, rulesets)
@@ -404,5 +430,46 @@ mod tests {
         assert_eq!(info.commit_message_patterns.len(), 1);
         let signed = parse_repo_rules(&[rule("required_signatures", 1, None)], &rulesets, true);
         assert_eq!(signed.signed_commits_required, RepoRuleEnforced::No);
+    }
+
+    #[test]
+    fn exempt_rulesets_are_skipped() {
+        let ruleset = |id, bypass: &str| {
+            (
+                id,
+                ApiRepoRuleset {
+                    id,
+                    current_user_can_bypass: Some(bypass.into()),
+                },
+            )
+        };
+        let rulesets: HashMap<u64, ApiRepoRuleset> = [
+            ruleset(1, "exempt"),
+            ruleset(2, "pull_requests_only"),
+            ruleset(3, "always"),
+        ]
+        .into_iter()
+        .collect();
+        let rules = [
+            rule("update", 1, None),
+            rule(
+                "commit_message_pattern",
+                1,
+                Some((RuleOperator::Contains, "JIRA", false)),
+            ),
+            rule("pull_request", 2, None),
+            rule("required_signatures", 3, None),
+        ];
+        // `338-ruleset-exempt-bypass`: the exempt ruleset's rules are gone
+        let info = parse_repo_rules(&rules, &enforced_rulesets(&rulesets, true), false);
+        assert_eq!(info.basic_commit_warning, RepoRuleEnforced::No);
+        assert!(info.commit_message_patterns.is_empty());
+        // a direct push still has to pass the rules of a pull-requests-only bypass
+        assert_eq!(info.pull_request_required, RepoRuleEnforced::Yes);
+        assert_eq!(info.signed_commits_required, RepoRuleEnforced::Bypass);
+        // GHD: exempt enforces the rules
+        let ghd = parse_repo_rules(&rules, &enforced_rulesets(&rulesets, false), false);
+        assert_eq!(ghd.basic_commit_warning, RepoRuleEnforced::Yes);
+        assert_eq!(ghd.commit_message_patterns.len(), 1);
     }
 }

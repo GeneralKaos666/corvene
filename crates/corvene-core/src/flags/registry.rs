@@ -2607,6 +2607,22 @@ registry! {
         code: &["crates/corvene-core/src/alive.rs", "crates/corvene-core/src/notifications.rs"],
     },
 
+    /// A ruleset the user is exempt from does not block commits.
+    RULESET_EXEMPT_BYPASS = 338 "ruleset-exempt-bypass" {
+        title: "Respect ruleset exemptions",
+        summary: "A repository ruleset whose bypass list makes you exempt (GitHub's \"Exempt\" \
+                  bypass mode) is left out of the commit form's rule checks: no warning and no \
+                  disabled Commit button for rules GitHub never applies to your pushes.",
+        ghd_behaviour: "Only \"Always allow\" counts as a bypass; an exempt user gets the \
+                        blocking \"will prevent pushing\" warning and cannot commit.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21159), Upstream::issue(21347)],
+        code: &["crates/corvene-core/src/repo_rules.rs", "crates/corvene-github/src/api.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

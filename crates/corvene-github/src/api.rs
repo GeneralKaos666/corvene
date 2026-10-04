@@ -521,17 +521,27 @@ pub struct ApiSlimRepoRuleset {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiRepoRuleset {
     pub id: u64,
-    /// `always` | `pull_requests_only` | `never`
+    /// `always` | `pull_requests_only` | `never`, and since 2025-09
+    /// `exempt` (the ruleset is not evaluated for the user at all)
     #[serde(default)]
     pub current_user_can_bypass: Option<String>,
 }
 
 impl ApiRepoRuleset {
+    /// GHD: `always` is a bypass, anything else enforces the rules.
     pub fn enforced(&self) -> RepoRuleEnforced {
-        if self.current_user_can_bypass.as_deref() == Some("always") {
-            RepoRuleEnforced::Bypass
-        } else {
-            RepoRuleEnforced::Yes
+        self.enforced_for(false)
+    }
+
+    /// [`Self::enforced`], or with `exempt_skips` (Corvene
+    /// `338-ruleset-exempt-bypass`) [`RepoRuleEnforced::No`] for an `exempt`
+    /// user, whose pushes GitHub does not check against the ruleset. GHD
+    /// predates the mode and treats it as enforced (desktop#21347).
+    pub fn enforced_for(&self, exempt_skips: bool) -> RepoRuleEnforced {
+        match self.current_user_can_bypass.as_deref() {
+            Some("always") => RepoRuleEnforced::Bypass,
+            Some("exempt") if exempt_skips => RepoRuleEnforced::No,
+            _ => RepoRuleEnforced::Yes,
         }
     }
 }

@@ -1475,8 +1475,8 @@ pub struct AppState {
     pub show_ci_status_popover: bool,
     /// `CommitStatusStore`: CI statuses of refs.
     pub commit_statuses: crate::commit_status::CommitStatusStore,
-    /// `cachedRepoRulesets`: ruleset id → how it applies to the user.
-    pub repo_rulesets: HashMap<u64, corvene_models::RepoRuleEnforced>,
+    /// `cachedRepoRulesets`: ruleset id → the ruleset (how it applies to the user).
+    pub repo_rulesets: HashMap<u64, corvene_github::ApiRepoRuleset>,
     /// Installed editors / shells (`getAvailableEditors` / `getAvailableShells`).
     pub editors: Vec<FoundEditor>,
     pub shells: Vec<FoundShell>,
