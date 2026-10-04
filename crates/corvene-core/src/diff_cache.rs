@@ -39,6 +39,11 @@ impl<K: PartialEq, V: Clone> Lru<K, V> {
         }
     }
 
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+
     fn get(&mut self, key: &K) -> Option<V> {
         let ix = self.entries.iter().position(|(k, _, _)| k == key)?;
         let entry = self.entries.remove(ix)?;
@@ -210,6 +215,16 @@ pub fn working_stamp(
         file: file_stamp(&workdir.join(&file.path)),
         options,
     })
+}
+
+/// Forget every cached diff (a flag changed how diffs are read).
+pub fn clear_diffs() {
+    if let Ok(mut cache) = COMMIT_DIFFS.lock() {
+        cache.clear();
+    }
+    if let Ok(mut cache) = WORKING_DIFFS.lock() {
+        cache.clear();
+    }
 }
 
 pub fn working_diff(workdir: &Path, path: &str, stamp: &WorkingStamp) -> Option<LoadedDiff> {

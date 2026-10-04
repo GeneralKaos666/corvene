@@ -1911,6 +1911,7 @@ mod tests {
             old_line: None,
             new_line: None,
             no_trailing_newline: false,
+            raw: None,
         };
         DiffHunk {
             unified_diff_start: 0,

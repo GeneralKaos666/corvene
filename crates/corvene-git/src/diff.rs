@@ -5,7 +5,9 @@
 //! Deviations: a renamed file can diff against `HEAD:<old path>`
 //! (`743-renamed-diff-against-head`); a mode-only change carries the modes
 //! (`742-file-mode-change-message`); a symbolic link's working copy is its
-//! target path (`745-symlink-contents`).
+//! target path (`745-symlink-contents`); text that is not UTF-8 can be
+//! decoded in its legacy encoding (`789-non-utf8-diffs`,
+//! [`crate::text_encoding`]).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -322,8 +324,9 @@ pub fn blob_bytes(
 
 /// File contents as lines for hunk expansion; a trailing newline does not
 /// produce an empty last line.
+/// Text that is not UTF-8 is decoded per [`crate::text_encoding`].
 pub fn file_lines(bytes: &[u8]) -> Vec<String> {
-    let text = String::from_utf8_lossy(bytes);
+    let text = crate::text_encoding::file_text(bytes);
     let mut lines: Vec<String> = text
         .split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l).to_string())
@@ -435,6 +438,11 @@ pub fn parse_raw_diff_with_warnings(stdout: &[u8], stderr: &str) -> Diff {
 /// Parse `--patch-with-raw -z` output: skip the raw header block, then the
 /// unified diff. Handles binary and oversize diffs.
 pub fn parse_raw_diff(stdout: &[u8]) -> Diff {
+    parse_raw_diff_decoding(stdout, crate::text_encoding::decode_legacy())
+}
+
+/// [`parse_raw_diff`]; `decode_legacy`: flag `789-non-utf8-diffs`.
+fn parse_raw_diff_decoding(stdout: &[u8], decode_legacy: bool) -> Diff {
     if stdout.len() > UNRENDERABLE_BYTES {
         return Diff::TooLarge;
     }
@@ -448,7 +456,19 @@ pub fn parse_raw_diff(stdout: &[u8]) -> Diff {
     if patch.contains("\nBinary files ") || patch.starts_with("Binary files ") {
         return Diff::Binary;
     }
-    match parse_unified(patch) {
+    // not UTF-8: the same patch's bytes, line for line (the replacement
+    // characters never stand in for a newline)
+    let raw = match &text {
+        std::borrow::Cow::Borrowed(_) => None,
+        std::borrow::Cow::Owned(_) => {
+            let start = stdout
+                .windows(b"diff --git".len())
+                .position(|w| w == b"diff --git")
+                .unwrap_or(stdout.len());
+            Some(&stdout[start..])
+        }
+    };
+    match parse_unified_with_raw(patch, raw, decode_legacy) {
         Diff::Text { hunks, warnings } if stdout.len() > MAX_DIFF_BYTES => {
             Diff::LargeText { hunks, warnings }
         }
@@ -473,6 +493,16 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32, u32, u32)> {
 }
 
 pub fn parse_unified(patch: &str) -> Diff {
+    parse_unified_with_raw(patch, None, false)
+}
+
+/// [`parse_unified`]; `raw` is the patch's bytes when they are not UTF-8
+/// (`patch` is then their lossy rendition): changed and context lines that
+/// are not UTF-8 keep their bytes (`DiffLine::raw`), and with
+/// `decode_legacy` (flag `789-non-utf8-diffs`) their text is decoded in the
+/// encoding guessed from them all.
+fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) -> Diff {
+    let mut raw_lines = raw.map(|raw| raw.split_inclusive(|b| *b == b'\n'));
     let mut hunks: Vec<DiffHunk> = Vec::new();
     let mut current: Option<DiffHunk> = None;
     let mut old_no = 0u32;
@@ -484,6 +514,7 @@ pub fn parse_unified(patch: &str) -> Diff {
     let (mut sections, mut deleted_mode, mut added_mode) = (0usize, None, None);
 
     for line in patch.split_inclusive('\n') {
+        let raw_line = raw_lines.as_mut().and_then(|lines| lines.next());
         let line = line.strip_suffix('\n').unwrap_or(line);
         let line = line.strip_suffix('\r').unwrap_or(line);
         if line.starts_with("diff --git ") {
@@ -513,6 +544,7 @@ pub fn parse_unified(patch: &str) -> Diff {
                     old_line: None,
                     new_line: None,
                     no_trailing_newline: false,
+                    raw: None,
                 }],
             });
             continue;
@@ -566,12 +598,19 @@ pub fn parse_unified(patch: &str) -> Diff {
                 (Some(o), Some(n))
             }
         };
+        let raw = raw_line.and_then(|bytes| {
+            let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+            let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+            let bytes = bytes.get(1..)?;
+            std::str::from_utf8(bytes).is_err().then(|| bytes.to_vec())
+        });
         hunk.lines.push(DiffLine {
             kind,
             text: text.to_string(),
             old_line,
             new_line,
             no_trailing_newline: false,
+            raw,
         });
     }
     if let Some(h) = current.take() {
@@ -585,6 +624,9 @@ pub fn parse_unified(patch: &str) -> Diff {
     };
     if hunks.is_empty() && mode_change.is_none() {
         return Diff::Empty;
+    }
+    if decode_legacy {
+        decode_raw_lines(&mut hunks);
     }
     let warnings = DiffWarnings {
         hidden_bidi: hunks
@@ -602,9 +644,61 @@ pub fn parse_unified(patch: &str) -> Diff {
     }
 }
 
+/// Flag `789-non-utf8-diffs`: the text of the lines that kept their bytes,
+/// decoded in the encoding guessed from all of them.
+fn decode_raw_lines(hunks: &mut [DiffHunk]) {
+    let samples: Vec<&[u8]> = hunks
+        .iter()
+        .flat_map(|h| h.lines.iter())
+        .filter_map(|l| l.raw.as_deref())
+        .collect();
+    if samples.is_empty() {
+        return;
+    }
+    let encoding = crate::text_encoding::guess_encoding(samples);
+    for line in hunks.iter_mut().flat_map(|h| h.lines.iter_mut()) {
+        if let Some(raw) = &line.raw {
+            line.text = crate::text_encoding::decode_with(raw, encoding);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_utf8_lines_keep_their_bytes_and_decode() {
+        let patch = b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n-caf\xe9\n+caf\xe9s\n ok\n";
+        let lines = |diff: &Diff| -> Vec<(String, Option<Vec<u8>>)> {
+            diff.hunks().unwrap()[0].lines[1..]
+                .iter()
+                .map(|l| (l.text.clone(), l.raw.clone()))
+                .collect()
+        };
+        // GHD: replacement characters
+        let ghd = parse_raw_diff_decoding(patch, false);
+        assert_eq!(
+            lines(&ghd),
+            [
+                ("caf\u{fffd}".to_string(), Some(b"caf\xe9".to_vec())),
+                ("caf\u{fffd}s".to_string(), Some(b"caf\xe9s".to_vec())),
+                ("ok".to_string(), None),
+            ]
+        );
+        let decoded = parse_raw_diff_decoding(patch, true);
+        assert_eq!(
+            lines(&decoded),
+            [
+                ("café".to_string(), Some(b"caf\xe9".to_vec())),
+                ("cafés".to_string(), Some(b"caf\xe9s".to_vec())),
+                ("ok".to_string(), None),
+            ]
+        );
+        // UTF-8 diffs keep no bytes
+        let utf8 = parse_raw_diff_decoding("diff --git a/f b/f\n@@ -1 +1 @@\n-é\n+è\n".as_bytes(), true);
+        assert!(utf8.hunks().unwrap()[0].lines.iter().all(|l| l.raw.is_none()));
+    }
 
     #[test]
     fn working_directory_patch_applies() {

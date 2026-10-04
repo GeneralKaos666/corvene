@@ -3,7 +3,8 @@
 //!
 //! Deviation ([`PatchOptions`]): with `788-partial-commit-hunk-positions`
 //! a hunk's start on the produced side counts only the hunks the patch
-//! writes, not the changes left out of it.
+//! writes, not the changes left out of it; with `789-non-utf8-diffs` a
+//! line that is not UTF-8 is written as its original bytes.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -26,6 +27,10 @@ pub struct PatchOptions {
     /// left out, so `git apply` (which starts looking for a hunk there)
     /// can match its context at a later, identical spot.
     pub exact_hunk_starts: bool,
+    /// `789-non-utf8-diffs`: a line that is not UTF-8 is written as its
+    /// bytes (`DiffLine::raw`); GHD writes the replacement characters it
+    /// decoded, which no longer match the file, so `git apply` refuses.
+    pub raw_lines: bool,
 }
 
 fn format_patch_header(from: Option<&str>, to: Option<&str>) -> String {
@@ -53,14 +58,25 @@ fn format_hunk_header(old_start: u32, old_count: u32, new_start: u32, new_count:
 /// before it changed the line count by `delta`. As in git's own headers, a
 /// side with no lines names the line before the hunk.
 fn shifted_start(start: u32, count: u32, delta: i64, produced_count: u32) -> u32 {
-    let unchanged_before = if count == 0 { start } else { start.saturating_sub(1) };
+    let unchanged_before = if count == 0 {
+        start
+    } else {
+        start.saturating_sub(1)
+    };
     let before = u32::try_from((i64::from(unchanged_before) + delta).max(0)).unwrap_or(u32::MAX);
-    if produced_count == 0 { before } else { before + 1 }
+    if produced_count == 0 {
+        before
+    } else {
+        before + 1
+    }
 }
 
-fn push_line(buf: &mut Vec<u8>, marker: u8, line: &DiffLine) {
+fn push_line(buf: &mut Vec<u8>, marker: u8, line: &DiffLine, options: PatchOptions) {
     buf.push(marker);
-    buf.extend_from_slice(line.text.as_bytes());
+    match line.raw.as_deref() {
+        Some(raw) if options.raw_lines => buf.extend_from_slice(raw),
+        _ => buf.extend_from_slice(line.text.as_bytes()),
+    }
     buf.push(b'\n');
 }
 
@@ -94,7 +110,7 @@ pub fn format_patch_with(
             match line.kind {
                 DiffLineKind::Hunk => continue,
                 DiffLineKind::Context => {
-                    push_line(&mut buf, b' ', line);
+                    push_line(&mut buf, b' ', line, options);
                     old_count += 1;
                     new_count += 1;
                 }
@@ -102,10 +118,10 @@ pub fn format_patch_with(
                     if file.selection.is_selected(absolute) =>
                 {
                     if line.kind == DiffLineKind::Add {
-                        push_line(&mut buf, b'+', line);
+                        push_line(&mut buf, b'+', line, options);
                         new_count += 1;
                     } else {
-                        push_line(&mut buf, b'-', line);
+                        push_line(&mut buf, b'-', line, options);
                         old_count += 1;
                     }
                     any_change = true;
@@ -116,7 +132,7 @@ pub fn format_patch_with(
                 _ if is_new => continue,
                 // An unselected deletion stays in the file: context line.
                 DiffLineKind::Delete => {
-                    push_line(&mut buf, b' ', line);
+                    push_line(&mut buf, b' ', line, options);
                     old_count += 1;
                     new_count += 1;
                 }
@@ -184,23 +200,23 @@ pub fn format_patch_to_discard_changes_with(
             match line.kind {
                 DiffLineKind::Hunk => continue,
                 DiffLineKind::Context => {
-                    push_line(&mut buf, b' ', line);
+                    push_line(&mut buf, b' ', line, options);
                     old_count += 1;
                     new_count += 1;
                 }
                 DiffLineKind::Add | DiffLineKind::Delete if selection.is_selected(absolute) => {
                     if line.kind == DiffLineKind::Add {
-                        push_line(&mut buf, b'-', line);
+                        push_line(&mut buf, b'-', line, options);
                         new_count += 1;
                     } else {
-                        push_line(&mut buf, b'+', line);
+                        push_line(&mut buf, b'+', line, options);
                         old_count += 1;
                     }
                     any_change = true;
                 }
                 // An unselected addition is already in the working copy: context.
                 DiffLineKind::Add => {
-                    push_line(&mut buf, b' ', line);
+                    push_line(&mut buf, b' ', line, options);
                     old_count += 1;
                     new_count += 1;
                 }
@@ -454,6 +470,7 @@ mod tests {
         assert!(ghd.contains("@@ -20,3 +22,2 @@"), "{ghd}");
         let exact = PatchOptions {
             exact_hunk_starts: true,
+            ..Default::default()
         };
         let patch = String::from_utf8(format_patch_with(&f, hunks, exact).unwrap()).unwrap();
         assert!(patch.contains("@@ -20,3 +20,2 @@"), "{patch}");
@@ -487,15 +504,33 @@ mod tests {
         run(&["init", "-q", "-b", "main"]);
         run(&["config", "commit.gpgsign", "false"]);
         let block = "p\np\np\nq\np\np\np\n";
-        let filler = |prefix: &str| -> String { (1..=11).map(|i| format!("{prefix}{i}\n")).collect() };
-        let head = format!("top\n{block}{}{block}{}{block}end\n", filler("f"), filler("g"));
+        let filler =
+            |prefix: &str| -> String { (1..=11).map(|i| format!("{prefix}{i}\n")).collect() };
+        let head = format!(
+            "top\n{block}{}{block}{}{block}end\n",
+            filler("f"),
+            filler("g")
+        );
         std::fs::write(path.join("f.txt"), &head).unwrap();
         run(&["add", "."]);
-        run(&["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-q", "-m", "init"]);
+        run(&[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.x",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ]);
         // 18 new lines at the top, the second block's q removed
         let added: String = (1..=18).map(|i| format!("new{i}\n")).collect();
         let second_q = head.match_indices("q\n").nth(1).unwrap().0;
-        let edited = format!("top\n{added}{}{}", &head[4..second_q], &head[second_q + 2..]);
+        let edited = format!(
+            "top\n{added}{}{}",
+            &head[4..second_q],
+            &head[second_q + 2..]
+        );
         std::fs::write(path.join("f.txt"), &edited).unwrap();
         let git = Arc::new(crate::find_git().unwrap());
         let staged_q_lines = |options: PatchOptions| -> Vec<usize> {
@@ -541,8 +576,70 @@ mod tests {
         assert_eq!(staged_q_lines(PatchOptions::default()), [5, 23]);
         let exact = PatchOptions {
             exact_hunk_starts: true,
+            ..Default::default()
         };
         assert_eq!(staged_q_lines(exact), [5, 40]);
+    }
+
+    #[test]
+    fn raw_lines_stage_legacy_encoded_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["config", "commit.gpgsign", "false"]);
+        // windows-1252: "café", "naïve"
+        std::fs::write(
+            path.join("f.txt"),
+            b"caf\xe9\none\ntwo\nthree\nfour\nfive\nna\xefve\n",
+        )
+        .unwrap();
+        run(&["add", "."]);
+        run(&[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.x",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ]);
+        std::fs::write(
+            path.join("f.txt"),
+            b"caf\xe9!\none\ntwo\nthree\nfour\nfive\nna\xefve!\n",
+        )
+        .unwrap();
+        let git = Arc::new(crate::find_git().unwrap());
+        let mut status = crate::get_status(git.clone(), path).unwrap();
+        // lines: 0 hunk, 1 del café, 2 add café!, 3..7 ctx, 8 del naïve, 9 add naïve!
+        status.files[0].selection = DiffSelection::none().with_range(1, 2, true);
+        crate::unstage_all(git.clone(), path).unwrap();
+        // GHD: the decoded text no longer matches the file
+        assert!(stage_partial_files(git.clone(), path, &status.files).is_err());
+        let options = PatchOptions {
+            raw_lines: true,
+            ..Default::default()
+        };
+        stage_partial_files_with(git.clone(), path, &status.files, options).unwrap();
+        let shown = Command::new("git")
+            .args(["show", ":f.txt"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert_eq!(
+            shown.stdout,
+            b"caf\xe9!\none\ntwo\nthree\nfour\nfive\nna\xefve\n"
+        );
     }
 
     #[test]

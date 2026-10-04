@@ -205,6 +205,14 @@ impl Dispatcher {
         }
         Self::sync_crash_reports_setting(cx);
         corvene_git::set_explain_missing_workdir(now.bool(ids::GIT_SPAWN_ERROR_DETAILS));
+        if now.bool(ids::NON_UTF8_DIFFS) != previous.bool(ids::NON_UTF8_DIFFS) {
+            corvene_git::text_encoding::set_decode_legacy_text(now.bool(ids::NON_UTF8_DIFFS));
+            crate::diff_cache::clear_diffs();
+            if let Some(id) = Self::state(cx).read(cx).selected {
+                Self::load_diff(id, cx);
+                Self::load_commit_diff(id, cx);
+            }
+        }
         if now.bool(ids::EXTRA_EDITORS) != previous.bool(ids::EXTRA_EDITORS)
             || now.bool(ids::JETBRAINS_64BIT_HIVE) != previous.bool(ids::JETBRAINS_64BIT_HIVE)
             || now.bool(ids::INTEGRATION_APP_ICONS) != previous.bool(ids::INTEGRATION_APP_ICONS)

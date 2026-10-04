@@ -42,6 +42,7 @@ pub mod status;
 mod status_gix;
 pub mod submodule;
 pub mod terminal;
+pub mod text_encoding;
 pub mod worktree;
 
 pub use branch_ops::{

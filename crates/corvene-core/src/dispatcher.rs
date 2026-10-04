@@ -113,6 +113,10 @@ impl Dispatcher {
         corvene_git::set_explain_missing_workdir(
             flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
         );
+        // `789-non-utf8-diffs`
+        corvene_git::text_encoding::set_decode_legacy_text(
+            flags.bool(crate::flags::ids::NON_UTF8_DIFFS),
+        );
         cx.install_state(AppState {
             store,
             settings,
@@ -2511,7 +2515,7 @@ impl Dispatcher {
         Self::load_commit_diff(id, cx);
     }
 
-    fn load_commit_diff(id: u64, cx: &mut dyn Host) {
+    pub(crate) fn load_commit_diff(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -5511,6 +5515,7 @@ impl Dispatcher {
     fn patch_options_of(flags: &crate::flags::Flags) -> corvene_git::PatchOptions {
         corvene_git::PatchOptions {
             exact_hunk_starts: flags.bool(crate::flags::ids::PARTIAL_COMMIT_HUNK_POSITIONS),
+            raw_lines: flags.bool(crate::flags::ids::NON_UTF8_DIFFS),
         }
     }
 

@@ -4762,6 +4762,26 @@ registry! {
         code: &["crates/corvene-git/src/patch.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Diffs of legacy-encoded files are decoded, and can be partly committed.
+    NON_UTF8_DIFFS = 789 "non-utf8-diffs" {
+        title: "Readable diffs of files that are not UTF-8",
+        summary: "Text files kept in another encoding (windows-1252, ISO-8859-2, Shift_JIS…) \
+                  are shown decoded in Changes, History and expanded diff lines, the encoding \
+                  guessed from the file (windows-1252 when there is nothing to go on). \
+                  Committing or discarding some of their lines writes the original bytes, so \
+                  git accepts the patch. Files with a working-tree-encoding attribute are \
+                  already shown right (git converts them).",
+        ghd_behaviour: "Every non-UTF-8 character shows as a replacement character (\u{FFFD}), \
+                        and committing or discarding selected lines of such a file fails \
+                        because the patch no longer matches it.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3923), Upstream::issue(5498)],
+        code: &["crates/corvene-git/src/text_encoding.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-git/src/patch.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

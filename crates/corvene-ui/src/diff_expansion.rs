@@ -73,6 +73,7 @@ fn header_line(old_start: u32, old_lines: u32, new_start: u32, new_lines: u32) -
             old_line: None,
             new_line: None,
             no_trailing_newline: false,
+            raw: None,
         },
         original: None,
     }
@@ -157,6 +158,7 @@ pub fn from_hunks(hunks: &[DiffHunk], new_line_count: Option<usize>) -> Vec<XHun
                         old_line: None,
                         new_line: None,
                         no_trailing_newline: false,
+                        raw: None,
                     },
                     original: None,
                 }],
@@ -266,6 +268,7 @@ pub fn expand_hunk(
                     old_line: Some(old_no.max(0) as u32),
                     new_line: Some(new_no.max(0) as u32),
                     no_trailing_newline: false,
+                    raw: None,
                 },
                 original: None,
             }
@@ -379,6 +382,7 @@ mod tests {
             old_line: old,
             new_line: new,
             no_trailing_newline: false,
+            raw: None,
         }
     }
 
