@@ -1131,6 +1131,9 @@ pub(crate) fn main() {
             }
         });
         Dispatcher::start_background_tasks(cx);
+        // `296-cancel-fetch-on-wake`: a background fetch that hangs on a
+        // connection the sleep broke is stopped
+        cx.on_system_wake(|cx| Dispatcher::system_woke(cx)).detach();
         Dispatcher::refresh_accounts(cx);
         // Alive subscriptions for pull request notifications (GHD AliveStore)
         Dispatcher::start_alive(cx);

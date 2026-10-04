@@ -60,6 +60,16 @@ fn macos_only() -> Availability {
     }
 }
 
+/// The system's sleep and wake notifications reach the app (not on Android,
+/// where WorkManager runs the background fetch).
+fn wake_events() -> Availability {
+    if cfg!(target_os = "android") {
+        Availability::BuiltIn("Android does not tell the app when the device wakes.")
+    } else {
+        Availability::Available
+    }
+}
+
 /// Android's lists of applications always show their launcher icons.
 fn android_built_in() -> Availability {
     if cfg!(target_os = "android") {
@@ -2045,6 +2055,24 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(14095)],
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/process.rs", "crates/corvene-ui/src/toolbar.rs"],
+    },
+
+    /// Waking from sleep stops a hanging background fetch.
+    CANCEL_FETCH_ON_WAKE = 296 "cancel-fetch-on-wake" {
+        title: "Stop a stuck background fetch after sleep",
+        summary: "When the computer wakes from sleep, a background fetch still running is \
+                  stopped: its connection most likely died during sleep, and SSH or a stalled \
+                  HTTPS transfer would otherwise leave \"Fetching origin\" spinning for good. \
+                  The next background round fetches again; fetches you started are left \
+                  alone.",
+        ghd_behaviour: "The fetch can hang until the app is restarted, with the push/pull \
+                        button stuck on \"Fetching origin\".",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: wake_events,
+        upstream: &[Upstream::issue(19979)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene/src/main.rs"],
     },
 
     // ---- 300 GitHub ----

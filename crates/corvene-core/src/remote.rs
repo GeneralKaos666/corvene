@@ -36,7 +36,8 @@
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
 //! A running fetch, push or pull (until it merges) can be stopped from the
 //! push/pull button (`295-cancel-network-operations`; GHD `push-pull-button.tsx`
-//! only disables itself).
+//! only disables itself), and waking from sleep stops a background fetch
+//! left hanging on a dead connection (`296-cancel-fetch-on-wake`).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -370,7 +371,9 @@ impl Dispatcher {
         cx: &mut dyn Host,
     ) -> Option<corvene_git::CancelToken> {
         let flags = &Self::state(cx).read(cx).flags;
-        if !flags.bool(crate::flags::ids::CANCEL_NETWORK_OPERATIONS) {
+        if !flags.bool(crate::flags::ids::CANCEL_NETWORK_OPERATIONS)
+            && !flags.bool(crate::flags::ids::CANCEL_FETCH_ON_WAKE)
+        {
             return None;
         }
         let token = corvene_git::CancelToken::new();
@@ -439,6 +442,24 @@ impl Dispatcher {
             cx.update(|cx| Self::state(cx).update(cx, |_, cx| cx.notify()));
         })
         .detach();
+    }
+
+    /// `296-cancel-fetch-on-wake`: the system woke from sleep. A background
+    /// fetch still running then most likely waits on a connection that died
+    /// during sleep (SSH and stalled HTTPS never time out): stop it, and the
+    /// next background round fetches again. Fetches the user started keep
+    /// running and fail as they would.
+    pub fn system_woke(cx: &mut dyn Host) {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::CANCEL_FETCH_ON_WAKE) {
+            return;
+        }
+        for (id, rs) in &s.repo_states {
+            if let Some(cancel) = rs.network_cancel.as_ref().filter(|c| c.background) {
+                info!(id, "stopping a background fetch after wake");
+                cancel.token.cancel();
+            }
+        }
     }
 
     /// Run a network operation on a background thread, mirroring progress
