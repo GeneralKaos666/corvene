@@ -21,7 +21,9 @@
 //! profile (`882-commit-author-links`). A merge commit's file list header
 //! toggles "conflict resolutions only" (`773-merge-remerge-diff`: git's
 //! `--remerge-diff`), with a "Merged cleanly" note when there are none; GHD
-//! diffs merges against their first parent only.
+//! diffs merges against their first parent only. While whitespace is hidden,
+//! files with whitespace changes only can be left out of the list, with a
+//! note under it (`793-hide-whitespace-only-files`).
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher, Popup, UnreachableCommitsTab};
 use gpui_kit::component::resizable::{
@@ -984,6 +986,8 @@ impl SelectedCommitView {
         let remerge = rs
             .filter(|rs| Dispatcher::remerge_available(s, rs))
             .map(|rs| rs.remerge_diff);
+        // `793-hide-whitespace-only-files`
+        let whitespace_hidden = rs.map_or(0, |r| r.changeset_whitespace_hidden);
         if rs.and_then(|r| r.changeset.as_ref()).is_some() && files.is_empty() {
             let empty = div()
                 .flex_1()
@@ -994,9 +998,14 @@ impl SelectedCommitView {
                 .text_center()
                 .text_color(t.text_secondary)
                 .child(if remerge == Some(true) {
-                    "Merged cleanly: nothing differs from git's automatic merge"
+                    "Merged cleanly: nothing differs from git's automatic merge".to_string()
+                } else if whitespace_hidden > 0 {
+                    format!(
+                        "No files in commit apart from {} with whitespace changes only",
+                        crate::format::format_count(whitespace_hidden as u64)
+                    )
                 } else {
-                    "No files in commit"
+                    "No files in commit".to_string()
                 });
             return match remerge {
                 Some(on) => div()
@@ -1071,6 +1080,12 @@ impl SelectedCommitView {
                         .with_scrollbar_handle(&scroll),
                     ),
             )
+            .when(whitespace_hidden > 0, |d| {
+                d.child(crate::changes::whitespace_hidden_note(
+                    whitespace_hidden,
+                    cx,
+                ))
+            })
             .into_any_element()
     }
 }

@@ -7,6 +7,8 @@
 //!   list menu has "Open All in <editor>" (`712-open-multiple-files`).
 //! - files matching the `706-changes-hide-globs` patterns are left out of the
 //!   list (they are still committed).
+//! - while whitespace is hidden, files with whitespace changes only can be
+//!   left out too, with a note under the list (`793-hide-whitespace-only-files`).
 //! - ↑ / ↓ in an empty summary recall recent commit messages
 //!   (`731-recall-commit-messages`).
 //! - committing on the default branch asks first
@@ -290,6 +292,8 @@ struct VisibleKey {
     /// patterns (empty for any other order).
     order_file: Vec<String>,
     mode: String,
+    /// `793-hide-whitespace-only-files`: the files left out (by address).
+    whitespace_only: Option<usize>,
 }
 
 /// The cached part of [`VisibleFiles`]. It keeps the status only weakly:
@@ -306,6 +310,8 @@ struct VisibleData {
     /// (GHD `isCommittingFileHiddenByFilter`).
     included: usize,
     included_hidden: bool,
+    /// `793-hide-whitespace-only-files`: listed files left out.
+    whitespace_hidden: usize,
     /// `changes-line-counts` totals for one line-stats map.
     line_totals: RefCell<Option<(std::sync::Weak<LineStatsMap>, corvene_git::LineStats)>>,
 }
@@ -319,14 +325,18 @@ pub(crate) struct VisibleFiles {
 }
 
 impl VisibleData {
-    fn build(key: VisibleKey, status: Option<&std::sync::Arc<Status>>) -> Self {
+    fn build(
+        key: VisibleKey,
+        status: Option<&std::sync::Arc<Status>>,
+        whitespace_only: Option<&std::collections::HashSet<String>>,
+    ) -> Self {
         let files = status.map_or(&[][..], |s| &s.files[..]);
         // `706-changes-hide-globs`
         let hide = corvene_core::filter::hide_patterns(&key.hide);
         // `703-changes-sort-order`
         let order = corvene_core::filter::sorted_indices_with(files, &key.order, &key.order_file);
         // `704-changes-filter-match`
-        let indices = corvene_core::filter::filtered_indices(
+        let mut indices = corvene_core::filter::filtered_indices(
             files,
             order.as_deref(),
             &key.text,
@@ -335,6 +345,13 @@ impl VisibleData {
             &hide,
             &key.mode,
         );
+        // `793-hide-whitespace-only-files`
+        let mut whitespace_hidden = 0;
+        if let Some(paths) = whitespace_only {
+            let before = indices.len();
+            indices.retain(|&i| !paths.contains(&files[i].path));
+            whitespace_hidden = before - indices.len();
+        }
         let kind = |i: &usize| files[*i].selection.kind();
         // `getCheckAllValue`: the box reflects only the files passing the filter
         let include_all = if indices.iter().all(|i| kind(i) == DiffSelectionType::All) {
@@ -364,6 +381,7 @@ impl VisibleData {
             include_all,
             included,
             included_hidden,
+            whitespace_hidden,
             line_totals: RefCell::new(None),
         }
     }
@@ -385,6 +403,12 @@ impl VisibleFiles {
     /// Every changed file, filtered or not.
     fn total(&self) -> usize {
         self.files().len()
+    }
+
+    /// `793-hide-whitespace-only-files`: files left out for whitespace-only
+    /// changes.
+    fn whitespace_hidden(&self) -> usize {
+        self.data.whitespace_hidden
     }
 
     fn include_all(&self) -> Option<bool> {
@@ -2128,6 +2152,8 @@ impl ChangesSidebar {
         let s = self.state.read(cx);
         let rs = s.selected_state();
         let status = rs.and_then(|rs| rs.status.clone());
+        // `793-hide-whitespace-only-files` (set only while it applies)
+        let whitespace_only = rs.and_then(|rs| rs.whitespace_only_files.clone());
         let order = s.flags.text(corvene_core::flags::ids::CHANGES_SORT_ORDER);
         // `diff.orderFile` (path order when unset)
         let order_file = match order {
@@ -2152,6 +2178,9 @@ impl ChangesSidebar {
                 .flags
                 .text(corvene_core::flags::ids::CHANGES_FILTER_MATCH)
                 .to_string(),
+            whitespace_only: whitespace_only
+                .as_ref()
+                .map(|w| std::sync::Arc::as_ptr(w) as usize),
         };
         let cached = self
             .visible_cache
@@ -2160,7 +2189,11 @@ impl ChangesSidebar {
             .filter(|data| data.key == key)
             .cloned();
         let data = cached.unwrap_or_else(|| {
-            let data = Rc::new(VisibleData::build(key, status.as_ref()));
+            let data = Rc::new(VisibleData::build(
+                key,
+                status.as_ref(),
+                whitespace_only.as_deref(),
+            ));
             *self.visible_cache.borrow_mut() = Some(data.clone());
             data
         });
@@ -3406,6 +3439,7 @@ impl ChangesSidebar {
         let line_stats = self.line_stats(cx);
         // `ariaLabelledBy="changes-list-check-all-label"`: the header's text
         let label = changed_files_label(files.len(), files.total());
+        let whitespace_hidden = files.whitespace_hidden();
         div()
             .id("changes-list")
             .role(Role::List)
@@ -3449,6 +3483,9 @@ impl ChangesSidebar {
                 .min_h_0()
                 .with_scrollbar_handle(&self.list_scroll),
             )
+            .when(whitespace_hidden > 0, |d| {
+                d.child(whitespace_hidden_note(whitespace_hidden, cx))
+            })
     }
 
     /// `.stashed-changes-button`: shown when the current branch has a stash.
@@ -5562,6 +5599,29 @@ fn line_stats_label(
                     .child(format!("-{}", crate::format::format_count(stats.deleted))),
             )
         })
+}
+
+/// `793-hide-whitespace-only-files`: "N files hidden (whitespace only)"
+/// under a file list.
+pub(crate) fn whitespace_hidden_note(count: usize, cx: &App) -> Div {
+    let t = cx.ghd();
+    let text = if count == 1 {
+        "1 file hidden (whitespace only)".to_string()
+    } else {
+        format!(
+            "{} files hidden (whitespace only)",
+            crate::format::format_count(count as u64)
+        )
+    };
+    div()
+        .flex_none()
+        .px(SPACING())
+        .py(SPACING_HALF())
+        .border_t_1()
+        .border_color(t.box_border)
+        .text_size(FONT_SIZE_SM())
+        .text_color(t.text_secondary)
+        .child(text)
 }
 
 /// "N changed files", or GHD's "3 of 10 changed files" while a filter hides

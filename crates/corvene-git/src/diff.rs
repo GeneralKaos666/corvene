@@ -306,6 +306,68 @@ fn unchanged_line_pairs<'a>(
         .flatten()
 }
 
+/// Corvene `793-hide-whitespace-only-files`: the files `git diff <revs>`
+/// (`HEAD` for the working directory, `<base> <commit>` for a commit)
+/// changes in whitespace only: modified in place (neither new, deleted,
+/// renamed, a submodule nor changed in type or mode) and without a changed
+/// line once whitespace is ignored. `git diff -w` leaves such files out
+/// (older versions list them with 0 lines), so the file list without `-w`
+/// is compared with the one with it. Read-only.
+pub fn whitespace_only_paths(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    revs: &[&str],
+) -> Result<std::collections::HashSet<String>> {
+    let run = |args: &[&str]| {
+        GitCommand::new(git.clone())
+            .args(["diff", "--no-ext-diff", "--no-color", "--no-renames", "-z"])
+            .args(args)
+            .args(revs)
+            .arg("--")
+            .current_dir(workdir)
+            .run()
+    };
+    let raw = run(&["--raw"])?;
+    let ignoring_whitespace = run(&["-w", "--numstat"])?;
+    Ok(parse_whitespace_only(
+        &raw.stdout,
+        &ignoring_whitespace.stdout,
+    ))
+}
+
+/// [`whitespace_only_paths`]' parser: `raw` is `--raw -z` output, `numstat`
+/// is `-w --numstat -z` output.
+fn parse_whitespace_only(raw: &[u8], numstat: &[u8]) -> std::collections::HashSet<String> {
+    let raw = String::from_utf8_lossy(raw);
+    let mut fields = raw.split('\0');
+    let mut modified = std::collections::HashSet::new();
+    while let Some(field) = fields.next() {
+        let Some(record) = field.strip_prefix(':') else {
+            continue;
+        };
+        // ":100644 100644 <old> <new> M", then the path
+        let Some(path) = fields.next() else { break };
+        let parts: Vec<&str> = record.split(' ').collect();
+        if let [old_mode, new_mode, _, _, status, ..] = parts[..]
+            && old_mode == new_mode
+            && old_mode != "160000"
+            && status == "M"
+        {
+            modified.insert(path.to_string());
+        }
+    }
+    let numstat = String::from_utf8_lossy(numstat);
+    for record in numstat.split('\0') {
+        let mut parts = record.splitn(3, '\t');
+        if let (Some(added), Some(deleted), Some(path)) = (parts.next(), parts.next(), parts.next())
+            && (added, deleted) != ("0", "0")
+        {
+            modified.remove(path);
+        }
+    }
+    modified
+}
+
 /// Corvene `714-copy-diff`: the working-directory changes of `files` as one
 /// patch `git apply` takes (`--binary`), against `base` (`HEAD`, or
 /// [`crate::NULL_TREE_SHA`] on an unborn branch). Tracked files come first,
@@ -773,6 +835,57 @@ fn decode_raw_lines(hunks: &mut [DiffHunk]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whitespace_only_files_are_plain_modifications_without_lines() {
+        let raw = b":100644 100644 aaa bbb M\0ws.txt\0:100644 100755 ccc ddd M\0mode.sh\0:000000 100644 000 eee A\0new.txt\0:100644 100644 fff 111 M\0real.txt\0:100644 100644 222 333 M\0bin.png\0:100644 100644 444 555 M\0old-git.txt\0";
+        // `-w`: git 2.54 leaves ws.txt out, older versions list 0 lines
+        let numstat = b"0\t0\told-git.txt\x002\t1\treal.txt\0-\t-\tbin.png\0";
+        let paths = parse_whitespace_only(raw, numstat);
+        assert_eq!(
+            paths,
+            std::collections::HashSet::from(["ws.txt".to_string(), "old-git.txt".to_string()])
+        );
+    }
+
+    #[test]
+    fn whitespace_only_paths_in_a_repository() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        run(&["init", "-q", "-b", "main"]);
+        std::fs::write(path.join("ws.txt"), "a\nb\n").unwrap();
+        std::fs::write(path.join("real.txt"), "a\nb\n").unwrap();
+        run(&["add", "."]);
+        run(&[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.x",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ]);
+        std::fs::write(path.join("ws.txt"), "  a\nb  \n").unwrap();
+        std::fs::write(path.join("real.txt"), "a\nc\n").unwrap();
+        let git = Arc::new(crate::find_git().unwrap());
+        let paths = whitespace_only_paths(git, path, &["HEAD"]).unwrap();
+        assert_eq!(
+            paths,
+            std::collections::HashSet::from(["ws.txt".to_string()])
+        );
+    }
 
     #[test]
     fn non_utf8_lines_keep_their_bytes_and_decode() {

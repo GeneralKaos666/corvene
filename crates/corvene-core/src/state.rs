@@ -1039,6 +1039,9 @@ pub struct RepositoryState {
     /// `1208-undo-restores-line-selection`: the line selections an undone
     /// commit had made, put on each file when a status lists it.
     pub restored_selections: HashMap<String, corvene_models::DiffSelection>,
+    /// `793-hide-whitespace-only-files`: the changed files whose changes
+    /// are whitespace only, while Changes hides whitespace.
+    pub whitespace_only_files: Option<Arc<std::collections::HashSet<String>>>,
     pub diff_loading: bool,
     /// `749-binary-diff-as-text`: the path whose diff was asked for with
     /// `--text` ("Show diff anyway" on a binary file).
@@ -1113,6 +1116,9 @@ pub struct RepositoryState {
     pub shas_in_diff: Vec<String>,
     /// Files + line counts of the selected commit (`changesetData`).
     pub changeset: Option<corvene_models::ChangesetData>,
+    /// `793-hide-whitespace-only-files`: how many of the commit's files
+    /// `changeset` leaves out because their changes are whitespace only.
+    pub changeset_whitespace_hidden: usize,
     /// Path selected in the commit's file list.
     pub commit_selected_file: Option<String>,
     pub commit_diff: Option<Arc<Diff>>,

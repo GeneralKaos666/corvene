@@ -4833,6 +4833,23 @@ registry! {
         code: &["crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// Hide Whitespace Changes also hides files with whitespace changes only.
+    HIDE_WHITESPACE_ONLY_FILES = 793 "hide-whitespace-only-files" {
+        title: "Hide files with whitespace changes only",
+        summary: "While Hide Whitespace Changes is on, files whose changes are all in \
+                  whitespace (re-indented or with trailing spaces removed) are left out of the \
+                  changes list and of a commit's file list in History, with a note \
+                  \"N files hidden (whitespace only)\" under the list. In Changes they are \
+                  still included in the commit.",
+        ghd_behaviour: "Such files stay listed and show an empty diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15980)],
+        code: &["crates/corvene-git/src/diff.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

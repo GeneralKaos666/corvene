@@ -1592,6 +1592,7 @@ impl Dispatcher {
                 // GHD `GitStore.loadFilesForCurrentStashEntry`, run with every
                 // stash entry load (the no-changes "View stash" card counts them)
                 Self::load_stash_files(id, cx);
+                Self::load_whitespace_only_files(id, cx);
                 if let Some((rebase_snapshot, cherry_pick_snapshot, merge_head_branches)) =
                     snapshots
                 {
@@ -2421,25 +2422,46 @@ impl Dispatcher {
             });
             cx.spawn(async move |cx: &mut AsyncCtx| {
                 let result = task.await;
-                cx.update(|cx| Self::apply_changeset(id, &key, true, result, cx));
+                cx.update(|cx| Self::apply_changeset(id, &key, true, result, 0, cx));
             })
             .detach();
             return;
         }
+        // Corvene (`793-hide-whitespace-only-files`): while whitespace is
+        // hidden, the files with whitespace changes only are left out
+        let hide_whitespace_only = {
+            let s = Self::state(cx).read(cx);
+            s.flags.bool(crate::flags::ids::HIDE_WHITESPACE_ONLY_FILES)
+                && s.settings.hide_whitespace_in_history_diff
+        };
         // a commit's files never change: shown in this same frame
-        if let Some(data) = crate::diff_cache::changeset(&workdir, &ordered) {
-            Self::apply_changeset(id, &ordered, false, Ok(data), cx);
+        if !hide_whitespace_only
+            && let Some(data) = crate::diff_cache::changeset(&workdir, &ordered)
+        {
+            Self::apply_changeset(id, &ordered, false, Ok(data), 0, cx);
             return;
         }
         let key = ordered.clone();
         let task = cx.background_executor().spawn(async move {
-            let data = compute_changeset(git, &workdir, &ordered, in_process)?;
-            crate::diff_cache::store_changeset(&workdir, &ordered, data.clone());
-            Ok(data)
+            let data = match crate::diff_cache::changeset(&workdir, &ordered) {
+                Some(data) => data,
+                None => {
+                    let data = compute_changeset(git.clone(), &workdir, &ordered, in_process)?;
+                    crate::diff_cache::store_changeset(&workdir, &ordered, data.clone());
+                    data
+                }
+            };
+            if !hide_whitespace_only {
+                return Ok((data, 0));
+            }
+            Ok(without_whitespace_only_files(git, &workdir, &ordered, data))
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
-            let result = task.await;
-            cx.update(|cx| Self::apply_changeset(id, &key, false, result, cx));
+            let (result, hidden) = match task.await {
+                Ok((data, hidden)) => (Ok(data), hidden),
+                Err(err) => (Err(err), 0),
+            };
+            cx.update(|cx| Self::apply_changeset(id, &key, false, result, hidden, cx));
         })
         .detach();
     }
@@ -2489,6 +2511,7 @@ impl Dispatcher {
         key: &[String],
         remerge: bool,
         result: corvene_git::error::Result<Arc<corvene_models::ChangesetData>>,
+        whitespace_hidden: usize,
         cx: &mut dyn Host,
     ) {
         let load = Self::state(cx).update(cx, |s, cx| {
@@ -2519,6 +2542,7 @@ impl Dispatcher {
                         .or(keep)
                         .or_else(|| data.files.first().map(|f| f.path.clone()));
                     let mut changed = set(&mut rs.commit_selected_file, file);
+                    changed |= set(&mut rs.changeset_whitespace_hidden, whitespace_hidden);
                     if rs.changeset.as_ref() != Some(&*data) {
                         rs.changeset = Some(Arc::unwrap_or_clone(data));
                         changed = true;
@@ -5670,6 +5694,48 @@ impl Dispatcher {
         );
     }
 
+    /// Corvene `793-hide-whitespace-only-files`: while Changes hides
+    /// whitespace, which changed files have whitespace changes only (the
+    /// list leaves them out; they are still committed).
+    fn load_whitespace_only_files(id: u64, cx: &mut dyn Host) {
+        let wanted = {
+            let s = Self::state(cx).read(cx);
+            s.flags.bool(crate::flags::ids::HIDE_WHITESPACE_ONLY_FILES)
+                && s.settings.hide_whitespace_in_changes_diff
+                && s.repo_states
+                    .get(&id)
+                    .and_then(|rs| rs.status.as_deref())
+                    .is_some_and(|st| !st.files.is_empty())
+        };
+        if !wanted {
+            Self::state(cx).update(cx, |s, cx| {
+                if s.repo_state_mut(id).whitespace_only_files.take().is_some() {
+                    cx.notify();
+                }
+            });
+            return;
+        }
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        crate::remote::spawn_bg(
+            cx,
+            move || {
+                corvene_git::whitespace_only_paths(git, &workdir, &["HEAD"]).unwrap_or_default()
+            },
+            move |paths, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    let next = (!paths.is_empty()).then(|| Arc::new(paths));
+                    if rs.whitespace_only_files != next {
+                        rs.whitespace_only_files = next;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
     /// Diff Settings › Hide Whitespace Changes, per tab
     /// (`_setHideWhitespaceInChangesDiff` / `…HistoryDiff`); reloads the diff.
     /// In Changes it refreshes the status with partial selections cleared
@@ -5685,6 +5751,14 @@ impl Dispatcher {
         });
         if let Some(id) = Self::state(cx).read(cx).selected {
             if history {
+                // `793-hide-whitespace-only-files`: the list depends on it
+                if Self::state(cx)
+                    .read(cx)
+                    .flags
+                    .bool(crate::flags::ids::HIDE_WHITESPACE_ONLY_FILES)
+                {
+                    Self::load_changeset(id, cx);
+                }
                 Self::load_commit_diff(id, cx);
                 Self::load_stash_diff(id, cx);
             } else {
@@ -6685,6 +6759,35 @@ fn compute_working_diff(
 /// `883-unpublished-commit-links`: with this many local-only commits or more
 /// none is marked (links stay as in GHD).
 const UNPUBLISHED_COMMITS_LIMIT: usize = 10_000;
+
+/// `793-hide-whitespace-only-files`: `data` (the files of `ordered`, oldest
+/// first) without the files whose changes are whitespace only, and how
+/// many those were. Unchanged when git cannot tell.
+fn without_whitespace_only_files(
+    git: Arc<corvene_git::GitBinary>,
+    workdir: &Path,
+    ordered: &[String],
+    data: Arc<corvene_models::ChangesetData>,
+) -> (Arc<corvene_models::ChangesetData>, usize) {
+    let (Some(oldest), Some(newest)) = (ordered.first(), ordered.last()) else {
+        return (data, 0);
+    };
+    let base = format!("{oldest}^");
+    let hidden = corvene_git::whitespace_only_paths(git.clone(), workdir, &[&base, newest])
+        // a root commit: against the empty tree
+        .or_else(|_| {
+            corvene_git::whitespace_only_paths(git, workdir, &[corvene_git::NULL_TREE_SHA, newest])
+        })
+        .unwrap_or_default();
+    if hidden.is_empty() {
+        return (data, 0);
+    }
+    let mut data = Arc::unwrap_or_clone(data);
+    let before = data.files.len();
+    data.files.retain(|f| !hidden.contains(&f.path));
+    let count = before - data.files.len();
+    (Arc::new(data), count)
+}
 
 /// The changed files of one commit or of a contiguous range (oldest first).
 /// `in_process`: flag `907-in-process-commit-files`.
