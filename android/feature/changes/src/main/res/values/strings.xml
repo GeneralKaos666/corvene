@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- the list -->
+    <plurals name="chg_changed_files">
+        <item quantity="one">%1$d changed file</item>
+        <item quantity="other">%1$d changed files</item>
+    </plurals>
+    <string name="chg_changed_files_filtered">%1$d of %2$d changed files</string>
+    <plurals name="chg_conflicts">
+        <item quantity="one">%1$d file has conflicts. Resolve it before committing.</item>
+        <item quantity="other">%1$d files have conflicts. Resolve them before committing.</item>
+    </plurals>
+    <plurals name="chg_conflict_badge">
+        <item quantity="one">%1$d conflict</item>
+        <item quantity="other">%1$d conflicts</item>
+    </plurals>
+    <string name="chg_stash">You have stashed changes on this branch.</string>
+    <string name="chg_stash_restore">Restore</string>
+    <string name="chg_filter_included">Included</string>
+    <string name="chg_filter_excluded">Excluded</string>
+    <string name="chg_filter_new">New</string>
+    <string name="chg_filter_modified">Modified</string>
+    <string name="chg_filter_deleted">Deleted</string>
+    <string name="chg_filter_renamed">Renamed</string>
+    <string name="chg_filter_clear">Clear</string>
+    <string name="chg_filtered_empty">No changed files match the filters.</string>
+    <string name="chg_include">Include in commit</string>
+    <string name="chg_exclude">Exclude from commit</string>
+    <string name="chg_include_file">Include %1$s in the commit</string>
+    <string name="chg_discard">Discard changes</string>
+    <string name="chg_discard_title">Discard changes?</string>
+    <string name="chg_discard_message">The changes to %1$s will be moved to the trash.</string>
+    <string name="chg_discard_confirm">Discard changes</string>
+    <string name="chg_cancel">Cancel</string>
+    <string name="chg_close">Close</string>
+    <string name="chg_status_new">New</string>
+    <string name="chg_status_modified">Modified</string>
+    <string name="chg_status_deleted">Deleted</string>
+    <string name="chg_status_renamed">Renamed</string>
+    <string name="chg_status_conflicted">Conflicted</string>
+    <string name="chg_line_stats">%1$d additions, %2$d deletions</string>
+    <string name="chg_failed">Could not read the changes: %1$s</string>
+    <!-- no changes (GHD NoChanges) -->
+    <string name="chg_empty_title">No local changes</string>
+    <string name="chg_empty_description">There are no uncommitted changes in this repository. Here are some friendly suggestions for what to do next.</string>
+    <string name="chg_suggest_pull">Pull from the remote</string>
+    <string name="chg_suggest_pull_body">Bring in commits others pushed.</string>
+    <string name="chg_suggest_pull_button">Pull</string>
+    <string name="chg_suggest_editor">Open the repository in your editor</string>
+    <string name="chg_suggest_editor_body">Make changes with an editor app.</string>
+    <string name="chg_suggest_editor_button">Open</string>
+    <string name="chg_suggest_github">View on GitHub</string>
+    <string name="chg_suggest_github_body">Open the repository page in the browser.</string>
+    <string name="chg_suggest_github_button">View</string>
+    <!-- commit -->
+    <string name="chg_included">%1$d of %2$d files included</string>
+    <string name="chg_commit_to">Commit to %1$s</string>
+    <string name="chg_no_branch">no branch</string>
+    <string name="chg_commit_title">Commit changes</string>
+    <string name="chg_amending">Amending</string>
+    <string name="chg_summary">Summary</string>
+    <string name="chg_summary_placeholder">Summary (required)</string>
+    <string name="chg_description">Description</string>
+    <string name="chg_description_placeholder">Description</string>
+    <string name="chg_co_authors">Co-authors</string>
+    <plurals name="chg_files_to_commit">
+        <item quantity="one">%1$d file</item>
+        <item quantity="other">%1$d files</item>
+    </plurals>
+    <string name="chg_commit">Commit</string>
+    <string name="chg_committed">Committed just now</string>
+    <string name="chg_undo">Undo</string>
+    <!-- diff -->
+    <string name="chg_diff_none">No file selected</string>
+    <string name="chg_diff_loading">Loading the diff</string>
+    <string name="chg_diff_binary">This binary file has changed.</string>
+    <string name="chg_diff_image">This image has changed.</string>
+    <string name="chg_diff_image_later">Image diffs arrive with a later milestone.</string>
+    <string name="chg_diff_too_large">The diff is too large to be displayed.</string>
+    <string name="chg_diff_too_large_body">Open the file in an editor to see the changes.</string>
+    <string name="chg_diff_large">This diff is large.</string>
+    <string name="chg_diff_large_body">Showing it may be slow.</string>
+    <string name="chg_diff_show">Show diff</string>
+    <string name="chg_diff_submodule">This submodule has changed.</string>
+    <string name="chg_diff_empty">This file has no changes to show.</string>
+    <string name="chg_diff_options">Diff options</string>
+    <string name="chg_diff_view">View</string>
+    <string name="chg_diff_unified">Unified</string>
+    <string name="chg_diff_split">Split</string>
+    <string name="chg_diff_split_later">Split view arrives with a later milestone; the diff stays unified.</string>
+    <string name="chg_diff_wrap">Wrap lines</string>
+    <string name="chg_diff_hide_whitespace">Hide whitespace changes</string>
+    <string name="chg_line_include">Include this line</string>
+    <string name="chg_line_exclude">Exclude this line</string>
+</resources>

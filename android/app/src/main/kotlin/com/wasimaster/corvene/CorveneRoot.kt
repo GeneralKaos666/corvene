@@ -37,10 +37,7 @@ fun CorveneRoot(onQuit: () -> Unit) {
     }
     CorveneTheme(style = appearance.style, colorMode = appearance.colorMode, highContrast = appearance.highContrast) {
         HostRequestHandler(core, onQuit = onQuit)
-        CorveneNavigation(
-            appearance = appearance,
-            onStyle = { style -> core.dispatch { setDesignStyle(style.toVm()) } },
-            onTheme = { theme -> core.dispatch { setTheme(theme) } },
-        )
+        CorveneNavigation()
+        PopupHost()
     }
 }

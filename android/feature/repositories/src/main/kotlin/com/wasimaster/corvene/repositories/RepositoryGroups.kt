@@ -11,29 +11,28 @@ data class RepositoryGroup(val kind: Kind, val title: String, val repositories: 
 }
 
 /**
- * GHD's `groupRepositories` (crates/corvene-ui/src/repository_list.rs `groups`
- * without a filter): Recent (the three most recently opened, when there is more
- * than one repository), then one group per GitHub owner, then Other; names
- * sorted case-insensitively within a group.
- *
- * Kotlin-side until the engine's view model carries the groups
- * (android/FFI-REQUESTS.md).
+ * The engine's grouping (`RepoListVm.groups`: GHD's `groupRepositories`,
+ * Recent / one per GitHub owner / Other, flag 209 deciding how many recent
+ * ones) with the rows resolved, narrowed by [filter] (case-insensitive,
+ * name or `owner/name`). A filter drops the Recent group so no repository
+ * shows twice (GHD filters the flat list).
  */
-fun groupRepositories(list: RepoListVm, recentCount: Int = RECENT_COUNT): List<RepositoryGroup> {
+fun groupRepositories(list: RepoListVm, filter: String = ""): List<RepositoryGroup> {
     val byId = list.repositories.associateBy { it.id }
-    val groups = mutableListOf<RepositoryGroup>()
-    val recent = list.recent.take(recentCount).mapNotNull(byId::get)
-    if (recent.isNotEmpty() && list.repositories.size > 1) {
-        groups += RepositoryGroup(RepositoryGroup.Kind.Recent, "", recent)
+    val needle = filter.trim()
+    return list.groups.mapIndexedNotNull { index, group ->
+        val repos = group.ids.mapNotNull(byId::get)
+            .filter { needle.isEmpty() || it.name.contains(needle, ignoreCase = true) || it.github?.contains(needle, true) == true }
+        val kind = when {
+            index == 0 && group.title == RECENT && list.groups.size > 1 -> RepositoryGroup.Kind.Recent
+            repos.all { it.github == null } && group.title == OTHER -> RepositoryGroup.Kind.Other
+            else -> RepositoryGroup.Kind.Owner
+        }
+        val hidden = repos.isEmpty() || kind == RepositoryGroup.Kind.Recent && needle.isNotEmpty()
+        if (hidden) null else RepositoryGroup(kind, group.title, repos)
     }
-    val sorted = list.repositories.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
-    sorted.filter { it.github != null }
-        .groupBy { it.github.orEmpty().substringBefore('/') }
-        .toSortedMap(String.CASE_INSENSITIVE_ORDER)
-        .forEach { (owner, repos) -> groups += RepositoryGroup(RepositoryGroup.Kind.Owner, owner, repos) }
-    val other = sorted.filter { it.github == null }
-    if (other.isNotEmpty()) groups += RepositoryGroup(RepositoryGroup.Kind.Other, "", other)
-    return groups
 }
 
-private const val RECENT_COUNT = 3
+/** The engine's titles for the two fixed groups (crates/corvene-ffi/src/vm/repo_list.rs). */
+private const val RECENT = "Recent"
+private const val OTHER = "Other"

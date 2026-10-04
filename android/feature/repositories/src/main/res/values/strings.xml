@@ -15,4 +15,7 @@
     <string name="repo_ahead">%1$d ahead</string>
     <string name="repo_behind">%1$d behind</string>
     <string name="repo_failed">The engine did not start: %1$s</string>
+    <string name="repo_filter">Filter</string>
+    <string name="repo_close">Close</string>
+    <string name="repo_no_match">No repositories match</string>
 </resources>

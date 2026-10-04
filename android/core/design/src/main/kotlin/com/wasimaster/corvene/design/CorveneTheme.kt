@@ -37,7 +37,8 @@ internal val LocalCorveneTextStyles = staticCompositionLocalOf { textStylesFor(D
  * High contrast text, or the Android 14 contrast slider at ≥ 0.5).
  * [dynamicColor] applies to the Material style on Android 12+.
  * Provides MaterialTheme (colour scheme mapped from the Primer tokens for the
- * two GitHub styles), and Corvene's own tokens through [CorveneTheme].
+ * two GitHub styles), and Corvene's own tokens through [CorveneTheme]
+ * (colours, spacing, metrics, text styles, [LocalDiffPalette], [LocalOcticonTint]).
  */
 @Composable
 fun CorveneTheme(
@@ -67,6 +68,7 @@ fun CorveneTheme(
             colors.toColorScheme() to colors
         }
     }
+    val diffPalette = remember(colors) { colors.toDiffPalette() }
     MaterialTheme(colorScheme = scheme, typography = typographyFor(style), shapes = shapesFor(style)) {
         CompositionLocalProvider(
             LocalDesignStyle provides style,
@@ -74,6 +76,8 @@ fun CorveneTheme(
             LocalCorveneSpacing provides spacingFor(style),
             LocalCorveneMetrics provides metricsFor(style),
             LocalCorveneTextStyles provides textStylesFor(style),
+            LocalDiffPalette provides diffPalette,
+            LocalOcticonTint provides OcticonTint.Primary,
             content = content,
         )
     }
@@ -96,6 +100,10 @@ object CorveneTheme {
     val textStyles: CorveneTextStyles
         @Composable @ReadOnlyComposable
         get() = LocalCorveneTextStyles.current
+
+    val diff: DiffPalette
+        @Composable @ReadOnlyComposable
+        get() = LocalDiffPalette.current
 }
 
 private fun materialScheme(context: Context, dark: Boolean, dynamic: Boolean): ColorScheme = when {

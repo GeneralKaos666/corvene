@@ -16,8 +16,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * The one activity. Shows the splash screen until the engine has answered its
  * first query (or failed, or [SPLASH_TIMEOUT_MS] passed), then the app edge to
- * edge. Hands `x-corvene://` links to the engine and tells it when the app
- * comes to the front (GHD refreshes on window focus).
+ * edge. Hands `x-corvene://` links to the engine; [CorveneApp] tells it when
+ * the app is visible and focused.
  */
 class MainActivity : ComponentActivity() {
 
@@ -43,21 +43,12 @@ class MainActivity : ComponentActivity() {
             }
             ready = true
         }
-        if (savedInstanceState == null) {
-            // GHD's indicator updater runs at start-up; the engine leaves it to the host (FFI-REQUESTS.md #9)
-            core.dispatch { refreshIndicators() }
-            handleIntent(intent)
-        }
+        if (savedInstanceState == null) handleIntent(intent)
         setContent {
             CompositionLocalProvider(LocalCore provides core) {
                 CorveneRoot(onQuit = ::finishAndRemoveTask)
             }
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        core.dispatch { focus() }
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -45,13 +45,16 @@ fun OcticonTint.color(): Color {
     }
 }
 
-/** An Octicon: the 24 px drawing at 24 dp and up, the 16 px one below. */
+/**
+ * An Octicon: the 24 px drawing at 24 dp and up, the 16 px one below. The
+ * tint defaults to [LocalOcticonTint] (link blue inside bars).
+ */
 @Composable
 fun Octicon(
     icon: OcticonIcon,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    tint: OcticonTint = OcticonTint.Primary,
+    tint: OcticonTint = LocalOcticonTint.current,
     size: Dp = 16.dp,
 ) {
     OcticonColored(icon, contentDescription, tint.color(), modifier, size)

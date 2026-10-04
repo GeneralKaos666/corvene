@@ -21,7 +21,9 @@ val LocalCore = staticCompositionLocalOf<Core> { error("no Core: CorveneApp prov
 
 /**
  * A query's latest result. [value] stays while a re-query runs
- * (stale-while-revalidate); [loading] is true until the first result.
+ * (stale-while-revalidate); [loading] is true until the first result (a
+ * query that answers null, like `changes()` for an unknown repository, has
+ * `loading` false and `value` null).
  */
 @Stable
 data class QueryState<out T>(val value: T?, val loading: Boolean, val error: String?)
@@ -33,7 +35,7 @@ data class QueryState<out T>(val value: T?, val loading: Boolean, val error: Str
  * contents and an unchanged screen does not recompose).
  */
 @Composable
-fun <T : Any> rememberCoreQuery(vararg keys: Any?, query: suspend Corvene.() -> T): State<QueryState<T>> {
+fun <T> rememberCoreQuery(vararg keys: Any?, query: suspend Corvene.() -> T): State<QueryState<T>> {
     val core = LocalCore.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val latest = rememberUpdatedState(query)

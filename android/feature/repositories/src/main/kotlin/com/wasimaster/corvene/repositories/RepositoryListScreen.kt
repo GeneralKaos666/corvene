@@ -37,6 +37,7 @@ import com.wasimaster.corvene.design.IconTile
 import com.wasimaster.corvene.design.Octicons
 import com.wasimaster.corvene.design.PrimerButton
 import com.wasimaster.corvene.design.PrimerButtonVariant
+import com.wasimaster.corvene.ffi.gen.RepoGroupVm
 import com.wasimaster.corvene.ffi.gen.RepoListVm
 import com.wasimaster.corvene.ffi.gen.RepoVm
 
@@ -153,6 +154,8 @@ private fun RepositoryRow(repo: RepoVm, selected: Boolean, onClick: () -> Unit, 
         leading = {
             when {
                 repo.missing -> IconTile(Octicons.Alert, colors.attention)
+                repo.private -> IconTile(Octicons.Lock, colors.accent)
+                repo.fork -> IconTile(Octicons.RepoForked, colors.accent)
                 repo.github != null -> IconTile(Octicons.Repo, colors.accent)
                 else -> IconTile(Octicons.DeviceDesktop, colors.done)
             }
@@ -187,16 +190,23 @@ internal val SampleList = RepoListVm(
     recent = listOf(2u, 3u),
     repositories = listOf(
         RepoVm(1u, "corvene", "/data/user/0/com.wasimaster.corvene/files/repositories/corvene",
-            "wasi-master/corvene", false, "main", 0u, 0u, 0u),
-        RepoVm(2u, "desktop", "/storage/emulated/0/Code/desktop", "desktop/desktop", false, "development", 3u, 2u, 1u),
-        RepoVm(3u, "notes", "/storage/emulated/0/Documents/notes", null, false, "main", 0u, null, null),
-        RepoVm(4u, "old-project", "/storage/emulated/0/old-project", null, true, null, 0u, null, null),
+            "wasi-master/corvene", "wasi-master", false, true, null, false, "main", 0u, 0u, 0u),
+        RepoVm(2u, "desktop", "/storage/emulated/0/Code/desktop", "desktop/desktop", "desktop", true, false, null, false,
+            "development", 3u, 2u, 1u),
+        RepoVm(3u, "notes", "/storage/emulated/0/Documents/notes", null, null, false, false, null, false, "main", 0u, null, null),
+        RepoVm(4u, "old-project", "/storage/emulated/0/old-project", null, null, false, false, null, true, null, 0u, null, null),
+    ),
+    groups = listOf(
+        RepoGroupVm("Recent", listOf(2u, 3u)),
+        RepoGroupVm("desktop", listOf(2u)),
+        RepoGroupVm("wasi-master", listOf(1u)),
+        RepoGroupVm("Other", listOf(3u, 4u)),
     ),
     signedIn = false,
     welcomeCompleted = true,
 )
 
-internal val EmptyList = RepoListVm(null, emptyList(), emptyList(), signedIn = false, welcomeCompleted = false)
+internal val EmptyList = RepoListVm(null, emptyList(), emptyList(), emptyList(), signedIn = false, welcomeCompleted = false)
 
 @Preview(widthDp = 360, heightDp = 1500)
 @Composable

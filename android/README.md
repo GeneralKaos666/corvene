@@ -33,8 +33,8 @@ builds reuse cargo's output. Debug builds install as
 | `:app:assemble{Foss,Play}{Debug,Release,Fast}` | APKs. `fast` = release without R8, one ABI, not debuggable |
 | `unitTests` | every module's fossDebug unit tests (JVM, Robolectric, Compose, Roborazzi capture) + Konsist rules |
 | `staticAnalysis` | type-resolved detekt per module, Android Lint (`:app`, checkAll), Konsist rules |
-| `:feature:repositories:recordRoborazziFossDebug` | write screenshots to `src/test/screenshots/` |
-| `:feature:repositories:verifyRoborazziFossDebug` | compare against them |
+| `recordRoborazziFossDebug` | every module's screenshots to its `src/test/screenshots/` |
+| `verifyRoborazziFossDebug` | compare against them |
 | `:app:checkElfAlignmentFossDebug` | every 64-bit `.so` in the APK aligned to 16 KB |
 | `:app:licenseeAndroidFossRelease` | licence audit of what the APK ships |
 | `buildHealth` | unused / mis-scoped dependencies (advice only) |
@@ -79,12 +79,17 @@ build-logic/                      convention plugins, reading the catalog
   com/wasimaster/corvene/buildlogic/{CargoNdkTask,GenerateUniffiTask,BundledGitSyncTask,ElfAlignmentTask}.kt
 config/  detekt/detekt.yml  lint/lint.xml  compose/stability.conf
 core/common      logging (tag `corvene`), trace sections (`Corvene:*`), LiveState
-core/design      DesignStyle, PrimerColors + palettes (3 styles × light/dark × contrast), CorveneTheme,
-                 Inter + JetBrains Mono, Octicons, PrimerButton, PrimerIconButton, ActionList, Blankslate, CounterLabel, Avatar
+core/design      DesignStyle, PrimerColors + palettes (3 styles × light/dark × contrast), CorveneTheme, DiffPalette,
+                 Inter + JetBrains Mono, Octicons, the Primer component set (buttons, ActionList/ActionMenu, SelectPanel,
+                 PrimerDialog, Flash, labels, Avatar (Coil), inputs, SegmentedControl, UnderlineNav, chips, Truncate/FilePath,
+                 PrimerTopAppBar, RepositoryTopChrome, StyleMiniature)
 core/ffi         the engine: generated bindings (build/generated/uniffi), Core, rememberCoreQuery, HostEventsBridge
 core/platform    HostRequestHandler (URLs, clipboard, toasts, folder picker), FolderResolver
-feature/repositories   RepositoryListScreen (+ route, grouping, tests, screenshots)
-app              CorveneApp, MainActivity (splash, edge to edge), Navigation 3, the temporary Appearance menu
+feature/repositories   RepositoryListScreen, RepositoryPicker (SelectPanel) (+ route, grouping, tests, screenshots)
+feature/changes  ChangesScreen (+ CommitPanel/CommitForm, filters), DiffScreen (+ DiffPager, DiffLineCache), routes
+feature/settings AppearanceScreen (style cards, theme)
+app              CorveneApp (process lifecycle → appVisible/focus), MainActivity (splash, edge to edge), Navigation 3,
+                 CorveneScaffold (repository chrome, list-detail on medium/expanded), PopupHost
 tools/architecture     Konsist rules        tools/octicons/gen.py + icons.txt        tools/tokens/gen.py
 ```
 
@@ -99,5 +104,5 @@ Kotlin style per `.editorconfig` (WMKeyboard's, ktlint android_studio, 140
 columns), no auto-formatter. No ViewModel and no DI: the engine is the state,
 `Core` is wired explicitly and handed down with `LocalCore`; screens take view
 models and lambdas, routes query. Strings live in each module's `strings.xml`
-with its resource prefix (`cvd_`, `repo_`, `plt_`, `app_`). Every task name
+with its resource prefix (`cvd_`, `repo_`, `chg_`, `set_`, `plt_`, `app_`). Every task name
 carries the flavour (`testFossDebugUnitTest`); use the root aggregates.

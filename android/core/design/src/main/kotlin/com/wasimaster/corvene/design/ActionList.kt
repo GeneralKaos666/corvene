@@ -2,10 +2,12 @@ package com.wasimaster.corvene.design
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.defaultMinSize
@@ -30,9 +32,29 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 /**
+ * Primer's ActionList: a column of [ActionListItem]s. GitHub Desktop draws
+ * it as a bordered box (GHD's lists), the other styles flush with the screen.
+ */
+@Composable
+fun ActionList(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val colors = CorveneTheme.colors
+    val desktop = LocalDesignStyle.current == DesignStyle.GitHubDesktop
+    val shape = RoundedCornerShape(CorveneTheme.metrics.cornerMedium)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .then(if (desktop) Modifier.clip(shape).border(1.dp, colors.borderDefault, shape) else Modifier)
+            .background(colors.bgDefault),
+        content = content,
+    )
+}
+
+/**
  * A row of a Primer ActionList: [leading] visual, [title] with an optional
- * [description] line, and [trailing] visuals (counters, chevrons).
- * Long-press is the context menu's gesture.
+ * [description] line, and trailing visuals: a [count], a [checked] mark
+ * (single-select lists; `null` draws no check column), a [chevron] when more
+ * follows, or anything in [trailing]. Long-press is the context menu's gesture.
+ * [danger] colours the title for destructive items.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -41,6 +63,11 @@ fun ActionListItem(
     modifier: Modifier = Modifier,
     description: String? = null,
     selected: Boolean = false,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    count: Int? = null,
+    checked: Boolean? = null,
+    chevron: Boolean = false,
     onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     leading: (@Composable () -> Unit)? = null,
@@ -50,6 +77,7 @@ fun ActionListItem(
     val colors = CorveneTheme.colors
     val clickable = if (onClick != null || onLongClick != null) {
         Modifier.combinedClickable(
+            enabled = enabled,
             role = Role.Button,
             onLongClick = onLongClick,
             onClick = onClick ?: {},
@@ -60,7 +88,7 @@ fun ActionListItem(
     Row(
         modifier
             .fillMaxWidth()
-            .semantics { this.selected = selected }
+            .semantics { this.selected = selected || checked == true }
             .background(if (selected) colors.bgSelected else Color.Transparent)
             .then(clickable)
             .defaultMinSize(minHeight = if (description != null) metrics.rowHeightLarge else metrics.rowHeight)
@@ -73,7 +101,11 @@ fun ActionListItem(
             Text(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = colors.textPrimary,
+                color = when {
+                    !enabled -> colors.textDisabled
+                    danger -> colors.danger.fg
+                    else -> colors.textPrimary
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -87,12 +119,21 @@ fun ActionListItem(
                 )
             }
         }
-        if (trailing != null) {
+        if (trailing != null || count != null || checked != null || chevron) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(CorveneTheme.spacing.s),
                 verticalAlignment = Alignment.CenterVertically,
-                content = trailing,
-            )
+            ) {
+                trailing?.invoke(this)
+                if (count != null) {
+                    Text(count.toString(), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                }
+                if (checked != null) {
+                    // the column stays when unchecked, so labels line up
+                    Box(Modifier.size(16.dp)) { if (checked) Octicon(Octicons.Check, null, tint = OcticonTint.Link) }
+                }
+                if (chevron) Octicon(Octicons.ChevronRight, null, tint = OcticonTint.Secondary)
+            }
         }
     }
 }
@@ -145,7 +186,7 @@ fun IconTile(icon: OcticonIcon, tint: SemanticColor, modifier: Modifier = Modifi
 @Composable
 private fun ActionListPreview() {
     DesignStyleSamples {
-        Column {
+        ActionList {
             ActionListGroupHeader("Recent")
             ActionListItem(
                 "corvene",
@@ -155,7 +196,11 @@ private fun ActionListPreview() {
                 trailing = { CounterLabel("3") },
             )
             ActionListDivider()
-            ActionListItem("desktop", leading = { IconTile(Octicons.RepoForked, CorveneTheme.colors.done) })
+            ActionListItem("desktop", leading = { IconTile(Octicons.RepoForked, CorveneTheme.colors.done) }, count = 12)
+            ActionListDivider()
+            ActionListItem("main", checked = true, leading = { Octicon(Octicons.GitBranch, null) })
+            ActionListItem("Appearance", chevron = true, leading = { Octicon(Octicons.Paintbrush, null) })
+            ActionListItem("Remove", danger = true, leading = { Octicon(Octicons.Trash, null, tint = OcticonTint.Danger) })
         }
     }
 }

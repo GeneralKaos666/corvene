@@ -3,26 +3,16 @@
 Requests from the Android side; the Rust side owns the crate. Each says what
 Kotlin does meanwhile.
 
-1. **Repository list groups in the view model.** `RepoListVm` gives the flat
-   list and `recent`; Kotlin re-implements GHD's `groupRepositories`
-   (Recent, one group per GitHub owner, Other) in
-   `feature/repositories/.../RepositoryGroups.kt`, without flag
-   `209-recent-repositories-count` (fixed at 3) and without the filters
-   (207/208/211). Wanted: `RepoListVm.groups: Vec<RepoGroupVm { kind, title, ids }>`
-   computed by the same code as `corvene-ui/src/repository_list.rs::groups`,
-   and a `filter: String` argument to `repo_list`.
-2. **Row icons.** GHD draws lock / fork / device-desktop per repository;
-   `RepoVm` has no `private`/`fork` (Kotlin shows repo vs device-desktop only).
-   Wanted: `fork: bool`, `private: bool`, and `alias: Option<String>` (rename UI).
-3. ~~Design style and colour mode in the settings~~: done (`settings()`,
-   `setDesignStyle`, `setTheme`); the DataStore workaround is gone.
-4. **App visibility.** `app_visible(bool)` so the engine pauses the indicator
-   updater, fetcher and watcher while the app is in the background
-   (`ProcessLifecycleOwner` ON_START/ON_STOP, design §4). Kotlin calls
-   `focus()` on resume only.
-5. **Start-up readiness.** The splash screen waits for the first `repo_list()`.
-   A cheap `ready() -> bool` (store loaded, first indicators requested) would
-   let the splash end without building a view model.
+1. ~~Repository list groups in the view model~~: done (`RepoListVm.groups`);
+   Kotlin resolves the ids and filters by name (the picker's FilterField).
+   Still open: a `filter` argument to `repo_list` so the fuzzy match is GHD's.
+2. ~~Row icons~~: done (`RepoVm.owner/fork/private/alias`); lock and fork
+   icons are drawn. The rename UI (alias) is M-A2+.
+3. ~~Design style and colour mode in the settings~~: done.
+4. ~~App visibility~~: done; `CorveneApp` calls `appVisible` from
+   ProcessLifecycleOwner ON_START/ON_STOP and `focus()` on ON_RESUME.
+5. ~~Start-up readiness~~: `ready()` exists; the splash still waits for the
+   first `settings()` + `repoList()` (both answer at once now).
 6. **`kotlin_target_version = "2.2.20"`** in `uniffi.toml` (named in
    design-core-host.md) so the generated code never uses newer language features
    than AGP 9.3's built-in Kotlin.
@@ -32,10 +22,49 @@ Kotlin does meanwhile.
    (or `./gradlew :core:ffi:cargoNdkDebug`) after touching them.
 8. ~~`CoreError::Failed { message }` broke the Kotlin bindings~~ (a field named
    `message` clashes with `Throwable.message`): renamed to `reason` upstream.
-9. **Indicators at start-up.** After a cold start `repo_list()` has no branch or
-   change indicators until `refresh_indicators()` is called (GHD's
-   `RepositoryIndicatorUpdater` runs right away and then periodically).
-   MainActivity calls `refreshIndicators()` once per process start meanwhile.
+9. ~~Indicators at start-up~~: the constructor refreshes them; MainActivity
+   no longer does.
+
+## M-A1
+
+10. **Two highlight classes are lost.** `TokenClassVm::from` matches on the
+    Debug names of GHD's CodeMirror classes, but `corvene_highlight::TokenClass`
+    is `Variable, AltVariable, Keyword, Atom, String, Qualifier, Type, Comment,
+    Tag, Attribute, Link, Header, Quote`: `AltVariable` and `Type` fall into
+    `Other` and draw uncoloured. Wanted: `AltVariable → Variable2`,
+    `Type → Variable3` (Kotlin already maps those to `syntaxAltVariable` /
+    `syntaxType`), or a `TokenClassVm` that mirrors `TokenClass` one to one.
+11. **Selection revision in the diff header.** Toggling a line keeps
+    `diff_generation`, so Kotlin re-reads the visible pages (≤ 600 rows) after
+    every state change to pick up `selected`. Wanted:
+    `DiffHeaderVm.selection_revision: u64` (bumps when the file's
+    `DiffSelection` changes) so the pager refreshes only then.
+12. **Select all.** GHD's list header checkbox (`set_files_included(repo,
+    paths, include)` exists in the Dispatcher) is not exported; the header
+    shows the count only.
+13. **Commit draft in the engine.** The summary/description live in
+    `rememberSaveable` (cleared when `commit_nonce` bumps); design §4 wants
+    `update_draft(repo, summary, description)` + `CommitFormVm.summary /
+    description` so a draft survives process death and repository switches
+    like GHD's.
+14. **Discard through the popup.** Kotlin shows its own confirmation when
+    `confirm_discard_changes` is on and then calls `discard_changes`. Wanted:
+    `request_discard_changes(repo, paths)` that opens
+    `Popup::DiscardChanges` (or discards at once when the setting is off), so
+    the prompt's "Do not show this again" writes the setting (M-A2 popups).
+15. **Visible files.** `ChangesVm.files` is the whole status; Kotlin applies
+    the filter options itself (`matches_options`), without the text filter,
+    the `703-changes-sort-order` order or hidden paths. Wanted: either the
+    files already filtered and sorted, or `ChangesVm.visible: Vec<u32>`.
+16. **Gutter width.** `DiffHeaderVm.max_line_number` (old and new) to size the
+    line-number gutters; Kotlin picks 36 or 44 dp from the row count.
+17. **Commit author avatar.** `CommitFormVm.author` is the login; wanted the
+    avatar file path (and `request_avatar(login)` when missing) for Coil.
+18. **Split view rows** (`diff_rows_split(repo, generation, start, count)`
+    pairing deletes with adds) for the split diff on expanded widths; the gear
+    menu offers Split but the diff stays unified until then.
+19. **Image diffs.** `DiffKindVm::Image` carries no files; wanted old/new blob
+    paths (temporary files) to draw them with Coil.
 
 ## Provided by the FFI (2026-10-04, 79678bd4)
 

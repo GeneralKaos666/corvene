@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="set_title">Settings</string>
+    <string name="set_appearance">Appearance</string>
+    <string name="set_style">Style</string>
+    <string name="set_style_github_mobile">GitHub Mobile</string>
+    <string name="set_style_github_desktop">GitHub Desktop</string>
+    <string name="set_style_material">Material</string>
+    <string name="set_style_github_mobile_body">GitHub for Android\'s look</string>
+    <string name="set_style_github_desktop_body">GitHub Desktop\'s toolbar and tokens</string>
+    <string name="set_style_material_body">Material You, wallpaper colours</string>
+    <string name="set_style_pinned">The style is pinned by flag 112-design-style; your choice applies once the flag is cleared.</string>
+    <string name="set_theme">Theme</string>
+    <string name="set_theme_system">System</string>
+    <string name="set_theme_system_body">Follow the device\'s dark theme setting</string>
+    <string name="set_theme_light">Light</string>
+    <string name="set_theme_dark">Dark</string>
+    <string name="set_theme_high_contrast">High contrast</string>
+    <string name="set_theme_high_contrast_body">GitHub Desktop\'s high contrast dark theme</string>
+    <string name="set_sample_repository">corvene</string>
+    <string name="set_sample_commit">Commit</string>
+</resources>

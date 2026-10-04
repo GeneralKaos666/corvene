@@ -2,9 +2,9 @@ package com.wasimaster.corvene
 
 import com.wasimaster.corvene.design.ColorMode
 import com.wasimaster.corvene.design.DesignStyle
-import com.wasimaster.corvene.ffi.gen.DesignStyleVm
 import com.wasimaster.corvene.ffi.gen.SettingsVm
 import com.wasimaster.corvene.ffi.gen.ThemeVm
+import com.wasimaster.corvene.settings.toDesignStyle
 
 /**
  * How the app looks, as the engine's settings say (Settings › Appearance;
@@ -33,15 +33,3 @@ fun SettingsVm.toAppearance(): Appearance = Appearance(
     stylePinned = designStylePinned,
     theme = theme,
 )
-
-fun DesignStyleVm.toDesignStyle(): DesignStyle = when (this) {
-    DesignStyleVm.GIT_HUB_MOBILE -> DesignStyle.GitHubMobile
-    DesignStyleVm.GIT_HUB_DESKTOP -> DesignStyle.GitHubDesktop
-    DesignStyleVm.MATERIAL -> DesignStyle.Material
-}
-
-fun DesignStyle.toVm(): DesignStyleVm = when (this) {
-    DesignStyle.GitHubMobile -> DesignStyleVm.GIT_HUB_MOBILE
-    DesignStyle.GitHubDesktop -> DesignStyleVm.GIT_HUB_DESKTOP
-    DesignStyle.Material -> DesignStyleVm.MATERIAL
-}

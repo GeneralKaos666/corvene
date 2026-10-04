@@ -1,7 +1,80 @@
-# M-A0 notes
+# Notes
 
 Status, measurements and every place this build differs from
-`.docs/android/design-compose-app.md`.
+`.docs/android/design-compose-app.md`. Newest milestone first.
+
+# M-A1 notes
+
+## Built
+
+- `:core:design`: DiffPalette + `LocalDiffPalette`, `LocalOcticonTint` (bars set
+  Link; `Octicon`/`PrimerIconButton` default to it), ActionList container and
+  item trailing count/check/chevron, ActionMenu (+ item, divider, group header),
+  SelectPanel (ModalBottomSheet < 600 dp, anchored Popup otherwise), PrimerDialog
+  (+ fullScreenOnCompact), Flash, Label/StateLabel/CounterLabel, BranchName,
+  Avatar (Coil 3.2 core + compose-core, file path over initials), Spinner,
+  ProgressBar, SegmentedControl, UnderlineNav, PrimerChip + ChipRow, Truncate +
+  FilePath (dimmed directory, bold name, middle ellipsis), PrimerTextField,
+  FilterField, PrimerCheckbox (tri-state), PrimerSwitch, SwitchRow, RadioRow,
+  PrimerTopAppBar, RepositoryTopChrome (Mobile/Material: app bar + branch chip +
+  sync button; Desktop: GHD toolbar), StyleMiniature, `isCompactWidth()`,
+  `diffPaletteOf()`. 42 more Octicons (79).
+- `:feature:changes`: ChangesScreen (filters live through `toggleFilterOption`,
+  include box incl. partial, status octicons, swipe right include / left discard
+  with the prompt per `confirmDiscardChanges`, stash banner with Restore =
+  `popStash`, conflicts banner + badge, NoChanges blank slate with disabled
+  suggestion cards), CommitPanel (Undo bar, docked "Commit to <branch>", commit
+  sheet = CommitForm), DiffScreen (header with include box, +/−, gear menu: wrap
+  lines, hide whitespace via `setHideWhitespaceInDiff`, Unified/Split on wide
+  screens), DiffPager (200-row pages, one page of prefetch either side, LRU of 12
+  pages, refresh after state changes), DiffLineCache (4096 AnnotatedStrings
+  keyed generation+index, cleared per palette).
+- `:feature:settings`: AppearanceScreen (three style cards drawn in their own
+  style, theme radios, "pinned by flag" Flash) + route.
+- `:app`: CorveneScaffold (repository chrome, Changes [n] | History tabs,
+  compact single pane + `Diff` destination, medium/expanded
+  NavigableListDetailPaneScaffold with a draggable divider at 35/50/65 %),
+  RepositoryPicker from the title, read-only branch picker, overflow menu
+  (Refresh, Appearance), PopupHost (Error dialog with git output behind "Show
+  details"; any other kind = a generic dialog with its fields), process
+  lifecycle → `appVisible` / `focus`. The paintbrush menu is gone.
+
+## Deviations (and why)
+
+- **Split view deferred**: the gear menu shows Unified/Split on wide screens;
+  Split says it arrives later and the diff stays unified (FFI-REQUESTS #18).
+- **No Kotlin `TextField`/`Checkbox`/`Switch` names**: `PrimerTextField`,
+  `PrimerCheckbox`, `PrimerSwitch`, `RadioRow`, `SwitchRow`, to not shadow
+  Material's composables in the same files.
+- **Filter applied in Kotlin** (`visibleFiles`, same rule as
+  `corvene-core/src/filter.rs::matches_options`); no text filter, no
+  703-changes-sort-order (FFI-REQUESTS #15).
+- **Commit message in `rememberSaveable`**, cleared on `commitNonce`
+  (FFI-REQUESTS #13). Co-authors are read-only Labels.
+- **Discard prompt is Kotlin's** PrimerDialog, not GHD's popup (FFI-REQUESTS
+  #14); it discards one file (swipe).
+- **Diff refresh**: the pager re-reads its window (≤ 600 rows) after every state
+  change and replaces only pages that differ (FFI-REQUESTS #11).
+- **Selected-line gutters** use GHD's look in every style (blue gutter = in the
+  commit); the GitHub app has no line staging to copy.
+- **Wrap** defaults to on below 600 dp and off above, per screen (not saved).
+- **Sync button** shows GHD's states (Fetch/Pull n/Push n/Publish/progress) and is
+  disabled until M-A3; the branch picker lists local branches read-only (M-A2).
+- **History tab** is a placeholder blank slate (M-A4); switching tabs dispatches
+  `selectSection`.
+- **Window class** comes from `LocalConfiguration.screenWidthDp` (600 dp), not
+  `WindowSizeClass`, so :core:design needs no adaptive dependency; medium and
+  expanded both get the two panes, no NavigationRail yet.
+- **`rememberCoreQuery` takes nullable results** (`<T>` instead of `<T : Any>`):
+  `changes()`/`diffHeader()` answer null for an unknown repository.
+- **StyleMiniature in :core:design**: a card has to draw another style's primary
+  button, and only :core:design may branch on the style.
+- **Moved** `feature/core/ffi/.../HostEventsBridgeTest.kt` (committed under the
+  wrong root in M-A0) to `core/ffi/src/test`.
+- **Highlight**: `AltVariable` and `Type` spans arrive as `Other` and stay
+  uncoloured (FFI-REQUESTS #10).
+
+# M-A0 notes
 
 ## Deviations from the design (and why)
 

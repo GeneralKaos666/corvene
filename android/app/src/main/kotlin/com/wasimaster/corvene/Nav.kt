@@ -10,6 +10,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 data object Repositories : NavKey
 
-/** A repository's screens (Changes, History, Branches from M-A1). */
+/** A repository's screens: Changes and History under the repository chrome. */
 @Serializable
 data class Repository(val id: Long) : NavKey
+
+/** The diff of the selected file on its own screen (compact widths; wider ones show it beside the list). */
+@Serializable
+data class Diff(val id: Long) : NavKey
+
+/** Settings › Appearance. */
+@Serializable
+data object AppearanceSettings : NavKey

@@ -47,6 +47,8 @@ include(":core:design")
 include(":core:ffi")
 include(":core:platform")
 include(":feature:repositories")
+include(":feature:changes")
+include(":feature:settings")
 // Konsist house rules (a plain JVM module, tests only).
 include(":tools:architecture")
 
