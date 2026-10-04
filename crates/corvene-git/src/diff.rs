@@ -38,6 +38,10 @@ pub const MAX_DIFF_LINES: usize = 50_000;
 /// the change the commit will record, falling back to GHD's diff when git
 /// does not pair the two paths as one rename.
 ///
+/// A rename in the working tree only (Corvene
+/// `786-worktree-rename-detection`, index unchanged) diffs the old path's
+/// blob against the working file.
+///
 /// `as_text` adds `--text` (Corvene `749-binary-diff-as-text`): a file git
 /// takes for binary is diffed line by line anyway.
 ///
@@ -78,6 +82,38 @@ pub fn working_directory_diff(
             .args(["--no-index", "--", "/dev/null"])
             .arg(&file.path)
             .allow_exit_code(1);
+    } else if file.status.kind == FileStatusKind::Renamed
+        && file.status.index == GitStatusEntry::Unchanged
+        && let Some(old_path) = &file.old_path
+    {
+        // Corvene `786-worktree-rename-detection`: a rename in the working
+        // tree only (`.R`), whose new path is untracked: the old path's blob
+        // (`HEAD`'s, else the index's) against the working file, hashed
+        // into the object database (`hash-object -w`, so git can diff the
+        // two blobs and the file's filters apply)
+        let new_blob = GitCommand::new(git.clone())
+            .args(["hash-object", "-w", "--"])
+            .arg(&file.path)
+            .current_dir(workdir)
+            .run()?
+            .stdout_string()?
+            .trim()
+            .to_string();
+        let in_head = format!("HEAD:{old_path}");
+        let old_blob = if GitCommand::new(git.clone())
+            .args(["rev-parse", "--verify", "-q"])
+            .arg(&in_head)
+            .current_dir(workdir)
+            .allow_exit_code(1)
+            .run()?
+            .status
+            .success()
+        {
+            in_head
+        } else {
+            format!(":{old_path}")
+        };
+        cmd = cmd.arg(old_blob).arg(new_blob);
     } else if file.status.kind == FileStatusKind::Renamed {
         if renamed_against_head && let Some(old_path) = &file.old_path {
             let out = base()

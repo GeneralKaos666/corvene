@@ -41,6 +41,10 @@ pub struct StatusOptions {
     /// their conflict markers sit in the pointer, not in the file. Flag
     /// `1205-lfs-conflicts-pick-a-side`; GHD offers the editor.
     pub lfs_conflicts_manual: bool,
+    /// The in-process reader pairs a deleted tracked file with a similar
+    /// untracked one as a rename in the working tree (`.R`), which `git
+    /// status` never does. Flag `786-worktree-rename-detection`.
+    pub worktree_renames: bool,
 }
 
 /// What `git status` leaves out about submodules.

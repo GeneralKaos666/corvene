@@ -1071,6 +1071,7 @@ impl Dispatcher {
                     lfs_conflicts_manual: s
                         .flags
                         .bool(crate::flags::ids::LFS_CONFLICTS_PICK_A_SIDE),
+                    worktree_renames: s.flags.bool(crate::flags::ids::WORKTREE_RENAME_DETECTION),
                 },
                 // GHD `RecentBranchesLimit` is 5
                 usize::try_from(s.flags.number(crate::flags::ids::RECENT_BRANCHES_COUNT))

@@ -11,6 +11,11 @@
 //! tests below and by every GHD test that reads a status
 //! (`corvene_test_support::get_status_or_throw`).
 //!
+//! With `786-worktree-rename-detection` a deleted tracked file and a similar
+//! untracked file are one rename (`.R`, which porcelain v2 only prints for
+//! intent-to-add entries): gitoxide's index-worktree rewrites, 50 %
+//! similarity.
+//!
 //! Left to git: inexact or ambiguous staged renames and copies
 //! ([`StagedRenames`], `status.renames=copies`), `diff.ignoreSubmodules`
 //! ([`submodule_config_matches`]), untracked paths at or below a submodule
@@ -57,6 +62,19 @@ pub(crate) fn status(
     options: StatusOptions,
     hide_untracked: bool,
 ) -> Option<WorkingDirectoryStatus> {
+    status_pass(workdir, options, hide_untracked, false)
+}
+
+/// [`status`]; `track_rewrites` pairs deleted and untracked files
+/// (`786-worktree-rename-detection`). gitoxide hashes every untracked file
+/// for that, so it is a second pass, run only when the first one found both
+/// a deleted tracked file and an untracked one.
+fn status_pass(
+    workdir: &Path,
+    options: StatusOptions,
+    hide_untracked: bool,
+    track_rewrites: bool,
+) -> Option<WorkingDirectoryStatus> {
     let repo = crate::handle::open_trusted(workdir)?;
     let started = std::time::Instant::now();
     let untracked = if hide_untracked {
@@ -101,8 +119,14 @@ pub(crate) fn status(
                     }
                 })
                 .index_worktree_submodules(submodules)
-                // git status does not pair deleted and untracked files
-                .index_worktree_rewrites(None)
+                // git status does not pair deleted and untracked files;
+                // `786-worktree-rename-detection` does
+                .index_worktree_rewrites(track_rewrites.then_some(gix::diff::Rewrites {
+                    copies: None,
+                    percentage: Some(0.5),
+                    limit: 1000,
+                    track_empty: false,
+                }))
                 .tree_index_track_renames(renames)
                 .into_iter(Vec::<gix::bstr::BString>::new())
         })
@@ -110,6 +134,7 @@ pub(crate) fn status(
         .ok()?;
 
     let mut records: HashMap<String, Record> = HashMap::new();
+    let mut worktree_rename_sources: Vec<String> = Vec::new();
     let mut intent_to_add = Vec::new();
     let mut staged = StagedRenames::default();
     for item in iter {
@@ -173,8 +198,41 @@ pub(crate) fn status(
                     }
                     records.entry(path).or_default().untracked = true;
                 }
-                // rewrites are off for the worktree
-                WorktreeItem::Rewrite { .. } => return None,
+                // `786-worktree-rename-detection`: a deleted tracked file and
+                // the untracked one it became (git: `.D` and `??`)
+                WorktreeItem::Rewrite {
+                    source,
+                    dirwalk_entry,
+                    diff,
+                    copy,
+                    ..
+                } => {
+                    let gix::status::index_worktree::RewriteSource::RewriteFromIndex {
+                        source_entry,
+                        source_rela_path,
+                        ..
+                    } = source
+                    else {
+                        return None;
+                    };
+                    if copy
+                        || !track_rewrites
+                        || source_entry.mode == gix::index::entry::Mode::COMMIT
+                        || source_entry
+                            .flags
+                            .contains(gix::index::entry::Flags::INTENT_TO_ADD)
+                    {
+                        return None;
+                    }
+                    let path = dirwalk_entry.rela_path.to_str().ok()?.to_string();
+                    let record = records.entry(path).or_default();
+                    record.y = Some('R');
+                    record.old_path = Some(source_rela_path.to_str().ok()?.to_string());
+                    record.score = Some(
+                        diff.map_or(100, |d| (d.similarity * 100.).round().clamp(0., 100.) as u8),
+                    );
+                    worktree_rename_sources.push(record.old_path.clone()?);
+                }
             },
             gix::status::Item::TreeIndex(change) => {
                 use gix::diff::index::ChangeRef;
@@ -255,6 +313,26 @@ pub(crate) fn status(
         }
     }
     if !renames_off && !staged.settled() {
+        return None;
+    }
+    // `786-worktree-rename-detection`: something to pair, a deleted file
+    // and an untracked one
+    if options.worktree_renames
+        && !track_rewrites
+        && records.values().any(|r| r.untracked)
+        && records
+            .values()
+            .any(|r| r.y == Some('D') && !r.gitlink && r.conflict.is_none())
+    {
+        return status_pass(workdir, options, hide_untracked, true);
+    }
+    // a renamed file with staged changes of its own is left to git (two
+    // entries would describe one path)
+    if worktree_rename_sources.iter().any(|source| {
+        records
+            .get(source)
+            .is_some_and(|r| r.x.is_some() || r.y.is_some())
+    }) {
         return None;
     }
     for record in records.values_mut() {
@@ -634,6 +712,76 @@ mod tests {
         run(dir, &["init", "-q", "-b", "main"]);
         run(dir, &["config", "commit.gpgsign", "false"]);
         run(dir, &["config", "protocol.file.allow", "always"]);
+    }
+
+    #[test]
+    fn worktree_renames_pair_a_deleted_and_an_untracked_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init(root);
+        let text: String = (1..=20).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(root.join("a.txt"), &text).unwrap();
+        std::fs::write(root.join("keep.txt"), "keep\n").unwrap();
+        run(root, &["add", "."]);
+        run(root, &["commit", "-q", "-m", "init"]);
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+        std::fs::write(root.join("b.txt"), text.replace("line 7\n", "line seven\n")).unwrap();
+        let git_binary = Arc::new(crate::find_git().unwrap());
+        let options = StatusOptions {
+            in_process: true,
+            worktree_renames: true,
+            ..Default::default()
+        };
+        let status = get_status_with(git_binary.clone(), root, options).unwrap();
+        assert_eq!(status.files.len(), 1, "{:?}", summary(&status));
+        let file = &status.files[0];
+        assert_eq!(file.path, "b.txt");
+        assert_eq!(file.old_path.as_deref(), Some("a.txt"));
+        assert_eq!(file.status.kind, corvene_models::FileStatusKind::Renamed);
+        assert_eq!(file.status.code, ".R");
+        // the diff: the old blob against the working file
+        let diff = crate::diff::working_directory_diff(
+            git_binary.clone(),
+            root,
+            file,
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap();
+        let corvene_models::Diff::Text { hunks, .. } = diff else {
+            panic!("{diff:?}");
+        };
+        assert_eq!(hunks.len(), 1);
+        // committing it stages both paths
+        crate::commit::unstage_all(git_binary.clone(), root).unwrap();
+        crate::commit::stage_files(git_binary.clone(), root, &status.files).unwrap();
+        crate::commit::commit(
+            git_binary.clone(),
+            root,
+            "rename\n",
+            &crate::commit::CommitOptions::default(),
+        )
+        .unwrap();
+        let tree = Command::new("git")
+            .args(["ls-tree", "--name-only", "HEAD"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&tree.stdout), "b.txt\nkeep.txt\n");
+        // off (git's view): a deletion and an untracked file
+        std::fs::rename(root.join("b.txt"), root.join("c.txt")).unwrap();
+        let off = get_status_with(
+            git_binary,
+            root,
+            StatusOptions {
+                in_process: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(off.files.len(), 2, "{:?}", summary(&off));
     }
 
     /// What both implementations must agree on: per file, in git's order,

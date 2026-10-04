@@ -4703,6 +4703,25 @@ registry! {
         code: &["crates/corvene-core/src/commit_checks.rs", "crates/corvene-git/src/submodule.rs", "crates/corvene-ui/src/dialogs/add_embedded_repositories.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// The in-process status pairs deleted and untracked files as renames.
+    WORKTREE_RENAME_DETECTION = 786 "worktree-rename-detection" {
+        title: "Detect renames in the working tree",
+        summary: "A tracked file deleted or moved on disk and a similar new file (at least 50 % \
+                  alike) are listed as one renamed file, as git shows them once staged: its \
+                  diff compares the old file with the new one and committing it records the \
+                  rename. Needs 906-in-process-status (git status cannot pair them); a rename \
+                  whose old file also has staged changes is listed as before. Pairing reads the \
+                  untracked files, so it only runs while a tracked file is missing.",
+        ghd_behaviour: "The old path is listed as deleted and the new one as a new file until \
+                        they are committed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13588)],
+        code: &["crates/corvene-git/src/status_gix.rs", "crates/corvene-git/src/diff.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
