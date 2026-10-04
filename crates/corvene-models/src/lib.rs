@@ -195,6 +195,10 @@ pub struct Branch {
     /// relative dates in the branch list.
     #[serde(default)]
     pub tip_time: Option<i64>,
+    /// The tip commit's author name, for the branch list (Corvene,
+    /// `1201-branch-list-tip-author`).
+    #[serde(default)]
+    pub tip_author: Option<String>,
     /// The configured remote a remote branch belongs to (or, for a local
     /// branch, its upstream's), matched against the remote names so a name
     /// with slashes (`team/fork`) is kept whole. `None` falls back to GHD's
@@ -718,6 +722,7 @@ mod tests {
             tip: None,
             upstream: None,
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         };
         // GHD: split at the first slash
@@ -731,6 +736,7 @@ mod tests {
             tip: None,
             upstream: Some("refs/remotes/team/fork/feature/x".into()),
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         };
         assert_eq!(local.upstream_remote_name(), Some("team"));

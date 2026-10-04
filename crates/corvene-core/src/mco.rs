@@ -2167,6 +2167,7 @@ impl Dispatcher {
             tip: None,
             upstream: None,
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         });
         let local_name = target.name_without_remote().to_string();

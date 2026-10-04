@@ -49,6 +49,7 @@ fn throws_when_invalid_characters_are_used_for_branch_name() {
         tip: None,
         upstream: None,
         tip_time: None,
+        tip_author: None,
         remote_name: None,
     };
 

@@ -3366,6 +3366,7 @@ impl Dispatcher {
                 tip: None,
                 upstream: None,
                 tip_time: None,
+                tip_author: None,
                 remote_name: None,
             };
             corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)

@@ -38,6 +38,7 @@ fn create_branch(name: &str, upstream: Option<&str>, kind: BranchKind, full_name
         tip: Some("abc123".to_string()),
         upstream: upstream.map(|upstream| format!("refs/remotes/{upstream}")),
         tip_time: None,
+        tip_author: None,
         remote_name: None,
     }
 }

@@ -924,6 +924,7 @@ mod tests {
             tip: None,
             upstream: upstream.map(|u| format!("refs/remotes/{u}")),
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         }
     }

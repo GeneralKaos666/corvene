@@ -537,6 +537,7 @@ impl HistorySidebar {
                     tip: None,
                     upstream: None,
                     tip_time: None,
+                    tip_author: None,
                     remote_name: None,
                 })
                 .collect();

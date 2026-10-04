@@ -73,6 +73,7 @@ fn create_sample_branch(name: &str, upstream: Option<&str>) -> Branch {
         tip: Some("300acef".to_string()),
         upstream: upstream.map(|u| format!("refs/remotes/{u}")),
         tip_time: Some(now_secs()),
+        tip_author: None,
         remote_name: None,
     }
 }

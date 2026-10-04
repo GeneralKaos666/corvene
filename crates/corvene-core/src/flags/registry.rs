@@ -5995,6 +5995,21 @@ registry! {
 
     // ---- 1200 History & branches (overflow) ----
 
+    /// Branch list rows name the author of the branch's newest commit.
+    BRANCH_LIST_TIP_AUTHOR = 1201 "branch-list-tip-author" {
+        title: "Last author in the branch list",
+        summary: "Branch list rows show, dimmed after the date, the author of the branch's newest \
+                  commit. Git does not record who created a branch, so this is the last person \
+                  who committed to it (or whose commit it points at), not its creator.",
+        ghd_behaviour: "Rows show the branch name and the date of its newest commit only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20728)],
+        code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-git/src/repo.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

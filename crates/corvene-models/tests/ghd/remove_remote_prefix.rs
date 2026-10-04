@@ -22,6 +22,7 @@ fn remote_branch(name: &str) -> Branch {
         tip: None,
         upstream: None,
         tip_time: None,
+        tip_author: None,
         remote_name: None,
     }
 }

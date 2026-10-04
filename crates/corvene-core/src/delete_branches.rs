@@ -315,6 +315,7 @@ mod tests {
             tip: None,
             upstream: upstream.map(str::to_string),
             tip_time,
+            tip_author: None,
             remote_name: None,
         }
     }

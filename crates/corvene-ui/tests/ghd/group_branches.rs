@@ -53,6 +53,7 @@ fn should_group_branches() {
         tip: Some("300acef".to_string()),
         upstream: None,
         tip_time: Some(author_date),
+        tip_author: None,
         remote_name: None,
     };
 

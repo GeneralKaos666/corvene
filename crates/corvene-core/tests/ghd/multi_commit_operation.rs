@@ -74,6 +74,7 @@ fn local_branch(name: &str, sha: &str) -> Branch {
         tip: Some(sha.into()),
         upstream: None,
         tip_time: None,
+        tip_author: None,
         remote_name: None,
     }
 }

@@ -112,10 +112,12 @@ fn branches(repo: &gix::Repository, remote_list: &[Remote]) -> Result<Vec<Branch
         let name = reference.name().shorten().to_string();
         let tip_id = reference.peel_to_id().ok();
         let tip = tip_id.map(|id| id.to_string());
-        let tip_time = tip_id
-            .and_then(|id| repo.find_commit(id).ok())
+        let tip_commit = tip_id.and_then(|id| repo.find_commit(id).ok());
+        let tip_time = tip_commit
+            .as_ref()
             .and_then(|c| c.time().ok())
             .map(|t| t.seconds);
+        let tip_author = tip_commit.as_ref().and_then(tip_author_name);
         let upstream = repo
             .branch_remote_tracking_ref_name(reference.name(), gix::remote::Direction::Fetch)
             .and_then(|r| r.ok())
@@ -132,6 +134,7 @@ fn branches(repo: &gix::Repository, remote_list: &[Remote]) -> Result<Vec<Branch
             tip,
             upstream,
             tip_time,
+            tip_author,
             remote_name,
         });
     }
@@ -151,10 +154,12 @@ fn branches(repo: &gix::Repository, remote_list: &[Remote]) -> Result<Vec<Branch
         }
         let tip_id = reference.peel_to_id().ok();
         let tip = tip_id.map(|id| id.to_string());
-        let tip_time = tip_id
-            .and_then(|id| repo.find_commit(id).ok())
+        let tip_commit = tip_id.and_then(|id| repo.find_commit(id).ok());
+        let tip_time = tip_commit
+            .as_ref()
             .and_then(|c| c.time().ok())
             .map(|t| t.seconds);
+        let tip_author = tip_commit.as_ref().and_then(tip_author_name);
         let remote_name = Branch::match_remote(&name, remote_list).map(str::to_string);
         out.push(Branch {
             name,
@@ -163,10 +168,21 @@ fn branches(repo: &gix::Repository, remote_list: &[Remote]) -> Result<Vec<Branch
             tip,
             upstream: None,
             tip_time,
+            tip_author,
             remote_name,
         });
     }
     Ok(out)
+}
+
+/// The name of a branch tip's author, for the branch list (Corvene,
+/// `1201-branch-list-tip-author`).
+fn tip_author_name(commit: &gix::Commit<'_>) -> Option<String> {
+    commit
+        .author()
+        .ok()
+        .map(|a| a.name.to_string())
+        .filter(|n| !n.trim().is_empty())
 }
 
 /// Whether the repository has stash entries (`refs/stash` exists), for the
@@ -208,6 +224,7 @@ fn tip(repo: &gix::Repository, branches: &[Branch]) -> Result<Tip> {
             tip: head.id().map(|id| id.to_string()),
             upstream: None,
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         });
     Ok(Tip::Valid { branch })

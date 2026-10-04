@@ -29,6 +29,8 @@
 //! Deviation (`854-branch-list-stash-icon`): a local branch with a Desktop
 //! stash shows the stash icon after its name (GHD `branch-list-item.tsx` does
 //! not).
+//! Deviation (`1201-branch-list-tip-author`): rows can name the newest
+//! commit's author after the date.
 //! Deviation (`899-tags-in-branch-list`): with a filter typed, matching tags
 //! follow the branches in a Tags group; choosing one checks out its commit.
 //! Deviation (`898-branch-list-folders`): Other Branches sharing a prefix
@@ -336,6 +338,7 @@ fn tags_group(tags: &[(String, String)], query: &str) -> Option<BranchGroup> {
             tip: Some(sha.clone()),
             upstream: None,
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         })
         .collect();
@@ -1270,6 +1273,13 @@ impl BranchFoldout {
         let t = cx.ghd();
         let name = branch.name.clone();
         let is_tag = tag_commit(branch).is_some();
+        // `1201-branch-list-tip-author`
+        let author = branch.tip_author.clone().filter(|_| {
+            self.state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::BRANCH_LIST_TIP_AUTHOR)
+        });
         // the keyboard row (GHD `FilterList` moves its selection, focusing
         // the list) replaces the pointer / current-branch selection
         let keyboard = self.highlighted.is_some();
@@ -1305,9 +1315,10 @@ impl BranchFoldout {
         div()
             .id(SharedString::from(format!("branch-{}", branch.full_name)))
             .a11y_row(
-                match &date {
-                    Some(date) => format!("{}, {date}", branch.name),
-                    None => branch.name.clone(),
+                match (&date, &author) {
+                    (Some(date), Some(author)) => format!("{}, {date} by {author}", branch.name),
+                    (Some(date), None) => format!("{}, {date}", branch.name),
+                    (None, _) => branch.name.clone(),
                 },
                 current,
             )
@@ -1668,6 +1679,19 @@ impl BranchFoldout {
                         // the selected row's date takes the row colour
                         .when(!selected, |d| d.text_color(t.text_secondary))
                         .child(date),
+                )
+            })
+            .when_some(author, |d, author| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .max_w(zpx(110.))
+                        .mr(SPACING_HALF())
+                        .truncate()
+                        .text_size(FONT_SIZE_SM())
+                        .line_height(zpx(16.5))
+                        .when(!selected, |d| d.text_color(t.text_secondary))
+                        .child(format!("by {author}")),
                 )
             })
     }
@@ -2198,6 +2222,7 @@ mod tests {
             tip: None,
             upstream: upstream.map(|u| format!("refs/remotes/origin/{u}")),
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         }
     }
@@ -2210,6 +2235,7 @@ mod tests {
             tip: None,
             upstream: None,
             tip_time: None,
+            tip_author: None,
             remote_name: Some("origin".into()),
         }
     }

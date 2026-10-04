@@ -41,6 +41,7 @@ fn local_branch(name: &str) -> Branch {
         tip: Some(STUB_TIP.to_string()),
         upstream: None,
         tip_time: None,
+        tip_author: None,
         remote_name: None,
     }
 }

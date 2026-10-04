@@ -263,6 +263,7 @@ mod tests {
             tip: None,
             upstream: upstream.map(str::to_string),
             tip_time: None,
+            tip_author: None,
             remote_name: None,
         }
     }
