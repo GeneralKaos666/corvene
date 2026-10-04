@@ -6,6 +6,13 @@
 //! GHD's `popStashEntry` takes `git stash pop`'s exit code 1 with nothing on
 //! stderr for success and drops the entry. The conflicted files are marked
 //! resolved with [`mark_conflicts_resolved`] (the index only).
+//!
+//! Deviation (`775-stash-restore-unstages-new-files`): Desktop stashes add
+//! untracked files to the index first (`createDesktopStashEntry`), so a pop
+//! brings them back staged as new files, and a branch whose `.gitignore`
+//! ignores them still lists them; with
+//! [`StashPopOptions::unstage_new_files`] a restore unstages the files the
+//! stash added ([`stash_new_files`]) and they are untracked again.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -24,6 +31,9 @@ pub struct StashPopOptions {
     /// `774-stash-conflict-flow`: a pop that leaves conflicted files keeps
     /// the entry (GHD drops it).
     pub keep_on_conflict: bool,
+    /// `775-stash-restore-unstages-new-files`: after a restore, the files
+    /// the stash added are unstaged (GHD leaves them staged).
+    pub unstage_new_files: bool,
 }
 
 /// What [`pop_stash_entry_with`] did.
@@ -52,6 +62,11 @@ pub fn pop_stash_entry_with(
     let Some(entry) = stash_entry_matching_sha(git.clone(), workdir, stash_sha)? else {
         return Ok(StashPop::Missing);
     };
+    let new_files = if options.unstage_new_files {
+        stash_new_files(git.clone(), workdir, &entry).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     // conflicts already there are not this pop's (git refuses to apply)
     let unmerged_before =
         options.keep_on_conflict && !unmerged_paths(git.clone(), workdir)?.is_empty();
@@ -61,6 +76,7 @@ pub fn pop_stash_entry_with(
         .allow_any_exit_code()
         .run()?;
     if out.status.success() {
+        unstage_new_files(git, workdir, &new_files);
         return Ok(StashPop::Restored);
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -76,7 +92,8 @@ pub fn pop_stash_entry_with(
         return Ok(StashPop::Conflicted);
     }
     if out.status.code() == Some(1) && out.stderr.is_empty() {
-        drop_desktop_stash_entry(git, workdir, stash_sha)?;
+        drop_desktop_stash_entry(git.clone(), workdir, stash_sha)?;
+        unstage_new_files(git, workdir, &new_files);
         return Ok(StashPop::Restored);
     }
     Err(GitError::Failed {
@@ -84,6 +101,72 @@ pub fn pop_stash_entry_with(
         code: out.status.code(),
         stderr: out.stderr.trim().to_string(),
     })
+}
+
+/// The files stash `entry` added to the index: those its index commit
+/// (second parent) has and its base (first parent) does not. For a Desktop
+/// stash that is every file that was untracked, plus new files that were
+/// staged.
+pub fn stash_new_files(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    entry: &StashEntry,
+) -> Result<Vec<String>> {
+    let [base, index, ..] = entry.parents.as_slice() else {
+        return Ok(Vec::new());
+    };
+    let out = GitCommand::new(git)
+        .args([
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--diff-filter=A",
+            base,
+            index,
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(split_nul(&out.stdout))
+}
+
+/// After a restore: unstage those of `added` that are staged as new files
+/// now (index only). A failure leaves them staged; the restore stands.
+fn unstage_new_files(git: Arc<GitBinary>, workdir: &Path, added: &[String]) {
+    if added.is_empty() {
+        return;
+    }
+    let staged = GitCommand::new(git.clone())
+        .args([
+            "diff",
+            "--cached",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            "--diff-filter=A",
+        ])
+        .current_dir(workdir)
+        .run()
+        .map(|out| split_nul(&out.stdout));
+    let result = staged.and_then(|staged| {
+        let paths: Vec<String> = added
+            .iter()
+            .filter(|p| staged.contains(p))
+            .cloned()
+            .collect();
+        mark_conflicts_resolved(git, workdir, &paths)
+    });
+    if let Err(err) = result {
+        tracing::warn!(%err, "could not unstage the files the stash added");
+    }
+}
+
+fn split_nul(stdout: &[u8]) -> Vec<String> {
+    stdout
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| String::from_utf8_lossy(p).into_owned())
+        .collect()
 }
 
 /// The paths with unmerged index entries (`ls-files -u`), each once.
@@ -212,6 +295,7 @@ mod tests {
         let path = dir.path();
         let options = StashPopOptions {
             keep_on_conflict: true,
+            ..Default::default()
         };
         assert_eq!(
             pop_stash_entry_with(git.clone(), path, &sha, options).unwrap(),
@@ -239,6 +323,37 @@ mod tests {
             StashPop::Restored
         );
         assert!(stash_entry(git, path, &sha).unwrap().is_none());
+    }
+
+    #[test]
+    fn restore_can_leave_stashed_new_files_untracked() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        std::fs::write(path.join("new.txt"), "n\n").unwrap();
+        assert!(crate::create_desktop_stash(git.clone(), path, "main", false).unwrap());
+        let entry = crate::get_stashes(git.clone(), path).unwrap().0.remove(0);
+        assert_eq!(
+            stash_new_files(git.clone(), path, &entry).unwrap(),
+            ["new.txt"]
+        );
+        let options = StashPopOptions {
+            unstage_new_files: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            pop_stash_entry_with(git.clone(), path, &entry.sha, options).unwrap(),
+            StashPop::Restored
+        );
+        let status = crate::get_status(git.clone(), path).unwrap();
+        let new = status.files.iter().find(|f| f.path == "new.txt").unwrap();
+        assert_eq!(new.status.kind, corvene_models::FileStatusKind::Untracked);
+        let modified = status.files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert_eq!(
+            modified.status.kind,
+            corvene_models::FileStatusKind::Modified
+        );
+        assert!(stash_entry(git, path, &entry.sha).unwrap().is_none());
     }
 
     #[test]

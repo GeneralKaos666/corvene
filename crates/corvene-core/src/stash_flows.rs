@@ -8,6 +8,10 @@
 //! whether to drop the kept entry (`Popup::DropKeptStash`). GHD drops the
 //! entry after any pop git reports with exit code 1 and an empty stderr, and
 //! has no way to mark such files resolved.
+//!
+//! Deviation (`775-stash-restore-unstages-new-files`): every restore passes
+//! [`StashPopOptions::unstage_new_files`], so files that were untracked when
+//! stashed come back untracked (GHD's come back staged as new files).
 
 use std::path::PathBuf;
 
@@ -58,6 +62,7 @@ impl Dispatcher {
         let flags = &Self::state(cx).read(cx).flags;
         StashPopOptions {
             keep_on_conflict: flags.bool(crate::flags::ids::STASH_CONFLICT_FLOW),
+            unstage_new_files: flags.bool(crate::flags::ids::STASH_RESTORE_UNSTAGES_NEW_FILES),
         }
     }
 
@@ -103,9 +108,9 @@ impl Dispatcher {
         })
     }
 
-    /// Stashed Changes › Restore with `774` on: the pop of
-    /// [`Self::pop_stash`], recording a conflicted restore.
-    pub(crate) fn pop_stash_keeping_conflicts(
+    /// Stashed Changes › Restore: the pop of [`Self::pop_stash`] with the
+    /// flags' [`StashPopOptions`], recording a conflicted restore (`774`).
+    pub(crate) fn pop_stash_with_options(
         id: u64,
         stash: StashEntry,
         check_branch: bool,

@@ -4367,27 +4367,8 @@ impl Dispatcher {
         // its commit and only while its branch is still checked out (GHD pops
         // `stash@{n}` from the last refresh, which may be another branch's)
         let check_branch = s.flags.bool(crate::flags::ids::STASH_RESTORE_CHECKS_BRANCH);
-        // `774-stash-conflict-flow`: a conflicted restore keeps the entry
-        if s.flags.bool(crate::flags::ids::STASH_CONFLICT_FLOW) {
-            Self::pop_stash_keeping_conflicts(id, stash, check_branch, cx);
-            return;
-        }
-        Self::run_history_op(
-            id,
-            "Could not restore stash",
-            move |git, workdir| match (check_branch, stash.branch.as_deref()) {
-                (true, Some(branch)) => corvene_git::pop_stash_on_branch(
-                    git,
-                    &workdir,
-                    &stash.sha,
-                    branch,
-                    Default::default(),
-                )
-                .map(|_| ()),
-                _ => corvene_git::pop_stash_entry(git, &workdir, &stash.sha),
-            },
-            cx,
-        );
+        // `774-stash-conflict-flow` / `775-stash-restore-unstages-new-files`
+        Self::pop_stash_with_options(id, stash, check_branch, cx);
     }
 
     /// Discard: confirm unless the user opted out (`askForConfirmationOnDiscardStash`).

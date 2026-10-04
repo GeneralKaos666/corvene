@@ -4430,6 +4430,24 @@ registry! {
         code: &["crates/corvene-git/src/stash_ops.rs", "crates/corvene-core/src/stash_flows.rs", "crates/corvene-ui/src/stash_conflicts.rs"],
     },
 
+    /// Files that were untracked when stashed come back untracked.
+    STASH_RESTORE_UNSTAGES_NEW_FILES = 775 "stash-restore-unstages-new-files" {
+        title: "Restored stashes leave new files untracked",
+        summary: "A stash made by Corvene or GitHub Desktop includes the untracked files by \
+                  adding them to git's index first. After a restore (Restore, bringing changes \
+                  to another branch, returning to a branch) the files the stash added are \
+                  unstaged again, so they are untracked as before and a branch whose .gitignore \
+                  ignores them no longer lists them.",
+        ghd_behaviour: "Restored files come back staged as new files, so they stay tracked even \
+                        where .gitignore ignores them, until git reset is run.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17883)],
+        code: &["crates/corvene-git/src/stash_ops.rs", "crates/corvene-core/src/stash_flows.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
