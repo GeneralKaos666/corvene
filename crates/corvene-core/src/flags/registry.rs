@@ -4290,6 +4290,24 @@ registry! {
         code: &["crates/corvene-ui/src/workspace.rs", "crates/corvene-ui/src/no_changes.rs"],
     },
 
+    /// A merge commit can show only its conflict resolutions.
+    MERGE_REMERGE_DIFF = 773 "merge-remerge-diff" {
+        title: "Show a merge's conflict resolutions",
+        summary: "When one merge commit is selected in History, a toggle at the end of its file \
+                  list header switches to what the merge changed beyond git's automatic merge of \
+                  its parents (git show --remerge-diff): the conflict resolutions and any other \
+                  edit made while merging, or \"Merged cleanly\" when there are none. Needs git \
+                  2.36 or newer.",
+        ghd_behaviour: "A merge commit is diffed against its first parent only, so it lists \
+                        everything the merged branch brought in.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(386)],
+        code: &["crates/corvene-git/src/log.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

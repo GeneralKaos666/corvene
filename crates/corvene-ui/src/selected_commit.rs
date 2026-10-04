@@ -18,7 +18,10 @@
 //! changes from the commit (flag `814`).
 //! A file's context menu adds "Open All Files of Commit in <editor>"
 //! (`712-open-multiple-files`). The author's name can link to their GitHub
-//! profile (`882-commit-author-links`).
+//! profile (`882-commit-author-links`). A merge commit's file list header
+//! toggles "conflict resolutions only" (`773-merge-remerge-diff`: git's
+//! `--remerge-diff`), with a "Merged cleanly" note when there are none; GHD
+//! diffs merges against their first parent only.
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher, Popup, UnreachableCommitsTab};
 use gpui_kit::component::resizable::{
@@ -902,6 +905,69 @@ impl SelectedCommitView {
         )
     }
 
+    /// `.file-list-header`; `remerge` (`773-merge-remerge-diff`) adds the
+    /// "conflict resolutions only" toggle at its end, on or off.
+    fn file_list_header(
+        &self,
+        id: u64,
+        label: String,
+        remerge: Option<bool>,
+        cx: &Context<Self>,
+    ) -> Div {
+        let t = cx.ghd();
+        div()
+            .relative()
+            .h(zpx(30.))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(SPACING())
+            .bg(t.box_alt_background)
+            .border_b_1()
+            .border_color(t.box_border)
+            .text_size(FONT_SIZE())
+            .child(label)
+            .when_some(remerge, |d, on| {
+                let tooltip = if on {
+                    "Showing the conflict resolutions only: what differs from git's \
+                     automatic merge. Click to show all changes."
+                } else {
+                    "Show the conflict resolutions only: what differs from git's \
+                     automatic merge of the parents."
+                };
+                d.child(
+                    div()
+                        .id("remerge-diff-toggle")
+                        .a11y_button(if on {
+                            "Show all changes"
+                        } else {
+                            "Show conflict resolutions only"
+                        })
+                        .ghd_tooltip(tooltip)
+                        .absolute()
+                        .right(SPACING_HALF())
+                        .top(zpx(4.))
+                        .size(zpx(22.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(BORDER_RADIUS())
+                        .cursor_pointer()
+                        .when(on, |d| d.bg(t.box_selected_active_background))
+                        .child(octicon(
+                            Octicon::GitMerge,
+                            if on {
+                                t.box_selected_active_text
+                            } else {
+                                t.text_secondary
+                            },
+                        ))
+                        .on_click(move |_, _, cx| Dispatcher::set_remerge_diff(id, !on, cx)),
+                )
+            })
+    }
+
     /// `FileList` + `.file-list-header`
     fn file_list(&self, id: u64, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
@@ -914,15 +980,34 @@ impl SelectedCommitView {
         let selected = rs.and_then(|r| r.commit_selected_file.clone());
         let multi = std::rc::Rc::new(self.multi_selected(id, cx));
         let weak = cx.weak_entity();
+        // `773-merge-remerge-diff`: (toggle shown, showing resolutions only)
+        let remerge = rs
+            .filter(|rs| Dispatcher::remerge_available(s, rs))
+            .map(|rs| rs.remerge_diff);
         if rs.and_then(|r| r.changeset.as_ref()).is_some() && files.is_empty() {
-            return div()
-                .size_full()
+            let empty = div()
+                .flex_1()
                 .flex()
                 .items_center()
                 .justify_center()
+                .p(SPACING())
+                .text_center()
                 .text_color(t.text_secondary)
-                .child("No files in commit")
-                .into_any_element();
+                .child(if remerge == Some(true) {
+                    "Merged cleanly: nothing differs from git's automatic merge"
+                } else {
+                    "No files in commit"
+                });
+            return match remerge {
+                Some(on) => div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .child(self.file_list_header(id, String::new(), Some(on), cx))
+                    .child(empty)
+                    .into_any_element(),
+                None => empty.size_full().into_any_element(),
+            };
         }
         let count = files.len();
         let files = std::rc::Rc::new(files);
@@ -935,27 +1020,19 @@ impl SelectedCommitView {
             .flex_col()
             .border_r_1()
             .border_color(t.box_border)
-            .child(
-                div()
-                    .h(zpx(30.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .px(SPACING())
-                    .bg(t.box_alt_background)
-                    .border_b_1()
-                    .border_color(t.box_border)
-                    .text_size(FONT_SIZE())
-                    .child(if count == 1 {
-                        "1 changed file".to_string()
-                    } else {
-                        format!(
-                            "{} changed files",
-                            crate::format::format_count(count as u64)
-                        )
-                    }),
-            )
+            .child(self.file_list_header(
+                id,
+                if count == 1 {
+                    "1 changed file".to_string()
+                } else {
+                    format!(
+                        "{} changed files",
+                        crate::format::format_count(count as u64)
+                    )
+                },
+                remerge,
+                cx,
+            ))
             .child(
                 // a `List` node owning the file rows
                 div()

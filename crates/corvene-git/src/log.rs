@@ -882,6 +882,71 @@ pub fn commit_file_diff(
     ))
 }
 
+/// Corvene `773-merge-remerge-diff`: the oldest git with `--remerge-diff`.
+pub const REMERGE_DIFF_MIN_VERSION: (u32, u32) = (2, 36);
+
+/// Corvene `773-merge-remerge-diff`: the files of merge commit `sha` that
+/// differ from git's automatic re-merge of its parents, i.e. the conflict
+/// resolutions and any other edit made in the merge (`show --remerge-diff
+/// --format= --raw --numstat -z <sha>`). Empty for a clean merge.
+pub fn remerge_changed_files(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    sha: &str,
+) -> Result<ChangesetData> {
+    let out = GitCommand::new(git)
+        .args([
+            "show",
+            sha,
+            "--remerge-diff",
+            "--no-show-signature",
+            "--raw",
+            "--format=format:",
+            "--numstat",
+            "-z",
+            "--",
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(parse_raw_log_with_numstat(&out.stdout, sha))
+}
+
+/// Corvene `773-merge-remerge-diff`: one file of
+/// [`remerge_changed_files`], from the re-merge (conflict markers and all)
+/// to what the merge commit recorded.
+pub fn remerge_file_diff(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &CommittedFileChange,
+    hide_whitespace: bool,
+) -> Result<Diff> {
+    let mut args = vec!["show", file.commitish.as_str(), "--remerge-diff"];
+    if hide_whitespace {
+        args.push("-w");
+    }
+    args.extend([
+        "--no-show-signature",
+        "--patch-with-raw",
+        "-z",
+        "--no-color",
+        "--format=format:",
+        "--",
+    ]);
+    let out = GitCommand::new(git.clone())
+        .args(args)
+        .current_dir(workdir)
+        .arg(&file.path)
+        .run()?;
+    Ok(finish_committed_diff(
+        git,
+        workdir,
+        file,
+        &file.commitish,
+        &format!("{}^", file.commitish),
+        &out.stdout,
+    ))
+}
+
 /// `getMergeBase`: `None` when the two commits have unrelated histories
 /// (exit code 1) or a ref cannot be found (128).
 pub fn merge_base(git: Arc<GitBinary>, workdir: &Path, a: &str, b: &str) -> Result<Option<String>> {

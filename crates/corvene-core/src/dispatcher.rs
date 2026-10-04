@@ -2346,9 +2346,28 @@ impl Dispatcher {
         if ordered.is_empty() || (ordered.len() > 1 && !contiguous) {
             return;
         }
+        // `773-merge-remerge-diff`: a merge's conflict resolutions only
+        let remerge = {
+            let s = Self::state(cx).read(cx);
+            s.repo_states
+                .get(&id)
+                .is_some_and(|rs| Self::remerge_applies(s, rs))
+        };
+        if remerge {
+            let key = ordered.clone();
+            let task = cx.background_executor().spawn(async move {
+                corvene_git::remerge_changed_files(git, &workdir, &ordered[0]).map(Arc::new)
+            });
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                let result = task.await;
+                cx.update(|cx| Self::apply_changeset(id, &key, true, result, cx));
+            })
+            .detach();
+            return;
+        }
         // a commit's files never change: shown in this same frame
         if let Some(data) = crate::diff_cache::changeset(&workdir, &ordered) {
-            Self::apply_changeset(id, &ordered, Ok(data), cx);
+            Self::apply_changeset(id, &ordered, false, Ok(data), cx);
             return;
         }
         let key = ordered.clone();
@@ -2359,20 +2378,65 @@ impl Dispatcher {
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = task.await;
-            cx.update(|cx| Self::apply_changeset(id, &key, result, cx));
+            cx.update(|cx| Self::apply_changeset(id, &key, false, result, cx));
         })
         .detach();
+    }
+
+    /// `773-merge-remerge-diff`: History can show only the selected merge's
+    /// conflict resolutions (one merge commit selected, git 2.36 or newer).
+    pub fn remerge_available(s: &AppState, rs: &RepositoryState) -> bool {
+        let git_ok = s.git.as_ref().is_some_and(|git| {
+            (git.version.major, git.version.minor) >= corvene_git::REMERGE_DIFF_MIN_VERSION
+        });
+        git_ok
+            && s.flags.bool(crate::flags::ids::MERGE_REMERGE_DIFF)
+            && rs.selected_commits.len() == 1
+            && rs
+                .visible_commits()
+                .iter()
+                .find(|c| Some(&c.sha) == rs.selected_commits.first())
+                .is_some_and(|c| c.parents.len() > 1)
+    }
+
+    /// `773-merge-remerge-diff`: the toggle is on and applies to the selection.
+    pub fn remerge_applies(s: &AppState, rs: &RepositoryState) -> bool {
+        rs.remerge_diff && Self::remerge_available(s, rs)
+    }
+
+    /// `773-merge-remerge-diff`: show the selected merge's conflict
+    /// resolutions only (or all of its changes again).
+    pub fn set_remerge_diff(id: u64, on: bool, cx: &mut App) {
+        let changed = Self::state(cx).update(cx, |s, cx| {
+            let rs = s.repo_state_mut(id);
+            if rs.remerge_diff == on {
+                return false;
+            }
+            rs.remerge_diff = on;
+            rs.changeset = None;
+            rs.commit_diff = None;
+            cx.notify();
+            true
+        });
+        if changed {
+            Self::load_changeset(id, cx);
+        }
     }
 
     fn apply_changeset(
         id: u64,
         key: &[String],
+        remerge: bool,
         result: corvene_git::error::Result<Arc<corvene_models::ChangesetData>>,
         cx: &mut App,
     ) {
         let load = Self::state(cx).update(cx, |s, cx| {
+            let applies = s
+                .repo_states
+                .get(&id)
+                .is_some_and(|rs| Self::remerge_applies(s, rs));
             let rs = s.repo_state_mut(id);
-            if Self::ordered_selection(rs) != key {
+            if Self::ordered_selection(rs) != key || applies != remerge {
                 return false;
             }
             match result {
@@ -2452,10 +2516,40 @@ impl Dispatcher {
             .read(cx)
             .settings
             .hide_whitespace_in_history_diff;
+        // `773-merge-remerge-diff`: from the re-merge to the recorded merge
+        let remerge = {
+            let s = Self::state(cx).read(cx);
+            s.repo_states
+                .get(&id)
+                .is_some_and(|rs| Self::remerge_applies(s, rs))
+        };
+        if remerge {
+            let key = (ordered, file.path.clone());
+            let task = cx.background_executor().spawn(async move {
+                let diff =
+                    corvene_git::remerge_file_diff(git.clone(), &workdir, &file, hide_whitespace)
+                        .unwrap_or_else(|err| {
+                            warn!(%err, "remerge diff failed");
+                            corvene_models::Diff::Empty
+                        });
+                // the new side for expansion and highlighting; the re-merge
+                // with its conflict markers is no blob
+                let contents = (file.status.kind != corvene_models::FileStatusKind::Deleted)
+                    .then(|| corvene_git::blob_lines(git, &workdir, &file.commitish, &file.path))
+                    .flatten();
+                (Arc::new(diff), contents.map(Arc::new), None)
+            });
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                let loaded = task.await;
+                cx.update(|cx| Self::apply_commit_diff(id, &key.0, &key.1, true, loaded, cx));
+            })
+            .detach();
+            return;
+        }
         if let Some(loaded) =
             crate::diff_cache::commit_diff(&workdir, &ordered, &file.path, hide_whitespace)
         {
-            Self::apply_commit_diff(id, &ordered, &file.path, loaded, cx);
+            Self::apply_commit_diff(id, &ordered, &file.path, false, loaded, cx);
             Self::prefetch_commit_diffs(id, cx);
             return;
         }
@@ -2474,18 +2568,30 @@ impl Dispatcher {
         cx.spawn(async move |cx: &mut AsyncApp| {
             let loaded = task.await;
             cx.update(|cx| {
-                Self::apply_commit_diff(id, &key.0, &key.1, loaded, cx);
+                Self::apply_commit_diff(id, &key.0, &key.1, false, loaded, cx);
                 Self::prefetch_commit_diffs(id, cx);
             });
         })
         .detach();
     }
 
-    fn apply_commit_diff(id: u64, shas: &[String], path: &str, loaded: LoadedDiff, cx: &mut App) {
+    fn apply_commit_diff(
+        id: u64,
+        shas: &[String],
+        path: &str,
+        remerge: bool,
+        loaded: LoadedDiff,
+        cx: &mut App,
+    ) {
         Self::state(cx).update(cx, |s, cx| {
+            let applies = s
+                .repo_states
+                .get(&id)
+                .is_some_and(|rs| Self::remerge_applies(s, rs));
             let rs = s.repo_state_mut(id);
             if Self::ordered_selection(rs) != shas
                 || rs.commit_selected_file.as_deref() != Some(path)
+                || applies != remerge
             {
                 return;
             }

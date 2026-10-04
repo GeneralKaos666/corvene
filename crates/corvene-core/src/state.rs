@@ -1050,6 +1050,9 @@ pub struct RepositoryState {
     pub commit_diff_old_contents: Option<Arc<Vec<String>>>,
     /// `isExpanded` of the expandable commit summary.
     pub commit_summary_expanded: bool,
+    /// `773-merge-remerge-diff`: a selected merge shows only its conflict
+    /// resolutions (this session).
+    pub remerge_diff: bool,
     /// `commitToAmend`: the commit form rewrites HEAD instead of adding a commit.
     pub commit_to_amend: Option<corvene_models::Commit>,
     /// Bumped when amending starts so the form loads the commit's message.
