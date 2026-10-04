@@ -53,6 +53,11 @@
 //! Deviation (`747-intra-line-max-length`): the line length beyond which no
 //! intra-line range is computed can be changed (GHD: 1024, fixed).
 //!
+//! Deviation (`792-whitespace-hidden-highlight`): a context row takes the
+//! syntax spans of the file whose line it shows (git prints a context line
+//! from one file; with Hide Whitespace the other's can differ in
+//! indentation), GHD always the old file's unless the diff only adds lines.
+//!
 //! Deviation (`791-word-intra-line-diff`): a modified line highlights each
 //! changed word (a word diff of the paired lines) instead of GHD's one range
 //! between the common prefix and suffix (`ui/diff/diff-helpers.tsx`
@@ -635,6 +640,11 @@ impl DiffView {
     fn highlight(&mut self, key: (u64, String, u64), cx: &mut Context<Self>) {
         let previous = self.tokens.take().zip(self.previous_rows.take());
         let with = highlight_engine(self.state.read(cx));
+        let context_side = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::WHITESPACE_HIDDEN_HIGHLIGHT);
         self.highlighted_with = Some(with);
         let path = key.1.clone();
         let rows: Vec<RowSource> = self
@@ -666,7 +676,7 @@ impl DiffView {
             .find_map(|side| side.lines.first().map(String::as_str))
             .unwrap_or_default();
         if pending_bytes == 0 {
-            let (tokens, sides) = assemble(with.0, &path, &rows, old, new);
+            let (tokens, sides) = assemble(with.0, &path, &rows, old, new, context_side);
             remember_sides(sides);
             self.tokens = tokens.map(Rc::new);
             return;
@@ -674,7 +684,17 @@ impl DiffView {
         let in_process = tokenizes_in_process(with.0, &path, first_line);
         let (mut old, mut new) = (old, new);
         let preview = in_process
-            .then(|| preview(with.0, &path, &rows, self.preview_window(), &old, &new))
+            .then(|| {
+                preview(
+                    with.0,
+                    &path,
+                    &rows,
+                    self.preview_window(),
+                    &old,
+                    &new,
+                    context_side,
+                )
+            })
             .flatten();
         match preview {
             Some(preview) => {
@@ -717,7 +737,7 @@ impl DiffView {
         let rows_task = (old.is_none() && new.is_none()).then(|| {
             let (path, rows) = (path.clone(), rows.clone());
             cx.background_executor()
-                .spawn(async move { assemble(engine, &path, &rows, None, None).0 })
+                .spawn(async move { assemble(engine, &path, &rows, None, None, context_side).0 })
         });
         cx.spawn(async move |this, cx| {
             let result = match rows_task {
@@ -733,7 +753,7 @@ impl DiffView {
                         }
                     }
                     remember_sides(fresh);
-                    assemble(engine, &path, &rows, old, new).0
+                    assemble(engine, &path, &rows, old, new, context_side).0
                 }
             };
             this.update(cx, |this, cx| {
@@ -2312,6 +2332,7 @@ fn preview(
     window: std::ops::Range<usize>,
     old: &Option<Side>,
     new: &Option<Side>,
+    context_from_shown_side: bool,
 ) -> Option<Preview> {
     use corvene_core::DiffLineKind as K;
     let cost =
@@ -2374,7 +2395,14 @@ fn preview(
     if budget == 0 {
         return None;
     }
-    let (tokens, _) = assemble(engine, path, rows, preview_old, preview_new);
+    let (tokens, _) = assemble(
+        engine,
+        path,
+        rows,
+        preview_old,
+        preview_new,
+        context_from_shown_side,
+    );
     Some(Preview {
         tokens,
         whole,
@@ -2391,6 +2419,7 @@ fn assemble(
     rows: &[RowSource],
     old: Option<Side>,
     new: Option<Side>,
+    context_from_shown_side: bool,
 ) -> (Option<Tokens>, Vec<(SideKey, Arc<Option<Tokens>>)>) {
     use corvene_core::DiffLineKind as K;
     if old.is_none() && new.is_none() {
@@ -2436,6 +2465,23 @@ fn assemble(
             let picked = match kind {
                 K::Add => pick(&new, *new_line),
                 K::Delete => pick(&old, *old_line),
+                // `792-whitespace-hidden-highlight`: git prints a context
+                // line from one of the files; with whitespace hidden the
+                // other file's line can differ in its whitespace, and its
+                // spans would land on the wrong characters
+                K::Context if context_from_shown_side => {
+                    let shows = |picked: &Option<(Vec<corvene_highlight::Span>, String)>| {
+                        picked.as_ref().is_some_and(|(_, raw)| {
+                            crate::diff_view_rows::expand_tabs(raw) == *text
+                        })
+                    };
+                    let old_line = pick(&old, *old_line);
+                    if shows(&old_line) {
+                        old_line
+                    } else {
+                        Some(pick(&new, *new_line)).filter(shows).flatten()
+                    }
+                }
                 K::Context if any_added && !any_deleted => pick(&new, *new_line),
                 K::Context => pick(&old, *old_line).or_else(|| pick(&new, *new_line)),
                 _ => None,
@@ -3064,9 +3110,18 @@ mod tests {
             })
             .collect();
         let side = || Some(Side::new(with, "preview-test.js", lines.clone()));
-        let (whole, _) = assemble(with.0, "preview-test.js", &rows, side(), side());
+        let (whole, _) = assemble(with.0, "preview-test.js", &rows, side(), side(), false);
         let whole = whole.unwrap();
-        let part = preview(with.0, "preview-test.js", &rows, 0..3, &side(), &side()).unwrap();
+        let part = preview(
+            with.0,
+            "preview-test.js",
+            &rows,
+            0..3,
+            &side(),
+            &side(),
+            false,
+        )
+        .unwrap();
         let tokens = part.tokens.unwrap();
         assert!(!part.complete && part.whole.is_empty());
         assert_eq!(tokens.len(), rows.len());
@@ -3079,10 +3134,58 @@ mod tests {
             0..rows.len(),
             &side(),
             &side(),
+            false,
         )
         .unwrap();
         assert!(all.complete && all.whole.len() == 2);
         assert_eq!(all.tokens.unwrap(), whole);
+    }
+
+    #[::core::prelude::v1::test]
+    fn context_rows_take_the_side_they_show() {
+        use super::{Side, assemble};
+        use corvene_core::DiffLineKind as K;
+        use corvene_highlight::Engine;
+        use std::sync::Arc;
+        let with = (Engine::GitHubDesktop, 0);
+        // whitespace hidden: the context row is the new file's indented line
+        let old = Arc::new(vec![
+            "fn main() {".to_string(),
+            "let a = 1;".to_string(),
+            "let b = 2;".to_string(),
+            "}".to_string(),
+        ]);
+        let new = Arc::new(vec![
+            "fn main() {".to_string(),
+            "    let a = 1;".to_string(),
+            "}".to_string(),
+        ]);
+        let rows = vec![
+            (K::Hunk, None, None, "@@ -1,4 +1,3 @@".to_string()),
+            (K::Context, Some(1), Some(1), "fn main() {".to_string()),
+            (K::Context, Some(2), Some(2), "    let a = 1;".to_string()),
+            (K::Delete, Some(3), None, "let b = 2;".to_string()),
+            (K::Context, Some(4), Some(3), "}".to_string()),
+        ];
+        let sides = || {
+            (
+                Some(Side::new(with, "ws-test.rs", old.clone())),
+                Some(Side::new(with, "ws-test.rs", new.clone())),
+            )
+        };
+        let starts = |tokens: &Vec<corvene_highlight::Span>| -> Vec<usize> {
+            tokens.iter().map(|s| s.range.start).collect()
+        };
+        // GHD: the old line's spans, four characters off
+        let (o, n) = sides();
+        let ghd = assemble(with.0, "ws-test.rs", &rows, o, n, false)
+            .0
+            .unwrap();
+        assert_eq!(starts(&ghd[2])[0], 0);
+        let (o, n) = sides();
+        let fixed = assemble(with.0, "ws-test.rs", &rows, o, n, true).0.unwrap();
+        assert_eq!(starts(&fixed[2])[0], 4);
+        assert_eq!(fixed[1], ghd[1]);
     }
 
     #[::core::prelude::v1::test]
@@ -3100,7 +3203,7 @@ mod tests {
         ];
         let side = Side::new(with, "cache-test.rs", lines.clone());
         assert!(side.tokens.is_none());
-        let (tokens, fresh) = assemble(with.0, "cache-test.rs", &rows, None, Some(side));
+        let (tokens, fresh) = assemble(with.0, "cache-test.rs", &rows, None, Some(side), false);
         let tokens = tokens.expect("rust is highlighted");
         assert!(tokens[0].is_empty());
         assert_eq!(tokens[1][0].class, TokenClass::Keyword);
@@ -3108,7 +3211,7 @@ mod tests {
         remember_sides(fresh);
         let side = Side::new(with, "cache-test.rs", lines);
         assert!(side.tokens.is_some());
-        let (again, fresh) = assemble(with.0, "cache-test.rs", &rows, None, Some(side));
+        let (again, fresh) = assemble(with.0, "cache-test.rs", &rows, None, Some(side), false);
         assert!(fresh.is_empty());
         assert_eq!(again, Some(tokens));
     }

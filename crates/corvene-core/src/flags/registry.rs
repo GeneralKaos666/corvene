@@ -4817,6 +4817,22 @@ registry! {
         code: &["crates/corvene-ui/src/diff_view_rows.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// Unchanged lines keep their colours while whitespace is hidden.
+    WHITESPACE_HIDDEN_HIGHLIGHT = 792 "whitespace-hidden-highlight" {
+        title: "Right colours with whitespace hidden",
+        summary: "While Hide Whitespace Changes is on, an unchanged line whose indentation \
+                  changed is coloured from the file whose line git shows, so its syntax \
+                  colours sit on the right characters.",
+        ghd_behaviour: "The line is coloured from the other file's version, so the colours are \
+                        shifted by the change in indentation.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14920), Upstream::issue(21885)],
+        code: &["crates/corvene-ui/src/diff_view.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
