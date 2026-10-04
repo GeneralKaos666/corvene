@@ -720,4 +720,12 @@ impl Corvene {
             }
         });
     }
+
+    // ---- git identity (Welcome › Configure Git, Settings › Git) ----
+
+    /// Writes `user.name` / `user.email` to the global git config.
+    pub fn set_global_identity(&self, name: String, email: String) {
+        self.loop_
+            .post(move |host| Dispatcher::set_global_identity(name, email, host));
+    }
 }
