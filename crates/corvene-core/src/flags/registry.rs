@@ -6028,6 +6028,24 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/menu_state.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-git/src/config.rs"],
     },
 
+    /// The compare view lists the files that changed since the compared branch.
+    COMPARE_BRANCH_FILES = 1203 "compare-branch-files" {
+        title: "Changed files when comparing branches",
+        summary: "The compare view (History, comparing to a branch) has a Show Changed Files row \
+                  that opens the Preview Pull Request dialog, titled Compare Branches and \
+                  without a pull request button, with the compared branch as its base: the files \
+                  the current branch changed since the two diverged, with their diffs. It works \
+                  in any repository, GitHub or not.",
+        ghd_behaviour: "Comparing lists commits only; the files changed between two branches \
+                        appear only in Preview Pull Request, for GitHub repositories.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13458)],
+        code: &["crates/corvene-ui/src/history.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-ui/src/dialogs/open_pull_request.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

@@ -3,6 +3,10 @@
 //! `_changePullRequestFileSelection` and `setupPRMergeTreePromise`: the
 //! commits and changed files of the current branch since it diverged from
 //! the base branch, one file's merge-base diff, and the mergeability.
+//!
+//! Deviation (`1203-compare-branch-files`): the compare view opens the same
+//! dialog against the compared branch, without the pull request button
+//! ("Compare Branches"), for any repository.
 
 use std::sync::Arc;
 
@@ -42,6 +46,9 @@ pub struct PullRequestPreview {
     /// Bumped by every (re)initialisation; late results for an older
     /// generation are dropped.
     pub generation: u64,
+    /// `1203-compare-branch-files`: opened from the compare view to show the
+    /// changed files only (no pull request button).
+    pub compare_only: bool,
 }
 
 impl PullRequestPreview {
@@ -70,7 +77,22 @@ impl Dispatcher {
             (current, rs.default_branch.clone())
         };
         Self::close_foldout(cx);
-        Self::initialize_pull_request_preview(id, default_branch, current, cx);
+        Self::initialize_pull_request_preview(id, default_branch, current, false, cx);
+    }
+
+    /// `1203-compare-branch-files`: the compare view's Show Changed Files:
+    /// the preview dialog with `base` (the compared branch) as its base.
+    pub fn compare_branch_files(id: u64, base: String, cx: &mut App) {
+        let current = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|rs| rs.info.as_ref())
+            .and_then(|i| i.current_branch())
+            .map(|b| b.name.clone());
+        if let Some(current) = current {
+            Self::initialize_pull_request_preview(id, Some(base), current, true, cx);
+        }
     }
 
     /// `_updatePullRequestBaseBranch`
@@ -80,9 +102,9 @@ impl Dispatcher {
             .repo_states
             .get(&id)
             .and_then(|rs| rs.pull_request_preview.as_ref())
-            .map(|p| p.current_branch.clone());
-        if let Some(current) = current {
-            Self::initialize_pull_request_preview(id, Some(base), current, cx);
+            .map(|p| (p.current_branch.clone(), p.compare_only));
+        if let Some((current, compare_only)) = current {
+            Self::initialize_pull_request_preview(id, Some(base), current, compare_only, cx);
         }
     }
 
@@ -104,6 +126,7 @@ impl Dispatcher {
         id: u64,
         base: Option<String>,
         current: String,
+        compare_only: bool,
         cx: &mut App,
     ) {
         let generation = Self::state(cx).update(cx, |s, cx| {
@@ -117,6 +140,7 @@ impl Dispatcher {
                 base_branch: base.clone(),
                 current_branch: current.clone(),
                 generation,
+                compare_only,
                 ..PullRequestPreview::default()
             });
             cx.notify();

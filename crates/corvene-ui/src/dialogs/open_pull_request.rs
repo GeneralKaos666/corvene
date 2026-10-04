@@ -11,6 +11,11 @@
 //! says "No file changes between <base> and <current>." where GHD
 //! (`open-pull-request-dialog.tsx#renderContent`) shows an empty file list
 //! and a blank diff.
+//!
+//! Deviation (`1203-compare-branch-files`): opened from the compare view
+//! (`PullRequestPreview::compare_only`) it is titled "Compare Branches",
+//! reads "Comparing <base> with <current> (N commits)" and has only a
+//! Close button.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -803,6 +808,12 @@ impl Render for OpenPullRequestDialog {
                 .into_any_element()
             };
         let close = cx.listener(|this, _, _, cx| this.close(cx));
+        let compare_only = preview.compare_only;
+        let title = if compare_only {
+            mac_or("Compare Branches", "Compare branches")
+        } else {
+            mac_or("Open a Pull Request", "Open a pull request")
+        };
         let preview_for_submit = preview.clone();
         let ok_label = if has_pr {
             mac_or("View Pull Request", "View pull request")
@@ -835,11 +846,8 @@ impl Render for OpenPullRequestDialog {
                         div()
                             .id("open-pull-request-box")
                             .role(Role::Dialog)
-                            .aria_label(mac_or("Open a Pull Request", "Open a pull request"))
-                            .child(crate::dialog::window_title(mac_or(
-                                "Open a Pull Request",
-                                "Open a pull request",
-                            )))
+                            .aria_label(title)
+                            .child(crate::dialog::window_title(title))
                             .w(viewport.width - DIALOG_MARGIN())
                             .h(viewport.height - DIALOG_MARGIN())
                             .flex()
@@ -878,10 +886,7 @@ impl Render for OpenPullRequestDialog {
                                                     .flex_1()
                                                     .text_size(FONT_SIZE_MD())
                                                     .font_weight(FontWeight::SEMIBOLD)
-                                                    .child(mac_or(
-                                                        "Open a Pull Request",
-                                                        "Open a pull request",
-                                                    )),
+                                                    .child(title),
                                             )
                                             .child(
                                                 div()
@@ -911,17 +916,39 @@ impl Render for OpenPullRequestDialog {
                                                     .items_center()
                                                     .flex_wrap()
                                                     .gap(zpx(4.))
-                                                    .child(format!(
-                                                        "Merge {commit_count} commit{} into",
-                                                        if commit_count == 1 { "" } else { "s" }
-                                                    ))
+                                                    .when(!compare_only, |d| {
+                                                        d.child(format!(
+                                                            "Merge {commit_count} commit{} into",
+                                                            if commit_count == 1 {
+                                                                ""
+                                                            } else {
+                                                                "s"
+                                                            }
+                                                        ))
+                                                    })
+                                                    .when(compare_only, |d| d.child("Comparing"))
                                                     .child(self.base_select(&preview, cx))
-                                                    .child("from")
+                                                    .child(if compare_only {
+                                                        "with"
+                                                    } else {
+                                                        "from"
+                                                    })
                                                     .child(code_ref(
                                                         preview.current_branch.clone(),
                                                         cx,
                                                     ))
-                                                    .child("."),
+                                                    .child(if compare_only {
+                                                        format!(
+                                                            "({commit_count} commit{})",
+                                                            if commit_count == 1 {
+                                                                ""
+                                                            } else {
+                                                                "s"
+                                                            }
+                                                        )
+                                                    } else {
+                                                        ".".to_string()
+                                                    }),
                                             )
                                             .child(
                                                 // `.lines-added-deleted`
@@ -972,29 +999,60 @@ impl Render for OpenPullRequestDialog {
                                             .min_w_0()
                                             .child(self.merge_status(preview.merge_status, cx)),
                                     )
-                                    .children(crate::dialog::ok_cancel_order(vec![
-                                        button("open-pull-request-cancel", "Cancel", cx)
-                                            .min_w(zpx(120.))
-                                            .on_click(cx.listener(|this, _, _, cx| this.close(cx)))
-                                            .into_any_element(),
-                                        primary_button("open-pull-request-ok", "", ok_disabled, cx)
-                                            .min_w(zpx(120.))
-                                            .gap(SPACING_HALF())
-                                            .ghd_tooltip(ok_title)
-                                            .when(has_pr, |d| {
-                                                d.child(octicon(
-                                                    Octicon::LinkExternal,
-                                                    t.button_text,
-                                                ))
+                                    .when(compare_only, |d| {
+                                        d.child(
+                                            button("open-pull-request-close-button", "Close", cx)
+                                                .min_w(zpx(120.))
+                                                .on_click(
+                                                    cx.listener(|this, _, _, cx| this.close(cx)),
+                                                ),
+                                        )
+                                    })
+                                    .children(
+                                        (!compare_only)
+                                            .then(|| {
+                                                crate::dialog::ok_cancel_order(vec![
+                                                    button(
+                                                        "open-pull-request-cancel",
+                                                        "Cancel",
+                                                        cx,
+                                                    )
+                                                    .min_w(zpx(120.))
+                                                    .on_click(
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.close(cx)
+                                                        }),
+                                                    )
+                                                    .into_any_element(),
+                                                    primary_button(
+                                                        "open-pull-request-ok",
+                                                        "",
+                                                        ok_disabled,
+                                                        cx,
+                                                    )
+                                                    .min_w(zpx(120.))
+                                                    .gap(SPACING_HALF())
+                                                    .ghd_tooltip(ok_title)
+                                                    .when(has_pr, |d| {
+                                                        d.child(octicon(
+                                                            Octicon::LinkExternal,
+                                                            t.button_text,
+                                                        ))
+                                                    })
+                                                    .child(ok_label)
+                                                    .when(!ok_disabled, |d| {
+                                                        d.on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.submit(&preview_for_submit, cx)
+                                                            },
+                                                        ))
+                                                    })
+                                                    .into_any_element(),
+                                                ])
                                             })
-                                            .child(ok_label)
-                                            .when(!ok_disabled, |d| {
-                                                d.on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.submit(&preview_for_submit, cx)
-                                                }))
-                                            })
-                                            .into_any_element(),
-                                    ])),
+                                            .into_iter()
+                                            .flatten(),
+                                    ),
                             ),
                     ),
             ),

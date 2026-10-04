@@ -927,6 +927,48 @@ impl HistorySidebar {
         )
     }
 
+    /// `1203-compare-branch-files`: "Show Changed Files" opens the changes
+    /// of the current branch since it diverged from the compared one.
+    fn compare_changed_files(
+        &self,
+        id: u64,
+        branch: &str,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::COMPARE_BRANCH_FILES)
+        {
+            return None;
+        }
+        let t = cx.ghd();
+        let label = mac_or("Show Changed Files", "Show changed files");
+        let branch = branch.to_string();
+        Some(
+            div()
+                .id("compare-changed-files")
+                .a11y_button(label)
+                .flex_none()
+                .h(ROW_HEIGHT())
+                .px(SPACING())
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(SPACING_HALF())
+                .border_b_1()
+                .border_color(t.box_border)
+                .text_size(FONT_SIZE())
+                .cursor_pointer()
+                .hover(|s| s.bg(t.list_item_hover_background))
+                .on_click(move |_, _, cx| Dispatcher::compare_branch_files(id, branch.clone(), cx))
+                .child(octicon(Octicon::FileDiff, t.text_secondary))
+                .child(div().flex_1().child(label))
+                .into_any_element(),
+        )
+    }
+
     /// `MergeCallToActionWithConflicts` (`.merge-cta`).
     fn merge_cta(
         &self,
@@ -2757,6 +2799,7 @@ impl Render for HistorySidebar {
                 .flex_col()
                 .child(self.compare_tabs(id, mode, ahead_behind.ahead, ahead_behind.behind, cx))
                 .children(self.compare_conflicts(id, cx))
+                .children(self.compare_changed_files(id, &branch, cx))
                 .child(self.commit_list(cx))
                 .when(mode == ComparisonMode::Behind, |d| {
                     d.child(self.merge_cta(id, &branch, ahead_behind.behind, merge_status, cx))
