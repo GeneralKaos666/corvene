@@ -8,6 +8,8 @@
 //! endings (core.autocrlf)" select stored in the repository's own config.
 //! Deviation (flag `518-per-repo-editor`): an Editor tab picks the external
 //! editor this repository opens in.
+//! Deviation (flag `1102-repository-credential-helper`): the Remote tab can
+//! make the repository sign in through git's credential helper.
 
 use std::rc::Rc;
 
@@ -25,8 +27,8 @@ use crate::tab_bar::VerticalTab;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
-    SelectHandler, call_to_action, code_ref, labeled, link_button, paragraph, radio_row,
-    section_heading, select_button, text_box,
+    SelectHandler, call_to_action, checkbox_row, code_ref, labeled, link_button, paragraph,
+    radio_row, section_heading, select_button, text_box,
 };
 
 /// GHD `NoRemote`'s `HelpURL` (`ui/repository-settings/no-remote.tsx`).
@@ -87,6 +89,8 @@ pub struct RepositorySettingsDialog {
     /// `518-per-repo-editor`: the editor picked on the Editor tab (`None`:
     /// the one in Settings).
     editor: Option<String>,
+    /// `1102-repository-credential-helper`: the Remote tab's checkbox.
+    credential_helper: bool,
     /// `focusFirstSuitableChild`: with nothing to type into on the first tab
     /// (no remote), Save holds focus until a mouse press moves it.
     default_focus: bool,
@@ -166,6 +170,10 @@ impl RepositorySettingsDialog {
                 .read(cx)
                 .repository(repo)
                 .and_then(|r| r.editor.clone()),
+            credential_helper: state
+                .read(cx)
+                .repository(repo)
+                .is_some_and(|r| r.use_credential_helper),
             default_focus: true,
         };
         this.fill(&state, window, cx);
@@ -291,6 +299,15 @@ impl RepositorySettingsDialog {
         if stored_editor.is_some_and(|e| e != self.editor) {
             Dispatcher::set_repository_editor(self.repo, self.editor.clone(), cx);
         }
+        // `1102-repository-credential-helper`
+        let stored_helper = self
+            .state
+            .read(cx)
+            .repository(self.repo)
+            .map(|r| r.use_credential_helper);
+        if stored_helper.is_some_and(|on| on != self.credential_helper) {
+            Dispatcher::set_repository_credential_helper(self.repo, self.credential_helper, cx);
+        }
         if let Some(remote) = data.as_ref().and_then(|d| d.remote.clone()) {
             let url = self.remote_url.read(cx).value().trim().to_string();
             if url != remote.url {
@@ -377,6 +394,11 @@ impl RepositorySettingsDialog {
                             cx,
                         ))
                     })
+                    .when(
+                        s.flags
+                            .bool(corvene_core::flags::ids::REPOSITORY_CREDENTIAL_HELPER),
+                        |d| d.child(self.credential_helper_option(cx)),
+                    )
                     .into_any_element()
             }
             None => {
@@ -403,6 +425,44 @@ impl RepositorySettingsDialog {
                 .into_any_element()
             }
         }
+    }
+
+    /// Corvene (`1102-repository-credential-helper`): sign in through git's
+    /// credential helper (Git Credential Manager, the keychain) instead of
+    /// the account, e.g. as a second GitHub account.
+    fn credential_helper_option(&self, cx: &Context<Self>) -> AnyElement {
+        let t = cx.ghd();
+        let this = cx.entity().downgrade();
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACING_HALF())
+            .child(checkbox_row(
+                "repo-settings-credential-helper",
+                self.credential_helper,
+                mac_or(
+                    "Use Git Credential Manager for This Repository",
+                    "Use Git Credential Manager for this repository",
+                ),
+                move |on, _, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        this.credential_helper = on;
+                        cx.notify();
+                    });
+                },
+                cx,
+            ))
+            .child(
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .child(
+                        "Fetch, pull and push sign in with git's credential helpers (Git \
+                         Credential Manager, the keychain) instead of your account, e.g. to use \
+                         another account for this repository.",
+                    ),
+            )
+            .into_any_element()
     }
 
     /// Flag `237-gitignore-templates` (Corvene addition, desktop/desktop#2197):

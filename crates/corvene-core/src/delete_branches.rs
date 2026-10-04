@@ -195,8 +195,8 @@ impl Dispatcher {
                     .map(|r| r.url.clone())
             });
             if let Some(url) = url {
-                Self::arm_credential_helper(&url, cx);
-                askpass = Self::askpass_env(cx);
+                Self::arm_credential_helper_for(id, &url, cx);
+                askpass = Self::askpass_env_for(id, &url, cx);
             }
         }
         let task = cx.background_executor().spawn(async move {

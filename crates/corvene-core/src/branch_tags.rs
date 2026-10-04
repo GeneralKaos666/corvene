@@ -57,8 +57,8 @@ impl Dispatcher {
         let Some(remote) = remote else {
             return;
         };
-        Self::arm_credential_helper(&remote.url, cx);
-        let askpass = Self::askpass_env(cx);
+        Self::arm_credential_helper_for(id, &remote.url, cx);
+        let askpass = Self::askpass_env_for(id, &remote.url, cx);
         spawn_bg(
             cx,
             move || corvene_git::fetch_tags(git, &workdir, &remote.name, askpass.as_ref()),

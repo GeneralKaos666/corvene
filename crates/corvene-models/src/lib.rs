@@ -55,6 +55,10 @@ pub struct Repository {
     /// group the user moved this repository to (instead of its owner's).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Corvene (flag `1102-repository-credential-helper`): remote operations
+    /// sign in through git's credential helper instead of the account.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub use_credential_helper: bool,
 }
 
 /// GHD `ICommitOptions`: `skipCommitHooks`, `signOffCommits`, `allowEmptyCommit`.
@@ -86,6 +90,7 @@ impl Repository {
             editor: None,
             pinned_branches: Vec::new(),
             group: None,
+            use_credential_helper: false,
         }
     }
 

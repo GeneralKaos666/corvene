@@ -3411,6 +3411,20 @@ impl Dispatcher {
         });
     }
 
+    /// Repository Settings › Remote's credential helper checkbox
+    /// (`1102-repository-credential-helper`).
+    pub fn set_repository_credential_helper(id: u64, on: bool, cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
+                && repo.use_credential_helper != on
+            {
+                repo.use_credential_helper = on;
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
     /// Edit the repository's persisted `tagsToPush` (`storeTagsToPush`).
     pub(crate) fn update_tags_to_push(
         id: u64,
@@ -4097,10 +4111,13 @@ impl Dispatcher {
                 .and_then(|r| r.info.as_ref())
                 .and_then(|i| i.remotes.iter().find(|r| r.name == name))
                 .map(|r| r.url.clone());
-            if let Some(url) = url {
-                Self::arm_credential_helper(&url, cx);
+            match url {
+                Some(url) => {
+                    Self::arm_credential_helper_for(id, &url, cx);
+                    Self::askpass_env_for(id, &url, cx)
+                }
+                None => Self::askpass_env(cx),
             }
-            Self::askpass_env(cx)
         });
         Self::run_history_op_then(
             id,

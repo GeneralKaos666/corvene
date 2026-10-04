@@ -34,6 +34,9 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! A repository can sign in through git's credential helper instead of the
+//! account (`1102-repository-credential-helper`; GHD
+//! `useExternalCredentialHelper` covers hosts without an account only).
 //! The push button's tooltip can say how much a push sends
 //! (`1101-push-size-tooltip`).
 //! Repository › Pull All Repositories fetches every repository and
@@ -212,10 +215,16 @@ impl Dispatcher {
     /// `GIT_ASKPASS` environment: one login per host from the signed-in
     /// accounts and the generic credentials the user saved.
     pub(crate) fn askpass_env(cx: &dyn Host) -> Option<AskpassEnv> {
+        Self::askpass_env_except(None, cx)
+    }
+
+    /// [`Self::askpass_env`] without the signed-in accounts of `host`.
+    fn askpass_env_except(host: Option<&str>, cx: &dyn Host) -> Option<AskpassEnv> {
         let s = Self::state(cx).read(cx);
         let mut logins: Vec<String> = s
             .accounts
             .iter()
+            .filter(|a| host.is_none_or(|host| a.host() != host))
             .map(|a| format!("{}={}", a.host(), a.login))
             .collect();
         logins.extend(
@@ -224,6 +233,36 @@ impl Dispatcher {
                 .map(|(host, user)| format!("{host}={user}")),
         );
         AskpassEnv::current_exe(logins.join(";"))
+    }
+
+    /// Corvene (`1102-repository-credential-helper`): repository `id` signs
+    /// in through git's credential helper (Repository Settings › Remote).
+    pub(crate) fn uses_credential_helper(s: &crate::state::AppState, id: u64) -> bool {
+        s.flags
+            .bool(crate::flags::ids::REPOSITORY_CREDENTIAL_HELPER)
+            && s.repository(id).is_some_and(|r| r.use_credential_helper)
+    }
+
+    /// [`Self::arm_credential_helper`] for a remote of repository `id`: a
+    /// repository that signs in through the credential helper gets it, as a
+    /// host without an account does (`1102-repository-credential-helper`).
+    pub(crate) fn arm_credential_helper_for(id: u64, remote_url: &str, cx: &dyn Host) {
+        Self::arm_credential_helper(remote_url, cx);
+        if Self::uses_credential_helper(Self::state(cx).read(cx), id) {
+            corvene_git::set_credential_helper(true);
+        }
+    }
+
+    /// [`Self::askpass_env`] for a remote of repository `id`: a repository
+    /// that signs in through the credential helper leaves the account of the
+    /// remote's host out, so the helper (or a login saved in Corvene for
+    /// that host) answers (`1102-repository-credential-helper`).
+    pub(crate) fn askpass_env_for(id: u64, remote_url: &str, cx: &dyn Host) -> Option<AskpassEnv> {
+        if Self::uses_credential_helper(Self::state(cx).read(cx), id) {
+            Self::askpass_env_except(Some(&host_of(remote_url)), cx)
+        } else {
+            Self::askpass_env(cx)
+        }
     }
 
     /// GHD `currentRemote`: the branch's upstream remote, else `origin`, else
@@ -256,8 +295,8 @@ impl Dispatcher {
         if !Self::begin_network(id, cx) {
             return;
         }
-        Self::arm_credential_helper(&remote.url, cx);
-        let askpass = Self::askpass_env(cx);
+        Self::arm_credential_helper_for(id, &remote.url, cx);
+        let askpass = Self::askpass_env_for(id, &remote.url, cx);
         Self::set_progress(
             id,
             Some(PushPullProgress {
@@ -768,8 +807,8 @@ impl Dispatcher {
                 .read(cx)
                 .flags
                 .bool(crate::flags::ids::PUSH_DURING_BACKGROUND_FETCH);
-        Self::arm_credential_helper(&remote.url, cx);
-        let askpass = Self::askpass_env(cx);
+        Self::arm_credential_helper_for(id, &remote.url, cx);
+        let askpass = Self::askpass_env_for(id, &remote.url, cx);
         // `282-fast-forward-skips-worktree-branches`
         let skip_worktree_branches = Self::state(cx)
             .read(cx)
@@ -952,7 +991,16 @@ impl Dispatcher {
                 .collect();
             let repos: Vec<_> = listed
                 .filter(|r| !in_progress(r.id))
-                .map(|r| (r.id, r.name(), r.path.clone(), Self::fetch_options(s, r.id)))
+                .map(|r| {
+                    (
+                        r.id,
+                        r.name(),
+                        r.path.clone(),
+                        Self::fetch_options(s, r.id),
+                        // `1102-repository-credential-helper`
+                        Self::uses_credential_helper(s, r.id),
+                    )
+                })
                 .collect();
             let github_hosts: Vec<String> = std::iter::once("github.com".to_string())
                 .chain(s.accounts.iter().map(|a| a.host()))
@@ -963,6 +1011,14 @@ impl Dispatcher {
             return;
         }
         let askpass = Self::askpass_env(cx);
+        // `1102-repository-credential-helper`: the logins without the
+        // accounts, for the repositories that sign in through the helper
+        let accounts: Vec<String> = Self::state(cx)
+            .read(cx)
+            .accounts
+            .iter()
+            .map(|a| format!("{}={}", a.host(), a.login))
+            .collect();
         // `282-fast-forward-skips-worktree-branches`
         let skip_worktree_branches = Self::state(cx)
             .read(cx)
@@ -976,7 +1032,7 @@ impl Dispatcher {
                 let mut summary = PullAllSummary::default();
                 // `288-dead-remote-indicator`: (id, fetch error or `None`)
                 let mut outcomes = Vec::new();
-                for (id, name, path, options) in repos {
+                for (id, name, path, options, own_helper) in repos {
                     let Ok(info) = corvene_git::open_repository(&path) else {
                         continue;
                     };
@@ -990,15 +1046,20 @@ impl Dispatcher {
                     else {
                         continue;
                     };
+                    let host = host_of(&remote.url);
                     corvene_git::set_credential_helper(
-                        use_helper && !github_hosts.contains(&host_of(&remote.url)),
+                        own_helper || (use_helper && !github_hosts.contains(&host)),
                     );
+                    let own_askpass = askpass
+                        .as_ref()
+                        .filter(|_| own_helper)
+                        .map(|a| without_accounts_of(a, &accounts, &host));
                     match corvene_git::fetch_with(
                         git.clone(),
                         &info.workdir,
                         &remote.name,
                         options,
-                        askpass.as_ref(),
+                        own_askpass.as_ref().or(askpass.as_ref()),
                         &mut |_, _| {},
                     ) {
                         Ok(()) => {
@@ -1117,8 +1178,8 @@ impl Dispatcher {
         if !Self::begin_network(id, cx) {
             return then(false, cx);
         }
-        Self::arm_credential_helper(&remote.url, cx);
-        let askpass = Self::askpass_env(cx);
+        Self::arm_credential_helper_for(id, &remote.url, cx);
+        let askpass = Self::askpass_env_for(id, &remote.url, cx);
         // `282-fast-forward-skips-worktree-branches`
         let skip_worktree_branches = Self::state(cx)
             .read(cx)
@@ -1300,8 +1361,8 @@ impl Dispatcher {
         if !Self::begin_network(id, cx) {
             return;
         }
-        Self::arm_credential_helper(&remote_url, cx);
-        let askpass = Self::askpass_env(cx);
+        Self::arm_credential_helper_for(id, &remote_url, cx);
+        let askpass = Self::askpass_env_for(id, &remote_url, cx);
         Self::set_progress(
             id,
             Some(PushPullProgress {
@@ -1472,8 +1533,8 @@ impl Dispatcher {
                     .remove(&force_push_branch);
             });
         }
-        Self::arm_credential_helper(&remote.url, cx);
-        let askpass = Self::askpass_env(cx);
+        Self::arm_credential_helper_for(id, &remote.url, cx);
+        let askpass = Self::askpass_env_for(id, &remote.url, cx);
         // `282-fast-forward-skips-worktree-branches`
         let skip_worktree_branches = Self::state(cx)
             .read(cx)
@@ -2434,6 +2495,23 @@ fn r_loading(cx: &dyn Host, id: u64) -> bool {
         .is_some_and(|r| r.loading)
 }
 
+/// `1102-repository-credential-helper`: `askpass` without the logins of
+/// `accounts` (`host=login`) for `host`.
+fn without_accounts_of(askpass: &AskpassEnv, accounts: &[String], host: &str) -> AskpassEnv {
+    let logins: Vec<&str> = askpass
+        .logins
+        .split(';')
+        .filter(|login| {
+            !(login.split_once('=').is_some_and(|(h, _)| h == host)
+                && accounts.iter().any(|a| a == login))
+        })
+        .collect();
+    AskpassEnv {
+        program: askpass.program.clone(),
+        logins: logins.join(";"),
+    }
+}
+
 /// `github.com` from `https://github.com/a/b.git` or `git@github.com:a/b.git`.
 pub fn host_of(url: &str) -> String {
     let without_scheme = url.split("://").nth(1).unwrap_or(url);
@@ -2487,6 +2565,17 @@ mod tests {
         assert!(message.contains("one at a time:\n• c"));
         assert!(message.contains("then pull:\n• d"));
         assert!(message.ends_with("fast-forwarded:\n• e: boom"));
+    }
+
+    #[test]
+    fn credential_helper_repositories_drop_the_account_login() {
+        let askpass = AskpassEnv {
+            program: "/x".into(),
+            logins: "github.com=octocat;ghe.corp=me;github.com=saved".into(),
+        };
+        let accounts = ["github.com=octocat".to_string(), "ghe.corp=me".to_string()];
+        let env = without_accounts_of(&askpass, &accounts, "github.com");
+        assert_eq!(env.logins, "ghe.corp=me;github.com=saved");
     }
 
     #[test]

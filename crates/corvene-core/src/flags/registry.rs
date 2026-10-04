@@ -6968,6 +6968,25 @@ registry! {
         code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// A repository can sign in through git's credential helper.
+    REPOSITORY_CREDENTIAL_HELPER = 1102 "repository-credential-helper" {
+        title: "Credential helper per repository",
+        summary: "Repository Settings › Remote has \"Use Git Credential Manager for This \
+                  Repository\": fetch, pull and push then sign in with git's credential helpers \
+                  (Git Credential Manager, the keychain, or a login saved in Corvene) instead of \
+                  the signed-in account of that host, e.g. to work as a second GitHub account \
+                  or with a token a single repository needs.",
+        ghd_behaviour: "Git Credential Manager (Settings › Advanced) is only used for hosts \
+                        without a signed-in account; a github.com repository always uses the \
+                        account.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20432)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.
