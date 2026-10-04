@@ -1779,6 +1779,22 @@ registry! {
         code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
+    /// github.com repositories without a GitHub.com account.
+    GITHUB_WITHOUT_ACCOUNT = 331 "github-without-account" {
+        title: "github.com repositories without an account",
+        summary: "A repository whose origin is on github.com is a GitHub repository when it is \
+                  added even without a GitHub.com account, so View on GitHub, the pull request \
+                  links and the Pull Requests tab work.",
+        ghd_behaviour: "Only the hosts of signed-in accounts count, so such a repository is a \
+                        plain git repository.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/app_url.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

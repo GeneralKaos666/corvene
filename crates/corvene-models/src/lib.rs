@@ -487,9 +487,10 @@ pub fn github_from_remote(url: &str, hosts: &[String]) -> Option<GitHubRepositor
 /// The hosts [`github_from_remote`] matches for these accounts: GHD
 /// `matchGitHubRepository` matches the web host of each signed-in account
 /// (`Account::host`). With `dotcom`, `github.com` is listed even without a
-/// GitHub.com account (Corvene: a github.com remote is a GitHub repository
-/// when signed out, so View on GitHub, the pull request links and the
-/// signed-out Pull Requests tab work; GHD leaves it a plain repository).
+/// GitHub.com account (Corvene, flag `331-github-without-account`: a
+/// github.com remote is a GitHub repository when signed out, so View on
+/// GitHub, the pull request links and the signed-out Pull Requests tab
+/// work; GHD leaves it a plain repository).
 pub fn github_hosts(accounts: &[Account], dotcom: bool) -> Vec<String> {
     let mut hosts: Vec<String> = accounts.iter().map(Account::host).collect();
     if dotcom && !hosts.iter().any(|h| h.eq_ignore_ascii_case("github.com")) {

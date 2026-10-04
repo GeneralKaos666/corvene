@@ -712,8 +712,10 @@ impl Dispatcher {
                         }
                         let wiki_not_github = s.flags.bool(crate::flags::ids::WIKI_NOT_GITHUB);
                         // GHD `matchGitHubRepository`: the signed-in accounts'
-                        // hosts, plus github.com when signed out (Corvene)
-                        let hosts = corvene_models::github_hosts(&s.accounts, true);
+                        // hosts, plus github.com when signed out
+                        // (`331-github-without-account`)
+                        let dotcom = s.flags.bool(crate::flags::ids::GITHUB_WITHOUT_ACCOUNT);
+                        let hosts = corvene_models::github_hosts(&s.accounts, dotcom);
                         let github = info
                             .remote("origin")
                             .and_then(|r| github_from_remote(&r.url, &hosts))

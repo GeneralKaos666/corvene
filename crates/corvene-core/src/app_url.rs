@@ -550,7 +550,12 @@ impl Dispatcher {
         filepath: Option<String>,
         cx: &mut App,
     ) {
-        let hosts = corvene_models::github_hosts(&Self::state(cx).read(cx).accounts, true);
+        // `331-github-without-account`: github.com without a GitHub.com account
+        let hosts = {
+            let s = Self::state(cx).read(cx);
+            let dotcom = s.flags.bool(crate::flags::ids::GITHUB_WITHOUT_ACCOUNT);
+            corvene_models::github_hosts(&s.accounts, dotcom)
+        };
         let Some(github) = corvene_models::github_from_remote(&url, &hosts) else {
             warn!(%url, "not a GitHub repository URL");
             return;
