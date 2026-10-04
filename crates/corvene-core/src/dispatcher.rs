@@ -4031,30 +4031,29 @@ impl Dispatcher {
         clone.description = "Cloning…".into();
         let clone_id = clone.id;
         let cancel = clone.cancel.clone();
-        corvene_git::set_network_stall_timeout(
-            u32::try_from(
-                state
-                    .read(cx)
-                    .flags
-                    .number(crate::flags::ids::NETWORK_STALL_TIMEOUT),
-            )
-            .unwrap_or(0),
-        );
         state.update(cx, |s, cx| {
             s.cloning.push(clone);
             cx.notify();
         });
 
+        // GHD `envForRemoteOperation`: the signed-in accounts' credentials
+        // (and the stalled-transfer timeout of `network-stall-timeout`)
+        Self::arm_credential_helper(&url, cx);
+        let options = corvene_git::CloneOptions {
+            default_branch,
+            depth,
+            askpass: Self::askpass_env(cx),
+            ..corvene_git::CloneOptions::default()
+        };
         let (tx, rx) = std::sync::mpsc::channel::<corvene_git::CloneProgress>();
         let clone_path = path.clone();
         let clone_url = url.clone();
         let task = cx.background_executor().spawn(async move {
-            corvene_git::clone(
+            corvene_git::clone_with_options(
                 git,
                 &clone_url,
                 &clone_path,
-                default_branch.as_deref(),
-                depth,
+                &options,
                 Some(cancel),
                 |p| {
                     let _ = tx.send(p);
