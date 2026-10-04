@@ -23,6 +23,8 @@
 //! (`873-branch-name-forbidden-chars`).
 //! `ConfirmSwitchBranchDialog` is a Corvene addition (`864-confirm-branch-switch`).
 //! `DropKeptStashDialog` is a Corvene addition (`774-stash-conflict-flow`).
+//! Overwrite Stash can add the changes to the stash instead
+//! (`776-stash-add-to-existing`).
 //! Switch Branch can discard the changes instead (`865-switch-branch-discard`).
 //! Squash and merge has commit message fields (flag `837`).
 
@@ -1362,40 +1364,72 @@ impl Render for ConfirmOverwriteStashDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let (repo, branch) = (self.repo, self.branch.clone());
+        // Corvene (`776-stash-add-to-existing`): or fold the changes in
+        let add = AppState::global(cx)
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::STASH_ADD_TO_EXISTING);
+        let mut buttons = vec![DialogButton {
+            id: "overwrite-cancel",
+            label: "Cancel".into(),
+            primary: true,
+            disabled: false,
+            on_click: Box::new(close),
+        }];
+        if add {
+            let branch = branch.clone();
+            buttons.push(DialogButton {
+                id: "overwrite-add",
+                label: mac_or("Add to Stash", "Add to stash").into(),
+                primary: false,
+                disabled: false,
+                on_click: Box::new(move |_, cx| {
+                    Dispatcher::close_popup(cx);
+                    match &branch {
+                        Some(branch) => {
+                            Dispatcher::add_to_stash_and_checkout(repo, branch.clone(), cx)
+                        }
+                        None => Dispatcher::add_to_stash(repo, cx),
+                    }
+                }),
+            });
+        }
+        buttons.push(DialogButton {
+            id: "overwrite-ok",
+            label: "Overwrite".into(),
+            primary: false,
+            disabled: false,
+            on_click: Box::new(move |_, cx| {
+                Dispatcher::close_popup(cx);
+                match &branch {
+                    Some(branch) => Dispatcher::checkout_branch(
+                        repo,
+                        branch.clone(),
+                        Some(UncommittedChangesStrategy::StashOnCurrentBranch),
+                        cx,
+                    ),
+                    None => Dispatcher::create_stash_for_current_branch(repo, false, cx),
+                }
+            }),
+        });
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .child(
+                "Are you sure you want to proceed? This will overwrite your existing stash with your current changes.",
+            )
+            .when(add, |d| {
+                d.child(
+                    "Add to Stash keeps both: your changes join the existing stash, unless the two change the same lines.",
+                )
+            });
         dialog_with_kind(
             "dialog-overwrite-stash",
             DialogKind::Warning,
             mac_or("Overwrite Stash?", "Overwrite stash?"),
-            div().child(
-                "Are you sure you want to proceed? This will overwrite your existing stash with your current changes.",
-            ),
-            vec![
-                DialogButton {
-                    id: "overwrite-cancel",
-                    label: "Cancel".into(),
-                    primary: true,
-                    disabled: false,
-                    on_click: Box::new(close),
-                },
-                DialogButton {
-                    id: "overwrite-ok",
-                    label: "Overwrite".into(),
-                    primary: false,
-                    disabled: false,
-                    on_click: Box::new(move |_, cx| {
-                        Dispatcher::close_popup(cx);
-                        match &branch {
-                            Some(branch) => Dispatcher::checkout_branch(
-                                repo,
-                                branch.clone(),
-                                Some(UncommittedChangesStrategy::StashOnCurrentBranch),
-                                cx,
-                            ),
-                            None => Dispatcher::create_stash_for_current_branch(repo, false, cx),
-                        }
-                    }),
-                },
-            ],
+            content,
+            buttons,
             close,
             window,
             cx,

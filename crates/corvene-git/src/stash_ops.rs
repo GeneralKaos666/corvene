@@ -13,6 +13,10 @@
 //! ignores them still lists them; with
 //! [`StashPopOptions::unstage_new_files`] a restore unstages the files the
 //! stash added ([`stash_new_files`]) and they are untracked again.
+//!
+//! Deviation (`776-stash-add-to-existing`): [`add_to_desktop_stash`] folds
+//! the current changes into the branch's stash instead of replacing it (GHD
+//! can only overwrite, `createStashAndDropPreviousEntry`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -167,6 +171,214 @@ fn split_nul(stdout: &[u8]) -> Vec<String> {
         .filter(|p| !p.is_empty())
         .map(|p| String::from_utf8_lossy(p).into_owned())
         .collect()
+}
+
+/// What [`add_to_desktop_stash`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AddToStash {
+    /// One stash now holds the old entry's changes and the current ones.
+    Added,
+    /// There was nothing to add; the old entry is untouched.
+    NothingToAdd,
+    /// The old entry and the current changes both change these files;
+    /// nothing was touched.
+    Conflicts(Vec<String>),
+}
+
+/// `776-stash-add-to-existing`: fold the working directory's changes into
+/// the Desktop stash entry `old_sha` as one new entry made on `branch`.
+///
+/// 1. Snapshot without touching anything: a copy of the index (in the git
+///    dir) gets the untracked files the Desktop way and `git stash create`
+///    records the working directory from it, then `merge-tree` applies the
+///    old entry onto that snapshot (base: the entry's own base commit, as
+///    `git stash apply` does). Any conflict or error stops here, with the
+///    index, the working directory and the stash list as they were.
+/// 2. [`crate::create_desktop_stash`] stashes the changes (the worktree is
+///    clean), the merge is redone with that entry, and the merged tree is
+///    stored as a new entry (`commit-tree` + `stash store`) before the two
+///    others are dropped. A failure before the new entry is stored pops the
+///    just made entry back (onto the clean worktree it applies as is).
+pub fn add_to_desktop_stash(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    old_sha: &str,
+    branch: &str,
+    guard_assume_unchanged: bool,
+) -> Result<AddToStash> {
+    let Some(old) = stash_entry_matching_sha(git.clone(), workdir, old_sha)? else {
+        return Err(GitError::Gix(
+            "The stash is no longer there; it may have been restored or discarded already.".into(),
+        ));
+    };
+    // `stash -u` entries keep untracked files in a third parent the merge
+    // below would miss; Desktop entries have two
+    let [old_base, _] = old.parents.as_slice() else {
+        return Err(GitError::Gix(
+            "This stash was not made by Corvene or GitHub Desktop, so changes cannot be added \
+             to it."
+                .into(),
+        ));
+    };
+    if guard_assume_unchanged {
+        crate::ensure_no_modified_assume_unchanged(git.clone(), workdir)?;
+    }
+    let Some(snapshot) = snapshot_working_directory(git.clone(), workdir)? else {
+        return Ok(AddToStash::NothingToAdd);
+    };
+    if let Err(files) = merge_stash_trees(git.clone(), workdir, old_base, &snapshot, &old.sha)? {
+        return Ok(AddToStash::Conflicts(files));
+    }
+    // nothing has been touched so far; from here the changes are stashed
+    if !crate::create_desktop_stash(git.clone(), workdir, branch, false)? {
+        return Ok(AddToStash::NothingToAdd);
+    }
+    let Some(made) = crate::get_last_desktop_stash_entry_for_branch(git.clone(), workdir, branch)?
+    else {
+        return Err(GitError::Gix(
+            "The new stash entry could not be found.".into(),
+        ));
+    };
+    let stored = (|| -> Result<std::result::Result<(), Vec<String>>> {
+        let tree = match merge_stash_trees(git.clone(), workdir, old_base, &made.sha, &old.sha)? {
+            Ok(tree) => tree,
+            Err(files) => return Ok(Err(files)),
+        };
+        let head = made
+            .parents
+            .first()
+            .cloned()
+            .ok_or_else(|| GitError::Gix("The new stash entry has no base commit.".into()))?;
+        let message = crate::desktop_stash_message(branch);
+        let commit_tree = |message: &str, parents: &[&str]| -> Result<String> {
+            let mut args = vec!["commit-tree", tree.as_str(), "-m", message];
+            for parent in parents {
+                args.extend(["-p", parent]);
+            }
+            Ok(GitCommand::new(git.clone())
+                .args(args)
+                .current_dir(workdir)
+                .run()?
+                .stdout_string()?
+                .trim()
+                .to_string())
+        };
+        let index = commit_tree(&format!("index on {branch}"), &[&head])?;
+        let stash = commit_tree(&format!("On {branch}: {message}"), &[&head, &index])?;
+        GitCommand::new(git.clone())
+            .args([
+                "stash",
+                "store",
+                "-m",
+                &format!("On {branch}: {message}"),
+                &stash,
+            ])
+            .current_dir(workdir)
+            .run()?;
+        Ok(Ok(()))
+    })();
+    match stored {
+        Ok(Ok(())) => {
+            drop_desktop_stash_entry(git.clone(), workdir, &made.sha)?;
+            drop_desktop_stash_entry(git, workdir, &old.sha)?;
+            Ok(AddToStash::Added)
+        }
+        // put the changes back as they were stashed a moment ago
+        Ok(Err(files)) => {
+            restore_made_entry(git, workdir, &made.sha)?;
+            Ok(AddToStash::Conflicts(files))
+        }
+        Err(err) => {
+            restore_made_entry(git, workdir, &made.sha)?;
+            Err(err)
+        }
+    }
+}
+
+fn restore_made_entry(git: Arc<GitBinary>, workdir: &Path, sha: &str) -> Result<()> {
+    let options = StashPopOptions {
+        keep_on_conflict: true,
+        unstage_new_files: true,
+    };
+    match pop_stash_entry_with(git, workdir, sha, options)? {
+        StashPop::Restored | StashPop::Missing => Ok(()),
+        StashPop::Conflicted => Err(GitError::Gix(
+            "Your changes could not be put back cleanly; they are kept in the stash list.".into(),
+        )),
+    }
+}
+
+/// `git stash create` of the whole working directory, untracked files
+/// included the Desktop way, through a copy of the index so that neither
+/// the index nor the working directory changes. `None`: nothing to stash.
+fn snapshot_working_directory(git: Arc<GitBinary>, workdir: &Path) -> Result<Option<String>> {
+    /// Removes the copy whatever happens.
+    struct TempIndex(std::path::PathBuf);
+    impl Drop for TempIndex {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let git_dir = crate::paths::git_dir(workdir);
+    let index =
+        TempIndex(git_dir.join(format!("corvene-add-to-stash-{}.index", std::process::id())));
+    std::fs::copy(git_dir.join("index"), &index.0)?;
+    let untracked = GitCommand::new(git.clone())
+        .args(["ls-files", "--others", "--exclude-standard", "-z"])
+        .current_dir(workdir)
+        .run()?;
+    if untracked.stdout.iter().any(|b| *b != 0) {
+        GitCommand::new(git.clone())
+            .args(["update-index", "--add", "-z", "--stdin"])
+            .env("GIT_INDEX_FILE", &index.0)
+            .current_dir(workdir)
+            .stdin(untracked.stdout)
+            .run()?;
+    }
+    let sha = GitCommand::new(git)
+        .args(["stash", "create"])
+        .env("GIT_INDEX_FILE", &index.0)
+        .current_dir(workdir)
+        .run()?
+        .stdout_string()?;
+    let sha = sha.trim();
+    Ok((!sha.is_empty()).then(|| sha.to_string()))
+}
+
+/// `merge-tree` of stash commits `ours` and `theirs` over `base`: the
+/// merged tree, or the conflicted files.
+fn merge_stash_trees(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    base: &str,
+    ours: &str,
+    theirs: &str,
+) -> Result<std::result::Result<String, Vec<String>>> {
+    let out = GitCommand::new(git)
+        .args([
+            "merge-tree",
+            "--write-tree",
+            "--name-only",
+            "--no-messages",
+            "-z",
+            &format!("--merge-base={base}"),
+            ours,
+            theirs,
+        ])
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .run()?;
+    let tree = out
+        .stdout
+        .split(|b| *b == 0)
+        .next()
+        .map(|t| String::from_utf8_lossy(t).trim().to_string())
+        .unwrap_or_default();
+    if out.status.success() && !tree.is_empty() {
+        Ok(Ok(tree))
+    } else {
+        Ok(Err(crate::rebase_ops::parse_merge_tree_names(&out.stdout)))
+    }
 }
 
 /// The paths with unmerged index entries (`ls-files -u`), each once.
@@ -354,6 +566,84 @@ mod tests {
             corvene_models::FileStatusKind::Modified
         );
         assert!(stash_entry(git, path, &entry.sha).unwrap().is_none());
+    }
+
+    /// `git status --porcelain` of `path`.
+    fn porcelain(path: &Path) -> String {
+        let out = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    #[test]
+    fn adding_to_a_stash_folds_both_into_one_entry() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("b.txt"), "b1\n").unwrap();
+        run(path, &["add", "b.txt"]);
+        run(path, &["commit", "-q", "-m", "b"]);
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        std::fs::write(path.join("n.txt"), "n\n").unwrap();
+        assert!(crate::create_desktop_stash(git.clone(), path, "main", false).unwrap());
+        let old = crate::get_stashes(git.clone(), path).unwrap().0.remove(0);
+        std::fs::write(path.join("b.txt"), "b2\n").unwrap();
+        std::fs::write(path.join("u.txt"), "u\n").unwrap();
+        assert_eq!(
+            add_to_desktop_stash(git.clone(), path, &old.sha, "main", false).unwrap(),
+            AddToStash::Added
+        );
+        assert_eq!(porcelain(path), "");
+        let (entries, total) = crate::get_stashes(git.clone(), path).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(entries[0].branch.as_deref(), Some("main"));
+        crate::pop_stash_entry(git, path, &entries[0].sha).unwrap();
+        for (file, text) in [
+            ("a.txt", "two\n"),
+            ("b.txt", "b2\n"),
+            ("n.txt", "n\n"),
+            ("u.txt", "u\n"),
+        ] {
+            assert_eq!(
+                std::fs::read_to_string(path.join(file)).unwrap(),
+                text,
+                "{file}"
+            );
+        }
+    }
+
+    #[test]
+    fn adding_conflicting_changes_touches_nothing() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        assert!(crate::create_desktop_stash(git.clone(), path, "main", false).unwrap());
+        let old = crate::get_stashes(git.clone(), path).unwrap().0.remove(0);
+        std::fs::write(path.join("a.txt"), "three\n").unwrap();
+        std::fs::write(path.join("u.txt"), "u\n").unwrap();
+        let before = porcelain(path);
+        let index = std::fs::read(path.join(".git/index")).unwrap();
+        assert_eq!(
+            add_to_desktop_stash(git.clone(), path, &old.sha, "main", false).unwrap(),
+            AddToStash::Conflicts(vec!["a.txt".to_string()])
+        );
+        assert_eq!(std::fs::read(path.join(".git/index")).unwrap(), index);
+        assert_eq!(porcelain(path), before);
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "three\n"
+        );
+        let (entries, total) = crate::get_stashes(git, path).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(entries[0].sha, old.sha);
+        assert!(std::fs::read_dir(path.join(".git")).unwrap().all(|e| {
+            !e.unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("corvene-")
+        }));
     }
 
     #[test]

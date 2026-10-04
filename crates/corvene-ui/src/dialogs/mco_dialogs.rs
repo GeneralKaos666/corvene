@@ -18,7 +18,9 @@
 //! stays in progress (`877-conflicts-dialog-close-guard`). "Local changes
 //! would be overwritten" lists the first [`MAX_OVERWRITTEN_LISTED`] files and
 //! how many more there are (GHD lists them all,
-//! `local-changes-overwritten-dialog.tsx`).
+//! `local-changes-overwritten-dialog.tsx`). With a stash on the branch it
+//! can add the changes to it and continue (`776-stash-add-to-existing`;
+//! GHD offers only Close then).
 
 use corvene_core::{
     AppState, Dispatcher, ManualConflictResolution, McoStep, MultiCommitOperationKind, RetryAction,
@@ -1403,6 +1405,14 @@ impl Render for LocalChangesOverwrittenDialog {
             .repo_states
             .get(&repo)
             .is_some_and(|r| r.desktop_stash().is_some());
+        // Corvene (`776-stash-add-to-existing`): with a stash, the changes
+        // can join it
+        let add_to_stash = has_stash
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::STASH_ADD_TO_EXISTING);
         let retry = self.retry.clone();
         let content = div()
             .flex()
@@ -1448,14 +1458,31 @@ impl Render for LocalChangesOverwrittenDialog {
             })
             .when(!has_stash, |d| {
                 d.child("You can stash your changes now and recover them afterwards.")
+            })
+            .when(add_to_stash, |d| {
+                d.child(
+                    "You can add your changes to the branch's stash now and recover them afterwards.",
+                )
             });
         let mut buttons = vec![DialogButton {
             id: "overwritten-close",
             label: "Close".into(),
-            primary: has_stash,
+            primary: has_stash && !add_to_stash,
             disabled: false,
             on_click: Box::new(close),
         }];
+        if add_to_stash {
+            let retry = retry.clone();
+            buttons.push(DialogButton {
+                id: "overwritten-add-to-stash",
+                label: mac_or("Add to Stash and Continue", "Add to stash and continue").into(),
+                primary: true,
+                disabled: false,
+                on_click: Box::new(move |_, cx| {
+                    Dispatcher::add_to_stash_and_retry(repo, retry.clone(), cx)
+                }),
+            });
+        }
         if !has_stash {
             buttons.push(DialogButton {
                 id: "overwritten-stash",

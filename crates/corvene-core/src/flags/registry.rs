@@ -4448,6 +4448,25 @@ registry! {
         code: &["crates/corvene-git/src/stash_ops.rs", "crates/corvene-core/src/stash_flows.rs"],
     },
 
+    /// Changes can be added to the branch's stash instead of replacing it.
+    STASH_ADD_TO_EXISTING = 776 "stash-add-to-existing" {
+        title: "Add changes to an existing stash",
+        summary: "Overwrite Stash? (Stash All Changes, or switching branches while leaving the \
+                  changes) has an Add to Stash button, and \"Unable to … when changes are \
+                  present\" offers Add to Stash and Continue when the branch already has a \
+                  stash. The stash is applied onto the current changes in a scratch copy first; \
+                  when that is clean, one stash holding both replaces the old one. When the two \
+                  change the same lines nothing is touched and Corvene names the files.",
+        ghd_behaviour: "A branch holds one stash: stashing again overwrites it, and the \
+                        overwritten dialog of a pull or cherry-pick offers only Close.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18539)],
+        code: &["crates/corvene-git/src/stash_ops.rs", "crates/corvene-core/src/stash_flows.rs", "crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

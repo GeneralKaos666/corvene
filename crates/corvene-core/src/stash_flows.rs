@@ -12,6 +12,11 @@
 //! Deviation (`775-stash-restore-unstages-new-files`): every restore passes
 //! [`StashPopOptions::unstage_new_files`], so files that were untracked when
 //! stashed come back untracked (GHD's come back staged as new files).
+//!
+//! Deviation (`776-stash-add-to-existing`): Overwrite Stash and "Unable to
+//! … when changes are present" offer Add to Stash, which folds the changes
+//! into the branch's stash when the two do not conflict
+//! (`corvene_git::add_to_desktop_stash`); GHD can only overwrite the stash.
 
 use std::path::PathBuf;
 
@@ -236,6 +241,99 @@ impl Dispatcher {
         );
     }
 
+    /// `776-stash-add-to-existing` › Add to Stash: fold the changes into the
+    /// current branch's stash; `then(true)` once they are stashed (also when
+    /// there was nothing to add), `then(false)` when nothing changed.
+    pub(crate) fn add_to_stash_then(
+        id: u64,
+        then: impl FnOnce(bool, &mut App) + 'static,
+        cx: &mut App,
+    ) {
+        let (repo, branch, old, guard) = {
+            let s = Self::state(cx).read(cx);
+            let rs = s.repo_states.get(&id);
+            (
+                Self::repo_context(id, cx),
+                rs.and_then(|r| r.info.as_ref())
+                    .and_then(|i| i.current_branch())
+                    .map(|b| b.name.clone()),
+                rs.and_then(|r| r.desktop_stash()).map(|e| e.sha.clone()),
+                s.flags
+                    .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED),
+            )
+        };
+        let (Some((git, workdir)), Some(branch), Some(old)) = (repo, branch, old) else {
+            then(false, cx);
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || corvene_git::add_to_desktop_stash(git, &workdir, &old, &branch, guard),
+            move |result, cx| {
+                let ok = match result {
+                    Ok(corvene_git::AddToStash::Added | corvene_git::AddToStash::NothingToAdd) => {
+                        true
+                    }
+                    Ok(corvene_git::AddToStash::Conflicts(files)) => {
+                        Self::show_error(
+                            "Could not add to the stash",
+                            add_to_stash_conflict_message(&files),
+                            cx,
+                        );
+                        false
+                    }
+                    Err(err) => {
+                        Self::show_error("Could not add to the stash", &err, cx);
+                        false
+                    }
+                };
+                Self::refresh_repository(id, cx);
+                then(ok, cx);
+            },
+        );
+    }
+
+    /// Branch › Stash All Changes › Add to Stash (`776`).
+    pub fn add_to_stash(id: u64, cx: &mut App) {
+        Self::add_to_stash_then(id, |_, _| {}, cx);
+    }
+
+    /// Switch Branch › Overwrite Stash › Add to Stash (`776`): the changes
+    /// join the stash, then `branch` is checked out.
+    pub fn add_to_stash_and_checkout(id: u64, branch: String, cx: &mut App) {
+        Self::add_to_stash_then(
+            id,
+            move |ok, cx| {
+                if ok {
+                    Self::checkout_branch(
+                        id,
+                        branch,
+                        Some(crate::persistence::UncommittedChangesStrategy::StashOnCurrentBranch),
+                        cx,
+                    );
+                }
+            },
+            cx,
+        );
+    }
+
+    /// "Unable to … when changes are present" › Add to Stash and Continue
+    /// (`776`): the changes join the stash, then the operation runs again.
+    pub fn add_to_stash_and_retry(id: u64, retry: crate::state::RetryAction, cx: &mut App) {
+        Self::close_popup(cx);
+        Self::add_to_stash_then(
+            id,
+            move |ok, cx| {
+                if ok {
+                    Self::perform_retry(id, retry, cx);
+                } else {
+                    Self::end_mco(id, cx);
+                }
+            },
+            cx,
+        );
+    }
+
     /// `DropKeptStash` › Drop Stash: drop the entry whose commit is `sha`.
     pub fn drop_stash_entry(id: u64, sha: String, cx: &mut App) {
         Self::run_history_op(
@@ -244,5 +342,40 @@ impl Dispatcher {
             move |git, workdir| corvene_git::drop_desktop_stash_entry(git, &workdir, &sha),
             cx,
         );
+    }
+}
+
+/// Why Add to Stash stopped: the files both change (at most five named).
+pub fn add_to_stash_conflict_message(files: &[String]) -> String {
+    let shown: Vec<&str> = files.iter().take(5).map(String::as_str).collect();
+    let more = match files.len().saturating_sub(shown.len()) {
+        0 => String::new(),
+        n => format!(" and {n} more"),
+    };
+    let what = if shown.is_empty() {
+        "the same files".to_string()
+    } else {
+        format!("{}{more}", shown.join(", "))
+    };
+    format!(
+        "Your changes and the stash both change {what}, so they cannot be combined. Nothing \
+         was changed: your changes and the stash are as they were. Restore or discard the \
+         stash first, or overwrite it."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_to_stash_conflicts_name_the_files() {
+        let files: Vec<String> = (1..=7).map(|i| format!("f{i}.txt")).collect();
+        let message = add_to_stash_conflict_message(&files);
+        assert!(
+            message.contains("f1.txt, f2.txt, f3.txt, f4.txt, f5.txt and 2 more"),
+            "{message}"
+        );
+        assert!(add_to_stash_conflict_message(&[]).contains("the same files"));
     }
 }
