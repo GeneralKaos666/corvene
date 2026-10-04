@@ -9,6 +9,11 @@
 #   corvene add [path]                 add the repository at the path
 #                                      without the Add Local Repository
 #                                      dialog (flag 417-cli-add-repository)
+#   corvene list [--json]              list the repositories Corvene has
+#                                      (flag 425-cli-list-repositories)
+#   corvene open [path] --changes|--history
+#                                      open the path on that tab (flag
+#                                      425-cli-list-repositories)
 #   corvene -g|--background …          (before open or clone) leave Corvene
 #                                      in the background (flag
 #                                      416-url-background-open)
@@ -37,6 +42,9 @@ Corvene CLI usage:
                                      (ex torvalds/linux), optionally checking out
                                      the branch
   corvene add [path]                 Add the repository at the path without asking
+  corvene list [--json]              List the repositories Corvene has
+  corvene open [path] --changes      Open the path on the Changes (or --history)
+                                     tab
   corvene -g|--background ...        Do it without bringing Corvene forward
 USAGE
   exit "$1"
@@ -124,15 +132,48 @@ case "$1" in
     printf '%s' "$DIR" > "$TOKEN_FILE"
     send "x-corvene://openLocalRepo$(urlencode "$DIR")?add=${TOKEN_FILE##*/corvene-add.}"
     ;;
+  list)
+    shift
+    # written by Corvene whenever the list changes (the store is locked
+    # while it runs)
+    DATA="${CORVENE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/corvene}"
+    case "$1" in
+      "") FILE="$DATA/repositories.txt" ;;
+      --json) FILE="$DATA/repositories.json" ;;
+      *) usage 1 ;;
+    esac
+    if [ ! -f "$FILE" ]; then
+      echo "corvene: no repository list yet (start Corvene, with flag 425-cli-list-repositories on)" >&2
+      exit 1
+    fi
+    exec cat "$FILE"
+    ;;
   *)
     if [ "$1" = "open" ]; then
       shift
     fi
-    DIR="${1:-.}"
+    ARG=""
+    TAB=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --changes) TAB=changes ;;
+        --history) TAB=history ;;
+        *)
+          [ -z "$ARG" ] || usage 1
+          ARG="$1"
+          ;;
+      esac
+      shift
+    done
+    DIR="${ARG:-.}"
     if ! DIR="$(cd "$DIR" 2>/dev/null && pwd -P)"; then
-      echo "corvene: $1: no such directory" >&2
+      echo "corvene: $ARG: no such directory" >&2
       exit 1
     fi
-    send "x-corvene://openLocalRepo$(urlencode "$DIR")"
+    TARGET="x-corvene://openLocalRepo$(urlencode "$DIR")"
+    if [ -n "$TAB" ]; then
+      TARGET="$TARGET?tab=$TAB"
+    fi
+    send "$TARGET"
     ;;
 esac

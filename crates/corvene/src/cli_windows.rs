@@ -8,6 +8,10 @@
 //!   corvene clone [-b branch] <url>    clone the repository by url or
 //!                                      owner/name, optionally checking out
 //!                                      the branch
+//!   corvene open [path] --changes|--history
+//!                                      open the path on that tab (flag
+//!                                      `425-cli-list-repositories`; `list`
+//!                                      is the batch file's own)
 //! Each becomes an `x-corvene://` URL, which goes the way of the URLs on
 //! the command line: to the running Corvene, or into this one.
 
@@ -72,14 +76,29 @@ fn clone_url(args: &[String]) -> Result<String, String> {
     Ok(target)
 }
 
-/// `[open] [path]` → `x-corvene://openLocalRepo/<path>`
+/// `[open] [path] [--changes|--history]` →
+/// `x-corvene://openLocalRepo/<path>[?tab=…]`
 fn open_url(args: &[String], cwd: &Path) -> Result<String, String> {
-    let path = args.first().map_or(".", String::as_str);
+    let mut path = None;
+    let mut tab = None;
+    for arg in args {
+        match arg.as_str() {
+            "--changes" => tab = Some("changes"),
+            "--history" => tab = Some("history"),
+            other if path.is_none() => path = Some(other),
+            _ => return Err("usage: corvene open [path] [--changes|--history]".to_string()),
+        }
+    }
+    let path = path.unwrap_or(".");
     let dir = dunce::canonicalize(cwd.join(path))
         .ok()
         .filter(|dir| dir.is_dir())
         .ok_or_else(|| format!("corvene: {path}: no such directory"))?;
-    Ok(corvene_core::app_url::open_local_repo_url(&dir))
+    let url = corvene_core::app_url::open_local_repo_url(&dir);
+    Ok(match tab {
+        Some(tab) => format!("{url}?tab={tab}"),
+        None => url,
+    })
 }
 
 fn url_for(args: &[String], cwd: &Path) -> Result<String, String> {
@@ -148,5 +167,15 @@ mod tests {
         assert_eq!(url_for(&args(&["my repo"]), dir.path()).unwrap(), url);
         assert!(url_for(&args(&[]), dir.path()).is_ok());
         assert!(url_for(&args(&["missing"]), dir.path()).is_err());
+        // `425-cli-list-repositories`: the tab to open
+        assert_eq!(
+            url_for(&args(&["open", "my repo", "--history"]), dir.path()).unwrap(),
+            format!("{url}?tab=history")
+        );
+        assert_eq!(
+            url_for(&args(&["--changes", "my repo"]), dir.path()).unwrap(),
+            format!("{url}?tab=changes")
+        );
+        assert!(url_for(&args(&["a", "b"]), dir.path()).is_err());
     }
 }

@@ -2975,6 +2975,30 @@ registry! {
         code: &["crates/corvene-core/src/menu_state.rs", "crates/corvene/src/main.rs"],
     },
 
+    /// The command line tool lists the repositories and opens a tab.
+    CLI_LIST_REPOSITORIES = 425 "cli-list-repositories" {
+        title: "List repositories from the command line",
+        summary: "Corvene keeps repositories.json and repositories.txt in its data folder up to \
+                  date with the repository list (name, path, which one is selected), so scripts \
+                  and launchers can read it while Corvene runs; corvene list [--json] prints it. \
+                  corvene open [path] --changes or --history opens the repository on that tab.",
+        ghd_behaviour: "The repository list cannot be read from outside, and the command line \
+                        tool opens a repository on whatever tab it was on.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22779)],
+        code: &[
+            "crates/corvene-core/src/repository_list_file.rs",
+            "crates/corvene-core/src/app_url.rs",
+            "packaging/corvene.sh",
+            "packaging/linux/corvene.sh",
+            "packaging/windows/corvene.bat",
+            "crates/corvene/src/cli_windows.rs",
+        ],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

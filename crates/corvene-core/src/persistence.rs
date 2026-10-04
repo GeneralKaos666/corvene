@@ -744,7 +744,15 @@ impl StoreExt for Store {
     }
 
     fn save_repositories(&self, repos: &[Repository]) -> Result<()> {
-        self.set("repositories", repos)
+        self.set("repositories", repos)?;
+        // `425-cli-list-repositories`
+        if crate::repository_list_file::enabled()
+            && let Some(dir) = self.path().parent()
+        {
+            let selected = self.selected_repository().ok().flatten();
+            crate::repository_list_file::write(dir, repos, selected);
+        }
+        Ok(())
     }
 
     /// Monotonic, never reused.
@@ -813,7 +821,16 @@ impl StoreExt for Store {
     }
 
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()> {
-        self.set("ui.selected_repository", &id)
+        self.set("ui.selected_repository", &id)?;
+        // `425-cli-list-repositories`
+        if crate::repository_list_file::enabled()
+            && let Some(dir) = self.path().parent()
+        {
+            let repos: Vec<Repository> =
+                self.get("repositories").ok().flatten().unwrap_or_default();
+            crate::repository_list_file::write(dir, &repos, id);
+        }
+        Ok(())
     }
 
     /// `AccountsStore.loadFromStore`: the stored accounts, `*.ghe.com`

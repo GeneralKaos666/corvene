@@ -58,6 +58,7 @@ pub mod release_notes;
 pub mod remote;
 pub mod repo_rules;
 pub mod repositories_store;
+pub mod repository_list_file;
 pub mod round;
 pub mod samples;
 pub mod shared_storage;

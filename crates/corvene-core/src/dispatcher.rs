@@ -216,7 +216,22 @@ impl Dispatcher {
         if let Some(banner) = unreadable_banner {
             Self::set_banner(banner, cx);
         }
+        Self::sync_repository_list_file(cx);
         state
+    }
+
+    /// Corvene (`425-cli-list-repositories`): the repository list files
+    /// follow the flag (written now, or removed).
+    pub(crate) fn sync_repository_list_file(cx: &mut dyn Host) {
+        let s = Self::state(cx).read(cx);
+        let Some(dir) = s.store.path().parent() else {
+            return;
+        };
+        crate::repository_list_file::set_enabled(
+            s.flags.bool(crate::flags::ids::CLI_LIST_REPOSITORIES),
+            dir,
+            Some((&s.repositories, s.selected)),
+        );
     }
 
     /// Watch the repository's worktree; each debounced change triggers a

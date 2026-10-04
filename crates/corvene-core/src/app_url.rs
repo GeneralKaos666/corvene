@@ -24,7 +24,9 @@
 //! the URL over a fork matching through its parent (`doesRepositoryMatchUrl`
 //! callers take the first match). With `416-url-background-open`, an
 //! `openRepo` / `openLocalRepo` URL carrying `background=1` (the CLI's
-//! `--background`) does not bring the window forward.
+//! `--background`) does not bring the window forward. With
+//! `425-cli-list-repositories`, `openLocalRepo` takes `tab=changes|history`
+//! (the CLI's `--changes` / `--history`).
 
 use std::path::{Path, PathBuf};
 
@@ -231,6 +233,24 @@ pub fn opens_in_background(url: &str) -> bool {
         && query_value(query, "background").is_some_and(|v| v == "1" || v == "true")
 }
 
+/// Corvene (`425-cli-list-repositories`): the section an `openLocalRepo`
+/// URL asks for (`?tab=changes` / `?tab=history`, the CLI's `--changes` /
+/// `--history`).
+pub fn local_repo_section(url: &str) -> Option<corvene_models::Section> {
+    let (_, rest) = url.split_once("://")?;
+    let rest = rest.split('#').next().unwrap_or(rest);
+    let (location, query) = rest.split_once('?')?;
+    let action = location.split('/').next().unwrap_or("").to_lowercase();
+    if action != "openlocalrepo" {
+        return None;
+    }
+    match query_value(query, "tab")?.to_lowercase().as_str() {
+        "changes" => Some(corvene_models::Section::Changes),
+        "history" => Some(corvene_models::Section::History),
+        _ => None,
+    }
+}
+
 /// `x-corvene://openLocalRepo/<path>` (the CLI builds the same string).
 pub fn open_local_repo_url(path: &Path) -> String {
     let path = path.to_string_lossy();
@@ -375,7 +395,16 @@ impl Dispatcher {
                 pr,
                 filepath,
             } => Self::open_repository_from_url(url, branch, pr, filepath, cx),
-            UrlAction::OpenLocalRepository { path } => Self::open_local_repository(path, cx),
+            UrlAction::OpenLocalRepository { path } => {
+                // `425-cli-list-repositories`: `tab=`
+                let section = local_repo_section(url).filter(|_| {
+                    Self::state(cx)
+                        .read(cx)
+                        .flags
+                        .bool(crate::flags::ids::CLI_LIST_REPOSITORIES)
+                });
+                Self::open_local_repository_in(path, section, cx)
+            }
             UrlAction::AddLocalRepository { path, token } => {
                 // the token file goes whatever the flag says
                 let trusted = corvene_platform::cli::take_add_token(&token, &path);
@@ -701,6 +730,16 @@ impl Dispatcher {
     }
 
     pub fn open_local_repository(path: PathBuf, cx: &mut dyn Host) {
+        Self::open_local_repository_in(path, None, cx);
+    }
+
+    /// [`Self::open_local_repository`], then the repository's `section`
+    /// (`425-cli-list-repositories`) when it was added already.
+    pub fn open_local_repository_in(
+        path: PathBuf,
+        section: Option<corvene_models::Section>,
+        cx: &mut dyn Host,
+    ) {
         // Android (`corvene <dir>` in Termux): say why a folder cannot be
         // opened instead of calling a readable-looking path "not found"
         #[cfg(target_os = "android")]
@@ -744,7 +783,7 @@ impl Dispatcher {
                     .unwrap_or_default();
                 (root, worktrees)
             },
-            |(root, worktrees), cx| {
+            move |(root, worktrees), cx| {
                 let s = Self::state(cx).read(cx);
                 if let Some(id) = s
                     .repositories
@@ -753,6 +792,9 @@ impl Dispatcher {
                     .map(|r| r.id)
                 {
                     Self::select_repository(id, cx);
+                    if let Some(section) = section {
+                        Self::show_section(id, section, cx);
+                    }
                     return;
                 }
                 // a repository sharing the main worktree: switch to this one
@@ -767,6 +809,9 @@ impl Dispatcher {
                     .map(|r| r.id);
                 if let Some(id) = shared {
                     Self::select_repository(id, cx);
+                    if let Some(section) = section {
+                        Self::show_section(id, section, cx);
+                    }
                     Self::switch_worktree(id, root, cx);
                     return;
                 }
@@ -779,6 +824,28 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tab_query_names_the_section() {
+        use corvene_models::Section;
+        assert_eq!(
+            local_repo_section("x-corvene://openLocalRepo/tmp/a?tab=history"),
+            Some(Section::History)
+        );
+        assert_eq!(
+            local_repo_section("x-corvene://openLocalRepo/tmp/a?background=1&tab=Changes"),
+            Some(Section::Changes)
+        );
+        assert_eq!(local_repo_section("x-corvene://openLocalRepo/tmp/a"), None);
+        assert_eq!(
+            local_repo_section("x-corvene://openLocalRepo/tmp/a?tab=x"),
+            None
+        );
+        assert_eq!(
+            local_repo_section("x-corvene://openRepo/https://x/y?tab=history"),
+            None
+        );
+    }
 
     #[test]
     fn add_query_asks_for_a_silent_add() {

@@ -204,6 +204,9 @@ impl Dispatcher {
             Self::restart_watcher(cx);
         }
         Self::sync_crash_reports_setting(cx);
+        if now.bool(ids::CLI_LIST_REPOSITORIES) != previous.bool(ids::CLI_LIST_REPOSITORIES) {
+            Self::sync_repository_list_file(cx);
+        }
         corvene_git::set_explain_missing_workdir(now.bool(ids::GIT_SPAWN_ERROR_DETAILS));
         // flags that change how diffs are read: the cached ones are stale
         let reads_diffs = |flags: &Flags| {
