@@ -5554,6 +5554,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/history_dialogs.rs"],
     },
 
+    /// History reloads asked for during a page load are not dropped.
+    HISTORY_LOAD_RACE = 885 "history-load-race" {
+        title: "History keeps up with new commits",
+        summary: "A History reload asked for while a page of commits is still loading (a refresh \
+                  right after committing, switching first-parent mode) runs as soon as that page \
+                  is in, and the next page continues from the tip the list was loaded from, so a \
+                  commit made while scrolling neither duplicates rows nor hides the newest one.",
+        ghd_behaviour: "A reload asked for during a load is dropped, so a new commit can be missing \
+                        from History until the next refresh, and paging restarts from HEAD.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13830), Upstream::issue(20687), Upstream::issue(22064)],
+        code: &["crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

@@ -1021,6 +1021,9 @@ pub struct RepositoryState {
     /// Commits of HEAD, newest first, loaded in `COMMIT_BATCH_SIZE` pages.
     pub commits: Vec<corvene_models::Commit>,
     pub commits_loading: bool,
+    /// `885-history-load-race`: a first-page reload was asked for while a
+    /// page was loading; it runs when that one is in.
+    pub commits_reload_pending: bool,
     /// The last page was shorter than a batch: nothing more to load.
     pub commits_exhausted: bool,
     /// `commitSelection.shas[0]`: the anchor of the selection.

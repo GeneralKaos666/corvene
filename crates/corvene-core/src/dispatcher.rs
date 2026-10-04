@@ -2051,17 +2051,42 @@ impl Dispatcher {
     /// Load the first page of HEAD's history, or the next one when `more`.
     pub fn load_commits(id: u64, more: bool, cx: &mut App) {
         let state = Self::state(cx);
-        let (workdir, skip, first_parent) = {
+        // `885-history-load-race`: a reload asked for while a page loads
+        // runs once that page is in (GHD drops it), and the next page
+        // continues from the tip the list was loaded from, not HEAD
+        let race_fix = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::HISTORY_LOAD_RACE);
+        let loading = state
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .is_some_and(|rs| rs.commits_loading);
+        if loading {
+            if !more && race_fix {
+                state.update(cx, |s, _| {
+                    s.repo_state_mut(id).commits_reload_pending = true
+                });
+            }
+            return;
+        }
+        let (workdir, revision, skip, first_parent) = {
             let s = state.read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
                 return;
             };
-            if rs.commits_loading || (more && rs.commits_exhausted) {
+            if more && rs.commits_exhausted {
                 return;
             }
             let Some(info) = rs.info.as_ref() else { return };
+            let revision = match rs.commits.first() {
+                Some(tip) if more && race_fix => tip.sha.clone(),
+                _ => "HEAD".to_string(),
+            };
             (
                 info.workdir.clone(),
+                revision,
                 if more { rs.commits.len() } else { 0 },
                 Self::history_first_parent(s),
             )
@@ -2084,7 +2109,7 @@ impl Dispatcher {
             });
             let commits = corvene_git::get_commits_with(
                 &workdir,
-                "HEAD",
+                &revision,
                 skip,
                 corvene_git::COMMIT_BATCH_SIZE,
                 first_parent,
@@ -2095,9 +2120,11 @@ impl Dispatcher {
             let (result, unpublished) = task.await;
             cx.update(|cx| {
                 let mut rewritten = Vec::new();
+                let mut reload = false;
                 let reselect = Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
                     rs.commits_loading = false;
+                    reload = std::mem::take(&mut rs.commits_reload_pending);
                     let mut changed = true;
                     if rs.unpublished_commits != unpublished {
                         rs.unpublished_commits = unpublished;
@@ -2159,12 +2186,15 @@ impl Dispatcher {
                 });
                 if !rewritten.is_empty() {
                     Self::select_commits(id, rewritten, cx);
-                    return;
+                } else {
+                    match reselect {
+                        Err(Some(first)) => Self::select_commits(id, vec![first], cx),
+                        Ok(true) => Self::load_changeset(id, cx),
+                        _ => {}
+                    }
                 }
-                match reselect {
-                    Err(Some(first)) => Self::select_commits(id, vec![first], cx),
-                    Ok(true) => Self::load_changeset(id, cx),
-                    _ => {}
+                if reload {
+                    Self::load_commits(id, false, cx);
                 }
             });
         })
