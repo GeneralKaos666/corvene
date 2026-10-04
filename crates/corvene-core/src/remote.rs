@@ -34,6 +34,10 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! The hourly background fetch of a GitHub repository can be skipped while
+//! GitHub says nothing was pushed since the last one, with a real fetch at
+//! least every six hours (`298-background-fetch-skips-unchanged`; GHD
+//! fetches every hour).
 //! The Newer Commits on Remote dialog can pull and push in one go
 //! (`297-push-needs-pull-offers-pull`).
 //! A running fetch, push or pull (until it merges) can be stopped from the
@@ -149,6 +153,9 @@ pub enum ForcePushState {
 
 pub(crate) const BACKGROUND_FETCH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const BACKGROUND_FETCH_MINIMUM: Duration = Duration::from_secs(5 * 60);
+/// `298-background-fetch-skips-unchanged`: a real background fetch runs at
+/// least this often, whatever GitHub says.
+const FORCED_FETCH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const INDICATOR_REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 const INDICATOR_REFRESH_MINIMUM: Duration = Duration::from_secs(60);
 
@@ -1918,7 +1925,7 @@ impl Dispatcher {
     /// its last fetch is older than the interval (`shouldBackgroundFetch`).
     /// One background fetch round (the hourly timer, WorkManager on Android).
     pub fn background_fetch_tick(cx: &mut dyn Host) {
-        let (id, last_fetched, busy, known_push) = {
+        let (id, last_fetched, busy, known_push, skip_unchanged) = {
             let s = Self::state(cx).read(cx);
             let Some(id) = s.selected else { return };
             let Some(repo) = s.repository(id) else { return };
@@ -1928,6 +1935,13 @@ impl Dispatcher {
                 .github
                 .clone()
                 .filter(|_| s.flags.bool(crate::flags::ids::FETCH_ON_KNOWN_PUSH));
+            // `298-background-fetch-skips-unchanged`: the hourly fetch of a
+            // GitHub repository that is not a fork asks the API first
+            let skip_unchanged = repo.github.clone().filter(|gh| {
+                !gh.fork
+                    && s.flags
+                        .bool(crate::flags::ids::BACKGROUND_FETCH_SKIPS_UNCHANGED)
+            });
             // GHD fetches GitHub repositories only; `244-background-fetch`
             // can also turn it off or extend it to any remote
             let fetch = match s.flags.text(crate::flags::ids::BACKGROUND_FETCH) {
@@ -1950,19 +1964,29 @@ impl Dispatcher {
                 rs.and_then(|r| r.last_fetched),
                 rs.is_some_and(|r| r.push_pull_in_progress || r.mco.is_some()),
                 known_push,
+                skip_unchanged,
             )
         };
         if busy {
             return;
         }
-        let due = match last_fetched {
-            None => true,
-            Some(at) => SystemTime::now()
+        let age = last_fetched.map(|at| {
+            SystemTime::now()
                 .duration_since(at)
-                .map(|d| d >= BACKGROUND_FETCH_INTERVAL)
-                .unwrap_or(true),
-        };
+                .unwrap_or(Duration::MAX)
+        });
+        let due = age.is_none_or(|age| age >= BACKGROUND_FETCH_INTERVAL);
         if due {
+            // `298-background-fetch-skips-unchanged`: nothing was pushed since
+            // the last fetch, so the fetch would bring nothing; a real fetch
+            // still runs every few hours (a fork's parent, pull request refs
+            // and deleted branches do not move `pushed_at`)
+            if let (Some(github), Some(last_fetched)) = (skip_unchanged, last_fetched)
+                && age.is_some_and(|age| age < FORCED_FETCH_INTERVAL)
+                && let Some(api) = Self::api_for(&github, cx)
+            {
+                return Self::fetch_if_pushed(id, github, api, last_fetched, true, cx);
+            }
             info!(id, "background fetch");
             Self::fetch(id, true, cx);
             return;
@@ -1970,9 +1994,24 @@ impl Dispatcher {
         let (Some(github), Some(last_fetched)) = (known_push, last_fetched) else {
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+        let Some(api) = Self::api_for(&github, cx) else {
             return;
         };
+        Self::fetch_if_pushed(id, github, api, last_fetched, false, cx);
+    }
+
+    /// Ask GitHub when `github` was last pushed to and fetch repository `id`
+    /// when that was after `last_fetched` (`278-fetch-on-known-push`) - or,
+    /// with `due` (`298-background-fetch-skips-unchanged`, the hourly fetch),
+    /// unless it clearly was not: a failed or empty answer fetches too.
+    fn fetch_if_pushed(
+        id: u64,
+        github: corvene_models::GitHubRepository,
+        (endpoint, token, _): (corvene_github::Endpoint, String, String),
+        last_fetched: SystemTime,
+        due: bool,
+        cx: &mut dyn Host,
+    ) {
         spawn_bg(
             cx,
             move || {
@@ -1985,7 +2024,7 @@ impl Dispatcher {
                     Ok(pushed_at) => pushed_at.as_deref().and_then(corvene_models::parse_iso8601),
                     Err(err) => {
                         debug!(id, %err, "could not read when the repository was pushed to");
-                        return;
+                        None
                     }
                 };
                 // still selected, not fetched meanwhile, and nothing running
@@ -1996,9 +2035,23 @@ impl Dispatcher {
                         && rs.and_then(|r| r.last_fetched) == Some(last_fetched)
                         && !rs.is_some_and(|r| r.push_pull_in_progress || r.mco.is_some())
                 };
-                if still_stale && pushed_after_fetch(pushed_at, last_fetched) {
+                if !still_stale {
+                    return;
+                }
+                if pushed_after_fetch(pushed_at, last_fetched) {
                     info!(id, "background fetch after a push seen on GitHub");
                     Self::fetch(id, true, cx);
+                } else if due && pushed_at.is_none() {
+                    info!(
+                        id,
+                        "background fetch (GitHub did not say when it was pushed to)"
+                    );
+                    Self::fetch(id, true, cx);
+                } else if due {
+                    debug!(
+                        id,
+                        "background fetch skipped: nothing pushed since the last fetch"
+                    );
                 }
             },
         );

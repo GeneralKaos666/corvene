@@ -2092,6 +2092,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/remote_dialogs.rs", "crates/corvene-core/src/remote.rs"],
     },
 
+    /// The hourly fetch is skipped while GitHub saw no push.
+    BACKGROUND_FETCH_SKIPS_UNCHANGED = 298 "background-fetch-skips-unchanged" {
+        title: "Skip background fetches with nothing new",
+        summary: "Before the hourly background fetch of a GitHub repository (not a fork), \
+                  Corvene asks GitHub when it was last pushed to and skips the fetch when that \
+                  was before the last fetch. A real fetch still runs at least every six hours, \
+                  as pull request refs, deleted branches and a fork's parent do not always \
+                  show up there.",
+        ghd_behaviour: "Runs git fetch every hour, also when nothing changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1252)],
+        code: &["crates/corvene-core/src/remote.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
