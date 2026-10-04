@@ -16,9 +16,6 @@
 //!
 //! [`MenuLabelsEvent::of`] is GHD `updateMenuItemLabels` (`app-store.ts`),
 //! except:
-//! - `askForConfirmationWhenStashingAllChanges` is always false: Corvene's
-//!   Stash All Changes replaces an existing stash without GHD's
-//!   `ConfirmOverwriteStash` warning, so its label has no ellipsis.
 //! - `isChangesFilterVisible` stays at GHD's default (shown): whether the
 //!   filter is shown lives in the Changes view (`changes.rs`), not in
 //!   `AppState`.
@@ -168,7 +165,6 @@ impl MenuLabelsEvent {
             selected_external_editor: Some(s.editor_label()),
             ask_for_confirmation_on_force_push: s.settings.confirm_force_push,
             ask_for_confirmation_on_repository_removal: s.settings.confirm_repository_removal,
-            // Stash All Changes does not ask before replacing a stash
             ask_for_confirmation_when_stashing_all_changes: false,
             extras,
             ..Self::default()
@@ -212,6 +208,8 @@ impl MenuLabelsEvent {
             ) != corvene_core::ForcePushState::NotAvailable,
             is_stashed_changes_visible: rs.showing_stash,
             has_current_pull_request: s.current_pull_request(repository.id).is_some(),
+            // `changesState.stashEntry !== null`
+            ask_for_confirmation_when_stashing_all_changes: rs.desktop_stash().is_some(),
             ..labels
         }
     }

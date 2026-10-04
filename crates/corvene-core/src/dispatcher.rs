@@ -3483,7 +3483,7 @@ impl Dispatcher {
             Self::show_popup(
                 Popup::ConfirmOverwriteStash {
                     repo: id,
-                    branch: name,
+                    branch: Some(name),
                 },
                 cx,
             );
@@ -3555,12 +3555,14 @@ impl Dispatcher {
                                 &workdir,
                             )?;
                         }
-                        // `createStashAndDropPreviousEntry`
-                        if let Some(old) = previous_stash {
+                        // `createStashAndDropPreviousEntry`: the old entry
+                        // goes once the new one is made
+                        if corvene_git::create_desktop_stash(git.clone(), &workdir, current, false)?
+                            && let Some(old) = previous_stash
+                        {
                             let _ =
                                 corvene_git::drop_desktop_stash_entry(git.clone(), &workdir, &old);
                         }
-                        corvene_git::create_desktop_stash(git.clone(), &workdir, current, false)?;
                     }
                     corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
                 }
@@ -4137,8 +4139,16 @@ impl Dispatcher {
         }
     }
 
-    /// Branch › Stash All Changes (`createStashForCurrentBranch`).
+    /// Branch › Stash All Changes (`createStashForCurrentBranch`): asks
+    /// `ConfirmOverwriteStash` first when the branch has a stash.
     pub fn stash_all_changes(id: u64, cx: &mut App) {
+        Self::create_stash_for_current_branch(id, true, cx);
+    }
+
+    /// GHD `_createStashForCurrentBranch(repository, showConfirmationDialog)`:
+    /// stash every change on the current branch, then drop the branch's
+    /// previous stash (`createStashAndDropPreviousEntry`).
+    pub fn create_stash_for_current_branch(id: u64, show_confirmation: bool, cx: &mut App) {
         let current = Self::state(cx)
             .read(cx)
             .repo_states
@@ -4153,6 +4163,16 @@ impl Dispatcher {
             .get(&id)
             .and_then(|r| r.desktop_stash())
             .map(|s| s.sha.clone());
+        if show_confirmation && previous.is_some() {
+            Self::show_popup(
+                Popup::ConfirmOverwriteStash {
+                    repo: id,
+                    branch: None,
+                },
+                cx,
+            );
+            return;
+        }
         let guard = Self::state(cx)
             .read(cx)
             .flags
@@ -4164,10 +4184,12 @@ impl Dispatcher {
                 if guard {
                     corvene_git::ensure_no_modified_assume_unchanged(git.clone(), &workdir)?;
                 }
-                if let Some(old) = previous {
-                    let _ = corvene_git::drop_desktop_stash_entry(git.clone(), &workdir, &old);
+                if corvene_git::create_desktop_stash(git.clone(), &workdir, &current, false)?
+                    && let Some(old) = previous
+                {
+                    let _ = corvene_git::drop_desktop_stash_entry(git, &workdir, &old);
                 }
-                corvene_git::create_desktop_stash(git, &workdir, &current, false).map(|_| ())
+                Ok(())
             },
             cx,
         );

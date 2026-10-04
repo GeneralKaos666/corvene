@@ -2675,13 +2675,20 @@ impl ChangesSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (id, confirm, paths, openable, assume_unchanged) = {
+        let (id, confirm, paths, openable, assume_unchanged, has_stash, can_stash) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
             let Some(rs) = s.selected_state() else { return };
             if rs.committing {
                 return;
             }
+            // GHD: a branch, and no conflicts (`hasConflictedFiles` too)
+            let can_stash = rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
+                && rs.conflict_state.is_none()
+                && !rs
+                    .status
+                    .as_deref()
+                    .is_some_and(|st| st.files.iter().any(|f| f.status.is_conflicted()));
             let paths: Vec<String> = rs
                 .status
                 .as_deref()
@@ -2710,6 +2717,8 @@ impl ChangesSidebar {
                 paths,
                 openable,
                 s.flags.bool(corvene_core::flags::ids::ASSUME_UNCHANGED),
+                rs.desktop_stash().is_some(),
+                can_stash,
             )
         };
         let has_changes = !paths.is_empty();
@@ -2724,9 +2733,15 @@ impl ChangesSidebar {
                 move |_, cx| Dispatcher::request_discard_changes(id, paths.clone(), cx),
             )
             .enabled(has_changes),
-            // TODO(M4): stashes; disabled until then.
-            MenuItem::new(mac_or("Stash All Changes", "Stash all changes"), |_, _| {})
-                .enabled(false),
+            MenuItem::new(
+                if has_stash {
+                    mac_or("Stash All Changes…", "Stash all changes…")
+                } else {
+                    mac_or("Stash All Changes", "Stash all changes")
+                },
+                move |_, cx| Dispatcher::stash_all_changes(id, cx),
+            )
+            .enabled(has_changes && can_stash),
         ];
         if let Some(files) = openable {
             items.push(MenuItem::separator());

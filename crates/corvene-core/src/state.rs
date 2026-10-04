@@ -438,10 +438,11 @@ pub enum Popup {
         repo: u64,
         branch: String,
     },
-    /// `ConfirmOverwriteStash`
+    /// `ConfirmOverwriteStash`: `branch` is `branchToCheckout` (`None`:
+    /// Stash All Changes).
     ConfirmOverwriteStash {
         repo: u64,
-        branch: String,
+        branch: Option<String>,
     },
     /// Corvene: confirm a checkout from the branch list
     /// (`864-confirm-branch-switch`).

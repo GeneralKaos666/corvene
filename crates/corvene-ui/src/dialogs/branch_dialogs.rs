@@ -1348,11 +1348,12 @@ impl Render for StashAndSwitchBranchDialog {
 
 pub struct ConfirmOverwriteStashDialog {
     repo: u64,
-    branch: String,
+    /// `branchToCheckout`: `None` for Stash All Changes.
+    branch: Option<String>,
 }
 
 impl ConfirmOverwriteStashDialog {
-    pub fn new(repo: u64, branch: String) -> Self {
+    pub fn new(repo: u64, branch: Option<String>) -> Self {
         Self { repo, branch }
     }
 }
@@ -1383,12 +1384,15 @@ impl Render for ConfirmOverwriteStashDialog {
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
-                        Dispatcher::checkout_branch(
-                            repo,
-                            branch.clone(),
-                            Some(UncommittedChangesStrategy::StashOnCurrentBranch),
-                            cx,
-                        );
+                        match &branch {
+                            Some(branch) => Dispatcher::checkout_branch(
+                                repo,
+                                branch.clone(),
+                                Some(UncommittedChangesStrategy::StashOnCurrentBranch),
+                                cx,
+                            ),
+                            None => Dispatcher::create_stash_for_current_branch(repo, false, cx),
+                        }
                     }),
                 },
             ],
