@@ -911,6 +911,22 @@ pub fn pull(
     Ok(())
 }
 
+/// Corvene (`295-cancel-network-operations`): a [`pull`] that started at
+/// `since` has gone past its fetch and is merging or rebasing, which must
+/// not be interrupted: `ORIG_HEAD` (which `git merge` and `git rebase` write
+/// first) changed since, or the index is locked, or a merge or rebase is
+/// under way. Errs on the side of "merging".
+pub fn pull_merge_started(workdir: &Path, since: SystemTime) -> bool {
+    let dir = git_dir(workdir);
+    let orig_head_written = std::fs::metadata(dir.join("ORIG_HEAD"))
+        .and_then(|m| m.modified())
+        .is_ok_and(|modified| modified + std::time::Duration::from_secs(1) >= since);
+    orig_head_written
+        || ["index.lock", "MERGE_HEAD", "rebase-merge", "rebase-apply"]
+            .iter()
+            .any(|name| dir.join(name).exists())
+}
+
 /// GHD `IPushProgress` (`models/progress.ts`): what [`push_with_progress`]
 /// reports.
 #[derive(Clone, Debug, PartialEq)]
@@ -1463,6 +1479,25 @@ pub fn install_lfs_hooks(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pull_merge_started_reads_the_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = dir.path().join(".git");
+        std::fs::create_dir(&git).unwrap();
+        let started = SystemTime::now();
+        assert!(!pull_merge_started(dir.path(), started));
+        // an ORIG_HEAD from long before the pull does not count
+        std::fs::write(git.join("ORIG_HEAD"), "x\n").unwrap();
+        assert!(!pull_merge_started(
+            dir.path(),
+            started + std::time::Duration::from_secs(60)
+        ));
+        assert!(pull_merge_started(dir.path(), started));
+        std::fs::remove_file(git.join("ORIG_HEAD")).unwrap();
+        std::fs::create_dir(git.join("rebase-merge")).unwrap();
+        assert!(pull_merge_started(dir.path(), started));
+    }
 
     #[test]
     fn missing_remote_repositories() {

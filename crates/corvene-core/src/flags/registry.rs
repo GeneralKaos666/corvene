@@ -2029,6 +2029,24 @@ registry! {
         code: &["crates/corvene-core/src/bookmarks.rs", "crates/corvene-platform/src/bookmarks.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// A running fetch, pull or push can be stopped.
+    CANCEL_NETWORK_OPERATIONS = 295 "cancel-network-operations" {
+        title: "Stop a fetch, pull or push",
+        summary: "While a fetch, pull or push runs, the push/pull button has a Stop button in \
+                  place of its ▾: git is stopped (with the processes it started) and the button \
+                  says \"Cancelled\" for a moment. A push stopped while the server finishes it \
+                  may still land; a pull can be stopped while it fetches, not once it merges \
+                  or rebases.",
+        ghd_behaviour: "The button is disabled until the operation ends, however long a stalled \
+                        connection or a slow server hook takes.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14095)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/process.rs", "crates/corvene-ui/src/toolbar.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

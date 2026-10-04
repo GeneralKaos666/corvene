@@ -34,6 +34,9 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! A running fetch, push or pull (until it merges) can be stopped from the
+//! push/pull button (`295-cancel-network-operations`; GHD `push-pull-button.tsx`
+//! only disables itself).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,6 +86,29 @@ pub enum PushPullKind {
     Pull,
     Fetch,
     Generic,
+}
+
+/// Corvene (`295-cancel-network-operations`, `296-cancel-fetch-on-wake`):
+/// what stops the repository's running fetch, pull or push.
+#[derive(Clone, Debug)]
+pub struct NetworkCancel {
+    pub token: corvene_git::CancelToken,
+    pub kind: PushPullKind,
+    /// A background fetch, the only kind waking from sleep stops.
+    pub background: bool,
+    /// When it started: a pull that went on to merge cannot be stopped.
+    pub started: SystemTime,
+}
+
+/// How long the push/pull button says "Cancelled" after a stop.
+pub const CANCELLED_NOTE: Duration = Duration::from_secs(5);
+
+/// Run `f` with `token` stopping the git commands it starts.
+fn cancellable<T>(token: Option<&corvene_git::CancelToken>, f: impl FnOnce() -> T) -> T {
+    match token {
+        Some(token) => corvene_git::with_cancel_token(token, f),
+        None => f(),
+    }
 }
 
 /// Corvene (`271-persist-repository-indicators`): keep the indicators for
@@ -329,8 +355,90 @@ impl Dispatcher {
             rs.push_pull_in_progress = false;
             rs.quiet_background_fetch = false;
             rs.push_pull_progress = None;
+            rs.network_cancel = None;
             cx.notify();
         });
+    }
+
+    /// The token that stops the network operation just begun, kept in the
+    /// repository state while `295-cancel-network-operations` or
+    /// `296-cancel-fetch-on-wake` is on (`None`: GHD, nothing stops it).
+    fn network_cancel_token(
+        id: u64,
+        kind: PushPullKind,
+        background: bool,
+        cx: &mut dyn Host,
+    ) -> Option<corvene_git::CancelToken> {
+        let flags = &Self::state(cx).read(cx).flags;
+        if !flags.bool(crate::flags::ids::CANCEL_NETWORK_OPERATIONS) {
+            return None;
+        }
+        let token = corvene_git::CancelToken::new();
+        let cancel = NetworkCancel {
+            token: token.clone(),
+            kind,
+            background,
+            started: SystemTime::now(),
+        };
+        Self::state(cx).update(cx, |s, _| {
+            s.repo_state_mut(id).network_cancel = Some(cancel);
+        });
+        Some(token)
+    }
+
+    /// `295-cancel-network-operations`: the push/pull button offers Stop
+    /// (a fetch, pull or push showing its progress, not yet stopped).
+    pub fn network_cancellable(s: &crate::state::AppState, id: u64) -> bool {
+        s.flags.bool(crate::flags::ids::CANCEL_NETWORK_OPERATIONS)
+            && s.repo_states.get(&id).is_some_and(|rs| {
+                !rs.quiet_background_fetch
+                    && rs
+                        .network_cancel
+                        .as_ref()
+                        .is_some_and(|c| !c.token.is_cancelled())
+            })
+    }
+
+    /// The push/pull button's Stop (`295-cancel-network-operations`): stop
+    /// the running fetch, push or pull. A pull that already merges or
+    /// rebases is left to finish.
+    pub fn cancel_network(id: u64, cx: &mut dyn Host) {
+        let (cancel, workdir) = {
+            let s = Self::state(cx).read(cx);
+            if !Self::network_cancellable(s, id) {
+                return;
+            }
+            (
+                s.repo_states
+                    .get(&id)
+                    .and_then(|r| r.network_cancel.clone()),
+                s.repository(id).map(|r| r.path.clone()),
+            )
+        };
+        let Some(cancel) = cancel else { return };
+        if cancel.kind == PushPullKind::Pull
+            && workdir.is_none_or(|dir| corvene_git::pull_merge_started(&dir, cancel.started))
+        {
+            Self::show_error(
+                "Could not stop the pull",
+                "The pull has already started merging or rebasing, which must not be \
+                 interrupted. It will finish shortly.",
+                cx,
+            );
+            return;
+        }
+        info!(id, kind = ?cancel.kind, "stopping network operation");
+        cancel.token.cancel();
+        Self::state(cx).update(cx, |s, cx| {
+            s.repo_state_mut(id).network_cancelled_at = Some(Instant::now());
+            cx.notify();
+        });
+        // the button's "Cancelled" goes again
+        cx.spawn(async move |cx: &mut AsyncCtx| {
+            cx.background_executor().timer(CANCELLED_NOTE).await;
+            cx.update(|cx| Self::state(cx).update(cx, |_, cx| cx.notify()));
+        })
+        .detach();
     }
 
     /// Run a network operation on a background thread, mirroring progress
@@ -372,6 +480,12 @@ impl Dispatcher {
         background: bool,
         cx: &mut dyn Host,
     ) {
+        // `295-cancel-network-operations` / `296-cancel-fetch-on-wake`:
+        // stopped on purpose
+        if matches!(err, corvene_git::GitError::Cancelled(_)) {
+            info!(id, "remote operation stopped");
+            return;
+        }
         if background {
             warn!(id, %err, "background remote operation failed");
             return;
@@ -645,66 +759,69 @@ impl Dispatcher {
                 .read(cx)
                 .flags
                 .bool(crate::flags::ids::BACKGROUND_FETCH_FAST_FORWARDS);
+        let cancel = Self::network_cancel_token(id, PushPullKind::Fetch, background, cx);
         Self::run_network(
             id,
             cx,
             move |report| {
-                let mut report = |progress| {
-                    if !quiet {
-                        report(progress)
-                    }
-                };
-                let mut retry = prune_retry;
-                let result = loop {
-                    let result = corvene_git::fetch_with(
-                        git.clone(),
-                        &workdir,
-                        &remote_name,
-                        options,
-                        askpass.as_ref(),
-                        &mut |value, text| {
-                            report(PushPullProgress {
-                                kind: PushPullKind::Fetch,
-                                title: title.clone(),
-                                description: Some(text),
-                                value: value * 0.9,
-                            })
-                        },
-                    );
-                    if !Self::prune_before_retry(
-                        &mut retry,
-                        &result,
-                        &git,
-                        &workdir,
-                        &remote_name,
-                        askpass.as_ref(),
-                    ) {
-                        break result;
-                    }
-                };
-                if result.is_ok() {
-                    report(PushPullProgress {
-                        kind: PushPullKind::Generic,
-                        title: REFRESHING_REPOSITORY.into(),
-                        description: Some("Fast-forwarding branches".into()),
-                        value: 0.9,
-                    });
-                    let _ = corvene_git::fast_forward_branches_with(
-                        git.clone(),
-                        &workdir,
-                        skip_worktree_branches,
-                    );
-                    // `246-background-fetch-fast-forwards`: a clean branch
-                    // that is only behind catches up (GHD leaves it for Pull)
-                    if fast_forward_current {
-                        match corvene_git::fast_forward_if_only_behind(git, &workdir) {
-                            Ok(true) => info!(id, "fast-forwarded after background fetch"),
-                            Ok(false) => {}
-                            Err(err) => warn!(id, %err, "fast-forward after fetch failed"),
+                cancellable(cancel.as_ref(), || {
+                    let mut report = |progress| {
+                        if !quiet {
+                            report(progress)
+                        }
+                    };
+                    let mut retry = prune_retry;
+                    let result = loop {
+                        let result = corvene_git::fetch_with(
+                            git.clone(),
+                            &workdir,
+                            &remote_name,
+                            options,
+                            askpass.as_ref(),
+                            &mut |value, text| {
+                                report(PushPullProgress {
+                                    kind: PushPullKind::Fetch,
+                                    title: title.clone(),
+                                    description: Some(text),
+                                    value: value * 0.9,
+                                })
+                            },
+                        );
+                        if !Self::prune_before_retry(
+                            &mut retry,
+                            &result,
+                            &git,
+                            &workdir,
+                            &remote_name,
+                            askpass.as_ref(),
+                        ) {
+                            break result;
+                        }
+                    };
+                    if result.is_ok() {
+                        report(PushPullProgress {
+                            kind: PushPullKind::Generic,
+                            title: REFRESHING_REPOSITORY.into(),
+                            description: Some("Fast-forwarding branches".into()),
+                            value: 0.9,
+                        });
+                        let _ = corvene_git::fast_forward_branches_with(
+                            git.clone(),
+                            &workdir,
+                            skip_worktree_branches,
+                        );
+                        // `246-background-fetch-fast-forwards`: a clean branch
+                        // that is only behind catches up (GHD leaves it for Pull)
+                        if fast_forward_current {
+                            match corvene_git::fast_forward_if_only_behind(git, &workdir) {
+                                Ok(true) => info!(id, "fast-forwarded after background fetch"),
+                                Ok(false) => {}
+                                Err(err) => warn!(id, %err, "fast-forward after fetch failed"),
+                            }
                         }
                     }
-                }
-                result
+                    result
+                })
             },
             move |result, cx| {
                 let fetched = result.is_ok();
@@ -915,67 +1032,74 @@ impl Dispatcher {
         );
         let remote_name = remote.name.clone();
         let remote_url = remote.url.clone();
+        let cancel = Self::network_cancel_token(id, PushPullKind::Pull, false, cx);
         Self::run_network(
             id,
             cx,
             move |report| {
-                let mut retry = prune_retry;
-                let result = loop {
-                    let result = corvene_git::pull(
-                        git.clone(),
-                        &workdir,
-                        &remote_name,
-                        skip_submodules,
-                        askpass.as_ref(),
-                        &mut |value, text| {
-                            report(PushPullProgress {
-                                kind: PushPullKind::Pull,
-                                title: title.clone(),
-                                description: Some(text),
-                                value: value * 0.6,
-                            })
-                        },
-                    );
-                    if !Self::prune_before_retry(
-                        &mut retry,
-                        &result,
-                        &git,
-                        &workdir,
-                        &remote_name,
-                        askpass.as_ref(),
-                    ) {
-                        break result;
+                cancellable(cancel.as_ref(), || {
+                    let mut retry = prune_retry;
+                    let result = loop {
+                        let result = corvene_git::pull(
+                            git.clone(),
+                            &workdir,
+                            &remote_name,
+                            skip_submodules,
+                            askpass.as_ref(),
+                            &mut |value, text| {
+                                report(PushPullProgress {
+                                    kind: PushPullKind::Pull,
+                                    title: title.clone(),
+                                    description: Some(text),
+                                    value: value * 0.6,
+                                })
+                            },
+                        );
+                        if !Self::prune_before_retry(
+                            &mut retry,
+                            &result,
+                            &git,
+                            &workdir,
+                            &remote_name,
+                            askpass.as_ref(),
+                        ) {
+                            break result;
+                        }
+                    };
+                    // `251-remote-head-once`: `set-head -a` asks the server for
+                    // every ref, which takes minutes on huge repositories; skip
+                    // it while the remote's HEAD already resolves
+                    if result.is_ok()
+                        && !(keep_remote_head
+                            && corvene_git::remote_head_resolves(
+                                git.clone(),
+                                &workdir,
+                                &remote_name,
+                            ))
+                    {
+                        let _ = corvene_git::update_remote_head(
+                            git.clone(),
+                            &workdir,
+                            &remote_name,
+                            askpass.as_ref(),
+                        );
                     }
-                };
-                // `251-remote-head-once`: `set-head -a` asks the server for
-                // every ref, which takes minutes on huge repositories; skip
-                // it while the remote's HEAD already resolves
-                if result.is_ok()
-                    && !(keep_remote_head
-                        && corvene_git::remote_head_resolves(git.clone(), &workdir, &remote_name))
-                {
-                    let _ = corvene_git::update_remote_head(
-                        git.clone(),
-                        &workdir,
-                        &remote_name,
-                        askpass.as_ref(),
-                    );
-                }
-                if result.is_ok() {
-                    report(PushPullProgress {
-                        kind: PushPullKind::Generic,
-                        title: REFRESHING_REPOSITORY.into(),
-                        description: Some("Fast-forwarding branches".into()),
-                        value: 0.9,
-                    });
-                    let _ = corvene_git::fast_forward_branches_with(
-                        git.clone(),
-                        &workdir,
-                        skip_worktree_branches,
-                    );
-                }
-                let status = corvene_git::get_status(git, &workdir).ok();
-                (result, status)
+                    if result.is_ok() {
+                        report(PushPullProgress {
+                            kind: PushPullKind::Generic,
+                            title: REFRESHING_REPOSITORY.into(),
+                            description: Some("Fast-forwarding branches".into()),
+                            value: 0.9,
+                        });
+                        let _ = corvene_git::fast_forward_branches_with(
+                            git.clone(),
+                            &workdir,
+                            skip_worktree_branches,
+                        );
+                    }
+                    let status = corvene_git::get_status(git, &workdir).ok();
+                    (result, status)
+                })
             },
             move |(result, status), cx| {
                 if let Some(mut status) = status {
@@ -1288,63 +1412,66 @@ impl Dispatcher {
             branch: Some(branch.name.clone()),
             up_to,
         };
+        let cancel = Self::network_cancel_token(id, PushPullKind::Push, false, cx);
         Self::run_network(
             id,
             cx,
             move |report| {
-                let result = corvene_git::push(
-                    git.clone(),
-                    &workdir,
-                    &remote_name,
-                    &local,
-                    remote_branch.as_deref(),
-                    &tags,
-                    force_with_lease,
-                    askpass.as_ref(),
-                    &mut |value, text| {
-                        report(PushPullProgress {
-                            kind: PushPullKind::Push,
-                            title: title.clone(),
-                            description: Some(text),
-                            value: value * 0.65,
-                        })
-                    },
-                );
-                if result.is_ok() {
-                    report(PushPullProgress {
-                        kind: PushPullKind::Fetch,
-                        title: format!("Fetching {remote_name}"),
-                        description: None,
-                        value: 0.65,
-                    });
-                    let _ = corvene_git::fetch_with(
+                cancellable(cancel.as_ref(), || {
+                    let result = corvene_git::push(
                         git.clone(),
                         &workdir,
                         &remote_name,
-                        fetch_options,
+                        &local,
+                        remote_branch.as_deref(),
+                        &tags,
+                        force_with_lease,
                         askpass.as_ref(),
                         &mut |value, text| {
                             report(PushPullProgress {
-                                kind: PushPullKind::Fetch,
-                                title: format!("Fetching {remote_name}"),
+                                kind: PushPullKind::Push,
+                                title: title.clone(),
                                 description: Some(text),
-                                value: 0.65 + value * 0.25,
+                                value: value * 0.65,
                             })
                         },
                     );
-                    report(PushPullProgress {
-                        kind: PushPullKind::Generic,
-                        title: REFRESHING_REPOSITORY.into(),
-                        description: Some("Fast-forwarding branches".into()),
-                        value: 0.9,
-                    });
-                    let _ = corvene_git::fast_forward_branches_with(
-                        git,
-                        &workdir,
-                        skip_worktree_branches,
-                    );
-                }
-                result
+                    if result.is_ok() {
+                        report(PushPullProgress {
+                            kind: PushPullKind::Fetch,
+                            title: format!("Fetching {remote_name}"),
+                            description: None,
+                            value: 0.65,
+                        });
+                        let _ = corvene_git::fetch_with(
+                            git.clone(),
+                            &workdir,
+                            &remote_name,
+                            fetch_options,
+                            askpass.as_ref(),
+                            &mut |value, text| {
+                                report(PushPullProgress {
+                                    kind: PushPullKind::Fetch,
+                                    title: format!("Fetching {remote_name}"),
+                                    description: Some(text),
+                                    value: 0.65 + value * 0.25,
+                                })
+                            },
+                        );
+                        report(PushPullProgress {
+                            kind: PushPullKind::Generic,
+                            title: REFRESHING_REPOSITORY.into(),
+                            description: Some("Fast-forwarding branches".into()),
+                            value: 0.9,
+                        });
+                        let _ = corvene_git::fast_forward_branches_with(
+                            git,
+                            &workdir,
+                            skip_worktree_branches,
+                        );
+                    }
+                    result
+                })
             },
             move |result, cx| {
                 let pushed = result.is_ok();

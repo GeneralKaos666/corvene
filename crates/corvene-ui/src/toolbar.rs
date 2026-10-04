@@ -12,6 +12,8 @@
 //! Deviation (`.docs/deviations.md` › History, flag `257`): the Pull
 //! button's tooltip lists the incoming commits' summaries (GHD
 //! `push-pull-button.tsx` has none).
+//! While a fetch, pull or push runs, a Stop button takes the ▾'s place
+//! (`295-cancel-network-operations`; GHD only disables the button).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -66,6 +68,9 @@ pub struct ToolbarButtonModel {
     /// Corvene (`426-drag-repository-out`): the folder (and name) the button
     /// drags out of the window.
     pub drag: Option<(std::path::PathBuf, SharedString)>,
+    /// Corvene (`295-cancel-network-operations`): the push/pull button shows
+    /// a Stop button for the running operation.
+    pub cancel: bool,
 }
 
 /// Which toolbar button a resize handle belongs to.
@@ -207,6 +212,7 @@ pub fn toolbar_models(
             tooltip: worktree_tooltip,
             tooltip_fixed_width: false,
             drag: None,
+            cancel: false,
         }
     });
 
@@ -267,6 +273,7 @@ pub fn toolbar_models(
                         .bool(corvene_core::flags::ids::DRAG_REPOSITORY_OUT)
             })
             .map(|r| (r.path.clone(), r.name().into())),
+        cancel: false,
     };
 
     // `currentPullRequest`: the icon becomes the PR icon and the badge shows
@@ -412,6 +419,7 @@ pub fn toolbar_models(
         tooltip: branch_tooltip,
         tooltip_fixed_width: false,
         drag: None,
+        cancel: false,
     };
 
     // Push/Pull (`PushPullButton.renderButton`)
@@ -457,6 +465,7 @@ pub fn toolbar_models(
         tooltip: None,
         tooltip_fixed_width: false,
         drag: None,
+        cancel: false,
     };
     let push_pull = if repo.is_none() {
         ToolbarButtonModel {
@@ -480,6 +489,8 @@ pub fn toolbar_models(
             disabled: true,
             progress: Some(p.value),
             spin: true,
+            // `295-cancel-network-operations`
+            cancel: repo.is_some_and(|r| Dispatcher::network_cancellable(state, r.id)),
             ..base
         }
     } else if info.is_none()
@@ -575,6 +586,16 @@ pub fn toolbar_models(
             }
         }
     };
+
+    // `295-cancel-network-operations`: right after a Stop the button says so
+    let mut push_pull = push_pull;
+    if !push_pull.disabled
+        && repo_state
+            .and_then(|s| s.network_cancelled_at)
+            .is_some_and(|at| at.elapsed() < corvene_core::remote::CANCELLED_NOTE)
+    {
+        push_pull.description = "Cancelled".into();
+    }
 
     let mut buttons = vec![repository];
     // the worktree, branch and push/pull buttons need a
@@ -962,6 +983,39 @@ pub fn toolbar_button(
                         window.refresh();
                     }),
             )
+            .into_any_element();
+    }
+    if model.cancel {
+        // Corvene (`295-cancel-network-operations`): Stop in place of the ▾
+        let stop = div()
+            .id("toolbar-push-pull-cancel")
+            // the label is the tooltip too
+            .icon_button_label("Stop")
+            .h(TOOLBAR_BUTTON_HEIGHT())
+            .w(TOOLBAR_ARROW_WIDTH())
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .border_r_1()
+            .border_color(t.toolbar_button_border)
+            .bg(t.toolbar_background)
+            .text_color(t.toolbar_text)
+            .cursor_pointer()
+            .hover(move |s| s.bg(hover_bg).text_color(hover_text))
+            .on_click(|_, _, cx| {
+                if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                    Dispatcher::cancel_network(id, cx);
+                }
+            })
+            .child(octicon(Octicon::X, t.toolbar_text));
+        return div()
+            .flex()
+            .flex_row()
+            .flex_none()
+            .w(split_width)
+            .child(button.w(split_width - TOOLBAR_ARROW_WIDTH()))
+            .child(stop)
             .into_any_element();
     }
     if !arrow {

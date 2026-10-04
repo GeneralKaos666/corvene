@@ -1260,6 +1260,11 @@ pub struct RepositoryState {
     /// progress (`245-push-during-background-fetch`).
     pub quiet_background_fetch: bool,
     pub push_pull_progress: Option<crate::remote::PushPullProgress>,
+    /// Corvene (`295-cancel-network-operations`, `296-cancel-fetch-on-wake`):
+    /// stops the running fetch, pull or push.
+    pub network_cancel: Option<crate::remote::NetworkCancel>,
+    /// When the push/pull button's Stop was used, for its "Cancelled" note.
+    pub network_cancelled_at: Option<Instant>,
     pub last_fetched: Option<std::time::SystemTime>,
     /// Corvene (`288-dead-remote-indicator`): the last fetch said the remote
     /// repository does not exist (deleted, renamed or no access); the

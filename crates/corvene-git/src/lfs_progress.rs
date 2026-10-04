@@ -270,7 +270,11 @@ pub(crate) fn run_with_progress(
             });
         }
     };
-    let cmd = cmd.env("GIT_LFS_PROGRESS", &progress_file.path);
+    // git runs on a thread of its own: it takes this thread's cancel token
+    // along (`process::with_cancel_token`)
+    let cmd = cmd
+        .env("GIT_LFS_PROGRESS", &progress_file.path)
+        .with_scoped_cancel();
     // `with_env` variables belong to this thread's git commands, and its
     // tracing span to the logs of this run
     let scoped_env = crate::process::scoped_env();

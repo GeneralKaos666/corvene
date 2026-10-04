@@ -68,14 +68,20 @@ pub struct GitCommand {
 /// Stops a running [`GitCommand::run_streaming`] from another thread with
 /// `SIGTERM`, so git runs its own cleanup (`git clone` removes the directory
 /// it created). Cancelling before the command starts makes it stop at once.
+///
+/// Outside Windows and Android a command with a token runs in a process
+/// group of its own and the signal goes to the whole group: `git pull` runs
+/// its fetch as a child process that outlives a signal sent to `git pull`
+/// alone. (Windows' `taskkill /T` ends the tree.)
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(Arc<CancelInner>);
 
 #[derive(Debug, Default)]
 struct CancelInner {
     cancelled: AtomicBool,
-    /// The running git process.
-    pid: Mutex<Option<u32>>,
+    /// The running git process, and whether it leads a process group of
+    /// its own.
+    pid: Mutex<Option<(u32, bool)>>,
 }
 
 impl PartialEq for CancelToken {
@@ -92,9 +98,9 @@ impl CancelToken {
     pub fn cancel(&self) {
         self.0.cancelled.store(true, Ordering::SeqCst);
         if let Ok(pid) = self.0.pid.lock()
-            && let Some(pid) = *pid
+            && let Some((pid, group)) = *pid
         {
-            terminate(pid);
+            terminate(pid, group);
         }
     }
 
@@ -102,11 +108,12 @@ impl CancelToken {
         self.0.cancelled.load(Ordering::SeqCst)
     }
 
-    fn attach(&self, pid: u32) {
+    /// `pid` was started by [`own_process_group`] when `group`.
+    fn attach(&self, pid: u32, group: bool) {
         if let Ok(mut slot) = self.0.pid.lock() {
-            *slot = Some(pid);
+            *slot = Some((pid, group));
             if self.is_cancelled() {
-                terminate(pid);
+                terminate(pid, group);
             }
         }
     }
@@ -116,6 +123,61 @@ impl CancelToken {
             *slot = None;
         }
     }
+}
+
+/// Puts a cancellable command in a process group of its own, so
+/// [`CancelToken::cancel`] reaches the processes git starts; returns whether
+/// it did. The command also starts with no signal blocked: Rust's `Command`
+/// hands the spawning thread's signal mask on, and the background executor's
+/// threads (GCD on macOS) block `SIGTERM`, which left git and the helpers it
+/// starts deaf to the token.
+#[cfg(all(unix, not(target_os = "android")))]
+fn own_process_group(cmd: &mut Command) -> bool {
+    use std::os::unix::process::CommandExt;
+    cmd.process_group(0);
+    // SAFETY: `sigemptyset` and `pthread_sigmask` are async-signal-safe and
+    // touch only the child's stack, as `pre_exec` requires
+    unsafe {
+        cmd.pre_exec(|| {
+            let mut empty = std::mem::MaybeUninit::<libc::sigset_t>::uninit();
+            libc::sigemptyset(empty.as_mut_ptr());
+            libc::pthread_sigmask(libc::SIG_SETMASK, empty.as_ptr(), std::ptr::null_mut());
+            Ok(())
+        });
+    }
+    true
+}
+
+#[cfg(not(all(unix, not(target_os = "android"))))]
+fn own_process_group(_cmd: &mut Command) -> bool {
+    false
+}
+
+thread_local! {
+    /// The token [`with_cancel_token`] gives the git commands of this thread.
+    static SCOPED_CANCEL: std::cell::RefCell<Option<CancelToken>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` with `token` stopping every git command it starts on the current
+/// thread that has no token of its own (a fetch, pull or push with the
+/// commands around it). Once `token` is cancelled, the commands still to
+/// come stop at once.
+pub fn with_cancel_token<R>(token: &CancelToken, f: impl FnOnce() -> R) -> R {
+    /// Puts the previous token back, also when `f` panics.
+    struct Restore(Option<CancelToken>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            SCOPED_CANCEL.with(|scoped| *scoped.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(SCOPED_CANCEL.with(|scoped| scoped.replace(Some(token.clone()))));
+    f()
+}
+
+fn scoped_cancel_token() -> Option<CancelToken> {
+    SCOPED_CANCEL.with(|scoped| scoped.borrow().clone())
 }
 
 /// A token for streamed commands that were given none: lets a caller stop
@@ -136,7 +198,7 @@ fn default_cancel_token() -> Option<CancelToken> {
 /// Windows has no SIGTERM. `taskkill /T` ends the whole tree: `cmd\git.exe`
 /// is a wrapper around the real git, which in turn runs the remote helper.
 #[cfg(windows)]
-fn terminate(pid: u32) {
+fn terminate(pid: u32, _group: bool) {
     use std::os::windows::process::CommandExt;
     let _ = Command::new("taskkill")
         .args(["/T", "/F", "/PID", &pid.to_string()])
@@ -148,14 +210,15 @@ fn terminate(pid: u32) {
 }
 
 #[cfg(not(windows))]
-fn terminate(pid: u32) {
+fn terminate(pid: u32, group: bool) {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return;
     };
     // SAFETY: plain kill(2) with no memory access; the pid is the running
-    // child's (the token forgets it as soon as `wait` reaped the process)
+    // child's (the token forgets it as soon as `wait` reaped the process),
+    // and with `group` also the id of the group it leads
     unsafe {
-        libc::kill(pid, libc::SIGTERM);
+        libc::kill(if group { -pid } else { pid }, libc::SIGTERM);
     }
 }
 
@@ -302,6 +365,21 @@ impl GitCommand {
     /// Stop the streamed command when `token` is cancelled.
     pub fn cancel_token(mut self, token: CancelToken) -> Self {
         self.cancel = Some(token);
+        self
+    }
+
+    /// The command's token, else the one [`with_cancel_token`] set for this
+    /// thread.
+    fn effective_cancel(&self) -> Option<CancelToken> {
+        self.cancel.clone().or_else(scoped_cancel_token)
+    }
+
+    /// Gives the command this thread's [`with_cancel_token`] token, for a
+    /// command another thread runs (`lfs_progress::run_with_progress`).
+    pub(crate) fn with_scoped_cancel(mut self) -> Self {
+        if self.cancel.is_none() {
+            self.cancel = scoped_cancel_token();
+        }
         self
     }
 
@@ -470,21 +548,23 @@ impl GitCommand {
             }
             child.wait_with_output().map_err(GitError::Spawn)?
         };
+        let cancel = self.effective_cancel();
         #[cfg(not(target_os = "android"))]
-        let output = match (&self.stdin, &self.cancel) {
+        let output = match (&self.stdin, &cancel) {
             (None, None) => self
                 .command()
                 .output()
                 .map_err(|err| self.spawn_error(err))?,
             (stdin_bytes, cancel) => {
-                let mut child = self
-                    .command()
+                let mut cmd = self.command();
+                let group = cancel.is_some() && own_process_group(&mut cmd);
+                let mut child = cmd
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()
                     .map_err(|err| self.spawn_error(err))?;
                 if let Some(token) = cancel {
-                    token.attach(child.id());
+                    token.attach(child.id(), group);
                 }
                 if let (Some(bytes), Some(mut stdin)) = (stdin_bytes, child.stdin.take()) {
                     use std::io::Write;
@@ -498,7 +578,7 @@ impl GitCommand {
                 output.map_err(GitError::Spawn)?
             }
         };
-        if self.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+        if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
             debug!(git = %args, "git cancelled");
             return Err(GitError::Cancelled(args));
         }
@@ -579,19 +659,26 @@ impl GitCommand {
         let started = Instant::now();
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
-        let cancel = self.cancel.clone().or_else(default_cancel_token);
+        let cancel = self.effective_cancel().or_else(default_cancel_token);
         #[cfg(not(target_os = "android"))]
-        let mut child = self
-            .command()
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|err| self.spawn_error(err))?;
+        let (mut child, group) = {
+            let mut cmd = self.command();
+            let group = cancel.is_some() && own_process_group(&mut cmd);
+            let child = cmd
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|err| self.spawn_error(err))?;
+            (child, group)
+        };
         #[cfg(target_os = "android")]
-        let mut child = crate::spawn::spawn(self.command(), self.stdin.is_some())
-            .map_err(|err| self.spawn_error(err))?;
+        let (mut child, group) = (
+            crate::spawn::spawn(self.command(), self.stdin.is_some())
+                .map_err(|err| self.spawn_error(err))?,
+            false,
+        );
         if let Some(token) = &cancel {
-            token.attach(child.id());
+            token.attach(child.id(), group);
         }
         if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
             use std::io::Write;
@@ -686,19 +773,26 @@ impl GitCommand {
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
         // a streamed run: the default token stops it too
-        let cancel = self.cancel.clone().or_else(default_cancel_token);
+        let cancel = self.effective_cancel().or_else(default_cancel_token);
         #[cfg(not(target_os = "android"))]
-        let mut child = self
-            .command()
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|err| self.spawn_error(err))?;
+        let (mut child, group) = {
+            let mut cmd = self.command();
+            let group = cancel.is_some() && own_process_group(&mut cmd);
+            let child = cmd
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|err| self.spawn_error(err))?;
+            (child, group)
+        };
         #[cfg(target_os = "android")]
-        let mut child = crate::spawn::spawn(self.command(), self.stdin.is_some())
-            .map_err(|err| self.spawn_error(err))?;
+        let (mut child, group) = (
+            crate::spawn::spawn(self.command(), self.stdin.is_some())
+                .map_err(|err| self.spawn_error(err))?,
+            false,
+        );
         if let Some(token) = &cancel {
-            token.attach(child.id());
+            token.attach(child.id(), group);
         }
         // stdin on a thread of its own: git may fill its output pipes first
         let stdin_thread = match (&self.stdin, child.stdin.take()) {
