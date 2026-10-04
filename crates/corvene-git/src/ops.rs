@@ -8,8 +8,11 @@
 //! GHD's `CloneProgressParser` with Git LFS progress merged in
 //! (`executionOptionsWithProgress` with `trackLFSProgress`). The gits
 //! Corvene supports name the checkout step `Updating files`, which GHD's
-//! step list still calls `Checking out files`: GHD (and Corvene) show that
-//! step as context, at the 80 % the steps before it reached.
+//! step list still calls `Checking out files`: GHD shows that step as
+//! context, at the 80 % the steps before it reached. Deviation
+//! ([`CloneOptions::updating_files_step`], flag
+//! `281-clone-updating-files-step`): `Updating files` counts as the
+//! checkout step, so the bar moves on to 100 %.
 
 use std::path::{Component, MAIN_SEPARATOR_STR, Path, PathBuf};
 use std::sync::Arc;
@@ -284,6 +287,12 @@ impl CloneProgressParser {
         Self(ProgressParser::for_clone())
     }
 
+    /// [`Self::new`] that counts `Updating files` as the `Checking out
+    /// files` step (`281-clone-updating-files-step`).
+    pub fn with_updating_files_step() -> Self {
+        Self(ProgressParser::for_clone().with_alias("Updating files", "Checking out files"))
+    }
+
     /// GHD `parse(line)`: the line's progress, `value` the overall fraction
     /// for a line of a clone step and `None` for context.
     pub fn parse(&mut self, line: &str) -> CloneProgress {
@@ -322,6 +331,9 @@ pub struct CloneOptions {
     pub depth: Option<u32>,
     /// Credentials for the clone (GHD `envForAuthentication`).
     pub askpass: Option<AskpassEnv>,
+    /// Count git's `Updating files` lines as GHD's `Checking out files`
+    /// step (`281-clone-updating-files-step`); off is GHD's parser.
+    pub updating_files_step: bool,
 }
 
 /// GHD `isClonePathSensitive`: `path`, resolved and lower-cased, is the
@@ -464,7 +476,11 @@ pub fn clone_with_options(
     #[cfg(windows)]
     let existed = path.exists();
     let cmd = cmd.args(["--", url]).arg(path);
-    let mut parser = CloneProgressParser::new();
+    let mut parser = if options.updating_files_step {
+        CloneProgressParser::with_updating_files_step()
+    } else {
+        CloneProgressParser::new()
+    };
     let cloned = crate::lfs_progress::run_with_progress(cmd, &mut parser.0, &mut |event| {
         on_progress(clone_progress(&event, true))
     });

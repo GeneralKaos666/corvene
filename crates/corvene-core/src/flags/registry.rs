@@ -1434,6 +1434,21 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/index_lock.rs", "crates/corvene-ui/src/dialogs/simple.rs"],
     },
 
+    /// Clone progress through git's "Updating files" step.
+    CLONE_UPDATING_FILES_STEP = 281 "clone-updating-files-step" {
+        title: "Clone progress covers checking out the files",
+        summary: "The clone progress bar counts git's \"Updating files\" lines as the checkout \
+                  step, so it keeps moving through the last fifth while the files are written.",
+        ghd_behaviour: "Waits for \"Checking out files\", which current git no longer prints, so \
+                        the bar stops at 80 % while the files are checked out.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

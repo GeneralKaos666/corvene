@@ -10,6 +10,11 @@
 //! credential-helper trampoline over a socket instead; the askpass helper is
 //! simpler and keeps tokens out of the environment. SSH remotes are left to
 //! the user's ssh-agent, as in GHD.
+//!
+//! Deviation, off by default (GHD's behaviour): [`ProgressParser::with_alias`]
+//! lets the clone parser count git's `Updating files` lines as GHD's
+//! `Checking out files` step (`lib/progress/clone.ts`,
+//! `281-clone-updating-files-step`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -176,6 +181,9 @@ impl GitProgressEvent {
 #[derive(Clone, Debug)]
 pub struct ProgressParser {
     steps: Vec<(&'static str, f64)>,
+    /// `(title, step)`: lines titled `title` count as the step `step`
+    /// ([`Self::with_alias`]).
+    aliases: Vec<(&'static str, &'static str)>,
     step_index: usize,
     last_percent: f64,
 }
@@ -194,9 +202,27 @@ impl ProgressParser {
         let total: f64 = steps.iter().map(|(_, w)| w).sum();
         Self {
             steps: steps.iter().map(|(t, w)| (*t, w / total)).collect(),
+            aliases: Vec::new(),
             step_index: 0,
             last_percent: 0.,
         }
+    }
+
+    /// Lines titled `title` also count as the step `step` (Corvene; GHD
+    /// matches step titles exactly). `clone-updating-files-step` uses it
+    /// for the `Updating files` lines git prints for the checkout today,
+    /// which GHD's clone steps still call `Checking out files`.
+    pub fn with_alias(mut self, title: &'static str, step: &'static str) -> Self {
+        self.aliases.push((title, step));
+        self
+    }
+
+    fn is_step(&self, line_title: &str, step: &str) -> bool {
+        line_title == step
+            || self
+                .aliases
+                .iter()
+                .any(|(title, target)| *target == step && *title == line_title)
     }
 
     /// GHD `CloneProgressParser` (`lib/progress/clone.ts`).
@@ -250,7 +276,7 @@ impl ProgressParser {
         };
         let mut percent = 0.;
         for (i, (title, weight)) in self.steps.iter().enumerate() {
-            if i >= self.step_index && progress.title == *title {
+            if i >= self.step_index && self.is_step(&progress.title, title) {
                 if let Some(total) = progress.total.filter(|t| *t > 0) {
                     percent += weight * (progress.value as f64 / total as f64);
                 }
@@ -1335,6 +1361,24 @@ mod tests {
                 .parse("remote: Compressing objects: 10% (1/10)")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn clone_progress_counts_updating_files_with_the_alias() {
+        // GHD's steps: `Updating files` is context at the 80 % reached
+        let mut ghd = ProgressParser::for_clone();
+        ghd.parse("Resolving deltas: 100% (3/3), done.").unwrap();
+        assert!(ghd.parse("Updating files:  50% (1/2)").is_none());
+        assert!((ghd.last_percent() - 0.8).abs() < 0.001);
+        // `clone-updating-files-step`
+        let mut parser =
+            ProgressParser::for_clone().with_alias("Updating files", "Checking out files");
+        parser.parse("Resolving deltas: 100% (3/3), done.").unwrap();
+        let (percent, text) = parser.parse("Updating files:  50% (1/2)").unwrap();
+        assert!((percent - 0.9).abs() < 0.001, "{percent}");
+        assert_eq!(text, "Updating files:  50% (1/2)");
+        let (percent, _) = parser.parse("Checking out files: 100% (2/2)").unwrap();
+        assert!((percent - 1.0).abs() < 0.001, "{percent}");
     }
 
     #[test]

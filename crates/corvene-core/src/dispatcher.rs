@@ -4043,6 +4043,11 @@ impl Dispatcher {
             default_branch,
             depth,
             askpass: Self::askpass_env(cx),
+            // `281-clone-updating-files-step`
+            updating_files_step: state
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::CLONE_UPDATING_FILES_STEP),
             ..corvene_git::CloneOptions::default()
         };
         let (tx, rx) = std::sync::mpsc::channel::<corvene_git::CloneProgress>();
