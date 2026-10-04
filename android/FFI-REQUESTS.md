@@ -188,3 +188,12 @@ Kotlin does meanwhile.
   `suspend repositorySettings(): RepositorySettingsVm?`, `saveRepositorySettings(repo, remoteName?,
   remoteUrl?, gitignore?, gitConfigLocation?, name?, email?, autocrlf?)`, `openGlobalGitConfig()`,
   `suspend globalGitConfig(): GlobalGitConfigVm?`.
+- M-A3 requests (next commit after a7e8441a): `AccountVm.avatarPath` + `emails`; `suspend gitIdentity(): GitIdentityVm?`;
+  `gitignoreNames()`, `licenses(): List<LicenseVm{name, featured, hidden}>`; `setHostInfo(HostInfo)` (live
+  all-files/notification state); `endHeadless()` now waits (≤ 10 s) for the headless fetch to return;
+  `networkBusy(): Boolean` for the worker; `cancelTransfers()` (stops the clone; a cancel-all of git
+  network commands needs core work). **Breaking:** `HostEvents` gained `sharePath(path)`, `openTermux(dir)`,
+  `runTermux(program, arguments, dir)`, `viewPathWith(path, component, line?)`, `viewApps(): List<String>`
+  ("label\tpackage/class" per entry) and `packageInstalled(package): Boolean` — `HostEventsBridge` must
+  implement them (route to OpenPath.share, Termux.open/run, OpenPath.viewWith, the installed viewers probe,
+  PackageManager). The engine's own Share / Open in Termux / Open with now reach Kotlin through them.

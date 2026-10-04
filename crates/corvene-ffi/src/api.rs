@@ -40,6 +40,17 @@ pub trait HostEvents: Send + Sync {
     fn bring_to_front(&self);
     /// The engine wants the process to end (relaunch after a flag change).
     fn quit(&self);
+    /// The share sheet for a file (`ACTION_SEND`).
+    fn share_path(&self, path: String);
+    /// A Termux session in `dir`, or `program` with `arguments` in one.
+    fn open_termux(&self, dir: String);
+    fn run_termux(&self, program: String, arguments: Vec<String>, dir: String);
+    /// Opens `path` in the application `component` ("package/class") names,
+    /// at `line` when it can.
+    fn view_path_with(&self, path: String, component: String, line: Option<u32>);
+    /// The applications that open a text file, as "label\tpackage/class".
+    fn view_apps(&self) -> Vec<String>;
+    fn package_installed(&self, package: String) -> bool;
 }
 
 /// What the Android side knows at start-up that the engine asks for later.
@@ -1196,4 +1207,76 @@ impl Corvene {
         self.loop_
             .post(|host| Dispatcher::background_fetch_tick(host));
     }
+
+    // ---- the rest the Android side asked for ----
+
+    /// `user.name` / `user.email` from the global git config.
+    pub async fn git_identity(&self) -> Option<GitIdentityVm> {
+        self.loop_
+            .query(|host| {
+                let git = host.state_ref().git.clone()?;
+                let identity = corvene_git::global_identity(git);
+                Some(GitIdentityVm {
+                    name: identity.name,
+                    email: identity.email,
+                })
+            })
+            .await
+    }
+
+    /// The bundled `.gitignore` templates, by name.
+    pub fn gitignore_names(&self) -> Vec<String> {
+        corvene_core::templates::gitignore_names()
+    }
+
+    /// The bundled licenses.
+    pub fn licenses(&self) -> Vec<LicenseVm> {
+        corvene_core::templates::licenses()
+            .into_iter()
+            .map(|l| LicenseVm {
+                name: l.name,
+                featured: l.featured,
+                hidden: l.hidden,
+            })
+            .collect()
+    }
+
+    /// What changed at run time (all-files access granted, notifications
+    /// allowed…): the engine's Android paths read it from here on.
+    pub fn set_host_info(&self, info: HostInfo) {
+        #[cfg(target_os = "android")]
+        crate::bridge::set_host_info(info);
+        #[cfg(not(target_os = "android"))]
+        let _ = info;
+    }
+
+    /// A git network command is running (the worker waits for `false`).
+    pub fn network_busy(&self) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            corvene_platform::android::network_busy()
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            false
+        }
+    }
+
+    /// Stops the transfers the user can stop: the clone in progress.
+    pub fn cancel_transfers(&self) {
+        self.loop_.post(|host| Dispatcher::cancel_clone(host));
+    }
+}
+
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct GitIdentityVm {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct LicenseVm {
+    pub name: String,
+    pub featured: bool,
+    pub hidden: bool,
 }

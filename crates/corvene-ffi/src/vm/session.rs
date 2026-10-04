@@ -11,7 +11,10 @@ pub struct AccountVm {
     pub login: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
+    /// The avatar file the engine downloaded, once it did.
+    pub avatar_path: Option<String>,
     pub host: String,
+    pub emails: Vec<String>,
 }
 
 #[derive(uniffi::Enum, Clone, Debug, PartialEq, Eq)]
@@ -65,7 +68,13 @@ pub fn session(s: &AppState) -> SessionVm {
                 login: a.login.clone(),
                 name: a.name.clone(),
                 avatar_url: a.avatar_url.clone(),
+                avatar_path: a
+                    .avatar_url
+                    .as_deref()
+                    .and_then(|url| corvene_core::avatar_for_url(&s.avatars, url))
+                    .map(|p| p.to_string_lossy().into_owned()),
                 host: a.host(),
+                emails: a.emails.clone(),
             })
             .collect(),
         sign_in: s.sign_in.as_ref().map(|si| SignInVm {

@@ -6,11 +6,15 @@
 //! meanwhile, it calls [`end_headless`] first: git is stopped and the
 //! fetch returns.
 
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
 
 use corvene_core::headless::{CancelToken, Outcome};
 
 static CANCEL: Mutex<Option<CancelToken>> = Mutex::new(None);
+/// `true` while a headless fetch runs; `end_headless` waits for `false`.
+static RUNNING: Mutex<bool> = Mutex::new(false);
+static DONE: Condvar = Condvar::new();
 
 /// What a headless fetch did.
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +34,9 @@ pub fn headless_fetch(files_dir: String) -> HeadlessOutcome {
     if !crate::jni::attached() {
         tracing::warn!("NativeContext.attach was not called: the Keystore is unavailable");
     }
+    if let Ok(mut running) = RUNNING.lock() {
+        *running = true;
+    }
     let cancel = CancelToken::new();
     if let Ok(mut slot) = CANCEL.lock() {
         *slot = Some(cancel.clone());
@@ -47,6 +54,10 @@ pub fn headless_fetch(files_dir: String) -> HeadlessOutcome {
     if let Ok(mut slot) = CANCEL.lock() {
         *slot = None;
     }
+    if let Ok(mut running) = RUNNING.lock() {
+        *running = false;
+    }
+    DONE.notify_all();
     match outcome {
         Ok(Outcome::Fetched) => HeadlessOutcome::Fetched,
         Ok(Outcome::Skipped(_)) => HeadlessOutcome::Skipped,
@@ -54,12 +65,16 @@ pub fn headless_fetch(files_dir: String) -> HeadlessOutcome {
     }
 }
 
-/// Stops a running headless fetch (the app is starting).
+/// Stops a running headless fetch (the app is starting) and waits for it
+/// to return, up to ten seconds.
 #[uniffi::export]
 pub fn end_headless() {
     if let Ok(slot) = CANCEL.lock()
         && let Some(cancel) = slot.as_ref()
     {
         cancel.cancel();
+    }
+    if let Ok(running) = RUNNING.lock() {
+        let _ = DONE.wait_timeout_while(running, Duration::from_secs(10), |running| *running);
     }
 }
