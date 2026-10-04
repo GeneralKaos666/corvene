@@ -192,6 +192,12 @@ impl MenuLabelsEvent {
             rs.default_branch.as_deref(),
             configured_default,
         );
+        // `1202-update-from-parent-branch`: "Update from <parent>"
+        let contribution_target = rs
+            .update_parent
+            .as_deref()
+            .filter(|_| s.flags.bool(ids::UPDATE_FROM_PARENT_BRANCH))
+            .or(contribution_target);
         Self {
             contribution_target_default_branch: contribution_target.map(str::to_string),
             // the menu offers a force push whenever one is possible

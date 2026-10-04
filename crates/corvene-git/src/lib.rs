@@ -61,9 +61,10 @@ pub use commit::{
     set_assume_unchanged, stage_files, undo_last_commit, unstage_all,
 };
 pub use config::{
-    add_safe_directory, boolean_config_value, global_boolean_config_value, global_config_path,
-    global_config_value, global_config_values, local_config_value, remove_local_config_value,
-    set_default_branch, set_global_config_value, set_local_config_value, still_unsafe,
+    add_safe_directory, boolean_config_value, branch_merge_base, global_boolean_config_value,
+    global_config_path, global_config_value, global_config_values, local_config_value,
+    remove_local_config_value, set_branch_merge_base, set_default_branch, set_global_config_value,
+    set_local_config_value, still_unsafe,
 };
 pub use config_lock::delete_config_lock_file;
 pub use credential::{CredentialError, format_credential, parse_credential};

@@ -1040,6 +1040,7 @@ impl Dispatcher {
             detect_rewrite,
             refresh_stale_index,
             shared_fetch_head,
+            read_parent,
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -1072,6 +1073,7 @@ impl Dispatcher {
                 s.flags.bool(crate::flags::ids::REFRESH_STALE_INDEX),
                 s.flags
                     .bool(crate::flags::ids::WORKTREE_SHARED_LAST_FETCHED),
+                s.flags.bool(crate::flags::ids::UPDATE_FROM_PARENT_BRANCH),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -1266,6 +1268,15 @@ impl Dispatcher {
                                 )
                             })
                         });
+                    // `1202-update-from-parent-branch`
+                    let update_parent = info
+                        .current_branch()
+                        .filter(|_| read_parent)
+                        .and_then(|b| {
+                            corvene_git::branch_merge_base(git.clone(), &info.workdir, &b.name)
+                                .filter(|parent| *parent != b.name)
+                        })
+                        .filter(|parent| info.branches.iter().any(|b| b.name == *parent));
                     let head = head.and_then(join);
                     let configured = join(configured);
                     let default_branch = corvene_git::find_default_branch(
@@ -1320,6 +1331,7 @@ impl Dispatcher {
                         pull_with_rebase: join(pull_with_rebase),
                         worktrees,
                         upstream_rewritten,
+                        update_parent,
                         last_local_commit: last_local_commit.map(|c| crate::state::LastCommit {
                             at: std::time::UNIX_EPOCH
                                 + std::time::Duration::from_secs(c.author.seconds.max(0) as u64),
@@ -1451,6 +1463,7 @@ impl Dispatcher {
                                     set(&mut repo_state.last_commit, extras.last_local_commit);
                                 changed |=
                                     set(&mut repo_state.incoming_commits, extras.incoming_commits);
+                                changed |= set(&mut repo_state.update_parent, extras.update_parent);
                                 // `mainWorktreePath` bookkeeping for the
                                 // missing-worktree fallback (applied below)
                                 main_worktree = repo_state
@@ -3348,6 +3361,29 @@ impl Dispatcher {
         };
         let branch_name = name.clone();
         let checkout_options = Self::checkout_options(id, cx);
+        // `1202-update-from-parent-branch`: a branch started from another
+        // branch than the default one remembers it (VS Code's key)
+        let parent = {
+            let s = Self::state(cx).read(cx);
+            let rs = s.repo_states.get(&id);
+            let branches = rs
+                .and_then(|r| r.info.as_ref())
+                .map(|i| i.branches.as_slice())
+                .unwrap_or_default();
+            let default = rs.and_then(|r| r.default_branch.as_deref());
+            let default_upstream = default
+                .and_then(|d| {
+                    branches
+                        .iter()
+                        .find(|b| b.name == d && b.kind == corvene_models::BranchKind::Local)
+                })
+                .and_then(|b| b.upstream_short());
+            start_point
+                .clone()
+                .filter(|_| s.flags.bool(crate::flags::ids::UPDATE_FROM_PARENT_BRANCH))
+                .filter(|sp| branches.iter().any(|b| b.name == *sp))
+                .filter(|sp| Some(sp.as_str()) != default && Some(sp.as_str()) != default_upstream)
+        };
         let task = cx.background_executor().spawn(async move {
             if unborn {
                 return corvene_git::checkout_new_branch(git, &workdir, &name);
@@ -3359,6 +3395,12 @@ impl Dispatcher {
                 start_point.as_deref(),
                 false,
             )?;
+            if let Some(parent) = &parent
+                && let Err(err) =
+                    corvene_git::set_branch_merge_base(git.clone(), &workdir, &name, parent)
+            {
+                warn!(%err, "could not record the branch's parent");
+            }
             let branch = corvene_models::Branch {
                 name: name.clone(),
                 kind: corvene_models::BranchKind::Local,
@@ -4006,13 +4048,23 @@ impl Dispatcher {
     /// `updateBranchWithContributionTargetBranch`), which may be behind its
     /// remote; with the flag on, its remote is fetched first and the
     /// remote-tracking branch is merged.
+    ///
+    /// Deviation (`1202-update-from-parent-branch`): a branch created from
+    /// another branch than the default one is updated from that branch
+    /// (`branch.<name>.vscode-merge-base`, VS Code's key) while it exists.
     pub fn update_from_default_branch(id: u64, cx: &mut App) {
         let (default, fetch_first) = {
             let s = Self::state(cx).read(cx);
+            let rs = s.repo_states.get(&id);
             (
-                s.repo_states
-                    .get(&id)
-                    .and_then(|r| r.default_branch.clone()),
+                // `1202-update-from-parent-branch`: the branch this one was
+                // created from (GHD: always the default branch)
+                rs.and_then(|r| {
+                    r.update_parent
+                        .clone()
+                        .filter(|_| s.flags.bool(crate::flags::ids::UPDATE_FROM_PARENT_BRANCH))
+                })
+                .or_else(|| rs.and_then(|r| r.default_branch.clone())),
                 s.flags.bool(crate::flags::ids::UPDATE_FROM_DEFAULT_FETCHES),
             )
         };
@@ -6216,6 +6268,9 @@ struct RefreshExtras {
     pull_with_rebase: bool,
     worktrees: Vec<corvene_models::WorktreeEntry>,
     upstream_rewritten: bool,
+    /// `1202-update-from-parent-branch`: the branch the current one was
+    /// created from, when it still exists.
+    update_parent: Option<String>,
     last_local_commit: Option<crate::state::LastCommit>,
     incoming_commits: Vec<String>,
 }

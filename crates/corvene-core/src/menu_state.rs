@@ -492,12 +492,18 @@ fn repository_facts(
     RepositoryFacts::derive(&RepositorySnapshot {
         tip,
         default_branch,
-        contribution_target: contribution_target_default_branch(
-            repository,
-            branches,
-            default_branch,
-            configured_default,
-        ),
+        // `1202-update-from-parent-branch`: Update from <parent>
+        // (`update_parent` is only read while the flag is on)
+        contribution_target: repo_state
+            .and_then(|r| r.update_parent.as_deref())
+            .or_else(|| {
+                contribution_target_default_branch(
+                    repository,
+                    branches,
+                    default_branch,
+                    configured_default,
+                )
+            }),
         has_stash_entry: repo_state.is_some_and(|r| r.stash.is_some()),
         push_pull_fetch_in_progress: repo_state.is_some_and(|r| r.push_pull_in_progress),
         has_remote: info.is_some_and(|i| corvene_git::find_default_remote(&i.remotes).is_some()),

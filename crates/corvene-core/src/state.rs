@@ -1096,6 +1096,9 @@ pub struct RepositoryState {
     pub merge_preview: Option<crate::mco::MergePreview>,
     /// Delete Branch dialog warnings (`860-delete-branch-warnings`).
     pub delete_branch_preview: Option<DeleteBranchPreview>,
+    /// `1202-update-from-parent-branch`: the branch the current branch was
+    /// created from (`branch.<name>.vscode-merge-base`), when it exists.
+    pub update_parent: Option<String>,
     /// `899-tags-in-branch-list`: every tag (name, commit), read when the
     /// branch list opens.
     pub branch_list_tags: Option<Arc<Vec<(String, String)>>>,

@@ -6010,6 +6010,24 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-git/src/repo.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// Update from the branch the current branch was created from.
+    UPDATE_FROM_PARENT_BRANCH = 1202 "update-from-parent-branch" {
+        title: "Update from the parent branch",
+        summary: "Creating a branch from another branch than the default one records that \
+                  branch (as git config branch.<name>.vscode-merge-base, the key VS Code uses, \
+                  which is read when VS Code set it). While the parent still exists, Branch › \
+                  Update from Default Branch becomes \"Update from <parent>\" and merges it \
+                  instead, the same way.",
+        ghd_behaviour: "Update always merges the default branch, so a branch stacked on another \
+                        one has to be merged with Merge into Current Branch.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21842)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/menu_state.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-git/src/config.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

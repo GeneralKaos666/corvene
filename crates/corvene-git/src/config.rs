@@ -113,6 +113,29 @@ pub fn global_config_path(git: Arc<GitBinary>) -> Result<PathBuf> {
     Ok(normalized)
 }
 
+/// The branch `branch` was created from, as VS Code records it
+/// (`branch.<branch>.vscode-merge-base`; Corvene writes it too, flag
+/// `1202-update-from-parent-branch`).
+pub fn branch_merge_base(git: Arc<GitBinary>, workdir: &Path, branch: &str) -> Option<String> {
+    crate::config_value(git, workdir, &format!("branch.{branch}.vscode-merge-base"))
+}
+
+/// Records `parent` as the branch `branch` was created from
+/// ([`branch_merge_base`]).
+pub fn set_branch_merge_base(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch: &str,
+    parent: &str,
+) -> Result<()> {
+    set_local_config_value(
+        git,
+        workdir,
+        &format!("branch.{branch}.vscode-merge-base"),
+        parent,
+    )
+}
+
 /// GHD `setConfigValue`: `git config --replace-all <key> <value>` in
 /// `workdir`'s own config, so a key with several values ends up with one.
 pub fn set_local_config_value(
