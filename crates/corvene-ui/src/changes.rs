@@ -64,6 +64,8 @@
 //! - a message the amend, Undo Commit, the commit template or a commit puts
 //!   in the form can be taken back with ⌘Z
 //!   (`779-undoable-commit-message-replace`).
+//! - the commit options gear has "Amend Last Commit"
+//!   (`780-amend-from-commit-options`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -1935,15 +1937,31 @@ impl ChangesSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (id, options, push_option) = {
+        let (id, options, push_option, amend_option) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
+            // `780-amend-from-commit-options`: (amending, the HEAD commit
+            // to amend when there is one)
+            let amend_option = s
+                .flags
+                .bool(corvene_core::flags::ids::AMEND_FROM_COMMIT_OPTIONS)
+                .then(|| {
+                    let rs = s.selected_state();
+                    let head = rs
+                        .filter(|rs| {
+                            !matches!(rs.info.as_ref().map(|i| &i.tip), Some(Tip::Unborn { .. }))
+                        })
+                        .and_then(|rs| rs.commits.first())
+                        .map(|c| c.sha.clone());
+                    (rs.is_some_and(|rs| rs.commit_to_amend.is_some()), head)
+                });
             (
                 id,
                 s.repository(id)
                     .map(|r| r.commit_options)
                     .unwrap_or_default(),
                 s.flags.bool(corvene_core::flags::ids::COMMIT_AND_PUSH),
+                amend_option,
             )
         };
         let mut items = vec![
@@ -1994,6 +2012,24 @@ impl ChangesSidebar {
                     )
                 },
             ));
+        }
+        // Corvene: `780-amend-from-commit-options`, History's Amend Commit…
+        // (the same warnings) as a toggle
+        if let Some((amending, head)) = amend_option {
+            let enabled = amending || head.is_some();
+            items.push(MenuItem::separator());
+            items.push(
+                MenuItem::checkbox(
+                    mac_or("Amend Last Commit", "Amend last commit"),
+                    amending,
+                    move |_, cx| match (amending, head.clone()) {
+                        (true, _) => Dispatcher::stop_amending(id, cx),
+                        (false, Some(sha)) => Dispatcher::request_start_amending(id, sha, cx),
+                        (false, None) => {}
+                    },
+                )
+                .enabled(enabled),
+            );
         }
         self.open_menu(items, position, window, cx);
     }

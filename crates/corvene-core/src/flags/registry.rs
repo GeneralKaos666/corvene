@@ -4572,6 +4572,21 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Commit options gear › Amend Last Commit.
+    AMEND_FROM_COMMIT_OPTIONS = 780 "amend-from-commit-options" {
+        title: "Amend from the commit options",
+        summary: "The commit form's gear menu has an \"Amend Last Commit\" checkbox: ticking it \
+                  starts amending the latest commit as History's Amend Commit… does (with its \
+                  warnings), unticking it stops amending.",
+        ghd_behaviour: "Amending starts only from the latest commit's menu in History.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17222)],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
