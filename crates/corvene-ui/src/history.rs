@@ -29,7 +29,9 @@
 //! removable chip there (flag `887`); the compare view lists the files a
 //! merge of the compared branch would leave conflicted (flag `889`); rows
 //! label local branch tips and the default branch's remote tip (flag `890`);
-//! Edit Commit Message… rewords an unpushed commit (flag `892`).
+//! Edit Commit Message… rewords an unpushed commit (flag `892`); a commit of
+//! the compare view's Behind tab can be cherry-picked onto the current
+//! branch (flag `893`).
 
 use std::rc::Rc;
 
@@ -1598,12 +1600,28 @@ impl HistorySidebar {
                 items.push(MenuItem::submenu("Delete tag…", entries));
             }
         }
+        // `893`: a commit the current branch is behind can come over
+        let pick_from_compare = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::CHERRY_PICK_INTO_CURRENT_BRANCH)
+                && s.repo_states.get(&id).is_some_and(|r| {
+                    r.mco.is_none()
+                        && matches!(
+                            r.compare.form,
+                            corvene_core::CompareForm::Branch {
+                                mode: ComparisonMode::Behind,
+                                ..
+                            }
+                        )
+                })
+        };
         items.push(
             MenuItem::new(mac_or("Cherry-pick Commit…", "Cherry-pick commit…"), {
                 let sha = sha.clone();
                 move |_, cx| Dispatcher::start_cherry_pick_flow(id, vec![sha.clone()], cx)
             })
-            .enabled(!busy),
+            .enabled(!busy || pick_from_compare),
         );
         let (pick_no_commit, patches) = {
             let flags = &self.state.read(cx).flags;

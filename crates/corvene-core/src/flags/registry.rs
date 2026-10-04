@@ -5705,6 +5705,23 @@ registry! {
         code: &["crates/corvene-ui/src/history.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-git/src/rebase_ops.rs", "crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
     },
 
+    /// Commits from the compare view can be cherry-picked onto the current branch.
+    CHERRY_PICK_INTO_CURRENT_BRANCH = 893 "cherry-pick-into-current-branch" {
+        title: "Cherry-pick into the current branch",
+        summary: "Cherry-picking commits listed in the compare view's Behind tab (they are on the \
+                  compared branch) treats that branch as their source: the current branch can be \
+                  picked as the target and they are copied onto it without a checkout. The single \
+                  commit menu offers Cherry-pick Commit… there too.",
+        ghd_behaviour: "The current branch cannot be chosen as the target, so commits seen while \
+                        comparing cannot be brought into it from History.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12688)],
+        code: &["crates/corvene-core/src/mco.rs", "crates/corvene-ui/src/dialogs/mco_dialogs.rs", "crates/corvene-ui/src/history.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

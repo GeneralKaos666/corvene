@@ -1859,6 +1859,27 @@ impl Dispatcher {
         if commits.is_empty() {
             return;
         }
+        // `893-cherry-pick-into-current-branch`: commits from the compare
+        // view's Behind tab are on the compared branch, not this one, so it
+        // is their source and the current branch can be the target
+        let compared = {
+            let s = Self::state(cx).read(cx);
+            s.repo_states
+                .get(&id)
+                .filter(|_| {
+                    s.flags
+                        .bool(crate::flags::ids::CHERRY_PICK_INTO_CURRENT_BRANCH)
+                })
+                .and_then(|rs| match &rs.compare.form {
+                    crate::compare::CompareForm::Branch {
+                        branch,
+                        mode: crate::compare::ComparisonMode::Behind,
+                        ..
+                    } => Some(branch.clone()),
+                    _ => None,
+                })
+        };
+        let current = compared.unwrap_or(current);
         Self::init_mco(
             id,
             McoDetail::CherryPick {
@@ -1990,11 +2011,17 @@ impl Dispatcher {
         let count = commits.len();
         let keep_messages = Self::cherry_pick_keeps_messages(cx);
         let commits_for_result = commits.clone();
+        // `893-cherry-pick-into-current-branch`: onto the branch checked out
+        // here, nothing to check out
+        let onto_current = target.kind == corvene_models::BranchKind::Local
+            && Self::current_branch_and_tip(id, cx).is_some_and(|(name, _)| name == target.name);
         Self::run_with_progress(
             id,
             cx,
             move |on_progress| {
-                if let Err(err) = corvene_git::checkout_branch(git.clone(), &workdir, &target) {
+                if !onto_current
+                    && let Err(err) = corvene_git::checkout_branch(git.clone(), &workdir, &target)
+                {
                     return (CherryPickResult::Error(err.to_string()), None, None, false);
                 }
                 let undo_sha = corvene_git::head_sha(git.clone(), &workdir).ok();

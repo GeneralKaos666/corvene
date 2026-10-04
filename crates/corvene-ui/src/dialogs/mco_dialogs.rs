@@ -339,6 +339,19 @@ impl McoDialog {
         let close = move |_: &mut Window, cx: &mut App| Dispatcher::end_mco(repo, cx);
         let query = self.filter.read(cx).value().trim().to_string();
         let current = self.current_branch(cx);
+        // `893-cherry-pick-into-current-branch`: commits from another branch
+        // (the compare view) can go onto the current one, not their own
+        let source = self
+            .state
+            .read(cx)
+            .repo_states
+            .get(&repo)
+            .and_then(|r| r.mco.as_ref())
+            .and_then(|m| match &m.detail {
+                corvene_core::McoDetail::CherryPick { source_branch, .. } => source_branch.clone(),
+                _ => None,
+            })
+            .filter(|source| *source != current);
         let groups = {
             let s = self.state.read(cx);
             let rs = s.repo_states.get(&repo);
@@ -365,7 +378,7 @@ impl McoDialog {
             &self.filter,
             &self.list_focus,
             groups,
-            &current,
+            if source.is_some() { "" } else { &current },
             selected.as_deref(),
             std::rc::Rc::new(on_select),
             window,
@@ -384,7 +397,10 @@ impl McoDialog {
                 None => format!("Cherry-pick {commit_count} {plural}"),
             }
         };
-        let selected_is_current = selected.as_deref() == Some(current.as_str());
+        let selected_is_current = match &source {
+            Some(source) => selected.as_ref() == Some(source),
+            None => selected.as_deref() == Some(current.as_str()),
+        };
         let enabled = no_results || (selected.is_some() && !selected_is_current);
         let selected_for_ok = selected.clone();
         let query_for_ok = query.clone();
