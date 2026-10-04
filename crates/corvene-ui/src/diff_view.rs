@@ -33,7 +33,8 @@
 //!
 //! Deviation (`760-discard-from-text-menu`): right-clicking a changed line's
 //! text in the Changes tab adds the gutter's "Discard … Line" items (for the
-//! line and for its block).
+//! line and for its block), and "Discard N Selected Lines" for the changed
+//! lines a text selection spans.
 //!
 //! Deviation (`762-too-large-diff-escape-hatch`): a working-directory diff
 //! too large to show offers "Open in external diff tool" (with `diff.tool`
@@ -1291,20 +1292,30 @@ impl DiffView {
             items.push(MenuItem::separator());
             items.push(item);
         }
-        // `760-discard-from-text-menu`: the line, then its block
+        // `760-discard-from-text-menu`: the line, then its block, then the
+        // changed lines the text selection spans
+        let discard_menu = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::DISCARD_FROM_TEXT_MENU);
+        let mut separated = false;
         if let Some((original, (start, len), kind)) = discard
-            && self
-                .state
-                .read(cx)
-                .flags
-                .bool(corvene_core::flags::ids::DISCARD_FROM_TEXT_MENU)
+            && discard_menu
             && let Some(line_item) = self.discard_item(original, 1, kind, cx)
         {
             items.push(MenuItem::separator());
+            separated = true;
             items.push(line_item);
             if len > 1 {
                 items.extend(self.discard_item(start, len, kind, cx));
             }
+        }
+        if discard_menu && let Some(item) = self.discard_selected_text_item(cx) {
+            if !separated {
+                items.push(MenuItem::separator());
+            }
+            items.push(item);
         }
         if let Some(item) = self.expand_menu_item(cx) {
             items.push(MenuItem::separator());
@@ -1397,6 +1408,74 @@ impl DiffView {
         if let Some(item) = self.discard_item(start, len, kind, cx) {
             self.open_menu(vec![item], position, window, cx);
         }
+    }
+
+    /// `760-discard-from-text-menu`: "Discard N Selected Lines…" for the
+    /// added and removed lines the text selection spans, when there are
+    /// several (desktop/desktop#16415); same conditions as [`Self::discard_item`].
+    fn discard_selected_text_item(&self, cx: &Context<Self>) -> Option<MenuItem> {
+        let sel = self.text_selection_snapshot()?;
+        // a selection that ends at the start of a row takes nothing from it
+        let last = if sel.end.col == 0 && sel.end.row > sel.start.row {
+            sel.end.row - 1
+        } else {
+            sel.end.row
+        };
+        let lines: Vec<u32> = (sel.start.row..=last)
+            .filter_map(|ix| {
+                let unified = if self.split_mode {
+                    let (before, after) = self.split_rows.get(ix)?.unified_rows();
+                    match sel.column {
+                        Column::Before => before,
+                        Column::After => after,
+                    }?
+                } else {
+                    ix
+                };
+                Some(self.rows.get(unified)?.discard_target()?.0)
+            })
+            .collect::<std::collections::BTreeSet<u32>>()
+            .into_iter()
+            .collect();
+        if lines.len() < 2 {
+            return None;
+        }
+        let snap = self.snapshot(cx)?;
+        if self.source != DiffSource::WorkingDirectory
+            || snap.kind == FileStatusKind::Conflicted
+            || snap.hide_whitespace
+            || snap.as_text
+            || self.locked_type_change(&snap.diff, cx)
+        {
+            return None;
+        }
+        let count = lines.len();
+        let suffix = if snap.confirm_discard { "…" } else { "" };
+        let label = if IS_MAC {
+            format!("Discard {count} Selected Lines{suffix}")
+        } else {
+            format!("Discard {count} selected lines{suffix}")
+        };
+        let (repo, path) = (snap.repo, snap.path.clone());
+        Some(MenuItem::new(label, move |_, cx| {
+            // consecutive lines as one range each
+            let mut selection = DiffSelection::none();
+            let mut run: Option<(u32, u32)> = None;
+            for &line in &lines {
+                run = match run {
+                    Some((start, len)) if start + len == line => Some((start, len + 1)),
+                    Some((start, len)) => {
+                        selection = selection.with_range(start, len, true);
+                        Some((line, 1))
+                    }
+                    None => Some((line, 1)),
+                };
+            }
+            if let Some((start, len)) = run {
+                selection = selection.with_range(start, len, true);
+            }
+            Dispatcher::request_discard_selection(repo, path.clone(), selection, cx);
+        }))
     }
 
     /// "Discard Added Line…" for `len` selection lines from `start`; none
