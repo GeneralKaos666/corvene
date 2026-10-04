@@ -195,6 +195,7 @@ class PopupDialogTest(private val case: Case) {
                 syncProgress = null,
                 lastFetchedAt = null,
                 stashCount = 1u,
+                stashOnCurrentBranch = true,
             ),
             accounts = listOf(AccountVm("https://api.github.com", "wasi-master", null, null, "github.com")),
             repositoryName = "demo",

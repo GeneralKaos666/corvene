@@ -1,9 +1,9 @@
 package com.wasimaster.corvene.platform
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.widget.Toast
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,59 +11,60 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.net.toUri
 import com.wasimaster.corvene.common.CorveneLog
 import com.wasimaster.corvene.common.CorveneTrace
 import com.wasimaster.corvene.ffi.Core
 import com.wasimaster.corvene.ffi.HostRequest
 
 /**
- * Handles the engine's [HostRequest]s while the activity is composed: URLs,
- * the clipboard, toasts and the folder picker (answered with `pathsPicked`).
- * Requests made while no activity is up wait in [Core.hostRequests].
- * Notifications, the transfer service, opening files and all-files access
- * arrive with M-A3 and are logged until then.
+ * Handles the engine's [HostRequest]s while the activity is composed: URLs
+ * (sign-in pages in a Custom Tab), the clipboard, toasts, the folder and file
+ * pickers (each `pick_paths` answered exactly once with `pathsPicked`),
+ * opening files and folders, notifications and their permission, all-files
+ * access, the transfer service, bringing the app forward. Requests made
+ * while no activity is up wait in [Core.hostRequests].
  */
 @Composable
 fun HostRequestHandler(core: Core, onQuit: () -> Unit) {
     val context = LocalContext.current
     // the engine's request id survives the activity being recreated under the picker
     var pendingPick by rememberSaveable { mutableStateOf<Long?>(null) }
-    val picker = rememberFolderPicker { path ->
-        val request = pendingPick ?: return@rememberFolderPicker
+    val answer: (String?) -> Unit = { path ->
+        pendingPick?.let { request -> core.dispatch { pathsPicked(request.toULong(), path?.let(::listOf)) } }
         pendingPick = null
-        core.dispatch { pathsPicked(request.toULong(), path?.let(::listOf)) }
+    }
+    val folderPicker = rememberFolderPicker(onResult = answer)
+    val filePicker = rememberFilePicker(onResult = answer)
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        CorveneLog.i("notification permission: $granted")
     }
     LaunchedEffect(core) {
         core.hostRequests.collect { request ->
             CorveneTrace.section(CorveneTrace.HOST_REQUEST) {
                 when (request) {
-                    is HostRequest.OpenUrl -> openUrl(context, request.url)
+                    is HostRequest.OpenUrl ->
+                        if (isSignInUrl(request.url)) openCustomTab(context, request.url) else openUrl(context, request.url)
                     is HostRequest.WriteClipboard -> writeClipboard(context, request.text)
-                    is HostRequest.Toast -> Toast.makeText(context, request.message, Toast.LENGTH_LONG).show()
+                    is HostRequest.Toast -> toast(context, request.message)
                     is HostRequest.PickPaths -> {
+                        // one picker at a time: an unanswered earlier request is cancelled
+                        pendingPick?.let { old -> core.dispatch { pathsPicked(old.toULong(), null) } }
                         pendingPick = request.request.toLong()
-                        picker.pick()
+                        if (request.directories) folderPicker.pick() else filePicker.pick()
                     }
+                    is HostRequest.OpenPath -> OpenPath.open(context, request.path, request.reveal)?.let { toast(context, it) }
+                    is HostRequest.ShowNotification ->
+                        Notifications.show(context, request.identifier, request.title, request.body, request.payload)
+                    is HostRequest.TransferActive -> TransferController.transferActive(context, request.active)
+                    HostRequest.RequestNotificationPermission ->
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    HostRequest.RequestAllFilesAccess -> requestAllFilesAccess(context)
+                    HostRequest.BringToFront -> bringToFront(context)
                     HostRequest.Quit -> onQuit()
-                    is HostRequest.OpenPath,
-                    is HostRequest.ShowNotification,
-                    is HostRequest.TransferActive,
-                    HostRequest.RequestNotificationPermission,
-                    HostRequest.RequestAllFilesAccess,
-                    HostRequest.BringToFront,
-                    -> CorveneLog.i("host request not handled yet (M-A3): $request")
                 }
             }
         }
-    }
-}
-
-/** Opens [url] in the app that handles it (the browser), or says there is none. */
-fun openUrl(context: Context, url: String) {
-    try {
-        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, context.getString(R.string.plt_no_app_for_url, url), Toast.LENGTH_LONG).show()
     }
 }

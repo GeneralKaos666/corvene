@@ -29,6 +29,10 @@ jna = "5.19.1"
 # OkHttp, no network fetcher). 3.5 needs Kotlin 2.4 metadata.
 coil = "3.2.0"
 splashscreen = "1.0.1"
+# The hourly background fetch (CoroutineWorker); the design's pin.
+work = "2.10.0"
+# Custom Tabs for the sign-in pages; the design's pin.
+browser = "1.9.0"
 profileinstaller = "1.4.1"
 # Kotlin-only preferences until the Rust settings carry them (the design style).
 datastore = "1.1.7"
@@ -77,6 +81,9 @@ androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", vers
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "splashscreen" }
+androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
+androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
 androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 androidx-tracing = { module = "androidx.tracing:tracing", version.ref = "androidxTracing" }

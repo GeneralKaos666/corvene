@@ -70,6 +70,12 @@ Debug builds also accept `--es corvene.debug.addRepository <path>` on the
 `am start` line: the engine adds that folder as if it had been picked
 (scripted tests on a phone without touching the system picker).
 
+The engine starts in `MainActivity.onCreate`, not in `CorveneApp`: a process
+WorkManager starts for the hourly fetch has no activity and runs
+`headlessFetch` instead. Force it with the app killed:
+`adb shell cmd jobscheduler run -f <package> <job id>` (the id from
+`adb shell dumpsys jobscheduler | grep -B2 <package>`).
+
 ## Where things are
 
 ```
@@ -84,13 +90,18 @@ core/design      DesignStyle, PrimerColors + palettes (3 styles × light/dark ×
                  PrimerDialog, Flash, labels, Avatar (Coil), inputs, SegmentedControl, UnderlineNav, chips, Truncate/FilePath,
                  PrimerTopAppBar, RepositoryTopChrome, StyleMiniature)
 core/ffi         the engine: generated bindings (build/generated/uniffi), Core, rememberCoreQuery, HostEventsBridge
-core/platform    HostRequestHandler (URLs, clipboard, toasts, folder picker), FolderResolver
-feature/repositories   RepositoryListScreen, RepositoryPicker (SelectPanel) (+ route, grouping, tests, screenshots)
+core/platform    HostRequestHandler (every HostRequest), FolderResolver (own provider / shared storage / SAF import) + pickers,
+                 CorveneDocumentsProvider, CorveneFetchWorker (hourly, headless), TransferService + TransferController,
+                 Notifications (channels, pull requests), OpenPath (view / reveal / share), Termux, Custom Tabs, AppLinks
+                 (intent → appUrl), AvatarCache
+feature/repositories   RepositoryListScreen, RepositoryPicker (SelectPanel), Clone (GitHub.com | URL), Add, Create,
+                 clone progress (+ routes, grouping, tests, screenshots)
+feature/onboarding     Welcome (Start → Sign in → Configure Git), SignInPanel (device code, browser, Enterprise token)
 feature/changes  ChangesScreen (+ CommitPanel/CommitForm, filters), DiffScreen (+ DiffPager, DiffLineCache), routes
 feature/branches BranchSheet (groups, pull requests, menu), branch dialogs, sync button model/menu/controller, remote dialogs
 feature/history  HistoryScreen (+ CommitPager, compare, commit menu, multi-select), CommitDetailScreen, history dialogs
 feature/mco      ConflictsScreen, MultiCommitOperationRoute (choose branch, progress, abort), ChooseBranchSheet
-feature/settings AppearanceScreen (style cards, theme)
+feature/settings AppearanceScreen (style cards, theme), AccountsScreen (avatars, sign out, sign in)
 app              CorveneApp (process lifecycle → appVisible/focus), MainActivity (splash, edge to edge), Navigation 3,
                  CorveneScaffold (repository chrome, list-detail on medium/expanded), PopupHost (PopupDialog), BannerFlash
 tools/architecture     Konsist rules        tools/octicons/gen.py + icons.txt        tools/tokens/gen.py
@@ -107,5 +118,5 @@ Kotlin style per `.editorconfig` (WMKeyboard's, ktlint android_studio, 140
 columns), no auto-formatter. No ViewModel and no DI: the engine is the state,
 `Core` is wired explicitly and handed down with `LocalCore`; screens take view
 models and lambdas, routes query. Strings live in each module's `strings.xml`
-with its resource prefix (`cvd_`, `repo_`, `chg_`, `br_`, `hist_`, `mco_`, `set_`, `plt_`, `app_`). Every task name
+with its resource prefix (`cvd_`, `repo_`, `chg_`, `br_`, `hist_`, `mco_`, `set_`, `onb_`, `plt_`, `app_`). Every task name
 carries the flavour (`testFossDebugUnitTest`); use the root aggregates.

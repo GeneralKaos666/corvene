@@ -64,6 +64,7 @@ internal val SampleChanges = ChangesVm(
     filterModified = false,
     filterDeleted = false,
     filterRenamed = false,
+    stashOnCurrentBranch = true,
 )
 
 internal val EmptyChanges = SampleChanges.copy(files = emptyList(), includedCount = 0u, selectedFile = null, stashCount = 0u)

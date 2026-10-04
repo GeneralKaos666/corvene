@@ -111,6 +111,40 @@ Kotlin does meanwhile.
 32. **`RepoVm.htmlUrl`** for View on GitHub on Enterprise hosts; Kotlin builds
     github.com URLs from `RepoVm.github`.
 
+## M-A3
+
+33. **`AccountVm.avatarPath`** (the file the engine downloaded, as design §4
+    says) and **`AccountVm.emails`** (Configure Git's prefill, GHD picks the
+    primary or noreply address). Meanwhile Kotlin downloads `avatarUrl` itself
+    into `cache/avatars/` (`AvatarCache`) and Configure Git prefills the name
+    only.
+34. **The current global identity** (`gitIdentity(): {name, email}?`) so
+    Configure Git and Settings › Git show what git already has.
+35. **`HostEvents.sharePath(path)`** for the Bridge's `share_path` (GHD-less
+    Share on Android), and `view_path_with(path, component, line)` /
+    `view_apps()` routed to Kotlin (Settings › Integrations). `share_path`
+    answers "not available" today; `OpenPath.share` is ready in
+    `:core:platform`.
+36. **`HostEvents.openTermux(dir)`** (the Bridge's `open_termux` /
+    `run_termux` / `termux_programs`) so the engine's own "Open in Terminal"
+    reaches `Termux.open`. Meanwhile the repository overflow menu calls it
+    from Kotlin.
+37. **`cancelTransfers()`** for the transfer notification's Stop: today Stop
+    only ends the foreground service (git goes on while the process lives).
+38. **`gitignoreNames()` / `licenses()`** (the bundled template names) for
+    Create; Kotlin lists 21 common .gitignore templates and 14 licenses by
+    the engine's names meanwhile.
+39. **`HostInfo` updates at run time** (`setHostInfo` or `allFilesAccessChanged(bool)`,
+    `notificationsAllowedChanged(bool)`): the record is read once at start, so
+    granting "All files access" or notifications later is seen only after a
+    restart.
+40. **`endHeadless()` that waits** for the headless fetch to return (the GPUI
+    app's `nativeEndHeadless` did); now it only cancels, so `Corvene(...)` may
+    start while the headless git is still being stopped.
+41. **A `remoteBusy`/`backgroundFetch(): bool`** answer so the worker can stay
+    until the live fetch ended (design §4: await busy == false, 2 min cap);
+    `backgroundFetch()` is dispatched and the worker returns at once.
+
 ## Provided by the FFI (2026-10-04, 79678bd4)
 
 - `com.wasimaster.corvene.ffi.NativeContext` must exist in `:core:ffi` as

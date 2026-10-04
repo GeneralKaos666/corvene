@@ -1,5 +1,6 @@
 package com.wasimaster.corvene.ffi
 
+import android.content.Context
 import com.wasimaster.corvene.common.CorveneLog
 import com.wasimaster.corvene.common.CorveneTrace
 import com.wasimaster.corvene.ffi.gen.CoreException
@@ -38,7 +39,7 @@ data class CoreConfig(
  * The engine starts on that thread as soon as the Core is created, so the
  * main thread never waits for the store to load; a query waits for it.
  */
-class Core private constructor(config: CoreConfig) {
+class Core private constructor(context: Context, config: CoreConfig) {
 
     private val thread: ExecutorCoroutineDispatcher =
         Executors.newSingleThreadExecutor { Thread(it, THREAD_NAME) }.asCoroutineDispatcher()
@@ -66,7 +67,8 @@ class Core private constructor(config: CoreConfig) {
             CorveneTrace.section(CorveneTrace.ENGINE_INIT) {
                 val started = System.nanoTime()
                 try {
-                    NativeLoader.load()
+                    // the Keystore needs the context before the engine's first token read
+                    Native.prepare(context)
                     val bridge = HostEventsBridge(
                         onStateChanged = { version ->
                             CorveneLog.d("state_changed $version")
@@ -113,7 +115,18 @@ class Core private constructor(config: CoreConfig) {
         private var instance: Core? = null
 
         /** The process's engine, started on first use. */
-        fun start(config: () -> CoreConfig): Core =
-            instance ?: synchronized(this) { instance ?: Core(config()).also { instance = it } }
+        fun start(context: Context, config: () -> CoreConfig): Core =
+            instance ?: synchronized(this) {
+                instance ?: Core(context.applicationContext, config()).also { instance = it }
+            }
+
+        /**
+         * Whether this process runs the engine (the app was opened in it). A
+         * process WorkManager started for the background fetch does not.
+         */
+        val isRunning: Boolean get() = instance != null
+
+        /** The engine of this process, if it runs ([isRunning]). */
+        val current: Core? get() = instance
     }
 }

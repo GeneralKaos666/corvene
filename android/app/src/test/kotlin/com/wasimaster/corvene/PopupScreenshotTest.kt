@@ -68,7 +68,7 @@ class PopupScreenshotTest(private val style: DesignStyle, private val mode: Colo
             branches = BranchesVm(
                 1u, "main", null, "main", emptyList(),
                 listOf(BranchVm("main", false, true, "origin/main", null), BranchVm("feature-a", false, false, "origin/feature-a", null)),
-                null, null, SyncActionVm.FETCH, null, null, null, 0u,
+                null, null, SyncActionVm.FETCH, null, null, null, 0u, false,
             ),
         )
 

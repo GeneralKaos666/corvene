@@ -35,6 +35,17 @@ private val Settings = SettingsVm(
     hideWhitespaceInHistoryDiff = false,
     showDiffCheckMarks = true,
     underlineLinks = true,
+    confirmCheckoutCommit = true,
+    confirmUndoCommit = true,
+    confirmDiscardStash = true,
+    confirmCommitFilteredChanges = true,
+    showCommitLengthWarning = false,
+    commitSpellcheckEnabled = false,
+    historyFirstParent = false,
+    uncommittedChangesStrategy = "ask",
+    externalEditor = null,
+    shell = null,
+    cloneDir = null,
 )
 
 /** Settings › Appearance: the cards and radios send the engine's values; screenshots in every style. */

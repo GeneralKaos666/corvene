@@ -19,4 +19,14 @@
     <string name="set_theme_high_contrast_body">GitHub Desktop\'s high contrast dark theme</string>
     <string name="set_sample_repository">corvene</string>
     <string name="set_sample_commit">Commit</string>
+    <string name="set_accounts">Accounts</string>
+    <string name="set_accounts_signed_in">Signed in</string>
+    <string name="set_accounts_none">Not signed in to any account</string>
+    <string name="set_accounts_add">Add an account</string>
+    <string name="set_sign_in_dotcom">Sign in to GitHub.com</string>
+    <string name="set_sign_in_enterprise">Sign in to GitHub Enterprise</string>
+    <string name="set_sign_out">Sign out</string>
+    <string name="set_sign_out_title">Sign out?</string>
+    <string name="set_sign_out_body">Corvene forgets the token of %1$s on %2$s. Repositories stay where they are.</string>
+    <string name="set_cancel">Cancel</string>
 </resources>

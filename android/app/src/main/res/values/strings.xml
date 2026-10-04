@@ -4,6 +4,15 @@
     <string name="app_appearance">Appearance</string>
     <string name="app_settings">Settings</string>
     <string name="app_back">Back</string>
+    <string name="app_sign_in">Sign in</string>
+    <string name="app_sign_in_enterprise">Sign in to GitHub Enterprise</string>
+    <string name="app_accounts">Accounts</string>
+    <string name="app_add_menu">Add a repository</string>
+    <string name="app_clone">Clone repository…</string>
+    <string name="app_create">Create new repository…</string>
+    <string name="app_add_existing">Add existing repository…</string>
+    <string name="app_show_in_files">Show in Files</string>
+    <string name="app_open_in_termux">Open in Termux</string>
     <string name="app_more">More options</string>
     <string name="app_close">Close</string>
     <string name="app_refresh">Refresh</string>

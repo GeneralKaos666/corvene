@@ -9,7 +9,7 @@ import org.junit.Test
 class RepositoryGroupsTest {
 
     private fun repo(id: Int, name: String, github: String? = null) =
-        RepoVm(id.toULong(), name, "/r/$name", github, github?.substringBefore('/'), false, false, null, false, null, 0u, null, null)
+        RepoVm(id.toULong(), name, "/r/$name", github, github?.substringBefore('/'), false, false, null, null, false, null, 0u, null, null)
 
     private val list = RepoListVm(
         selected = null,

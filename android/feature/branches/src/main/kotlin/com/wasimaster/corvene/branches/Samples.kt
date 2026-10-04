@@ -38,6 +38,7 @@ internal val SampleBranches = BranchesVm(
     syncProgress = null,
     lastFetchedAt = SECONDS - 5 * 60,
     stashCount = 0u,
+    stashOnCurrentBranch = false,
 )
 
 internal val SamplePulls = PullRequestsVm(

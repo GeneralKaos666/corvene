@@ -1,5 +1,8 @@
 package com.wasimaster.corvene
 
+import android.app.Activity
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
@@ -30,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.wasimaster.corvene.branches.BranchSheetRoute
@@ -51,6 +55,8 @@ import com.wasimaster.corvene.ffi.LocalCore
 import com.wasimaster.corvene.ffi.rememberCoreQuery
 import com.wasimaster.corvene.history.CommitDetailRoute
 import com.wasimaster.corvene.history.HistoryRoute
+import com.wasimaster.corvene.platform.OpenPath
+import com.wasimaster.corvene.platform.Termux
 import com.wasimaster.corvene.platform.rememberFolderPicker
 import com.wasimaster.corvene.repositories.RepositoryPicker
 import kotlinx.coroutines.launch
@@ -72,6 +78,7 @@ fun CorveneScaffold(
     onOpenCommit: () -> Unit,
     onOpenRepository: (Long) -> Unit,
     onAppearance: () -> Unit,
+    onAccounts: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val core = LocalCore.current
@@ -85,6 +92,8 @@ fun CorveneScaffold(
     var branchPicker by remember { mutableStateOf(false) }
     var branchFrom by rememberSaveable { mutableStateOf<String?>(null) }
     val folderPicker = rememberFolderPicker { path -> if (path != null) core.dispatch { addRepository(path) } }
+    val context = LocalContext.current
+    val termux = remember(context) { Termux.installed(context) }
     val selected = list.value?.selected
     LaunchedEffect(id, selected) {
         // after process death the stack comes back before the engine's selection does
@@ -147,7 +156,7 @@ fun CorveneScaffold(
             },
             syncAnchor = { sync.Menu() },
             actions = {
-                OverflowMenu(onAppearance = onAppearance) { close ->
+                OverflowMenu(onAppearance = onAppearance, onAccounts = onAccounts) { close ->
                     ActionMenuItem(
                         stringResource(R.string.app_refresh),
                         {
@@ -156,6 +165,28 @@ fun CorveneScaffold(
                         },
                         leadingIcon = Octicons.Sync,
                     )
+                    val path = info?.path
+                    if (path != null) {
+                        ActionMenuItem(
+                            stringResource(R.string.app_show_in_files),
+                            {
+                                close()
+                                OpenPath.open(context, path, reveal = false)?.let { toast -> showToast(context, toast) }
+                            },
+                            leadingIcon = Octicons.FileDirectory,
+                        )
+                        if (termux) {
+                            ActionMenuItem(
+                                stringResource(R.string.app_open_in_termux),
+                                {
+                                    close()
+                                    val activity = context as? Activity
+                                    activity?.let { Termux.open(it, path) }?.let { toast -> showToast(context, toast) }
+                                },
+                                leadingIcon = Octicons.CodeSquare,
+                            )
+                        }
+                    }
                 }
             },
             tabs = {
@@ -277,3 +308,7 @@ private val PaneAnchors = listOf(
 
 private const val SHORT_SHA = 7
 private const val DETAIL_FILES = 0.4f
+
+private fun showToast(context: Context, message: String) {
+    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+}

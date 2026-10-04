@@ -43,6 +43,7 @@ internal val SampleHistory = HistoryVm(
     selected = listOf("b2c3d4e5f6"),
     start = 0u,
     commits = emptyList(),
+    compare = null,
 )
 
 internal fun samplePager(commits: List<CommitVm> = SampleCommits) = CommitPager(commits.size) { start, count ->

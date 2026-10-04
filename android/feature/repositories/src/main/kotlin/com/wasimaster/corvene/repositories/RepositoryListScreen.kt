@@ -2,6 +2,7 @@ package com.wasimaster.corvene.repositories
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -18,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
@@ -58,6 +60,8 @@ fun RepositoryListScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
+    onClone: () -> Unit = {},
+    onCreate: () -> Unit = {},
 ) {
     var removing by rememberSaveable { mutableStateOf<Long?>(null) }
     val groups = remember(list) { groupRepositories(list) }
@@ -75,12 +79,29 @@ fun RepositoryListScreen(
                         description = stringResource(R.string.repo_empty_description),
                         primaryAction = {
                             PrimerButton(
-                                stringResource(R.string.repo_add),
-                                onAdd,
+                                stringResource(R.string.repo_clone_repository),
+                                onClone,
                                 variant = PrimerButtonVariant.Primary,
-                                leadingIcon = Octicons.Plus,
-                                modifier = Modifier.testTag(TAG_ADD),
+                                leadingIcon = Octicons.Download,
+                                modifier = Modifier.testTag(TAG_CLONE),
                             )
+                        },
+                        secondaryAction = {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                PrimerButton(
+                                    stringResource(R.string.repo_create_repository),
+                                    onCreate,
+                                    leadingIcon = Octicons.Plus,
+                                    modifier = Modifier.testTag(TAG_CREATE),
+                                )
+                                PrimerButton(
+                                    stringResource(R.string.repo_add_existing),
+                                    onAdd,
+                                    variant = PrimerButtonVariant.Invisible,
+                                    leadingIcon = Octicons.FileDirectory,
+                                    modifier = Modifier.testTag(TAG_ADD),
+                                )
+                            }
                         },
                     )
                 }
@@ -184,17 +205,21 @@ private fun RepositoryRow(repo: RepoVm, selected: Boolean, onClick: () -> Unit, 
 const val TAG_LIST = "repo_list"
 const val TAG_ADD = "repo_add"
 const val TAG_ROW = "repo_row_"
+const val TAG_CLONE = "repo_clone"
+const val TAG_CREATE = "repo_create"
 
 internal val SampleList = RepoListVm(
     selected = 2u,
     recent = listOf(2u, 3u),
     repositories = listOf(
         RepoVm(1u, "corvene", "/data/user/0/com.wasimaster.corvene/files/repositories/corvene",
-            "wasi-master/corvene", "wasi-master", false, true, null, false, "main", 0u, 0u, 0u),
-        RepoVm(2u, "desktop", "/storage/emulated/0/Code/desktop", "desktop/desktop", "desktop", true, false, null, false,
-            "development", 3u, 2u, 1u),
-        RepoVm(3u, "notes", "/storage/emulated/0/Documents/notes", null, null, false, false, null, false, "main", 0u, null, null),
-        RepoVm(4u, "old-project", "/storage/emulated/0/old-project", null, null, false, false, null, true, null, 0u, null, null),
+            "wasi-master/corvene", "wasi-master", false, true, null, "https://github.com/wasi-master/corvene", false, "main", 0u, 0u, 0u),
+        RepoVm(
+            2u, "desktop", "/storage/emulated/0/Code/desktop", "desktop/desktop", "desktop", true, false, null,
+            "https://github.com/desktop/desktop", false, "development", 3u, 2u, 1u,
+        ),
+        RepoVm(3u, "notes", "/storage/emulated/0/Documents/notes", null, null, false, false, null, null, false, "main", 0u, null, null),
+        RepoVm(4u, "old-project", "/storage/emulated/0/old-project", null, null, false, false, null, null, true, null, 0u, null, null),
     ),
     groups = listOf(
         RepoGroupVm("Recent", listOf(2u, 3u)),

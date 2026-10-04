@@ -13,12 +13,15 @@ import com.wasimaster.corvene.design.ColorMode
 import com.wasimaster.corvene.design.CorveneTheme
 import com.wasimaster.corvene.ffi.LocalCore
 import com.wasimaster.corvene.ffi.rememberCoreQuery
+import com.wasimaster.corvene.onboarding.WelcomeRoute
 import com.wasimaster.corvene.platform.HostRequestHandler
 
 /**
  * The app under the activity: the engine's appearance settings decide the
  * theme (the splash screen stays up until they have been read once), the
  * system bars follow light/dark, and the engine's host requests are served.
+ * Until the Welcome flow was completed (`welcomeCompleted`) it is all there
+ * is; then the navigation with the engine's dialogs over it.
  */
 @Composable
 fun CorveneRoot(onQuit: () -> Unit) {
@@ -37,7 +40,10 @@ fun CorveneRoot(onQuit: () -> Unit) {
     }
     CorveneTheme(style = appearance.style, colorMode = appearance.colorMode, highContrast = appearance.highContrast) {
         HostRequestHandler(core, onQuit = onQuit)
-        CorveneNavigation()
-        PopupHost()
+        if (settings.value?.welcomeCompleted == false) {
+            WelcomeRoute(onFinished = {})
+        } else {
+            CorveneNavigation()
+        }
     }
 }

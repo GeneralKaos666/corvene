@@ -7,9 +7,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Scaffold
@@ -31,9 +31,16 @@ import com.wasimaster.corvene.design.CorveneTheme
 import com.wasimaster.corvene.design.Octicons
 import com.wasimaster.corvene.design.PrimerIconButton
 import com.wasimaster.corvene.design.PrimerTopAppBar
+import com.wasimaster.corvene.ffi.LocalCore
 import com.wasimaster.corvene.ffi.rememberCoreQuery
 import com.wasimaster.corvene.history.CommitDetailRoute
+import com.wasimaster.corvene.onboarding.SignInRoute
+import com.wasimaster.corvene.repositories.AddRepositoryRoute
+import com.wasimaster.corvene.repositories.CloneProgressRoute
+import com.wasimaster.corvene.repositories.CloneRoute
+import com.wasimaster.corvene.repositories.CreateRepositoryRoute
 import com.wasimaster.corvene.repositories.RepositoryListRoute
+import com.wasimaster.corvene.settings.AccountsRoute
 import com.wasimaster.corvene.settings.AppearanceRoute
 
 /**
@@ -43,8 +50,13 @@ import com.wasimaster.corvene.settings.AppearanceRoute
  */
 @Composable
 fun CorveneNavigation(modifier: Modifier = Modifier) {
+    val core = LocalCore.current
     val backStack = rememberNavBackStack(Repositories)
     val pop: () -> Unit = { backStack.removeLastOrNull() }
+    // a clone that finished opens its repository (GHD selects it)
+    CloneProgressRoute(onCloned = { id ->
+        if (backStack.lastOrNull() != Repository(id)) backStack.add(Repository(id))
+    })
     NavDisplay(
         backStack = backStack,
         modifier = modifier,
@@ -53,9 +65,22 @@ fun CorveneNavigation(modifier: Modifier = Modifier) {
             entry<Repositories> {
                 AppScaffold(
                     title = stringResource(R.string.app_name),
-                    actions = { OverflowMenu(onAppearance = { backStack.add(AppearanceSettings) }) },
+                    actions = {
+                        AddMenu(
+                            onClone = { backStack.add(Clone()) },
+                            onCreate = { backStack.add(CreateRepository) },
+                            onAdd = { backStack.add(AddRepository) },
+                        )
+                        OverflowMenu(onAppearance = { backStack.add(AppearanceSettings) }, onAccounts = { backStack.add(AccountsSettings) })
+                    },
                 ) { padding ->
-                    RepositoryListRoute(onOpen = { backStack.add(Repository(it)) }, contentPadding = padding)
+                    RepositoryListRoute(
+                        onOpen = { backStack.add(Repository(it)) },
+                        onClone = { backStack.add(Clone()) },
+                        onCreate = { backStack.add(CreateRepository) },
+                        onAddExisting = { backStack.add(AddRepository) },
+                        contentPadding = padding,
+                    )
                 }
             }
             entry<Repository> { key ->
@@ -70,6 +95,7 @@ fun CorveneNavigation(modifier: Modifier = Modifier) {
                         backStack.add(Repository(id))
                     },
                     onAppearance = { backStack.add(AppearanceSettings) },
+                    onAccounts = { backStack.add(AccountsSettings) },
                 )
             }
             entry<Diff> { key ->
@@ -116,6 +142,27 @@ fun CorveneNavigation(modifier: Modifier = Modifier) {
                     )
                 }
             }
+            entry<Clone> { key ->
+                CloneRoute(key.url, onClose = pop, onSignIn = { backStack.add(SignIn(enterprise = false)) })
+            }
+            entry<AddRepository> { AddRepositoryRoute(onClose = pop) }
+            entry<CreateRepository> { CreateRepositoryRoute(onClose = pop) }
+            entry<SignIn> { key ->
+                AppScaffold(
+                    title = stringResource(if (key.enterprise) R.string.app_sign_in_enterprise else R.string.app_sign_in),
+                    onBack = {
+                        core.dispatch { cancelSignIn() }
+                        pop()
+                    },
+                ) { padding -> SignInRoute(key.enterprise, onSignedIn = pop, contentPadding = padding) }
+            }
+            entry<AccountsSettings> {
+                AppScaffold(
+                    title = stringResource(R.string.app_accounts),
+                    subtitle = stringResource(R.string.app_settings),
+                    onBack = pop,
+                ) { padding -> AccountsRoute(onSignIn = { backStack.add(SignIn(it)) }, contentPadding = padding) }
+            }
             entry<AppearanceSettings> {
                 AppScaffold(
                     title = stringResource(R.string.app_appearance),
@@ -125,6 +172,7 @@ fun CorveneNavigation(modifier: Modifier = Modifier) {
             }
         },
     )
+    PopupHost(onSignIn = { enterprise -> backStack.add(SignIn(enterprise)) })
 }
 
 /** The top bar every plain destination shares, over the canvas colour. */
@@ -153,14 +201,57 @@ internal fun AppScaffold(
     )
 }
 
-/** The bar's overflow menu: Settings › Appearance for now (the temporary paintbrush menu is gone). */
+/** The "+" menu (GHD's File menu): Clone, Create, Add existing. */
 @Composable
-internal fun OverflowMenu(onAppearance: () -> Unit, extra: @Composable (close: () -> Unit) -> Unit = {}) {
+internal fun AddMenu(onClone: () -> Unit, onCreate: () -> Unit, onAdd: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        PrimerIconButton(Octicons.Plus, stringResource(R.string.app_add_menu), { open = true })
+        ActionMenu(expanded = open, onDismissRequest = { open = false }) {
+            ActionMenuItem(
+                stringResource(R.string.app_clone),
+                {
+                    open = false
+                    onClone()
+                },
+                leadingIcon = Octicons.Download,
+            )
+            ActionMenuItem(
+                stringResource(R.string.app_create),
+                {
+                    open = false
+                    onCreate()
+                },
+                leadingIcon = Octicons.Plus,
+            )
+            ActionMenuItem(
+                stringResource(R.string.app_add_existing),
+                {
+                    open = false
+                    onAdd()
+                },
+                leadingIcon = Octicons.FileDirectory,
+            )
+        }
+    }
+}
+
+/** The bar's overflow menu: [extra] items, then Settings › Accounts and Appearance. */
+@Composable
+internal fun OverflowMenu(onAppearance: () -> Unit, onAccounts: () -> Unit, extra: @Composable (close: () -> Unit) -> Unit = {}) {
     var open by remember { mutableStateOf(false) }
     Box {
         PrimerIconButton(Octicons.KebabHorizontal, stringResource(R.string.app_more), { open = true })
         ActionMenu(expanded = open, onDismissRequest = { open = false }) {
             extra { open = false }
+            ActionMenuItem(
+                stringResource(R.string.app_accounts),
+                {
+                    open = false
+                    onAccounts()
+                },
+                leadingIcon = Octicons.Person,
+            )
             ActionMenuItem(
                 stringResource(R.string.app_appearance),
                 {

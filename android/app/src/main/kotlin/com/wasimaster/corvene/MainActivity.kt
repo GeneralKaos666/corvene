@@ -8,16 +8,21 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import com.wasimaster.corvene.common.CorveneLog
+import com.wasimaster.corvene.ffi.Headless
 import com.wasimaster.corvene.ffi.LocalCore
 import com.wasimaster.corvene.ffi.gen.CoreException
+import com.wasimaster.corvene.platform.AppLinks
+import com.wasimaster.corvene.platform.Notifications
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * The one activity. Shows the splash screen until the engine has answered its
  * first query (or failed, or [SPLASH_TIMEOUT_MS] passed), then the app edge to
- * edge. Hands `x-corvene://` links to the engine; [CorveneApp] tells it when
- * the app is visible and focused.
+ * edge. Hands links to the engine (`x-corvene://`, the browser sign-in's
+ * `x-corvene-auth://` callback, a shared repository address, see
+ * [AppLinks]) and notification taps; [CorveneApp] tells it when the app is
+ * visible and focused. singleTask: a Custom Tab over it returns here.
  */
 class MainActivity : ComponentActivity() {
 
@@ -27,6 +32,11 @@ class MainActivity : ComponentActivity() {
     private var ready = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // a background fetch WorkManager started in this process lets go
+        // before the engine starts (headless and app never run together)
+        Headless.end()
+        // the engine starts loading the store on its thread while the activity inflates
+        core
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         splash.setKeepOnScreenCondition { !ready }
@@ -58,8 +68,16 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         intent ?: return
-        val url = intent.dataString
-        if (intent.action == Intent.ACTION_VIEW && url != null) core.dispatch { appUrl(url) }
+        if (intent.action == Notifications.ACTION_NOTIFICATION) {
+            val identifier = intent.getStringExtra(Notifications.EXTRA_IDENTIFIER).orEmpty()
+            val payload = intent.getStringExtra(Notifications.EXTRA_PAYLOAD)
+            core.dispatch { notificationClicked(identifier, payload) }
+            return
+        }
+        AppLinks.appUrl(intent)?.let { url ->
+            CorveneLog.i("app url: ${url.substringBefore('?')}")
+            core.dispatch { appUrl(url) }
+        }
         // Debug builds only: add a repository by path without the picker, for
         // scripted tests (`am start ... --es corvene.debug.addRepository <path>`).
         if (BuildConfig.DEBUG) {

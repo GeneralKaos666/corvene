@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,6 +21,8 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.wasimaster.corvene.branches.ConfirmForcePushDialog
 import com.wasimaster.corvene.branches.ConfirmOverwriteStashDialog
 import com.wasimaster.corvene.branches.ConfirmSwitchBranchDialog
@@ -45,6 +48,9 @@ import com.wasimaster.corvene.history.CreateTagDialog
 import com.wasimaster.corvene.history.WarningBeforeResetDialog
 import com.wasimaster.corvene.mco.ChooseBranchSheet
 import com.wasimaster.corvene.mco.MultiCommitOperationRoute
+import com.wasimaster.corvene.repositories.AddRepositoryRoute
+import com.wasimaster.corvene.repositories.CloneRoute
+import com.wasimaster.corvene.repositories.CreateRepositoryRoute
 
 /**
  * The engine's open dialog (`popup()`, GHD's popup stack) wired to the
@@ -52,10 +58,34 @@ import com.wasimaster.corvene.mco.MultiCommitOperationRoute
  * [CorePopupActions] for what the buttons do. The drawing is [PopupDialog].
  */
 @Composable
-fun PopupHost() {
+fun PopupHost(onSignIn: (enterprise: Boolean) -> Unit) {
     val core = LocalCore.current
     val popup by rememberCoreQuery { popup() ?: NoPopup }
     val value = popup.value?.takeIf { it.kind.isNotEmpty() } ?: return
+    val close: () -> Unit = { core.dispatch { closePopup() } }
+    // GHD's full-screen dialogs: the same screens the app's own menus open
+    when (value.kind) {
+        "CloneRepository", "CloneRepositoryRetry" -> return FullScreenPopup(close) {
+            CloneRoute(
+                value.field("url"),
+                onClose = close,
+                onSignIn = {
+                    close()
+                    onSignIn(false)
+                },
+            )
+        }
+        "AddExistingRepository" -> return FullScreenPopup(close) { AddRepositoryRoute(onClose = close, initialPath = value.field("path")) }
+        "CreateRepository" -> return FullScreenPopup(close) { CreateRepositoryRoute(onClose = close, initialBase = value.field("path")) }
+        "SignIn" -> {
+            // the sign-in screen is a destination; the popup only asks for it
+            LaunchedEffect(value) {
+                close()
+                onSignIn(value.field("enterprise") == "true")
+            }
+            return
+        }
+    }
     val repo = value.repo
     val branches by rememberCoreQuery(repo) { repo?.let { branches(it) } }
     val session by rememberCoreQuery(value.kind) { if (value.kind == "PublishRepository") session() else null }
@@ -70,6 +100,16 @@ fun PopupHost() {
         ),
         actions,
         multiCommitOperation = { id -> MultiCommitOperationRoute(id.toLong()) },
+    )
+}
+
+/** A dialog window over everything, the whole screen, edge to edge. */
+@Composable
+private fun FullScreenPopup(onDismissRequest: () -> Unit, content: @Composable () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        content = content,
     )
 }
 

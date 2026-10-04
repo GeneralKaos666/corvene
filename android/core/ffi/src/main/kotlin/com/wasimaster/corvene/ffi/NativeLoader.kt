@@ -13,6 +13,9 @@ internal object NativeLoader {
     @Volatile
     private var loaded = false
 
+    /** Whether [load] ran (in this process). */
+    val isLoaded: Boolean get() = loaded
+
     @Synchronized
     fun load() {
         if (loaded) return

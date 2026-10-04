@@ -3,6 +3,135 @@
 Status, measurements and every place this build differs from
 `.docs/android/design-compose-app.md`. Newest milestone first.
 
+# M-A3 notes
+
+## Built
+
+- `:core:ffi`: `NativeContext.attach` (JNI `Java_com_wasimaster_corvene_ffi_NativeContext_attach`)
+  behind `Native.prepare(context)` (load + attach once), called by `Core`'s
+  start-up before `Corvene(...)` and by `Headless.fetch` before
+  `headlessFetch`; `Headless.end()` (`endHeadless`, only once the library is
+  loaded); `Core.start(context, config)`, `Core.isRunning` / `Core.current`.
+- `:core:platform`: `FolderResolver` (own provider → its file; `primary:` +
+  all-files access → `/storage/emulated/0/…`; else a tree holding `.git` is
+  copied into `files/repositories/<name>[-n]` with an "Importing…" toast, else
+  "not a Git repository" / "allow All files access"; `import = false` for
+  destinations), `FileCopier` (single files → `cache/tmp/picked/file`, 16 MB
+  cap), `rememberFolderPicker(import)` / `rememberFilePicker` (each answer
+  exactly once), `CorveneDocumentsProvider` (Kotlin port: roots `repositories`
+  + `home`, `%2E` dot ids, hidden `shared/` `tmp/`, create/delete/rename,
+  folders-first sorting, `findDocumentPath`), `OpenPath` (view with chooser,
+  reveal = the parent folder, share), `Notifications` (channels
+  `pull-requests` + `transfers` at start, pull request notifications whose tap
+  → `notificationClicked`), `TransferService` (dataSync, Stop action,
+  `onTimeout`) + `TransferController` (starts after 1.5 s of transfer),
+  `CorveneFetchWorker` (CoroutineWorker, 1 h, CONNECTED + battery not low,
+  UPDATE, 1 h initial delay; live engine → `backgroundFetch()`, none →
+  headless; FAILED → retry), `Termux.open` (RUN_COMMAND, shared storage only,
+  asks the permission), Custom Tabs for GitHub's `/login/oauth/authorize` and
+  `/login/device` pages, `AppLinks` (VIEW x-corvene / x-corvene-auth as is,
+  GitHub/remote URL or SEND text with an address → `x-corvene://openRepo/<url>`),
+  `AvatarCache` (https avatar → `cache/avatars/`), HostRequestHandler for every
+  request (pick folder/file, open path, notification + permission, all-files
+  access, transfer, bring to front).
+- `:feature:onboarding` (`onb_`): WelcomeScreen (Start → Sign in → Configure
+  Git, step dots), SignInPanel (browser button = `signIn(null)`; steps
+  Requesting / DeviceCode with Copy + Open github.com + spinner / Browser /
+  Verifying / Error + Try again; Enterprise host + token →
+  `signInWithToken`; signed-in row with avatar), WelcomeRoute (a new account
+  moves on to Configure Git; Finish = `setGlobalIdentity` + `completeWelcome`,
+  Skip = `completeWelcome`), SignInRoute (Settings).
+- `:feature:repositories`: CloneScreen (GitHub.com tab: `loadCloneableRepositories`
+  / `cloneableRepositories`, filter, pick; signed out: "Sign in to list your
+  repositories"; URL tab: URL or owner/name), local path row (default
+  `settings().cloneDir`, else `files/repositories/<name>`; Choose… picks a
+  destination), Shallow clone (`depth` 1); AddRepositoryScreen (folder via the
+  importing picker; "Use folders in place" Flash → all-files settings where
+  it can be asked for); CreateRepositoryScreen (name with GHD's sanitising,
+  description, folder, README, .gitignore and license menus);
+  CloneProgressRoute (`session().cloning` dialog, Cancel = `cancelClone`; the
+  added repository opens). Empty list Blankslate: Clone / Create / Add.
+- `:feature:settings`: AccountsScreen + route (avatars, Sign out with a
+  confirmation → `signOut`, sign-in rows).
+- `:app`: Welcome replaces the navigation while `welcomeCompleted` is false;
+  keys Clone(url?) / AddRepository / CreateRepository / SignIn(enterprise) /
+  AccountsSettings; "+" ActionMenu on the list; overflow: Accounts, and on a
+  repository Show in Files + Open in Termux (when installed); PopupHost
+  renders the engine's CloneRepository / CloneRepositoryRetry /
+  AddExistingRepository / CreateRepository as full-screen dialogs and turns
+  SignIn into the destination; MainActivity: `Headless.end()` then the engine,
+  intents through `AppLinks`, notification taps → `notificationClicked`.
+  Manifest: TransferService, CorveneDocumentsProvider
+  (`${applicationId}.documents`, MANAGE_DOCUMENTS, DOCUMENTS_PROVIDER),
+  `dataExtractionRules` (everything excluded); foss keeps
+  MANAGE_EXTERNAL_STORAGE.
+
+## Deviations (and why)
+
+- **Engine start moved from `CorveneApp.onCreate` to `MainActivity.onCreate`**:
+  CorveneApp runs in the process WorkManager starts for the fetch too, and an
+  engine there would make the headless path unreachable. The activity starts
+  a few ms after the application, so start-up is unchanged in practice.
+- **Import copies with one cursor per folder** (DocumentsContract), not
+  DocumentFile: DocumentFile queries the provider again for every name and
+  type, ~3 IPCs per file of a `.git`.
+- **Shorthand `owner/name`** in the URL tab becomes `https://github.com/owner/name`
+  in Kotlin (GHD resolves it through the API).
+- **Templates**: 21 common .gitignore names and 14 licenses (engine names),
+  not the full bundled lists (FFI-REQUESTS #38).
+- **Avatars** downloaded by Kotlin (`AvatarCache`), not the engine (#33).
+- **Configure Git** prefills the account's name only; no emails in the view
+  model (#33/#34).
+- **Transfer Stop** ends the service only (#37). The service starts 1.5 s
+  into a transfer while the app is in front (as the GPUI app); Android 12+
+  refuses a start from the background, which is logged.
+- **Termux** only for repositories on shared storage (Termux cannot read app
+  storage), as the GPUI app; the editors probe is M-A5 (Settings ›
+  Integrations).
+- **Clone tabs**: GitHub.com and URL; Enterprise accounts' lists come with
+  M-A5's accounts work.
+- **Worker** dispatches `backgroundFetch()` and returns at once (#41).
+
+## Verification (2026-10-04)
+
+- `:app:assembleFossDebug :app:assemblePlayDebug -Pcorvene.abis=arm64-v8a`: OK
+  (57.3 MB each). `aapt2 dump permissions`: MANAGE_EXTERNAL_STORAGE in foss
+  only; WorkManager adds WAKE_LOCK, RECEIVE_BOOT_COMPLETED and its
+  DYNAMIC_RECEIVER_NOT_EXPORTED permission to both.
+- New tests: FolderResolverTest 6 (own provider, primary with access, import
+  copy of a fixture `.git`, `-2` suffix, no `.git`, destination never
+  imported; a fake external-storage DocumentsProvider over a temp folder),
+  CorveneDocumentsProviderTest 8, CorveneFetchWorkerTest 2 (work-testing),
+  AppLinksTest 6, WelcomeScreenTest 7, RepositoryFormsTest 6,
+  AccountsScreenTest 2; screenshots welcome ×4 steps (start, sign in, device
+  code, configure git) and clone (URL, GitHub.com), create, add, each 3 styles
+  × light/dark.
+- `unitTests staticAnalysis verifyRoborazziFossDebug`: green (one rerun of
+  `:feature:onboarding:testFossDebugUnitTest` after a corrupted binary test
+  result left by the full disk; its start screenshots were re-recorded after
+  the body text changed).
+- Disk: filled twice (Gradle's transforms cache was lost with it and rebuilt;
+  `build/cargo/debug/{deps,build}` deleted).
+
+## Phone checks owed (the phone dropped off wireless adb for the whole run)
+
+Install `:app:installFossDebug` (`com.wasimaster.corvene.compose`), then:
+(a) Welcome does not reappear for the existing store; Welcome on `pm clear
+com.wasimaster.corvene` (fast variant, rebuilt with `installFossFast`);
+(b) Sign in with browser → device code (no client secret in dev builds) →
+"Open github.com" Custom Tab; the user enters the code; then
+`session().accounts` non-empty after `am force-stop` (Keystore via
+NativeContext); (c) clone `https://github.com/octocat/Hello-World.git` →
+progress dialog → repository opens, History has commits; (d) Add existing:
+fast variant `/sdcard/Corvene/demo2` in place, debug variant without
+all-files access → import into `files/repositories/demo2`; (e) `am start -a
+android.intent.action.VIEW -d x-corvene://openRepo/octocat/Spoon-Knife -p
+com.wasimaster.corvene.compose` → Clone prefilled; (f) `ACTION_SEND` text →
+Clone prefilled; (g) Files root via `content://com.wasimaster.corvene.compose.documents/root/repositories`;
+(h) `cmd jobscheduler run -f com.wasimaster.corvene.compose <id>` with the app
+killed → logcat `headless background fetch`, then open the app; (i) Open in
+Termux on a shared-storage repository; (j) `android/build/m-a3-*.png`.
+
 # M-A2 notes
 
 ## Built

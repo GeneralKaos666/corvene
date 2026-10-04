@@ -52,6 +52,7 @@ include(":feature:branches")
 include(":feature:history")
 include(":feature:mco")
 include(":feature:settings")
+include(":feature:onboarding")
 // Konsist house rules (a plain JVM module, tests only).
 include(":tools:architecture")
 

@@ -24,6 +24,7 @@ dependencies {
     implementation(project(":feature:history"))
     implementation(project(":feature:mco"))
     implementation(project(":feature:settings"))
+    implementation(project(":feature:onboarding"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

@@ -22,23 +22,26 @@ import com.wasimaster.corvene.design.CorveneTheme
 import com.wasimaster.corvene.ffi.LocalCore
 import com.wasimaster.corvene.ffi.gen.RepoVm
 import com.wasimaster.corvene.ffi.rememberCoreQuery
-import com.wasimaster.corvene.platform.rememberFolderPicker
 import kotlinx.coroutines.delay
 
 /**
  * The repository list wired to the engine: queries `repoList` after every
- * state change and sends select / remove / add / refresh. [onOpen] runs after
- * a selection, with the repository's id.
+ * state change and sends select / remove / refresh. [onOpen] runs after a
+ * selection, with the repository's id; Clone, Create and Add open their screens.
  */
 @Composable
-fun RepositoryListRoute(onOpen: (Long) -> Unit, modifier: Modifier = Modifier, contentPadding: PaddingValues = PaddingValues()) {
+fun RepositoryListRoute(
+    onOpen: (Long) -> Unit,
+    onClone: () -> Unit,
+    onCreate: () -> Unit,
+    onAddExisting: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
+) {
     val core = LocalCore.current
     val query by rememberCoreQuery { repoList() }
     val failure by core.startupFailure.collectAsStateWithLifecycle()
     var refreshing by remember { mutableStateOf(false) }
-    val picker = rememberFolderPicker { path ->
-        if (path != null) core.dispatch { addRepository(path) }
-    }
     // the indicators come back as state changes; the spinner is only a receipt
     LaunchedEffect(refreshing, query.value) {
         if (refreshing) {
@@ -56,13 +59,15 @@ fun RepositoryListRoute(onOpen: (Long) -> Unit, modifier: Modifier = Modifier, c
                 onOpen(repo.id.toLong())
             },
             onRemove = { repo -> core.dispatch { removeRepository(repo.id) } },
-            onAdd = picker::pick,
+            onAdd = onAddExisting,
             onRefresh = {
                 refreshing = true
                 core.dispatch { refreshIndicators() }
             },
             modifier = modifier,
             contentPadding = contentPadding,
+            onClone = onClone,
+            onCreate = onCreate,
         )
         failure != null -> Box(modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) {
             Text(

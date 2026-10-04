@@ -30,6 +30,7 @@ class ArchitectureTest {
             "feature/history" to setOf("common", "design", "ffi", "platform"),
             "feature/mco" to setOf("common", "design", "ffi", "platform"),
             "feature/settings" to setOf("common", "design", "ffi", "platform"),
+            "feature/onboarding" to setOf("common", "design", "ffi", "platform"),
         )
         val problems = mutableListOf<String>()
         for ((module, layers) in allowed) {
