@@ -12,10 +12,8 @@ use crate::repository_scaffolding::{Tree, TreeEntry, make_commit, switch_to};
 use crate::temp::create_temp_directory;
 
 /// GitHub Desktop's `DefaultGitDescription` (`lib/git/description.ts`):
-/// what `git init` writes to `.git/description`. Corvene has no
-/// description module yet; use its constant once it does.
-pub const DEFAULT_GIT_DESCRIPTION: &str =
-    "Unnamed repository; edit this file 'description' to name the repository.\n";
+/// what `git init` writes to `.git/description`.
+pub use corvene_git::DEFAULT_GIT_DESCRIPTION;
 
 /// What GitHub Desktop's repository helpers return (a `Repository` model,
 /// or a path for `setupFixtureRepository`): a directory in a temporary

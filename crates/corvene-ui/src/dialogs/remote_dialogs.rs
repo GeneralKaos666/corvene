@@ -36,7 +36,10 @@ pub fn sanitized_repository_name(name: &str) -> String {
 }
 
 /// `Publish`: GitHub.com / GitHub Enterprise tabs, name, description,
-/// private checkbox, organisation.
+/// private checkbox, organisation. The name, description and private
+/// checkbox are shared by both tabs; GHD keeps them per tab, so its
+/// description prefill reaches only the tab it opens on
+/// (`ui/publish-repository/publish.tsx`).
 pub struct PublishRepositoryDialog {
     state: Entity<AppState>,
     repo: u64,
@@ -74,6 +77,34 @@ impl PublishRepositoryDialog {
         cx.observe(&name, |_, _, cx| cx.notify()).detach();
         cx.observe(&description, |_, _, cx| cx.notify()).detach();
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        // `componentDidMount`: prefill the description from the repository's
+        // `description` file (`getGitDescription`)
+        let handle = window.window_handle();
+        let weak = cx.weak_entity();
+        Dispatcher::git_description(
+            repo,
+            move |text, cx| {
+                // a text box keeps one line, as an HTML text input strips
+                // line breaks from its value
+                let text = text.replace(['\r', '\n'], "");
+                if text.is_empty() {
+                    return;
+                }
+                handle
+                    .update(cx, |_, window, cx| {
+                        weak.update(cx, |this, cx| {
+                            // keeps text typed before the read finished (GHD
+                            // puts back the tab's earlier settings)
+                            if this.description.read(cx).value().is_empty() {
+                                this.description
+                                    .update(cx, |s, cx| s.set_value(text, window, cx));
+                            }
+                        })
+                    })
+                    .ok();
+            },
+            cx,
+        );
         let has_dotcom = state.read(cx).accounts.iter().any(is_dotcom);
         let has_enterprise = state.read(cx).accounts.iter().any(|a| !is_dotcom(a));
         Self {

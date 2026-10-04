@@ -7,6 +7,7 @@ pub mod commit_template;
 pub mod config;
 pub mod config_lock;
 pub mod credential;
+pub mod description;
 pub mod detect;
 pub mod diff;
 pub mod error;
@@ -65,6 +66,7 @@ pub use config::{
 };
 pub use config_lock::delete_config_lock_file;
 pub use credential::{CredentialError, format_credential, parse_credential};
+pub use description::{DEFAULT_GIT_DESCRIPTION, get_git_description, write_git_description};
 pub use detect::{GitBinary, GitVersion, find_git, find_git_prefetched, prefetch_git};
 pub use diff::{
     blob_bytes, blob_lines, file_lines, has_hidden_bidi_chars, image_diff,

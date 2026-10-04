@@ -146,7 +146,9 @@ fn stages_a_conflicted_file_after_manual_resolution() {
   not obvious (see `crates/corvene-git/tests/ghd/git_init.rs`). When there
   is none, write a stand-in named like the GitHub Desktop function that
   calls `unimplemented!()`, keep the faithful test and ignore it with
-  `ghd: missing:` (see `git_description.rs`).
+  `ghd: missing:` (see the `endpoint_satisfies` stand-in in
+  `crates/corvene-github/tests/ghd/endpoint_capabilities.rs`, which is
+  ignored as a deviation instead).
 - **git**: run git with `exec` / `exec_with` (dugite's `exec`: any exit
   code is returned, never a failure), `exec_ok` (GitHub Desktop's `git()`:
   fails unless exit code 0) or `git_command(cwd)` (a

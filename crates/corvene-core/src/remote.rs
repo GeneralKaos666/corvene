@@ -1336,6 +1336,20 @@ impl Dispatcher {
 
     // ---- publish ----
 
+    /// `Publish.componentDidMount`: the repository's description
+    /// (`getGitDescription`, `""` when it has none or git's default text),
+    /// read in the background, for the Publish Repository dialog to prefill.
+    pub fn git_description(id: u64, then: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+        let Some(path) = Self::state(cx)
+            .read(cx)
+            .repository(id)
+            .map(|r| r.path.clone())
+        else {
+            return then(String::new(), cx);
+        };
+        spawn_bg(cx, move || corvene_git::get_git_description(&path), then);
+    }
+
     /// `_publishRepository`: create the GitHub repository, add `origin`, push.
     pub fn publish_repository(
         id: u64,

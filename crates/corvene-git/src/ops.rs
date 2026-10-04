@@ -167,8 +167,12 @@ pub fn init_repository(git: Arc<GitBinary>, opts: InitOptions) -> Result<PathBuf
         .args(args)
         .current_dir(&opts.path)
         .run()?;
-    if let Some(desc) = &opts.description {
-        let _ = std::fs::write(opts.path.join(".git/description"), format!("{desc}\n"));
+    // GHD `createRepository`: `writeGitDescription` of a non-empty
+    // description, as typed (no newline added)
+    if let Some(desc) = opts.description.as_deref().filter(|d| !d.is_empty())
+        && let Err(err) = crate::write_git_description(&opts.path, desc)
+    {
+        tracing::warn!(%err, "could not write the repository description");
     }
     let mut wrote_files = false;
     let writable = |name: &str| !(opts.keep_existing && opts.path.join(name).exists());
