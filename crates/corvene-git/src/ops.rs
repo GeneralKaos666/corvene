@@ -18,6 +18,12 @@
 //! `285-clone-keeps-repo-on-submodule-failure`): a clone that only failed in
 //! a submodule is kept; GHD `CloningRepositoriesStore.clone`
 //! (`lib/stores/cloning-repositories-store.ts`) drops it on any error.
+//!
+//! Deviation ([`init_repository_with`], flag
+//! `286-initial-commit-skips-large-files`): files over 100 MB that Git LFS
+//! does not track stay out of a new repository's first commit; GHD
+//! `createRepository` (`ui/add-repository/create-repository.tsx`) commits
+//! the whole folder.
 
 use std::path::{Component, MAIN_SEPARATOR_STR, Path, PathBuf};
 use std::sync::Arc;
@@ -197,6 +203,20 @@ pub struct InitOptions {
 
 /// `git init` (+ README + initial commit when requested). Returns the workdir.
 pub fn init_repository(git: Arc<GitBinary>, opts: InitOptions) -> Result<PathBuf> {
+    init_repository_with(git, opts, None).map(|(path, _)| path)
+}
+
+/// [`init_repository`]; with `large_file_limit` (Corvene,
+/// `286-initial-commit-skips-large-files`) the files larger than that many
+/// bytes that Git LFS does not track are left out of "Initial commit" (they
+/// stay as untracked files) and returned with the workdir. GHD
+/// `createRepository` commits everything in the folder, and pushing the
+/// result to GitHub then fails on files over 100 MB.
+pub fn init_repository_with(
+    git: Arc<GitBinary>,
+    opts: InitOptions,
+    large_file_limit: Option<u64>,
+) -> Result<(PathBuf, Vec<String>)> {
     std::fs::create_dir_all(&opts.path).map_err(crate::error::GitError::Spawn)?;
     let mut args = vec!["init".to_string()];
     if let Some(branch) = &opts.default_branch {
@@ -247,18 +267,62 @@ pub fn init_repository(git: Arc<GitBinary>, opts: InitOptions) -> Result<PathBuf
         wrote_files = true;
     }
     // GHD `createRepository`: everything written above goes into "Initial commit".
+    let mut left_out = Vec::new();
     if wrote_files {
         GitCommand::new(git.clone())
             .args(["add", "-A", "--"])
             .current_dir(&opts.path)
             .run()?;
+        if let Some(limit) = large_file_limit {
+            left_out = unstage_large_files(git.clone(), &opts.path, limit)?;
+        }
         GitCommand::new(git)
             .args(["commit", "-q", "-m", "Initial commit"])
             .current_dir(&opts.path)
             .run()?;
     }
     info!(path = %opts.path.display(), "initialised repository");
-    Ok(opts.path)
+    Ok((opts.path, left_out))
+}
+
+/// The staged files of a new repository over `limit` bytes that Git LFS does
+/// not track, taken out of the index again (`rm --cached`).
+fn unstage_large_files(git: Arc<GitBinary>, workdir: &Path, limit: u64) -> Result<Vec<String>> {
+    let out = GitCommand::new(git.clone())
+        .args(["ls-files", "-z"])
+        .current_dir(workdir)
+        .run()?;
+    let staged: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect();
+    let large = crate::large_file_paths(workdir, &staged, limit);
+    if large.is_empty() {
+        return Ok(large);
+    }
+    let large = crate::files_not_tracked_by_lfs(git.clone(), workdir, &large)?;
+    if large.is_empty() {
+        return Ok(large);
+    }
+    let mut stdin = Vec::new();
+    for path in &large {
+        stdin.extend_from_slice(path.as_bytes());
+        stdin.push(0);
+    }
+    GitCommand::new(git)
+        .args([
+            "--literal-pathspecs",
+            "rm",
+            "--cached",
+            "-q",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ])
+        .current_dir(workdir)
+        .stdin(stdin)
+        .run()?;
+    Ok(large)
 }
 
 /// `git config --global --get user.name/email`.
@@ -556,6 +620,49 @@ pub fn clone_failed_in_submodule(path: &Path, err: &GitError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_files_stay_out_of_the_initial_commit() {
+        // the user's global commit.gpgsign must not reach the test repo
+        unsafe {
+            std::env::set_var("GIT_CONFIG_PARAMETERS", "'commit.gpgsign=false'");
+            std::env::set_var("GIT_AUTHOR_NAME", "T");
+            std::env::set_var("GIT_AUTHOR_EMAIL", "t@example.com");
+            std::env::set_var("GIT_COMMITTER_NAME", "T");
+            std::env::set_var("GIT_COMMITTER_EMAIL", "t@example.com");
+        }
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("repo");
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("big [1].bin"), vec![0u8; 64]).unwrap();
+        std::fs::write(path.join("small.txt"), "x").unwrap();
+        let (workdir, left_out) = init_repository_with(
+            git.clone(),
+            InitOptions {
+                path: path.clone(),
+                default_branch: Some("main".into()),
+                description: None,
+                readme: true,
+                gitignore: None,
+                license: None,
+                git_attributes: None,
+                keep_existing: true,
+            },
+            Some(32),
+        )
+        .unwrap();
+        assert_eq!(left_out, vec!["big [1].bin".to_string()]);
+        let out = GitCommand::new(git)
+            .args(["ls-files"])
+            .current_dir(&workdir)
+            .run()
+            .unwrap();
+        let committed = out.stdout_string().unwrap();
+        assert!(committed.contains("small.txt"), "{committed}");
+        assert!(!committed.contains("big"), "{committed}");
+        assert!(path.join("big [1].bin").exists());
+    }
 
     #[test]
     fn a_failed_submodule_keeps_the_clone() {

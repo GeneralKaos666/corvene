@@ -1866,6 +1866,23 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs"],
     },
 
+    /// Create Repository leaves files over 100 MB out of the first commit.
+    INITIAL_COMMIT_SKIPS_LARGE_FILES = 286 "initial-commit-skips-large-files" {
+        title: "Leave large files out of a new repository's first commit",
+        summary: "Creating a repository in a folder with files over 100 MB (GitHub's limit) that \
+                  Git LFS does not track leaves them out of the initial commit: they stay as \
+                  uncommitted changes and a notice names them, so the repository can still be \
+                  published.",
+        ghd_behaviour: "Everything in the folder goes into the initial commit, and publishing \
+                        the repository then fails on the large files.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7849)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

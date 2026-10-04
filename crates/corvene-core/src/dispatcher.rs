@@ -4853,6 +4853,12 @@ impl Dispatcher {
                 .map(|l| l.body)
         });
         let failed_path = path.clone();
+        // Corvene (`286-initial-commit-skips-large-files`)
+        let large_file_limit = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::INITIAL_COMMIT_SKIPS_LARGE_FILES)
+            .then_some(corvene_git::RECEIVE_LIMIT);
         let task = cx.background_executor().spawn(async move {
             let default_branch = corvene_git::configured_default_branch(git.clone());
             let license_text = license_body.map(|body| {
@@ -4872,7 +4878,7 @@ impl Dispatcher {
                     },
                 )
             });
-            corvene_git::init_repository(
+            corvene_git::init_repository_with(
                 git,
                 InitOptions {
                     path,
@@ -4884,12 +4890,22 @@ impl Dispatcher {
                     git_attributes: Some(crate::templates::GIT_ATTRIBUTES.to_string()),
                     keep_existing,
                 },
+                large_file_limit,
             )
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| match result {
-                Ok(path) => Self::add_repository(path, cx),
+                Ok((path, left_out)) => {
+                    Self::add_repository(path, cx);
+                    if !left_out.is_empty() {
+                        Self::show_error(
+                            "Large files left out of the initial commit",
+                            large_files_left_out_message(&left_out),
+                            cx,
+                        );
+                    }
+                }
                 Err(err) => {
                     Self::take_pending_alias(&failed_path, cx);
                     Self::show_error("Could not create repository", &err, cx)
@@ -6695,6 +6711,27 @@ fn trust_failure_message(path: &Path, suggested: Option<&str>) -> String {
          in the form it sees, not the one it printed.\n\nAdd the value Git suggests instead:\n\n\
          git config --global --add safe.directory '{value}'\n\nor, if you trust every \
          repository on this computer, use '*' as the value."
+    )
+}
+
+/// Corvene (`286-initial-commit-skips-large-files`): the notice naming the
+/// files Create Repository left out of the initial commit.
+fn large_files_left_out_message(paths: &[String]) -> String {
+    const SHOWN: usize = 10;
+    let (them, are) = if paths.len() == 1 {
+        ("This file is", "it stays")
+    } else {
+        ("These files are", "they stay")
+    };
+    let mut list: Vec<String> = paths.iter().take(SHOWN).map(|p| format!("• {p}")).collect();
+    if paths.len() > SHOWN {
+        list.push(format!("and {} more", paths.len() - SHOWN));
+    }
+    format!(
+        "{them} larger than GitHub's 100 MB limit, so {are} in the folder, \
+         uncommitted, instead of going into the initial commit:\n\n{}\n\n\
+         Track them with Git LFS or add them to .gitignore.",
+        list.join("\n")
     )
 }
 
