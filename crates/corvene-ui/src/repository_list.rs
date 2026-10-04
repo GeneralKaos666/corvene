@@ -2,6 +2,11 @@
 //! (`ui/repositories-list/*.tsx`, `styles/ui/_repository-list.scss`).
 //! The groups are GHD `groupRepositories` ([`group_repositories`]); the
 //! filter then keeps each group's matches, as GHD `FilterList` does.
+//!
+//! Deviation (`288-dead-remote-indicator`): a repository whose last fetch
+//! found no remote repository shows the alert icon and says so in its
+//! tooltip (GHD `ui/repositories-list/repository-list-item.tsx` only marks
+//! missing folders).
 
 use std::collections::HashMap;
 
@@ -662,8 +667,20 @@ impl RepositoryFoldout {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let t = cx.ghd();
-        let icon = crate::icons::icon_for_repository(RepositoryOrCloning::Repository(repo));
         let id = repo.id;
+        // Corvene (`288-dead-remote-indicator`): the last fetch found no
+        // remote repository
+        let remote_not_found = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::DEAD_REMOTE_INDICATOR)
+                && s.repo_states.get(&id).is_some_and(|rs| rs.remote_not_found)
+        };
+        let icon = if remote_not_found {
+            Octicon::Alert
+        } else {
+            crate::icons::icon_for_repository(RepositoryOrCloning::Repository(repo))
+        };
         let hover_bg = t.list_item_hover_background;
         let behind_accent = self
             .state
@@ -779,6 +796,12 @@ impl RepositoryFoldout {
                 // Corvene (`273-fork-parent-in-tooltip`)
                 if let Some(parent) = crate::toolbar::fork_parent(repo, self.state.read(cx)) {
                     text.push_str(&format!("\nFork of {parent}"));
+                }
+                if remote_not_found {
+                    text.push_str(
+                        "\nThe remote repository was not found: it may have been deleted or \
+                         renamed, or you no longer have access to it.",
+                    );
                 }
                 crate::widgets::rich_tooltip(text, bold)
             })

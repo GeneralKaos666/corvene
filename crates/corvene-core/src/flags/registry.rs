@@ -1902,6 +1902,23 @@ registry! {
         code: &["crates/corvene-core/src/persistence.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene/src/main.rs", "crates/corvene-ui/src/banner.rs"],
     },
 
+    /// Repositories whose remote is gone are marked and not fetched.
+    DEAD_REMOTE_INDICATOR = 288 "dead-remote-indicator" {
+        title: "Mark repositories whose remote is gone",
+        summary: "When fetching a repository finds that its remote repository no longer exists \
+                  (deleted, renamed or no longer accessible), its row in the repository list \
+                  shows an alert icon with a tooltip saying so, and background fetches skip it \
+                  until a fetch works again.",
+        ghd_behaviour: "Background fetches keep failing silently and nothing in the list shows \
+                        that the remote is gone.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7521)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

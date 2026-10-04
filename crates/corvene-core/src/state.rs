@@ -1244,6 +1244,11 @@ pub struct RepositoryState {
     pub quiet_background_fetch: bool,
     pub push_pull_progress: Option<crate::remote::PushPullProgress>,
     pub last_fetched: Option<std::time::SystemTime>,
+    /// Corvene (`288-dead-remote-indicator`): the last fetch said the remote
+    /// repository does not exist (deleted, renamed or no access); the
+    /// repository list marks the row and background fetches skip it until a
+    /// fetch succeeds.
+    pub remote_not_found: bool,
     pub pull_with_rebase: bool,
     pub publishing: bool,
     /// The LFS initialisation prompt was already considered for this repository.

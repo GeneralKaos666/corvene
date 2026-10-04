@@ -407,6 +407,21 @@ pub fn remote_read_failure_cause(stderr: &str) -> Option<&str> {
         .last()
 }
 
+/// Corvene (`288-dead-remote-indicator`): the remote command failed because
+/// the remote repository is not there: GitHub's and Bitbucket's "Repository
+/// not found", GitLab's "could not be found", and the "does not appear to be
+/// a git repository" of a path (local or over SSH) without one.
+pub fn remote_repository_missing(err: &GitError) -> bool {
+    match err {
+        GitError::Failed { stderr, .. } => {
+            classify_remote_failure(stderr) == RemoteFailure::RepositoryNotFound
+                || stderr.contains("does not appear to be a git repository")
+                || (stderr.contains("remote:") && stderr.contains("could not be found"))
+        }
+        _ => false,
+    }
+}
+
 pub fn remote_failure(err: &GitError) -> RemoteFailure {
     match err {
         GitError::Failed { stderr, .. } => classify_remote_failure(stderr),
@@ -1448,6 +1463,25 @@ pub fn install_lfs_hooks(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_remote_repositories() {
+        let failed = |stderr: &str| GitError::Failed {
+            args: "fetch origin".into(),
+            code: Some(128),
+            stderr: stderr.into(),
+        };
+        for stderr in [
+            "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found",
+            "fatal: '/srv/gone.git' does not appear to be a git repository\nfatal: Could not read from remote repository.",
+            "remote: The project you were looking for could not be found or you don't have permission to view it.",
+        ] {
+            assert!(remote_repository_missing(&failed(stderr)), "{stderr}");
+        }
+        assert!(!remote_repository_missing(&failed(
+            "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com"
+        )));
+    }
 
     #[test]
     fn update_submodules_initialises_all_but_skipped() {

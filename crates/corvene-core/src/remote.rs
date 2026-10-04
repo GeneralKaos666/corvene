@@ -708,6 +708,7 @@ impl Dispatcher {
             },
             move |result, cx| {
                 let fetched = result.is_ok();
+                Self::note_remote_not_found(id, result.as_ref().err(), cx);
                 if let Err(err) = result {
                     Self::handle_remote_error(
                         id,
@@ -723,6 +724,20 @@ impl Dispatcher {
                 then(fetched, cx);
             },
         );
+    }
+
+    /// Corvene (`288-dead-remote-indicator`): a fetch that found no remote
+    /// repository marks the repository; one that worked clears the mark.
+    fn note_remote_not_found(id: u64, err: Option<&corvene_git::GitError>, cx: &mut dyn Host) {
+        let not_found = err.is_some_and(corvene_git::remote_repository_missing);
+        Self::state(cx).update(cx, |s, cx| {
+            let on = s.flags.bool(crate::flags::ids::DEAD_REMOTE_INDICATOR);
+            let mark = on && not_found;
+            if (err.is_none() || mark) && s.repo_state_mut(id).remote_not_found != mark {
+                s.repo_state_mut(id).remote_not_found = mark;
+                cx.notify();
+            }
+        });
     }
 
     /// Repository › Fetch All Repositories (`247-fetch-all-repositories`;
@@ -747,7 +762,7 @@ impl Dispatcher {
                         .get(&r.id)
                         .is_some_and(|rs| rs.push_pull_in_progress)
                 })
-                .map(|r| (r.name(), r.path.clone(), Self::fetch_options(s, r.id)))
+                .map(|r| (r.id, r.name(), r.path.clone(), Self::fetch_options(s, r.id)))
                 .collect();
             let github_hosts: Vec<String> = std::iter::once("github.com".to_string())
                 .chain(s.accounts.iter().map(|a| a.host()))
@@ -767,7 +782,9 @@ impl Dispatcher {
             cx,
             move || {
                 let mut failures = Vec::new();
-                for (name, path, options) in repos {
+                // `288-dead-remote-indicator`: (id, fetch error or `None`)
+                let mut outcomes = Vec::new();
+                for (id, name, path, options) in repos {
                     let Ok(info) = corvene_git::open_repository(&path) else {
                         continue;
                     };
@@ -798,14 +815,21 @@ impl Dispatcher {
                                 &info.workdir,
                                 skip_worktree_branches,
                             );
+                            outcomes.push((id, None));
                         }
-                        Err(err) => failures.push(format!("{name}: {err}")),
+                        Err(err) => {
+                            failures.push(format!("{name}: {err}"));
+                            outcomes.push((id, Some(err)));
+                        }
                     }
                 }
-                failures
+                (failures, outcomes)
             },
-            move |failures, cx| {
+            move |(failures, outcomes), cx| {
                 RUNNING.store(false, Ordering::SeqCst);
+                for (id, err) in outcomes {
+                    Self::note_remote_not_found(id, err.as_ref(), cx);
+                }
                 if !failures.is_empty() {
                     Self::show_error(
                         "Could not fetch all repositories",
@@ -1732,6 +1756,12 @@ impl Dispatcher {
                 return;
             }
             let rs = s.repo_states.get(&id);
+            // `288-dead-remote-indicator`: not until a fetch works again
+            if rs.is_some_and(|r| r.remote_not_found)
+                && s.flags.bool(crate::flags::ids::DEAD_REMOTE_INDICATOR)
+            {
+                return;
+            }
             (
                 id,
                 rs.and_then(|r| r.last_fetched),
