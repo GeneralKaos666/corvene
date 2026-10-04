@@ -177,6 +177,16 @@ pub fn apply_merged_files(
         state.diff = None;
         changed = true;
     }
+    // Corvene `790-selection-follows-lines`: only partial selections of
+    // files still listed need the diff they were made on
+    if !state.selection_bases.is_empty() {
+        state.selection_bases.retain(|path, _| {
+            status
+                .files
+                .iter()
+                .any(|f| &f.path == path && f.selection.kind() == DiffSelectionType::Partial)
+        });
+    }
     changed |= set(&mut state.status, Some(status));
     changed
 }

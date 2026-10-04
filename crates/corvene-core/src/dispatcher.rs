@@ -1858,6 +1858,7 @@ impl Dispatcher {
     /// file was selected meanwhile).
     fn apply_working_diff(id: u64, path: &str, loaded: LoadedDiff, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
+            let follow_lines = s.flags.bool(crate::flags::ids::SELECTION_FOLLOWS_LINES);
             let rs = s.repo_state_mut(id);
             // ignore stale results
             if rs.selected_file.as_deref() != Some(path) {
@@ -1896,17 +1897,47 @@ impl Dispatcher {
                     .collect(),
                 _ => Default::default(),
             };
+            // Corvene (`790-selection-follows-lines`): a partial selection
+            // made on another diff of the file moves with its lines
+            let new_hunks = rs.diff.as_deref().and_then(|d| d.hunks());
+            let basis = rs.selection_bases.get(path).cloned();
             // usually unchanged: only then copy the shared status
             let update = rs.status.as_deref().and_then(|st| {
                 let i = st.files.iter().position(|f| f.path == path)?;
-                let selection = st.files[i].selection.with_selectable_lines(selectable);
-                (selection != st.files[i].selection).then_some((i, selection))
+                let current = &st.files[i].selection;
+                let carried = match (follow_lines, basis.as_deref(), new_hunks) {
+                    (true, Some(basis), Some(new_hunks))
+                        if current.kind() == DiffSelectionType::Partial =>
+                    {
+                        basis.hunks().map(|old| {
+                            crate::line_selection::carry_over(current, old, new_hunks)
+                        })
+                    }
+                    _ => None,
+                };
+                let selection = carried.unwrap_or_else(|| current.with_selectable_lines(selectable));
+                (selection != *current).then_some((i, selection))
             });
             if let Some((i, selection)) = update
                 && let Some(st) = rs.status.as_mut().map(Arc::make_mut)
             {
                 st.files[i].selection = selection;
                 changed = true;
+            }
+            if follow_lines {
+                let partial = rs.status.as_deref().is_some_and(|st| {
+                    st.files.iter().any(|f| {
+                        f.path == path && f.selection.kind() == DiffSelectionType::Partial
+                    })
+                });
+                match rs.diff.clone() {
+                    Some(diff) if partial => {
+                        rs.selection_bases.insert(path.to_string(), diff);
+                    }
+                    _ => {
+                        rs.selection_bases.remove(path);
+                    }
+                }
             }
             // the same diff again (a refresh): nothing to draw
             if changed {
@@ -4527,6 +4558,19 @@ impl Dispatcher {
                 .and_then(|st| st.files.iter_mut().find(|f| f.path == path))
             {
                 f.selection = edit(&f.selection);
+                let partial = f.selection.kind() == DiffSelectionType::Partial;
+                // `790-selection-follows-lines`: the lines are the shown diff's
+                if s.flags.bool(crate::flags::ids::SELECTION_FOLLOWS_LINES) {
+                    let rs = s.repo_state_mut(id);
+                    match rs.diff.clone() {
+                        Some(diff) if partial && rs.selected_file.as_deref() == Some(path) => {
+                            rs.selection_bases.insert(path.to_string(), diff);
+                        }
+                        _ => {
+                            rs.selection_bases.remove(path);
+                        }
+                    }
+                }
                 crate::drafts::note_excluded(s, id, cx);
                 cx.notify();
             }

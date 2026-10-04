@@ -4782,6 +4782,23 @@ registry! {
         code: &["crates/corvene-git/src/text_encoding.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-git/src/patch.rs"],
     },
 
+    /// A partial line selection follows its lines when the diff changes.
+    SELECTION_FOLLOWS_LINES = 790 "selection-follows-lines" {
+        title: "Line selection follows its lines",
+        summary: "When a file with some lines ticked for the commit changes (edited above \
+                  them, or some lines discarded), the ticks stay on the same lines: the \
+                  changed lines of the old and new diff are matched by their text. Lines \
+                  that are new take the file's default.",
+        ghd_behaviour: "The selection is kept by row position in the diff, so after an edit or a \
+                        discard above them the ticks land on other lines.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4720), Upstream::issue(17614)],
+        code: &["crates/corvene-core/src/line_selection.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

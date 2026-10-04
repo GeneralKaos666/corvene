@@ -24,6 +24,7 @@ rust-embed = { workspace = true, features = ["include-exclude"] }
 notify = "7"
 dunce = "1"
 regex.workspace = true
+similar.workspace = true
 pulldown-cmark.workspace = true
 async-channel = "2"
 

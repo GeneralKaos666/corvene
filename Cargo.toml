@@ -47,6 +47,8 @@ keyring = "4.2"
 anyhow = "1"
 thiserror = "2"
 regex = "1"
+# line and word diffs of diff lines (selection carry-over, intra-line changes)
+similar = "2"
 # Markdown for PR bodies / comments (GHD renders `marked` in a sandboxed webview)
 pulldown-cmark = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }

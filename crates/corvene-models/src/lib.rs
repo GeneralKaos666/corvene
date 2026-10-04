@@ -1192,6 +1192,26 @@ impl DiffSelection {
         }
     }
 
+    /// Whether lines outside the diverging ones are selected.
+    pub fn defaults_to_selected(&self) -> bool {
+        self.default_all
+    }
+
+    /// A selection of `selectable` lines that are all selected
+    /// (`default_all`) or not, except the `diverging` ones (outside
+    /// `selectable` they are dropped).
+    pub fn from_parts(
+        default_all: bool,
+        diverging: BTreeSet<u32>,
+        selectable: BTreeSet<u32>,
+    ) -> Self {
+        Self {
+            default_all,
+            diverging: diverging.intersection(&selectable).copied().collect(),
+            selectable: Some(selectable),
+        }
+    }
+
     /// `withSelectableLines`: drops diverging lines that no longer exist.
     pub fn with_selectable_lines(&self, selectable: BTreeSet<u32>) -> Self {
         let diverging = self

@@ -1033,6 +1033,9 @@ pub struct RepositoryState {
     /// Every selected path (`selectedFileIDs`), click order; ⌘/⇧-click extend it.
     pub selected_files: Vec<String>,
     pub diff: Option<Arc<Diff>>,
+    /// `790-selection-follows-lines`: for each file with a partial line
+    /// selection, the diff that selection names lines of.
+    pub selection_bases: HashMap<String, Arc<Diff>>,
     pub diff_loading: bool,
     /// `749-binary-diff-as-text`: the path whose diff was asked for with
     /// `--text` ("Show diff anyway" on a binary file).
