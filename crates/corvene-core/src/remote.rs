@@ -38,6 +38,8 @@
 //! same-named remote branch shows Push / Pull against that branch instead of
 //! Publish (`1103-implicit-upstream-push-default`; GHD reads only the
 //! configured upstream).
+//! A Git LFS server that wants a login of its own gets the login dialog for
+//! its host (`1104-lfs-server-authentication`).
 //! A repository can sign in through git's credential helper instead of the
 //! account (`1102-repository-credential-helper`; GHD
 //! `useExternalCredentialHelper` covers hosts without an account only).
@@ -601,6 +603,17 @@ impl Dispatcher {
             );
             return;
         }
+        // Corvene (`1104-lfs-server-authentication`): git-lfs could not sign
+        // in to its server; the login is asked for that server's host (GHD
+        // shows git-lfs' output, or a login dialog for the remote's host)
+        if corvene_git::is_lfs_auth_failure(&stderr)
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::LFS_SERVER_AUTHENTICATION)
+        {
+            return Self::ask_lfs_login(id, title.to_string(), err, &stderr, remote_url, retry, cx);
+        }
         match corvene_git::remote_failure(&err) {
             RemoteFailure::PushNotFastForward => {
                 Self::show_popup(Popup::PushNeedsPull { repo: id }, cx);
@@ -722,6 +735,57 @@ impl Dispatcher {
                 Self::show_error(title, ErrorMessage::explained(&err, plain), cx)
             }
         }
+    }
+
+    /// `1104-lfs-server-authentication`: the Authentication Failed dialog for
+    /// the Git LFS server a remote operation could not sign in to, named by
+    /// git-lfs' output or else by `git lfs env`; the plain error when it
+    /// cannot be told.
+    fn ask_lfs_login(
+        id: u64,
+        title: String,
+        err: corvene_git::GitError,
+        stderr: &str,
+        remote_url: String,
+        retry: RetryAction,
+        cx: &mut dyn Host,
+    ) {
+        let show = move |lfs_url: Option<String>, cx: &mut dyn Host| {
+            let host = lfs_url.as_deref().map(host_of).unwrap_or_default();
+            let Some(lfs_url) = lfs_url.filter(|_| !host.is_empty()) else {
+                return Self::show_error(title.as_str(), &err, cx);
+            };
+            let username = Self::state(cx).read(cx).generic_logins.get(&host).cloned();
+            Self::show_popup(
+                Popup::GenericGitAuthentication {
+                    repo: id,
+                    remote_url: lfs_url,
+                    host,
+                    username,
+                    retry,
+                },
+                cx,
+            );
+        };
+        if let Some(url) = corvene_git::lfs_auth_failure_url(stderr) {
+            return show(Some(url), cx);
+        }
+        let remote = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|r| r.info.as_ref())
+            .and_then(|i| i.remotes.iter().find(|r| r.url == remote_url))
+            .map(|r| r.name.clone())
+            .unwrap_or_else(|| "origin".to_string());
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return show(None, cx);
+        };
+        spawn_bg(
+            cx,
+            move || corvene_git::lfs::lfs_endpoint(git, &workdir, &remote),
+            show,
+        );
     }
 
     // ---- fetch ----

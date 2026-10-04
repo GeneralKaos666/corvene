@@ -601,6 +601,51 @@ impl KnownGitError {
     }
 }
 
+/// Corvene (`1104-lfs-server-authentication`): git-lfs could not sign in to
+/// its server ("batch response: too many authentication attempts" when the
+/// credential prompt was answered with nothing, "Git credentials for … not
+/// found.", "Authorization error: …").
+pub fn is_lfs_auth_failure(stderr: &str) -> bool {
+    stderr.lines().any(|line| {
+        line.starts_with("batch response:")
+            && [
+                "too many authentication attempts",
+                "Git credentials for ",
+                "Authorization error",
+                "Authentication required",
+                "Bad credentials",
+            ]
+            .iter()
+            .any(|marker| line.contains(marker))
+    })
+}
+
+/// The Git LFS server of an [`is_lfs_auth_failure`], when git-lfs named it:
+/// "Git credentials for <url> not found.", "Authorization error: <url>", or
+/// the "could not read Username for '<url>'" of the prompt it asked for.
+pub fn lfs_auth_failure_url(stderr: &str) -> Option<String> {
+    let url_after = |marker: &str| {
+        stderr.lines().find_map(|line| {
+            let rest = &line[line.find(marker)? + marker.len()..];
+            let url = rest.split_whitespace().next()?;
+            let url = url.trim_end_matches(['.', ',', ':', '\'', '"', ')']);
+            (url.starts_with("http://") || url.starts_with("https://")).then(|| url.to_string())
+        })
+    };
+    url_after("Git credentials for ")
+        .or_else(|| {
+            stderr
+                .contains("batch response")
+                .then(|| url_after("Authorization error: "))
+                .flatten()
+        })
+        .or_else(|| {
+            (stderr.contains("LFS") || stderr.contains("git-lfs"))
+                .then(|| url_after("could not read Username for '"))
+                .flatten()
+        })
+}
+
 /// GHD `parseFilesToBeOverwritten` (`ui/lib/parse-files-to-be-overwritten.ts`):
 /// the tab-indented files git lists under the first `error: … files would be
 /// overwritten …:` line ("Your local changes to the following files would be
@@ -915,6 +960,43 @@ impl GitError {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn lfs_sign_in_failures_name_the_lfs_server() {
+        // git-lfs 3.8 pushing to a server that wants a login
+        let push = "error: unable to read askpass response from '/x/corvene'\n\
+                    fatal: could not read Username for 'http://127.0.0.1:18767': terminal prompts disabled\n\
+                    batch response: Git credentials for http://127.0.0.1:18767/repo.git/info/lfs not found.\n\
+                    Uploading LFS objects:   0% (0/1), 0 B | 0 B/s, done.\n\
+                    error: failed to push some refs to 'https://github.com/o/r.git'\n";
+        assert_eq!(
+            lfs_auth_failure_url(push).as_deref(),
+            Some("http://127.0.0.1:18767/repo.git/info/lfs")
+        );
+        let refused = "batch response: Authorization error: https://lfs.corp/o/r/info/lfs/objects/batch\n\
+                       Check that you have proper access to the repository\n";
+        assert_eq!(
+            lfs_auth_failure_url(refused).as_deref(),
+            Some("https://lfs.corp/o/r/info/lfs/objects/batch")
+        );
+        // plain git's own sign-in failure is not one
+        assert_eq!(
+            lfs_auth_failure_url(
+                "fatal: could not read Username for 'https://github.com': terminal prompts disabled\n"
+            ),
+            None
+        );
+        // Corvene's askpass answers an unknown host with nothing
+        let empty = "Uploading LFS objects:   0% (0/1), 0 B | 0 B/s, done.\n\
+                     batch response: too many authentication attempts\n\
+                     error: failed to push some refs to '/srv/remote.git'\n";
+        assert!(is_lfs_auth_failure(empty) && is_lfs_auth_failure(push));
+        assert_eq!(lfs_auth_failure_url(empty), None);
+        assert!(!is_lfs_auth_failure(
+            "remote: Invalid username or password.\nfatal: Authentication failed for 'https://github.com/o/r.git/'\n"
+        ));
+    }
+
     use super::*;
 
     const PULL_OVERWRITTEN: &str = "Updating e9455681..1f7e3d4e\n\

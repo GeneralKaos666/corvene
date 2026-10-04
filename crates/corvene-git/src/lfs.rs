@@ -61,6 +61,31 @@ pub fn lfs_pointer(bytes: &[u8]) -> Option<LfsPointer> {
     })
 }
 
+/// Corvene (`1104-lfs-server-authentication`): the Git LFS server `remote`
+/// uses (lfs.url, `.lfsconfig`, `remote.<name>.lfsurl` or the remote's own),
+/// from `git lfs env`.
+pub fn lfs_endpoint(git: Arc<GitBinary>, workdir: &Path, remote: &str) -> Option<String> {
+    let out = crate::process::GitCommand::new(git)
+        .args(["lfs", "env"])
+        .current_dir(workdir)
+        .run()
+        .ok()?
+        .stdout_string()
+        .ok()?;
+    parse_lfs_endpoint(&out, remote)
+}
+
+/// `Endpoint (<remote>)=<url> (auth=…)` for a remote other than the default
+/// one, else `Endpoint=<url> (auth=…)`.
+fn parse_lfs_endpoint(env: &str, remote: &str) -> Option<String> {
+    let named = format!("Endpoint ({remote})=");
+    let value = env
+        .lines()
+        .find_map(|line| line.strip_prefix(named.as_str()))
+        .or_else(|| env.lines().find_map(|line| line.strip_prefix("Endpoint=")))?;
+    value.split_whitespace().next().map(str::to_string)
+}
+
 /// git-lfs' storage directory: `lfs.storage` (relative to the git dir) or
 /// `<common git dir>/lfs`.
 fn lfs_storage(git: Arc<GitBinary>, workdir: &Path) -> PathBuf {
@@ -279,6 +304,25 @@ pub fn resolve_lfs_images(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn lfs_endpoints_from_git_lfs_env() {
+        let env = "git-lfs/3.8.0 (GitHub; darwin arm64; go 1.27.0)\n\
+                   git version 2.54.0\n\n\
+                   Endpoint=http://127.0.0.1:18767/repo.git/info/lfs (auth=basic)\n\
+                   Endpoint (fork)=https://lfs.corp/fork.git/info/lfs (auth=none)\n\
+                   LocalWorkingDir=/w\n";
+        assert_eq!(
+            parse_lfs_endpoint(env, "origin").as_deref(),
+            Some("http://127.0.0.1:18767/repo.git/info/lfs")
+        );
+        assert_eq!(
+            parse_lfs_endpoint(env, "fork").as_deref(),
+            Some("https://lfs.corp/fork.git/info/lfs")
+        );
+        assert_eq!(parse_lfs_endpoint("LocalWorkingDir=/w\n", "origin"), None);
+    }
+
     use super::*;
 
     const OID: &str = "4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393";

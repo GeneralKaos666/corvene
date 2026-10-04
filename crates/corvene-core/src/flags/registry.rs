@@ -7004,6 +7004,23 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/no_changes.rs"],
     },
 
+    /// A Git LFS server's login is asked for that server.
+    LFS_SERVER_AUTHENTICATION = 1104 "lfs-server-authentication" {
+        title: "Sign in to a separate Git LFS server",
+        summary: "When a push, pull or fetch fails because git-lfs could not sign in to an \
+                  LFS server other than the remote (lfs.url), the Authentication Failed dialog \
+                  asks for that server's username and password; once saved, the retry and \
+                  later operations sign in with them.",
+        ghd_behaviour: "The failure shows as a sign-in problem with the remote itself, or as \
+                        git-lfs' raw output, and the LFS server's login cannot be entered.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11575)],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/git_errors.rs"],
+    },
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.

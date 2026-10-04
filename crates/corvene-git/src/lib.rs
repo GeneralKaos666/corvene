@@ -88,8 +88,8 @@ pub use diff::{
 pub use error::{GitError, bad_config_line, dubious_ownership_path, explain_bad_config};
 pub use git_errors::{
     GitErrorDetails, GitFailure, KnownGitError, display_command, files_that_would_be_overwritten,
-    git_error_details, known_git_error, merge_abort_blocked_paths,
-    parse_config_lock_file_path_from_error,
+    git_error_details, is_lfs_auth_failure, known_git_error, lfs_auth_failure_url,
+    merge_abort_blocked_paths, parse_config_lock_file_path_from_error,
 };
 pub use history_ops::{
     ResetMode, checkout_commit, cherry_pick_no_commit, create_tag, delete_tag, format_patch_range,
