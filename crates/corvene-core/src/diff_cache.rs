@@ -174,8 +174,8 @@ pub struct WorkingStamp {
     head: Option<String>,
     /// size, mtime (ns), inode of the working file; `None` when missing
     file: Option<(u64, i128, u64)>,
-    /// the diff options (whitespace, rename, symlink, as-text flags)
-    options: [bool; 4],
+    /// the diff options (whitespace, rename, symlink, as-text, SVG as image)
+    options: [bool; 5],
 }
 
 type WorkingKey = (PathBuf, String, WorkingStamp);
@@ -203,7 +203,7 @@ pub fn working_stamp(
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
     head: Option<&str>,
-    options: [bool; 4],
+    options: [bool; 5],
 ) -> Option<WorkingStamp> {
     if file.status.submodule || file.status.kind == FileStatusKind::Conflicted {
         return None;

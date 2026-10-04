@@ -58,6 +58,9 @@
 //! from one file; with Hide Whitespace the other's can differ in
 //! indentation), GHD always the old file's unless the diff only adds lines.
 //!
+//! Deviation (`794-svg-image-diff`): an SVG file's header has a Text /
+//! Image switch; Image shows its image diff (GHD: text only).
+//!
 //! Deviation (`791-word-intra-line-diff`): a modified line highlights each
 //! changed word (a word diff of the paired lines) instead of GHD's one range
 //! between the common prefix and suffix (`ui/diff/diff-helpers.tsx`
@@ -209,6 +212,8 @@ pub fn diff_header(
                 .child(format!("Modified {}", crate::relative_time::relative(at)))
                 .ghd_tooltip(crate::format::format_date_time(at))
         }))
+        // `794-svg-image-diff`
+        .children(svg_switch(path, cx))
         // `.path-label-component { margin-right: 5px }`,
         // `.diff-options-component { margin-right: 5px }`
         .child(
@@ -218,6 +223,55 @@ pub fn diff_header(
                 .child(diff_options_button(view, cx)),
         )
         .child(octicon(icon, color))
+}
+
+/// `794-svg-image-diff`: the Text / Image switch of an SVG file's header.
+fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
+    let s = AppState::try_global(cx)?.read(cx);
+    if !corvene_git::is_svg(path) || !s.flags.bool(corvene_core::flags::ids::SVG_IMAGE_DIFF) {
+        return None;
+    }
+    let repo = s.selected?;
+    let as_image = s.repo_states.get(&repo)?.svg_as_image.contains(path);
+    let t = cx.ghd();
+    let segment = |id: &'static str, label: &'static str, image: bool| {
+        let path = path.to_string();
+        let selected = image == as_image;
+        let (bg, hover) = (t.box_selected_active_background, t.box_hover_background);
+        div()
+            .id(id)
+            .a11y_button(label)
+            .h_full()
+            .px(SPACING_HALF())
+            .flex()
+            .items_center()
+            .when(selected, |d| d.bg(bg).text_color(t.box_selected_active_text))
+            .when(!selected, |d| {
+                d.cursor_pointer()
+                    .text_color(t.text)
+                    .hover(move |d| d.bg(hover))
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::set_svg_as_image(repo, path.clone(), image, cx)
+                    })
+            })
+            .child(label)
+    };
+    Some(
+        div()
+            .id("svg-view-switch")
+            .flex_none()
+            .ml(SPACING())
+            .h(zpx(19.))
+            .flex()
+            .flex_row()
+            .overflow_hidden()
+            .rounded(BORDER_RADIUS())
+            .border_1()
+            .border_color(t.box_border)
+            .text_size(FONT_SIZE_SM())
+            .child(segment("svg-view-text", "Text", false))
+            .child(segment("svg-view-image", "Image", true)),
+    )
 }
 
 /// `DiffOptions`' gear (`.diff-options-component > button`); opens `view`'s

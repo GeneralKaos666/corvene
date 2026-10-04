@@ -18,6 +18,9 @@
 //! Deviation (`754-image-diff-alignment`): images of different sizes can
 //! share the top left corner instead of the centre.
 //!
+//! Deviation (`794-svg-image-diff`): an SVG file switched to Image is
+//! rendered with resvg (a small drawing enlarged, drawn sharp).
+//!
 //! Deviation (`761-pixelated-small-images`): images under 64 px are enlarged
 //! by a whole factor with nearest-neighbour sampling, so pixel art and icons
 //! show their pixels (GHD draws them at their natural size, tiny).
@@ -80,6 +83,9 @@ impl Side {
         if blob.media_type == TGA_MEDIA_TYPE {
             return Self::from_tga(blob);
         }
+        if blob.media_type == corvene_git::SVG_MEDIA_TYPE {
+            return Self::from_svg(blob);
+        }
         let format = match blob.media_type.as_str() {
             "image/jpg" | "image/jpeg" => ImageFormat::Jpeg,
             "image/gif" => ImageFormat::Gif,
@@ -107,6 +113,10 @@ impl Side {
         let Some((w, h)) = self.size else {
             return self;
         };
+        // an SVG is already drawn at the size it shows at
+        if self.size != self.natural {
+            return self;
+        }
         let k = upscale_factor((w, h));
         if k < 2 || self.image.format == ImageFormat::Gif {
             return self;
@@ -133,7 +143,51 @@ impl Side {
     }
 }
 
+/// `794-svg-image-diff`: an SVG drawing is rendered to at most this many
+/// pixels on its longer side.
+const MAX_SVG_PIXELS: f32 = 4096.;
+
 impl Side {
+    /// `794-svg-image-diff`: an SVG drawing rendered as PNG (resvg, the
+    /// renderer GPUI uses for its icons) at its own size, a small one
+    /// enlarged like `761-pixelated-small-images` enlarges small images but
+    /// drawn sharp; the footer shows the drawing's own size. An SVG that
+    /// does not parse shows no image.
+    fn from_svg(blob: &ImageBlob) -> Self {
+        let rendered = (|| {
+            let tree =
+                resvg::usvg::Tree::from_data(&blob.bytes, &resvg::usvg::Options::default()).ok()?;
+            let size = tree.size();
+            let natural = (
+                size.width().ceil().max(1.) as u32,
+                size.height().ceil().max(1.) as u32,
+            );
+            let longest = size.width().max(size.height()).max(1.);
+            let scale = (upscale_factor(natural) as f32).min(MAX_SVG_PIXELS / longest);
+            let (w, h) = (
+                ((size.width() * scale).ceil() as u32).max(1),
+                ((size.height() * scale).ceil() as u32).max(1),
+            );
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)?;
+            resvg::render(
+                &tree,
+                resvg::tiny_skia::Transform::from_scale(scale, scale),
+                &mut pixmap.as_mut(),
+            );
+            Some(((w, h), natural, pixmap.encode_png().ok()?))
+        })();
+        let (size, natural, bytes) = match rendered {
+            Some((size, natural, png)) => (Some(size), Some(natural), png),
+            None => (None, None, Vec::new()),
+        };
+        Self {
+            image: Arc::new(Image::from_bytes(ImageFormat::Png, bytes)),
+            bytes: blob.bytes.len(),
+            size,
+            natural,
+        }
+    }
+
     /// A TGA image (no magic number to guess from) re-encoded as PNG; the
     /// footer still shows the file's own size.
     fn from_tga(blob: &ImageBlob) -> Self {
@@ -962,6 +1016,31 @@ mod tests {
         assert_eq!(side.size, Some((3, 2)));
         assert_eq!(side.bytes, tga.len());
         assert!(side.image.bytes.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn svg_renders_sharp_at_a_whole_factor() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="12"><rect width="24" height="12" fill="#ff0000"/></svg>"##;
+        let blob = ImageBlob {
+            bytes: svg.to_vec(),
+            media_type: corvene_git::SVG_MEDIA_TYPE.to_string(),
+        };
+        let side = Side::from_blob(&blob);
+        assert_eq!(side.natural, Some((24, 12)));
+        // 256 / 24 = 10
+        assert_eq!(side.size, Some((240, 120)));
+        let png = image::load_from_memory(&side.image.bytes)
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(png.dimensions(), (240, 120));
+        assert_eq!(png.get_pixel(120, 60), &image::Rgba([255, 0, 0, 255]));
+        // already enlarged: left alone
+        assert_eq!(side.pixelated().size, Some((240, 120)));
+        let broken = ImageBlob {
+            bytes: b"<svg".to_vec(),
+            media_type: corvene_git::SVG_MEDIA_TYPE.to_string(),
+        };
+        assert_eq!(Side::from_blob(&broken).size, None);
     }
 
     #[test]

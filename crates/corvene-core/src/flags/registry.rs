@@ -4850,6 +4850,22 @@ registry! {
         code: &["crates/corvene-git/src/diff.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// SVG files can be shown as images.
+    SVG_IMAGE_DIFF = 794 "svg-image-diff" {
+        title: "SVG files as images",
+        summary: "The diff header of an .svg file has a Text / Image switch: Image shows the \
+                  old and new drawing with the image diff modes (2-up, Swipe, Onion Skin, \
+                  Difference), Text the usual line diff. It stays per file until switched \
+                  back; line selection keeps working on the text.",
+        ghd_behaviour: "SVG files only show their text diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11316)],
+        code: &["crates/corvene-ui/src/image_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

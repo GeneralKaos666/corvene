@@ -422,6 +422,28 @@ pub fn image_diff(
     let Some(media_type) = image_media_type(path) else {
         return Diff::Binary;
     };
+    image_diff_as(media_type, kind, current, previous)
+}
+
+/// Corvene `794-svg-image-diff`: an SVG file's media type when it is shown
+/// as an image (GHD only ever shows its text).
+pub const SVG_MEDIA_TYPE: &str = "image/svg+xml";
+
+/// Corvene `794-svg-image-diff`: whether `path` is an SVG file.
+pub fn is_svg(path: &str) -> bool {
+    path.rsplit('.')
+        .next()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
+}
+
+/// [`image_diff`] of a file known to be an image of `media_type`: the sides
+/// that exist (`Binary` when neither does).
+pub fn image_diff_as(
+    media_type: &str,
+    kind: FileStatusKind,
+    current: impl FnOnce() -> Option<Vec<u8>>,
+    previous: impl FnOnce() -> Option<Vec<u8>>,
+) -> Diff {
     let blob = |bytes: Vec<u8>| ImageBlob {
         bytes,
         media_type: media_type.to_string(),

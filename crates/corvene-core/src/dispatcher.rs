@@ -1763,6 +1763,37 @@ impl Dispatcher {
 
     /// `749-binary-diff-as-text`: "Show diff anyway" on a binary file
     /// reloads its diff with `git diff --text`.
+    /// `794-svg-image-diff`: whether `path`'s diff shows as images.
+    pub fn svg_shown_as_image(s: &AppState, rs: &RepositoryState, path: &str) -> bool {
+        corvene_git::is_svg(path)
+            && rs.svg_as_image.contains(path)
+            && s.flags.bool(crate::flags::ids::SVG_IMAGE_DIFF)
+    }
+
+    /// `794-svg-image-diff`: show `path` (an SVG file) as images, or as text
+    /// again, in Changes and History.
+    pub fn set_svg_as_image(id: u64, path: String, as_image: bool, cx: &mut dyn Host) {
+        let (working, commit) = Self::state(cx).update(cx, |s, cx| {
+            let rs = s.repo_state_mut(id);
+            let changed = if as_image {
+                rs.svg_as_image.insert(path.clone())
+            } else {
+                rs.svg_as_image.remove(&path)
+            };
+            cx.notify();
+            (
+                changed && rs.selected_file.as_deref() == Some(path.as_str()),
+                changed && rs.commit_selected_file.as_deref() == Some(path.as_str()),
+            )
+        });
+        if working {
+            Self::load_diff(id, cx);
+        }
+        if commit {
+            Self::load_commit_diff(id, cx);
+        }
+    }
+
     pub fn show_binary_diff_as_text(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
@@ -1902,8 +1933,12 @@ impl Dispatcher {
             // made on another diff of the file moves with its lines
             let new_hunks = rs.diff.as_deref().and_then(|d| d.hunks());
             let basis = rs.selection_bases.get(path).cloned();
+            // `794-svg-image-diff`: the image view of a text file keeps the
+            // line selection made on its text
+            let svg_image = corvene_git::is_svg(path)
+                && matches!(rs.diff.as_deref(), Some(corvene_models::Diff::Image { .. }));
             // usually unchanged: only then copy the shared status
-            let update = rs.status.as_deref().and_then(|st| {
+            let update = rs.status.as_deref().filter(|_| !svg_image).and_then(|st| {
                 let i = st.files.iter().position(|f| f.path == path)?;
                 let current = &st.files[i].selection;
                 let carried = match (follow_lines, basis.as_deref(), new_hunks) {
@@ -2627,6 +2662,48 @@ impl Dispatcher {
             cx.spawn(async move |cx: &mut AsyncCtx| {
                 let loaded = task.await;
                 cx.update(|cx| Self::apply_commit_diff(id, &key.0, &key.1, true, loaded, cx));
+            })
+            .detach();
+            return;
+        }
+        // `794-svg-image-diff`: the SVG before and after, as images
+        let svg_image = {
+            let s = Self::state(cx).read(cx);
+            s.repo_states
+                .get(&id)
+                .is_some_and(|rs| Self::svg_shown_as_image(s, rs, &file.path))
+        };
+        if svg_image {
+            let key = (ordered.clone(), file.path.clone());
+            let newest = match &ordered[..] {
+                [_, .., newest] => newest.clone(),
+                _ => file.commitish.clone(),
+            };
+            let oldest = ordered
+                .first()
+                .cloned()
+                .unwrap_or_else(|| file.commitish.clone());
+            let task = cx.background_executor().spawn(async move {
+                let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+                let diff = corvene_git::image_diff_as(
+                    corvene_git::SVG_MEDIA_TYPE,
+                    file.status.kind,
+                    || corvene_git::blob_bytes(git.clone(), &workdir, &newest, &file.path).ok(),
+                    || {
+                        corvene_git::blob_bytes(
+                            git.clone(),
+                            &workdir,
+                            &format!("{oldest}^"),
+                            previous_path,
+                        )
+                        .ok()
+                    },
+                );
+                (Arc::new(diff), None, None)
+            });
+            cx.spawn(async move |cx: &mut AsyncCtx| {
+                let loaded = task.await;
+                cx.update(|cx| Self::apply_commit_diff(id, &key.0, &key.1, false, loaded, cx));
             })
             .detach();
             return;
@@ -6638,6 +6715,8 @@ struct WorkingDiffOptions {
     renamed_against_head: bool,
     symlinks_as_links: bool,
     as_text: bool,
+    /// `794-svg-image-diff`
+    svg_as_image: bool,
 }
 
 impl WorkingDiffOptions {
@@ -6648,15 +6727,17 @@ impl WorkingDiffOptions {
             symlinks_as_links: s.flags.bool(crate::flags::ids::SYMLINK_CONTENTS),
             as_text: rs.diff_as_text.as_deref() == Some(path)
                 && s.flags.bool(crate::flags::ids::BINARY_DIFF_AS_TEXT),
+            svg_as_image: Dispatcher::svg_shown_as_image(s, rs, path),
         }
     }
 
-    fn key(self) -> [bool; 4] {
+    fn key(self) -> [bool; 5] {
         [
             self.hide_whitespace,
             self.renamed_against_head,
             self.symlinks_as_links,
             self.as_text,
+            self.svg_as_image,
         ]
     }
 }
@@ -6730,6 +6811,17 @@ fn compute_working_diff(
                 corvene_git::blob_lines(git, workdir, "HEAD", old_path)
             })
         });
+        if options.svg_as_image {
+            // `794-svg-image-diff`: the committed and working images, no lines
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            let diff = corvene_git::image_diff_as(
+                corvene_git::SVG_MEDIA_TYPE,
+                file.status.kind,
+                || std::fs::read(workdir.join(&file.path)).ok(),
+                || corvene_git::blob_bytes(git.clone(), workdir, "HEAD", previous_path).ok(),
+            );
+            return (Arc::new(diff), None, None);
+        }
         let diff = corvene_git::working_directory_diff(
             git,
             workdir,
