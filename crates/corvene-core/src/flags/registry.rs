@@ -2999,6 +2999,21 @@ registry! {
         ],
     },
 
+    /// The repository button and list rows drag the folder out.
+    DRAG_REPOSITORY_OUT = 426 "drag-repository-out" {
+        title: "Drag a repository out of the window",
+        summary: "The toolbar's Current Repository button and the repository list's rows can be \
+                  dragged out of the window as the repository's folder: onto Finder, the Dock, \
+                  an editor or Terminal. Clicking them works as before.",
+        ghd_behaviour: "Repositories cannot be dragged anywhere.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: macos_only,
+        upstream: &[Upstream::issue(9411)],
+        code: &["crates/corvene-ui/src/repository_drag.rs", "crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

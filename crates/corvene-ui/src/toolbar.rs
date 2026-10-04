@@ -63,6 +63,9 @@ pub struct ToolbarButtonModel {
     /// The tooltip keeps its maximum width while its text changes (flag
     /// `411-steady-progress-tooltip`).
     pub tooltip_fixed_width: bool,
+    /// Corvene (`426-drag-repository-out`): the folder (and name) the button
+    /// drags out of the window.
+    pub drag: Option<(std::path::PathBuf, SharedString)>,
 }
 
 /// Which toolbar button a resize handle belongs to.
@@ -203,6 +206,7 @@ pub fn toolbar_models(
             resize: Some((ResizeTarget::Worktree, widths.worktree)),
             tooltip: worktree_tooltip,
             tooltip_fixed_width: false,
+            drag: None,
         }
     });
 
@@ -253,6 +257,16 @@ pub fn toolbar_models(
                 text.into()
             }),
         tooltip_fixed_width: false,
+        // Corvene (`426-drag-repository-out`)
+        drag: repo
+            .filter(|r| {
+                !r.missing
+                    && cfg!(target_os = "macos")
+                    && state
+                        .flags
+                        .bool(corvene_core::flags::ids::DRAG_REPOSITORY_OUT)
+            })
+            .map(|r| (r.path.clone(), r.name().into())),
     };
 
     // `currentPullRequest`: the icon becomes the PR icon and the badge shows
@@ -397,6 +411,7 @@ pub fn toolbar_models(
         resize: Some((ResizeTarget::Branch, widths.branch)),
         tooltip: branch_tooltip,
         tooltip_fixed_width: false,
+        drag: None,
     };
 
     // Push/Pull (`PushPullButton.renderButton`)
@@ -441,6 +456,7 @@ pub fn toolbar_models(
         resize: None,
         tooltip: None,
         tooltip_fixed_width: false,
+        drag: None,
     };
     let push_pull = if repo.is_none() {
         ToolbarButtonModel {
@@ -736,6 +752,10 @@ pub fn toolbar_button(
             })
         })
         .when(ring, |d| d.child(focus_visible_ring(cx)))
+        // Corvene (`426-drag-repository-out`)
+        .when_some(model.drag, |d, (path, name)| {
+            crate::repository_drag::draggable(d, path, name)
+        })
         .when_some(model.width, |d, w| d.w(w))
         .when(model.width.is_none(), |d| d.flex_1().min_w_0())
         .child(if model.spin {

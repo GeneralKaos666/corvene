@@ -905,6 +905,11 @@ impl RepositoryFoldout {
                 let row = repo.clone();
                 move |_, _, cx| select_row(&row, cx)
             })
+            // Corvene (`426-drag-repository-out`): the folder drags out of
+            // the window
+            .when(!repo.missing && crate::repository_drag::enabled(cx), |d| {
+                crate::repository_drag::draggable(d, repo.path.clone(), repo.name().into())
+            })
             .on_mouse_down(MouseButton::Right, {
                 let repo = repo.clone();
                 move |ev: &MouseDownEvent, window, cx| {

@@ -46,6 +46,7 @@ pub mod path_text;
 pub mod popover;
 pub mod pull_request_list;
 pub mod relative_time;
+pub mod repository_drag;
 pub mod repository_list;
 pub mod scrollbar;
 pub mod selected_commit;
