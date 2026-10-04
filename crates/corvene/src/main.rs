@@ -1128,6 +1128,37 @@ pub(crate) fn main() {
         on_menu_action(cx, move |_: &PullAllRepositories, cx| {
             Dispatcher::pull_all_repositories(cx);
         });
+        // `1210-push-to-other-remote`: the remote at the item's index of the
+        // menu's list (`Dispatcher::menu_remotes`, which built the menu)
+        fn menu_remote(cx: &App, index: usize) -> Option<(u64, String)> {
+            let s = corvene_core::AppState::global(cx).read(cx);
+            let id = s.selected?;
+            Some((id, Dispatcher::menu_remotes(s, id).into_iter().nth(index)?))
+        }
+        macro_rules! remote_menu_actions {
+            ($($index:literal => $push:ident, $fetch:ident;)*) => {$(
+                on_menu_action(cx, move |_: &$push, cx| {
+                    if let Some((id, remote)) = menu_remote(cx, $index) {
+                        Dispatcher::push_to_remote(id, remote, cx);
+                    }
+                });
+                on_menu_action(cx, move |_: &$fetch, cx| {
+                    if let Some((id, remote)) = menu_remote(cx, $index) {
+                        Dispatcher::fetch_from_remote(id, remote, cx);
+                    }
+                });
+            )*};
+        }
+        remote_menu_actions! {
+            0 => PushToRemote0, FetchFromRemote0;
+            1 => PushToRemote1, FetchFromRemote1;
+            2 => PushToRemote2, FetchFromRemote2;
+            3 => PushToRemote3, FetchFromRemote3;
+            4 => PushToRemote4, FetchFromRemote4;
+            5 => PushToRemote5, FetchFromRemote5;
+            6 => PushToRemote6, FetchFromRemote6;
+            7 => PushToRemote7, FetchFromRemote7;
+        }
         on_menu_action(cx, move |_: &FetchAllTags, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::fetch_all_tags(id, cx);

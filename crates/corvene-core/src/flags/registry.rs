@@ -7173,6 +7173,23 @@ registry! {
         code: &["crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/remote.rs"],
     },
 
+    /// Branch › Push To ▸ and Fetch From ▸ another remote.
+    PUSH_TO_OTHER_REMOTE = 1210 "push-to-other-remote" {
+        title: "Push to and fetch from other remotes",
+        summary: "In a repository with several remotes, the Branch menu has Push To ▸ and \
+                  Fetch From ▸ submenus listing them: the current branch is pushed to the \
+                  same-named branch of the remote picked, or that remote is fetched, while the \
+                  branch's upstream stays what it was.",
+        ghd_behaviour: "Push, pull and fetch use the branch's upstream remote (or origin) \
+                        only.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20665)],
+        code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene-core/src/remote.rs", "crates/corvene/src/main.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

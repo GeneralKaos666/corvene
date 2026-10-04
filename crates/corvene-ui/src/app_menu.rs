@@ -26,7 +26,10 @@
 //! Corvene additions ([`MenuExtras`], all off in the github-desktop preset):
 //! "Flags…" (no GHD equivalent, always there), File › Import Repositories
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
-//! Fetch All Tags (flag `899-tags-in-branch-list`), Branch › Request
+//! Pull All Repositories (flag `299-pull-all-repositories`), Repository ›
+//! Fetch All Tags (flag `899-tags-in-branch-list`), Branch › Push To ▸ and
+//! Fetch From ▸ with a repository's remotes when it has several (flag
+//! `1210-push-to-other-remote`), Branch › Request
 //! Reviewers… (flag `336-request-reviewers`), Repository ›
 //! View Upstream on GitHub, Repository › Add License… ("A&dd license…" off
 //! macOS: `Pu&ll` has the `l`), View › Show Pull Requests List and Toggle
@@ -68,6 +71,9 @@ pub struct MenuLabelsEvent {
     /// GHD: `changesState.stashEntry !== null` (see the module docs)
     pub ask_for_confirmation_when_stashing_all_changes: bool,
     pub is_changes_filter_visible: bool,
+    /// Corvene (`1210-push-to-other-remote`): the remotes of Branch › Push
+    /// To ▸ and Fetch From ▸ (`Dispatcher::menu_remotes`; empty: no menus).
+    pub remotes: Vec<String>,
     /// Corvene's flag-dependent items.
     pub extras: MenuExtras,
 }
@@ -85,6 +91,7 @@ impl Default for MenuLabelsEvent {
             is_stashed_changes_visible: false,
             ask_for_confirmation_when_stashing_all_changes: true,
             is_changes_filter_visible: true,
+            remotes: Vec::new(),
             extras: MenuExtras::default(),
         }
     }
@@ -226,6 +233,7 @@ impl MenuLabelsEvent {
             has_current_pull_request: s.current_pull_request(repository.id).is_some(),
             // `changesState.stashEntry !== null`
             ask_for_confirmation_when_stashing_all_changes: rs.desktop_stash().is_some(),
+            remotes: corvene_core::Dispatcher::menu_remotes(s, repository.id),
             ..labels
         }
     }
@@ -660,6 +668,21 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             l("Rebase Current Branch…", "R&ebase current branch…"),
             RebaseCurrentBranch,
         ),
+    ]);
+    // Corvene (`1210-push-to-other-remote`)
+    if !labels.remotes.is_empty() {
+        branch.extend([
+            submenu(
+                l("Push To", "Push &to"),
+                remote_items(&labels.remotes, &PUSH_TO_REMOTE),
+            ),
+            submenu(
+                l("Fetch From", "Fetch &from"),
+                remote_items(&labels.remotes, &FETCH_FROM_REMOTE),
+            ),
+        ]);
+    }
+    branch.extend([
         separator(),
         item(
             l("Compare on GitHub", "Compare on &GitHub"),
@@ -697,6 +720,52 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         help_items(extras.show_release_notes),
     ));
     template
+}
+
+/// `1210-push-to-other-remote`: the actions of Branch › Push To ▸'s items,
+/// by index into [`MenuLabelsEvent::remotes`].
+const PUSH_TO_REMOTE: [fn() -> Box<dyn Action>; 8] = [
+    || Box::new(PushToRemote0),
+    || Box::new(PushToRemote1),
+    || Box::new(PushToRemote2),
+    || Box::new(PushToRemote3),
+    || Box::new(PushToRemote4),
+    || Box::new(PushToRemote5),
+    || Box::new(PushToRemote6),
+    || Box::new(PushToRemote7),
+];
+
+/// Fetch From ▸'s, as [`PUSH_TO_REMOTE`].
+const FETCH_FROM_REMOTE: [fn() -> Box<dyn Action>; 8] = [
+    || Box::new(FetchFromRemote0),
+    || Box::new(FetchFromRemote1),
+    || Box::new(FetchFromRemote2),
+    || Box::new(FetchFromRemote3),
+    || Box::new(FetchFromRemote4),
+    || Box::new(FetchFromRemote5),
+    || Box::new(FetchFromRemote6),
+    || Box::new(FetchFromRemote7),
+];
+
+/// One item per remote name (a `&` in a name is doubled for the Windows
+/// and Linux access keys).
+fn remote_items(
+    remotes: &[String],
+    actions: &[fn() -> Box<dyn Action>; 8],
+) -> Vec<MenuItemConstructorOptions> {
+    remotes
+        .iter()
+        .zip(actions)
+        .map(|(name, action)| MenuItemConstructorOptions {
+            label: Some(if cfg!(target_os = "macos") {
+                name.clone()
+            } else {
+                name.replace('&', "&&")
+            }),
+            action: Some(action()),
+            ..Default::default()
+        })
+        .collect()
 }
 
 /// Window menu; flag `405-window-menu-main-window` appends "Corvene", which
@@ -852,6 +921,7 @@ mod tests {
                 is_force_push_for_current_repository: bits & 4 != 0,
                 ask_for_confirmation_on_repository_removal: bits & 8 != 0,
                 is_changes_filter_visible: bits & 16 != 0,
+                remotes: vec!["fork".into(), "origin".into()],
                 extras: MenuExtras {
                     show_release_notes: true,
                     show_import: true,

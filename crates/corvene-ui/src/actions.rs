@@ -106,6 +106,24 @@ gpui_kit::actions!(
         FetchAllTags,
         // Branch › Request Reviewers… (`336-request-reviewers`)
         RequestReviewers,
+        // Branch › Push To ▸ / Fetch From ▸ the remote at that index of
+        // `MenuLabelsEvent::remotes` (`1210-push-to-other-remote`)
+        PushToRemote0,
+        PushToRemote1,
+        PushToRemote2,
+        PushToRemote3,
+        PushToRemote4,
+        PushToRemote5,
+        PushToRemote6,
+        PushToRemote7,
+        FetchFromRemote0,
+        FetchFromRemote1,
+        FetchFromRemote2,
+        FetchFromRemote3,
+        FetchFromRemote4,
+        FetchFromRemote5,
+        FetchFromRemote6,
+        FetchFromRemote7,
         // Branch › Move Changes to Worktree… (`283-move-changes-to-worktree`)
         MoveChangesToWorktree,
         RemoveRepository,

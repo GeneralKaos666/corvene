@@ -820,6 +820,10 @@ pub enum RetryAction {
     Rebase {
         base: String,
     },
+    /// Branch › Push To ▸ `remote` (flag `1210-push-to-other-remote`).
+    PushToRemote {
+        remote: String,
+    },
 }
 
 impl RetryAction {
@@ -831,7 +835,7 @@ impl RetryAction {
             }
             RetryAction::Squash { .. } => "squash",
             RetryAction::Reorder { .. } => "reorder",
-            RetryAction::Push { .. } => "push",
+            RetryAction::Push { .. } | RetryAction::PushToRemote { .. } => "push",
             RetryAction::Pull => "pull",
             RetryAction::Fetch => "fetch",
             RetryAction::Rebase { .. } => "rebase",

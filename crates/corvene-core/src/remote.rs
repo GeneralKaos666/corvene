@@ -34,6 +34,8 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! Branch › Push To ▸ and Fetch From ▸ reach the repository's other
+//! remotes, the upstream left as it is (`1210-push-to-other-remote`).
 //! A branch without an upstream that `push.default=current` pushes to the
 //! same-named remote branch shows Push / Pull against that branch instead of
 //! Publish (`1103-implicit-upstream-push-default`; GHD reads only the
@@ -1806,6 +1808,176 @@ impl Dispatcher {
             .bool(crate::flags::ids::IMPLICIT_UPSTREAM_PUSH_DEFAULT)
             .then(|| s.repo_states.get(&id)?.implicit_upstream.clone())
             .flatten()
+    }
+
+    // ---- push to / fetch from another remote (`1210-push-to-other-remote`) ----
+
+    /// The remotes Branch › Push To ▸ and Fetch From ▸ list (at most eight,
+    /// in the repository's order): none while the flag is off or the
+    /// repository has one remote.
+    pub fn menu_remotes(s: &crate::state::AppState, id: u64) -> Vec<String> {
+        if !s.flags.bool(crate::flags::ids::PUSH_TO_OTHER_REMOTE) {
+            return Vec::new();
+        }
+        let remotes = s
+            .repo_states
+            .get(&id)
+            .and_then(|r| r.info.as_ref())
+            .map(|i| i.remotes.as_slice())
+            .unwrap_or_default();
+        if remotes.len() < 2 {
+            return Vec::new();
+        }
+        remotes.iter().take(8).map(|r| r.name.clone()).collect()
+    }
+
+    /// Branch › Fetch From ▸ `remote`.
+    pub fn fetch_from_remote(id: u64, remote: String, cx: &mut dyn Host) {
+        if Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::PUSH_TO_OTHER_REMOTE)
+        {
+            Self::fetch_remote_then(id, Some(&remote), false, |_, _| {}, cx);
+        }
+    }
+
+    /// Branch › Push To ▸ `remote` (GHD pushes to the upstream's remote
+    /// only): the current branch to the same-named branch of `remote`,
+    /// `git push <remote> refs/heads/<b>:refs/heads/<b>` without
+    /// `--set-upstream`, so the upstream stays what it was. No tags, no
+    /// force.
+    pub fn push_to_remote(id: u64, remote_name: String, cx: &mut dyn Host) {
+        if !Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::PUSH_TO_OTHER_REMOTE)
+        {
+            return;
+        }
+        if Self::behind_background_fetch(id, cx) {
+            return Self::after_network(id, cx, move |cx| {
+                Self::push_to_remote(id, remote_name, cx)
+            });
+        }
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let (remote, branch) = {
+            let s = Self::state(cx).read(cx);
+            let info = s.repo_states.get(&id).and_then(|r| r.info.as_ref());
+            (
+                info.and_then(|i| i.remotes.iter().find(|r| r.name == remote_name))
+                    .cloned(),
+                info.and_then(|i| match &i.tip {
+                    Tip::Valid { branch } => Some(branch.name.clone()),
+                    _ => None,
+                }),
+            )
+        };
+        let (Some(remote), Some(branch)) = (remote, branch) else {
+            Self::show_error(
+                "Could not push",
+                "Pushing to another remote needs a checked-out branch.",
+                cx,
+            );
+            return;
+        };
+        if !Self::begin_network(id, cx) {
+            return;
+        }
+        Self::arm_credential_helper_for(id, &remote.url, cx);
+        let askpass = Self::askpass_env_for(id, &remote.url, cx);
+        // `867-qualified-push-refspecs`
+        let refspec = if Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::QUALIFIED_PUSH_REFSPECS)
+        {
+            format!("refs/heads/{branch}")
+        } else {
+            branch.clone()
+        };
+        let title = format!("Pushing to {}", remote.name);
+        Self::set_progress(
+            id,
+            Some(PushPullProgress {
+                kind: PushPullKind::Push,
+                title: title.clone(),
+                description: None,
+                value: 0.,
+            }),
+            cx,
+        );
+        let fetch_options = corvene_git::FetchOptions {
+            prune_tags: false,
+            ..Self::fetch_options(Self::state(cx).read(cx), id)
+        };
+        let cancel = Self::network_cancel_token(id, PushPullKind::Push, false, cx);
+        let remote_url = remote.url.clone();
+        let remote_name = remote.name.clone();
+        let retry = RetryAction::PushToRemote {
+            remote: remote_name.clone(),
+        };
+        Self::run_network(
+            id,
+            cx,
+            move |report| {
+                cancellable(cancel.as_ref(), || {
+                    let result = corvene_git::push(
+                        git.clone(),
+                        &workdir,
+                        &remote_name,
+                        &refspec,
+                        Some(&refspec),
+                        &[],
+                        false,
+                        askpass.as_ref(),
+                        &mut |value, text| {
+                            report(PushPullProgress {
+                                kind: PushPullKind::Push,
+                                title: title.clone(),
+                                description: Some(text),
+                                value: value * 0.8,
+                            })
+                        },
+                    );
+                    if result.is_ok() {
+                        // the remote-tracking branch catches up
+                        let _ = corvene_git::fetch_with(
+                            git,
+                            &workdir,
+                            &remote_name,
+                            fetch_options,
+                            askpass.as_ref(),
+                            &mut |value, text| {
+                                report(PushPullProgress {
+                                    kind: PushPullKind::Fetch,
+                                    title: format!("Fetching {remote_name}"),
+                                    description: Some(text),
+                                    value: 0.8 + value * 0.2,
+                                })
+                            },
+                        );
+                    }
+                    result
+                })
+            },
+            move |result, cx| {
+                if let Err(err) = result {
+                    Self::handle_remote_error(
+                        id,
+                        "Could not push",
+                        err,
+                        remote_url,
+                        retry,
+                        false,
+                        cx,
+                    );
+                }
+                Self::refresh_repository(id, cx);
+            },
+        );
     }
 
     /// The toolbar button's main click (`PushPullButton.renderButton`).

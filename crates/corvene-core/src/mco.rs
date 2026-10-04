@@ -908,6 +908,7 @@ impl Dispatcher {
             RetryAction::Pull => Self::pull(id, cx),
             RetryAction::Fetch => Self::fetch(id, false, cx),
             RetryAction::Rebase { base } => Self::start_rebase(id, base, false, cx),
+            RetryAction::PushToRemote { remote } => Self::push_to_remote(id, remote, cx),
         }
     }
 
