@@ -90,9 +90,9 @@ pub use index_lock::{index_lock_path, remove_stale_index_lock};
 pub use lfs_progress::GitLfsProgressParser;
 pub use log::{
     COMMIT_BATCH_SIZE, NULL_TREE_SHA, commit_file_diff, commit_range_file_diff, get_all_tags,
-    get_changed_files, get_commit_range_changed_files, get_commits, get_commits_in_range,
-    get_commits_with, merge_base, merge_base_changed_files, merge_base_file_diff,
-    most_recent_local_commit, parse_raw_log_with_numstat, tag_names,
+    get_changed_files, get_changed_files_in_process, get_commit_range_changed_files, get_commits,
+    get_commits_in_range, get_commits_with, merge_base, merge_base_changed_files,
+    merge_base_file_diff, most_recent_local_commit, parse_raw_log_with_numstat, tag_names,
 };
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,
@@ -141,8 +141,8 @@ pub use repo::{
 };
 pub use ssh::{AddSshHostInfo, parse_add_ssh_host_prompt};
 pub use status::{
-    IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_with, map_status,
-    parse_porcelain_v2, refresh_stale_index, working_directory_line_stats,
+    IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,
+    map_status, parse_porcelain_v2, refresh_stale_index, working_directory_line_stats,
 };
 pub use submodule::{
     SubmoduleEntry, list_submodules, reset_submodule_paths, update_submodules_after_operation,

@@ -3,9 +3,11 @@
 //! Corvene equivalents of GitHub Desktop's `lib/git/status.ts`:
 //!
 //! - `getStatus(repository)` is `corvene_git::get_status(git(), path)`
-//!   (`getStatusOrThrow` is `get_status_or_throw`). GitHub Desktop's `null`
-//!   (git exited with 128, "likely missing its .git directory") is
-//!   `Err(GitError::Failed { code: Some(128), .. })`.
+//!   (`getStatusOrThrow` is `get_status_or_throw`, which also reads the
+//!   status in-process, flag `906-in-process-status`, and requires the
+//!   same result, so every expectation below holds for both readers).
+//!   GitHub Desktop's `null` (git exited with 128, "likely missing its
+//!   .git directory") is `Err(GitError::Failed { code: Some(128), .. })`.
 //! - `status.workingDirectory.files` is `WorkingDirectoryStatus::files`, a
 //!   file's `path` is `WorkingDirectoryFileChange::path`.
 //! - The `AppFileStatus` keys compared by `deepStrictEqual` map to:

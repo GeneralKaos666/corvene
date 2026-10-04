@@ -16,7 +16,8 @@
 //! - `getCommits(repository, 'HEAD', n)` and `getCommit(repository, 'HEAD')`
 //!   are `corvene_git::get_commits` (`corvene_test_support::get_commits` /
 //!   `get_commit`), `getChangedFiles` is
-//!   `corvene_git::get_changed_files` with git (`in_process` off).
+//!   `corvene_test_support::get_changed_files` (`corvene_git::get_changed_files`
+//!   with git, `in_process` off, checked against the in-process reader).
 //! - `getWorkingDirectoryDiff(repository, file)` is
 //!   `corvene_git::working_directory_diff` with GHD's settings: whitespace
 //!   shown, and the flags `743-renamed-diff-against-head` and
@@ -76,7 +77,7 @@ fn create_merge_commit(
 
 /// GitHub Desktop's `getChangedFiles(repository, sha)`.
 fn get_changed_files(repository: &TestRepo, sha: &str) -> ChangesetData {
-    corvene_git::get_changed_files(git(), repository.path(), sha, false).expect("getChangedFiles")
+    corvene_test_support::get_changed_files(repository, sha).expect("getChangedFiles")
 }
 
 /// The test file's `getTextDiff(repo, file)`: `getWorkingDirectoryDiff`,

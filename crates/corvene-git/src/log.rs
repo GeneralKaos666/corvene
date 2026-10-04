@@ -333,6 +333,19 @@ pub fn get_changed_files(
     Ok(parse_raw_log_with_numstat(&out.stdout, sha))
 }
 
+/// Flag `907-in-process-commit-files`'s reader on its own: the files
+/// [`get_changed_files`] (`oldest` and `newest` the same sha) or
+/// [`get_commit_range_changed_files`] (the range's oldest and newest sha)
+/// return, read by gitoxide, or `None` where those run git instead. For
+/// tests that hold the two side by side.
+pub fn get_changed_files_in_process(
+    workdir: &Path,
+    oldest: &str,
+    newest: &str,
+) -> Option<ChangesetData> {
+    crate::log_gix::changed_files(workdir, oldest, newest)
+}
+
 /// git's file mode for a submodule (GHD `SubmoduleFileMode`).
 const SUBMODULE_FILE_MODE: &str = "160000";
 
@@ -816,6 +829,173 @@ mod tests {
         );
         assert_eq!(split("one\r\n\r\nbody"), ("one".into(), "body".into()));
         assert_eq!(split(""), ("".into(), "".into()));
+    }
+
+    /// The in-process walk against GHD's `getCommits`, which reads `git log
+    /// --date=raw --format=…%s…%b…%(trailers:unfold,only)…%D`: summary,
+    /// body, trailers (split as `parseRawUnfoldedTrailers` does), tags
+    /// (the `tag: ` entries of `%D`, in its order), parents and identities.
+    #[test]
+    fn walk_matches_ghd_log_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let git = |args: &[&str], n: u32| {
+            let date = format!("{} +0130", 1_700_000_000 + n * 60);
+            let out = Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .env("GIT_AUTHOR_NAME", "Ada Lovelace")
+                .env("GIT_AUTHOR_EMAIL", "ada@example.com")
+                .env("GIT_COMMITTER_NAME", "Grace")
+                .env("GIT_COMMITTER_EMAIL", "grace@example.com")
+                .env("GIT_AUTHOR_DATE", &date)
+                .env("GIT_COMMITTER_DATE", &date)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}");
+            out.stdout
+        };
+        git(&["init", "-q", "-b", "main"], 0);
+        git(&["config", "commit.gpgsign", "false"], 0);
+        git(&["config", "tag.gpgsign", "false"], 0);
+        let messages = [
+            "one line",
+            "subject\n\nbody\n",
+            "  \n\nsubject over\ntwo lines  \n\n\n\nbody one\n\nbody two\n\n",
+            "subject\r\n\r\nbody with crlf\r\n",
+            "subject\n\nSigned-off-by: A <a@example.com>\nCo-authored-by: B <b@example.com>\n",
+            "subject\n\nbody\n\nCo-Authored-By: X <x@example.com>\nLink: https://example.com/a:b\n",
+            "subject\n\nNot a trailer: this\nis prose\n",
+            "subject\n\nbody\n\nAcked-by : Spaced\nFolded-by: first\n  second\nEmpty:\n",
+            "subject\n\n(cherry picked from commit abc)\nNote: x\n",
+            "subject\n\nbody\n\nKey: value\nnot a trailer line\nmore prose\nand more\nSigned-off-by: Z <z@example.com>\n",
+            "subject\n\nbody\n\nKey: value\nnot a trailer line\nmore prose\nand more\nlast\n",
+            "subject\n\n# not a comment here\n\nToken: v\n",
+            "",
+        ];
+        for (n, message) in messages.iter().enumerate() {
+            let file = path.join(format!("m{n}"));
+            std::fs::write(&file, message).unwrap();
+            git(
+                &[
+                    "commit",
+                    "-q",
+                    "--allow-empty",
+                    "--allow-empty-message",
+                    "--cleanup=verbatim",
+                    "-F",
+                    file.to_str().unwrap(),
+                ],
+                n as u32 + 1,
+            );
+            std::fs::remove_file(&file).unwrap();
+            match n {
+                1 => {
+                    git(&["tag", "light"], 0);
+                    git(&["tag", "-a", "-m", "annotated", "zeta"], 0);
+                    git(&["tag", "-a", "-m", "nested", "nested", "zeta"], 0);
+                    git(&["tag", "with,comma"], 0);
+                    git(&["branch", "other"], 0);
+                }
+                4 => {
+                    git(&["tag", "Upper"], 0);
+                }
+                _ => {}
+            }
+        }
+        let format = [
+            "%H",
+            "%s",
+            "%b",
+            "%an <%ae> %ad",
+            "%cn <%ce> %cd",
+            "%P",
+            "%(trailers:unfold,only)",
+            "%D",
+        ]
+        .join("%x00");
+        let out = git(
+            &[
+                "log",
+                "HEAD",
+                "--date=raw",
+                &format!("--format=format:{format}%x01"),
+                "--no-show-signature",
+                "--no-color",
+                "--",
+            ],
+            0,
+        );
+        let identity = |field: &str| {
+            let (name, rest) = field.split_once(" <").unwrap();
+            let (email, date) = rest.split_once("> ").unwrap();
+            let (seconds, offset) = date.split_once(' ').unwrap();
+            let sign = if offset.starts_with('-') { -1 } else { 1 };
+            let hours: i32 = offset[1..3].parse().unwrap();
+            let minutes: i32 = offset[3..5].parse().unwrap();
+            (
+                name.to_string(),
+                email.to_string(),
+                seconds.parse::<i64>().unwrap(),
+                sign * (hours * 3600 + minutes * 60),
+            )
+        };
+        let expected: Vec<String> = String::from_utf8(out)
+            .unwrap()
+            .split('\x01')
+            .map(|record| record.trim_start_matches('\n'))
+            .filter(|record| !record.is_empty())
+            .map(|record| {
+                let f: Vec<&str> = record.split('\0').collect();
+                let trailers: Vec<(String, String)> = f[6]
+                    .split('\n')
+                    .filter_map(|line| {
+                        let ix = line.find(':').filter(|&ix| ix > 0)?;
+                        Some((
+                            line[..ix].trim().to_string(),
+                            line[ix + 1..].trim().to_string(),
+                        ))
+                    })
+                    .collect();
+                let tags: Vec<&str> = f[7]
+                    .split(", ")
+                    .filter_map(|r| r.strip_prefix("tag: "))
+                    .collect();
+                let parents: Vec<&str> = f[5].split(' ').filter(|p| !p.is_empty()).collect();
+                format!(
+                    "{} {:?} {:?} {:?} {:?} {parents:?} {trailers:?} {tags:?}",
+                    f[0],
+                    f[1],
+                    f[2],
+                    identity(f[3]),
+                    identity(f[4])
+                )
+            })
+            .collect();
+        let actual: Vec<String> = get_commits(path, "HEAD", 0, 100)
+            .unwrap()
+            .iter()
+            .map(|c| {
+                let id =
+                    |i: &CommitIdentity| (i.name.clone(), i.email.clone(), i.seconds, i.offset);
+                format!(
+                    "{} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                    c.sha,
+                    c.summary,
+                    c.body,
+                    id(&c.author),
+                    id(&c.committer),
+                    c.parents,
+                    c.trailers,
+                    c.tags
+                )
+            })
+            .collect();
+        assert_eq!(actual.len(), messages.len());
+        for (actual, expected) in actual.iter().zip(&expected) {
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(actual, expected);
     }
 
     #[test]

@@ -47,7 +47,7 @@
 //! | `lib/git/description.ts` `DefaultGitDescription` | [`DEFAULT_GIT_DESCRIPTION`] |
 //! | `helpers/repository-scaffolding.ts` | [`make_commit`] with [`Tree`] / [`TreeEntry`], [`create_branch`], [`switch_to`], [`clone_repository`], [`clone_local_repository`] |
 //! | `helpers/git.ts` | [`get_tip_or_error`], [`get_ref_or_error`], [`get_branch_or_error`] |
-//! | `helpers/status.ts` | [`get_status_or_throw`] |
+//! | `helpers/status.ts` | [`get_status_or_throw`] (also checks the in-process status, [`check_in_process_status`]) |
 //! | `helpers/random-data.ts` | [`generate_string`], [`DEFAULT_STRING_LENGTH`] |
 //! | `helpers/local-config.ts` | [`setup_local_config`] |
 //! | `helpers/repository-builder-rebase-test.ts` | [`repository_builder_rebase::create_repository`] |
@@ -67,6 +67,7 @@
 //! | `lib/git/for-each-ref.ts` `getBranches` | [`get_branches`] |
 //! | `lib/git/commit.ts` `createCommit` | [`create_commit`], [`try_create_commit`] |
 //! | `lib/git/log.ts` `getCommits`, `getCommit` | [`get_commits`], [`get_commit`] |
+//! | `lib/git/log.ts` `getChangedFiles` | [`get_changed_files`] (also checks the in-process files, [`check_in_process_changed_files`]) |
 //! | `lib/git/core.ts` `GitError.message` | [`git_error_message`] |
 //! | `lib/git/diff.ts` `getWorkingDirectoryDiff` | [`get_working_directory_diff`] |
 //! | `GitStore.tip` after `loadStatus()` | [`load_tip`] |
@@ -157,5 +158,7 @@ pub use repository_scaffolding::{
     Tree, TreeEntry, clone_local_repository, clone_repository, create_branch, make_commit,
     switch_to,
 };
-pub use status::get_status_or_throw;
+pub use status::{
+    check_in_process_changed_files, check_in_process_status, get_changed_files, get_status_or_throw,
+};
 pub use temp::create_temp_directory;

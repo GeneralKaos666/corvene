@@ -65,19 +65,12 @@ pub fn get_status_with(
     workdir: &Path,
     options: StatusOptions,
 ) -> Result<WorkingDirectoryStatus> {
-    let hide_untracked = options.respect_show_untracked_files
-        && crate::remote_ops::config_value(git.clone(), workdir, "status.showUntrackedFiles")
-            .is_some_and(|v| {
-                matches!(
-                    v.to_ascii_lowercase().as_str(),
-                    "no" | "false" | "off" | "0"
-                )
-            });
+    let hide_untracked = hide_untracked(git.clone(), workdir, options);
     let in_process = options
         .in_process
         .then(|| crate::status_gix::status(workdir, options, hide_untracked))
         .flatten();
-    let mut status = match in_process {
+    let status = match in_process {
         Some(status) => status,
         None => {
             let untracked = if hide_untracked {
@@ -99,6 +92,44 @@ pub fn get_status_with(
             parse_porcelain_v2(&out.stdout)
         }
     };
+    Ok(finish_status(git, workdir, status))
+}
+
+/// Flag `906-in-process-status`'s reader on its own: the status gitoxide
+/// reads, finished as [`get_status_with`] finishes it, or `None` where
+/// [`get_status_with`] runs git instead (`options.in_process` is ignored).
+/// For tests that hold the two side by side.
+pub fn get_status_in_process(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    options: StatusOptions,
+) -> Option<WorkingDirectoryStatus> {
+    let hide_untracked = hide_untracked(git.clone(), workdir, options);
+    let status = crate::status_gix::status(workdir, options, hide_untracked)?;
+    Some(finish_status(git, workdir, status))
+}
+
+/// `respect_show_untracked_files` and `status.showUntrackedFiles` says no.
+fn hide_untracked(git: Arc<GitBinary>, workdir: &Path, options: StatusOptions) -> bool {
+    options.respect_show_untracked_files
+        && crate::remote_ops::config_value(git, workdir, "status.showUntrackedFiles").is_some_and(
+            |v| {
+                matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "no" | "false" | "off" | "0"
+                )
+            },
+        )
+}
+
+/// What [`get_status_with`] adds to the parsed files and branch headers,
+/// whichever reader produced them: the operation in progress and conflict
+/// details.
+fn finish_status(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    mut status: WorkingDirectoryStatus,
+) -> WorkingDirectoryStatus {
     let git_dir = crate::paths::git_dir(workdir);
     status.merge_head_found = git_dir.join("MERGE_HEAD").exists();
     status.rebase_in_progress =
@@ -112,7 +143,7 @@ pub fn get_status_with(
     // git's order (tracked before untracked, bytewise), as GHD `getStatus`
     // returns it; the changes list sorts them
     // (`WorkingDirectoryStatus::sort_files`)
-    Ok(status)
+    status
 }
 
 /// Corvene `903-refresh-stale-index`: `git update-index -q --refresh`, which

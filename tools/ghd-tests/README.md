@@ -93,6 +93,13 @@ the GitHub Desktop function or helper it mirrors:
   `server.request_heads()`); `unreachable_endpoint()` is a URL nothing
   listens on (a stub that throws).
 - `has_git_lfs()`: whether the test git runs `git lfs`.
+- Corvene's in-process readers: `get_status_or_throw` also reads the
+  status with gitoxide (flag `906-in-process-status`) and fails unless it
+  equals git's; read a status through it (or pass one to
+  `check_in_process_status`) and a commit's files through
+  `get_changed_files` (flag `907-in-process-commit-files`), so every
+  expectation holds for both readers. `CORVENE_GHD_IN_PROCESS_REPORT=1`
+  (with `--nocapture`) prints the cases gitoxide leaves to git.
 
 `corvene-test-support` depends on `corvene-git` and `corvene-models` only
 (never `corvene-core`: that would pull GPUI into every `corvene-git` test

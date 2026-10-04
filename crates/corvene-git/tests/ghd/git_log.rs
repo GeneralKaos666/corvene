@@ -5,9 +5,11 @@
 //! - `getCommits(repository, 'HEAD', n)` is `corvene_git::get_commits(path,
 //!   "HEAD", 0, n)` (an in-process walk with gitoxide rather than `git
 //!   log`); `shortSha` is `Commit::short_sha()`.
-//! - `getChangedFiles(repository, sha)` is `corvene_git::get_changed_files`
+//! - `getChangedFiles(repository, sha)` is
+//!   `corvene_test_support::get_changed_files`: `corvene_git::get_changed_files`
 //!   with `in_process` off (the same `git log -C -M -m -1 --first-parent
-//!   --raw --numstat -z`).
+//!   --raw --numstat -z`), checked against the in-process reader (flag
+//!   `907-in-process-commit-files`).
 //! - GitHub Desktop's committed file status `{ kind, oldPath,
 //!   submoduleStatus, renameIncludesModifications }` is Corvene's
 //!   `FileStatus::kind`, `CommittedFileChange::old_path` and
@@ -16,7 +18,7 @@
 //!   score, `FileStatus::score`).
 
 use corvene_models::FileStatusKind;
-use corvene_test_support::{git, setup_fixture_repository, setup_local_config};
+use corvene_test_support::{get_changed_files, setup_fixture_repository, setup_local_config};
 
 // GHD: unit/git/log-test.ts › git/log › getCommits › loads history
 #[test]
@@ -75,13 +77,8 @@ fn parses_tags() {
 fn loads_the_files_changed_in_the_commit() {
     let repository = setup_fixture_repository("test-repo-with-tags");
 
-    let changeset_data = corvene_git::get_changed_files(
-        git(),
-        repository.path(),
-        "7cd6640e5b6ca8dbfd0b33d0281ebe702127079c",
-        false,
-    )
-    .expect("getChangedFiles");
+    let changeset_data = get_changed_files(&repository, "7cd6640e5b6ca8dbfd0b33d0281ebe702127079c")
+        .expect("getChangedFiles");
     assert_eq!(changeset_data.files.len(), 1);
     assert_eq!(changeset_data.files[0].path, "README.md");
     assert_eq!(changeset_data.files[0].status.kind, FileStatusKind::New);
@@ -92,8 +89,7 @@ fn loads_the_files_changed_in_the_commit() {
 fn detects_renames() {
     let repository = setup_fixture_repository("rename-history-detection");
 
-    let first = corvene_git::get_changed_files(git(), repository.path(), "55bdecb", false)
-        .expect("getChangedFiles");
+    let first = get_changed_files(&repository, "55bdecb").expect("getChangedFiles");
     assert_eq!(first.files.len(), 1);
 
     assert_eq!(first.files[0].path, "NEWER.md");
@@ -104,8 +100,7 @@ fn detects_renames() {
     assert_eq!(first.files[0].status.submodule_status, None);
     assert!(first.files[0].status.rename_includes_modifications());
 
-    let second = corvene_git::get_changed_files(git(), repository.path(), "c898ca8", false)
-        .expect("getChangedFiles");
+    let second = get_changed_files(&repository, "c898ca8").expect("getChangedFiles");
     assert_eq!(second.files.len(), 1);
 
     assert_eq!(second.files[0].path, "NEW.md");
@@ -125,9 +120,7 @@ fn detect_copies() {
     // ensure the test repository is configured to detect copies
     setup_local_config(&repository, [("diff.renames", "copies")]);
 
-    let changeset_data =
-        corvene_git::get_changed_files(git(), repository.path(), "a500bf415", false)
-            .expect("getChangedFiles");
+    let changeset_data = get_changed_files(&repository, "a500bf415").expect("getChangedFiles");
     assert_eq!(changeset_data.files.len(), 2);
 
     assert_eq!(changeset_data.files[0].path, "duplicate-with-edits.md");
@@ -165,8 +158,7 @@ fn detect_copies() {
 fn handles_commit_when_head_exists_on_disk() {
     let repository = setup_fixture_repository("test-repo-with-tags");
 
-    let changeset_data = corvene_git::get_changed_files(git(), repository.path(), "HEAD", false)
-        .expect("getChangedFiles");
+    let changeset_data = get_changed_files(&repository, "HEAD").expect("getChangedFiles");
     assert_eq!(changeset_data.files.len(), 1);
     assert_eq!(changeset_data.files[0].path, "README.md");
     assert_eq!(
@@ -180,8 +172,7 @@ fn handles_commit_when_head_exists_on_disk() {
 fn detects_submodule_changes_within_commits() {
     let repository = setup_fixture_repository("submodule-basic-setup");
 
-    let changeset_data = corvene_git::get_changed_files(git(), repository.path(), "HEAD", false)
-        .expect("getChangedFiles");
+    let changeset_data = get_changed_files(&repository, "HEAD").expect("getChangedFiles");
     assert_eq!(changeset_data.files.len(), 2);
     assert_eq!(changeset_data.files[1].path, "foo/submodule");
     assert!(changeset_data.files[1].status.submodule_status.is_some());

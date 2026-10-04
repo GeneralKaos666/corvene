@@ -3,8 +3,9 @@
 //! - `rebase`, `abortRebase`, `continueRebase` (`lib/git/rebase.ts`) are
 //!   `crate::rebase_support::{rebase, abort_rebase, continue_rebase}` over
 //!   `corvene_git::rebase` / `abort_rebase` / `continue_rebase`.
-//! - `getChangedFiles(repository, sha)` is `corvene_git::get_changed_files`
-//!   with git (`in_process` off).
+//! - `getChangedFiles(repository, sha)` is
+//!   `corvene_test_support::get_changed_files`: `corvene_git::get_changed_files`
+//!   with git (`in_process` off), checked against the in-process reader.
 //! - GitHub Desktop's status fields are `WorkingDirectoryStatus`'s:
 //!   `rebaseInternalState` is `rebase_internal_state` (`None` is `null`),
 //!   `workingDirectory.files` is `files`, `currentBranch` is `branch`
@@ -17,8 +18,8 @@ use std::collections::BTreeMap;
 use corvene_git::RebaseResult;
 use corvene_models::{RebaseInternalState, WorkingDirectoryStatus};
 use corvene_test_support::{
-    conflicted_count, exec, get_branch_or_error, get_status_or_throw, git,
-    repository_builder_rebase, write_file,
+    conflicted_count, exec, get_branch_or_error, get_status_or_throw, repository_builder_rebase,
+    write_file,
 };
 
 use crate::rebase_support::{abort_rebase, continue_rebase, rebase};
@@ -358,11 +359,9 @@ fn setup_continue_with_additional_changes() -> ContinueWithAdditionalChanges {
 
     assert!(status.current_tip.is_some());
 
-    let changeset_data = corvene_git::get_changed_files(
-        git(),
-        repository.path(),
+    let changeset_data = corvene_test_support::get_changed_files(
+        &repository,
         status.current_tip.as_deref().expect("current tip"),
-        false,
     )
     .expect("getChangedFiles");
 
