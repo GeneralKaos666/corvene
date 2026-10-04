@@ -74,6 +74,7 @@ fun PopupHost(onSignIn: (enterprise: Boolean) -> Unit, onOpenSettings: (section:
                     close()
                     onSignIn(false)
                 },
+                error = value.field("error"),
             )
         }
         "AddExistingRepository" -> return FullScreenPopup(close) { AddRepositoryRoute(onClose = close, initialPath = value.field("path")) }

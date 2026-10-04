@@ -94,6 +94,8 @@ pub struct ChangesVm {
     pub filter_modified: bool,
     pub filter_deleted: bool,
     pub filter_renamed: bool,
+    /// Flag `705-renamed-files-filter`: whether the Renamed filter exists.
+    pub renamed_filter_available: bool,
 }
 
 pub fn changes(s: &AppState, repo: u64) -> Option<ChangesVm> {
@@ -160,6 +162,7 @@ pub fn changes(s: &AppState, repo: u64) -> Option<ChangesVm> {
         filter_modified: rs.file_list_filter.modified,
         filter_deleted: rs.file_list_filter.deleted,
         filter_renamed: rs.file_list_filter.renamed,
+        renamed_filter_available: s.flags.bool(corvene_core::flags::ids::RENAMED_FILES_FILTER),
         files,
     })
 }

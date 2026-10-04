@@ -30,6 +30,7 @@
     <string name="repo_tab_url">URL</string>
     <string name="repo_clone_url">Repository URL or GitHub username and repository</string>
     <string name="repo_clone_url_hint">URL or username/repository</string>
+    <string name="repo_clone_failed">Clone failed</string>
     <string name="repo_clone_sign_in_title">Sign in to list your repositories</string>
     <string name="repo_clone_sign_in_body">Your repositories on GitHub.com show here once you are signed in. Any repository clones from the URL tab.</string>
     <string name="repo_sign_in">Sign in</string>

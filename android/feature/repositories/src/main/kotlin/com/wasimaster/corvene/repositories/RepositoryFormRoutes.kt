@@ -40,7 +40,13 @@ private const val GITHUB_COM = "https://api.github.com"
  * in [CloneProgressRoute]. [prefillUrl]: an `openRepo` link or shared text.
  */
 @Composable
-fun CloneRoute(prefillUrl: String?, onClose: () -> Unit, onSignIn: () -> Unit, modifier: Modifier = Modifier) {
+fun CloneRoute(
+    prefillUrl: String?,
+    onClose: () -> Unit,
+    onSignIn: () -> Unit,
+    modifier: Modifier = Modifier,
+    error: String? = null,
+) {
     val core = LocalCore.current
     val context = LocalContext.current
     val session by rememberCoreQuery { session() }
@@ -96,6 +102,7 @@ fun CloneRoute(prefillUrl: String?, onClose: () -> Unit, onSignIn: () -> Unit, m
             loading = cloneable.value?.loading == true,
             repositories = cloneable.value?.repositories,
             filter = query,
+            error = error,
         ),
         actions,
         modifier,

@@ -41,7 +41,11 @@ class CorveneFetchWorker(context: Context, parameters: WorkerParameters) : Corou
     companion object {
         const val NAME = "background-fetch"
 
-        /** Hourly with a network and a battery that is not low; UPDATE keeps the schedule of an earlier enqueue. */
+        /**
+         * Hourly with a network and a battery that is not low. KEEP: every launch
+         * calls this, and UPDATE would push the first run an hour out each time, so
+         * the fetch never ran while the app was in daily use.
+         */
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<CorveneFetchWorker>(1, TimeUnit.HOURS)
                 // the app fetches by itself while it is open
@@ -53,7 +57,7 @@ class CorveneFetchWorker(context: Context, parameters: WorkerParameters) : Corou
                         .build(),
                 )
                 .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.KEEP, request)
         }
     }
 }

@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import com.wasimaster.corvene.common.CorveneLog
 import java.io.File
 
 /**
@@ -29,6 +32,8 @@ object Termux {
     }
 
     /** Opens a session in [directory]; returns an error for the user, or null when the intent went. */
+    private const val SERVICE_DELAY_MS = 800L
+
     fun open(activity: Activity, directory: String): String? {
         if (!installed(activity)) return activity.getString(R.string.plt_termux_missing)
         @Suppress("DEPRECATION") // Termux needs the path
@@ -47,7 +52,19 @@ object Termux {
             // switch to the new session and open Termux
             .putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
         return try {
-            activity.startService(intent)
+            // A Termux the user restricted in the background (ColorOS does by
+            // default) rejects the service while it is not in the foreground:
+            // its activity first, the command once it is up.
+            activity.startActivity(
+                Intent().setClassName(PACKAGE, "com.termux.app.TermuxActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    activity.startService(intent)
+                } catch (error: RuntimeException) {
+                    CorveneLog.w("termux command not started: ${error.message.orEmpty()}")
+                }
+            }, SERVICE_DELAY_MS)
             null
         } catch (error: SecurityException) {
             activity.getString(R.string.plt_termux_failed, error.message.orEmpty())

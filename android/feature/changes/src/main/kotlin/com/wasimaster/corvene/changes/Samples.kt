@@ -63,6 +63,7 @@ internal val SampleChanges = ChangesVm(
     filterNew = false,
     filterModified = false,
     filterDeleted = false,
+    renamedFilterAvailable = true,
     filterRenamed = false,
     stashOnCurrentBranch = true,
 )

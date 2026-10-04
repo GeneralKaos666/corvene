@@ -689,3 +689,26 @@ measured yet: M-A0 ran fossDebug only.
 - `generateUniffiRelease` failed with "No UniFFI metadata found": the workspace release
   profile has `strip = true`, and library-mode bindgen reads the static symbol table. The
   cargo task now sets `CARGO_PROFILE_RELEASE_STRIP=false` and strips itself (98c0e33b).
+
+## Phone verification 2026-10-05 (debug build, CPH2481)
+
+M-A3 (a)–(g) and M-A5 (a)–(d), (f), (g) pass; screenshots `m-a3-*` / `m-a5-*` in `.docs/android/compose-shots/`.
+Fixed from the run: clone URL field autocorrected (`KeyboardType.Uri`, no autocorrect); a failed clone
+showed the form again without its error (`CloneRepositoryRetry.error` now a danger Flash); the Renamed
+filter chip ignored flag 705 (`ChangesVm.renamedFilterAvailable`); `CorveneFetchWorker.schedule` used
+`UPDATE`, so every launch pushed the first fetch an hour out (`KEEP`); Open in Termux started the
+`RUN_COMMAND` service while a background-restricted Termux refused it (its activity is brought up first,
+the command follows 800 ms later).
+
+Open:
+- Ctrl+1 / Ctrl+2 do nothing (Ctrl+B and Meta+/ reach `Shortcut.of`); `input keycombination 113 8` was
+  the input. Check what key code the digit row delivers with Ctrl on this keyboard (log the event).
+- Headless fetch (M-A3 (h)) still untested: `cmd jobscheduler run -f` is refused by WorkManager before the
+  schedule ("executed before schedule"); test by waiting an hour or with `adb shell cmd jobscheduler
+  run -f <pkg> <id>` after the first interval passed.
+- First device-code poll fails with `No address associated with hostname` and recovers on the retry.
+- `jni::wrapper::objects::global_ref: Dropping a GlobalRef in a detached thread` after sign-in (the
+  context ref of `NativeContext.attach` or a bridge callback dropped off the JVM thread).
+- Minor: avatar tile shows the initial although `cache/avatars/` has the file; new repository rows show
+  the path instead of the branch until the next refresh; tablet Mobile list pane bars cramped.
+- Baseline profile and macrobenchmark (M-A5 (h)) not run yet.

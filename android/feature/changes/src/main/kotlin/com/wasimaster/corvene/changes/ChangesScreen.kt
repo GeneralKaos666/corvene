@@ -145,7 +145,7 @@ fun ChangesScreen(
         if (changes.files.isEmpty()) {
             NoChanges(Modifier.weight(1f))
         } else {
-            if (if (short) chipsOpen else !chipsHidden) FilterChips(active, actions)
+            if (if (short) chipsOpen else !chipsHidden) FilterChips(active, actions, renamed = changes.renamedFilterAvailable)
             ListHeader(changes, files.size, onFilter = if (short) ({ chipsOpen = !chipsOpen }) else null, filtered = active.isNotEmpty())
             LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag(TAG_FILES)) {
                 items(files, key = { it.path }, contentType = { "file" }) { file ->
@@ -190,9 +190,10 @@ fun ChangesScreen(
 }
 
 @Composable
-private fun FilterChips(active: Set<FilterOption>, actions: ChangesActions) {
+private fun FilterChips(active: Set<FilterOption>, actions: ChangesActions, renamed: Boolean) {
     ChipRow {
-        FilterOption.entries.forEach { option ->
+        // the Renamed filter is flag 705; the engine ignores it when off
+        FilterOption.entries.filter { renamed || it != FilterOption.Renamed }.forEach { option ->
             PrimerChip(
                 stringResource(option.label()),
                 selected = option in active,

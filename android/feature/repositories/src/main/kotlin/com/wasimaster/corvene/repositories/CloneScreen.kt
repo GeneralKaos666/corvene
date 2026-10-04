@@ -7,11 +7,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.wasimaster.corvene.design.ActionListDivider
@@ -20,6 +22,8 @@ import com.wasimaster.corvene.design.Blankslate
 import com.wasimaster.corvene.design.CorveneTheme
 import com.wasimaster.corvene.design.FilterField
 import com.wasimaster.corvene.design.IconTile
+import com.wasimaster.corvene.design.Flash
+import com.wasimaster.corvene.design.FlashVariant
 import com.wasimaster.corvene.design.Octicons
 import com.wasimaster.corvene.design.PrimerButton
 import com.wasimaster.corvene.design.PrimerButtonVariant
@@ -44,6 +48,8 @@ data class CloneState(
     val loading: Boolean = false,
     val repositories: List<CloneableRepositoryVm>? = null,
     val filter: String = "",
+    /** The last clone's failure (GHD `CloneRepositoryRetry`), shown over the form. */
+    val error: String? = null,
 )
 
 /** What the Clone screen's controls do. */
@@ -84,6 +90,17 @@ fun CloneScreen(state: CloneState, actions: CloneActions, modifier: Modifier = M
         onClose = actions::close,
         modifier = modifier,
     ) {
+        if (state.error != null) {
+            FormFields {
+                Flash(
+                    state.error,
+                    title = stringResource(R.string.repo_clone_failed),
+                    icon = Octicons.Alert,
+                    variant = FlashVariant.Danger,
+                    modifier = Modifier.testTag(TAG_CLONE_ERROR),
+                )
+            }
+        }
         UnderlineNav(
             listOf(UnderlineNavItem(stringResource(R.string.repo_tab_github)), UnderlineNavItem(stringResource(R.string.repo_tab_url))),
             selectedIndex = state.tab.ordinal,
@@ -99,6 +116,8 @@ fun CloneScreen(state: CloneState, actions: CloneActions, modifier: Modifier = M
                         Modifier.testTag(TAG_CLONE_URL),
                         label = stringResource(R.string.repo_clone_url),
                         placeholder = stringResource(R.string.repo_clone_url_hint),
+                        // a URL: no autocorrect ("Hello-World.git" became "Hello-World.github")
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
                     )
                 }
                 Destination(state, actions)
@@ -181,6 +200,7 @@ private fun Destination(state: CloneState, actions: CloneActions) {
 }
 
 const val TAG_CLONE_URL = "repo_clone_url"
+const val TAG_CLONE_ERROR = "repo_clone_error"
 const val TAG_CLONE_LIST = "repo_clone_list"
 const val TAG_CLONE_SHALLOW = "repo_clone_shallow"
 const val TAG_CLONE_SIGN_IN = "repo_clone_sign_in"
