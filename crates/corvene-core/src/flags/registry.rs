@@ -6289,6 +6289,21 @@ registry! {
         code: &["crates/corvene-git/src/status.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// A merge that cannot be aborted says which files are in the way.
+    EXPLAIN_MERGE_ABORT_FAILURE = 1206 "explain-merge-abort-failure" {
+        title: "Explain why a merge cannot be aborted",
+        summary: "When aborting a conflicted merge fails because files changed after the merge \
+                  started (git's \"Entry … not uptodate. Cannot merge.\"), the error names those \
+                  files and says to discard or stash their changes, then abort again.",
+        ghd_behaviour: "Shows git's raw output.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19973)],
+        code: &["crates/corvene-core/src/mco.rs", "crates/corvene-git/src/git_errors.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

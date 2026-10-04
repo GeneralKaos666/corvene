@@ -11,6 +11,10 @@
 //! Deviation: with `878-conflicts-open-as-banner`, conflicts found by an
 //! operation show the conflicts banner instead of opening the conflicts
 //! dialog (GHD `startMultiCommitOperationConflictFlow` opens the dialog).
+//! Deviation (`1206-explain-merge-abort-failure`): when `git merge --abort`
+//! refuses because files changed after the merge started, the error names
+//! them and says what to do ([`merge_abort_blocked_message`]); GHD shows
+//! git's output.
 //!
 //! Deviation: [`derive_conflict_state`] drops the manual resolutions when
 //! the kind of conflict changes between two status reads (a merge aborted
@@ -277,6 +281,28 @@ pub fn derive_conflict_state(
         },
         kind,
     })
+}
+
+/// `1206-explain-merge-abort-failure`: why `git merge --abort` refused,
+/// naming the files that changed after the merge started (at most five).
+pub fn merge_abort_blocked_message(paths: &[String]) -> String {
+    let shown: Vec<&str> = paths.iter().take(5).map(String::as_str).collect();
+    let names = match shown.as_slice() {
+        [one] if paths.len() == 1 => one.to_string(),
+        [rest @ .., last] if paths.len() == shown.len() => {
+            format!("{} and {last}", rest.join(", "))
+        }
+        _ => format!(
+            "{} and {} more",
+            shown.join(", "),
+            paths.len() - shown.len()
+        ),
+    };
+    let them = if paths.len() == 1 { "it" } else { "them" };
+    format!(
+        "Could not abort the merge because {names} changed after the merge started. Discard or \
+         stash the changes to {them}, then abort again."
+    )
 }
 
 /// GHD `getSquashedCommitDescription(commits, squashOnto)`
@@ -1540,6 +1566,12 @@ impl Dispatcher {
             _ => None,
         };
         let detail = mco.detail.clone();
+        // `1206-explain-merge-abort-failure`
+        let explain = matches!(detail, McoDetail::Merge { squash: false, .. })
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::EXPLAIN_MERGE_ABORT_FAILURE);
         spawn_bg(
             cx,
             move || -> corvene_git::error::Result<()> {
@@ -1565,7 +1597,21 @@ impl Dispatcher {
             },
             move |result, cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not abort", &err, cx);
+                    let blocked = match &err {
+                        corvene_git::GitError::Failed { stderr, .. } if explain => {
+                            corvene_git::merge_abort_blocked_paths(stderr)
+                        }
+                        _ => Vec::new(),
+                    };
+                    if blocked.is_empty() {
+                        Self::show_error("Could not abort", &err, cx);
+                    } else {
+                        Self::show_error(
+                            "Could not abort the merge",
+                            merge_abort_blocked_message(&blocked),
+                            cx,
+                        );
+                    }
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -3147,6 +3193,23 @@ mod tests {
             ("Title".to_string(), "body\nmore".to_string())
         );
         assert_eq!(split_message("Title"), ("Title".to_string(), String::new()));
+    }
+
+    #[test]
+    fn merge_abort_message_names_the_files() {
+        let one = merge_abort_blocked_message(&["b.txt".to_string()]);
+        assert_eq!(
+            one,
+            "Could not abort the merge because b.txt changed after the merge started. Discard \
+             or stash the changes to it, then abort again."
+        );
+        let two = merge_abort_blocked_message(&["a".to_string(), "b".to_string()]);
+        assert!(
+            two.contains("because a and b changed") && two.contains("to them"),
+            "{two}"
+        );
+        let many: Vec<String> = (1..=7).map(|i| format!("f{i}")).collect();
+        assert!(merge_abort_blocked_message(&many).contains("f1, f2, f3, f4, f5 and 2 more"));
     }
 
     #[test]

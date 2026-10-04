@@ -626,6 +626,21 @@ pub fn files_that_would_be_overwritten(stderr: &str) -> Vec<String> {
     files
 }
 
+/// Corvene (`1206-explain-merge-abort-failure`): the files of `git merge
+/// --abort`'s "error: Entry '<path>' not uptodate. Cannot merge." lines,
+/// files that changed after the merge started, which keep git from
+/// resetting the index.
+pub fn merge_abort_blocked_paths(stderr: &str) -> Vec<String> {
+    stderr
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("error: Entry '")?;
+            let path = rest.strip_suffix("' not uptodate. Cannot merge.")?;
+            (!path.is_empty()).then(|| path.to_string())
+        })
+        .collect()
+}
+
 /// GHD `parseConfigLockFilePathFromError` (`lib/git/core.ts`): the lock file
 /// of git's "error: could not lock config file <path>: File exists"
 /// (`<path>.lock`), resolved against `path`, the directory git ran in, as
@@ -908,6 +923,15 @@ mod tests {
         \tcrates/corvene-ui/src/widgets.rs\n\
         Please commit your changes or stash them before you merge.\n\
         Aborting";
+
+    #[test]
+    fn merge_abort_names_the_files_that_changed() {
+        let stderr = "error: Entry 'b.txt' not uptodate. Cannot merge.\n\
+                      error: Entry 'dir/c d.txt' not uptodate. Cannot merge.\n\
+                      fatal: Could not reset index file to revision 'HEAD'.\n";
+        assert_eq!(merge_abort_blocked_paths(stderr), ["b.txt", "dir/c d.txt"]);
+        assert!(merge_abort_blocked_paths("fatal: There is no merge to abort").is_empty());
+    }
 
     #[test]
     fn recognises_dugite_errors() {
