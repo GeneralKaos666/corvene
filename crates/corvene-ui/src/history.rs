@@ -24,7 +24,8 @@
 //! parents only (flag `807`); the compare list offers matching tags (flag
 //! `825`); pushed tags can be deleted after a confirmation (flag `826`);
 //! Cherry-pick Without Committing (flag `820`); Create Patch File(s) (flag
-//! `821`).
+//! `821`); a filter box under the compare box searches the history (flag
+//! `886`, `corvene_core::history_filter`).
 
 use std::rc::Rc;
 
@@ -257,6 +258,8 @@ enum DropHint {
 pub struct HistorySidebar {
     state: Entity<AppState>,
     compare: Entity<InputState>,
+    /// `886-history-search`: the filter box under the compare box.
+    filter: Entity<InputState>,
     list_focus: FocusHandle,
     context_menu: Option<Entity<ContextMenu>>,
     /// Live drop target while a commit drag is over the list.
@@ -308,9 +311,36 @@ impl HistorySidebar {
             }
         })
         .detach();
+        // `886`: the box edits the repository's history filter and follows
+        // it when it changes elsewhere (another repository, cleared)
+        let filter = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(mac_or("Filter Commits", "Filter commits"))
+        });
+        cx.subscribe(&filter, |this: &mut Self, input, ev: &InputEvent, cx| {
+            if matches!(ev, InputEvent::Change)
+                && let Some(id) = this.state.read(cx).selected
+            {
+                let text = input.read(cx).value().to_string();
+                Dispatcher::set_history_filter_text(id, text, cx);
+            }
+        })
+        .detach();
+        cx.observe_in(&state, window, |this, state, window, cx| {
+            let text = state
+                .read(cx)
+                .selected_state()
+                .map(|rs| rs.history_filter.text.clone())
+                .unwrap_or_default();
+            if this.filter.read(cx).value() != text.as_str() {
+                this.filter
+                    .update(cx, |input, cx| input.set_value(text, window, cx));
+            }
+        })
+        .detach();
         Self {
             state,
             compare,
+            filter,
             list_focus: cx.focus_handle(),
             context_menu: None,
             drop_hint: None,
@@ -321,6 +351,50 @@ impl HistorySidebar {
             list_scroll: UniformListScrollHandle::new(),
             shown_tip: None,
         }
+    }
+
+    /// `886-history-search`: the filter box under the compare box, in the
+    /// compare form's look.
+    fn filter_row(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let t = cx.ghd().clone();
+        let focused = self.filter.read(cx).focus_handle(cx).is_focused(window);
+        div()
+            .id("history-filter-form")
+            .key_context("HistoryFilter")
+            .on_action(cx.listener(|this, _: &CompareClear, window, cx| {
+                if let Some(id) = this.state.read(cx).selected {
+                    Dispatcher::set_history_filter_text(id, String::new(), cx);
+                }
+                this.filter
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SelectNextFile, window, cx| {
+                window.focus(&this.list_focus, cx);
+            }))
+            .flex_none()
+            .px(SPACING_HALF())
+            .pb(SPACING_HALF())
+            .bg(t.box_alt_background)
+            .border_b_1()
+            .border_color(t.box_border)
+            .ghd_tooltip(
+                "Words match the message, author or SHA. Narrow with author:name, \
+                 before:date or after:date.",
+            )
+            .child(
+                crate::widgets::filter_text_box(
+                    "history-filter",
+                    &self.filter,
+                    Some(octicon(Octicon::Search, t.text).size(zpx(12.))),
+                    window,
+                    cx,
+                )
+                .h(zpx(25.) + 2. * crate::widgets::hairline(window))
+                .pl(zpx(7.))
+                .gap(zpx(1.))
+                .when(!focused, |d| d.border_color(t.box_border)),
+            )
+            .into_any_element()
     }
 
     /// Corvene (`603-focus-list-on-section-switch`).
@@ -959,12 +1033,13 @@ impl HistorySidebar {
     ) {
         let count = selection.len();
         let busy = self.mco_in_progress(id, cx);
+        // `886`: squashing and reordering need the plain list's neighbours
         let comparing = self
             .state
             .read(cx)
             .repo_states
             .get(&id)
-            .is_some_and(|r| r.compare.is_comparing());
+            .is_some_and(|r| r.compare.is_comparing() || r.history_filter.is_active());
         let (copy_items, revert_no_commit, pick_no_commit, patches) = {
             let flags = &self.state.read(cx).flags;
             (
@@ -980,7 +1055,7 @@ impl HistorySidebar {
             let mut shas = selection.clone();
             if let Some(rs) = s.repo_states.get(&id) {
                 shas.sort_by_key(|sha| {
-                    rs.commits
+                    rs.visible_commits()
                         .iter()
                         .position(|c| &c.sha == sha)
                         .unwrap_or(usize::MAX)
@@ -1139,6 +1214,13 @@ impl HistorySidebar {
                         .is_some(),
             )
         };
+        // `886`: no reordering among filtered rows
+        let filtering = self
+            .state
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .is_some_and(|r| r.history_filter.is_active());
         Dispatcher::select_commit(id, commit.sha.clone(), cx);
         let sha = commit.sha.clone();
         let weak = cx.weak_entity();
@@ -1176,7 +1258,7 @@ impl HistorySidebar {
                     .ok();
                 }
             })
-            .enabled(!busy),
+            .enabled(!busy && !filtering),
             MenuItem::new(
                 mac_or("Revert Changes in Commit", "Revert changes in commit"),
                 {
@@ -1545,12 +1627,31 @@ impl HistorySidebar {
             Rc::new(rs.map(|r| r.selected_commits.clone()).unwrap_or_default());
         let highlighted: Rc<Vec<String>> =
             Rc::new(rs.map(|r| r.highlighted_shas.clone()).unwrap_or_default());
-        let exhausted = comparing || rs.map(|r| r.commits_exhausted).unwrap_or(true);
+        // `886`: the filter's matches page in from its own search
+        let filter = rs
+            .map(|r| &r.history_filter)
+            .filter(|f| !comparing && f.is_active());
+        let filtering = filter.is_some();
+        let exhausted = comparing
+            || match filter {
+                Some(filter) => filter.exhausted,
+                None => rs.map(|r| r.commits_exhausted).unwrap_or(true),
+            };
         let loaded = rs.map(|r| r.info.is_some()).unwrap_or(false);
         let draggable = rs.is_some_and(|r| r.mco.is_none()) && self.reorder.is_none() && !comparing;
+        // filtered rows can be dragged onto a branch, not squashed or reordered
+        let droppable = draggable && !filtering;
         if commits.is_empty() {
             let compare_loading = rs.is_some_and(|r| r.compare.loading);
+            let filter_message = filter.map(|filter| {
+                if filter.loading || !filter.searched {
+                    String::new()
+                } else {
+                    "No commits match".to_string()
+                }
+            });
             let message: String = match rs.map(|r| &r.compare.form) {
+                _ if filter_message.is_some() => filter_message.unwrap_or_default(),
                 Some(corvene_core::CompareForm::Branch { branch, mode, .. })
                     if !compare_loading =>
                 {
@@ -1655,7 +1756,11 @@ impl HistorySidebar {
                 uniform_list("commit-list-rows", count, move |range, window, cx| {
                     // GHD `onScroll` → `loadNextCommitBatch` near the end of the list
                     if !exhausted && range.end + 20 >= count {
-                        Dispatcher::load_commits(id, true, cx);
+                        if filtering {
+                            Dispatcher::load_more_history_filter(id, cx);
+                        } else {
+                            Dispatcher::load_commits(id, true, cx);
+                        }
                     }
                     let focused = list_focus.is_focused(window) || menu_open;
                     range
@@ -1683,6 +1788,7 @@ impl HistorySidebar {
                                 is_selected,
                                 focused && !in_reorder,
                                 draggable,
+                                droppable,
                                 selected.clone(),
                                 row_hint,
                                 dimmed,
@@ -1708,16 +1814,17 @@ impl HistorySidebar {
             let Some(rs) = s.repo_states.get(&id) else {
                 return;
             };
+            let commits = rs.visible_commits();
             let current = rs
                 .selected_commit
                 .as_ref()
-                .and_then(|sha| rs.commits.iter().position(|c| &c.sha == sha));
+                .and_then(|sha| commits.iter().position(|c| &c.sha == sha));
             let ix = match current {
                 // GHD `List.moveSelection` wraps around the ends
-                Some(ix) => crate::filter_list::wrap_step(ix, delta, rs.commits.len()),
+                Some(ix) => crate::filter_list::wrap_step(ix, delta, commits.len()),
                 None => 0,
             };
-            rs.commits.get(ix).map(|c| c.sha.clone())
+            commits.get(ix).map(|c| c.sha.clone())
         };
         if let Some(sha) = next {
             Dispatcher::select_commit(id, sha, cx);
@@ -1732,14 +1839,15 @@ impl HistorySidebar {
             let Some(rs) = s.repo_states.get(&id) else {
                 return;
             };
+            let commits = rs.visible_commits();
             let end = rs
                 .selected_commits
                 .last()
                 .or(rs.selected_commit.as_ref())
-                .and_then(|sha| rs.commits.iter().position(|c| &c.sha == sha));
+                .and_then(|sha| commits.iter().position(|c| &c.sha == sha));
             let Some(end) = end else { return };
-            let ix = (end as isize + delta).clamp(0, rs.commits.len() as isize - 1) as usize;
-            rs.commits.get(ix).map(|c| c.sha.clone())
+            let ix = (end as isize + delta).clamp(0, commits.len() as isize - 1) as usize;
+            commits.get(ix).map(|c| c.sha.clone())
         };
         if let Some(sha) = next {
             Dispatcher::extend_commit_selection(id, sha, cx);
@@ -2048,6 +2156,7 @@ fn commit_row(
     is_selected: bool,
     list_focused: bool,
     draggable: bool,
+    droppable: bool,
     selection: Rc<Vec<String>>,
     hint: RowHint,
     dimmed: bool,
@@ -2193,39 +2302,41 @@ fn commit_row(
                 },
             )
         })
-        .on_drag_move::<CommitDrag>(move |ev, _, cx| {
-            let bounds = ev.bounds;
-            let pos = ev.event.position;
-            let hint = if bounds.contains(&pos) {
-                let rel = (pos.y - bounds.origin.y) / bounds.size.height;
-                if rel < 0.25 {
-                    Some(DropHint::InsertAt(ix))
-                } else if rel > 0.75 {
-                    Some(DropHint::InsertAt(ix + 1))
+        .when(droppable, |d| {
+            d.on_drag_move::<CommitDrag>(move |ev, _, cx| {
+                let bounds = ev.bounds;
+                let pos = ev.event.position;
+                let hint = if bounds.contains(&pos) {
+                    let rel = (pos.y - bounds.origin.y) / bounds.size.height;
+                    if rel < 0.25 {
+                        Some(DropHint::InsertAt(ix))
+                    } else if rel > 0.75 {
+                        Some(DropHint::InsertAt(ix + 1))
+                    } else {
+                        Some(DropHint::Squash(ix))
+                    }
                 } else {
-                    Some(DropHint::Squash(ix))
-                }
-            } else {
-                None
-            };
-            if hint.is_some() {
-                let target = match hint {
-                    Some(DropHint::Squash(_)) => Some(DropTarget::Commit),
-                    Some(DropHint::InsertAt(_)) => Some(DropTarget::InsertionPoint {
-                        count: ev.drag(cx).shas.len(),
-                    }),
-                    None => None,
+                    None
                 };
-                Dispatcher::set_drag_target(target, cx);
-                weak_for_move
-                    .update(cx, |this, cx| this.update_drop_hint(hint, cx))
+                if hint.is_some() {
+                    let target = match hint {
+                        Some(DropHint::Squash(_)) => Some(DropTarget::Commit),
+                        Some(DropHint::InsertAt(_)) => Some(DropTarget::InsertionPoint {
+                            count: ev.drag(cx).shas.len(),
+                        }),
+                        None => None,
+                    };
+                    Dispatcher::set_drag_target(target, cx);
+                    weak_for_move
+                        .update(cx, |this, cx| this.update_drop_hint(hint, cx))
+                        .ok();
+                }
+            })
+            .on_drop(move |drag: &CommitDrag, _, cx| {
+                weak_for_drop
+                    .update(cx, |this, cx| this.drop_on_row(id, ix, drag, cx))
                     .ok();
-            }
-        })
-        .on_drop(move |drag: &CommitDrag, _, cx| {
-            weak_for_drop
-                .update(cx, |this, cx| this.drop_on_row(id, ix, drag, cx))
-                .ok();
+            })
         })
         .child(commit_row_contents(commit, text, secondary, badge, cx))
         .when(hint.line_above, |d| {
@@ -2307,19 +2418,29 @@ impl Render for HistorySidebar {
                 .into_any_element(),
             _ => self.commit_list(cx).into_any_element(),
         };
-        let t = cx.ghd();
+        let t = cx.ghd().clone();
         // `807`: the first-parent toggle before the compare box
-        let (first_parent_toggle, comparing) = {
+        let (first_parent_toggle, comparing, search, filter_active) = {
             let s = self.state.read(cx);
+            let rs = s.selected.and_then(|id| s.repo_states.get(&id));
             (
                 s.flags
                     .bool(corvene_core::flags::ids::HISTORY_FIRST_PARENT)
                     .then_some(s.settings.history_first_parent),
-                s.selected
-                    .and_then(|id| s.repo_states.get(&id))
-                    .is_some_and(|rs| rs.compare.is_comparing()),
+                rs.is_some_and(|rs| rs.compare.is_comparing()),
+                s.flags.bool(corvene_core::flags::ids::HISTORY_SEARCH),
+                rs.is_some_and(|rs| !rs.history_filter.text.is_empty()),
             )
         };
+        // `886`: switched off while filtering, History goes back to normal
+        if !search
+            && filter_active
+            && let Some(id) = id
+        {
+            Dispatcher::set_history_filter_text(id, String::new(), cx);
+        }
+        let filter_row = (search && !comparing && !show_list && id.is_some())
+            .then(|| self.filter_row(window, cx));
         div()
             .size_full()
             .flex()
@@ -2351,7 +2472,7 @@ impl Render for HistorySidebar {
                     .flex_none()
                     .p(SPACING_HALF())
                     .bg(t.box_alt_background)
-                    .border_b_1()
+                    .when(filter_row.is_none(), |d| d.border_b_1())
                     .border_color(t.box_border)
                     .when_some(first_parent_toggle, |d, on| {
                         d.flex()
@@ -2380,6 +2501,7 @@ impl Render for HistorySidebar {
                         )
                     }),
             )
+            .children(filter_row)
             .child(body)
             .children(self.context_menu.clone())
     }

@@ -188,6 +188,9 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("down", SelectNextFile, Some("CompareFilter")),
         KeyBinding::new("up", SelectPreviousFile, Some("CompareFilter")),
         KeyBinding::new("escape", ReorderCancel, Some("HistoryList")),
+        // `886-history-search`: Esc clears the filter, ↓ moves to the list
+        KeyBinding::new("escape", CompareClear, Some("HistoryFilter")),
+        KeyBinding::new("down", SelectNextFile, Some("HistoryFilter")),
         // GHD `FilterList.onFilterKeyDown`: ↓ / ↑ / Enter from the filter box
         KeyBinding::new("down", SelectNextFile, Some("RepositoryFilter")),
         KeyBinding::new("up", SelectPreviousFile, Some("RepositoryFilter")),

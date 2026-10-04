@@ -31,6 +31,7 @@ pub mod git_config_import;
 pub mod git_store;
 #[cfg(any(target_os = "android", test))]
 pub mod headless;
+pub mod history_filter;
 pub mod integrations;
 pub mod list_selection;
 pub mod markdown;

@@ -2045,6 +2045,7 @@ impl Dispatcher {
         Self::update_settings(cx, |s| s.history_first_parent = on);
         if let Some(id) = Self::state(cx).read(cx).selected {
             Self::load_commits(id, false, cx);
+            Self::refresh_history_filter(id, true, cx);
         }
     }
 
@@ -2147,7 +2148,9 @@ impl Dispatcher {
                                 rs.commits_exhausted = batch.len() < corvene_git::COMMIT_BATCH_SIZE;
                                 rs.commits = batch;
                             }
+                            // the filter's selection is not in the plain list
                             let missing = !rs.compare.is_comparing()
+                                && !rs.history_filter.is_active()
                                 && rs
                                     .selected_commits
                                     .iter()
@@ -2177,7 +2180,7 @@ impl Dispatcher {
                     }
                     // GHD `updateOrSelectFirstCommit`: with nothing (left)
                     // selected, the newest commit becomes the selection
-                    let comparing = rs.compare.is_comparing();
+                    let comparing = rs.compare.is_comparing() || rs.history_filter.is_active();
                     if !more && !comparing && rs.selected_commits.is_empty() {
                         Err(rs.commits.first().map(|c| c.sha.clone()))
                     } else {
@@ -2195,6 +2198,8 @@ impl Dispatcher {
                 }
                 if reload {
                     Self::load_commits(id, false, cx);
+                } else if !more {
+                    Self::refresh_history_filter(id, false, cx);
                 }
             });
         })
@@ -2305,13 +2310,14 @@ impl Dispatcher {
         in_diff
     }
 
-    /// `orderShasByHistory`: the selection oldest first.
+    /// `orderShasByHistory`: the selection oldest first, in the list History
+    /// shows (`compareState.commitSHAs`).
     pub fn ordered_selection(rs: &RepositoryState) -> Vec<String> {
         let mut with_index: Vec<(usize, &String)> = rs
             .selected_commits
             .iter()
             .filter_map(|sha| {
-                rs.commits
+                rs.visible_commits()
                     .iter()
                     .position(|c| &c.sha == sha)
                     .map(|i| (i, sha))

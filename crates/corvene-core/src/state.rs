@@ -1097,6 +1097,8 @@ pub struct RepositoryState {
 
     /// `compareState`
     pub compare: crate::compare::CompareState,
+    /// `886-history-search`: the filter box above History.
+    pub history_filter: crate::history_filter::HistoryFilter,
 
     // ---- multi-commit operations ----
     pub mco: Option<crate::mco::MultiCommitOperation>,
@@ -1238,10 +1240,13 @@ pub struct LastCommit {
 
 impl RepositoryState {
     /// The commit list the History tab shows: the comparison while comparing
-    /// to a branch, else the branch's own history.
+    /// to a branch, the filter's matches while History is filtered
+    /// (`886-history-search`), else the branch's own history.
     pub fn visible_commits(&self) -> &Vec<corvene_models::Commit> {
         if self.compare.is_comparing() {
             &self.compare.commits
+        } else if self.history_filter.is_active() {
+            &self.history_filter.commits
         } else {
             &self.commits
         }

@@ -150,6 +150,29 @@ fn commit_from_walk(
     tags: &HashMap<gix::ObjectId, Vec<String>>,
 ) -> Result<Commit> {
     let commit = info.object().map_err(|e| GitError::Gix(e.to_string()))?;
+    let parents = info.parent_ids.iter().map(|p| p.to_string()).collect();
+    build_commit(info.id, &commit, parents, tags)
+}
+
+/// The commit `id` as GHD's `getCommits` builds it, looked up by id.
+fn commit_from_id(
+    repo: &gix::Repository,
+    id: gix::ObjectId,
+    tags: &HashMap<gix::ObjectId, Vec<String>>,
+) -> Result<Commit> {
+    let commit = repo
+        .find_commit(id)
+        .map_err(|e| GitError::Gix(e.to_string()))?;
+    let parents = commit.parent_ids().map(|p| p.to_string()).collect();
+    build_commit(id, &commit, parents, tags)
+}
+
+fn build_commit(
+    id: gix::ObjectId,
+    commit: &gix::Commit<'_>,
+    parents: Vec<String>,
+    tags: &HashMap<gix::ObjectId, Vec<String>>,
+) -> Result<Commit> {
     let decoded = commit.decode().map_err(|e| GitError::Gix(e.to_string()))?;
     let (summary, body) = subject_and_body(decoded.message);
     // `%(trailers:unfold,only)` parsed by `parseRawUnfoldedTrailers`
@@ -168,7 +191,7 @@ fn commit_from_walk(
         })
         .unwrap_or_default();
     Ok(Commit {
-        sha: info.id.to_string(),
+        sha: id.to_string(),
         summary,
         body,
         author: identity(commit.author().map_err(|e| GitError::Gix(e.to_string()))?),
@@ -177,9 +200,9 @@ fn commit_from_walk(
                 .committer()
                 .map_err(|e| GitError::Gix(e.to_string()))?,
         ),
-        parents: info.parent_ids.iter().map(|p| p.to_string()).collect(),
+        parents,
         trailers,
-        tags: tags.get(&info.id).cloned().unwrap_or_default(),
+        tags: tags.get(&id).cloned().unwrap_or_default(),
     })
 }
 
@@ -224,6 +247,185 @@ pub fn get_commits_with(
         out.push(commit_from_walk(info, &tags)?);
     }
     Ok(out)
+}
+
+/// Corvene `886-history-search`: what a filtered History asks `git log`
+/// for. `words` are matched in Rust ([`commit_matches_words`]); the rest
+/// are `git log` limits.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HistoryQuery {
+    /// Each must appear in the message, the author's name or their e-mail
+    /// (any case).
+    pub words: Vec<String>,
+    /// `--author`, a fixed string matched in any case.
+    pub author: Option<String>,
+    /// `--before` / `--after`: a date git understands (`2024-05-01`,
+    /// `2.weeks.ago`).
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+impl HistoryQuery {
+    pub fn is_empty(&self) -> bool {
+        self.words.is_empty()
+            && self.author.is_none()
+            && self.before.is_none()
+            && self.after.is_none()
+    }
+
+    /// A free word that looks like an abbreviated SHA (4 to 40 hex digits),
+    /// when it is the only word.
+    pub fn sha_prefix(&self) -> Option<&str> {
+        match self.words.as_slice() {
+            [word]
+                if (4..=40).contains(&word.len())
+                    && word.bytes().all(|b| b.is_ascii_hexdigit()) =>
+            {
+                Some(word)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// One commit of a filtered History's `git log`, in its order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoggedCommit {
+    pub sha: String,
+}
+
+/// Corvene `886-history-search`: the commits reachable from `tip` that
+/// match the query's `git log` limits, newest first (`git log -i -F
+/// --format=%H [--author] [--before] [--after] <tip>`). Free words are left
+/// to [`filtered_history_page`].
+pub fn filtered_history(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    tip: &str,
+    query: &HistoryQuery,
+    first_parent: bool,
+    cancel: Option<crate::process::CancelToken>,
+) -> Result<Vec<LoggedCommit>> {
+    let mut args: Vec<String> = vec![
+        "-c".into(),
+        "core.quotePath=false".into(),
+        "log".into(),
+        "--regexp-ignore-case".into(),
+        "--fixed-strings".into(),
+        "--format=%x00%H".into(),
+    ];
+    if first_parent {
+        args.push("--first-parent".into());
+    }
+    if let Some(author) = &query.author {
+        args.push(format!("--author={author}"));
+    }
+    if let Some(before) = &query.before {
+        args.push(format!("--before={before}"));
+    }
+    if let Some(after) = &query.after {
+        args.push(format!("--after={after}"));
+    }
+    args.push(tip.to_string());
+    args.push("--".into());
+    let mut command = GitCommand::new(git).args(&args).current_dir(workdir);
+    if let Some(cancel) = cancel {
+        command = command.cancel_token(cancel);
+    }
+    let out = command.run()?;
+    Ok(parse_filtered_history(&out.stdout))
+}
+
+/// [`filtered_history`]'s output: `\0<sha>` per commit, each followed by
+/// the commit's file names when `--name-only` was asked for.
+pub fn parse_filtered_history(stdout: &[u8]) -> Vec<LoggedCommit> {
+    String::from_utf8_lossy(stdout)
+        .split('\0')
+        .filter_map(|entry| {
+            let sha = entry.lines().next()?.trim();
+            (sha.len() >= 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())).then(|| LoggedCommit {
+                sha: sha.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The commit `revision` names, as a full sha (`rev-parse <revision>^{commit}`).
+pub fn resolve_commit(workdir: &Path, revision: &str) -> Result<Option<String>> {
+    let repo = crate::handle::open(workdir)?;
+    Ok(repo
+        .rev_parse_single(revision)
+        .ok()
+        .and_then(|id| id.object().ok()?.peel_to_commit().ok())
+        .map(|c| c.id.to_string()))
+}
+
+/// Corvene `886-history-search`: every word appears in the commit's
+/// message, author name or e-mail, ignoring case. `words` are lower case.
+pub fn commit_matches_words(commit: &Commit, words: &[String]) -> bool {
+    if words.is_empty() {
+        return true;
+    }
+    let haystack = format!(
+        "{}\n{}\n{}\n{}",
+        commit.summary, commit.body, commit.author.name, commit.author.email
+    )
+    .to_lowercase();
+    words.iter().all(|w| haystack.contains(w.as_str()))
+}
+
+/// One page of a filtered History: from `logged[start..]`, the commits that
+/// match `words` ([`commit_matches_words`]) and are not in `skip`, until
+/// `limit` of them are found. Returns them and where the next page starts.
+pub fn filtered_history_page(
+    workdir: &Path,
+    logged: &[LoggedCommit],
+    start: usize,
+    words: &[String],
+    skip: &[String],
+    limit: usize,
+) -> Result<(Vec<Commit>, usize)> {
+    let repo = crate::handle::open(workdir)?;
+    let tags = tags_by_commit(&repo);
+    let mut out = Vec::new();
+    let mut next = start;
+    for entry in logged.iter().skip(start) {
+        if out.len() >= limit {
+            break;
+        }
+        next += 1;
+        if skip.contains(&entry.sha) {
+            continue;
+        }
+        let Ok(id) = gix::ObjectId::from_hex(entry.sha.as_bytes()) else {
+            continue;
+        };
+        let commit = commit_from_id(&repo, id, &tags)?;
+        if commit_matches_words(&commit, words) {
+            out.push(commit);
+        }
+    }
+    Ok((out, next))
+}
+
+/// The commits whose sha starts with `prefix` among `logged` (at most
+/// `limit`), for a SHA typed in History's filter box.
+pub fn commits_with_sha_prefix(
+    workdir: &Path,
+    logged: &[LoggedCommit],
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<Commit>> {
+    let prefix = prefix.to_ascii_lowercase();
+    let repo = crate::handle::open(workdir)?;
+    let tags = tags_by_commit(&repo);
+    logged
+        .iter()
+        .filter(|c| c.sha.starts_with(&prefix))
+        .take(limit)
+        .filter_map(|c| gix::ObjectId::from_hex(c.sha.as_bytes()).ok())
+        .map(|id| commit_from_id(&repo, id, &tags))
+        .collect()
 }
 
 /// The newest commit on the current branch that no remote has (GHD
@@ -788,6 +990,56 @@ pub fn parse_recent_authors(text: &str) -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn filtered_history_output_lists_shas() {
+        let a = "a".repeat(40);
+        let b = "b".repeat(40);
+        let out = format!("\0{a}\n\0{b}\n\nsrc/x.rs\n");
+        let logged = parse_filtered_history(out.as_bytes());
+        assert_eq!(
+            logged,
+            vec![LoggedCommit { sha: a }, LoggedCommit { sha: b }]
+        );
+    }
+
+    #[test]
+    fn words_match_message_or_author() {
+        let author = CommitIdentity {
+            name: "Mona Lisa".into(),
+            email: "mona@example.com".into(),
+            seconds: 0,
+            offset: 0,
+        };
+        let commit = Commit {
+            sha: "a".repeat(40),
+            summary: "Fix the Login form".into(),
+            body: "Closes #3\n".into(),
+            author: author.clone(),
+            committer: author,
+            parents: Vec::new(),
+            trailers: Vec::new(),
+            tags: Vec::new(),
+        };
+        let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(commit_matches_words(&commit, &words(&["login", "mona"])));
+        assert!(commit_matches_words(&commit, &words(&["example.com"])));
+        assert!(commit_matches_words(&commit, &words(&["#3"])));
+        assert!(!commit_matches_words(&commit, &words(&["login", "hubot"])));
+        assert!(commit_matches_words(&commit, &[]));
+    }
+
+    #[test]
+    fn a_lone_hex_word_is_a_sha_prefix() {
+        let query = |w: &[&str]| HistoryQuery {
+            words: w.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        assert_eq!(query(&["a1b2"]).sha_prefix(), Some("a1b2"));
+        assert_eq!(query(&["a1b"]).sha_prefix(), None);
+        assert_eq!(query(&["fix"]).sha_prefix(), None);
+        assert_eq!(query(&["a1b2", "c3d4"]).sha_prefix(), None);
+    }
+
     #[test]
     fn recent_authors_are_distinct_by_email() {
         let text = "Ann\u{1f}ann@x.io\nBob\u{1f}bob@x.io\nAnn B\u{1f}ANN@x.io\nNo Mail\u{1f}\n";
