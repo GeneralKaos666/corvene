@@ -3141,6 +3141,34 @@ impl Dispatcher {
         let submodule_error =
             std::sync::Arc::new(std::sync::Mutex::new(None::<corvene_git::GitError>));
         let submodule_error_bg = submodule_error.clone();
+        // GHD `deleteRemoteBranch` pushes with `envForRemoteOperation(remote.url)`:
+        // the signed-in accounts' credentials
+        let remote_name = match branch.kind {
+            corvene_models::BranchKind::Local => branch
+                .upstream_remote_name()
+                .filter(|_| include_remote)
+                .map(str::to_string),
+            corvene_models::BranchKind::Remote => Some(
+                branch
+                    .name
+                    .split_once('/')
+                    .map_or("origin", |(remote, _)| remote)
+                    .to_string(),
+            ),
+        };
+        let askpass = remote_name.and_then(|name| {
+            let url = Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .and_then(|r| r.info.as_ref())
+                .and_then(|i| i.remotes.iter().find(|r| r.name == name))
+                .map(|r| r.url.clone());
+            if let Some(url) = url {
+                Self::arm_credential_helper(&url, cx);
+            }
+            Self::askpass_env(cx)
+        });
         Self::run_history_op_then(
             id,
             "Could not delete branch",
@@ -3204,11 +3232,12 @@ impl Dispatcher {
                                 branch.upstream_without_remote(),
                             )
                         {
-                            corvene_git::delete_remote_branch(
+                            corvene_git::delete_remote_branch_with(
                                 git,
                                 &workdir,
                                 remote,
                                 remote_branch,
+                                askpass.as_ref(),
                             )?;
                         }
                         Ok(())
@@ -3218,7 +3247,13 @@ impl Dispatcher {
                             .name
                             .split_once('/')
                             .unwrap_or(("origin", &branch.name));
-                        corvene_git::delete_remote_branch(git, &workdir, remote, remote_branch)
+                        corvene_git::delete_remote_branch_with(
+                            git,
+                            &workdir,
+                            remote,
+                            remote_branch,
+                            askpass.as_ref(),
+                        )
                     }
                 }
             },

@@ -128,7 +128,7 @@ impl Dispatcher {
     /// Settings › Advanced › Use Git Credential Manager: only for remotes that
     /// are not GitHub (GHD `useExternalCredentialHelper`). Also arms the
     /// stalled-transfer timeout of flag `network-stall-timeout` (0 = none).
-    fn arm_credential_helper(remote_url: &str, cx: &App) {
+    pub(crate) fn arm_credential_helper(remote_url: &str, cx: &App) {
         let s = Self::state(cx).read(cx);
         let host = host_of(remote_url);
         let github = host == "github.com" || s.accounts.iter().any(|a| a.host() == host);

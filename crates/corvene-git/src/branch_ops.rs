@@ -164,7 +164,20 @@ pub fn delete_remote_branch(
     remote: &str,
     name: &str,
 ) -> Result<()> {
-    let out = crate::remote_ops::remote_operation(git.clone(), workdir, remote, None)
+    delete_remote_branch_with(git, workdir, remote, name, None)
+}
+
+/// [`delete_remote_branch`] with the signed-in accounts' credentials
+/// (`askpass`): GHD runs it with `envForRemoteOperation(remote.url)`, the
+/// credentials and the system proxy.
+pub fn delete_remote_branch_with(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+    name: &str,
+    askpass: Option<&AskpassEnv>,
+) -> Result<()> {
+    let out = crate::remote_ops::remote_operation(git.clone(), workdir, remote, askpass)
         .args(["push", remote])
         .arg(format!(":{name}"))
         .expected_errors([KnownGitError::BranchDeletionFailed])
