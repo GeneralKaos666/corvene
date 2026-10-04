@@ -29,6 +29,7 @@ mod import_git_config;
 mod import_github_desktop;
 mod language_extensions;
 mod mco_dialogs;
+mod move_repository_to_group;
 mod move_to_applications_folder;
 mod move_to_shared_storage;
 mod open_pull_request;
@@ -452,6 +453,13 @@ impl DialogHost {
             Popup::ChangeRepositoryAlias { repo } => cx
                 .new(|cx| {
                     change_repository_alias::ChangeRepositoryAliasDialog::new(
+                        state, *repo, window, cx,
+                    )
+                })
+                .into(),
+            Popup::MoveRepositoryToGroup { repo } => cx
+                .new(|cx| {
+                    move_repository_to_group::MoveRepositoryToGroupDialog::new(
                         state, *repo, window, cx,
                     )
                 })

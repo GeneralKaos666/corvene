@@ -427,6 +427,11 @@ pub enum Popup {
     ChangeRepositoryAlias {
         repo: u64,
     },
+    /// Corvene (`290-custom-repository-groups`): the repository list's
+    /// "Move to Group…".
+    MoveRepositoryToGroup {
+        repo: u64,
+    },
     /// Worktrees (GHD 3.6 `enableWorktreeSupport`).
     AddWorktree {
         repo: u64,
@@ -654,6 +659,7 @@ impl Popup {
             | Self::CreateBranch { repo, .. }
             | Self::RenameBranch { repo, .. }
             | Self::ChangeRepositoryAlias { repo, .. }
+            | Self::MoveRepositoryToGroup { repo, .. }
             | Self::AddWorktree { repo, .. }
             | Self::RenameWorktree { repo, .. }
             | Self::DeleteWorktree { repo, .. }

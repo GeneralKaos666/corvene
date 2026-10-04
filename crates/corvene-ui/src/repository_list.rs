@@ -3,6 +3,10 @@
 //! The groups are GHD `groupRepositories` ([`group_repositories`]); the
 //! filter then keeps each group's matches, as GHD `FilterList` does.
 //!
+//! Deviation (`290-custom-repository-groups`): "Move to Group…" puts a
+//! repository in a group of the user's naming, listed (by name) after
+//! Pinned and Recent and before GHD's owner groups.
+//!
 //! Deviation (`288-dead-remote-indicator`): a repository whose last fetch
 //! found no remote repository shows the alert icon and says so in its
 //! tooltip (GHD `ui/repositories-list/repository-list-item.tsx` only marks
@@ -57,6 +61,10 @@ struct Group {
     /// (`needsDisambiguation`).
     repos: Vec<(Repository, Vec<usize>, bool)>,
 }
+
+/// `290-custom-repository-groups`: a custom group's name as typed and its
+/// matching repositories (score, repository, matched name chars).
+type CustomGroup = (String, Vec<(f32, Repository, Vec<usize>)>);
 
 /// GHD `RepositoryListGroup` (`ui/repositories-list/group-repositories.ts`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -552,6 +560,15 @@ impl RepositoryFoldout {
                 .flags
                 .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST);
         let mut all: Vec<(Repository, Vec<usize>, bool)> = Vec::new();
+        // Corvene (`290-custom-repository-groups`): the repositories moved to
+        // a group of their own, by group name (ignoring case), placed after
+        // Pinned and Recent; they leave their owner groups
+        let custom_groups = state
+            .flags
+            .bool(corvene_core::flags::ids::CUSTOM_REPOSITORY_GROUPS);
+        let mut custom: std::collections::BTreeMap<String, CustomGroup> =
+            std::collections::BTreeMap::new();
+        let mut leading = groups.len();
         for group in group_repositories(&repositories, &state.indicators, &recent) {
             // GHD `FilterList`: each group's matches, best first
             let mut hits: Vec<(f32, Repository, Vec<usize>, bool)> = Vec::new();
@@ -567,6 +584,16 @@ impl RepositoryFoldout {
                         .map(|(score, matches)| (score, matches.title)),
                 };
                 if let Some((score, positions)) = hit {
+                    if let Some(name) = item.repository.group.clone().filter(|_| {
+                        custom_groups && group.identifier != RepositoryListGroup::Recent
+                    }) {
+                        custom
+                            .entry(name.to_lowercase())
+                            .or_insert_with(|| (name, Vec::new()))
+                            .1
+                            .push((score, item.repository, positions));
+                        continue;
+                    }
                     hits.push((score, item.repository, positions, item.needs_disambiguation));
                 }
             }
@@ -587,13 +614,39 @@ impl RepositoryFoldout {
                 RepositoryListGroup::Enterprise { host } => format!("host:{host}"),
                 RepositoryListGroup::Other => ":other".to_string(),
             });
+            let recent = group.identifier == RepositoryListGroup::Recent;
             groups.push(Group {
                 title: group.identifier.label().to_string().into(),
-                recent: group.identifier == RepositoryListGroup::Recent,
+                recent,
                 key: k,
                 collapsed: false,
                 repos: hits.into_iter().map(|(_, r, p, d)| (r, p, d)).collect(),
             });
+            if recent {
+                leading = groups.len();
+            }
+        }
+        for (ix, (_, (name, mut hits))) in custom.into_iter().enumerate() {
+            if query.is_empty() {
+                hits.sort_by_cached_key(|(_, r, _)| r.name().to_lowercase());
+            } else {
+                // stable: ties keep the name order
+                hits.sort_by(|a, b| b.0.total_cmp(&a.0));
+            }
+            // a name shown twice in the group gets its owner prefix
+            let mut names: HashMap<String, usize> = HashMap::new();
+            for (_, r, _) in &hits {
+                *names.entry(r.name()).or_default() += 1;
+            }
+            let repos = hits
+                .into_iter()
+                .map(|(_, r, p)| {
+                    let twice = names.get(&r.name()).copied().unwrap_or(0) > 1;
+                    (r, p, twice)
+                })
+                .collect();
+            let k = key(format!("group:{}", name.to_lowercase()));
+            groups.insert(leading + ix, Group::new(name, k, repos));
         }
         if !all.is_empty() {
             // by name, ignoring case (stable); a name shown twice gets its
@@ -1102,6 +1155,25 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
             move |_, cx| Dispatcher::set_repository_pinned(id, !pinned, cx),
         ));
     }
+    // Corvene (`290-custom-repository-groups`)
+    if state
+        .flags
+        .bool(corvene_core::flags::ids::CUSTOM_REPOSITORY_GROUPS)
+    {
+        items.push(MenuItem::new(
+            mac_or("Move to Group…", "Move to group…"),
+            move |_, cx| {
+                Dispatcher::close_foldout(cx);
+                Dispatcher::show_popup(Popup::MoveRepositoryToGroup { repo: id }, cx)
+            },
+        ));
+        if repo.group.is_some() {
+            items.push(MenuItem::new(
+                mac_or("Remove from Group", "Remove from group"),
+                move |_, cx| Dispatcher::set_repository_group(id, None, cx),
+            ));
+        }
+    }
     items.extend([
         // `buildWorktreeMenuItems` (worktree support is on)
         MenuItem::new(mac_or("Show Worktrees", "Show worktrees"), move |_, cx| {
@@ -1540,16 +1612,43 @@ fn duplicate_name_paths<'a>(
 /// Enterprise hosts, then Other; by name within a group; by name alone with
 /// `268-ungrouped-repository-list`), for ⇧⌘] / ⇧⌘[.
 pub fn list_order(state: &AppState) -> Vec<u64> {
-    if state
+    let order: Vec<u64> = if state
         .flags
         .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST)
     {
-        return state.sorted_repositories().iter().map(|r| r.id).collect();
+        state.sorted_repositories().iter().map(|r| r.id).collect()
+    } else {
+        group_repositories(&state.repositories, &HashMap::new(), &[])
+            .into_iter()
+            .flat_map(|g| g.items)
+            .map(|item| item.repository.id)
+            .collect()
+    };
+    // `290-custom-repository-groups`: the custom groups come first, by name
+    if !state
+        .flags
+        .bool(corvene_core::flags::ids::CUSTOM_REPOSITORY_GROUPS)
+    {
+        return order;
     }
-    group_repositories(&state.repositories, &HashMap::new(), &[])
+    let group_of = |id: u64| {
+        state
+            .repository(id)
+            .and_then(|r| r.group.as_ref())
+            .map(|g| g.to_lowercase())
+    };
+    let mut grouped: Vec<(String, String, u64)> = order
+        .iter()
+        .filter_map(|&id| {
+            let name = state.repository(id)?.name().to_lowercase();
+            group_of(id).map(|g| (g, name, id))
+        })
+        .collect();
+    grouped.sort();
+    grouped
         .into_iter()
-        .flat_map(|g| g.items)
-        .map(|item| item.repository.id)
+        .map(|(_, _, id)| id)
+        .chain(order.iter().copied().filter(|&id| group_of(id).is_none()))
         .collect()
 }
 

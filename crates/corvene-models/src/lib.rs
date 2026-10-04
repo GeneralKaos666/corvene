@@ -51,6 +51,10 @@ pub struct Repository {
     /// branch list's Pinned group.
     #[serde(default)]
     pub pinned_branches: Vec<String>,
+    /// Corvene (flag `290-custom-repository-groups`): the repository list
+    /// group the user moved this repository to (instead of its owner's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// GHD `ICommitOptions`: `skipCommitHooks`, `signOffCommits`, `allowEmptyCommit`.
@@ -81,6 +85,7 @@ impl Repository {
             pinned: false,
             editor: None,
             pinned_branches: Vec::new(),
+            group: None,
         }
     }
 

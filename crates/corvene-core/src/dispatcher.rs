@@ -3323,6 +3323,24 @@ impl Dispatcher {
         });
     }
 
+    /// Corvene (`290-custom-repository-groups`): move a repository to the
+    /// repository list group `group` (trimmed; `None` or empty = back to its
+    /// owner's group).
+    pub fn set_repository_group(id: u64, group: Option<String>, cx: &mut dyn Host) {
+        let group = group
+            .map(|g| g.trim().to_string())
+            .filter(|g| !g.is_empty());
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
+                && repo.group != group
+            {
+                repo.group = group;
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
     /// Corvene (`897-pinned-branches`): pin or unpin a branch of a repository.
     pub fn set_branch_pinned(id: u64, branch: String, pinned: bool, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {

@@ -154,6 +154,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::TestNotifications { repo: r }
         | Popup::WarnLocalChangesBeforeUndo { repo: r }
         | Popup::ChangeRepositoryAlias { repo: r }
+        | Popup::MoveRepositoryToGroup { repo: r }
         | Popup::ConfirmDiscardStash { repo: r }
         | Popup::PublishRepository { repo: r }
         | Popup::PushNeedsPull { repo: r }

@@ -1935,6 +1935,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/add_existing.rs", "crates/corvene-git/src/ops.rs"],
     },
 
+    /// Repository list groups of the user's naming.
+    CUSTOM_REPOSITORY_GROUPS = 290 "custom-repository-groups" {
+        title: "Custom repository groups",
+        summary: "The repository list's context menu has \"Move to Group…\", which puts the \
+                  repository in a group you name (or one already in use) instead of its owner's \
+                  group, and \"Remove from Group\". Custom groups are listed by name after Pinned \
+                  and Recent, above the owner groups, and collapse like the others.",
+        ghd_behaviour: "Repositories are grouped by GitHub owner or Enterprise host, then Other; \
+                        the groups cannot be changed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20328), Upstream::issue(21424)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-ui/src/dialogs/move_repository_to_group.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
