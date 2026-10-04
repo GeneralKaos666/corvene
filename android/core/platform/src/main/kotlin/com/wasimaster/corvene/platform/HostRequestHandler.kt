@@ -63,6 +63,13 @@ fun HostRequestHandler(core: Core, onQuit: () -> Unit) {
                     HostRequest.RequestAllFilesAccess -> requestAllFilesAccess(context)
                     HostRequest.BringToFront -> bringToFront(context)
                     HostRequest.Quit -> onQuit()
+                    is HostRequest.SharePath -> OpenPath.share(context, request.path)?.let { toast(context, it) }
+                    is HostRequest.OpenTermux ->
+                        (context as? android.app.Activity)?.let { Termux.open(it, request.dir)?.let { m -> toast(context, m) } }
+                    is HostRequest.RunTermux ->
+                        (context as? android.app.Activity)?.let { Termux.open(it, request.dir)?.let { m -> toast(context, m) } }
+                    is HostRequest.ViewPathWith ->
+                        OpenPath.viewWith(context, request.path, request.component, request.line)?.let { toast(context, it) }
                 }
             }
         }

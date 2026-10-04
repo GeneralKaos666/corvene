@@ -10,6 +10,9 @@ import com.wasimaster.corvene.ffi.gen.HostEvents
 internal class HostEventsBridge(
     private val onStateChanged: (Long) -> Unit,
     private val send: (HostRequest) -> Unit,
+    /** The applications that open a text file, as "label\tpackage/class" (answered at once). */
+    private val viewApps: () -> List<String> = { emptyList() },
+    private val packageInstalled: (String) -> Boolean = { false },
 ) : HostEvents {
     override fun stateChanged(version: ULong) = onStateChanged(version.toLong())
 
@@ -36,4 +39,18 @@ internal class HostEventsBridge(
     override fun bringToFront() = send(HostRequest.BringToFront)
 
     override fun quit() = send(HostRequest.Quit)
+
+    override fun sharePath(path: String) = send(HostRequest.SharePath(path))
+
+    override fun openTermux(dir: String) = send(HostRequest.OpenTermux(dir))
+
+    override fun runTermux(program: String, arguments: List<String>, dir: String) =
+        send(HostRequest.RunTermux(program, arguments, dir))
+
+    override fun viewPathWith(path: String, component: String, line: UInt?) =
+        send(HostRequest.ViewPathWith(path, component, line?.toInt()))
+
+    override fun viewApps(): List<String> = viewApps.invoke()
+
+    override fun packageInstalled(`package`: String): Boolean = packageInstalled.invoke(`package`)
 }

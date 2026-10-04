@@ -9,8 +9,7 @@ internal val SampleAccount = AccountVm(
     login = "octocat",
     name = "The Octocat",
     avatarUrl = "https://avatars.githubusercontent.com/u/583231",
-    host = "github.com",
-)
+    host = "github.com", avatarPath = null, emails = emptyList())
 
 internal val SampleDeviceCode = SignInVm(
     endpoint = "https://api.github.com",

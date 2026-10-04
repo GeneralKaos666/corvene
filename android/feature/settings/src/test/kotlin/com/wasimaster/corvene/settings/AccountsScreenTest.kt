@@ -13,7 +13,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-private val Octocat = AccountVm("https://api.github.com", "octocat", "The Octocat", null, "github.com")
+private val Octocat = AccountVm(endpoint = "https://api.github.com", login = "octocat", name = "The Octocat", avatarUrl = null, avatarPath = null, host = "github.com", emails = emptyList())
 
 /** Settings › Accounts: sign out asks first; sign-in rows by what is missing. */
 @RunWith(AndroidJUnit4::class)

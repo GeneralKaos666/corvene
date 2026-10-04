@@ -27,4 +27,16 @@ sealed interface HostRequest {
     data object BringToFront : HostRequest
 
     data object Quit : HostRequest
+
+    /** The share sheet for a file. */
+    data class SharePath(val path: String) : HostRequest
+
+    /** A Termux session in [dir]. */
+    data class OpenTermux(val dir: String) : HostRequest
+
+    /** [program] with [arguments] in a new Termux session in [dir]. */
+    data class RunTermux(val program: String, val arguments: List<String>, val dir: String) : HostRequest
+
+    /** Opens [path] in the application [component] ("package/class") names, at [line] when it can. */
+    data class ViewPathWith(val path: String, val component: String, val line: Int?) : HostRequest
 }

@@ -197,7 +197,7 @@ class PopupDialogTest(private val case: Case) {
                 stashCount = 1u,
                 stashOnCurrentBranch = true,
             ),
-            accounts = listOf(AccountVm("https://api.github.com", "wasi-master", null, null, "github.com")),
+            accounts = listOf(AccountVm(endpoint = "https://api.github.com", login = "wasi-master", name = null, avatarUrl = null, avatarPath = null, host = "github.com", emails = emptyList())),
             repositoryName = "demo",
         )
 

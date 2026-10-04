@@ -51,6 +51,26 @@ object OpenPath {
         return start(context, Intent.createChooser(intent, null), file)
     }
 
+    /**
+     * The engine's `view_path_with`: [path] in the application [component]
+     * ("package/class") names; [line] (1-based) reaches the applications that
+     * take one (Markor).
+     */
+    fun viewWith(context: Context, path: String, component: String, line: Int?): String? {
+        val file = File(path)
+        val uri = CorveneDocumentsProvider.documentUri(context, file) ?: return context.getString(R.string.plt_cannot_share, path)
+        val (pkg, cls) = component.split('/', limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, mimeType(file))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        if (cls.isNotEmpty()) intent.setClassName(pkg, cls) else intent.setPackage(pkg)
+        if (line != null && pkg == MARKOR) intent.putExtra(MARKOR_LINE, line - 1)
+        return start(context, intent, file)
+    }
+
+    private const val MARKOR = "net.gsantner.markor"
+    private const val MARKOR_LINE = "EXTRA_FILE_LINE_NUMBER"
+
     /** ACTION_SEND through the share sheet, as a document the receiver may read. */
     fun share(context: Context, path: String): String? {
         val file = File(path)

@@ -75,6 +75,8 @@ class Core private constructor(context: Context, config: CoreConfig) {
                             versionFlow.value = version
                         },
                         send = { requests.trySend(it) },
+                        viewApps = { InstalledApps.textViewers(context) },
+                        packageInstalled = { InstalledApps.installed(context, it) },
                     )
                     engine.complete(Corvene(config.filesDir, config.env, config.info, bridge))
                     CorveneLog.i("engine started in ${(System.nanoTime() - started) / NANOS_PER_MILLI} ms")
