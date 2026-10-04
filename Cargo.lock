@@ -1681,6 +1681,7 @@ dependencies = [
  "encoding_rs",
  "gix",
  "libc",
+ "similar",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",

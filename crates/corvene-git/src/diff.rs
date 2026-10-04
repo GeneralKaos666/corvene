@@ -199,6 +199,113 @@ pub fn open_difftool(
     cmd.run().map(|_| ())
 }
 
+/// Corvene `1208-undo-restores-line-selection`: the lines one file's
+/// change in a commit made, in the numbering of a working-directory diff
+/// against the commit's parent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommitLines {
+    /// The parent's lines the commit deleted.
+    pub deleted: std::collections::BTreeSet<u32>,
+    /// The working copy's lines that are lines the commit added (unchanged
+    /// since).
+    pub added: std::collections::BTreeSet<u32>,
+}
+
+/// Commits with more files than this are not read line by line.
+pub const COMMIT_LINES_MAX_FILES: usize = 500;
+
+/// Corvene `1208-undo-restores-line-selection`: for each file `commit`
+/// changed against `parent`, the lines it made ([`CommitLines`]). The
+/// commit's own diff comes from git; its lines are found in the working
+/// copy by a line diff of the committed file against it. Read-only. `None`
+/// for a commit of more than [`COMMIT_LINES_MAX_FILES`] files.
+pub fn lines_made_by_commit(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    parent: &str,
+    commit: &str,
+) -> Result<Option<std::collections::HashMap<String, CommitLines>>> {
+    let names = GitCommand::new(git.clone())
+        .args([
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            parent,
+            commit,
+        ])
+        .current_dir(workdir)
+        .run()?;
+    let names = String::from_utf8_lossy(&names.stdout).into_owned();
+    let paths: Vec<&str> = names.split('\0').filter(|p| !p.is_empty()).collect();
+    if paths.len() > COMMIT_LINES_MAX_FILES {
+        return Ok(None);
+    }
+    let mut out = std::collections::HashMap::new();
+    for path in paths {
+        let patch = GitCommand::new(git.clone())
+            .args([
+                "diff",
+                "--no-ext-diff",
+                "--no-color",
+                "--no-renames",
+                "-U0",
+                parent,
+                commit,
+                "--",
+                path,
+            ])
+            .current_dir(workdir)
+            .run()?;
+        let diff = parse_raw_diff(&patch.stdout);
+        let Some(hunks) = diff.hunks() else {
+            continue;
+        };
+        let lines = || hunks.iter().flat_map(|h| h.lines.iter());
+        let deleted = lines()
+            .filter(|l| l.kind == DiffLineKind::Delete)
+            .filter_map(|l| l.old_line)
+            .collect();
+        let added_in_commit: std::collections::BTreeSet<u32> = lines()
+            .filter(|l| l.kind == DiffLineKind::Add)
+            .filter_map(|l| l.new_line)
+            .collect();
+        let committed = blob_bytes(git.clone(), workdir, commit, path)
+            .map(|b| file_lines(&b))
+            .unwrap_or_default();
+        let working = working_file_lines(workdir, path, true).unwrap_or_default();
+        let added = unchanged_line_pairs(&committed, &working)
+            .filter(|(committed, _)| added_in_commit.contains(committed))
+            .map(|(_, working)| working)
+            .collect();
+        out.insert(path.to_string(), CommitLines { deleted, added });
+    }
+    Ok(Some(out))
+}
+
+/// The lines `old` and `new` have in common (a line diff), as 1-based
+/// (old line, new line) pairs.
+fn unchanged_line_pairs<'a>(
+    old: &'a [String],
+    new: &'a [String],
+) -> impl Iterator<Item = (u32, u32)> + 'a {
+    let deadline = std::time::Instant::now().checked_add(std::time::Duration::from_millis(200));
+    similar::capture_diff_slices_deadline(similar::Algorithm::Myers, old, new, deadline)
+        .into_iter()
+        .filter_map(|op| match op {
+            similar::DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } => Some(
+                (0..len).map(move |k| ((old_index + k + 1) as u32, (new_index + k + 1) as u32)),
+            ),
+            _ => None,
+        })
+        .flatten()
+}
+
 /// Corvene `714-copy-diff`: the working-directory changes of `files` as one
 /// patch `git apply` takes (`--binary`), against `base` (`HEAD`, or
 /// [`crate::NULL_TREE_SHA`] on an unborn branch). Tracked files come first,
@@ -669,7 +776,8 @@ mod tests {
 
     #[test]
     fn non_utf8_lines_keep_their_bytes_and_decode() {
-        let patch = b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n-caf\xe9\n+caf\xe9s\n ok\n";
+        let patch =
+            b"diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n-caf\xe9\n+caf\xe9s\n ok\n";
         let lines = |diff: &Diff| -> Vec<(String, Option<Vec<u8>>)> {
             diff.hunks().unwrap()[0].lines[1..]
                 .iter()
@@ -696,8 +804,14 @@ mod tests {
             ]
         );
         // UTF-8 diffs keep no bytes
-        let utf8 = parse_raw_diff_decoding("diff --git a/f b/f\n@@ -1 +1 @@\n-é\n+è\n".as_bytes(), true);
-        assert!(utf8.hunks().unwrap()[0].lines.iter().all(|l| l.raw.is_none()));
+        let utf8 =
+            parse_raw_diff_decoding("diff --git a/f b/f\n@@ -1 +1 @@\n-é\n+è\n".as_bytes(), true);
+        assert!(
+            utf8.hunks().unwrap()[0]
+                .lines
+                .iter()
+                .all(|l| l.raw.is_none())
+        );
     }
 
     #[test]

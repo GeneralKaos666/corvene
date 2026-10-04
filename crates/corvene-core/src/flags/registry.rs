@@ -6602,6 +6602,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-core/src/stash_flows.rs"],
     },
 
+    /// Undo Commit brings back which lines were in the commit.
+    UNDO_RESTORES_LINE_SELECTION = 1208 "undo-restores-line-selection" {
+        title: "Undo restores the line selection",
+        summary: "After Undo (the undo bar or History's Undo Commit), the lines the commit \
+                  had are the ticked ones: in a file only partly committed, the lines left \
+                  out of the commit come back unticked, so the same commit can be made again \
+                  after a fix to its message.",
+        ghd_behaviour: "Every line of the undone files comes back ticked, including the ones \
+                        that had been left out of the commit.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19138)],
+        code: &["crates/corvene-core/src/line_selection.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/diff.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

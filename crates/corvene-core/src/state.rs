@@ -1036,6 +1036,9 @@ pub struct RepositoryState {
     /// `790-selection-follows-lines`: for each file with a partial line
     /// selection, the diff that selection names lines of.
     pub selection_bases: HashMap<String, Arc<Diff>>,
+    /// `1208-undo-restores-line-selection`: the line selections an undone
+    /// commit had made, put on each file when a status lists it.
+    pub restored_selections: HashMap<String, corvene_models::DiffSelection>,
     pub diff_loading: bool,
     /// `749-binary-diff-as-text`: the path whose diff was asked for with
     /// `--text` ("Show diff anyway" on a binary file).

@@ -1909,13 +1909,14 @@ impl Dispatcher {
                     (true, Some(basis), Some(new_hunks))
                         if current.kind() == DiffSelectionType::Partial =>
                     {
-                        basis.hunks().map(|old| {
-                            crate::line_selection::carry_over(current, old, new_hunks)
-                        })
+                        basis
+                            .hunks()
+                            .map(|old| crate::line_selection::carry_over(current, old, new_hunks))
                     }
                     _ => None,
                 };
-                let selection = carried.unwrap_or_else(|| current.with_selectable_lines(selectable));
+                let selection =
+                    carried.unwrap_or_else(|| current.with_selectable_lines(selectable));
                 (selection != *current).then_some((i, selection))
             });
             if let Some((i, selection)) = update
@@ -1926,9 +1927,9 @@ impl Dispatcher {
             }
             if follow_lines {
                 let partial = rs.status.as_deref().is_some_and(|st| {
-                    st.files.iter().any(|f| {
-                        f.path == path && f.selection.kind() == DiffSelectionType::Partial
-                    })
+                    st.files
+                        .iter()
+                        .any(|f| f.path == path && f.selection.kind() == DiffSelectionType::Partial)
                 });
                 match rs.diff.clone() {
                     Some(diff) if partial => {
@@ -5288,24 +5289,61 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
+        // Corvene (`1208-undo-restores-line-selection`): the diffs are read
+        // the way the Changes tab reads them, so the line numbers match;
+        // not while whitespace is hidden, which turns line selection off
+        let restore = {
+            let s = Self::state(cx).read(cx);
+            (s.flags
+                .bool(crate::flags::ids::UNDO_RESTORES_LINE_SELECTION)
+                && !s.settings.hide_whitespace_in_changes_diff)
+                .then(|| s.flags.bool(crate::flags::ids::RENAMED_DIFF_AGAINST_HEAD))
+        };
         let task = cx.background_executor().spawn(async move {
             let head = corvene_git::get_commits(&workdir, "HEAD", 0, 1)?
                 .into_iter()
                 .next();
-            match head {
-                Some(commit) => crate::git_store::undo_commit(git, &workdir, &commit).map(Some),
-                None => corvene_git::undo_last_commit(git, &workdir).map(|()| None),
-            }
+            let message = match &head {
+                Some(commit) => {
+                    crate::git_store::undo_commit(git.clone(), &workdir, commit).map(Some)
+                }
+                None => corvene_git::undo_last_commit(git.clone(), &workdir).map(|()| None),
+            }?;
+            let restored = match (restore, &head) {
+                (Some(renamed_against_head), Some(commit)) => {
+                    restored_selections(git, &workdir, commit, renamed_against_head).unwrap_or_else(
+                        |err| {
+                            warn!(%err, "could not read the undone commit's lines");
+                            Vec::new()
+                        },
+                    )
+                }
+                _ => Vec::new(),
+            };
+            Ok::<_, corvene_git::GitError>((message, restored))
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
+            let (result, restored) = match result {
+                Ok((message, restored)) => (Ok(message), restored),
+                Err(err) => (Err(err), Vec::new()),
+            };
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
+                    let follow_lines = s.flags.bool(crate::flags::ids::SELECTION_FOLLOWS_LINES);
                     let rs = s.repo_state_mut(id);
                     rs.last_commit = None;
                     if let Ok(Some(message)) = &result {
                         rs.commit_message = message.clone();
                         rs.commit_message_nonce += 1;
+                    }
+                    rs.restored_selections.clear();
+                    for (path, selection, diff) in restored {
+                        // `790`: the diff those lines are positions in
+                        if follow_lines && selection.kind() == DiffSelectionType::Partial {
+                            rs.selection_bases.insert(path.clone(), diff);
+                        }
+                        rs.restored_selections.insert(path, selection);
                     }
                     cx.notify();
                 });
@@ -6547,6 +6585,52 @@ impl WorkingDiffOptions {
             self.as_text,
         ]
     }
+}
+
+/// Corvene `1208-undo-restores-line-selection`, after `commit` was undone:
+/// for each file it changed that is listed now, the selection of the lines
+/// it made (`renamed_against_head` as the Changes tab diffs) and the diff
+/// it names lines of. Nothing for a root commit (its files become
+/// untracked, all selected) or a huge one.
+fn restored_selections(
+    git: Arc<corvene_git::GitBinary>,
+    workdir: &Path,
+    commit: &corvene_models::Commit,
+    renamed_against_head: bool,
+) -> corvene_git::error::Result<
+    Vec<(
+        String,
+        corvene_models::DiffSelection,
+        Arc<corvene_models::Diff>,
+    )>,
+> {
+    let Some(parent) = commit.parents.first() else {
+        return Ok(Vec::new());
+    };
+    let Some(made) = corvene_git::lines_made_by_commit(git.clone(), workdir, parent, &commit.sha)?
+    else {
+        return Ok(Vec::new());
+    };
+    let status = corvene_git::get_status(git.clone(), workdir)?;
+    let mut out = Vec::new();
+    for file in status.files.iter().filter(|f| !f.status.submodule) {
+        let Some(lines) = made.get(&file.path) else {
+            continue;
+        };
+        let diff = corvene_git::working_directory_diff(
+            git.clone(),
+            workdir,
+            file,
+            false,
+            renamed_against_head,
+            false,
+            None,
+        )?;
+        let Some(hunks) = diff.hunks() else { continue };
+        let selection = crate::line_selection::selection_from_commit(hunks, lines);
+        out.push((file.path.clone(), selection, Arc::new(diff)));
+    }
+    Ok(out)
 }
 
 /// `file`'s diff against `HEAD` with the working copy and the committed

@@ -10,6 +10,9 @@
 //! selection was made on are matched with the new diff's by kind and text
 //! (a line diff over the changed lines): matched lines keep their state,
 //! new or unmatched ones get the file's default.
+//!
+//! Corvene `1208-undo-restores-line-selection` ([`selection_from_commit`]):
+//! after Undo, the lines the undone commit made are the ones selected.
 
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
@@ -26,14 +29,17 @@ fn changed_lines(hunks: &[DiffHunk]) -> Vec<(u32, bool, &str)> {
     hunks
         .iter()
         .flat_map(|h| {
-            h.lines.iter().enumerate().filter_map(move |(i, l)| match l.kind {
-                DiffLineKind::Add | DiffLineKind::Delete => Some((
-                    h.unified_diff_start + i as u32,
-                    l.kind == DiffLineKind::Add,
-                    l.text.as_str(),
-                )),
-                _ => None,
-            })
+            h.lines
+                .iter()
+                .enumerate()
+                .filter_map(move |(i, l)| match l.kind {
+                    DiffLineKind::Add | DiffLineKind::Delete => Some((
+                        h.unified_diff_start + i as u32,
+                        l.kind == DiffLineKind::Add,
+                        l.text.as_str(),
+                    )),
+                    _ => None,
+                })
         })
         .collect()
 }
@@ -72,6 +78,34 @@ pub fn carry_over(selection: &DiffSelection, old: &[DiffHunk], new: &[DiffHunk])
     DiffSelection::from_parts(default_all, diverging, selectable)
 }
 
+/// Corvene `1208-undo-restores-line-selection`: the selection of a
+/// working-directory diff's lines that an undone commit had made: its
+/// deletions by the parent's line number, its additions by the working
+/// copy's.
+pub fn selection_from_commit(hunks: &[DiffHunk], made: &corvene_git::CommitLines) -> DiffSelection {
+    let mut selectable = BTreeSet::new();
+    let mut unselected = BTreeSet::new();
+    for h in hunks {
+        for (i, l) in h.lines.iter().enumerate() {
+            let made_by_commit = match l.kind {
+                DiffLineKind::Add => l.new_line.is_some_and(|n| made.added.contains(&n)),
+                DiffLineKind::Delete => l.old_line.is_some_and(|n| made.deleted.contains(&n)),
+                _ => continue,
+            };
+            let ix = h.unified_diff_start + i as u32;
+            selectable.insert(ix);
+            if !made_by_commit {
+                unselected.insert(ix);
+            }
+        }
+    }
+    if unselected.is_empty() {
+        DiffSelection::all().with_selectable_lines(selectable)
+    } else {
+        DiffSelection::from_parts(true, unselected, selectable)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use corvene_models::{Diff, DiffSelectionType};
@@ -106,9 +140,8 @@ mod tests {
             "@@ -1,1 +1,2 @@\n top\n+new\n@@ -1,3 +2,3 @@\n a\n-b\n+B\n c\n@@ -10,2 +11,3 @@\n x\n+y\n z\n",
         );
         // GHD: the old positions, now other lines
-        let ghd = selection.with_selectable_lines(
-            changed_lines(&after).iter().map(|l| l.0).collect(),
-        );
+        let ghd =
+            selection.with_selectable_lines(changed_lines(&after).iter().map(|l| l.0).collect());
         assert_ne!(selected(&ghd, &after), ["+new", "-b", "+B"]);
         let carried = carry_over(&selection, &before, &after);
         assert_eq!(selected(&carried, &after), ["+new", "-b", "+B"]);
@@ -126,6 +159,27 @@ mod tests {
         let after = hunks("@@ -1,3 +1,3 @@\n a\n B\n-c\n+C\n d\n");
         let carried = carry_over(&selection, &before, &after);
         assert_eq!(selected(&carried, &after), ["-c"]);
+    }
+
+    #[test]
+    fn selection_from_commit_picks_the_committed_lines() {
+        // parent: a b c d; commit: a B c d (b → B); working copy: a B c D x
+        let working = hunks("@@ -1,4 +1,5 @@\n a\n-b\n+B\n c\n-d\n+D\n+x\n");
+        let made = corvene_git::CommitLines {
+            deleted: BTreeSet::from([2]),
+            added: BTreeSet::from([2]),
+        };
+        let selection = selection_from_commit(&working, &made);
+        assert_eq!(selected(&selection, &working), ["-b", "+B"]);
+        assert_eq!(selection.kind(), DiffSelectionType::Partial);
+        let everything = corvene_git::CommitLines {
+            deleted: BTreeSet::from([2, 4]),
+            added: BTreeSet::from([2, 4, 5]),
+        };
+        assert_eq!(
+            selection_from_commit(&working, &everything).kind(),
+            DiffSelectionType::All
+        );
     }
 
     #[test]

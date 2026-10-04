@@ -177,6 +177,16 @@ pub fn apply_merged_files(
         state.diff = None;
         changed = true;
     }
+    // Corvene `1208-undo-restores-line-selection`: the lines an undone
+    // commit made are selected once its files are listed
+    if !state.restored_selections.is_empty() {
+        let files = &mut Arc::make_mut(&mut status).files;
+        for file in files.iter_mut() {
+            if let Some(selection) = state.restored_selections.remove(&file.path) {
+                file.selection = selection;
+            }
+        }
+    }
     // Corvene `790-selection-follows-lines`: only partial selections of
     // files still listed need the diff they were made on
     if !state.selection_bases.is_empty() {

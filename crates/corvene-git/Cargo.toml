@@ -13,6 +13,7 @@ dunce = "1"
 # flag 789-non-utf8-diffs: legacy-encoded text
 encoding_rs = "0.8"
 chardetng = "1"
+similar.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
