@@ -5672,6 +5672,22 @@ registry! {
         code: &["crates/corvene-ui/src/history.rs"],
     },
 
+    /// A squash keeps its typed message after resolving conflicts.
+    SQUASH_MESSAGE_SURVIVES_CONFLICTS = 891 "squash-message-survives-conflicts" {
+        title: "Squash message survives conflicts",
+        summary: "When a squash stops on a conflict, continuing it after the conflicts are \
+                  resolved still gives the squashed commit the message typed in the Squash \
+                  dialog; other commits the rebase replays keep their own messages.",
+        ghd_behaviour: "After a conflict the squashed commit gets git's combined message of all \
+                        the squashed commits and the typed one is lost.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16129)],
+        code: &["crates/corvene-core/src/mco.rs", "crates/corvene-git/src/rebase_ops.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

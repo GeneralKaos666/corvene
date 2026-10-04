@@ -1635,7 +1635,23 @@ impl Dispatcher {
                     },
                 );
             }
-            McoDetail::Squash { commits, .. } | McoDetail::Reorder { commits, .. } => {
+            detail @ (McoDetail::Squash { .. } | McoDetail::Reorder { .. }) => {
+                // `892-squash-message-survives-conflicts`: the squash keeps
+                // the message typed for it once it is continued
+                let (commits, message) = match detail {
+                    McoDetail::Squash {
+                        commits, message, ..
+                    } => (
+                        commits,
+                        Self::state(cx)
+                            .read(cx)
+                            .flags
+                            .bool(crate::flags::ids::SQUASH_MESSAGE_SURVIVES_CONFLICTS)
+                            .then_some(message),
+                    ),
+                    McoDetail::Reorder { commits, .. } => (commits, None),
+                    _ => return,
+                };
                 let one_line: Vec<CommitOneLine> = commits
                     .iter()
                     .map(|c| CommitOneLine {
@@ -1653,16 +1669,28 @@ impl Dispatcher {
                     id,
                     cx,
                     move |on_progress| {
-                        let result = corvene_git::continue_rebase(
-                            git.clone(),
-                            &workdir,
-                            &files,
-                            &resolutions,
-                            &one_line,
-                            keep_messages,
-                            None,
-                            on_progress,
-                        )
+                        let result = match &message {
+                            Some(message) => corvene_git::continue_squash_rebase(
+                                git.clone(),
+                                &workdir,
+                                &files,
+                                &resolutions,
+                                &one_line,
+                                keep_messages,
+                                message,
+                                on_progress,
+                            ),
+                            None => corvene_git::continue_rebase(
+                                git.clone(),
+                                &workdir,
+                                &files,
+                                &resolutions,
+                                &one_line,
+                                keep_messages,
+                                None,
+                                on_progress,
+                            ),
+                        }
                         .unwrap_or_else(|e| RebaseResult::Error(e.to_string()));
                         let status = corvene_git::get_status(git, &workdir).ok();
                         (result, status)

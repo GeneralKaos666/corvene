@@ -779,6 +779,64 @@ pub fn continue_rebase(
     Ok(classify_rebase(workdir, result))
 }
 
+/// Corvene `892-squash-message-survives-conflicts`: GIT_EDITOR for
+/// continuing a squash that stopped on a conflict. git hands the editor the
+/// squashed commit's message (it starts with "This is a combination of N
+/// commits"; git runs in English here) only for the last squash of a chain;
+/// that buffer gets `message_path`'s message, any other one (a conflicted
+/// pick's own message) is left as it is, as `:` would.
+pub fn squash_continue_editor(message_path: &Path) -> Option<String> {
+    let path = message_path.to_string_lossy();
+    if path.contains('"') {
+        return None;
+    }
+    Some(format!(
+        "f() {{ if grep -q 'This is a combination of [0-9]* commits' \"$1\"; then cat \"{path}\" > \"$1\"; fi; }}; f"
+    ))
+}
+
+/// Corvene `892-squash-message-survives-conflicts`: [`continue_rebase`] for
+/// a squash, keeping the message typed for it (GHD continues with git's
+/// combined message once a squash hit a conflict).
+#[allow(clippy::too_many_arguments)]
+pub fn continue_squash_rebase(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    files: &[WorkingDirectoryFileChange],
+    resolutions: &BTreeMap<String, ManualConflictResolution>,
+    commits: &[CommitOneLine],
+    keep_messages: bool,
+    message: &str,
+    on_progress: impl FnMut(McoProgress),
+) -> Result<RebaseResult> {
+    if message.trim().is_empty() {
+        return continue_rebase(
+            git,
+            workdir,
+            files,
+            resolutions,
+            commits,
+            keep_messages,
+            None,
+            on_progress,
+        );
+    }
+    let message_path = temp_file("squash-message", message)?;
+    let editor = squash_continue_editor(&message_path);
+    let result = continue_rebase(
+        git,
+        workdir,
+        files,
+        resolutions,
+        commits,
+        keep_messages && editor.is_some(),
+        editor.as_deref(),
+        on_progress,
+    );
+    let _ = std::fs::remove_file(&message_path);
+    result
+}
+
 /// Options for the interactive rebases behind squash and reorder.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RebaseOptions {
@@ -1333,6 +1391,14 @@ pub fn continue_cherry_pick(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn squash_continue_editor_writes_only_squash_messages() {
+        let editor = squash_continue_editor(Path::new("/tmp/msg")).unwrap();
+        assert!(editor.contains("cat \"/tmp/msg\" > \"$1\""));
+        assert!(editor.contains("This is a combination of"));
+        assert_eq!(squash_continue_editor(Path::new("/tmp/a\"b")), None);
+    }
 
     #[test]
     fn merge_tree_names_skip_the_tree() {
