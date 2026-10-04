@@ -504,15 +504,19 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
     })
 }
 
-/// The banner under the toolbar (merge/rebase outcomes, conflicts…).
+/// The banner under the toolbar (merge/rebase outcomes, conflicts…), as
+/// its kind plus the payload flattened like [`PopupVm`].
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct BannerVm {
     pub kind: String,
     pub text: String,
     pub nonce: u64,
+    pub repo: Option<u64>,
+    pub fields: Vec<KeyValue>,
 }
 
 pub fn banner(s: &AppState) -> Option<BannerVm> {
+    use corvene_core::mco::Banner;
     let banner = s.banner.as_ref()?;
     let debug = format!("{banner:?}");
     let kind = debug
@@ -520,9 +524,75 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
         .next()
         .unwrap_or(&debug)
         .to_string();
+    let mut f = Fields::new();
+    let mut repo = None;
+    match banner {
+        Banner::SuccessfulMerge {
+            our_branch,
+            their_branch,
+        }
+        | Banner::BranchAlreadyUpToDate {
+            our_branch,
+            their_branch,
+        } => {
+            f.put("our_branch", our_branch)
+                .opt("their_branch", their_branch.as_ref());
+        }
+        Banner::SuccessfulRebase {
+            target_branch,
+            base_branch,
+        } => {
+            f.put("target_branch", target_branch)
+                .opt("base_branch", base_branch.as_ref());
+        }
+        Banner::SuccessfulCherryPick {
+            repo: r,
+            target_branch,
+            count,
+        } => {
+            repo = Some(*r);
+            f.put("target_branch", target_branch).put("count", count);
+        }
+        Banner::CherryPickUndone {
+            target_branch,
+            count,
+        } => {
+            f.put("target_branch", target_branch).put("count", count);
+        }
+        Banner::SuccessfulSquash { repo: r, count }
+        | Banner::SuccessfulReorder { repo: r, count } => {
+            repo = Some(*r);
+            f.put("count", count);
+        }
+        Banner::SquashUndone { count } | Banner::ReorderUndone { count } => {
+            f.put("count", count);
+        }
+        Banner::BranchDeleted {
+            repo: r,
+            branch,
+            sha,
+        } => {
+            repo = Some(*r);
+            f.put("branch", branch).put("sha", sha);
+        }
+        Banner::BranchRestored { branch } => {
+            f.put("branch", branch);
+        }
+        Banner::ConflictsFound {
+            repo: r,
+            description,
+            branch,
+        } => {
+            repo = Some(*r);
+            f.put("description", description)
+                .opt("branch", branch.as_ref());
+        }
+    }
     Some(BannerVm {
         kind,
         text: debug,
         nonce: s.banner_nonce,
+        repo,
+        fields: f.fields,
     })
 }

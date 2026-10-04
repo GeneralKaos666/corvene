@@ -45,6 +45,7 @@ pub struct BranchesVm {
     pub sync_progress: Option<f32>,
     pub last_fetched_at: Option<i64>,
     pub stash_count: u32,
+    pub stash_on_current_branch: bool,
 }
 
 pub fn branches(s: &AppState, repo: u64) -> Option<BranchesVm> {
@@ -111,5 +112,6 @@ pub fn branches(s: &AppState, repo: u64) -> Option<BranchesVm> {
                 .unwrap_or(0)
         }),
         stash_count: u32::try_from(rs.stash_count).unwrap_or(u32::MAX),
+        stash_on_current_branch: rs.stash.is_some(),
     })
 }

@@ -85,6 +85,8 @@ pub struct ChangesVm {
     pub form: CommitFormVm,
     pub conflicts: u32,
     pub stash_count: u32,
+    /// GHD `desktop_stash`: the current branch has a stash (the banner).
+    pub stash_on_current_branch: bool,
     /// The filter bar: which kinds are hidden (GHD `FilterOptions`).
     pub filter_included: bool,
     pub filter_excluded: bool,
@@ -151,6 +153,7 @@ pub fn changes(s: &AppState, repo: u64) -> Option<ChangesVm> {
         },
         conflicts: u32::try_from(conflicts).unwrap_or(u32::MAX),
         stash_count: u32::try_from(rs.stash_count).unwrap_or(u32::MAX),
+        stash_on_current_branch: rs.stash.is_some(),
         filter_included: rs.file_list_filter.included,
         filter_excluded: rs.file_list_filter.excluded,
         filter_new: rs.file_list_filter.new_files,

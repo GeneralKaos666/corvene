@@ -804,4 +804,173 @@ impl Corvene {
             Dispatcher::publish_repository(repo, name, description, private, account, org, host);
         });
     }
+
+    // ---- GHD's own dialogs, opened the way its menus do ----
+
+    pub fn request_delete_branch(&self, repo: u64, name: String) {
+        self.loop_.post(move |host| {
+            Dispatcher::show_popup(
+                corvene_core::state::Popup::DeleteBranch { repo, name },
+                host,
+            )
+        });
+    }
+
+    pub fn request_rename_branch(&self, repo: u64, name: String) {
+        self.loop_.post(move |host| {
+            Dispatcher::show_popup(
+                corvene_core::state::Popup::RenameBranch { repo, name },
+                host,
+            )
+        });
+    }
+
+    pub fn request_create_branch(
+        &self,
+        repo: u64,
+        target_sha: Option<String>,
+        initial_name: String,
+    ) {
+        self.loop_.post(move |host| {
+            Dispatcher::show_popup(
+                corvene_core::state::Popup::CreateBranch {
+                    repo,
+                    target_sha,
+                    initial_name,
+                },
+                host,
+            )
+        });
+    }
+
+    pub fn request_create_tag(&self, repo: u64, sha: String) {
+        self.loop_.post(move |host| {
+            Dispatcher::show_popup(corvene_core::state::Popup::CreateTag { repo, sha }, host)
+        });
+    }
+
+    pub fn request_merge(&self, repo: u64, squash: bool) {
+        self.loop_.post(move |host| {
+            Dispatcher::show_popup(
+                corvene_core::state::Popup::MergeBranch { repo, squash },
+                host,
+            )
+        });
+    }
+
+    pub fn request_publish_repository(&self, repo: u64) {
+        self.loop_.post(move |host| {
+            Dispatcher::show_popup(corvene_core::state::Popup::PublishRepository { repo }, host)
+        });
+    }
+
+    /// Respects "Confirm before checking out a commit".
+    pub fn request_checkout_commit(&self, repo: u64, sha: String) {
+        self.loop_
+            .post(move |host| Dispatcher::request_checkout_commit(repo, sha, host));
+    }
+
+    pub fn request_reset_to_commit(&self, repo: u64, sha: String) {
+        self.loop_
+            .post(move |host| Dispatcher::request_reset_to_commit(repo, sha, host));
+    }
+
+    /// Pushes, or asks first when it would be a force push.
+    pub fn confirm_or_force_push(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::confirm_or_force_push(repo, host));
+    }
+
+    pub fn request_drop_stash(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::request_drop_stash(repo, host));
+    }
+
+    /// Respects "Confirm before undoing a commit" and the tag warnings.
+    pub fn request_undo_commit(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::request_undo_commit(repo, host));
+    }
+
+    pub fn request_discard_changes(&self, repo: u64, paths: Vec<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::request_discard_changes(repo, paths, host));
+    }
+
+    pub fn request_remove_repository(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::request_remove_repository(repo, host));
+    }
+
+    /// Branch › Rebase current branch…: the ChooseBranch step, `base`
+    /// preselected when given.
+    pub fn start_rebase_flow(&self, repo: u64, base: Option<String>) {
+        self.loop_
+            .post(move |host| Dispatcher::start_rebase_flow_onto(repo, base, host));
+    }
+
+    /// WarnForcePush › Begin rebase.
+    pub fn start_rebase_with(&self, repo: u64, base_branch: String, force_push_checked: bool) {
+        self.loop_.post(move |host| {
+            Dispatcher::start_rebase(repo, base_branch, force_push_checked, host)
+        });
+    }
+
+    /// Leaves the operation wizard (the ChooseBranch step was dismissed).
+    pub fn end_mco(&self, repo: u64) {
+        self.loop_.post(move |host| Dispatcher::end_mco(repo, host));
+    }
+
+    pub fn request_abort_mco(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::request_abort_mco(repo, host));
+    }
+
+    /// `LocalChangesOverwritten` › Stash changes and retry.
+    pub fn stash_and_retry(&self) {
+        self.loop_.post(move |host| {
+            let Some(corvene_core::state::Popup::LocalChangesOverwritten { repo, retry, .. }) =
+                host.state_ref().popup.clone()
+            else {
+                return;
+            };
+            Dispatcher::close_popup(host);
+            Dispatcher::stash_and_retry(repo, retry, host);
+        });
+    }
+
+    /// The `BranchDeleted` banner's Undo (flag `861`).
+    pub fn undo_delete_branch(&self) {
+        self.loop_.post(move |host| {
+            let Some(corvene_core::mco::Banner::BranchDeleted { repo, branch, sha }) =
+                host.state_ref().banner.clone()
+            else {
+                return;
+            };
+            Dispatcher::restore_deleted_branch(repo, branch, sha, host);
+        });
+    }
+
+    /// `StashAndSwitchBranch` › Discard my changes (flag `865`).
+    pub fn discard_all_and_checkout(&self, repo: u64, branch: String) {
+        self.loop_
+            .post(move |host| Dispatcher::discard_all_and_checkout(repo, branch, host));
+    }
+
+    /// Branch › Update from default branch (merge, or rebase per flag `859`).
+    pub fn update_from_default(&self, repo: u64) {
+        self.loop_
+            .post(move |host| Dispatcher::update_from_default_branch(repo, host));
+    }
+
+    /// `UpstreamAlreadyExists` › Update remote / Ignore.
+    pub fn update_upstream_remote(&self, repo: u64, update: bool) {
+        self.loop_.post(move |host| {
+            if update {
+                Dispatcher::update_existing_upstream_remote(repo, host)
+            } else {
+                Dispatcher::ignore_existing_upstream_remote(repo, host)
+            }
+        });
+    }
 }

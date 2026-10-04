@@ -21,9 +21,23 @@ pub struct CommitVm {
     pub is_merge: bool,
 }
 
+/// The branch comparison on the History tab (GHD `ICompareBranch`).
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct CompareVm {
+    pub branch: String,
+    /// "behind" = their commits, "ahead" = ours.
+    pub mode: String,
+    pub ahead: u32,
+    pub behind: u32,
+    /// "clean", "conflicts", "invalid" or "loading".
+    pub merge_status: String,
+    pub merge_conflicts: u32,
+}
+
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct HistoryVm {
     pub repo: u64,
+    pub compare: Option<CompareVm>,
     pub loading: bool,
     /// No more commits past the ones loaded (`load_more` is a no-op).
     pub exhausted: bool,
@@ -53,8 +67,35 @@ pub fn history(s: &AppState, repo: u64, start: u32, count: u32) -> Option<Histor
             is_merge: c.parents.len() > 1,
         })
         .collect();
+    let compare = match &rs.compare.form {
+        corvene_core::compare::CompareForm::Branch {
+            branch,
+            mode,
+            ahead_behind,
+        } => {
+            let (merge_status, merge_conflicts) = match rs.compare.merge_status {
+                Some(corvene_models::Mergeability::Clean) => ("clean", 0),
+                Some(corvene_models::Mergeability::Conflicts(n)) => ("conflicts", n),
+                Some(corvene_models::Mergeability::Invalid) => ("invalid", 0),
+                None => ("loading", 0),
+            };
+            Some(CompareVm {
+                branch: branch.clone(),
+                mode: match mode {
+                    corvene_core::compare::ComparisonMode::Behind => "behind".into(),
+                    corvene_core::compare::ComparisonMode::Ahead => "ahead".into(),
+                },
+                ahead: ahead_behind.ahead,
+                behind: ahead_behind.behind,
+                merge_status: merge_status.into(),
+                merge_conflicts,
+            })
+        }
+        corvene_core::compare::CompareForm::History => None,
+    };
     Some(HistoryVm {
         repo,
+        compare,
         loading: rs.commits_loading,
         exhausted: rs.commits_exhausted,
         total_loaded: u32::try_from(all.len()).unwrap_or(u32::MAX),

@@ -15,6 +15,8 @@ pub struct RepoVm {
     pub fork: bool,
     pub private: bool,
     pub alias: Option<String>,
+    /// The repository page on GitHub (Enterprise hosts included).
+    pub html_url: Option<String>,
     /// The directory is gone ("Can't find").
     pub missing: bool,
     /// Flag `214`: the checked-out branch, once the indicators refreshed.
@@ -63,6 +65,7 @@ pub fn repo_list(s: &AppState) -> RepoListVm {
                 fork: r.github.as_ref().is_some_and(|g| g.fork),
                 private: r.github.as_ref().is_some_and(|g| g.private),
                 alias: r.alias.clone(),
+                html_url: r.github.as_ref().map(|g| g.html_url.clone()),
                 missing: r.missing,
                 branch: indicator.and_then(|i| i.branch.clone()),
                 changed_files: indicator
