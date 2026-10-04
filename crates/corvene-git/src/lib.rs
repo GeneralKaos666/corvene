@@ -117,7 +117,7 @@ pub use ops::{
     clone_failed_in_submodule, clone_with_options, explain_open_failure, explain_stale_worktree,
     global_identity, init_repository, init_repository_with, is_clone_path_sensitive,
     normalize_clone_url, parse_clone_progress, path_status, readme_exists, refresh_index,
-    repository_name_from_url, root_path_status, set_global_identity,
+    repositories_inside, repository_name_from_url, root_path_status, set_global_identity,
 };
 pub use patch::{
     PatchOptions, apply_patch_to_index, discard_changes_from_selection, format_patch,

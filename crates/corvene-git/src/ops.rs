@@ -87,6 +87,37 @@ pub fn root_path_status(path: &Path) -> PathStatus {
     PathStatus::NotARepository
 }
 
+/// Corvene (`289-add-repositories-in-folder`): the working directories in
+/// the folders of `dir`, `depth` levels down (`.git` folder or file; found
+/// repositories are not looked into, symbolic links not followed), sorted.
+pub fn repositories_inside(dir: &Path, depth: usize) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            let path = entry.path();
+            if entry.file_name() == ".git" {
+                continue;
+            }
+            if path.join(".git").exists() {
+                out.push(path);
+            } else if depth > 1 {
+                walk(&path, depth - 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if depth > 0 {
+        walk(dir, depth, &mut out);
+    }
+    out.sort();
+    out
+}
+
 /// Corvene addition (flag `875`): why git cannot open the repository at
 /// `path`, when the reason is an unreadable configuration file
 /// ([`crate::explain_bad_config`] of `git rev-parse --git-dir`).
@@ -620,6 +651,26 @@ pub fn clone_failed_in_submodule(path: &Path, err: &GitError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repositories_inside_look_two_levels_down() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for repo in ["a", "group/b", "group/deeper/c", "a/nested"] {
+            std::fs::create_dir_all(root.join(repo).join(".git")).unwrap();
+        }
+        std::fs::create_dir_all(root.join("plain")).unwrap();
+        std::fs::create_dir_all(root.join("wt")).unwrap();
+        std::fs::write(root.join("wt/.git"), "gitdir: elsewhere").unwrap();
+        assert_eq!(
+            repositories_inside(root, 2),
+            vec![root.join("a"), root.join("group/b"), root.join("wt")]
+        );
+        assert_eq!(
+            repositories_inside(root, 1),
+            vec![root.join("a"), root.join("wt")]
+        );
+    }
 
     #[test]
     fn large_files_stay_out_of_the_initial_commit() {

@@ -13,6 +13,10 @@
 //! Deviation (`223-add-local-path-completion`): the Local Path box
 //! autocompletes folder names (↑/↓, Enter/Tab, Esc) like the Add Worktree
 //! branch box.
+//!
+//! Deviation (`289-add-repositories-in-folder`): a folder that is not a
+//! repository but holds some (two levels down) offers "N repositories found
+//! inside. Add them all" under the not-a-repository warning.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -42,6 +46,9 @@ pub struct AddExistingRepositoryDialog {
     autocomplete: Option<Autocompletion>,
     /// `224-alias-when-adding`.
     alias: Entity<InputState>,
+    /// `289-add-repositories-in-folder`: the last folder scanned and the
+    /// repositories found in it (`None` while the scan runs).
+    inside: Option<(PathBuf, Option<Vec<PathBuf>>)>,
 }
 
 impl AddExistingRepositoryDialog {
@@ -76,7 +83,38 @@ impl AddExistingRepositoryDialog {
             warning: None,
             autocomplete: None,
             alias: cx.new(|cx| InputState::new(window, cx).placeholder("optional")),
+            inside: None,
         }
+    }
+
+    /// `289-add-repositories-in-folder`: the repositories inside `path`,
+    /// scanned once per path on a background thread (`None` until known).
+    fn repositories_inside(
+        &mut self,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<PathBuf>> {
+        if let Some((scanned, found)) = &self.inside
+            && *scanned == path
+        {
+            return found.clone();
+        }
+        self.inside = Some((path.clone(), None));
+        let scan = path.clone();
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async move { corvene_git::repositories_inside(&scan, 2) })
+                .await;
+            this.update(cx, |d, cx| {
+                if d.inside.as_ref().is_some_and(|(p, _)| *p == path) {
+                    d.inside = Some((path, Some(found)));
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        None
     }
 
     fn open_autocomplete(&mut self, cx: &mut Context<Self>) {
@@ -238,7 +276,7 @@ fn dirs_home() -> PathBuf {
 
 impl Render for AddExistingRepositoryDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = cx.ghd();
+        let t = cx.ghd().clone();
         let has_path = self.resolved_path(cx).is_some();
         let live = corvene_core::AppState::global(cx)
             .read(cx)
@@ -256,6 +294,17 @@ impl Render for AddExistingRepositoryDialog {
             // linking "create a repository"
             Some(PathStatus::NotARepository) => Some({
                 let path = self.resolved_path(cx);
+                // Corvene (`289-add-repositories-in-folder`)
+                let inside = path
+                    .clone()
+                    .filter(|_| {
+                        self.state
+                            .read(cx)
+                            .flags
+                            .bool(corvene_core::flags::ids::ADD_REPOSITORIES_IN_FOLDER)
+                    })
+                    .and_then(|p| self.repositories_inside(p, cx))
+                    .filter(|found| !found.is_empty());
                 div()
                     .flex()
                     .flex_col()
@@ -277,6 +326,23 @@ impl Render for AddExistingRepositoryDialog {
                             .into(),
                         " here instead?".into(),
                     ]))
+                    .when_some(inside, |d, found| {
+                        let (count, add) = if found.len() == 1 {
+                            ("1 repository found inside. ".to_string(), "Add it")
+                        } else {
+                            (
+                                format!("{} repositories found inside. ", found.len()),
+                                "Add them all",
+                            )
+                        };
+                        d.child(crate::widgets::paragraph(vec![
+                            div().text_color(t.text).child(count).into_any_element().into(),
+                            crate::widgets::link_button("add-inside", add, cx)
+                                .on_click(move |_, _, cx| add_several(found.clone(), cx))
+                                .into_any_element()
+                                .into(),
+                        ]))
+                    })
                     .into_any_element()
             }),
             Some(PathStatus::Bare) => Some(

@@ -1919,6 +1919,22 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// Add Local Repository offers the repositories inside a folder.
+    ADD_REPOSITORIES_IN_FOLDER = 289 "add-repositories-in-folder" {
+        title: "Add the repositories inside a folder",
+        summary: "When Add Local Repository's path is a folder that is not a repository itself \
+                  but holds some (up to two levels down), \"N repositories found inside. Add them \
+                  all\" under the warning adds every one of them.",
+        ghd_behaviour: "Only says the folder is not a Git repository and offers to create one \
+                        there; each repository inside has to be added on its own.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20965)],
+        code: &["crates/corvene-ui/src/dialogs/add_existing.rs", "crates/corvene-git/src/ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
