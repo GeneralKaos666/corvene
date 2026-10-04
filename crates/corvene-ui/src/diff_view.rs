@@ -58,6 +58,9 @@
 //! from one file; with Hide Whitespace the other's can differ in
 //! indentation), GHD always the old file's unless the diff only adds lines.
 //!
+//! Deviation (`796-lfs-text-diff`): the contents diff of a file in Git LFS
+//! has no line selection or expansion, with a note in the Changes tab.
+//!
 //! Deviation (`795-lfs-image-previews`): an LFS image whose contents are
 //! not downloaded gets a note above its pointer diff.
 //!
@@ -248,7 +251,9 @@ fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
             .px(SPACING_HALF())
             .flex()
             .items_center()
-            .when(selected, |d| d.bg(bg).text_color(t.box_selected_active_text))
+            .when(selected, |d| {
+                d.bg(bg).text_color(t.box_selected_active_text)
+            })
             .when(!selected, |d| {
                 d.cursor_pointer()
                     .text_color(t.text)
@@ -1223,14 +1228,17 @@ impl DiffView {
     }
 
     /// `757-typechange-diff`: a type change whose lines are not selectable
-    /// or expandable.
+    /// or expandable; also `796-lfs-text-diff`'s contents of a file stored
+    /// in Git LFS (the index holds its pointer).
     fn locked_type_change(&self, diff: &Diff, cx: &App) -> bool {
-        diff.warnings().is_some_and(|w| w.type_change.is_some())
-            && self
-                .state
-                .read(cx)
-                .flags
-                .bool(corvene_core::flags::ids::TYPECHANGE_DIFF)
+        let warnings = diff.warnings();
+        warnings.is_some_and(|w| w.lfs_contents)
+            || (warnings.is_some_and(|w| w.type_change.is_some())
+                && self
+                    .state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::TYPECHANGE_DIFF))
     }
 
     // ---- expansion ----
@@ -2867,6 +2875,17 @@ impl DiffView {
                         file_type_name(new)
                     )
                     .into(),
+                ])
+                .into_any_element(),
+            );
+        }
+        // `796-lfs-text-diff`
+        if warnings.lfs_contents && self.source == DiffSource::WorkingDirectory {
+            items.push(
+                paragraph(vec![
+                    "This file is stored in Git LFS: its contents are compared. Its lines \
+                     cannot be selected one by one."
+                        .into(),
                 ])
                 .into_any_element(),
             );

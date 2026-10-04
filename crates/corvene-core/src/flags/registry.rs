@@ -4883,6 +4883,23 @@ registry! {
         code: &["crates/corvene-git/src/lfs.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// Text files stored in Git LFS diff their contents.
+    LFS_TEXT_DIFF = 796 "lfs-text-diff" {
+        title: "Diff the contents of text files in Git LFS",
+        summary: "A text file stored in Git LFS shows the diff of its contents in Changes and \
+                  History when they are downloaded, instead of the pointer files' text. Its \
+                  lines cannot be selected one by one (the commit holds the pointer), only \
+                  the whole file. Files over 16 MB, binary contents and contents that are \
+                  not downloaded keep the pointer diff.",
+        ghd_behaviour: "The diff shows the LFS pointer files (version, oid and size lines).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15136)],
+        code: &["crates/corvene-git/src/lfs.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

@@ -1937,6 +1937,14 @@ impl Dispatcher {
             // line selection made on its text
             let svg_image = corvene_git::is_svg(path)
                 && matches!(rs.diff.as_deref(), Some(corvene_models::Diff::Image { .. }));
+            // `796-lfs-text-diff`: lines of the contents, not of the pointers
+            // the selection is staged against
+            let svg_image = svg_image
+                || rs
+                    .diff
+                    .as_deref()
+                    .and_then(|d| d.warnings())
+                    .is_some_and(|w| w.lfs_contents);
             // usually unchanged: only then copy the shared status
             let update = rs.status.as_deref().filter(|_| !svg_image).and_then(|st| {
                 let i = st.files.iter().position(|f| f.path == path)?;
@@ -6716,6 +6724,8 @@ struct WorkingDiffOptions {
     svg_as_image: bool,
     /// `795-lfs-image-previews`
     lfs_images: bool,
+    /// `796-lfs-text-diff`
+    lfs_text: bool,
 }
 
 impl WorkingDiffOptions {
@@ -6728,10 +6738,11 @@ impl WorkingDiffOptions {
                 && s.flags.bool(crate::flags::ids::BINARY_DIFF_AS_TEXT),
             svg_as_image: Dispatcher::svg_shown_as_image(s, rs, path),
             lfs_images: s.flags.bool(crate::flags::ids::LFS_IMAGE_PREVIEWS),
+            lfs_text: s.flags.bool(crate::flags::ids::LFS_TEXT_DIFF),
         }
     }
 
-    fn key(self) -> [bool; 6] {
+    fn key(self) -> [bool; 7] {
         [
             self.hide_whitespace,
             self.renamed_against_head,
@@ -6739,6 +6750,7 @@ impl WorkingDiffOptions {
             self.as_text,
             self.svg_as_image,
             self.lfs_images,
+            self.lfs_text,
         ]
     }
 }
@@ -6853,6 +6865,24 @@ fn compute_working_diff(
         } else {
             diff
         };
+        // `796-lfs-text-diff`: another LFS file's contents instead of its pointers
+        let diff = if options.lfs_text {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            corvene_git::lfs::resolve_lfs_text(
+                git.clone(),
+                workdir,
+                file.status.kind,
+                diff,
+                || Some(corvene_git::lfs::LfsSide::File(workdir.join(&file.path))),
+                || {
+                    corvene_git::blob_bytes(git.clone(), workdir, "HEAD", previous_path)
+                        .ok()
+                        .map(corvene_git::lfs::LfsSide::Blob)
+                },
+            )
+        } else {
+            diff
+        };
         // GHD `fileContents.newContents`: the working copy, for hunk expansion.
         let contents = (file.status.kind != corvene_models::FileStatusKind::Deleted)
             .then(|| {
@@ -6919,6 +6949,8 @@ struct CommitDiffOptions {
     hide_whitespace: bool,
     /// `795-lfs-image-previews`
     lfs_images: bool,
+    /// `796-lfs-text-diff`
+    lfs_text: bool,
 }
 
 impl CommitDiffOptions {
@@ -6926,6 +6958,7 @@ impl CommitDiffOptions {
         Self {
             hide_whitespace: s.settings.hide_whitespace_in_history_diff,
             lfs_images: s.flags.bool(crate::flags::ids::LFS_IMAGE_PREVIEWS),
+            lfs_text: s.flags.bool(crate::flags::ids::LFS_TEXT_DIFF),
         }
     }
 }
@@ -7000,6 +7033,25 @@ fn compute_commit_diff(
                     )
                     .ok()
                 },
+            )
+        } else {
+            diff
+        };
+        // `796-lfs-text-diff`: another LFS file's contents instead of its pointers
+        let diff = if options.lfs_text {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            let blob = |rev: &str, path: &str| {
+                corvene_git::blob_bytes(git.clone(), workdir, rev, path)
+                    .ok()
+                    .map(corvene_git::lfs::LfsSide::Blob)
+            };
+            corvene_git::lfs::resolve_lfs_text(
+                git.clone(),
+                workdir,
+                file.status.kind,
+                diff,
+                || blob(&newest, &file.path),
+                || blob(&format!("{oldest}^"), previous_path),
             )
         } else {
             diff

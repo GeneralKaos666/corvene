@@ -828,6 +828,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
         mode_change,
         type_change,
         lfs_not_downloaded: false,
+        lfs_contents: false,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }

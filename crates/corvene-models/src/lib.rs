@@ -1772,6 +1772,11 @@ pub struct DiffWarnings {
     /// contents are not downloaded, so its pointer files are diffed.
     #[serde(default)]
     pub lfs_not_downloaded: bool,
+    /// Corvene `796-lfs-text-diff`: the diff compares the contents of a
+    /// file stored in Git LFS, not the pointer files the index holds, so
+    /// its lines cannot be selected.
+    #[serde(default)]
+    pub lfs_contents: bool,
 }
 
 /// GHD `IDiff` (`DiffType`).

@@ -9,6 +9,10 @@
 //! Corvene `795-lfs-image-previews` ([`resolve_lfs_images`]): an image whose
 //! sides are pointers shows the images when their objects are local, else
 //! the pointer diff with a note that the contents are not downloaded.
+//!
+//! Corvene `796-lfs-text-diff` ([`resolve_lfs_text`]): any other file whose
+//! sides are pointers with local objects diffs those contents (`git diff
+//! --no-index`), its lines not selectable (the index holds the pointers).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -68,26 +72,136 @@ fn lfs_storage(git: Arc<GitBinary>, workdir: &Path) -> PathBuf {
     }
 }
 
-/// The downloaded contents `pointer` names; `None` when they are not local
-/// (or do not have the size the pointer records).
-pub fn lfs_object(git: Arc<GitBinary>, workdir: &Path, pointer: &LfsPointer) -> Option<Vec<u8>> {
+/// The file holding the downloaded contents `pointer` names; `None` when
+/// they are not local (or do not have the size the pointer records).
+pub fn lfs_object_path(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    pointer: &LfsPointer,
+) -> Option<PathBuf> {
     let path = lfs_storage(git, workdir)
         .join("objects")
         .join(&pointer.oid[0..2])
         .join(&pointer.oid[2..4])
         .join(&pointer.oid);
     let meta = std::fs::metadata(&path).ok()?;
-    if meta.len() != pointer.size {
-        return None;
+    (meta.len() == pointer.size).then_some(path)
+}
+
+/// The downloaded contents `pointer` names ([`lfs_object_path`]).
+pub fn lfs_object(git: Arc<GitBinary>, workdir: &Path, pointer: &LfsPointer) -> Option<Vec<u8>> {
+    std::fs::read(lfs_object_path(git, workdir, pointer)?).ok()
+}
+
+/// Contents larger than this are not diffed (`796-lfs-text-diff`).
+pub const LFS_TEXT_DIFF_MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+/// One side of a file for [`resolve_lfs_text`].
+pub enum LfsSide {
+    /// A file on disk (the working copy): itself, or its object when it is
+    /// a pointer.
+    File(PathBuf),
+    /// A committed blob: the object it points to.
+    Blob(Vec<u8>),
+}
+
+/// Corvene `796-lfs-text-diff`: a pointer diff of a file stored in Git LFS
+/// as the diff of the contents (`git diff --no-index` of the objects, or of
+/// the working copy), marked `DiffWarnings::lfs_contents`. `current` and
+/// `previous` are the new and old sides (`None` for a new or deleted file).
+/// Any other diff, a side whose contents are not local or too large, or
+/// contents git takes for binary keep `diff` as it is.
+pub fn resolve_lfs_text(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    kind: FileStatusKind,
+    diff: Diff,
+    current: impl FnOnce() -> Option<LfsSide>,
+    previous: impl FnOnce() -> Option<LfsSide>,
+) -> Diff {
+    if !diff.hunks().is_some_and(is_pointer_diff) {
+        return diff;
     }
-    std::fs::read(path).ok()
+    let object = |bytes: &[u8]| {
+        let pointer = lfs_pointer(bytes)?;
+        lfs_object_path(git.clone(), workdir, &pointer)
+    };
+    let file = |side: LfsSide| -> Option<PathBuf> {
+        let path = match side {
+            LfsSide::Blob(bytes) => object(&bytes)?,
+            LfsSide::File(path) => {
+                let meta = std::fs::metadata(&path).ok()?;
+                if meta.len() as usize <= MAX_POINTER_BYTES
+                    && let Ok(bytes) = std::fs::read(&path)
+                    && lfs_pointer(&bytes).is_some()
+                {
+                    object(&bytes)?
+                } else {
+                    path
+                }
+            }
+        };
+        let size = std::fs::metadata(&path).ok()?.len();
+        (size <= LFS_TEXT_DIFF_MAX_BYTES).then_some(path)
+    };
+    let side = |wanted: bool, side: Option<LfsSide>| -> Option<Option<PathBuf>> {
+        if !wanted {
+            return Some(None);
+        }
+        Some(Some(file(side?)?))
+    };
+    let (Some(new), Some(old)) = (
+        side(kind != FileStatusKind::Deleted, current()),
+        side(!kind.is_new_or_untracked(), previous()),
+    ) else {
+        return diff;
+    };
+    let null = PathBuf::from("/dev/null");
+    // run outside the repository: inside it `--no-index` still applies the
+    // LFS clean filter to the working copy, which turns it back into a pointer
+    let Ok(out) = crate::process::GitCommand::new(git)
+        .args([
+            "diff",
+            "--no-index",
+            "--no-ext-diff",
+            "--patch-with-raw",
+            "-z",
+            "--no-color",
+            "--",
+        ])
+        .arg(old.unwrap_or_else(|| null.clone()))
+        .arg(new.unwrap_or(null))
+        .current_dir(std::env::temp_dir())
+        .allow_exit_code(1)
+        .run()
+    else {
+        return diff;
+    };
+    match crate::diff::parse_raw_diff(&out.stdout) {
+        Diff::Text {
+            hunks,
+            mut warnings,
+        } => {
+            warnings.lfs_contents = true;
+            Diff::Text { hunks, warnings }
+        }
+        Diff::LargeText {
+            hunks,
+            mut warnings,
+        } => {
+            warnings.lfs_contents = true;
+            Diff::LargeText { hunks, warnings }
+        }
+        _ => diff,
+    }
 }
 
 /// Whether a text diff's lines are those of LFS pointer files.
 fn is_pointer_diff(hunks: &[corvene_models::DiffHunk]) -> bool {
     hunks.iter().flat_map(|h| h.lines.iter()).any(|l| {
         l.text.starts_with("oid sha256:")
-            || l.text.starts_with("version https://git-lfs.github.com/spec/")
+            || l.text
+                .starts_with("version https://git-lfs.github.com/spec/")
     })
 }
 
@@ -171,7 +285,8 @@ mod tests {
 
     #[test]
     fn parses_pointers() {
-        let text = format!("version https://git-lfs.github.com/spec/v1\noid sha256:{OID}\nsize 12345\n");
+        let text =
+            format!("version https://git-lfs.github.com/spec/v1\noid sha256:{OID}\nsize 12345\n");
         assert_eq!(
             lfs_pointer(text.as_bytes()),
             Some(LfsPointer {
@@ -180,9 +295,76 @@ mod tests {
             })
         );
         assert_eq!(lfs_pointer(b"\x89PNG\r\n"), None);
-        assert_eq!(lfs_pointer(b"version https://example.com\noid sha256:x\nsize 1\n"), None);
+        assert_eq!(
+            lfs_pointer(b"version https://example.com\noid sha256:x\nsize 1\n"),
+            None
+        );
         let short = "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 1\n";
         assert_eq!(lfs_pointer(short.as_bytes()), None);
+    }
+
+    #[test]
+    fn lfs_text_diffs_the_contents() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let old = b"one\ntwo\nthree\n";
+        let old_oid = "1".repeat(64);
+        let object = path.join(".git/lfs/objects/11/11");
+        std::fs::create_dir_all(&object).unwrap();
+        std::fs::write(object.join(&old_oid), old).unwrap();
+        let pointer = |oid: &str, size: usize| {
+            format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {size}\n")
+        };
+        // the working copy holds the smudged contents
+        std::fs::write(path.join("data.txt"), "one\nTWO\nthree\n").unwrap();
+        let git = Arc::new(crate::find_git().unwrap());
+        let pointer_diff = crate::parse_unified(&format!(
+            "@@ -1,3 +1,3 @@\n version https://git-lfs.github.com/spec/v1\n-oid sha256:{old_oid}\n-size {}\n+oid sha256:{}\n+size 14\n",
+            old.len(),
+            "2".repeat(64)
+        ));
+        let diff = resolve_lfs_text(
+            git.clone(),
+            path,
+            FileStatusKind::Modified,
+            pointer_diff.clone(),
+            || Some(LfsSide::File(path.join("data.txt"))),
+            || Some(LfsSide::Blob(pointer(&old_oid, old.len()).into_bytes())),
+        );
+        let changed: Vec<String> = diff
+            .hunks()
+            .unwrap()
+            .iter()
+            .flat_map(|h| h.lines.iter())
+            .filter(|l| {
+                matches!(
+                    l.kind,
+                    corvene_models::DiffLineKind::Add | corvene_models::DiffLineKind::Delete
+                )
+            })
+            .map(|l| l.text.clone())
+            .collect();
+        assert_eq!(changed, ["two", "TWO"]);
+        assert!(diff.warnings().unwrap().lfs_contents);
+        // the old contents are not downloaded: the pointer diff stays
+        let kept = resolve_lfs_text(
+            git,
+            path,
+            FileStatusKind::Modified,
+            pointer_diff.clone(),
+            || Some(LfsSide::File(path.join("data.txt"))),
+            || Some(LfsSide::Blob(pointer(&"3".repeat(64), 3).into_bytes())),
+        );
+        assert_eq!(kept, pointer_diff);
     }
 
     #[test]
@@ -199,7 +381,10 @@ mod tests {
                 .success()
         );
         let png = b"\x89PNG\r\n\x1a\nnot really".to_vec();
-        let object = path.join(".git/lfs/objects").join(&OID[0..2]).join(&OID[2..4]);
+        let object = path
+            .join(".git/lfs/objects")
+            .join(&OID[0..2])
+            .join(&OID[2..4]);
         std::fs::create_dir_all(&object).unwrap();
         std::fs::write(object.join(OID), &png).unwrap();
         let pointer = format!(
