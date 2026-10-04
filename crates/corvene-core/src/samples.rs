@@ -110,6 +110,8 @@ fn pull_request_in(github: GitHubRepository) -> PullRequest {
         author: "wasi-master".into(),
         draft: false,
         body: "Renders **Markdown** natively.".into(),
+        assignees: Vec::new(),
+        requested_reviewers: Vec::new(),
     }
 }
 

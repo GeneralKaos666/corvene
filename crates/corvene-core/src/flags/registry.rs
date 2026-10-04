@@ -2291,6 +2291,22 @@ registry! {
         code: &["crates/corvene-core/src/commit_status.rs", "crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/ci_check_popover.rs"],
     },
 
+    /// Filters for the pull request list.
+    PULL_REQUEST_LIST_FILTERS = 335 "pull-request-list-filters" {
+        title: "Pull request list filters",
+        summary: "A menu beside the Pull Requests filter box narrows the list to the pull \
+                  requests created by you, those asking you for a review, or those assigned to \
+                  you (requests to a team you are in are not counted). The choice is kept until \
+                  Corvene quits.",
+        ghd_behaviour: "The list can only be filtered by text.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10966)],
+        code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-ui/src/pull_request_list.rs", "crates/corvene-core/src/pull_requests.rs", "crates/corvene-github/src/api.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

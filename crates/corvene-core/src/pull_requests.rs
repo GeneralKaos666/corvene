@@ -141,6 +141,12 @@ pub(crate) fn convert_pull_request(client: &Client, pr: ApiPullRequest) -> (Pull
             author: pr.user.login,
             draft: pr.draft,
             body: pr.body.unwrap_or_default(),
+            assignees: pr.assignees.into_iter().map(|u| u.login).collect(),
+            requested_reviewers: pr
+                .requested_reviewers
+                .into_iter()
+                .map(|u| u.login)
+                .collect(),
         },
         open,
     )
@@ -913,6 +919,8 @@ mod tests {
             author: "octocat".into(),
             draft: false,
             body: String::new(),
+            assignees: Vec::new(),
+            requested_reviewers: Vec::new(),
         }
     }
 

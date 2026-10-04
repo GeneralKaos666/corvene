@@ -68,6 +68,8 @@ fn create_sample_pull_request(github_repository: &GitHubRepository) -> PullReque
         author: "shiftkey".to_string(),
         draft: false,
         body: "something body".to_string(),
+        assignees: Vec::new(),
+        requested_reviewers: Vec::new(),
     }
 }
 

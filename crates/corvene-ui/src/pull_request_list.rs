@@ -73,6 +73,47 @@ pub fn matches_filter(pr: &PullRequest, query: &str) -> bool {
     query.is_empty() || match_keys(query, &[pr.title.clone(), subtitle(pr)]).is_some()
 }
 
+/// Corvene (`335-pull-request-list-filters`): which pull requests the list
+/// shows besides the filter text (GHD lists them all).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PullRequestListFilter {
+    #[default]
+    All,
+    CreatedByMe,
+    ReviewRequested,
+    AssignedToMe,
+}
+
+impl PullRequestListFilter {
+    pub const ALL: [Self; 4] = [
+        Self::All,
+        Self::CreatedByMe,
+        Self::ReviewRequested,
+        Self::AssignedToMe,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => mac_or("All Pull Requests", "All pull requests"),
+            Self::CreatedByMe => mac_or("Created by Me", "Created by me"),
+            Self::ReviewRequested => mac_or("Review Requested from Me", "Review requested from me"),
+            Self::AssignedToMe => mac_or("Assigned to Me", "Assigned to me"),
+        }
+    }
+
+    /// Whether `pr` passes for the signed-in `login` (no login: only All
+    /// shows anything).
+    pub fn matches(self, pr: &PullRequest, login: Option<&str>) -> bool {
+        let me = |user: &str| login.is_some_and(|l| l.eq_ignore_ascii_case(user));
+        match self {
+            Self::All => true,
+            Self::CreatedByMe => me(&pr.author),
+            Self::ReviewRequested => pr.requested_reviewers.iter().any(|u| me(u)),
+            Self::AssignedToMe => pr.assignees.iter().any(|u| me(u)),
+        }
+    }
+}
+
 /// A pull request's CI status, as `ci_status` draws it.
 pub type CiSummary = Option<(
     corvene_core::CheckStatus,

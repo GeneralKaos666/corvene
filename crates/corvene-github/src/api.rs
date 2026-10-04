@@ -290,6 +290,19 @@ pub struct ApiPullRequest {
     pub state: String,
     #[serde(default)]
     pub draft: bool,
+    /// Corvene: the assignees and the users asked for a review (the pull
+    /// request list's filters).
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub assignees: Vec<ApiOwner>,
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub requested_reviewers: Vec<ApiOwner>,
+}
+
+/// `null` → `[]` for lists the API may send as `null`.
+fn null_as_empty_vec<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> std::result::Result<Vec<T>, D::Error> {
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
 /// `IAPIRefStatusItem` (the legacy commit status API).

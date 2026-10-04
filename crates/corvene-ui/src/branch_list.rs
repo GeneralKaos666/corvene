@@ -29,6 +29,9 @@
 //! Deviation (`854-branch-list-stash-icon`): a local branch with a Desktop
 //! stash shows the stash icon after its name (GHD `branch-list-item.tsx` does
 //! not).
+//! Deviation (`335-pull-request-list-filters`): a menu beside the Pull
+//! Requests filter box narrows the list to the pull requests created by,
+//! awaiting a review from or assigned to the signed-in user.
 //! Deviation (`1201-branch-list-tip-author`): rows can name the newest
 //! commit's author after the date.
 //! Deviation (`899-tags-in-branch-list`): with a filter typed, matching tags
@@ -122,6 +125,8 @@ pub struct BranchFoldout {
     scroll: UniformListScrollHandle,
     /// The same for the Pull Requests tab.
     pr_highlighted: Option<usize>,
+    /// `335-pull-request-list-filters`, kept while Corvene runs.
+    pr_list_filter: crate::pull_request_list::PullRequestListFilter,
     pr_scroll: ScrollHandle,
 }
 
@@ -698,6 +703,7 @@ impl BranchFoldout {
             highlighted: None,
             scroll: UniformListScrollHandle::new(),
             pr_highlighted: None,
+            pr_list_filter: Default::default(),
             pr_scroll: ScrollHandle::new(),
         }
     }
@@ -801,13 +807,39 @@ impl BranchFoldout {
     /// The Pull Requests tab's rows as the list shows them.
     fn pull_request_items(&self, id: u64, cx: &App) -> Vec<corvene_core::PullRequest> {
         let query = self.pr_filter.read(cx).value().trim().to_string();
-        self.state
-            .read(cx)
-            .pull_requests_for(id)
+        let s = self.state.read(cx);
+        let (filter, login) = self.pr_list_filter(id, cx);
+        s.pull_requests_for(id)
             .iter()
             .filter(|pr| matches_filter(pr, &query))
+            .filter(|pr| filter.matches(pr, login.as_deref()))
             .cloned()
             .collect()
+    }
+
+    /// `335-pull-request-list-filters`: the list's filter (All while the
+    /// flag is off) and the signed-in login it compares with.
+    fn pr_list_filter(
+        &self,
+        id: u64,
+        cx: &App,
+    ) -> (
+        crate::pull_request_list::PullRequestListFilter,
+        Option<String>,
+    ) {
+        let s = self.state.read(cx);
+        if !s
+            .flags
+            .bool(corvene_core::flags::ids::PULL_REQUEST_LIST_FILTERS)
+        {
+            return (Default::default(), None);
+        }
+        let login = s
+            .repository(id)
+            .and_then(|r| r.non_fork_github())
+            .and_then(|gh| s.account_for(&gh.endpoint))
+            .map(|a| a.login.clone());
+        (self.pr_list_filter, login)
     }
 
     /// GHD `ui/lib/filter-list.tsx` `onFilterKeyDown`: ↓ / ↑ in the
@@ -1094,6 +1126,11 @@ impl BranchFoldout {
         });
         let all = s.pull_requests_for(id);
         let items = self.pull_request_items(id, cx);
+        // `335-pull-request-list-filters`
+        let filters_on = s
+            .flags
+            .bool(corvene_core::flags::ids::PULL_REQUEST_LIST_FILTERS);
+        let list_filter = self.pr_list_filter(id, cx).0;
         let highlighted = self.pr_highlighted.filter(|ix| *ix < items.len());
         let highlight_bg = t.box_selected_active_background;
         let highlight_text = t.box_selected_active_text;
@@ -1174,6 +1211,46 @@ impl BranchFoldout {
                         window,
                         cx,
                     ))
+                    .when(filters_on, |d| {
+                        let entity = cx.entity().downgrade();
+                        let filtered = list_filter != Default::default();
+                        d.child(
+                            button("pull-request-list-filter", "", cx)
+                                .flex_none()
+                                .px(SPACING_HALF())
+                                .gap(zpx(2.))
+                                .when(filtered, |d| d.bg(t.box_selected_background))
+                                .icon_button_label(list_filter.label())
+                                .on_click(move |ev: &ClickEvent, window, cx| {
+                                    let position = ev.mouse_position().unwrap_or_default();
+                                    let items =
+                                        crate::pull_request_list::PullRequestListFilter::ALL
+                                            .into_iter()
+                                            .map(|filter| {
+                                                let entity = entity.clone();
+                                                crate::context_menu::MenuItem::checkbox(
+                                                    filter.label(),
+                                                    filter == list_filter,
+                                                    move |_, cx| {
+                                                        entity
+                                                            .update(cx, |this, cx| {
+                                                                this.pr_list_filter = filter;
+                                                                this.pr_highlighted = None;
+                                                                cx.notify();
+                                                            })
+                                                            .ok();
+                                                    },
+                                                )
+                                            })
+                                            .collect();
+                                    crate::native_menu::show_context_menu(
+                                        items, position, window, cx,
+                                    );
+                                })
+                                .child(octicon(Octicon::Filter, t.secondary_button_text))
+                                .child(octicon(Octicon::TriangleDown, t.secondary_button_text)),
+                        )
+                    })
                     .child(
                         button("pull-request-refresh", "", cx)
                             .flex_none()
@@ -1203,7 +1280,7 @@ impl BranchFoldout {
                     no_pull_requests(
                         id,
                         repository_name,
-                        !query.is_empty(),
+                        !query.is_empty() || list_filter != Default::default(),
                         loading && all.is_empty(),
                         on_default_branch,
                         cx,
@@ -1887,16 +1964,11 @@ impl Render for BranchFoldout {
         let open_prs = self.state.read(cx).pull_requests_for(id).len();
         if tab == BranchesTab::PullRequests {
             // `CIStatus.subscribe` for every row on screen
-            let refs: Vec<(corvene_core::GitHubRepository, String)> = {
-                let query = self.pr_filter.read(cx).value().trim().to_string();
-                self.state
-                    .read(cx)
-                    .pull_requests_for(id)
-                    .iter()
-                    .filter(|pr| matches_filter(pr, &query))
-                    .filter_map(|pr| pr.base.repository.clone().map(|r| (r, pr.commit_ref())))
-                    .collect()
-            };
+            let refs: Vec<(corvene_core::GitHubRepository, String)> = self
+                .pull_request_items(id, cx)
+                .iter()
+                .filter_map(|pr| pr.base.repository.clone().map(|r| (r, pr.commit_ref())))
+                .collect();
             for (base, git_ref) in refs {
                 Dispatcher::touch_commit_status(&base, &git_ref, None, cx);
             }

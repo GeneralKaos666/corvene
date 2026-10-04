@@ -1787,6 +1787,12 @@ pub struct PullRequest {
     pub author: String,
     pub draft: bool,
     pub body: String,
+    /// The assignees' logins (Corvene, `335-pull-request-list-filters`).
+    #[serde(default)]
+    pub assignees: Vec<String>,
+    /// The users asked for a review (logins; team requests left out).
+    #[serde(default)]
+    pub requested_reviewers: Vec<String>,
 }
 
 impl PullRequest {

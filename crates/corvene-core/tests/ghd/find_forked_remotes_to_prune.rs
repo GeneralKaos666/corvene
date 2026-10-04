@@ -62,6 +62,8 @@ fn create_sample_pull_request(
         author: user_name.to_string(),
         draft: false,
         body: "sample body".to_string(),
+        assignees: Vec::new(),
+        requested_reviewers: Vec::new(),
     }
 }
 
