@@ -17,11 +17,14 @@
 //! Deviation (`776-stash-add-to-existing`): [`add_to_desktop_stash`] folds
 //! the current changes into the branch's stash instead of replacing it (GHD
 //! can only overwrite, `createStashAndDropPreviousEntry`).
+//!
+//! Deviation (`777-stash-selected-files`): [`create_desktop_stash_of_files`]
+//! stashes some of the changed files (GHD stashes all of them).
 
 use std::path::Path;
 use std::sync::Arc;
 
-use corvene_models::StashEntry;
+use corvene_models::{FileStatusKind, StashEntry, WorkingDirectoryFileChange};
 
 use crate::branch_ops::{drop_desktop_stash_entry, stash_entry_matching_sha};
 use crate::detect::GitBinary;
@@ -171,6 +174,87 @@ fn split_nul(stdout: &[u8]) -> Vec<String> {
         .filter(|p| !p.is_empty())
         .map(|p| String::from_utf8_lossy(p).into_owned())
         .collect()
+}
+
+/// `777-stash-selected-files`: `createDesktopStashEntry` for `files` only:
+/// their untracked ones are added to the index first, a staged rename
+/// brings its old path back to the index (`git stash push` refuses a path
+/// it no longer knows; the rename comes back as a deletion plus a new
+/// file), then `git stash push -m !!GitHub_Desktop<branch> -- <paths>`.
+/// Returns false when there was nothing to stash.
+pub fn create_desktop_stash_of_files(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch: &str,
+    files: &[WorkingDirectoryFileChange],
+    guard_assume_unchanged: bool,
+) -> Result<bool> {
+    if files.is_empty() {
+        return Ok(false);
+    }
+    let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+    if guard_assume_unchanged {
+        let hidden: Vec<String> = crate::modified_assume_unchanged(git.clone(), workdir)?
+            .into_iter()
+            .filter(|p| paths.contains(p))
+            .collect();
+        if !hidden.is_empty() {
+            return Err(GitError::Gix(format!(
+                "Your changes were not stashed: {} {} marked assume-unchanged, and a stash would \
+                 discard {} local changes without saving them. Run git update-index \
+                 --no-assume-unchanged first.",
+                hidden.join(", "),
+                if hidden.len() == 1 { "is" } else { "are" },
+                if hidden.len() == 1 { "its" } else { "their" },
+            )));
+        }
+    }
+    let untracked: Vec<String> = files
+        .iter()
+        .filter(|f| f.status.kind == FileStatusKind::Untracked)
+        .map(|f| f.path.clone())
+        .collect();
+    if !untracked.is_empty() {
+        GitCommand::new(git.clone())
+            .args(["update-index", "--add", "-z", "--stdin"])
+            .current_dir(workdir)
+            .stdin(nul_separated(&untracked))
+            .run()?;
+    }
+    let renamed_from: Vec<String> = files
+        .iter()
+        .filter(|f| f.status.kind == FileStatusKind::Renamed)
+        .filter_map(|f| f.old_path.clone())
+        .collect();
+    if !renamed_from.is_empty() {
+        mark_conflicts_resolved(git.clone(), workdir, &renamed_from)?;
+        paths.extend(renamed_from);
+    }
+    let out = GitCommand::new(git)
+        .args([
+            "stash",
+            "push",
+            "-m",
+            &crate::desktop_stash_message(branch),
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ])
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .current_dir(workdir)
+        .stdin(nul_separated(&paths))
+        .allow_exit_code(1)
+        .run()?;
+    if out.stdout_string()?.trim() == "No local changes to save" {
+        return Ok(false);
+    }
+    if !out.status.success() {
+        return Err(GitError::Failed {
+            args: "stash push".into(),
+            code: out.status.code(),
+            stderr: out.stderr,
+        });
+    }
+    Ok(true)
 }
 
 /// What [`add_to_desktop_stash`] did.
@@ -644,6 +728,40 @@ mod tests {
                 .to_string_lossy()
                 .starts_with("corvene-")
         }));
+    }
+
+    #[test]
+    fn stashes_only_the_selected_files() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        for (file, text) in [("b.txt", "b1\n"), ("r.txt", "r\n")] {
+            std::fs::write(path.join(file), text).unwrap();
+        }
+        run(path, &["add", "."]);
+        run(path, &["commit", "-q", "-m", "more"]);
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        std::fs::write(path.join("b.txt"), "b2\n").unwrap();
+        std::fs::write(path.join("u.txt"), "u\n").unwrap();
+        std::fs::write(path.join("v.txt"), "v\n").unwrap();
+        run(path, &["mv", "r.txt", "r2.txt"]);
+        let status = crate::get_status(git.clone(), path).unwrap();
+        let picked: Vec<WorkingDirectoryFileChange> = status
+            .files
+            .into_iter()
+            .filter(|f| ["a.txt", "u.txt", "r2.txt"].contains(&f.path.as_str()))
+            .collect();
+        assert_eq!(picked.len(), 3);
+        assert!(create_desktop_stash_of_files(git.clone(), path, "main", &picked, false).unwrap());
+        assert_eq!(porcelain(path), " M b.txt\n?? v.txt\n");
+        let entry = crate::get_stashes(git.clone(), path).unwrap().0.remove(0);
+        assert_eq!(entry.branch.as_deref(), Some("main"));
+        crate::pop_stash_entry(git, path, &entry.sha).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "two\n"
+        );
+        assert!(path.join("u.txt").exists() && path.join("r2.txt").exists());
+        assert!(!path.join("r.txt").exists());
     }
 
     #[test]

@@ -17,6 +17,10 @@
 //! … when changes are present" offer Add to Stash, which folds the changes
 //! into the branch's stash when the two do not conflict
 //! (`corvene_git::add_to_desktop_stash`); GHD can only overwrite the stash.
+//!
+//! Deviation (`777-stash-selected-files`): the changes list's file menu
+//! stashes the selected files ([`Dispatcher::stash_selected_files`]) while
+//! the branch has no stash of its own; GHD stashes all changes or none.
 
 use std::path::PathBuf;
 
@@ -329,6 +333,54 @@ impl Dispatcher {
                 } else {
                     Self::end_mco(id, cx);
                 }
+            },
+            cx,
+        );
+    }
+
+    /// `777-stash-selected-files` › Stash N Selected Files: a Desktop stash
+    /// of `paths` only, on the current branch. Refused while the branch has
+    /// a stash (the menu item is disabled then).
+    pub fn stash_selected_files(id: u64, paths: Vec<String>, cx: &mut App) {
+        let (branch, files, has_stash, guard) = {
+            let s = Self::state(cx).read(cx);
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            let wanted: std::collections::HashSet<&str> =
+                paths.iter().map(String::as_str).collect();
+            (
+                rs.info
+                    .as_ref()
+                    .and_then(|i| i.current_branch())
+                    .map(|b| b.name.clone()),
+                rs.status
+                    .as_deref()
+                    .map(|st| {
+                        st.files
+                            .iter()
+                            .filter(|f| wanted.contains(f.path.as_str()))
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                rs.desktop_stash().is_some(),
+                s.flags
+                    .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED),
+            )
+        };
+        let Some(branch) = branch else {
+            return;
+        };
+        if has_stash || files.is_empty() {
+            return;
+        }
+        Self::run_history_op(
+            id,
+            "Could not stash changes",
+            move |git, workdir| {
+                corvene_git::create_desktop_stash_of_files(git, &workdir, &branch, &files, guard)
+                    .map(|_| ())
             },
             cx,
         );

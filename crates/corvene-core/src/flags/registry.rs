@@ -4467,6 +4467,22 @@ registry! {
         code: &["crates/corvene-git/src/stash_ops.rs", "crates/corvene-core/src/stash_flows.rs", "crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/dialogs/mco_dialogs.rs"],
     },
 
+    /// The changes list can stash only the selected files.
+    STASH_SELECTED_FILES = 777 "stash-selected-files" {
+        title: "Stash selected files",
+        summary: "A changed file's menu has Stash File, or Stash N Selected Files for a \
+                  selection: those files (new ones included) go into the branch's stash and \
+                  the other changes stay. The branch keeps one stash, so the item is disabled, \
+                  saying why, while the branch already has one.",
+        ghd_behaviour: "Only all changes can be stashed (Stash All Changes).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11531), Upstream::issue(14859)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/stash_flows.rs", "crates/corvene-git/src/stash_ops.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

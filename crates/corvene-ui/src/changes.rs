@@ -55,6 +55,7 @@
 //!   (`616-accept-summary-placeholder`).
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
 //!   pattern before it is added to `.gitignore` (`768-ignore-custom-pattern`).
+//! - a file menu can stash the selected files (`777-stash-selected-files`).
 //! - conflicts left by restoring a stash replace the commit form with a list
 //!   of the files to resolve (`774-stash-conflict-flow`,
 //!   `crate::stash_conflicts`).
@@ -2258,6 +2259,7 @@ impl ChangesSidebar {
             copy_diff,
             assume_unchanged,
             open_file_with,
+            stash_files,
         ) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
@@ -2266,6 +2268,21 @@ impl ChangesSidebar {
                 return;
             }
             let Some(repo) = s.repository(id) else { return };
+            // `777-stash-selected-files`: (branch has a stash, can stash at
+            // all: a branch and no conflicts)
+            let stash_files = s
+                .flags
+                .bool(corvene_core::flags::ids::STASH_SELECTED_FILES)
+                .then(|| {
+                    (
+                        rs.desktop_stash().is_some(),
+                        rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
+                            && rs.conflict_state.is_none()
+                            && !rs.status.as_deref().is_some_and(|st| {
+                                st.files.iter().any(|f| f.status.is_conflicted())
+                            }),
+                    )
+                });
             (
                 id,
                 s.settings.confirm_discard_changes,
@@ -2283,6 +2300,7 @@ impl ChangesSidebar {
                 s.flags.bool(corvene_core::flags::ids::COPY_DIFF),
                 s.flags.bool(corvene_core::flags::ids::ASSUME_UNCHANGED),
                 s.flags.bool(corvene_core::flags::ids::OPEN_FILE_WITH),
+                stash_files,
             )
         };
         let path = file.path.clone();
@@ -2414,7 +2432,32 @@ impl ChangesSidebar {
             vec![file.clone()]
         };
         let paths: Vec<String> = targets.iter().map(|f| f.path.clone()).collect();
-        let mut items = vec![discard_item(paths.clone()), MenuItem::separator()];
+        let mut items = vec![discard_item(paths.clone())];
+        // `777-stash-selected-files`: only while the branch has no stash
+        if let Some((has_stash, can_stash)) = stash_files {
+            let label = match (paths.len(), IS_MAC) {
+                (1, _) => mac_or("Stash File", "Stash file").to_string(),
+                (n, true) => format!("Stash {n} Selected Files"),
+                (n, false) => format!("Stash {n} selected files"),
+            };
+            let label = if has_stash {
+                let why = mac_or(
+                    " (Restore or Discard the Stash First)",
+                    " (restore or discard the stash first)",
+                );
+                format!("{label}{why}")
+            } else {
+                label
+            };
+            let to_stash = paths.clone();
+            items.push(
+                MenuItem::new(label, move |_, cx| {
+                    Dispatcher::stash_selected_files(id, to_stash.clone(), cx)
+                })
+                .enabled(can_stash && !has_stash),
+            );
+        }
+        items.push(MenuItem::separator());
         if paths.len() == 1 {
             let is_gitignore = file.file_name() == ".gitignore";
             items.push(
