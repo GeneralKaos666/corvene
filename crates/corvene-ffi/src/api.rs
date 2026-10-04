@@ -10,11 +10,12 @@ use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 
 use crate::runtime::Services;
 use crate::vm::{
-    BannerVm, BranchesVm, ChangesVm, CommitDetailVm, ConflictsVm, DesignStyleVm, DiffHeaderVm,
-    DiffRowVm, FlagsVm, GlobalGitConfigVm, HistoryVm, McoVm, PopupVm, PullRequestsVm, RepoListVm,
-    RepositorySettingsVm, ResolutionVm, SessionVm, SettingsVm, ThemeVm, banner, branches, changes,
-    commit_detail, commit_diff_rows, conflicts, diff_header, diff_rows, flags, global_git_config,
-    history, mco, popup, pull_requests, repo_list, repository_settings, session, settings,
+    BannerVm, BranchesVm, ChangesVm, CloneableRepositoriesVm, CommitDetailVm, ConflictsVm,
+    DesignStyleVm, DiffHeaderVm, DiffRowVm, FlagsVm, GlobalGitConfigVm, HistoryVm, McoVm, PopupVm,
+    PullRequestsVm, RepoListVm, RepositorySettingsVm, ResolutionVm, SessionVm, SettingsVm, ThemeVm,
+    banner, branches, changes, cloneable_repositories, commit_detail, commit_diff_rows, conflicts,
+    diff_header, diff_rows, flags, global_git_config, history, mco, popup, pull_requests,
+    repo_list, repository_settings, session, settings,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -1151,5 +1152,48 @@ impl Corvene {
         self.loop_
             .query(|host| global_git_config(host.state_ref()))
             .await
+    }
+
+    // ---- the Clone dialog's repository list, notifications, the worker ----
+
+    /// Starts loading the account's repositories (cached in the store).
+    pub fn load_cloneable_repositories(&self, endpoint: String) {
+        self.loop_.post(move |host| {
+            let Some(account) = host
+                .state_ref()
+                .accounts
+                .iter()
+                .find(|a| a.endpoint == endpoint)
+                .cloned()
+            else {
+                return;
+            };
+            Dispatcher::load_api_repositories(account, host);
+        });
+    }
+
+    pub async fn cloneable_repositories(&self, endpoint: String) -> CloneableRepositoriesVm {
+        self.loop_
+            .query(move |host| cloneable_repositories(host.state_ref(), &endpoint))
+            .await
+    }
+
+    /// A tap on a notification the engine posted (`HostEvents::show_notification`).
+    pub fn notification_clicked(&self, identifier: String, payload: Option<String>) {
+        #[cfg(target_os = "android")]
+        corvene_platform::notifications::clicked(
+            corvene_platform::notifications::NotificationClick {
+                identifier,
+                payload,
+            },
+        );
+        #[cfg(not(target_os = "android"))]
+        let _ = (identifier, payload);
+    }
+
+    /// WorkManager's hourly tick while the app is alive: one fetch round.
+    pub fn background_fetch(&self) {
+        self.loop_
+            .post(|host| Dispatcher::background_fetch_tick(host));
     }
 }

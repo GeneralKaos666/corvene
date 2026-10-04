@@ -97,3 +97,44 @@ pub fn session(s: &AppState) -> SessionVm {
         welcome_completed: s.settings.welcome_completed,
     }
 }
+
+/// A repository of the signed-in account, for the Clone dialog's list.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct CloneableRepositoryVm {
+    pub owner: String,
+    pub name: String,
+    pub clone_url: String,
+    pub html_url: String,
+    pub private: bool,
+    pub fork: bool,
+    pub default_branch: Option<String>,
+}
+
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct CloneableRepositoriesVm {
+    pub endpoint: String,
+    pub loading: bool,
+    /// `None` until loaded.
+    pub repositories: Option<Vec<CloneableRepositoryVm>>,
+}
+
+pub fn cloneable_repositories(s: &AppState, endpoint: &str) -> CloneableRepositoriesVm {
+    CloneableRepositoriesVm {
+        endpoint: endpoint.to_string(),
+        loading: s.api_repositories_loading.contains(endpoint),
+        repositories: s.api_repositories.get(endpoint).map(|repos| {
+            repos
+                .iter()
+                .map(|r| CloneableRepositoryVm {
+                    owner: r.owner.clone(),
+                    name: r.name.clone(),
+                    clone_url: r.clone_url.clone(),
+                    html_url: r.html_url.clone(),
+                    private: r.private,
+                    fork: r.fork,
+                    default_branch: r.default_branch.clone(),
+                })
+                .collect()
+        }),
+    }
+}

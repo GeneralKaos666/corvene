@@ -1592,7 +1592,8 @@ impl Dispatcher {
 
     /// Fetch the selected GitHub repository (see `244-background-fetch`) when
     /// its last fetch is older than the interval (`shouldBackgroundFetch`).
-    fn background_fetch_tick(cx: &mut dyn Host) {
+    /// One background fetch round (the hourly timer, WorkManager on Android).
+    pub fn background_fetch_tick(cx: &mut dyn Host) {
         let (id, last_fetched, busy) = {
             let s = Self::state(cx).read(cx);
             let Some(id) = s.selected else { return };
