@@ -1,13 +1,13 @@
 //! `PopupType.DiscardChangesRetry` - GHD
 //! `ui/discard-changes/discard-changes-retry-dialog.tsx`: Discard Changes
-//! could not move files to the Trash; "Permanently Discard Changes" deletes
-//! them, and "Do not show this message again" clears
+//! could not move files to the Trash; "Permanently Discard Changes"
+//! discards them without it, and "Do not show this message again" clears
 //! `askForConfirmationOnDiscardChangesPermanently` (Settings › Prompts).
 //!
 //! Differences: GHD stops the whole discard at the first file the Trash
 //! refuses and retries all of it permanently; Corvene discards everything
-//! else and keeps only the refused new files, which this dialog lists (GHD
-//! names none) before deleting them.
+//! else and keeps only the refused files' changes, which this dialog lists
+//! (GHD names none) before discarding them for good.
 
 use corvene_core::Dispatcher;
 use gpui_kit::prelude::*;

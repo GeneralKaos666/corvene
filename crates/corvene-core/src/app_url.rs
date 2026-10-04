@@ -240,12 +240,51 @@ pub fn open_local_repo_url(path: &Path) -> String {
     )
 }
 
-/// GHD `resolveWithin`: `relative` inside `root`, symlinks resolved; `None`
-/// when it escapes the root or does not exist.
-fn resolve_within(root: &Path, relative: &str) -> Option<PathBuf> {
-    let root = dunce::canonicalize(root).ok()?;
-    let resolved = dunce::canonicalize(root.join(relative)).ok()?;
-    resolved.starts_with(&root).then_some(resolved)
+/// GHD `resolveWithin` (`lib/path.ts` `_resolveWithin`): `relative` resolved
+/// against `root` (`path.resolve`: joined, `.` and `..` collapsed, not
+/// following symlinks), returned when its real path (symlinks followed) is
+/// inside the root's real path; `None` when it escapes the root, does not
+/// exist, the root is empty or either contains a null byte.
+///
+/// The containment check compares path components, where GHD compares
+/// strings (`/repo-other` would pass for the root `/repo` there).
+#[doc(hidden)]
+pub fn resolve_within(root: &Path, relative: &str) -> Option<PathBuf> {
+    if root.as_os_str().is_empty()
+        || root.to_string_lossy().contains('\0')
+        || relative.contains('\0')
+    {
+        return None;
+    }
+    let resolved = lexically_resolve(root, Path::new(relative))?;
+    let real_root = dunce::canonicalize(root).ok()?;
+    let real_resolved = dunce::canonicalize(&resolved).ok()?;
+    real_resolved.starts_with(&real_root).then_some(resolved)
+}
+
+/// Node's `path.resolve(root, relative)`: an absolute path (`relative` when
+/// it is absolute, else `root` joined with it, a relative root taken from
+/// the working directory) with `.` and `..` collapsed lexically.
+fn lexically_resolve(root: &Path, relative: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let joined = root.join(relative);
+    let absolute = if joined.is_absolute() {
+        joined
+    } else {
+        std::env::current_dir().ok()?.join(joined)
+    };
+    let mut out = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            // `..` above the root stays at the root
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    Some(out)
 }
 
 /// What an `openRepo` action still has to do once its repository is known
@@ -555,7 +594,13 @@ impl Dispatcher {
         filepath: Option<String>,
         cx: &mut App,
     ) {
-        let Some(github) = corvene_models::github_from_remote(&url, &[]) else {
+        // `331-github-without-account`: github.com without a GitHub.com account
+        let hosts = {
+            let s = Self::state(cx).read(cx);
+            let dotcom = s.flags.bool(crate::flags::ids::GITHUB_WITHOUT_ACCOUNT);
+            corvene_models::github_hosts(&s.accounts, dotcom)
+        };
+        let Some(github) = corvene_models::github_from_remote(&url, &hosts) else {
             warn!(%url, "not a GitHub repository URL");
             return;
         };

@@ -1,0 +1,99 @@
+---
+import "../styles/global.css";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import { SITE_NAME, SITE_DESCRIPTION, SITE_TAGLINE, pageUrl, websiteLd, type SiteContext } from "../lib/seo";
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** absolute URL of the social image; the app screenshot by default */
+  image?: string;
+  imageAlt?: string;
+  /** "website" for the landing page, "article" for documentation */
+  type?: "website" | "article";
+  /** `dateModified` for articles */
+  modified?: Date;
+  /** JSON-LD objects added to this page (WebSite is always included) */
+  jsonLd?: Record<string, unknown>[];
+  noindex?: boolean;
+}
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const root = new URL(base, Astro.site).toString().replace(/\/$/, "");
+const page = pageUrl(Astro.url.pathname, Astro.site);
+const ctx: SiteContext = { root, page };
+
+const {
+  title = `${SITE_NAME}: ${SITE_TAGLINE}`,
+  description = SITE_DESCRIPTION,
+  image = `${root}/app-screenshot.webp`,
+  imageAlt = "Corvene showing a repository's changed files and a diff in the dark theme",
+  type = "website",
+  modified,
+  jsonLd = [],
+  noindex = false,
+} = Astro.props;
+
+const structuredData = [websiteLd(ctx), ...jsonLd];
+---
+
+<!doctype html>
+<html lang="en" prefix="og: https://ogp.me/ns#">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0d1117" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="author" content="Wasi Master" />
+    <meta name="application-name" content={SITE_NAME} />
+    <meta name="apple-mobile-web-app-title" content={SITE_NAME} />
+    <meta name="generator" content={Astro.generator} />
+    <meta
+      name="robots"
+      content={noindex ? "noindex, nofollow" : "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"}
+    />
+    <link rel="canonical" href={page} />
+    <link rel="sitemap" type="application/xml" href={`${base}/sitemap-index.xml`} />
+    <link rel="manifest" href={`${base}/manifest.webmanifest`} />
+    <link rel="icon" type="image/svg+xml" href={`${base}/icon/Corvene.svg`} />
+    <link rel="icon" type="image/png" sizes="256x256" href={`${base}/icon/Corvene-256.png`} />
+    <link rel="apple-touch-icon" href={`${base}/icon/Corvene-256.png`} />
+
+    <meta property="og:type" content={type} />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content={page} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={image} />
+    <meta property="og:image:alt" content={imageAlt} />
+    {image.endsWith(".webp") && <meta property="og:image:type" content="image/webp" />}
+    {image.endsWith("app-screenshot.webp") && <meta property="og:image:width" content="2734" />}
+    {image.endsWith("app-screenshot.webp") && <meta property="og:image:height" content="1581" />}
+    {type === "article" && modified && <meta property="article:modified_time" content={modified.toISOString()} />}
+    {type === "article" && <meta property="article:author" content="https://github.com/wasi-master" />}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={image} />
+    <meta name="twitter:image:alt" content={imageAlt} />
+
+    <script type="application/ld+json" set:html={JSON.stringify(structuredData)} />
+  </head>
+  <body class="flex min-h-screen flex-col">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-canvas-overlay focus:px-3 focus:py-2 focus:text-sm focus:text-fg"
+    >
+      Skip to content
+    </a>
+    <Header />
+    <main id="main" class="flex-grow">
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

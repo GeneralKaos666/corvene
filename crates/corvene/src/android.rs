@@ -511,6 +511,25 @@ impl corvene_platform::android::Bridge for ActivityBridge {
         activity_result!("openTermux", &dir.to_string_lossy())
     }
 
+    fn shared_storage_dir(&self) -> Option<PathBuf> {
+        gpui_android::jni::with_env(|env| {
+            let class = gpui_android::jni::find_app_class(env, ACTIVITY)?;
+            let dir = env
+                .call_static_method(
+                    &class,
+                    jni::jni_str!("sharedStorageDir"),
+                    jni::jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )
+                .and_then(|value| value.l())
+                .map_err(|err| err.to_string())?;
+            Ok(gpui_android::jni::get_string(env, &dir))
+        })
+        .ok()
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+    }
+
     fn run_termux(&self, program: &str, arguments: &[String], dir: &Path) -> Result<(), String> {
         let arguments = arguments.join("\n");
         let dir = dir.to_string_lossy();

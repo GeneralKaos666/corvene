@@ -184,7 +184,7 @@ fn stash_file_row(
             format!(
                 "{}, {}",
                 file.path,
-                crate::widgets::status_label(file.status.kind)
+                crate::widgets::status_label(&file.status)
             ),
             is_selected,
         )
@@ -212,29 +212,26 @@ fn stash_file_row(
             move |d| d.hover(move |s| s.bg(hover_bg)),
         )
         .on_click(move |_, _, cx| Dispatcher::select_stash_file(id, path.clone(), cx))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .text_size(FONT_SIZE())
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .child(
-                            div()
-                                // `.list-item.selected .dirname` inherits the row colour
-                                .text_color(match (is_selected, list_focused) {
-                                    (true, true) => t.box_selected_active_text,
-                                    (true, false) => t.box_selected_text,
-                                    _ => t.text_secondary,
-                                })
-                                .child(crate::format::display_path(file.directory())),
-                        )
-                        .child(div().child(file.file_name().to_string())),
+        .child({
+            // GHD `PathLabel`; `.list-item.selected .dirname` inherits the
+            // row colour
+            let (directory_color, arrow_color) = match (is_selected, list_focused) {
+                (true, true) => (t.box_selected_active_text, t.box_selected_active_text),
+                (true, false) => (t.box_selected_text, t.box_selected_text),
+                _ => (t.text_secondary, t.text),
+            };
+            crate::path_label::path_label_element(
+                crate::path_label::path_label(
+                    &file.path,
+                    file.status.kind,
+                    file.old_path.as_deref(),
                 ),
-        )
+                Vec::new(),
+                directory_color,
+                arrow_color,
+            )
+            .text_size(FONT_SIZE())
+        })
         .child(octicon(icon, color))
         .into_any_element()
 }

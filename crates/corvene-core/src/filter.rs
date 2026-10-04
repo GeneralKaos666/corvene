@@ -1,6 +1,7 @@
 //! Changes-list filtering - GHD `ui/changes/filter-changes-logic.ts` plus the
 //! fuzzy text match of `lib/fuzzy-find.ts` (fuzzaldrin-plus, approximated:
-//! ordered subsequence with bonuses for consecutive and boundary hits).
+//! ordered subsequence with bonuses for consecutive and boundary hits) and
+//! its multi-key `match` ([`match_items`]) that GHD's filter lists use.
 //!
 //! Deviation: [`hidden_by`] hides files matching the `706-changes-hide-globs`
 //! patterns from the list (view only; they are still committed), and the
@@ -10,7 +11,9 @@
 //! [`path_match`] can match the filter text as a substring, a suffix or the
 //! exact path / file name instead of fuzzily (`704-changes-filter-match`).
 
-use corvene_models::{FileStatusKind, WorkingDirectoryFileChange};
+use std::collections::HashMap;
+
+use corvene_models::{DiffSelectionType, FileStatusKind, WorkingDirectoryFileChange};
 
 use crate::state::{FileListFilter, FilterOption};
 
@@ -57,6 +60,71 @@ pub fn fuzzy_match(query: &str, text: &str) -> Option<(f32, Vec<usize>)> {
             .sqrt()
             .clamp(0.05, 1.0);
     Some((score, hits))
+}
+
+/// GHD `IMatches`: the matched char positions in an item's first key (the
+/// title) and second key (the subtitle).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Matches {
+    pub title: Vec<usize>,
+    pub subtitle: Vec<usize>,
+}
+
+/// GHD `IMatch<T>`: an item [`match_items`] kept.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Match<'a, T> {
+    /// `0 <= score <= 1`
+    pub score: f32,
+    pub item: &'a T,
+    pub matches: Matches,
+}
+
+/// GHD `match`'s test of one item (`lib/fuzzy-find.ts`): `None` unless the
+/// first or second of `keys` (the title and subtitle) has a fuzzy hit for
+/// `query`, else the score of the joined keys relative to the query's
+/// score against itself, and the hits in the title and subtitle. An empty
+/// query matches nothing (fuzzaldrin finds no positions for it).
+pub fn match_keys<S: AsRef<str>>(query: &str, keys: &[S]) -> Option<(f32, Matches)> {
+    let hits = |ix: usize| {
+        keys.get(ix)
+            .and_then(|key| fuzzy_match(query, key.as_ref()))
+            .map(|(_, positions)| positions)
+            .unwrap_or_default()
+    };
+    let matches = Matches {
+        title: hits(0),
+        subtitle: hits(1),
+    };
+    if matches.title.is_empty() && matches.subtitle.is_empty() {
+        return None;
+    }
+    let joined: String = keys.iter().map(AsRef::as_ref).collect();
+    // matching `query` against itself is a perfect match
+    let max_score = fuzzy_score(query, query).unwrap_or(1.0);
+    let score = fuzzy_score(query, &joined).unwrap_or(0.0) / max_score;
+    Some((score, matches))
+}
+
+/// GHD `match(query, items, getKey)` (`lib/fuzzy-find.ts`): the items with a
+/// fuzzy hit in their title or subtitle key ([`match_keys`]), best score
+/// first (ties keep the input order).
+pub fn match_items<'a, T, S: AsRef<str>>(
+    query: &str,
+    items: &'a [T],
+    get_key: impl Fn(&T) -> Vec<S>,
+) -> Vec<Match<'a, T>> {
+    let mut result: Vec<Match<'a, T>> = items
+        .iter()
+        .filter_map(|item| {
+            match_keys(query, &get_key(item)).map(|(score, matches)| Match {
+                score,
+                item,
+                matches,
+            })
+        })
+        .collect();
+    result.sort_by(|a, b| b.score.total_cmp(&a.score));
+    result
 }
 
 /// `704-changes-filter-match`: how the changes filter text matches a path.
@@ -124,16 +192,18 @@ pub fn branch_matches(query: &str, names: &[String]) -> Vec<(String, Vec<usize>)
         .collect()
 }
 
-/// `applyFilterOptions`: every active option must match.
+/// `applyFilterOptions`: every active option must match. A partially
+/// included file is neither included in nor excluded from the commit
+/// (`isIncludedInCommit` / `isExcludedFromCommit`).
 pub fn matches_options(filter: &FileListFilter, file: &WorkingDirectoryFileChange) -> bool {
     if filter.count_active() == 0 {
         return true;
     }
-    let included = file.selection.kind() != corvene_models::DiffSelectionType::None;
-    if filter.included && !included {
+    let selection = file.selection.kind();
+    if filter.included && selection != DiffSelectionType::All {
         return false;
     }
-    if filter.excluded && included {
+    if filter.excluded && selection != DiffSelectionType::None {
         return false;
     }
     if filter.new_files
@@ -154,6 +224,46 @@ pub fn matches_options(filter: &FileListFilter, file: &WorkingDirectoryFileChang
         return false;
     }
     true
+}
+
+/// GHD `hasActiveFilters`: filter text (as typed, not trimmed) or an option
+/// is set.
+pub fn has_active_filters(filter_text: &str, filter: &FileListFilter) -> bool {
+    !filter_text.is_empty() || filter.count_active() > 0
+}
+
+/// GHD `applyFilters`: the options apply only while the changes filter is
+/// shown (View › Show Changes Filter); hidden, every file passes.
+pub fn apply_filters(
+    file: &WorkingDirectoryFileChange,
+    show_changes_filter: bool,
+    filter: &FileListFilter,
+) -> bool {
+    !show_changes_filter || matches_options(filter, file)
+}
+
+/// GHD `isCommittingFileHiddenByFilter`: whether a file included in the
+/// commit (`file_ids_included_in_commit`, partially included ones too) is
+/// left out of the filtered list (`filtered_items`, keyed by id, of the
+/// `file_count` files).
+pub fn is_committing_file_hidden_by_filter<V>(
+    file_ids_included_in_commit: &[&str],
+    filtered_items: &HashMap<String, V>,
+    file_count: usize,
+    filter_text: &str,
+    filter: &FileListFilter,
+) -> bool {
+    // every file is listed (no filter, or every file matches it)
+    if !has_active_filters(filter_text, filter) || filtered_items.len() == file_count {
+        return false;
+    }
+    // more included files than listed ones: some must be hidden
+    if file_ids_included_in_commit.len() > filtered_items.len() {
+        return true;
+    }
+    file_ids_included_in_commit
+        .iter()
+        .any(|id| !filtered_items.contains_key(*id))
 }
 
 /// The `706-changes-hide-globs` flag text split into patterns: separated by
@@ -220,42 +330,107 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 }
 
 /// Files that pass the option filters and fuzzy-match `text`, best match first
-/// (original order when `text` is empty). Files matching a `hide` pattern
-/// ([`hidden_by`]) are left out; `mode` is the [`path_match`] mode.
+/// (original order when `text` is empty). While the changes filter is hidden
+/// (`show_changes_filter` off) neither the text nor the options apply (GHD
+/// passes `filterText: ''` and [`apply_filters`]). Files matching a `hide`
+/// pattern ([`hidden_by`]) are left out; `mode` is the [`path_match`] mode.
 pub fn filtered_files<'a>(
     files: &'a [WorkingDirectoryFileChange],
     text: &str,
+    show_changes_filter: bool,
     filter: &FileListFilter,
     hide: &[String],
     mode: &str,
 ) -> Vec<&'a WorkingDirectoryFileChange> {
-    let text = text.trim();
-    let mut scored: Vec<(f32, &WorkingDirectoryFileChange)> = files
-        .iter()
-        .filter(|f| hide.is_empty() || !hidden_by(hide, &f.path))
-        .filter(|f| matches_options(filter, f))
-        .filter_map(|f| path_match(mode, text, &f.path).map(|(s, _)| (s, f)))
-        .collect();
+    filtered_indices(files, None, text, show_changes_filter, filter, hide, mode)
+        .into_iter()
+        .map(|i| &files[i])
+        .collect()
+}
+
+/// [`filtered_files`] as indices into `files`, taking the files in `order`
+/// (indices, see [`sorted_indices`]) or as they are. Indices let a view
+/// keep a 100,000-file list without copying it.
+pub fn filtered_indices(
+    files: &[WorkingDirectoryFileChange],
+    order: Option<&[usize]>,
+    text: &str,
+    show_changes_filter: bool,
+    filter: &FileListFilter,
+    hide: &[String],
+    mode: &str,
+) -> Vec<usize> {
+    let text = if show_changes_filter { text.trim() } else { "" };
+    let keep = |i: usize| {
+        let f = &files[i];
+        if !hide.is_empty() && hidden_by(hide, &f.path) {
+            return None;
+        }
+        if !apply_filters(f, show_changes_filter, filter) {
+            return None;
+        }
+        if text.is_empty() {
+            return Some((1.0, i));
+        }
+        path_match(mode, text, &f.path).map(|(s, _)| (s, i))
+    };
+    let mut scored: Vec<(f32, usize)> = match order {
+        Some(order) => order.iter().filter_map(|&i| keep(i)).collect(),
+        None => (0..files.len()).filter_map(keep).collect(),
+    };
     if !text.is_empty() {
         scored.sort_by(|a, b| b.0.total_cmp(&a.0));
     }
-    scored.into_iter().map(|(_, f)| f).collect()
+    scored.into_iter().map(|(_, i)| i).collect()
+}
+
+/// [`sort_files`] as a permutation of `files`' indices; `None` when the
+/// order is git's path order (the files as they are).
+pub fn sorted_indices(files: &[WorkingDirectoryFileChange], order: &str) -> Option<Vec<usize>> {
+    let mut indices: Vec<usize> = (0..files.len()).collect();
+    match order {
+        "status" => indices.sort_by_key(|&i| status_rank(files[i].status.kind)),
+        "name" => indices.sort_by_cached_key(|&i| files[i].file_name().to_lowercase()),
+        _ => return None,
+    }
+    Some(indices)
+}
+
+/// [`sorted_indices`] that also knows `703-changes-sort-order`'s
+/// "order-file": the files in the order of the `diff.orderFile` patterns
+/// ([`order_file_rank`]), `None` (git's path order) without patterns.
+pub fn sorted_indices_with(
+    files: &[WorkingDirectoryFileChange],
+    order: &str,
+    order_file: &[String],
+) -> Option<Vec<usize>> {
+    if order != "order-file" {
+        return sorted_indices(files, order);
+    }
+    if order_file.is_empty() {
+        return None;
+    }
+    let mut indices: Vec<usize> = (0..files.len()).collect();
+    // stable: path order among equal ranks
+    indices.sort_by_cached_key(|&i| order_file_rank(order_file, &files[i].path));
+    Some(indices)
+}
+
+fn status_rank(kind: FileStatusKind) -> u8 {
+    match kind {
+        FileStatusKind::Conflicted => 0,
+        FileStatusKind::New | FileStatusKind::Untracked => 1,
+        FileStatusKind::Modified => 2,
+        FileStatusKind::Renamed | FileStatusKind::Copied => 3,
+        FileStatusKind::Deleted => 4,
+    }
 }
 
 /// `703-changes-sort-order`: how the changes list orders its files before
 /// the filter ranks them. Unknown flag values keep git's path order.
 pub fn sort_files(files: &mut [WorkingDirectoryFileChange], order: &str) {
-    fn rank(kind: FileStatusKind) -> u8 {
-        match kind {
-            FileStatusKind::Conflicted => 0,
-            FileStatusKind::New | FileStatusKind::Untracked => 1,
-            FileStatusKind::Modified => 2,
-            FileStatusKind::Renamed | FileStatusKind::Copied => 3,
-            FileStatusKind::Deleted => 4,
-        }
-    }
     match order {
-        "status" => files.sort_by_key(|f| rank(f.status.kind)),
+        "status" => files.sort_by_key(|f| status_rank(f.status.kind)),
         "name" => files.sort_by_cached_key(|f| f.file_name().to_lowercase()),
         _ => {}
     }
@@ -316,11 +491,14 @@ pub fn option_count(option: FilterOption, files: &[WorkingDirectoryFileChange]) 
     files.iter().filter(|f| matches_options(&only, f)).count()
 }
 
-/// `getNoResultsMessage`
+/// `getNoResultsMessage`: the filter text is quoted as typed.
 pub fn no_results_message(text: &str, filter: &FileListFilter) -> Option<String> {
+    if !has_active_filters(text, filter) {
+        return None;
+    }
     let mut active: Vec<String> = Vec::new();
-    if !text.trim().is_empty() {
-        active.push(format!("\"{}\"", text.trim()));
+    if !text.is_empty() {
+        active.push(format!("\"{text}\""));
     }
     for (flag, label) in [
         (filter.included, "Included in commit"),
@@ -443,7 +621,12 @@ mod tests {
         let mut f = FileListFilter::default();
         f.set(FilterOption::RenamedFiles, true);
         assert_eq!(f.count_active(), 1);
-        let hits = filtered_files(&files, "", &f, &[], "fuzzy");
+        let hits = filtered_files(&files, "", true, &f, &[], "fuzzy");
+        // a hidden filter shows every file
+        assert_eq!(
+            filtered_files(&files, "b", false, &f, &[], "fuzzy").len(),
+            2
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, "a");
         assert!(
@@ -451,6 +634,47 @@ mod tests {
                 .unwrap()
                 .ends_with("Renamed files")
         );
+    }
+
+    #[test]
+    fn partial_selection_is_neither_included_nor_excluded() {
+        use corvene_models::{DiffSelection, FileStatus, GitStatusEntry};
+        let file = WorkingDirectoryFileChange {
+            path: "a".to_string(),
+            old_path: None,
+            status: FileStatus {
+                kind: FileStatusKind::Modified,
+                index: GitStatusEntry::Unchanged,
+                working_tree: GitStatusEntry::Modified,
+                score: None,
+                code: String::new(),
+                submodule: false,
+                submodule_status: None,
+                conflict_markers: None,
+            },
+            selection: DiffSelection::all().with_line(0, false),
+        };
+        let mut included = FileListFilter::default();
+        included.set(FilterOption::IncludedInCommit, true);
+        let mut excluded = FileListFilter::default();
+        excluded.set(FilterOption::ExcludedFromCommit, true);
+        assert!(!matches_options(&included, &file));
+        assert!(!matches_options(&excluded, &file));
+    }
+
+    #[test]
+    fn match_items_keeps_title_or_subtitle_hits_best_first() {
+        let items = [
+            ("main", "origin"),
+            ("feature/main-menu", ""),
+            ("other", "x"),
+        ];
+        let hits = match_items("main", &items, |(a, b)| vec![*a, *b]);
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].item.0, "main");
+        assert_eq!(hits[0].matches.title, vec![0, 1, 2, 3]);
+        assert!(hits[0].score > hits[1].score);
+        assert!(match_items("", &items, |(a, b)| vec![*a, *b]).is_empty());
     }
 
     #[test]

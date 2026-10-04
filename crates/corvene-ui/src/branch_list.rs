@@ -3,7 +3,9 @@
 //! (`styles/ui/_branches.scss`, `_no-branches.scss`, `_filter-list.scss`):
 //! `[🔍 Filter][New Branch]`, groups Default Branch / Recent Branches /
 //! Other Branches, 29 px rows (check or branch icon, name, relative date) and
-//! the "Choose a branch to merge into <current>" footer. GitHub repositories
+//! the "Choose a branch to merge into <current>" footer. Remote branches a
+//! local branch tracks are hidden behind it (GHD `mergeRemoteAndLocalBranches`,
+//! `lib/stores/git-store.ts`). GitHub repositories
 //! get the Branches / Pull Requests tab bar (`branches-container.tsx`); the
 //! pull request rows come from `pull_request_list.rs`.
 //!
@@ -49,7 +51,7 @@ use crate::pull_request_list::{
     QUICK_VIEW_MAX_HEIGHT, matches_filter, no_pull_requests, pull_request_row, quick_view,
     quick_view_top, signed_out_pull_requests,
 };
-use crate::relative_time::relative;
+use crate::relative_time::relative_at;
 use crate::scrollbar::ScrollbarExt;
 use crate::tab_bar::{TabModel, tab_bar};
 use crate::theme::ActiveGhdTheme;
@@ -117,6 +119,102 @@ const QUICK_VIEW_HIDE_DELAY: Duration = Duration::from_millis(500);
 pub struct BranchGroup {
     pub title: &'static str,
     pub branches: Vec<Branch>,
+}
+
+/// What GHD `BranchListItem` (`ui/branches/branch-list-item.tsx`) shows:
+/// the icon (check for the current branch), the name and the author date
+/// (`RelativeTime` with `onlyRelative`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchListItemContent {
+    pub icon: Octicon,
+    pub name: String,
+    pub author_date: Option<String>,
+}
+
+/// GHD `BranchListItem`'s content for a branch row while the clock reads
+/// `now`.
+pub fn branch_list_item(
+    name: &str,
+    is_current_branch: bool,
+    author_date: Option<std::time::SystemTime>,
+    now: std::time::SystemTime,
+) -> BranchListItemContent {
+    BranchListItemContent {
+        icon: if is_current_branch {
+            Octicon::Check
+        } else {
+            Octicon::GitBranch
+        },
+        name: name.to_string(),
+        author_date: author_date.map(|date| relative_at(date, now)),
+    }
+}
+
+/// What a `NoBranches` button does (`onCreateNewBranch`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoBranchesAction {
+    CreateNewBranch,
+}
+
+/// What GHD `NoBranches` (`ui/branches/no-branches.tsx`) shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoBranchesContent {
+    /// `canCreateNewBranch`: whether the blank-slate image is drawn, the
+    /// title, the subtitle, the create button (its label and action) and
+    /// the ProTip's text (its shortcut included).
+    CreateBranch {
+        blankslate_image: bool,
+        title: String,
+        subtitle: String,
+        button: (String, NoBranchesAction),
+        protip: String,
+    },
+    /// Otherwise: `noBranchesMessage`, or the title.
+    Message(String),
+}
+
+impl NoBranchesContent {
+    /// The title, or the message of the variant without a button.
+    pub fn title(&self) -> &str {
+        match self {
+            Self::CreateBranch { title, .. } => title,
+            Self::Message(message) => message,
+        }
+    }
+}
+
+const NO_BRANCHES_TITLE: &str = "Sorry, I can't find that branch";
+/// The ProTip around its `KeyboardShortcut` (`darwinKeys`).
+const NO_BRANCHES_PROTIP: (&str, [&str; 3], &str) = (
+    "ProTip! Press ",
+    ["⌘", "⇧", "N"],
+    " to quickly create a new branch from anywhere within the app",
+);
+
+/// GHD `NoBranches` with `canCreateNewBranch` and `noBranchesMessage`.
+pub fn no_branches(
+    can_create_new_branch: bool,
+    no_branches_message: Option<&str>,
+) -> NoBranchesContent {
+    if !can_create_new_branch {
+        return NoBranchesContent::Message(
+            no_branches_message.unwrap_or(NO_BRANCHES_TITLE).to_string(),
+        );
+    }
+    let (lead, keys, tail) = NO_BRANCHES_PROTIP;
+    NoBranchesContent::CreateBranch {
+        blankslate_image: true,
+        title: NO_BRANCHES_TITLE.into(),
+        subtitle: "Do you want to create a new branch instead?".into(),
+        button: (
+            mac_or("Create New Branch", "Create new branch").into(),
+            NoBranchesAction::CreateNewBranch,
+        ),
+        protip: format!(
+            "{lead}{}{tail}",
+            crate::widgets::keyboard_shortcut_text(&keys)
+        ),
+    }
 }
 
 /// Flag `849-branch-filter-strips-owner`: `owner:branch` (GitHub's
@@ -205,17 +303,7 @@ pub fn group_branches(
 ) -> Vec<BranchGroup> {
     let query = query.trim();
     let matches = |b: &Branch| query.is_empty() || fuzzy_score(query, &b.name).is_some();
-    // `mergeRemoteAndLocalBranches`: remote branches with a local counterpart are hidden
-    let locals: Vec<&Branch> = branches
-        .iter()
-        .filter(|b| b.kind == BranchKind::Local)
-        .collect();
-    let mut all: Vec<Branch> = locals.iter().map(|b| (*b).clone()).collect();
-    for b in branches.iter().filter(|b| b.kind == BranchKind::Remote) {
-        if !locals.iter().any(|l| l.name == b.name_without_remote()) {
-            all.push(b.clone());
-        }
-    }
+    let mut all = merge_remote_and_local_branches(branches);
     all.sort_by_key(|b| b.name.to_lowercase());
 
     let mut groups = Vec::new();
@@ -263,19 +351,47 @@ pub fn group_branches(
     groups
 }
 
-/// Remote-tracking branches that [`group_branches`] hides behind their local
-/// branch (`origin/main` when `main` exists), for the rebase list (flag
-/// `832`): rebasing onto the fetched remote needs no pull of the local one.
+/// GHD `mergeRemoteAndLocalBranches` (`lib/stores/git-store.ts`, its
+/// `allBranches`): the local branches, then the remote branches no local
+/// branch tracks.
+pub fn merge_remote_and_local_branches(branches: &[Branch]) -> Vec<Branch> {
+    let mut all: Vec<Branch> = branches
+        .iter()
+        .filter(|b| b.kind == BranchKind::Local)
+        .cloned()
+        .collect();
+    let tracked = tracked_upstreams(branches);
+    all.extend(
+        branches
+            .iter()
+            .filter(|b| b.kind == BranchKind::Remote && !tracked.contains(b.name.as_str()))
+            .cloned(),
+    );
+    all
+}
+
+/// The remote branches a local branch in `branches` tracks (GHD's
+/// `upstreamBranchesAdded`: the local branches' `upstream`, compared with
+/// the remote branches' names).
+fn tracked_upstreams(branches: &[Branch]) -> std::collections::HashSet<&str> {
+    branches
+        .iter()
+        .filter(|b| b.kind == BranchKind::Local)
+        .filter_map(|b| b.upstream_short())
+        .collect()
+}
+
+/// Remote-tracking branches that [`group_branches`] hides behind the local
+/// branch tracking them (`origin/main` behind `main`), for the rebase list
+/// (flag `832`): rebasing onto the fetched remote needs no pull of the
+/// local one.
 pub fn remote_counterparts(branches: &[Branch], query: &str) -> Option<BranchGroup> {
     let query = query.trim();
+    let tracked = tracked_upstreams(branches);
     let mut remotes: Vec<Branch> = branches
         .iter()
         .filter(|b| b.kind == BranchKind::Remote && !b.name.ends_with("/HEAD"))
-        .filter(|b| {
-            branches
-                .iter()
-                .any(|l| l.kind == BranchKind::Local && l.name == b.name_without_remote())
-        })
+        .filter(|b| tracked.contains(b.name.as_str()))
         .filter(|b| query.is_empty() || fuzzy_score(query, &b.name).is_some())
         .cloned()
         .collect();
@@ -829,10 +945,16 @@ impl BranchFoldout {
             self.shown_selected.as_deref() == Some(branch.name.as_str())
         };
         let focused = keyboard || self.list_focused;
-        let date = branch
-            .tip_time
-            .filter(|s| *s > 0)
-            .map(|s| relative(UNIX_EPOCH + Duration::from_secs(s as u64)));
+        let item = branch_list_item(
+            &branch.name,
+            current,
+            branch
+                .tip_time
+                .filter(|s| *s > 0)
+                .map(|s| UNIX_EPOCH + Duration::from_secs(s as u64)),
+            std::time::SystemTime::now(),
+        );
+        let date = item.author_date.clone();
         // `.list-item:hover`: `--list-item-hover-background-color`, text unchanged
         let list_hover = t.list_item_hover_background;
         let hover_bg = t.box_selected_active_background;
@@ -1029,9 +1151,7 @@ impl BranchFoldout {
             })
             .child(
                 octicon(
-                    if current {
-                        Octicon::Check
-                    } else if distinguish_remote {
+                    if distinguish_remote && !current {
                         // `850-branch-list-local-remote-icons`
                         match (branch.kind, branch.upstream.is_some()) {
                             (BranchKind::Remote, _) => Octicon::Server,
@@ -1039,7 +1159,7 @@ impl BranchFoldout {
                             (BranchKind::Local, true) => Octicon::GitBranch,
                         }
                     } else {
-                        Octicon::GitBranch
+                        item.icon
                     },
                     t.text,
                 )
@@ -1053,7 +1173,7 @@ impl BranchFoldout {
                     .mr(SPACING_HALF())
                     .truncate()
                     .text_size(FONT_SIZE())
-                    .child(branch.name.clone()),
+                    .child(item.name),
             )
             .when_some(sync_state, |d, (tooltip, counts)| {
                 let content = match counts {
@@ -1136,8 +1256,8 @@ impl BranchFoldout {
     /// `NoBranches`: shown when the filter matches nothing. `.no-branches`
     /// in a resizable `.branches-container`: 365 px wide, 10 px margin and
     /// padding, the illustration at full width (`.foldout .blankslate-image`).
-    fn no_branches(&self, id: u64, query: String, cx: &Context<Self>) -> impl IntoElement {
-        div()
+    fn no_branches(&self, id: u64, query: String, cx: &Context<Self>) -> AnyElement {
+        let container = div()
             .flex_none()
             .w(zpx(365.))
             .mx_auto()
@@ -1148,61 +1268,67 @@ impl BranchFoldout {
             .items_center()
             .text_center()
             .text_size(FONT_SIZE())
-            .line_height(zpx(18.))
+            .line_height(zpx(18.));
+        let NoBranchesContent::CreateBranch {
+            blankslate_image,
+            title,
+            subtitle,
+            button: (label, NoBranchesAction::CreateNewBranch),
+            ..
+        } = no_branches(true, None)
+        else {
+            return container.into_any_element();
+        };
+        let (lead, keys, tail) = NO_BRANCHES_PROTIP;
+        container
             // 257 × 85 at the 345 px content width
-            .child(
-                crate::widgets::blankslate_image("empty-no-branches.svg", cx)
-                    .w(zpx(345.))
-                    .h(zpx(345. * 85. / 257.)),
-            )
-            .child(
-                div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Sorry, I can't find that branch"),
-            )
+            .when(blankslate_image, |d| {
+                d.child(
+                    crate::widgets::blankslate_image("empty-no-branches.svg", cx)
+                        .w(zpx(345.))
+                        .h(zpx(345. * 85. / 257.)),
+                )
+            })
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
             .child(
                 div()
                     .mx(SPACING_DOUBLE())
                     .text_size(FONT_SIZE_SM())
                     .line_height(zpx(16.5))
-                    .child("Do you want to create a new branch instead?"),
+                    .child(subtitle),
             )
             .child(
-                crate::widgets::primary_button(
-                    "no-branches-create",
-                    mac_or("Create New Branch", "Create new branch"),
-                    false,
-                    cx,
-                )
-                .m(SPACING_DOUBLE())
-                .self_stretch()
-                .on_click(move |_, _, cx| {
-                    Dispatcher::close_foldout(cx);
-                    Dispatcher::show_popup(
-                        Popup::CreateBranch {
-                            repo: id,
-                            target_sha: None,
-                            initial_name: query.clone(),
-                        },
-                        cx,
-                    )
-                }),
+                crate::widgets::primary_button("no-branches-create", label, false, cx)
+                    .m(SPACING_DOUBLE())
+                    .self_stretch()
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::close_foldout(cx);
+                        Dispatcher::show_popup(
+                            Popup::CreateBranch {
+                                repo: id,
+                                target_sha: None,
+                                initial_name: query.clone(),
+                            },
+                            cx,
+                        )
+                    }),
             )
             .child(
                 // `.protip` with a `KeyboardShortcut` (⌘⇧N) in the sentence
                 crate::widgets::paragraph(vec![
-                    "ProTip! Press ".into(),
+                    lead.into(),
                     // `kbd` inherits the 11 px `.protip` text
-                    crate::widgets::kbd_group_sized(&["⌘", "⇧", "N"], FONT_SIZE_SM(), cx)
+                    crate::widgets::kbd_group_sized(&keys, FONT_SIZE_SM(), cx)
                         .into_any_element()
                         .into(),
-                    " to quickly create a new branch from anywhere within the app".into(),
+                    tail.into(),
                 ])
                 .justify_center()
                 .px(SPACING() * 3.)
                 .text_size(FONT_SIZE_SM())
                 .line_height(zpx(16.5)),
             )
+            .into_any_element()
     }
 }
 
@@ -1472,7 +1598,7 @@ impl BranchFoldout {
                         dot: false,
                         id: "pull-requests-tab",
                         label: mac_or("Pull Requests", "Pull requests").into(),
-                        count: (open_prs > 0).then_some(open_prs),
+                        count: (open_prs > 0).then(|| open_prs.to_string().into()),
                     },
                 ],
                 match tab {

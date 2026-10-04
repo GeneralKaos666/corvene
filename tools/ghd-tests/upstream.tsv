@@ -1,0 +1,1579 @@
+unit/accounts-store-test.ts	AccountsStore › adding a new user › contains the added user	18
+unit/accounts-store-test.ts	AccountsStore › loading persisted users › migrates .ghe.com users still using /api/v3 to api. subdomain	30
+unit/accounts-store-test.ts	AccountsStore › loading persisted users › does NOT migrate GHE users already using the api. subdomain	58
+unit/accounts-store-test.ts	AccountsStore › loading persisted users › does NOT migrate GHES users still using /api/v3 to api. subdomain	86
+unit/ahead-behind-store-test.ts	AheadBehindStore › tryGetAheadBehind › returns undefined for uncached range	49
+unit/ahead-behind-store-test.ts	AheadBehindStore › getAheadBehind › calculates ahead/behind for diverged branches	57
+unit/ahead-behind-store-test.ts	AheadBehindStore › getAheadBehind › returns cached result on subsequent calls	92
+unit/ahead-behind-store-test.ts	AheadBehindStore › getAheadBehind › supports aborting via disposable	122
+unit/api-error-handling-test.ts	http › APIError › creates an error with API message	7
+unit/api-error-handling-test.ts	http › APIError › creates an error with fallback message when no API error	35
+unit/api-error-handling-test.ts	http › APIError › handles API error without additional errors array	51
+unit/api-error-handling-test.ts	http › APIError › handles common HTTP status codes	68
+unit/api-error-handling-test.ts	http › getAbsoluteUrl › constructs URL from endpoint and path	90
+unit/api-error-handling-test.ts	http › getAbsoluteUrl › handles endpoint without trailing slash	95
+unit/api-error-handling-test.ts	http › getAbsoluteUrl › handles endpoint with trailing slash	100
+unit/api-error-handling-test.ts	http › getAbsoluteUrl › strips duplicate api/v3/ prefix from path	105
+unit/api-error-handling-test.ts	http › getAbsoluteUrl › handles enterprise endpoints	113
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › returns null when there's no link header	54
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › returns raw link when missing page size	58
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › returns raw link when missing page number	68
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › does not increase page size when not aligned	78
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › increases page size on alignment with an initial page size of 10	88
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › increases page size on alignment with an initial page size of 5	101
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › increases page size on alignment with an initial page size of 1	106
+unit/api-test.ts	API › getNextPagePathWithIncreasingPageSize › doesn't increase page size when page size is 100	120
+unit/api-test.ts	API › getDiffChangesCommitMessage › preserves structured payment required errors for the legacy Copilot API path	134
+unit/api-test.ts	API › fetchProtectedBranches › returns the protected branches from a successful request	185
+unit/api-test.ts	API › fetchProtectedBranches › returns an empty array when the request succeeds without protected branches	200
+unit/api-test.ts	API › fetchProtectedBranches › returns null when the request fails	211
+unit/api-test.ts	API › fetchProtectedBranches › returns null when the repository is not found	219
+unit/app-store-test-harness-test.ts	app-store-test-harness › createTestStores › creates a complete set of test stores	14
+unit/app-store-test-harness-test.ts	app-store-test-harness › createTestAccountsStore › starts with no accounts	32
+unit/app-store-test-harness-test.ts	app-store-test-harness › createTestAccountsStore › can add and retrieve an account	38
+unit/app-store-test-harness-test.ts	app-store-test-harness › createTestSignInStore › starts in null state	58
+unit/app-store-test-harness-test.ts	app-store-test-harness › createTestRepositoryStateCache › creates a working cache	65
+unit/app-store-test-harness-test.ts	app-store-test-harness › individual store factories › creates stores with shared dependencies	72
+unit/branch-pruner-test.ts	BranchPruner › does nothing on non GitHub repositories	38
+unit/branch-pruner-test.ts	BranchPruner › prunes for GitHub repository	64
+unit/branch-pruner-test.ts	BranchPruner › does not prune if the last prune date is less than 24 hours ago	91
+unit/branch-pruner-test.ts	BranchPruner › does not prune if there is no default branch	117
+unit/branch-pruner-test.ts	BranchPruner › does not prune reserved branches	145
+unit/branch-pruner-test.ts	BranchPruner › never prunes a branch that lacks an upstream	184
+unit/branch-pruner-test.ts	BranchPruner › does not prune branches checked out in a linked worktree	213
+unit/bytes-test.ts	formatBytes › rounds to the desired number decimals	6
+unit/bytes-test.ts	formatBytes › uses the correct units	16
+unit/bytes-test.ts	formatBytes › doesn't attempt to format NaN	33
+unit/bytes-test.ts	formatBytes › doesn't attempt to format Infinity	37
+unit/ci-checks-test.ts	getCheckRunsGroupedByActionWorkflowNameAndEvent › groups by actions workflow name	10
+unit/ci-checks-test.ts	getCheckRunsGroupedByActionWorkflowNameAndEvent › groups any check run without an actions workflow name into Other	21
+unit/ci-checks-test.ts	getCheckRunsGroupedByActionWorkflowNameAndEvent › groups any check run without an actions workflow name with an app name of "GitHub Code Scanning" into "Code scanning results"	32
+unit/ci-checks-test.ts	getCheckRunsGroupedByActionWorkflowNameAndEvent › groups by actions event type if more than one event type	45
+unit/clone-path-safety-test.ts	sanitizeCloneName › returns a simple name unchanged	10
+unit/clone-path-safety-test.ts	sanitizeCloneName › extracts last component from backslash-separated traversal	14
+unit/clone-path-safety-test.ts	sanitizeCloneName › rejects names that resolve to .. or empty	18
+unit/clone-path-safety-test.ts	sanitizeCloneName › does not traverse from default basepath (#x\..\..\..\.ssh)	24
+unit/clone-path-safety-test.ts	clone path derivation with sanitizeCloneName › normal URLs are unchanged after sanitization	30
+unit/clone-path-safety-test.ts	clone path derivation with sanitizeCloneName › traversal payload clone path stays contained (POSIX)	43
+unit/clone-path-safety-test.ts	clone path derivation with sanitizeCloneName › traversal payload clone path stays contained (Windows)	58
+unit/cloning-repositories-store-test.ts	CloningRepositoriesStore › starts with no repositories	7
+unit/cloning-repositories-store-test.ts	CloningRepositoriesStore › remove › removes a repository that was added	13
+unit/cloning-repositories-store-test.ts	CloningRepositoriesStore › remove › handles removing a repository that does not exist	28
+unit/cloning-repositories-store-test.ts	CloningRepositoriesStore › getRepositoryState › returns null for unknown repository	42
+unit/cloning-repositories-store-test.ts	CloningRepositoriesStore › emitUpdate › notifies listeners when state changes	53
+unit/cloning-repository-test.ts	CloningRepository › name › provides the name of the repository being cloned	7
+unit/cloning-repository-test.ts	CloningRepository › name › extracts the repo name from the url not the path	16
+unit/cloning-repository-test.ts	CloningRepository › name › extracts the repo name without git suffix	25
+unit/cloning-repository-test.ts	CloningRepository › identity › generates unique IDs	36
+unit/cloning-repository-test.ts	CloningRepository › identity › generates a hash from the repository identity	49
+unit/commit-identity-test.ts	CommitIdentity › #parseIdent › understands a normal ident string	7
+unit/commit-identity-test.ts	CommitIdentity › #parseIdent › parses timezone information	19
+unit/commit-identity-test.ts	CommitIdentity › #parseIdent › parses even if the email address isn't a normal email	31
+unit/commit-identity-test.ts	CommitIdentity › #parseIdent › parses even if the email address is broken	39
+unit/copilot-byok-test.ts	byok storage › round-trips providers through localStorage	29
+unit/copilot-byok-test.ts	byok storage › returns an empty list when no providers have been stored	35
+unit/copilot-byok-test.ts	byok storage › removes the storage entry when saving an empty list	39
+unit/copilot-byok-test.ts	byok storage › returns an empty list when the stored value is malformed	45
+unit/copilot-byok-test.ts	byok storage › filters out entries that fail validation	50
+unit/copilot-byok-test.ts	encode/parseModelKey › round-trips copilot keys	63
+unit/copilot-byok-test.ts	encode/parseModelKey › round-trips byok keys	68
+unit/copilot-byok-test.ts	encode/parseModelKey › treats legacy bare strings as copilot model IDs	77
+unit/copilot-byok-test.ts	encode/parseModelKey › handles model IDs that contain colons	84
+unit/copilot-byok-test.ts	encode/parseModelKey › falls back to an empty copilot model on a malformed BYOK key	93
+unit/copilot-byok-test.ts	isValidBYOKBaseUrl › accepts https URLs	106
+unit/copilot-byok-test.ts	isValidBYOKBaseUrl › accepts http URLs that point at the local machine	110
+unit/copilot-byok-test.ts	isValidBYOKBaseUrl › rejects http URLs that point at non-loopback hosts	116
+unit/copilot-byok-test.ts	isValidBYOKBaseUrl › rejects file:// URLs	122
+unit/copilot-byok-test.ts	isValidBYOKBaseUrl › rejects javascript: URLs	126
+unit/copilot-byok-test.ts	isValidBYOKBaseUrl › rejects ftp:// and other non-http schemes	130
+unit/copilot-byok-test.ts	isValidBYOKBaseUrl › rejects strings that are not absolute URLs	135
+unit/copilot-byok-test.ts	loadBYOKProviders URL validation › rejects providers whose stored baseUrl is not http(s)	143
+unit/copilot-byok-test.ts	isLocalBaseUrl › matches localhost and 127.0.0.1	162
+unit/copilot-byok-test.ts	isLocalBaseUrl › matches the rest of the 127/8 loopback block	167
+unit/copilot-byok-test.ts	isLocalBaseUrl › does not match 0.0.0.0	172
+unit/copilot-byok-test.ts	isLocalBaseUrl › does not match malformed 127/8 addresses	176
+unit/copilot-byok-test.ts	isLocalBaseUrl › matches IPv6 loopback in bracketed form	180
+unit/copilot-byok-test.ts	isLocalBaseUrl › does not match other private addresses	184
+unit/copilot-byok-test.ts	isLocalBaseUrl › does not match public hosts	189
+unit/copilot-byok-test.ts	isLocalBaseUrl › returns false for malformed URLs	193
+unit/copilot-byok-test.ts	requiresNewBYOKSecret › never requires a secret when the new auth kind is none	209
+unit/copilot-byok-test.ts	requiresNewBYOKSecret › requires a secret for new (non-none) providers	214
+unit/copilot-byok-test.ts	requiresNewBYOKSecret › does not require a new secret when editing with the same auth kind	219
+unit/copilot-byok-test.ts	requiresNewBYOKSecret › requires a new secret when switching from none to a credential kind	224
+unit/copilot-byok-test.ts	requiresNewBYOKSecret › requires a new secret when switching between apiKey and bearer	229
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageSystemPrompt › returns the base system prompt unchanged when there are no rules	41
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageSystemPrompt › returns the base system prompt unchanged when tags are missing	51
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageSystemPrompt › augments the system prompt with a fixed blurb naming the per-request tags	57
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageUserPrompt › wraps the diff in a tagged block when no rules are provided	77
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageUserPrompt › omits the rules block when no rules are enforced	86
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageUserPrompt › prepends a rules block listing each enforced rule as a bullet	96
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageUserPrompt › deduplicates identical rule descriptions	122
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageUserPrompt › strips control characters from rule descriptions so they cannot escape the block	135
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageUserPrompt › preserves diff content verbatim even if it contains generic </diff> text	156
+unit/copilot-commit-message-prompt-test.ts	buildCommitMessageUserPrompt › does not embed instruction text in the system channel	168
+unit/copilot-commit-message-prompt-test.ts	generateCommitMessagePromptTags › produces unique, well-formed tags on every call	184
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › handles CRLF line endings (Windows)	54
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › does not bleed conflict markers into context lines	73
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › extracts a standard two-way conflict hunk	101
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › extracts a diff3 three-way conflict hunk	120
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › extracts multiple conflict hunks from one file	157
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › returns an empty array when no conflict markers are present	183
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › includes surrounding context lines and respects contextLines parameter	191
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › handles zero context lines	221
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › handles conflict markers at the start of the file	239
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › handles conflict markers at the end of the file	258
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › handles multi-line content in each section	277
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › handles empty ours content	296
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › handles empty theirs content	311
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › does not treat markers inside content as boundaries	326
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › extractConflictHunks › skips a malformed hunk with no closing marker	346
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt › formats a single file with one conflict	361
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt › uses language from file extension in code fences	397
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt › formats multiple files with multiple conflicts	425
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt › includes base content for diff3 conflicts	477
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt › uses empty language for extensionless files	505
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt › omits context before/after blocks when empty	534
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt › renders skipped files with a reason instead of hunks	562
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › includes commit context in output	620
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › includes PR context in output with body fenced	641
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › includes multiple PR titles and bodies	682
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › truncates an over-long PR body	707
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › omits PR description section when body is empty	719
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › omits commit sections when both sides have no commits	730
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › uses safe fences when content contains backticks	739
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › sanitizes malicious file paths in markdown headings	767
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › falls back to empty language for non-alphanumeric extensions	797
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › handles one-sided commit context	827
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with enrichment › does not include rawContent in prompt (used only for reassembly)	842
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with delete-vs-modify › renders delete-vs-modify conflict with scenario description	891
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with delete-vs-modify › renders ours-deleted scenario correctly	918
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › formatConflictContextForPrompt with delete-vs-modify › renders mixed text and delete-vs-modify files	942
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › returns null for a small, resolvable conflict	997
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › returns null for no hunks	1002
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › skips when a single line exceeds the max line length	1006
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › does not skip a line exactly at the max line length	1015
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › detects a long line on the incoming (theirs) side	1021
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › detects a long line in diff3 base content	1030
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › skips when total conflict content exceeds the max content size	1039
+unit/copilot-conflict-context-test.ts	copilot-conflict-context › getHunkSkipReason › accumulates content across multiple hunks	1051
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › falls back to the default model and effort when nothing is selected	51
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › omits the effort when the model list has not loaded	59
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › clamps the effort to one the selected model supports	67
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › omits the effort when the selected model has no reasoning support	85
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › omits the effort when the selected built-in model is not in the list	98
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › strips the reasoning marker but keeps other markers, with the effort	111
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › shows BYOK model names verbatim and passes through the effort	129
+unit/copilot-conflict-resolution-model-test.ts	getConflictResolutionModelDisplay › falls back to the default model when the BYOK selection is missing	145
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › parses a valid JSON response	68
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › unwraps ```json code blocks	79
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › unwraps ``` code blocks without json tag	88
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › handles multiple resolutions	97
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on invalid JSON	108
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on non-object payload	115
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on missing resolutions array	122
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on empty resolutions array	129
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on missing path	136
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on empty path	146
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on missing hunks	158
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on empty hunks array	168
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on missing reasoning	178
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › allows empty resolvedContent in a hunk (intentional deletion)	188
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › handles resolvedContent containing triple backticks	196
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › parses when LLM adds preamble/postamble around code block	212
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws when resolvedContent still contains conflict markers	222
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › does not reject resolvedContent with only opening marker in a comment	238
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws on truncated conflict markers (opening + separator without closing)	253
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › parses JSON block followed by another code block	269
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › trims whitespace from path values	281
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › normalizes Windows-style backslash separators	289
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › strips leading ./ from paths	297
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › collapses redundant path separators	305
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › returns null summary when missing, mistyped, or blank	313
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › preserves a non-empty summary string	321
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › parses valid references and strips a leading # from PR ids	331
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › returns empty references when missing and drops invalid entries	346
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › parses a delete-vs-modify resolution with action "keep"	369
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › parses a delete-vs-modify resolution with action "delete"	388
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › handles mixed text and delete-vs-modify resolutions	404
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › ignores unknown action values and treats as regular resolution	419
+unit/copilot-conflict-resolution-test.ts	parseCopilotConflictResolution › throws when action resolution has empty reasoning	435
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › replaces a single conflict in the middle of a file	451
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › replaces multiple conflicts in order	474
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › handles diff3 (three-way) markers	502
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › handles empty resolved content (intentional deletion)	520
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › handles multi-line resolved content	536
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › preserves CRLF line endings	554
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › preserves file with no conflicts unchanged	570
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › treats malformed markers (missing separator) as regular content	576
+unit/copilot-conflict-resolution-test.ts	reassembleResolvedFile › treats unclosed markers (missing >>>>>>>) as regular content	591
+unit/copilot-conflict-resolution-test.ts	validateResolutionPaths › skips hunk count check for action-based resolutions	613
+unit/copilot-conflict-resolution-test.ts	validateResolutionPaths › validates hunk count for regular resolutions alongside action files	635
+unit/copilot-conflict-resolution-test.ts	validateResolutionPaths › still catches wrong hunk count for non-action resolutions	673
+unit/copilot-conflict-resolution-test.ts	reassembleResolutions › passes through action-based resolutions with deleteConflictAction	707
+unit/copilot-conflict-resolution-test.ts	reassembleResolutions › handles mixed action and text resolutions	731
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts exports from hunk content	793
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts all export kinds	804
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts import paths and named references	824
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts default import references	840
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts extends/implements/instanceof/new/typeof references	847
+unit/copilot-conflict-resolution-test.ts	extractSymbols › scans base content when present	861
+unit/copilot-conflict-resolution-test.ts	extractSymbols › scans context lines	869
+unit/copilot-conflict-resolution-test.ts	extractSymbols › returns empty sets for a file with no symbols	879
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts namespace imports (import * as X)	887
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts combined default + named imports	894
+unit/copilot-conflict-resolution-test.ts	extractSymbols › extracts type-only imports	907
+unit/copilot-conflict-resolution-test.ts	extractSymbols › strips inline type keyword from named imports	919
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › returns all files in a single chunk when count <= targetSize	936
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › groups files that import from each other	943
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › groups files that share exported/referenced symbols	966
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › splits large dependency groups beyond target size	978
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › bin-packs small independent groups	1004
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › every input file appears in exactly one chunk	1020
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › does not false-positive group files with short basenames	1034
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › does not group unrelated index.ts files together	1085
+unit/copilot-conflict-resolution-test.ts	createDependencyAwareChunks › handles group.length exactly equal to targetSize	1107
+unit/copilot-conflict-resolution-test.ts	selectReferencedContext › resolves pull request references against the gathered context	1170
+unit/copilot-conflict-resolution-test.ts	selectReferencedContext › resolves commit references by full and abbreviated SHA	1187
+unit/copilot-conflict-resolution-test.ts	selectReferencedContext › refuses to resolve short or ambiguous commit prefixes	1205
+unit/copilot-conflict-resolution-test.ts	selectReferencedContext › promotes a merge commit to its pull request, de-duplicating direct citations	1226
+unit/copilot-conflict-resolution-test.ts	selectReferencedContext › keeps a merge commit as a commit when its PR was not gathered	1255
+unit/copilot-conflict-resolution-test.ts	fallbackReferencedContext › prefers the incoming pull request over commits	1271
+unit/copilot-conflict-resolution-test.ts	fallbackReferencedContext › falls back to a meaningful commit, skipping noise	1283
+unit/copilot-conflict-resolution-test.ts	fallbackReferencedContext › returns empty when there are no commits or pull requests	1301
+unit/copilot-error-test.ts	parseCopilotPaymentRequiredError › parses quota_exceeded responses	11
+unit/copilot-error-test.ts	parseCopilotPaymentRequiredError › parses session_quota_exceeded responses	30
+unit/copilot-error-test.ts	parseCopilotPaymentRequiredError › parses billing_not_configured responses	49
+unit/copilot-error-test.ts	parseCopilotPaymentRequiredError › falls back to the raw response body when the server returns plain text	67
+unit/copilot-error-test.ts	getCopilotErrorDisplayInfo › returns a quota-specific title and retry timing for quota_exceeded	79
+unit/copilot-error-test.ts	getCopilotErrorDisplayInfo › returns a distinct title for session_quota_exceeded	106
+unit/copilot-error-test.ts	getCopilotErrorDisplayInfo › returns a settings CTA for billing_not_configured	128
+unit/copilot-error-test.ts	getCopilotErrorDisplayInfo › treats unknown 402 responses as a generic Copilot billing issue	151
+unit/copilot-error-test.ts	getCopilotPaymentRequiredErrorFromSessionError › returns null when statusCode is not 402	167
+unit/copilot-error-test.ts	getCopilotPaymentRequiredErrorFromSessionError › returns null when statusCode is missing	176
+unit/copilot-error-test.ts	getCopilotPaymentRequiredErrorFromSessionError › strips the leading status code and trailing request id	184
+unit/copilot-error-test.ts	getCopilotPaymentRequiredErrorFromSessionError › preserves the message when no prefix or suffix is present	197
+unit/copilot-error-test.ts	getCopilotPaymentRequiredErrorFromSessionError › falls back to a default message when the cleaned message is empty	207
+unit/copilot-error-test.ts	getCopilotPaymentRequiredErrorFromSessionError › ignores unknown errorCode values	221
+unit/copilot-in-memory-session-fs-provider-test.ts	getCopilotInMemorySessionFsConfig › uses a POSIX session filesystem rooted in the in-memory state directory	10
+unit/copilot-in-memory-session-fs-provider-test.ts	getCopilotInMemorySessionFsConfig › normalizes Windows repository paths for POSIX session filesystem conventions on non-Windows platforms	21
+unit/copilot-in-memory-session-fs-provider-test.ts	getCopilotInMemorySessionFsConfig › uses Windows session filesystem conventions	32
+unit/copilot-in-memory-session-fs-provider-test.ts	getCopilotInMemorySessionFsConfig › falls back to a normalized process cwd when no repository path is provided	43
+unit/copilot-in-memory-session-fs-provider-test.ts	getCopilotInMemorySessionFsConfig › falls back to a Windows process cwd on Windows	61
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › creates isolated providers with the default state directory	81
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › writes, reads, and appends files while creating parent directories	93
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › normalizes POSIX paths consistently	107
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › handles absolute POSIX paths without recursing indefinitely	119
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › normalizes Windows paths consistently	129
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › lists root-level files with the correct type	144
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › reports file and directory metadata	154
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › keeps directory metadata stable between stat calls	175
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › lists direct children with type information	187
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › requires existing parent directories for non-recursive mkdir	205
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › does not allow files and directories to share a path	221
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › removes files and directories with force and recursive semantics	237
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › renames files and directories	257
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › does not rename files over directories	282
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › does not merge directory renames into existing directories	302
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › does not rename directories into their own subtree	330
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › treats renaming a path to itself as a no-op	353
+unit/copilot-in-memory-session-fs-provider-test.ts	createCopilotInMemorySessionFsProvider › throws ENOENT errors for missing required paths	370
+unit/copilot-resolution-helpers-test.ts	isDeleteConflictFile › returns true when "us" is deleted and "them" is not	101
+unit/copilot-resolution-helpers-test.ts	isDeleteConflictFile › returns true when "them" is deleted and "us" is not	105
+unit/copilot-resolution-helpers-test.ts	isDeleteConflictFile › returns false when both sides are deleted	109
+unit/copilot-resolution-helpers-test.ts	isDeleteConflictFile › returns false when neither side is deleted	113
+unit/copilot-resolution-helpers-test.ts	isDeleteConflictFile › returns false for ConflictsWithMarkers (text conflicts)	117
+unit/copilot-resolution-helpers-test.ts	isDeleteConflictFile › returns false for BothAdded manual conflict	121
+unit/copilot-resolution-helpers-test.ts	getDeletedSide › returns "ours" when us is deleted	131
+unit/copilot-resolution-helpers-test.ts	getDeletedSide › returns "theirs" when them is deleted	135
+unit/copilot-resolution-helpers-test.ts	getDeletedSide › returns undefined when neither side is deleted	139
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictLabels › labels correctly when ours deleted the file	149
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictLabels › labels correctly when theirs deleted the file	159
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictLabels › omits branch names when not provided	169
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictChoiceLabel › returns "Copilot" for the copilot choice	183
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictChoiceLabel › returns "Delete file" for ours when ours deleted	190
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictChoiceLabel › returns "Keep file" for theirs when ours deleted	197
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictChoiceLabel › returns "Keep file" for ours when theirs deleted	204
+unit/copilot-resolution-helpers-test.ts	getDeleteConflictChoiceLabel › returns "Delete file" for theirs when theirs deleted	211
+unit/copilot-resolution-helpers-test.ts	getOursTheirsLabels › returns delete conflict labels for a delete-vs-modify file	224
+unit/copilot-resolution-helpers-test.ts	getOursTheirsLabels › returns text conflict labels for a non-delete conflict	234
+unit/copilot-resolution-helpers-test.ts	getOursTheirsLabels › returns text conflict labels when status is undefined	244
+unit/copilot-resolution-helpers-test.ts	getOursTheirsLabels › omits branch names when not provided	254
+unit/create-branch-test.ts	create-branch/getStartPoint › for default branch › returns current HEAD when HEAD requested	58
+unit/create-branch-test.ts	create-branch/getStartPoint › for default branch › chooses current branch when current branch requested	62
+unit/create-branch-test.ts	create-branch/getStartPoint › for default branch › chooses default branch when default branch requested	66
+unit/create-branch-test.ts	create-branch/getStartPoint › for a non-default branch › returns current HEAD when HEAD requested	84
+unit/create-branch-test.ts	create-branch/getStartPoint › for a non-default branch › chooses current branch when current branch requested	88
+unit/create-branch-test.ts	create-branch/getStartPoint › for a non-default branch › chooses default branch when default branch requested	92
+unit/create-branch-test.ts	create-branch/getStartPoint › for detached HEAD › returns current HEAD when HEAD requested	110
+unit/create-branch-test.ts	create-branch/getStartPoint › for detached HEAD › returns current HEAD when current branch requested	114
+unit/create-branch-test.ts	create-branch/getStartPoint › for detached HEAD › returns current HEAD when default branch requested	118
+unit/database-migration-test.ts	BaseDatabase › conditionalVersion › registers all versions when schemaVersion is undefined	24
+unit/database-migration-test.ts	BaseDatabase › conditionalVersion › registers all versions when schemaVersion equals the highest	36
+unit/database-migration-test.ts	BaseDatabase › conditionalVersion › skips versions higher than schemaVersion	44
+unit/desktop-console-transport-test.ts	DesktopConsoleTransport › ignores EPIPE errors emitted by stdio streams	7
+unit/desktop-console-transport-test.ts	DesktopConsoleTransport › throws non-EPIPE errors emitted by stdio streams	17
+unit/desktop-file-transport-test.ts	DesktopFileTransport › creates a file on demand	17
+unit/desktop-file-transport-test.ts	DesktopFileTransport › creates a file for each day	30
+unit/desktop-file-transport-test.ts	DesktopFileTransport › retains a maximum of 14 log files	49
+unit/diff-parser-test.ts	DiffParser › parses changed files	17
+unit/diff-parser-test.ts	DiffParser › parses new files	115
+unit/diff-parser-test.ts	DiffParser › parses files containing @@	150
+unit/diff-parser-test.ts	DiffParser › parses new files without a newline at end of file	191
+unit/diff-parser-test.ts	DiffParser › parses diffs that adds newline to end of file	229
+unit/diff-parser-test.ts	DiffParser › parses diffs where neither file version has a trailing newline	275
+unit/diff-parser-test.ts	DiffParser › parses binary diffs	326
+unit/diff-parser-test.ts	DiffParser › parses diff of empty file	338
+unit/diff-parser-test.ts	DiffParser › parses hunk headers with omitted line counts from new file	351
+unit/diff-parser-test.ts	DiffParser › parses hunk headers with omitted line counts from old file	372
+unit/email-test.ts	emails › lookupPreferredEmail › returns a stealth email address for empty list	16
+unit/email-test.ts	emails › lookupPreferredEmail › returns a stealth email address for empty list from GHES	34
+unit/email-test.ts	emails › lookupPreferredEmail › returns the primary if it has public visibility	52
+unit/email-test.ts	emails › lookupPreferredEmail › returns the primary if it has null visibility	91
+unit/email-test.ts	emails › lookupPreferredEmail › returns the noreply if there is no public address	130
+unit/email-test.ts	emails › lookupPreferredEmail › returns the noreply if there is no public address for GitHub Enterprise as well	169
+unit/email-test.ts	emails › lookupPreferredEmail › uses first email if nothing special found	208
+unit/email-test.ts	emails › isAttributableEmailFor › considers all email addresses on the account as well as legacy and modern stealth emails	240
+unit/email-test.ts	emails › isAttributableEmailFor › considers stealth emails when account has no emails	286
+unit/email-test.ts	emails › isAttributableEmailFor › considers stealth emails for GitHub Enterprise	300
+unit/email-test.ts	emails › isAttributableEmailFor › considers email adresses in a case-insensitive manner	314
+unit/endpoint-capabilities-test.ts	endpoint-capabilities › endpointSatisfies › recognizes github.com	13
+unit/endpoint-capabilities-test.ts	endpoint-capabilities › endpointSatisfies › recognizes GHES	18
+unit/endpoint-capabilities-test.ts	endpoint-capabilities › endpointSatisfies › recognizes GHAE	23
+unit/endpoint-capabilities-test.ts	endpoint-capabilities › endpointSatisfies › assumes GHES versions	32
+unit/endpoint-capabilities-test.ts	endpoint-capabilities › endpointSatisfies › parses semver ranges	37
+unit/endpoint-capabilities-test.ts	endpoint-capabilities › endpointSatisfies › deals with common cases (smoketest)	43
+unit/enterprise-validate-url-test.ts	validateURL › passes through a valid url	6
+unit/enterprise-validate-url-test.ts	validateURL › prepends https if no protocol is provided	12
+unit/enterprise-validate-url-test.ts	validateURL › throws if given an invalid protocol	17
+unit/enterprise-validate-url-test.ts	validateURL › throws if given whitespace	21
+unit/enterprise-validate-url-test.ts	validateURL › handles whitespace alongside valid text	25
+unit/enum-test.ts	parseEnumValue › parses an enum type from a string	11
+unit/enum-test.ts	parseEnumValue › returns undefined when enum value doesn't exist	18
+unit/enum-test.ts	parseEnumValue › ignores inherited values	22
+unit/fatal-error-test.ts	forceUnwrap › fails for null	6
+unit/fatal-error-test.ts	forceUnwrap › fails for undefined	16
+unit/fatal-error-test.ts	forceUnwrap › passes for false	26
+unit/fatal-error-test.ts	forceUnwrap › passes for a hash	30
+unit/file-system-test.ts	file-system › getTempFilePath › returns a path in the temp directory	11
+unit/file-system-test.ts	file-system › getTempFilePath › includes the given name in the path	16
+unit/file-system-test.ts	file-system › getTempFilePath › generates unique paths on each call	21
+unit/file-system-test.ts	file-system › readPartialFile › reads a specific range from a file	29
+unit/file-system-test.ts	file-system › readPartialFile › reads from the middle of a file	38
+unit/file-system-test.ts	file-system › readPartialFile › reads a single byte	47
+unit/filter-changes-logic-test.ts	filter-changes-logic › applyFilterOptions › when no filters are active › should show all files	57
+unit/filter-changes-logic-test.ts	filter-changes-logic › applyFilterOptions › when using AND logic › should show files matching ALL active filters	90
+unit/filter-changes-logic-test.ts	filter-changes-logic › applyFilterOptions › when using AND logic › should handle conflicting filters correctly	124
+unit/filter-changes-logic-test.ts	filter-changes-logic › applyFilterOptions › when using AND logic › should treat untracked files as new files	150
+unit/filter-changes-logic-test.ts	filter-changes-logic › applyFilterOptions › when using AND logic › should match excluded files when excluded filter is active	173
+unit/filter-changes-logic-test.ts	filter-changes-logic › isCommittingFileHiddenByFilter › should return false when no filters are active	201
+unit/filter-changes-logic-test.ts	filter-changes-logic › isCommittingFileHiddenByFilter › should return true when committing files not in filtered list	223
+unit/filter-changes-logic-test.ts	filter-changes-logic › isCommittingFileHiddenByFilter › should return false when all files remain visible after filtering	245
+unit/filter-changes-logic-test.ts	filter-changes-logic › getNoResultsMessage › should return undefined when no filters active	269
+unit/filter-changes-logic-test.ts	filter-changes-logic › getNoResultsMessage › should return message with text filter	282
+unit/filter-changes-logic-test.ts	filter-changes-logic › getNoResultsMessage › should return message with multiple filters	296
+unit/filter-changes-logic-test.ts	filter-changes-logic › getNoResultsMessage › should format three or more filters with commas and and	311
+unit/filter-changes-logic-test.ts	filter-changes-logic › hasActiveFilters › should return false when no text or filter options are active	329
+unit/filter-changes-logic-test.ts	filter-changes-logic › hasActiveFilters › should return true when either text or filter options are active	342
+unit/filter-changes-logic-test.ts	filter-changes-logic › applyFilters › should bypass filter logic when the changes filter is hidden	370
+unit/find-account-test.ts	findAccountForRemoteURL › gives no account for non-GitHub endpoint	58
+unit/find-account-test.ts	findAccountForRemoteURL › gives no account for non-existent GitHub owner/name repository	67
+unit/find-account-test.ts	findAccountForRemoteURL › finds the anonymous account for public GitHub owner/name repository	76
+unit/find-account-test.ts	findAccountForRemoteURL › finds the anonymous account for public repository on GitHub endpoint	86
+unit/find-account-test.ts	findAccountForRemoteURL › finds the account for GitHub owner/name repository	96
+unit/find-account-test.ts	findAccountForRemoteURL › finds the account for GitHub endpoint	106
+unit/find-account-test.ts	findAccountForRemoteURL › finds the account for GitHub Enterprise endpoint	116
+unit/find-account-test.ts	findAccountForRemoteURL › finds the account for private GitHub owner/name repository	126
+unit/find-account-test.ts	findAccountForRemoteURL › cannot see the private GitHub owner/name repository	136
+unit/find-forked-remotes-to-prune-test.ts	findForkedRemotesToPrune › never prunes remotes not created by the app	82
+unit/find-forked-remotes-to-prune-test.ts	findForkedRemotesToPrune › never prunes remotes with local branches	91
+unit/find-forked-remotes-to-prune-test.ts	findForkedRemotesToPrune › never prunes remotes with pull requests	108
+unit/find-forked-remotes-to-prune-test.ts	findForkedRemotesToPrune › prunes remotes without pull requests or local branches	126
+unit/find-upstream-remote-test.ts	findUpstreamRemote › finds the upstream	10
+unit/format-commit-message-test.ts	formatCommitMessage › always adds trailing newline	7
+unit/format-commit-message-test.ts	formatCommitMessage › omits description when null	20
+unit/format-commit-message-test.ts	formatCommitMessage › omits description when empty string	28
+unit/format-commit-message-test.ts	formatCommitMessage › adds two newlines between summary and description	36
+unit/format-commit-message-test.ts	formatCommitMessage › appends trailers to a summary-only message	44
+unit/format-commit-message-test.ts	formatCommitMessage › appends trailers to a regular message	62
+unit/format-commit-message-test.ts	formatCommitMessage › merges duplicate trailers	81
+unit/format-commit-message-test.ts	formatCommitMessage › fixes up malformed trailers when trailers are given	100
+unit/format-commit-message-test.ts	formatCommitMessage › doesn't treat --- as end of commit message	120
+unit/format-duration-test.ts	formatPreciseDuration › returns 0s for ms less than 1000	6
+unit/format-duration-test.ts	formatPreciseDuration › return 0[unit] after encountering first whole unit	10
+unit/format-duration-test.ts	formatPreciseDuration › treats negative values as absolute numbers	17
+unit/format-number-test.ts	formatNumber › integers › formats small integers without thousands separator	39
+unit/format-number-test.ts	formatNumber › integers › formats thousands with comma separator	46
+unit/format-number-test.ts	formatNumber › integers › formats millions with multiple separators	58
+unit/format-number-test.ts	formatNumber › integers › formats thousands with dot separator (European style)	69
+unit/format-number-test.ts	formatNumber › integers › formats thousands with space separator	81
+unit/format-number-test.ts	formatNumber › integers › formats without thousands separator when configured	93
+unit/format-number-test.ts	formatNumber › decimals › formats decimals with dot separator	104
+unit/format-number-test.ts	formatNumber › decimals › formats decimals with comma separator (European style)	113
+unit/format-number-test.ts	formatNumber › decimals › formats large numbers with decimals	122
+unit/format-number-test.ts	formatNumber › decimals › truncates decimals to the maximum fraction digits	137
+unit/format-number-test.ts	formatNumber › decimals › omits the decimal separator when maximum fraction digits is zero	154
+unit/format-number-test.ts	formatNumber › decimals › leaves integers unchanged when maximum fraction digits is set	164
+unit/format-number-test.ts	formatNumber › negative numbers › formats negative integers	176
+unit/format-number-test.ts	formatNumber › negative numbers › formats negative decimals	188
+unit/format-number-test.ts	formatNumber › edge cases › handles Infinity	198
+unit/format-number-test.ts	formatNumber › edge cases › handles NaN	209
+unit/format-number-test.ts	formatNumber › edge cases › handles very small decimals	213
+unit/format-number-test.ts	formatCompactNumber › small numbers (< 1000) › formats small numbers without compaction	225
+unit/format-number-test.ts	formatCompactNumber › small numbers (< 1000) › formats small decimals without compaction	244
+unit/format-number-test.ts	formatCompactNumber › thousands (k) › formats thousands with k suffix	257
+unit/format-number-test.ts	formatCompactNumber › thousands (k) › shows one decimal for values under 10k	272
+unit/format-number-test.ts	formatCompactNumber › thousands (k) › shows no decimals for values 10k and above	283
+unit/format-number-test.ts	formatCompactNumber › thousands (k) › uses configured decimal separator	298
+unit/format-number-test.ts	formatCompactNumber › millions (m) › formats millions with m suffix	311
+unit/format-number-test.ts	formatCompactNumber › millions (m) › shows one decimal for values under 10m	326
+unit/format-number-test.ts	formatCompactNumber › millions (m) › shows no decimals for values 10m and above	341
+unit/format-number-test.ts	formatCompactNumber › billions (b) › formats billions with b suffix	358
+unit/format-number-test.ts	formatCompactNumber › billions (b) › shows one decimal for values under 10b	373
+unit/format-number-test.ts	formatCompactNumber › billions (b) › shows no decimals for values 10b and above	382
+unit/format-number-test.ts	formatCompactNumber › trillions (t) › formats trillions with t suffix	393
+unit/format-number-test.ts	formatCompactNumber › trillions (t) › caps at trillion for extremely large numbers	408
+unit/format-number-test.ts	formatCompactNumber › edge cases › handles Infinity	420
+unit/format-number-test.ts	formatCompactNumber › edge cases › handles NaN	435
+unit/format-number-test.ts	formatCompactNumber › edge cases › handles negative large numbers	442
+unit/format-number-test.ts	formatCompactNumber › explicit decimals › uses explicit decimals when provided	457
+unit/format-number-test.ts	formatCompactNumber › explicit decimals › respects explicit decimals of 0	469
+unit/format-number-test.ts	formatCompactNumber › explicit decimals › works with explicit decimals across magnitude boundaries	481
+unit/format-number-test.ts	formatCompactNumber › explicit decimals › uses configured decimal separator with explicit decimals	498
+unit/format-number-test.ts	formatCompactNumber › all format configurations › works with space thousands and dot decimal	510
+unit/format-number-test.ts	formatCompactNumber › all format configurations › works with space thousands and comma decimal	523
+unit/format-number-test.ts	formatCompactNumber › all format configurations › works with no thousands separator	530
+unit/format-test.ts	format › formatRebaseValue › clamps a negative value	7
+unit/format-test.ts	format › formatRebaseValue › clamps a positive value	15
+unit/format-test.ts	format › formatRebaseValue › formats to two significant figures	23
+unit/format-test.ts	format › formatRebaseValue › handles infinity	31
+unit/fuzzy-find-test.ts	fuzzy find › should find matching item when searching by pull request number	21
+unit/fuzzy-find-test.ts	fuzzy find › should find matching item when searching by author	28
+unit/fuzzy-find-test.ts	fuzzy find › should find matching item when by title	35
+unit/fuzzy-find-test.ts	fuzzy find › should find nothing	42
+unit/get-file-hash-test.ts	get-file-hash › returns consistent sha256 hash for known content	9
+unit/get-file-hash-test.ts	get-file-hash › returns different hashes for different content	26
+unit/get-file-hash-test.ts	get-file-hash › returns same hash for same content in different files	42
+unit/get-file-hash-test.ts	get-file-hash › rejects for non-existent file	58
+unit/get-file-hash-test.ts	get-file-hash › supports sha1 algorithm	64
+unit/get-shell-env-test.ts	getShellEnv › returns an env containing PATH (${label})	13
+unit/git/add-test.ts	git/add › addConflictedFile › stages a conflicted file after manual resolution	13
+unit/git/apply-test.ts	git/apply › discardChangesFromSelection() › does not change the file when an empty selection is passed	34
+unit/git/apply-test.ts	git/apply › discardChangesFromSelection() › discards all file changes when a full selection is passed	53
+unit/git/apply-test.ts	git/apply › discardChangesFromSelection() › re-adds a single removed line	72
+unit/git/apply-test.ts	git/apply › discardChangesFromSelection() › re-adds a removed hunk	105
+unit/git/apply-test.ts	git/apply › discardChangesFromSelection() › removes an added line	144
+unit/git/apply-test.ts	git/apply › discardChangesFromSelection() › removes an added hunk	177
+unit/git/branch-test.ts	git/branch › tip › returns unborn for new repository	33
+unit/git/branch-test.ts	git/branch › tip › returns correct ref if checkout occurs	45
+unit/git/branch-test.ts	git/branch › tip › returns detached for arbitrary checkout	59
+unit/git/branch-test.ts	git/branch › tip › returns current branch when on a valid HEAD	75
+unit/git/branch-test.ts	git/branch › tip › returns non-origin remote	92
+unit/git/branch-test.ts	git/branch › upstreamWithoutRemote › returns the upstream name without the remote prefix	107
+unit/git/branch-test.ts	git/branch › getBranchesPointedAt › in a local repo › finds one branch name	126
+unit/git/branch-test.ts	git/branch › getBranchesPointedAt › in a local repo › finds no branch names	136
+unit/git/branch-test.ts	git/branch › getBranchesPointedAt › in a local repo › returns null on a malformed committish	145
+unit/git/branch-test.ts	git/branch › getBranchesPointedAt › in a repo with identical branches › finds multiple branch names	155
+unit/git/branch-test.ts	git/branch › deleteLocalBranch › deletes local branches	173
+unit/git/branch-test.ts	git/branch › deleteRemoteBranch › delete a local branches upstream branch	194
+unit/git/branch-test.ts	git/branch › deleteRemoteBranch › handles attempted delete of removed remote branch	232
+unit/git/checkout-test.ts	git/checkout › throws when invalid characters are used for branch name	22
+unit/git/checkout-test.ts	git/checkout › can checkout a valid branch name in an existing repository	44
+unit/git/checkout-test.ts	git/checkout › can checkout a branch when it exists on multiple remotes	69
+unit/git/checkout-test.ts	git/checkout › will fail when an existing branch matches the remote branch	106
+unit/git/checkout-test.ts	git/checkout › with submodules › updates a changed submodule reference	130
+unit/git/checkout-test.ts	git/checkout › with submodules › initializes an uninitialized submodule when checking out a branch	150
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picked one commit without conflicts	57
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picked a commit with empty message	75
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picks a redundant commit	104
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picks an empty commit	126
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picks an empty commit inside a range	147
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picked multiple commits without conflicts	190
+unit/git/cherry-pick-test.ts	git/cherry-pick › fails to cherry-pick array of no commits	217
+unit/git/cherry-pick-test.ts	git/cherry-pick › fails to cherry-pick when working tree is not clean	224
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picks a merge commit	256
+unit/git/cherry-pick-test.ts	git/cherry-pick › successfully cherry-picks a merge commit after a conflict	290
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking with conflicts › successfully detects cherry-pick with conflicts	373
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking with conflicts › successfully continues cherry-picking with conflicts after resolving them by overwriting	391
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking with conflicts › successfully continues cherry-picking with conflicts after resolving them manually	425
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking with conflicts › successfully continues cherry-picking with conflicts after resolving them manually and no changes to commit	457
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking with conflicts › successfully detects cherry-picking with outstanding files not staged	489
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking with conflicts › successfully continues cherry-picking with additional changes to untracked files	510
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking with conflicts › successfully aborts cherry-pick after conflict	548
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking progress › successfully parses progress for a single commit	572
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking progress › successfully parses progress for multiple commits	594
+unit/git/cherry-pick-test.ts	git/cherry-pick › cherry-picking progress › successfully parses progress for multiple commits including a conflict	615
+unit/git/clone-test.ts	git/clone › clones a local repository	23
+unit/git/clone-test.ts	git/clone › clones with a specific branch	40
+unit/git/clone-test.ts	git/clone › reports progress when callback is provided	67
+unit/git/clone-test.ts	git/clone › clones with a custom default branch name	86
+unit/git/clone-test.ts	git/clone › rejects cloning into ~/.ssh	115
+unit/git/clone-test.ts	git/clone › rejects cloning into home directory root	131
+unit/git/clone-test.ts	git/clone › rejects cloning into ~/.config/git	147
+unit/git/commit-test.ts	git/commit › createCommit normal › commits the given files	53
+unit/git/commit-test.ts	git/commit › createCommit normal › commit does not strip commentary by default	75
+unit/git/commit-test.ts	git/commit › createCommit normal › can commit for empty repository	99
+unit/git/commit-test.ts	git/commit › createCommit normal › can commit renames	133
+unit/git/commit-test.ts	git/commit › createCommit partials › can commit some lines from new file	159
+unit/git/commit-test.ts	git/commit › createCommit partials › can commit second hunk from modified file	205
+unit/git/commit-test.ts	git/commit › createCommit partials › can commit single delete from modified file	260
+unit/git/commit-test.ts	git/commit › createCommit partials › can commit multiple hunks from modified file	307
+unit/git/commit-test.ts	git/commit › createCommit partials › can commit some lines from deleted file	367
+unit/git/commit-test.ts	git/commit › createCommit partials › can commit renames with modifications	412
+unit/git/commit-test.ts	git/commit › createCommit partials › can commit renames with partially selected modifications	443
+unit/git/commit-test.ts	git/commit › createCommit with a merge conflict › creates a merge commit	488
+unit/git/commit-test.ts	git/commit › createMergeCommit › with a simple merge conflict › with a merge conflict › creates a merge commit	531
+unit/git/commit-test.ts	git/commit › createMergeCommit › with a merge conflict and manual resolutions › keeps files chosen to be added and commits	547
+unit/git/commit-test.ts	git/commit › createMergeCommit › with a merge conflict and manual resolutions › deletes files chosen to be removed and commits	568
+unit/git/commit-test.ts	git/commit › createMergeCommit › with a merge conflict and manual resolutions › checks out our content for file added in both branches	589
+unit/git/commit-test.ts	git/commit › createMergeCommit › with a merge conflict and manual resolutions › checks out their content for file added in both branches	613
+unit/git/commit-test.ts	git/commit › createMergeCommit › with a merge conflict and manual resolutions › binary file conflicts › chooses `their` version of a file and commits	663
+unit/git/commit-test.ts	git/commit › createMergeCommit › with a merge conflict and manual resolutions › binary file conflicts › chooses `our` version of a file and commits	698
+unit/git/commit-test.ts	git/commit › createMergeCommit › with no changes › throws an error	734
+unit/git/commit-test.ts	git/commit › index corner cases › can commit when staged new file is then deleted	751
+unit/git/commit-test.ts	git/commit › index corner cases › can commit when a delete is staged and the untracked file exists	788
+unit/git/commit-test.ts	git/commit › index corner cases › file is deleted in index	826
+unit/git/commit-test.ts	git/commit › createCommit allowEmpty › creates an empty commit when allowEmpty is true	871
+unit/git/commit-test.ts	git/commit › createCommit allowEmpty › fails to create an empty commit when allowEmpty is not set	898
+unit/git/config-test.ts	git/config › config › looks up config values	22
+unit/git/config-test.ts	git/config › config › returns null for undefined values	29
+unit/git/config-test.ts	git/config › GIT_CONFIG_PARAMETERS › picks them up	38
+unit/git/config-test.ts	git/config › GIT_CONFIG_PARAMETERS › takes precedence over GIT_CONFIG_*	64
+unit/git/config-test.ts	git/config › global config › getGlobalConfigPath › gets the config path	92
+unit/git/config-test.ts	git/config › global config › setGlobalConfigValue › will replace all entries for a global value	105
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "false" as false	121
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "off" as false	129
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "no" as false	137
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "0" as false	145
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "true" as true	153
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "yes" as true	161
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "on" as true	169
+unit/git/config-test.ts	git/config › global config › getGlobalBooleanConfigValue › treats "1" as true	177
+unit/git/core-test.ts	git/core › error handling › does not throw for errors that were expected	15
+unit/git/core-test.ts	git/core › error handling › throws for errors that were not expected	25
+unit/git/core-test.ts	git/core › exit code handling › does not throw for exit codes that were expected	38
+unit/git/core-test.ts	git/core › exit code handling › throws for exit codes that were not expected	47
+unit/git/core-test.ts	git/core › config lock file error handling › can parse lock file path from stderr	57
+unit/git/core-test.ts	git/core › config lock file error handling › normalizes paths	78
+unit/git/create-tail-stream-test.ts	createTailStream › only keeps the tail of the input stream	7
+unit/git/create-terminal-stream-test.ts	terminal-stream › can handle git clone progress	9
+unit/git/create-terminal-stream-test.ts	terminal-stream › can handle all kinds of chunk sizes	28
+unit/git/create-terminal-stream-test.ts	terminal-stream › can handle empty buffers	56
+unit/git/credential-test.ts	git/credential › parseCredential › expands arrays into numeric entries	10
+unit/git/credential-test.ts	git/credential › formatCredential › transforms numbered array entries into unnumbered	22
+unit/git/description-test.ts	git/description › getGitDescription › returns empty for an initialized repository	11
+unit/git/description-test.ts	git/description › getGitDescription › returns empty when path is missing	17
+unit/git/description-test.ts	git/description › getGitDescription › reads the custom text	26
+unit/git/diff-check-test.ts	getFilesWithConflictMarkers › with one conflicted file › finds one conflicted file	13
+unit/git/diff-check-test.ts	getFilesWithConflictMarkers › with one conflicted file › finds multiple conflicted files	24
+unit/git/diff-check-test.ts	getFilesWithConflictMarkers › with no conflicted files › finds no conflicted files	38
+unit/git/diff-resolution-test.ts	git/diff/getResolutionDiff › diffs resolved content against the on-disk file	10
+unit/git/diff-stage-test.ts	git/diff/getResolutionDiff (stage mode) › diffs ours (:2) against the on-disk conflict-marker file	11
+unit/git/diff-stage-test.ts	git/diff/getResolutionDiff (stage mode) › diffs theirs (:3) against the on-disk conflict-marker file	52
+unit/git/diff-stage-test.ts	git/diff/getResolutionDiff (stage mode) › shows deletion diff when file deleted in requested stage	92
+unit/git/diff-stage-test.ts	git/diff/getResolutionDiff (stage mode) › respects hideWhitespaceInDiff flag	128
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryImage › retrieves valid image for new file	51
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryImage › retrieves valid images for modified file	71
+unit/git/diff-test.ts	git/diff › getBlobImage › retrieves valid image for modified file	92
+unit/git/diff-test.ts	git/diff › getBlobImage › retrieves valid images for deleted file	116
+unit/git/diff-test.ts	git/diff › imageDiff › changes for images are set	142
+unit/git/diff-test.ts	git/diff › imageDiff › changes for text are not set	165
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff › counts lines for new file	184
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff › counts lines for modified file	210
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff › counts lines for staged file	241
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff › displays a binary diff for a docx file	280
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff › is empty for a renamed file	297
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff › only shows modifications after move for a renamed and modified file	320
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff › handles unborn repository with mixed state	346
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff/line-endings › displays line endings change from LF to CRLF	371
+unit/git/diff-test.ts	git/diff › getWorkingDirectoryDiff/unicode › displays unicode characters	408
+unit/git/diff-test.ts	git/diff › getBinaryPaths › in empty repo › throws since HEAD doesnt exist	426
+unit/git/diff-test.ts	git/diff › getBinaryPaths › with files using binary merge driver › includes plain text files using binary driver	433
+unit/git/diff-test.ts	git/diff › getBinaryPaths › in repo with text only files › returns an empty array	467
+unit/git/diff-test.ts	git/diff › getBinaryPaths › in repo with image changes › returns all changed image files	477
+unit/git/diff-test.ts	git/diff › getBinaryPaths › in repo with merge conflicts on image files › returns all conflicted image files	491
+unit/git/diff-test.ts	git/diff › with submodules › can get the diff for a submodule with the right paths	521
+unit/git/diff-test.ts	git/diff › with submodules › can get the diff for a submodule with only modified changes	534
+unit/git/diff-test.ts	git/diff › with submodules › can get the diff for a submodule with only untracked changes	549
+unit/git/diff-test.ts	git/diff › with submodules › can get the diff for a submodule a commit change	564
+unit/git/diff-test.ts	git/diff › with submodules › can get the diff for a submodule a all kinds of changes	580
+unit/git/diff-test.ts	git/diff › getBranchMergeBaseChangedFiles › loads the files changed between two branches if merged	599
+unit/git/diff-test.ts	git/diff › getBranchMergeBaseChangedFiles › returns null for unrelated histories	651
+unit/git/diff-test.ts	git/diff › getBranchMergeBaseDiff › loads the diff of a file between two branches if merged	676
+unit/git/environment-test.ts	git/environmnent › envForProxy › sets the correct environment variable based on protocol	22
+unit/git/environment-test.ts	git/environmnent › envForProxy › fails gracefully if resolver throws	34
+unit/git/environment-test.ts	git/environmnent › envForProxy › it doesn't set any variables if resolver returns undefined	41
+unit/git/environment-test.ts	git/environmnent › envForProxy › sets the correct environment variable based on protocol #2	48
+unit/git/environment-test.ts	git/environmnent › envForProxy › ignores unknown protocols	64
+unit/git/environment-test.ts	git/environmnent › envForProxy › does not override existing environment variables	71
+unit/git/fetch-test.ts	git/fetch › fastForwardBranches › fast-forwards branches using fetch	20
+unit/git/fetch-test.ts	git/fetch › fastForwardBranches › does not change FETCH_HEAD after fast-forwarding branches with fetch	92
+unit/git/for-each-ref-test.ts	git/for-each-ref › getBranches › fetches branches using for-each-ref	17
+unit/git/for-each-ref-test.ts	git/for-each-ref › getBranches › should return empty list for empty repo	52
+unit/git/for-each-ref-test.ts	git/for-each-ref › getBranches › should return empty list for directory without a .git directory	58
+unit/git/for-each-ref-test.ts	git/for-each-ref › getBranchesDifferingFromUpstream › filters branches differing from upstream using for-each-ref	66
+unit/git/format-patch-test.ts	formatPatch › in a repo with commits › returns a string for a single commit range	25
+unit/git/format-patch-test.ts	formatPatch › in a repo with commits › returns a string for a multi commit range	31
+unit/git/format-patch-test.ts	formatPatch › in a repo with commits › returns empty string for no range	37
+unit/git/format-patch-test.ts	formatPatch › in a repo with commits › applied in a related repo › will be applied cleanly	44
+unit/git/format-patch-test.ts	formatPatch › in a repo with 105 commits › can create a series of commits from start to HEAD	60
+unit/git/git-attributes-test.ts	git/git-attributes › writeGitAttributes › initializes a .gitattributes file	11
+unit/git/gitignore-test.ts	gitignore › readGitIgnoreAtRoot › returns null when .gitignore does not exist on disk	21
+unit/git/gitignore-test.ts	gitignore › readGitIgnoreAtRoot › reads contents from disk	29
+unit/git/gitignore-test.ts	gitignore › readGitIgnoreAtRoot › rejects a symbolic link	43
+unit/git/gitignore-test.ts	gitignore › readGitIgnoreAtRoot › rejects a dangling symbolic link	56
+unit/git/gitignore-test.ts	gitignore › readGitIgnoreAtRoot › when autocrlf=true and safecrlf=true, appends CRLF to file	68
+unit/git/gitignore-test.ts	gitignore › readGitIgnoreAtRoot › when autocrlf=input, appends LF to file	92
+unit/git/gitignore-test.ts	gitignore › saveGitIgnore › creates gitignore file when it doesn't exist	120
+unit/git/gitignore-test.ts	gitignore › saveGitIgnore › rejects a symbolic link without modifying its target	130
+unit/git/gitignore-test.ts	gitignore › saveGitIgnore › rejects a dangling symbolic link	144
+unit/git/gitignore-test.ts	gitignore › saveGitIgnore › deletes gitignore file when no entries provided	156
+unit/git/gitignore-test.ts	gitignore › saveGitIgnore › applies rule correctly to repository	170
+unit/git/gitignore-test.ts	gitignore › saveGitIgnore › escapes string with special git characters	191
+unit/git/gitignore-test.ts	gitignore › appendIgnoreRule › appends one rule	201
+unit/git/gitignore-test.ts	gitignore › appendIgnoreRule › appends multiple rules	219
+unit/git/gitignore-test.ts	gitignore › appendIgnoreRule › appends one file containing special characters	237
+unit/git/init-test.ts	git/init › creates a new git repository	13
+unit/git/init-test.ts	git/init › creates a repository with a default branch	21
+unit/git/lfs-test.ts	git-lfs › isUsingLFS › returns false for repository not using LFS	20
+unit/git/lfs-test.ts	git-lfs › isUsingLFS › returns true if LFS is tracking a path	28
+unit/git/lfs-test.ts	git-lfs › isUsingLFS › returns false if a non-LFS Git filter is configured	38
+unit/git/lfs-test.ts	git-lfs › isUsingLFS › returns true if LFS tracks a path alongside a non-LFS Git filter	53
+unit/git/lfs-test.ts	git-lfs › isTrackedByLFS › returns false for repository not using LFS	71
+unit/git/lfs-test.ts	git-lfs › isTrackedByLFS › returns true after tracking file in Git LFS	82
+unit/git/lfs-test.ts	git-lfs › isTrackedByLFS › returns true after tracking file with character issues in Git LFS	95
+unit/git/lfs-test.ts	git-lfs › filesNotTrackedByLFS › returns files not listed in Git LFS	111
+unit/git/lfs-test.ts	git-lfs › filesNotTrackedByLFS › skips files that are tracked by Git LFS	123
+unit/git/lfs-test.ts	git-lfs › filesNotTrackedByLFS › skips files in a subfolder that are tracked	134
+unit/git/lfs-test.ts	git-lfs › filesNotTrackedByLFS › skips files in a subfolder where the rule only covers the subdirectory	146
+unit/git/log-test.ts	git/log › getCommits › loads history	11
+unit/git/log-test.ts	git/log › getCommits › handles repository with HEAD file on disk	27
+unit/git/log-test.ts	git/log › getCommits › handles repository with signed commit and log.showSignature set	34
+unit/git/log-test.ts	git/log › getCommits › parses tags	50
+unit/git/log-test.ts	git/log › getChangedFiles › loads the files changed in the commit	67
+unit/git/log-test.ts	git/log › getChangedFiles › detects renames	83
+unit/git/log-test.ts	git/log › getChangedFiles › detect copies	113
+unit/git/log-test.ts	git/log › getChangedFiles › handles commit when HEAD exists on disk	143
+unit/git/log-test.ts	git/log › detects submodule changes within commits	160
+unit/git/merge-test.ts	git/merge › merge › and is successful › returns MergeResult.Success	21
+unit/git/merge-test.ts	git/merge › merge › and is a noop › returns MergeResult.AlreadyUpToDate	28
+unit/git/merge-test.ts	git/merge › getMergeBase › returns the common ancestor of two branches	41
+unit/git/merge-test.ts	git/merge › getMergeBase › returns null when the branches do not have a common ancestor	60
+unit/git/merge-test.ts	git/merge › getMergeBase › returns null when a ref cannot be found	96
+unit/git/merge-test.ts	git/merge › abortMerge › when there is no in-progress merge › throws an error	115
+unit/git/merge-test.ts	git/merge › abortMerge › in the middle of resolving conflicts merge › aborts the merge	124
+unit/git/multi-operation-terminal-output-test.ts	git/multi-operation-terminal-output › streams output from two git operations	11
+unit/git/multi-operation-terminal-output-test.ts	git/multi-operation-terminal-output › buffers output from two git operations	27
+unit/git/multi-operation-terminal-output-test.ts	git/multi-operation-terminal-output › calls the original callback only once	58
+unit/git/multi-operation-terminal-output-test.ts	git/multi-operation-terminal-output › streams output untrimmed	74
+unit/git/multi-operation-terminal-output-test.ts	git/multi-operation-terminal-output › trims buffered output	92
+unit/git/multi-operation-terminal-output-test.ts	git/multi-operation-terminal-output › handles multiple subscribers	124
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=false and pull.ff=false set in config › creates a merge commit	74
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=false and pull.ff=false set in config › is different from remote branch	81
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=false and pull.ff=false set in config › is ahead of tracking branch	88
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=false set in config › creates a merge commit	112
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=false set in config › is ahead of tracking branch	118
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=true set in config › does not create a merge commit	142
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=true set in config › is ahead of tracking branch	149
+unit/git/pull/ahead-and-behind-test.ts	git/pull › ahead and behind of tracking branch › with pull.rebase=false and pull.ff=only set in config › throws an error as the user blocks merge commits on pull	159
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › by default › does not create new commit	57
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › by default › is different from tracking branch	62
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › by default › remains ahead of tracking branch	69
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › with pull.ff=false set in config › does not create new commit	81
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › with pull.ff=false set in config › is different to tracking branch	86
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › with pull.ff=false set in config › is ahead of tracking branch	93
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › with pull.ff=only set in config › does not create new commit	104
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › with pull.ff=only set in config › is different from tracking branch	109
+unit/git/pull/only-ahead-test.ts	git/pull › only ahead of tracking branch › with pull.ff=only set in config › is ahead of tracking branch	116
+unit/git/pull/only-behind-test.ts	git/pull › only behind tracking branch › with pull.rebase=false and pull.ff=false set in config › creates a merge commit	74
+unit/git/pull/only-behind-test.ts	git/pull › only behind tracking branch › with pull.rebase=false and pull.ff=false set in config › is different from remote branch	81
+unit/git/pull/only-behind-test.ts	git/pull › only behind tracking branch › with pull.rebase=false and pull.ff=false set in config › is now ahead of tracking branch	88
+unit/git/pull/only-behind-test.ts	git/pull › only behind tracking branch › with pull.ff=only set in config › does not create a merge commit	101
+unit/git/pull/only-behind-test.ts	git/pull › only behind tracking branch › with pull.ff=only set in config › is same as remote branch	108
+unit/git/pull/only-behind-test.ts	git/pull › only behind tracking branch › with pull.ff=only set in config › is not behind tracking branch	115
+unit/git/pull/pull-test.ts	git/pull › with submodules › updates submodule references after pulling changes	57
+unit/git/pull/pull-test.ts	git/pull › with submodules › handles pull when there are no submodule changes	109
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › basic functionality › appends a string chunk to an empty buffer	7
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › basic functionality › appends multiple string chunks	13
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › basic functionality › appends a Buffer chunk by converting it to string	20
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › basic functionality › appends an empty string chunk	26
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › basic functionality › appends an empty Buffer chunk	32
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › does not trim when total length equals capacity	40
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › does not trim when total length is under capacity	47
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › removes entire first chunk when overrun exceeds first chunk length	53
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › partially trims first chunk when overrun is less than first chunk length	63
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › removes multiple chunks when necessary	72
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › handles single chunk that exceeds capacity	81
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › handles capacity of zero	90
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › capacity management › handles capacity of one	98
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › rolling buffer behavior › maintains rolling buffer with repeated pushes	107
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › rolling buffer behavior › preserves newest content when trimming	129
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › edge cases › handles unicode characters correctly (counts characters, not bytes)	141
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › edge cases › trims unicode characters correctly	150
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › edge cases › handles emoji characters	158
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › edge cases › handles mixed Buffer and string inputs	166
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › edge cases › handles newlines and special characters	173
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › edge cases › handles ANSI escape sequences	179
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › pre-existing buffer state › works correctly with pre-populated buffer	188
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › pre-existing buffer state › trims pre-existing content when adding new chunk exceeds capacity	194
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › boundary conditions › handles exact capacity boundary	205
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › boundary conditions › handles one character over capacity	212
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › boundary conditions › handles very large capacity with small chunks	220
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › boundary conditions › handles many small chunks	227
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › boundary conditions › correctly handles while loop with exact chunk removal	239
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › realistic terminal output scenarios › simulates git push output	250
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › realistic terminal output scenarios › simulates progress output with carriage returns	281
+unit/git/push-terminal-chunk-test.ts	pushTerminalChunk › realistic terminal output scenarios › handles large output that needs significant trimming	295
+unit/git/push-test.ts	git/push › pushes commits to a local remote	27
+unit/git/push-test.ts	git/push › pushes with --set-upstream for a new branch	52
+unit/git/push-test.ts	git/push › pushes with force-with-lease	85
+unit/git/push-test.ts	git/push › reports progress when callback is provided	119
+unit/git/rebase/detect-conflict-test.ts	git/rebase › detect conflicts › returns a value indicating conflicts were encountered	47
+unit/git/rebase/detect-conflict-test.ts	git/rebase › detect conflicts › status detects REBASE_HEAD	52
+unit/git/rebase/detect-conflict-test.ts	git/rebase › detect conflicts › has conflicted files in working directory	62
+unit/git/rebase/detect-conflict-test.ts	git/rebase › detect conflicts › is a detached HEAD state	73
+unit/git/rebase/detect-conflict-test.ts	git/rebase › abort after conflicts found › REBASE_HEAD is no longer found	101
+unit/git/rebase/detect-conflict-test.ts	git/rebase › abort after conflicts found › no longer has working directory changes	106
+unit/git/rebase/detect-conflict-test.ts	git/rebase › abort after conflicts found › returns to the feature branch	111
+unit/git/rebase/detect-conflict-test.ts	git/rebase › attempt to continue without resolving conflicts › indicates that the rebase was not complete	146
+unit/git/rebase/detect-conflict-test.ts	git/rebase › attempt to continue without resolving conflicts › REBASE_HEAD is still found	151
+unit/git/rebase/detect-conflict-test.ts	git/rebase › attempt to continue without resolving conflicts › still has conflicted files in working directory	160
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue after resolving conflicts › returns success	219
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue after resolving conflicts › REBASE_HEAD is no longer found	224
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue after resolving conflicts › no longer has working directory changes	229
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue after resolving conflicts › returns to the feature branch	234
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue after resolving conflicts › branch is now a different ref	240
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue with additional changes unrelated to conflicted files › returns success	304
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue with additional changes unrelated to conflicted files › keeps untracked working directory file out of rebase	309
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue with additional changes unrelated to conflicted files › has modified but unconflicted file in commit contents	314
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue with additional changes unrelated to conflicted files › returns to the feature branch	322
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue with additional changes unrelated to conflicted files › branch is now a different ref	328
+unit/git/rebase/detect-conflict-test.ts	git/rebase › continue with tracked change omitted from list › returns error code indicating that required files were missing	336
+unit/git/rebase/progress-test.ts	git/rebase › skips a normal repository › returns null for rebase progress	24
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress › returns a value indicating conflicts were encountered	59
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress › reported step-by-step progress before encountering conflicts	64
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress › status detects REBASE_HEAD	77
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress › is a detached HEAD state	91
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress for long rebase › returns a value indicating conflicts were encountered	124
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress for long rebase › reported step-by-step progress before encountering conflicts	129
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress for long rebase › reports progress after resolving conflicts	142
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress for long rebase › status detects REBASE_HEAD	163
+unit/git/rebase/progress-test.ts	git/rebase › can parse progress for long rebase › is a detached HEAD state	180
+unit/git/rebase-full-test.ts	git/rebase › getRebaseInternalState › returns null when no rebase is in progress	34
+unit/git/rebase-full-test.ts	git/rebase › rebase › rebases a branch onto another	47
+unit/git/rebase-full-test.ts	git/rebase › rebase › detects conflicts during rebase	84
+unit/git/rebase-full-test.ts	git/rebase › abortRebase › aborts an in-progress rebase	119
+unit/git/ref-test.ts	git/refs › formatAsLocalRef › formats the common branch syntax	8
+unit/git/ref-test.ts	git/refs › formatAsLocalRef › formats an explicit heads/ prefix	13
+unit/git/ref-test.ts	git/refs › formatAsLocalRef › formats when a remote name is included	18
+unit/git/ref-test.ts	git/refs › getSymbolicRef › resolves a valid symbolic ref	25
+unit/git/ref-test.ts	git/refs › getSymbolicRef › does not resolve a missing ref	31
+unit/git/reflog-test.ts	git/reflog › getRecentBranches › returns the recently checked out branches	30
+unit/git/reflog-test.ts	git/reflog › getRecentBranches › works after renaming a branch	42
+unit/git/reflog-test.ts	git/reflog › getRecentBranches › returns a limited number of branches	63
+unit/git/reflog-test.ts	git/reflog › getBranchCheckouts › returns does not return the branches that were checked out before a specific date	80
+unit/git/reflog-test.ts	git/reflog › getBranchCheckouts › returns all branches checked out after a specific date	94
+unit/git/reflog-test.ts	git/reflog › getBranchCheckouts › returns empty when current branch is orphaned	109
+unit/git/remote-test.ts	git/remote › getRemotes › should return both remotes	21
+unit/git/remote-test.ts	git/remote › getRemotes › returns remotes sorted alphabetically	53
+unit/git/remote-test.ts	git/remote › getRemotes › returns empty array for directory without a .git directory	75
+unit/git/remote-test.ts	git/remote › getRemotes › returns promisor remote	81
+unit/git/remote-test.ts	git/remote › findDefaultRemote › returns null for empty array	104
+unit/git/remote-test.ts	git/remote › findDefaultRemote › returns origin when multiple remotes found	109
+unit/git/remote-test.ts	git/remote › findDefaultRemote › returns something when origin removed	123
+unit/git/remote-test.ts	git/remote › findDefaultRemote › returns null for new repository	138
+unit/git/remote-test.ts	git/remote › addRemote › can set origin and return it as default	149
+unit/git/remote-test.ts	git/remote › removeRemote › silently fails when remote not defined	166
+unit/git/remote-test.ts	git/remote › setRemoteURL › can set the url for an existing remote	177
+unit/git/remote-test.ts	git/remote › setRemoteURL › returns false for unknown remote name	186
+unit/git/reorder-test.ts	git/reorder › moves second commit before the first one	22
+unit/git/reorder-test.ts	git/reorder › moves first and fourth commits after the second one respecting their order in the log	45
+unit/git/reorder-test.ts	git/reorder › moves first commit after the last one	76
+unit/git/reorder-test.ts	git/reorder › reorders using the root of the branch if last retained commit is null	105
+unit/git/reorder-test.ts	git/reorder › handles reordering a conflicting commit	123
+unit/git/reorder-test.ts	git/reorder › returns error on invalid lastRetainedCommitRef	199
+unit/git/reorder-test.ts	git/reorder › returns error on invalid base commit	222
+unit/git/reorder-test.ts	git/reorder › returns error when no commits are reordered	245
+unit/git/reset-test.ts	git/reset › reset › can hard reset a repository	15
+unit/git/reset-test.ts	git/reset › resetPaths › resets discarded staged file	33
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › should return an absolute path when run inside a working directory	18
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › should return missing when not run inside a working directory	44
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › should return correct path for submodules	49
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › returns regular for default initialized repository	95
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › returns bare for initialized bare repository	107
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › returns missing for empty directory	115
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › returns missing for missing directory	122
+unit/git/rev-parse-test.ts	git/rev-parse › getRepositoryType › returns unsafe for unsafe repository	131
+unit/git/revert-test.ts	git/revert › revertCommit › reverts a simple commit	14
+unit/git/revert-test.ts	git/revert › revertCommit › reverts a commit that adds a new file	45
+unit/git/squash-test.ts	git/cherry-pick › squashes one commit onto the next (non-conflicting)	23
+unit/git/squash-test.ts	git/cherry-pick › returns error when squashOnto is in the toSquash array	58
+unit/git/squash-test.ts	git/cherry-pick › squashes multiple commit onto one (non-conflicting)	76
+unit/git/squash-test.ts	git/cherry-pick › squashes using the root of the branch if last retained commit is null	115
+unit/git/squash-test.ts	git/cherry-pick › squashes multiple commit non-sequential commits (reorders, non-conflicting)	154
+unit/git/squash-test.ts	git/cherry-pick › handles squashing a conflicting commit	210
+unit/git/squash-test.ts	git/cherry-pick › squashes with default merged commit message/description if commit message not provided	295
+unit/git/squash-test.ts	git/cherry-pick › returns error on invalid lastRetainedCommitRef	318
+unit/git/squash-test.ts	git/cherry-pick › returns error on invalid commit to squashOnto	341
+unit/git/squash-test.ts	git/cherry-pick › returns error on empty toSquash	364
+unit/git/stash-test.ts	git/stash › getStash › handles unborn repo by returning empty list	27
+unit/git/stash-test.ts	git/stash › getStash › returns an empty list when no stash entries have been created	34
+unit/git/stash-test.ts	git/stash › getStash › returns all stash entries created by Desktop	40
+unit/git/stash-test.ts	git/stash › createDesktopStashEntry › creates a stash entry when repo is not unborn or in any kind of conflict or rebase state	70
+unit/git/stash-test.ts	git/stash › createDesktopStashEntry › stashes untracked files and removes them from the working directory	83
+unit/git/stash-test.ts	git/stash › getLastDesktopStashEntryForBranch › returns null when no stash entries exist for branch	117
+unit/git/stash-test.ts	git/stash › getLastDesktopStashEntryForBranch › returns last entry made for branch	129
+unit/git/stash-test.ts	git/stash › createDesktopStashMessage › creates message that matches Desktop stash entry format	150
+unit/git/stash-test.ts	git/stash › dropDesktopStashEntry › removes the entry identified by `stashSha`	170
+unit/git/stash-test.ts	git/stash › dropDesktopStashEntry › does not fail when attempting to delete when stash is empty	191
+unit/git/stash-test.ts	git/stash › dropDesktopStashEntry › does not fail when attempting to delete stash entry that doesn't exist	208
+unit/git/stash-test.ts	git/stash › popStashEntry › without any conflicts › restores changes back to the working directory	240
+unit/git/stash-test.ts	git/stash › popStashEntry › when there are (resolvable) conflicts › restores changes and drops stash	262
+unit/git/stash-test.ts	git/stash › popStashEntry › when there are unresolvable conflicts › throws an error	291
+unit/git/status-test.ts	git/status › getStatus › with conflicted repo › parses conflicted files with markers	30
+unit/git/status-test.ts	git/status › getStatus › with conflicted repo › parses conflicted files without markers	84
+unit/git/status-test.ts	git/status › getStatus › with conflicted repo › parses conflicted files resulting from popping a stash	110
+unit/git/status-test.ts	git/status › getStatus › with conflicted repo › parses resolved files	138
+unit/git/status-test.ts	git/status › getStatus › with conflicted images repo › parses conflicted image file on merge	172
+unit/git/status-test.ts	git/status › getStatus › with conflicted images repo › parses conflicted image file on merge after removing	194
+unit/git/status-test.ts	git/status › getStatus › with unconflicted repo › parses changed files	220
+unit/git/status-test.ts	git/status › getStatus › with unconflicted repo › returns an empty array when there are no changes	235
+unit/git/status-test.ts	git/status › getStatus › with unconflicted repo › reflects renames	244
+unit/git/status-test.ts	git/status › getStatus › with unconflicted repo › reflects copies	266
+unit/git/status-test.ts	git/status › getStatus › with unconflicted repo › returns null for directory without a .git directory	297
+unit/git/status-test.ts	git/status › getStatus › with submodules › returns the submodule status	304
+unit/git/submodule-test.ts	git/submodule › listSubmodules › returns the submodule entry	16
+unit/git/submodule-test.ts	git/submodule › listSubmodules › returns the expected tag	29
+unit/git/submodule-test.ts	git/submodule › resetSubmodulePaths › update submodule to original commit	59
+unit/git/submodule-test.ts	git/submodule › resetSubmodulePaths › eliminate submodule dirty state	89
+unit/git/tag-test.ts	git/tag › createTag › creates a tag with the given name	30
+unit/git/tag-test.ts	git/tag › createTag › creates a tag with the a comma in it	41
+unit/git/tag-test.ts	git/tag › createTag › creates multiple tags	52
+unit/git/tag-test.ts	git/tag › createTag › creates a tag on a specified commit	64
+unit/git/tag-test.ts	git/tag › createTag › fails when creating a tag with a name that already exists	79
+unit/git/tag-test.ts	git/tag › deleteTag › deletes a tag with the given name	93
+unit/git/tag-test.ts	git/tag › getAllTags › returns an empty map when the repository has no tags	106
+unit/git/tag-test.ts	git/tag › getAllTags › returns all the created tags	113
+unit/git/tag-test.ts	git/tag › fetchTagsToPush › returns an empty array when there are no tags to get pushed	148
+unit/git/tag-test.ts	git/tag › fetchTagsToPush › returns local tags that haven't been pushed	156
+unit/git/tag-test.ts	git/tag › fetchTagsToPush › returns an empty array after pushing the tag	166
+unit/git/tag-test.ts	git/tag › fetchTagsToPush › does not return a tag created on a non-pushed branch	178
+unit/git/tag-test.ts	git/tag › fetchTagsToPush › returns unpushed tags even if it fails to push the branch	202
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › returns empty array for empty output	18
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses a single main worktree	23
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses multiple worktrees	44
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses detached HEAD worktree	70
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses locked worktree	92
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses locked worktree with reason	112
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses prunable worktree	132
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses paths with spaces	152
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses worktree with locked and prunable flags combined	175
+unit/git/worktree-test.ts	git/worktree › parseWorktreePorcelainOutput › parses paths with newlines	199
+unit/git/worktree-test.ts	git/worktree › listWorktrees › returns only main worktree branch when there are no linked worktrees	231
+unit/git/worktree-test.ts	git/worktree › listWorktrees › returns branches checked out in linked worktrees	242
+unit/git/worktree-test.ts	git/worktree › listWorktrees › handles multiple linked worktrees	259
+unit/git/worktree-test.ts	git/worktree › listWorktrees › handles detached HEAD worktrees	282
+unit/git/worktree-test.ts	git/worktree › listWorktrees › lists worktrees from a git dir after a linked worktree directory is removed	300
+unit/git/worktree-test.ts	git/worktree › resolveMainWorktreePath › resolves from the persisted path once the worktree metadata is gone	353
+unit/git/worktree-test.ts	git/worktree › resolveMainWorktreePath › falls back to the git dir when no path was persisted	377
+unit/git/worktree-test.ts	git/worktree › resolveMainWorktreePath › returns null when the repository is already the main worktree	400
+unit/git/worktree-test.ts	git/worktree › resolveMainWorktreePath › falls back to the git dir when the persisted path is stale	418
+unit/git/worktree-test.ts	git/worktree › resolveMainWorktreePath › returns null when neither a persisted path nor a git dir is available	439
+unit/git-info-test.ts	getSHA › reads HEAD from a standard .git directory	10
+unit/git-info-test.ts	getSHA › reads HEAD from a linked worktree .git file	22
+unit/git-info-test.ts	getSHA › reads packed refs from a linked worktree common git dir	47
+unit/git-store-cache-test.ts	GitStoreCache › returns same instance of GitStore	10
+unit/git-store-cache-test.ts	GitStoreCache › returns different instance of GitStore after removing	20
+unit/git-store-test.ts	GitStore › loadCommitBatch › includes HEAD when loading commits	28
+unit/git-store-test.ts	GitStore › can discard changes from a repository	44
+unit/git-store-test.ts	GitStore › can discard a renamed file	82
+unit/git-store-test.ts	GitStore › undo first commit › reports the repository is unborn	129
+unit/git-store-test.ts	GitStore › undo first commit › pre-fills the commit message	143
+unit/git-store-test.ts	GitStore › undo first commit › clears the undo commit dialog	156
+unit/git-store-test.ts	GitStore › undo first commit › has no staged files	179
+unit/git-store-test.ts	GitStore › repository with HEAD file › can discard modified change cleanly	211
+unit/git-store-test.ts	GitStore › loadBranches › has a remote defined	282
+unit/git-store-test.ts	GitStore › loadBranches › will merge a local and remote branch when tracking branch set	288
+unit/git-store-test.ts	GitStore › loadBranches › the tracking branch is not cleared when the remote branch is removed	306
+unit/group-branches-test.ts	Branches grouping › should group branches	42
+unit/http-test.ts	getAbsoluteUrl › dotcom endpoint › handles leading slashes	10
+unit/http-test.ts	getAbsoluteUrl › dotcom endpoint › handles missing leading slash	15
+unit/http-test.ts	getAbsoluteUrl › dotcom endpoint › doesn't mangle encoded query parameters	20
+unit/http-test.ts	getAbsoluteUrl › enterprise endpoint › handles leading slash	35
+unit/http-test.ts	getAbsoluteUrl › enterprise endpoint › handles missing leading slash	40
+unit/http-test.ts	getAbsoluteUrl › enterprise endpoint › handles next page resource which already contains prefix	45
+unit/http-test.ts	getAbsoluteUrl › enterprise endpoint › doesn't mangle encoded query parameters	53
+unit/identifier-rules-test.ts	Identifier rules › gitAuthorNameIsValid › returns any value that is a disallowed character	7
+unit/identifier-rules-test.ts	Identifier rules › gitAuthorNameIsValid › returns true for empty strings	20
+unit/identifier-rules-test.ts	Identifier rules › gitAuthorNameIsValid › returns false when name consists only of ascii character codes 0-32 inclusive	24
+unit/identifier-rules-test.ts	Identifier rules › gitAuthorNameIsValid › returns false when name consists solely of disallowed characters	31
+unit/identifier-rules-test.ts	Identifier rules › gitAuthorNameIsValid › returns true if the value consists of allowed characters	35
+unit/identifier-rules-test.ts	Identifier rules › gitAuthorNameIsValid › returns true if the value contains allowed characters with disallowed characters	39
+unit/identifier-rules-test.ts	Identifier rules › gitAuthorNameIsValid › returns true if the value contains ASCII characters whose code point is greater than 32	44
+unit/ipc-contract-test.ts	IPC channel contract › RequestChannels › lists every request channel exactly once	105
+unit/ipc-contract-test.ts	IPC channel contract › RequestChannels › includes critical lifecycle channels	117
+unit/ipc-contract-test.ts	IPC channel contract › RequestResponseChannels › lists every request-response channel exactly once	135
+unit/ipc-contract-test.ts	IPC channel contract › RequestResponseChannels › includes critical request-response channels	147
+unit/is-application-bundle-test.ts	isApplicationBundleFromMetadata › identifies application bundles	7
+unit/is-application-bundle-test.ts	isApplicationBundleFromMetadata › identifies non-executable directories	20
+unit/is-application-bundle-test.ts	isApplicationBundleFromMetadata › rejects inconclusive metadata	33
+unit/is-application-bundle-test.ts	isApplicationBundleFromMetadata › rejects an unknown primary type that inherits from public.directory	40
+unit/list-selection-test.ts	list-selection › findNextSelectableRow › returns first row when selecting down outside list (filter text)	9
+unit/list-selection-test.ts	list-selection › findNextSelectableRow › returns first selectable row when header is first	17
+unit/list-selection-test.ts	list-selection › findNextSelectableRow › returns first row when selecting down from last row	35
+unit/list-selection-test.ts	list-selection › findNextSelectableRow › returns last row when selecting up from top row	44
+unit/local-storage-test.ts	local storage › setBoolean › round-trips a true value	19
+unit/local-storage-test.ts	local storage › setBoolean › round-trips a false value	25
+unit/local-storage-test.ts	local storage › getBoolean parsing › returns default value when no key found	33
+unit/local-storage-test.ts	local storage › getBoolean parsing › returns default value when malformed string encountered	41
+unit/local-storage-test.ts	local storage › getBoolean parsing › returns false if found and ignores default value	50
+unit/local-storage-test.ts	local storage › getBoolean parsing › can parse the string 'true' if found	58
+unit/local-storage-test.ts	local storage › getBoolean parsing › can parse the string 'false' if found	66
+unit/local-storage-test.ts	local storage › setNumber › round-trip a valid number	77
+unit/local-storage-test.ts	local storage › setNumber › round-trip zero and ignore default value	85
+unit/local-storage-test.ts	local storage › getNumber parsing › returns default value when no key found	96
+unit/local-storage-test.ts	local storage › getNumber parsing › returns default value when malformed string encountered	102
+unit/local-storage-test.ts	local storage › getNumber parsing › returns zero if found and ignores default value	111
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › leaves explicitly specified ids	72
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › assigns ids to items which lack it	82
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › assigns ids recursively	92
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › handles duplicate generated ids	125
+unit/main-process/menu-test.ts	main-process menu › getAccessKey handles escaped ampersands › does not treat && as an access key prefix	139
+unit/main-process/menu-test.ts	main-process menu › getAccessKey handles escaped ampersands › does not treat && at start of word as access key	144
+unit/main-process/menu-test.ts	main-process menu › getAccessKey handles escaped ampersands › extracts access key after escaped ampersand	149
+unit/main-process/menu-test.ts	main-process menu › getAccessKey handles escaped ampersands › extracts normal access key correctly	154
+unit/main-process/menu-test.ts	main-process menu › buildDefaultMenuTemplate › has no duplicate access keys for any combination of label-affecting parameters	183
+unit/main-process/spell-checker-menu-test.ts	spell-checker-menu › returns null menu item options when both spellchecker language and user language are english	11
+unit/main-process/spell-checker-menu-test.ts	spell-checker-menu › returns null menu item options when spellchecker language is english, user language is not english and user language is not supported	21
+unit/main-process/spell-checker-menu-test.ts	spell-checker-menu › returns set system language label when spellchecker language is english, user language is not english and user language is supported	31
+unit/main-process/spell-checker-menu-test.ts	spell-checker-menu › returns set to english label when spellchecker language is no english	41
+unit/main-process-proxy-test.ts	showFolderContents › opens a conclusively safe directory directly	39
+unit/main-process-proxy-test.ts	showFolderContents › does nothing when the user cancels for an application bundle	51
+unit/main-process-proxy-test.ts	showFolderContents › reveals an application bundle after confirmation	65
+unit/main-process-proxy-test.ts	showFolderContents › handles a failed reveal after confirmation	86
+unit/main-process-proxy-test.ts	showFolderContents › does nothing when confirmation fails	112
+unit/main-process-proxy-test.ts	showFolderContents › warns when application metadata cannot be read	134
+unit/main-process-proxy-test.ts	showFolderContents › warns when file information cannot be read	150
+unit/mock-api-test.ts	mock-api › rejects unmocked API methods instead of attempting a real request	7
+unit/mock-api-test.ts	mock-api › uses provided method overrides	16
+unit/model-type-guards-test.ts	Repository type guards › isRepositoryWithGitHubRepository › returns false for a plain local repository	66
+unit/model-type-guards-test.ts	Repository type guards › isRepositoryWithGitHubRepository › returns true for a GitHub-connected repository	71
+unit/model-type-guards-test.ts	Repository type guards › isRepositoryWithGitHubRepository › returns true for a forked GitHub repository	76
+unit/model-type-guards-test.ts	Repository type guards › isRepositoryWithForkedGitHubRepository › returns false for a plain local repository	83
+unit/model-type-guards-test.ts	Repository type guards › isRepositoryWithForkedGitHubRepository › returns false for a non-forked GitHub repository	88
+unit/model-type-guards-test.ts	Repository type guards › isRepositoryWithForkedGitHubRepository › returns true for a forked GitHub repository	93
+unit/model-type-guards-test.ts	Repository type guards › getGitHubHtmlUrl › returns null for a plain local repository	100
+unit/model-type-guards-test.ts	Repository type guards › getGitHubHtmlUrl › returns the HTML URL for a GitHub repository	105
+unit/model-type-guards-test.ts	Repository type guards › isForkedRepositoryContributingToParent › returns false for a plain local repository	113
+unit/model-type-guards-test.ts	Repository type guards › isForkedRepositoryContributingToParent › returns false for a non-forked GitHub repository	118
+unit/model-type-guards-test.ts	Repository type guards › isForkedRepositoryContributingToParent › returns true for a forked repository with default settings	123
+unit/multi-commit-operation-test.ts	multi-commit-operation › isIdMultiCommitOperation › returns true for Rebase	17
+unit/multi-commit-operation-test.ts	multi-commit-operation › isIdMultiCommitOperation › returns true for Cherry-pick	21
+unit/multi-commit-operation-test.ts	multi-commit-operation › isIdMultiCommitOperation › returns true for Squash	25
+unit/multi-commit-operation-test.ts	multi-commit-operation › isIdMultiCommitOperation › returns true for Merge	29
+unit/multi-commit-operation-test.ts	multi-commit-operation › isIdMultiCommitOperation › returns true for Reorder	33
+unit/multi-commit-operation-test.ts	multi-commit-operation › isIdMultiCommitOperation › returns false for unknown operations	37
+unit/multi-commit-operation-test.ts	multi-commit-operation › conflictSteps › includes ShowConflicts	45
+unit/multi-commit-operation-test.ts	multi-commit-operation › conflictSteps › includes ConfirmAbort	51
+unit/multi-commit-operation-test.ts	multi-commit-operation › conflictSteps › does not include ChooseBranch	57
+unit/multi-commit-operation-test.ts	multi-commit-operation › isConflictsFlow › returns false when popup is not open	66
+unit/multi-commit-operation-test.ts	multi-commit-operation › isConflictsFlow › returns false when state is null	70
+unit/multi-commit-operation-test.ts	multi-commit-operation › isConflictsFlow › returns false when step is not a conflict step	74
+unit/multi-commit-operation-test.ts	multi-commit-operation › isConflictsFlow › returns true when in ShowConflicts step	85
+unit/multi-commit-operation-test.ts	multi-commit-operation › isConflictsFlow › returns true when in ConfirmAbort step	96
+unit/multi-commit-operation-test.ts	multi-commit-operation › getMultiCommitOperationChooseBranchStep › throws when tip is not valid	109
+unit/multi-commit-operation-test.ts	multi-commit-operation › getMultiCommitOperationChooseBranchStep › returns ChooseBranch step with branch info when tip is valid	124
+unit/name-of-test.ts	nameOf › Returns the repo base path if there is no associated github metadata	9
+unit/name-of-test.ts	nameOf › Returns the name of the repo	17
+unit/octicon-test.ts	octicon/iconForRepository › shows download icon for cloning repository	10
+unit/octicon-test.ts	octicon/iconForRepository › shows computer icon for non-GitHub repository	19
+unit/octicon-test.ts	octicon/iconForRepository › shows repo icon for public GitHub repository	25
+unit/octicon-test.ts	octicon/iconForRepository › shows lock icon for private GitHub repository	41
+unit/octicon-test.ts	octicon/iconForRepository › shows fork icon for forked GitHub repository	57
+unit/offset-from-test.ts	offset-from › offsetFrom with number input › offsets by seconds	7
+unit/offset-from-test.ts	offset-from › offsetFrom with number input › offsets by minutes	13
+unit/offset-from-test.ts	offset-from › offsetFrom with number input › offsets by hours	19
+unit/offset-from-test.ts	offset-from › offsetFrom with number input › offsets by days	25
+unit/offset-from-test.ts	offset-from › offsetFrom with number input › offsets by years	31
+unit/offset-from-test.ts	offset-from › offsetFrom with number input › handles negative offsets	37
+unit/offset-from-test.ts	offset-from › offsetFrom with number input › returns a number when given a number	43
+unit/offset-from-test.ts	offset-from › offsetFrom with Date input › returns a Date when given a Date	50
+unit/offset-from-test.ts	offset-from › offsetFrom with Date input › offsets a Date by the correct amount	56
+unit/offset-from-test.ts	offset-from › offsetFrom with Date input › offsets a Date by negative amount	62
+unit/offset-from-test.ts	offset-from › offsetFromNow › returns a timestamp close to now plus the offset	70
+unit/offset-from-test.ts	offset-from › offsetFromNow › returns a past timestamp for negative offsets	80
+unit/parse-app-url-test.ts	parseAppURL › returns unknown by default	10
+unit/parse-app-url-test.ts	parseAppURL › oauth › returns right name	15
+unit/parse-app-url-test.ts	parseAppURL › openRepo via HTTPS › returns right name	27
+unit/parse-app-url-test.ts	parseAppURL › openRepo via HTTPS › returns unknown when no remote defined	37
+unit/parse-app-url-test.ts	parseAppURL › openRepo via HTTPS › adds branch name if set	42
+unit/parse-app-url-test.ts	parseAppURL › openRepo via HTTPS › adds pull request ID if found	53
+unit/parse-app-url-test.ts	parseAppURL › openRepo via HTTPS › returns unknown for unexpected pull request input	65
+unit/parse-app-url-test.ts	parseAppURL › openRepo via HTTPS › returns unknown for invalid branch name	72
+unit/parse-app-url-test.ts	parseAppURL › openRepo via HTTPS › adds file path if found	80
+unit/parse-app-url-test.ts	parseAppURL › openRepo via SSH › returns right name	97
+unit/parse-app-url-test.ts	parseAppURL › openRepo via SSH › returns unknown when no remote defined	107
+unit/parse-app-url-test.ts	parseAppURL › openRepo via SSH › adds branch name if set	112
+unit/parse-app-url-test.ts	parseAppURL › openRepo via SSH › adds pull request ID if found	123
+unit/parse-app-url-test.ts	parseAppURL › openRepo via SSH › returns unknown for unexpected pull request input	135
+unit/parse-app-url-test.ts	parseAppURL › openRepo via SSH › returns unknown for invalid branch name	142
+unit/parse-app-url-test.ts	parseAppURL › openRepo via SSH › adds file path if found	150
+unit/parse-files-to-be-overwritten-test.ts	parseFilesToBeOverwritten › parses files from pull error	12
+unit/parse-files-to-be-overwritten-test.ts	parseFilesToBeOverwritten › isn't able to parse files from pull rebase error	34
+unit/parse-files-to-be-overwritten-test.ts	parseFilesToBeOverwritten › parses files from merge error	56
+unit/parse-files-to-be-overwritten-test.ts	parseFilesToBeOverwritten › parses files from checkout error	77
+unit/parse-pac-string-test.ts	parsePACString › returns no url for DIRECT	6
+unit/parse-pac-string-test.ts	parsePACString › parses Chromium PAC strings	10
+unit/parse-pac-string-test.ts	parsePACString › parses PAC strings with white space between specs	39
+unit/parse-pac-string-test.ts	parsePACString › skips protocols cURL doesn't understand	55
+unit/parse-pac-string-test.ts	parsePACString › skips invalid specs	60
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › creates right patch when first hunk is selected	43
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › creates right patch when second hunk is selected	86
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › creates right patch when first and third hunk is selected	128
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › creates the right patch when an addition is selected but preceding deletions aren't	170
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › doesn't include unselected added lines as context	251
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › rewrites hunk header when necessary	288
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › includes empty context lines	314
+unit/patch-formatter-test.ts	patch formatting › formatPatchesForModifiedFile › creates the right patch when a `No newline` marker is involved	341
+unit/path-test.ts	path › encodePathAsUrl › normalizes path separators on Windows	13
+unit/path-test.ts	path › encodePathAsUrl › encodes spaces and hashes	23
+unit/path-test.ts	path › encodePathAsUrl › encodes spaces and hashes #2	35
+unit/path-test.ts	path › resolveWithin › fails for paths outside of the root	47
+unit/path-test.ts	path › resolveWithin › succeeds for paths that traverse out, and then back into, the root	52
+unit/path-test.ts	path › resolveWithin › fails for paths containing null bytes	56
+unit/path-test.ts	path › resolveWithin › succeeds for absolute relative paths as long as they stay within the root	60
+unit/path-test.ts	path › resolveWithin › fails for paths that use a symlink to traverse outside of the root	66
+unit/path-test.ts	path › resolveWithin › succeeds for paths that use a symlink to traverse outside of the root and then back again	80
+unit/path-text-test.ts	PathText › truncateMid › doesn't truncate if the string already fits	7
+unit/path-text-test.ts	PathText › truncateMid › returns an empty string if length is zero or less	12
+unit/path-text-test.ts	PathText › truncateMid › returns an ellipsis if length is one	17
+unit/path-text-test.ts	PathText › truncateMid › truncates to the exact length given	21
+unit/path-text-test.ts	PathText › truncatePath › doesn't truncate if the string already fits	29
+unit/path-text-test.ts	PathText › truncatePath › returns an empty string if length is zero or less	34
+unit/path-text-test.ts	PathText › truncatePath › returns an ellipsis if length is one	39
+unit/path-text-test.ts	PathText › truncatePath › truncates to the exact length given	43
+unit/path-text-test.ts	PathText › truncatePath › favors truncation of directory components over file names	57
+unit/path-text-test.ts	PathText › extract › converts untracked submodule correctly	89
+unit/path-text-test.ts	PathText › extract › converts tracked submodule correctly	100
+unit/path-text-test.ts	PathText › extract › converts file path correctly	111
+unit/popup-manager-test.ts	PopupManager › currentPopup › returns null when no popups added	9
+unit/popup-manager-test.ts	PopupManager › currentPopup › returns last added non-error popup	14
+unit/popup-manager-test.ts	PopupManager › currentPopup › returns last added error popup	24
+unit/popup-manager-test.ts	PopupManager › isAPopupOpen › returns false when no popups added	37
+unit/popup-manager-test.ts	PopupManager › isAPopupOpen › returns last added popup	42
+unit/popup-manager-test.ts	PopupManager › getPopupsOfType › returns popups of a given type	52
+unit/popup-manager-test.ts	PopupManager › getPopupsOfType › returns empty array if none exist of given type	62
+unit/popup-manager-test.ts	PopupManager › areTherePopupsOfType › returns true if popup of type exists	72
+unit/popup-manager-test.ts	PopupManager › areTherePopupsOfType › returns false if there are no popups of that type	79
+unit/popup-manager-test.ts	PopupManager › addPopup › adds a popup to the stack	88
+unit/popup-manager-test.ts	PopupManager › addPopup › does not add multiple popups of the same kind to the stack	99
+unit/popup-manager-test.ts	PopupManager › addPopup › adds multiple popups of different types	109
+unit/popup-manager-test.ts	PopupManager › addPopup › trims oldest popup when limit is reached	123
+unit/popup-manager-test.ts	PopupManager › addErrorPopup › adds a popup of type error to the stack	147
+unit/popup-manager-test.ts	PopupManager › addErrorPopup › adds multiple popups of type error to the stack	158
+unit/popup-manager-test.ts	PopupManager › addErrorPopup › trims oldest popup when limit is reached	167
+unit/popup-manager-test.ts	PopupManager › updatePopup › updates the given popup	181
+unit/popup-manager-test.ts	PopupManager › removePopup › deletes popup when give a popup with an id	236
+unit/popup-manager-test.ts	PopupManager › removePopup › does not remove popups by type	250
+unit/popup-manager-test.ts	PopupManager › removePopupByType › removes the popups of a given type	266
+unit/popup-manager-test.ts	PopupManager › removePopupById › removes the popup by its id	282
+unit/popup-manager-test.ts	PopupManager › popup id increment › assigns id starting at 1 for first popup	303
+unit/popup-manager-test.ts	PopupManager › popup id increment › increments ids sequentially for multiple popups	309
+unit/popup-manager-test.ts	PopupManager › popup id increment › increments ids for error popups	322
+unit/popup-manager-test.ts	PopupManager › popup id increment › continues incrementing after popups are removed	331
+unit/progress/clone-test.ts	CloneProgressParser › #parse › understands receiving object	13
+unit/progress/clone-test.ts	CloneProgressParser › #parse › understands resolving deltas	21
+unit/progress/clone-test.ts	CloneProgressParser › #parse › understands checking out files	25
+unit/progress/clone-test.ts	CloneProgressParser › #parse › understands remote compression	29
+unit/progress/clone-test.ts	CloneProgressParser › #parse › understands relative weights	33
+unit/progress/clone-test.ts	CloneProgressParser › #parse › ignores wrong order	55
+unit/progress/clone-test.ts	CloneProgressParser › #parse › ignores lines it doesn't understand	63
+unit/progress/git-test.ts	GitProgressParser › requires at least one step	11
+unit/progress/git-test.ts	GitProgressParser › parses progress with one step	15
+unit/progress/git-test.ts	GitProgressParser › parses progress with several steps	26
+unit/progress/git-test.ts	GitProgressParser › enforces ordering of steps	47
+unit/progress/git-test.ts	GitProgressParser › parses progress with no total	72
+unit/progress/git-test.ts	GitProgressParser › parses final progress with no total	85
+unit/progress/git-test.ts	GitProgressParser › parses progress with total	98
+unit/progress/git-test.ts	GitProgressParser › parses final with total	111
+unit/progress/git-test.ts	GitProgressParser › parses with total and throughput	124
+unit/progress/git-test.ts	GitProgressParser › parses final with total and throughput	139
+unit/progress/git-test.ts	GitProgressParser › does not parse things that aren't progress	154
+unit/progress/lfs-test.ts	GitLFSProgressParser › #parse › understands valid lines	13
+unit/progress/lfs-test.ts	GitLFSProgressParser › #parse › ignores lines it doesn't understand	18
+unit/promise-test.ts	timeout › falls back to the fallback value if promise takes too long	9
+unit/promise-test.ts	timeout › returns the promise result if it finishes in time	19
+unit/promise-with-timeout-test.ts	promiseWithMinimumTimeout › handles promise finishing before timeout	9
+unit/promise-with-timeout-test.ts	promiseWithMinimumTimeout › handles promise and timeout finishing together	30
+unit/promise-with-timeout-test.ts	promiseWithMinimumTimeout › handles promise finishing after timeout	47
+unit/promise-with-timeout-test.ts	promiseWithMinimumTimeout › handles actions returning null	69
+unit/pull-request-refs-test.ts	extractPullRequestNumbersFromCommits › returns empty for no commits	55
+unit/pull-request-refs-test.ts	extractPullRequestNumbersFromCommits › extracts and de-duplicates refs from summaries and bodies in first-seen order	59
+unit/pull-request-refs-test.ts	extractPullRequestNumbersFromCommits › extracts gh-prefixed refs	70
+unit/pull-request-refs-test.ts	extractPullRequestNumbersFromCommits › skips cross-repo owner/repo#NNN references	75
+unit/pull-request-refs-test.ts	extractPullRequestNumbersFromCommits › does not match # preceded by a word character	80
+unit/pull-request-refs-test.ts	findPullRequestsByNumbers › matches by number in input order and skips unmatched numbers	87
+unit/release-notes-test.ts	release-notes › parseReleaseEntries › formats lowercased fixed message	10
+unit/release-notes-test.ts	release-notes › parseReleaseEntries › formats uppercased fixed message	19
+unit/release-notes-test.ts	release-notes › parseReleaseEntries › uses [Other] for unrecognized category	28
+unit/release-notes-test.ts	release-notes › getReleaseSummary › can render 1.0.11 layout	40
+unit/release-notes-test.ts	release-notes › getReleaseSummary › can render 1.0.10 layout	76
+unit/release-notes-test.ts	release-notes › getReleaseSummary › can render 1.0.9 layout	118
+unit/remote-parsing-test.ts	URL remote parsing › parses HTTPS URLs with a trailing git suffix	6
+unit/remote-parsing-test.ts	URL remote parsing › parses HTTPS URLs with a trailing -git suffix	14
+unit/remote-parsing-test.ts	URL remote parsing › parses HTTPS URLs with a trailing -git and .git suffixes	22
+unit/remote-parsing-test.ts	URL remote parsing › parses HTTPS URLs without a trailing git suffix	30
+unit/remote-parsing-test.ts	URL remote parsing › parses HTTPS URLs with a trailing slash	38
+unit/remote-parsing-test.ts	URL remote parsing › parses HTTPS URLs which include a username	46
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs	54
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs with custom username	62
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs without the git suffix	70
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs without the git suffix but with -git suffix	78
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs with the .git suffix and -git suffix	86
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs with a trailing slash	94
+unit/remote-parsing-test.ts	URL remote parsing › parses git URLs	102
+unit/remote-parsing-test.ts	URL remote parsing › parses git URLs without the git suffix	110
+unit/remote-parsing-test.ts	URL remote parsing › parses git URLs with a trailing slash	118
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs with the ssh prefix	126
+unit/remote-parsing-test.ts	URL remote parsing › parses SSH URLs with the ssh prefix and trailing slash	134
+unit/remote-parsing-test.ts	URL remote parsing › does not parse invalid HTTP URLs when missing repo name	142
+unit/remote-parsing-test.ts	URL remote parsing › does not parse invalid SSH URLs when missing repo name 	147
+unit/remote-parsing-test.ts	URL remote parsing › does not parse invalid git URLs when missing repo name	152
+unit/remote-parsing-test.ts	URL remote parsing › does not parse invalid HTTP URLs when missing repo owner	157
+unit/remote-parsing-test.ts	URL remote parsing › does not parse invalid SSH URLs when missing repo owner	162
+unit/remote-parsing-test.ts	URL remote parsing › does not parse invalid git URLs when missing repo owner	167
+unit/remove-remote-prefix-test.ts	removeRemotePrefix › removes the remote prefix	6
+unit/remove-remote-prefix-test.ts	removeRemotePrefix › removes only the remote prefix and not any subsequent /'s	11
+unit/remove-remote-prefix-test.ts	removeRemotePrefix › returns null if there is no remote prefix	16
+unit/repo-rules-test.ts	await parseRepoRules › cannot bypass when bypass is "never"	151
+unit/repo-rules-test.ts	await parseRepoRules › can bypass when bypass is "always"	158
+unit/repo-rules-test.ts	await parseRepoRules › cannot bypass when at least one bypass mode is "never" or "pull_requests_only"	165
+unit/repo-rules-test.ts	await parseRepoRules › is not enforced when no rules are provided	175
+unit/repo-rules-test.ts	repo metadata rules › startsWith rule › shows no rules and passes everything when no rules are provided	184
+unit/repo-rules-test.ts	repo metadata rules › startsWith rule › has correct matching logic for StartsWith rule	194
+unit/repo-rules-test.ts	repo metadata rules › startsWith rule › has correct bypass logic for StartsWith rule	205
+unit/repo-rules-test.ts	repo metadata rules › startsWith rule › has correct logic when bypassed rule is included with non-bypassed rule	215
+unit/repo-rules-test.ts	repo metadata rules › startsWith rule › escapes special characters and otherwise handles regex properly	229
+unit/repo-rules-test.ts	repo metadata rules › endsWith rule › has correct matching logic for negated EndsWith rule	248
+unit/repo-rules-test.ts	repo metadata rules › contains rule › has correct matching logic for Contains rule	264
+unit/repo-rules-test.ts	repo metadata rules › regex rule › has correct matching logic for RegexMatch rule	280
+unit/repo-rules-test.ts	repo metadata rules › regex rule › has correct matching logic for multi-line data	320
+unit/repo-rules-test.ts	getEnforcedRuleDescriptions › returns an empty array when no rules are configured	340
+unit/repo-rules-test.ts	getEnforcedRuleDescriptions › returns descriptions for enforced rules	350
+unit/repo-rules-test.ts	getEnforcedRuleDescriptions › returns descriptions for bypass-able rules (still evaluated by github.com)	365
+unit/repo-rules-test.ts	getEnforcedRuleDescriptions › returns descriptions for both enforced and bypass-able rules together	380
+unit/repositories-clone-grouping-test.ts	clone repository grouping › groups repositories by owner	37
+unit/repositories-database-test.ts	RepositoriesDatabase › migrates from version 2 to 4 by deleting duplicate GitHub repositories	11
+unit/repositories-database-test.ts	RepositoriesDatabase › migrates from version 8 to 9 by deleting duplicate owners	44
+unit/repositories-list-grouping-test.ts	repository list grouping › groups repositories by owners/Enterprise/Other	31
+unit/repositories-list-grouping-test.ts	repository list grouping › sorts repositories alphabetically within each group	55
+unit/repositories-list-grouping-test.ts	repository list grouping › only disambiguates Enterprise repositories	96
+unit/repositories-store-test.ts	RepositoriesStore › adding a new repository › contains the added repository	24
+unit/repositories-store-test.ts	RepositoriesStore › getting all repositories › returns multiple repositories	34
+unit/repositories-store-test.ts	RepositoriesStore › updating a GitHub repository › adds a new GitHub repository	77
+unit/repositories-store-test.ts	RepositoriesStore › updating a GitHub repository › reuses an existing GitHub repository	97
+unit/repositories-store-test.ts	RepositoriesStore › switching worktrees › persists the main worktree path	126
+unit/repositories-store-test.ts	RepositoriesStore › switching worktrees › keeps the main worktree path when switching between worktrees	145
+unit/repositories-store-test.ts	RepositoriesStore › relocating a repository › updates the main worktree path	195
+unit/repositories-store-test.ts	RepositoriesStore › relocating a repository › clears the main worktree path when it cannot be resolved	213
+unit/repository-matching-test.ts	repository-matching › matchGitHubRepository › matches HTTPS URLs	14
+unit/repository-matching-test.ts	repository-matching › matchGitHubRepository › matches HTTPS URLs without the git extension	36
+unit/repository-matching-test.ts	repository-matching › matchGitHubRepository › matches git URLs	58
+unit/repository-matching-test.ts	repository-matching › matchGitHubRepository › matches SSH URLs	80
+unit/repository-matching-test.ts	repository-matching › matchGitHubRepository › doesn't match if there aren't any users with that endpoint	102
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with HTTPS remote › does not match null	134
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with HTTPS remote › matches cloneURL from API	138
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with HTTPS remote › matches cloneURL from API with different casing	143
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with HTTPS remote › matches cloneURL from API without suffix	148
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with HTTPS remote › matches htmlURL from API	153
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with HTTPS remote › matches htmlURL from API with different casing	158
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with HTTPS remote › matches htmlURL from API without suffix	163
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with SSH remote › does not match null	174
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with SSH remote › matches cloneURL from API	178
+unit/repository-matching-test.ts	repository-matching › urlMatchesRemote › with SSH remote › matches htmlURL from API	183
+unit/repository-matching-test.ts	repository-matching › cloneUrlMatches › returns true for exact match	218
+unit/repository-matching-test.ts	repository-matching › cloneUrlMatches › returns true when URL doesn't have a .git suffix	228
+unit/repository-matching-test.ts	repository-matching › cloneUrlMatches › returns false when URL belongs to a different owner	235
+unit/repository-matching-test.ts	repository-matching › cloneUrlMatches › returns false if GitHub repository does't have a cloneURL set	245
+unit/repository-state-cache-test.ts	RepositoryStateCache › can update branches state for a repository	39
+unit/repository-state-cache-test.ts	RepositoryStateCache › can update changes state for a repository	61
+unit/repository-state-cache-test.ts	RepositoryStateCache › can update compare state for a repository	94
+unit/repository-test.ts	Repository › name › uses the last path component as the name	7
+unit/repository-test.ts	Repository › name › handles repository at root of the drive	13
+unit/round-test.ts	round › rounds to the desired number decimals	6
+unit/round-test.ts	round › doesn't attempt to round NaN	16
+unit/round-test.ts	round › doesn't attempt to round infinity	20
+unit/round-test.ts	round › doesn't attempt to round to less than zero decimals	25
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › leaves a good branch name alone	6
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › replaces invalid characters with dashes	12
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › does not allow branch name to end in slash	18
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › does not allow name to start with plus	24
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › does not allow name to start with minus	30
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › does not allow name to end in `.lock`	36
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › replaces newlines with dash	42
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › removes starting dot	48
+unit/sanitize-ref-name-test.ts	sanitizedBranchName › allows double dashes after first character	54
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › leaves a good repo name alone	6
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › replaces invalid characters with dashes	12
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › replaces space with dashes	18
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › replaces ending slash with dashes	24
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › does not allow name to start with plus, replaces it with dashes	30
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › allow name to start with minus	36
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › replaces slash in newlines with dash	42
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › allow name to have dots	48
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › allows double dashes	54
+unit/sanitized-repository-name-test.ts	sanitizedRepositoryName › replaces one emoji with one dash	60
+unit/script/version-test.ts	getNextVersionNumber › production › increments the patch number	9
+unit/script/version-test.ts	getNextVersionNumber › production › doesn't care for › beta versions	14
+unit/script/version-test.ts	getNextVersionNumber › production › doesn't care for › test versions	20
+unit/script/version-test.ts	getNextVersionNumber › beta › when a beta version is used › the beta tag is incremented	33
+unit/script/version-test.ts	getNextVersionNumber › beta › when a beta version is used › handles multiple digits	39
+unit/script/version-test.ts	getNextVersionNumber › beta › when a production version is used › increments the patch and returns the first beta	48
+unit/script/version-test.ts	getNextVersionNumber › beta › doesn't care for › test versions	54
+unit/section-list-selection-test.ts	section-list-selection › findNextSelectableRow › returns first row when selecting down outside list (filter text)	13
+unit/section-list-selection-test.ts	section-list-selection › findNextSelectableRow › returns first selectable row when header is first	21
+unit/section-list-selection-test.ts	section-list-selection › findNextSelectableRow › returns first row when selecting down from last row	39
+unit/section-list-selection-test.ts	section-list-selection › findNextSelectableRow › returns last row when selecting up from top row	51
+unit/section-list-selection-test.ts	section-list-selection › findNextSelectableRow › returns first row of next section when selecting down from last row of a section	66
+unit/section-list-selection-test.ts	section-list-selection › findNextSelectableRow › returns last row of previous section when selecting up from first row of a section	81
+unit/section-list-test.ts	section-list › getRowOffsetInSection › sums the height of each preceding variable-height row	8
+unit/sign-in-store-test.ts	SignInStore › initial state › starts with null state	59
+unit/sign-in-store-test.ts	SignInStore › beginDotComSignIn › transitions to Authentication step when no existing account	65
+unit/sign-in-store-test.ts	SignInStore › beginDotComSignIn › transitions to ExistingAccountWarning when a dotcom account exists	77
+unit/sign-in-store-test.ts	SignInStore › beginDotComSignIn › calls resultCallback when provided	90
+unit/sign-in-store-test.ts	SignInStore › beginEnterpriseSignIn › transitions to EndpointEntry step	103
+unit/sign-in-store-test.ts	SignInStore › beginEnterpriseSignIn › sets initial state correctly	110
+unit/sign-in-store-test.ts	SignInStore › beginEnterpriseSignIn › resets previous state before starting	119
+unit/sign-in-store-test.ts	SignInStore › setEndpoint › transitions to Authentication step for valid enterprise URL	131
+unit/sign-in-store-test.ts	SignInStore › setEndpoint › redirects to dotcom flow for github.com URLs	139
+unit/sign-in-store-test.ts	SignInStore › setEndpoint › redirects to dotcom flow for api.github.com URLs	151
+unit/sign-in-store-test.ts	SignInStore › setEndpoint › sets error for non-HTTPS URL	162
+unit/sign-in-store-test.ts	SignInStore › setEndpoint › shows ExistingAccountWarning if enterprise account exists	174
+unit/sign-in-store-test.ts	SignInStore › reset › clears the state back to null	191
+unit/sign-in-store-test.ts	SignInStore › reset › calls resultCallback with cancelled	199
+unit/sign-in-store-test.ts	SignInStore › onDidUpdate › emits updates when state changes	212
+unit/sign-in-store-test.ts	SignInStore › onDidUpdate › emits null when reset	223
+unit/squashed-commit-description-test.ts	getSquashedCommitDescription › builds squashed commit descriptions - no coauthors provided	12
+unit/squashed-commit-description-test.ts	getSquashedCommitDescription › builds squashed commit descriptions that do not include coauthors	24
+unit/squashed-commit-description-test.ts	getSquashedCommitDescription › builds squashed commit descriptions with whitespace trimmed	40
+unit/squirrel-error-parser-test.ts	parseError › parses a missing Squirrel error	6
+unit/squirrel-error-parser-test.ts	parseError › parses a Squirrel network error	16
+unit/squirrel-error-parser-test.ts	parseError › parses a timeout error	83
+unit/squirrel-error-parser-test.ts	parseError › passes through an empty error	154
+unit/ssh-test.ts	SSH › parsing SSH prompts › extracts info from github.com host key fingerprint	7
+unit/ssh-test.ts	SSH › parsing SSH prompts › extracts info from fake host key fingerprint	22
+unit/ssh-test.ts	SSH › parsing SSH prompts › extracts info from fake host key fingerprint when keys of different type are available	38
+unit/ssh-test.ts	SSH › parsing SSH prompts › extract info when [fingerprint] option is not present	54
+unit/stats-store-test.ts	StatsStore › unsubscribes from the activity monitor when it's no longer needed	21
+unit/stats-store-test.ts	StatsStore › resubscribes to the activity monitor after submitting	41
+unit/status-parser-test.ts	parsePorcelainStatus › parses a standard status	12
+unit/status-parser-test.ts	parsePorcelainStatus › parses renames	36
+unit/status-parser-test.ts	parsePorcelainStatus › ignores ignored files	58
+unit/status-parser-test.ts	parsePorcelainStatus › parses status headers	69
+unit/status-parser-test.ts	parsePorcelainStatus › parses a path which includes a newline	95
+unit/status-parser-test.ts	parsePorcelainStatus › parses a typechange	109
+unit/status-parser-test.ts	parsePorcelainStatus › parses submodule changes	120
+unit/status-utils-test.ts	lib/status › mapStatus › returns "New" for new files	43
+unit/status-utils-test.ts	lib/status › mapStatus › returns "New" for untracked files	47
+unit/status-utils-test.ts	lib/status › mapStatus › returns "Modified" for modified files	51
+unit/status-utils-test.ts	lib/status › mapStatus › returns "Deleted" for deleted files	55
+unit/status-utils-test.ts	lib/status › mapStatus › returns "Renamed" for renamed files	59
+unit/status-utils-test.ts	lib/status › mapStatus › returns "Copied" for copied files	70
+unit/status-utils-test.ts	lib/status › isConflictedFile › returns true for conflicted files	83
+unit/status-utils-test.ts	lib/status › isConflictedFile › returns false for non-conflicted files	97
+unit/status-utils-test.ts	lib/status › hasConflictedFiles › returns false for an empty working directory	108
+unit/status-utils-test.ts	lib/status › hasConflictedFiles › returns false when no files are conflicted	113
+unit/status-utils-test.ts	lib/status › hasConflictedFiles › returns true when a file is conflicted	122
+unit/stores/copilot-store-test.ts	getCopilotModelCacheKey › uses account id and endpoint	200
+unit/stores/copilot-store-test.ts	getCopilotModelCacheKey › differs when account id or endpoint differs	212
+unit/stores/copilot-store-test.ts	migrateCopilotModelSelectionsToAccounts › copies legacy selections to every account and preserves overrides	232
+unit/stores/copilot-store-test.ts	getCopilotGHHost › returns undefined for GitHub.com accounts	264
+unit/stores/copilot-store-test.ts	getCopilotGHHost › returns the endpoint host for Enterprise accounts	268
+unit/stores/copilot-store-test.ts	CopilotStore model cache › reuses cached models for the same account	293
+unit/stores/copilot-store-test.ts	CopilotStore model cache › keeps separate model caches for different accounts	308
+unit/stores/copilot-store-test.ts	CopilotStore model cache › deduplicates concurrent fetches for the same account	342
+unit/stores/copilot-store-test.ts	CopilotStore model cache › clears cached models when the account is logged out	363
+unit/stores/copilot-store-test.ts	CopilotStore model cache › does not restore cached models when an in-flight fetch resolves after logout	378
+unit/stores/copilot-store-test.ts	CopilotStore model cache › does not restore stale models when the account signs back in before an old fetch resolves	397
+unit/stores/copilot-store-test.ts	CopilotStore quota snapshots › defaults missing token-based billing metadata without dropping snapshots	438
+unit/stores/copilot-store-test.ts	CopilotStore commit message generation cancellation › does not create a commit-message client after cancellation during model resolution	477
+unit/stores/copilot-store-test.ts	CopilotStore commit message generation cancellation › stops the client without creating a session after cancellation before session creation	504
+unit/stores/copilot-store-test.ts	CopilotStore commit message generation cancellation › stops the client after cancellation during session creation	542
+unit/stores/copilot-store-test.ts	CopilotStore commit message generation cancellation › disconnects the session and stops the client after cancellation during generation	592
+unit/stores/copilot-store-test.ts	getLowestReasoningEffort › returns undefined when model has no supported reasoning efforts	641
+unit/stores/copilot-store-test.ts	getLowestReasoningEffort › returns undefined when supportedReasoningEfforts is empty	646
+unit/stores/copilot-store-test.ts	getLowestReasoningEffort › returns low when it is the only supported effort	655
+unit/stores/copilot-store-test.ts	getLowestReasoningEffort › returns low when multiple efforts are supported	664
+unit/stores/copilot-store-test.ts	getLowestReasoningEffort › returns medium when low is not supported	673
+unit/stores/copilot-store-test.ts	getLowestReasoningEffort › returns xhigh when it is the only supported effort	682
+unit/stores/copilot-store-test.ts	getSupportedReasoningEffort › returns undefined when the model supports no reasoning efforts	693
+unit/stores/copilot-store-test.ts	getSupportedReasoningEffort › returns the preferred effort when the model supports it	698
+unit/stores/copilot-store-test.ts	getSupportedReasoningEffort › falls back to the lowest supported effort when preferred is unsupported	707
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › returns null for an empty model list	718
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › returns the default model when it is in the list	722
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › falls back to the cheapest model by billing multiplier	738
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › falls back to the cheapest model by token prices	758
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › normalizes token price costs by batch size	799
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › treats models without billing info as most expensive	826
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › returns the single model when only one is available	840
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › prefers default model regardless of billing cost	850
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › treats models without token prices as most expensive in usage billing	865
+unit/stores/copilot-store-test.ts	getPreferredDefaultModel › treats models with incomplete token prices as most expensive in usage billing	885
+unit/stores/copilot-store-test.ts	runConflictResolutionTurn › rejects as aborted and tears down the session when cancelled mid-turn	970
+unit/stores/copilot-store-test.ts	runConflictResolutionTurn › rejects and disconnects the session for an already-aborted signal	990
+unit/stores/copilot-store-test.ts	runConflictResolutionTurn › resolves with the final message content and disconnects the session once	1008
+unit/stores/copilot-store-test.ts	runConflictResolutionTurn › streams reasoning snippets sentence-by-sentence	1027
+unit/stores/github-user-store-test.ts	matchMentionableUsers › does not match users without a name when searching for "null"	24
+unit/stores/github-user-store-test.ts	matchMentionableUsers › does not drag in a nameless user on a leading "n"	30
+unit/stores/github-user-store-test.ts	matchMentionableUsers › matches a user by their login even when they have no name	38
+unit/stores/github-user-store-test.ts	matchMentionableUsers › matches a user by their real name	45
+unit/stores/github-user-store-test.ts	matchMentionableUsers › matches a user by their login	52
+unit/stores/github-user-store-test.ts	matchMentionableUsers › ranks earlier matches ahead of later ones	59
+unit/stores/github-user-store-test.ts	matchMentionableUsers › honors the maxHits limit	82
+unit/stores/github-user-store-test.ts	matchMentionableUsers › ranks a login match ahead of a name-only match	96
+unit/stores/github-user-store-test.ts	matchMentionableUsers › treats an empty-string name the same as a null name	120
+unit/stores/github-user-store-test.ts	matchMentionableUsers › breaks ties alphabetically by login	135
+unit/stores/github-user-store-test.ts	matchMentionableUsers › matches case-insensitively for uppercase queries	158
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › workingDirectory › clears partial selection on file when clearPartialState is true	65
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › workingDirectory › preserves partial selection on file when clearPartialState is false	87
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › workingDirectory › does not return same working directory object	109
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › selectedFileIDs › selects the first file if none found in state	126
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › selectedFileIDs › remembers previous selection if file is found in status	144
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › selectedFileIDs › clears selection if no files found in status	167
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › diff › clears diff if selected file is not in previous state	189
+unit/stores/updates/update-changed-files-test.ts	updateChangedFiles › diff › returns same diff if selected file from previous state is found	212
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › merge conflicts › returns null when no MERGE_HEAD file found	17
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › merge conflicts › preserves manual resolutions between updates in the same merge	35
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › merge conflicts › returns null when MERGE_HEAD set but not branch or tip defined	65
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › merge conflicts › returns a value when status has MERGE_HEAD set and in conflicted state	88
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › merge conflicts › increments abort counter when branch has changed	113
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › merge conflicts › increments abort counter when conflict resolved and tip has not changed	136
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › merge conflicts › increments success counter when conflict resolved and tip has changed	158
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › rebase conflicts › returns null when no REBASE_HEAD file found	182
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › rebase conflicts › returns a value when status has REBASE_HEAD set and conflict present	202
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › rebase conflicts › preserves manual resolutions when a rebase is detected	233
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › rebase conflicts › increments abort counter when conflict remains but branch has changed	271
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › rebase conflicts › increments abort counter when conflict resolved but tip has not changed	299
+unit/stores/updates/update-conflict-state-test.ts	updateConflictState › rebase conflicts › does not increment aborted counter when conflict resolved and tip has changed	323
+unit/stores/updates/update-remote-url-test.ts	Update remote url › updates the repository's remote url when the github url changes	68
+unit/stores/updates/update-remote-url-test.ts	Update remote url › doesn't update the repository's remote url when the github url is the same	83
+unit/stores/updates/update-remote-url-test.ts	Update remote url › doesn't update repository's remote url if protocols don't match	96
+unit/stores/updates/update-remote-url-test.ts	Update remote url › doesn't update the repository's remote url if it differs from the default from the github API	114
+unit/text-diff-expansion-test.ts	text-diff-expansion › adds a dummy hunk to the bottom to allow expansion when last hunk does not reach bottom	78
+unit/text-diff-expansion-test.ts	text-diff-expansion › does not add a dummy hunk to the bottom when last hunk reaches bottom	91
+unit/text-diff-expansion-test.ts	text-diff-expansion › expands the initial hunk without reaching the top	98
+unit/text-diff-expansion-test.ts	text-diff-expansion › expands the initial hunk reaching the top	119
+unit/text-diff-expansion-test.ts	text-diff-expansion › expands the second-to-last hunk without reaching the bottom	141
+unit/text-diff-expansion-test.ts	text-diff-expansion › expands the second-to-last hunk reaching the bottom	161
+unit/text-diff-expansion-test.ts	text-diff-expansion › merges hunks when the gap between them is shorter than the expansion size	180
+unit/text-diff-expansion-test.ts	text-diff-expansion › expands the whole file	207
+unit/text-token-parser-test.ts	Tokenizer › basic tests › preserves plain text string	25
+unit/text-token-parser-test.ts	Tokenizer › basic tests › returns emoji between two string elements	34
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › renders an emoji match	67
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › skips emoji when no match exists	82
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › does not render link when email address found	91
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › render mention when text starts with a @	103
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › renders mention when token found	121
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › ignores http prefix when no text after	139
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › ignores https prefix when no text after	150
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › renders link when an issue reference is found	161
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › renders link when squash and merge	183
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › renders link and author mention when parsing release notes	205
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › renders multiple issue links and mentions	239
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › renders multiple issue links and mentions even with commas	311
+unit/text-token-parser-test.ts	Tokenizer › with GitHub repository › converts full URL to issue shorthand	383
+unit/text-token-parser-test.ts	Tokenizer › with non-GitHub repository › renders an emoji match	433
+unit/text-token-parser-test.ts	Tokenizer › with non-GitHub repository › skips emoji when no match exists	448
+unit/text-token-parser-test.ts	Tokenizer › with non-GitHub repository › does not render link for mention	457
+unit/text-token-parser-test.ts	Tokenizer › with non-GitHub repository › does not render link for issue reference	466
+unit/text-token-parser-test.ts	Tokenizer › with non-GitHub repository › renders plain link for full URL	476
+unit/truncate-with-ellipsis-test.ts	truncateWithEllipsis › does not truncate a string that fits	6
+unit/truncate-with-ellipsis-test.ts	truncateWithEllipsis › does not truncate a max length string	12
+unit/truncate-with-ellipsis-test.ts	truncateWithEllipsis › truncates a string that does not fit	18
+unit/truncate-with-ellipsis-test.ts	truncateWithEllipsis › does not truncate a unicode string that fits	24
+unit/truncate-with-ellipsis-test.ts	truncateWithEllipsis › does not truncate a max length unicode string	30
+unit/truncate-with-ellipsis-test.ts	truncateWithEllipsis › truncates a unicode string that does not fit	36
+unit/ui/aria-live-container-test.tsx	AriaLiveContainer › renders a polite live region with the provided id and message	22
+unit/ui/aria-live-container-test.tsx	AriaLiveContainer › rebuilds the message after tracked user input changes	39
+unit/ui/banner-surfaces-test.tsx	banner surfaces › focuses the first suitable banner element and auto-dismisses on focus out	25
+unit/ui/banner-surfaces-test.tsx	banner surfaces › renders success banner content and triggers dismiss plus undo from the undo link	58
+unit/ui/banner-surfaces-test.tsx	banner surfaces › renders branch up-to-date banner messages with and without the compared branch	88
+unit/ui/banner-surfaces-test.tsx	banner surfaces › renders cherry-pick undone messages with singular and plural commit copy	113
+unit/ui/branch-empty-states-test.tsx	branch empty states › renders the create-branch empty state and invokes the create callback	34
+unit/ui/branch-empty-states-test.tsx	branch empty states › renders the no-create fallback message when branch creation is unavailable	55
+unit/ui/branch-empty-states-test.tsx	branch empty states › renders the search and loading pull-request placeholders	70
+unit/ui/branch-empty-states-test.tsx	branch empty states › renders default-branch and feature-branch calls to action and invokes their callbacks	99
+unit/ui/branch-list-item-test.tsx	BranchListItem › renders the branch name and relative author date	26
+unit/ui/branch-list-item-test.tsx	BranchListItem › drops dragged commits onto a non-current branch	40
+unit/ui/branch-list-item-test.tsx	BranchListItem › drops dragged commits onto the current branch callback	79
+unit/ui/commit-message-test.tsx	CommitMessage › does not allow cancelling commit message generation when the Copilot SDK is disabled	180
+unit/ui/commit-message-test.tsx	CommitMessage › allows cancelling commit message generation when the Copilot SDK is enabled	204
+unit/ui/commit-message-warning-dialogs-test.tsx	commit message warning dialogs › renders the disclaimer dialog and submits the generation flow	95
+unit/ui/commit-message-warning-dialogs-test.tsx	commit message warning dialogs › renders the override warning tip and persists the opt-out choice on submit	148
+unit/ui/commit-message-warning-dialogs-test.tsx	commit message warning dialogs › omits the Copilot instructions tip when the flag is disabled	215
+unit/ui/component-primitives-test.tsx	component primitives › renders the loading spinner octicon	14
+unit/ui/component-primitives-test.tsx	component primitives › renders a horizontal rule title when provided	23
+unit/ui/component-primitives-test.tsx	component primitives › renders footer, ref, and toolbar children with their wrapper classes	33
+unit/ui/component-primitives-test.tsx	component primitives › renders the changed files badge count and caps large values	59
+unit/ui/control-primitives-test.tsx	control primitives › renders enabled buttons with forwarded refs, classes, and aria attributes	13
+unit/ui/control-primitives-test.tsx	control primitives › prevents disabled button interactions and exposes aria-disabled	75
+unit/ui/control-primitives-test.tsx	control primitives › renders checkbox labels, mixed state, and change wiring	115
+unit/ui/control-primitives-test.tsx	control primitives › keeps checkbox double clicks from bubbling to ancestor handlers	153
+unit/ui/control-primitives-test.tsx	control primitives › renders radio buttons and forwards selection plus double-click values	173
+unit/ui/control-primitives-test.tsx	control primitives › renders radio groups with one tabbable selected option and selection callbacks	210
+unit/ui/control-primitives-test.tsx	control primitives › renders selects with associated labels and change callbacks	244
+unit/ui/copilot-custom-providers-dialog-test.tsx	CopilotCustomProvidersDialog › renders providers and invokes management actions	37
+unit/ui/copilot-custom-providers-dialog-test.tsx	CopilotCustomProvidersDialog › renders the empty state	67
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows sign-in call to action when no account is available	358
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows sign-in call to action when only GHES accounts are available	386
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows checking message when Copilot account metadata has not loaded	411
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows checking message when Copilot license metadata has not loaded	428
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › opens Copilot plans when the user does not have a Copilot license	445
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › opens Copilot feature settings when Desktop access is disabled	474
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › uses Copilot when a GHE account has Copilot enabled	509
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › renders Snapshot cards instead of model settings for multiple Copilot accounts	539
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › excludes accounts without Copilot SDK access from settings	578
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › makes multiple account Snapshot cards scrollable	605
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › requests account-specific Copilot settings from a Snapshot card	633
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › ignores GHES accounts while checking Copilot access	676
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows loading message when models not yet fetched	702
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows no-models message when fetch completed with empty result	712
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows a loading message when quota snapshots have not been fetched	722
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › renders Copilot quota snapshot cards	733
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › renders code completions quota snapshots	771
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › describes unlimited quotas as determinate progress	794
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › renders token-based billing quota snapshots as AI credits	826
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › renders a Copilot group with the available models	872
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › renders a BYOK group per provider	924
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › selects the default Copilot model when no model is selected	935
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › shows usage billing below the selected model picker	946
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › renders unavailable cost details for missing token prices	1039
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › omits the cost details button when token batch size is missing	1076
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › treats legacy bare-string selections as Copilot models	1104
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › selects the matching BYOK option when chosen	1119
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › emits the encoded composite key on change	1139
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › emits the selected value directly on change	1162
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › falls back to the default Copilot model when persisted selection is not in the model list	1197
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › falls back to the default Copilot model when the BYOK provider for the persisted selection is gone	1212
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › falls back to the first available Copilot model when DefaultCopilotModel is unavailable	1231
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › falls back to the first BYOK model when no Copilot models are available	1248
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › always shows models without settings tabs	1265
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › hides custom provider configuration when BYOK settings are disabled	1272
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › opens custom provider configuration from the model picker	1283
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › conflict resolution model picker › renders a second picker	1304
+unit/ui/copilot-preferences-test.tsx	CopilotPreferences › conflict resolution model picker › emits the conflict-resolution feature on change	1309
+unit/ui/copy-button-test.tsx	CopyButton › copies content and announces the copied state before resetting	27
+unit/ui/dialog-action-wrappers-test.tsx	dialog action wrappers › renders dialog content classes, children, and ref callbacks	11
+unit/ui/dialog-action-wrappers-test.tsx	dialog action wrappers › renders a dialog footer wrapper around its children	37
+unit/ui/dialog-action-wrappers-test.tsx	dialog action wrappers › renders ok-cancel buttons in platform order with non-destructive defaults	50
+unit/ui/dialog-action-wrappers-test.tsx	dialog action wrappers › dispatches submit and reset events for destructive button groups	89
+unit/ui/dialog-and-input-description-test.tsx	dialog and input descriptions › renders dialog error and success banners with alert semantics	13
+unit/ui/dialog-and-input-description-test.tsx	dialog and input descriptions › renders caption styling without error semantics	36
+unit/ui/dialog-and-input-description-test.tsx	dialog and input descriptions › renders input errors as alerts when they are not tied to tracked input	54
+unit/ui/dialog-and-input-description-test.tsx	dialog and input descriptions › renders input warnings with warning styling and aria-live content	71
+unit/ui/dialog-composition-and-toggle-test.tsx	dialog composition and toggle components › renders call-to-action content and invokes the action callback	12
+unit/ui/dialog-composition-and-toggle-test.tsx	dialog composition and toggle components › renders dialog header title, accessory, spinner, and close button behavior	43
+unit/ui/dialog-composition-and-toggle-test.tsx	dialog composition and toggle components › renders a default dialog footer with a single submit button	83
+unit/ui/dialog-composition-and-toggle-test.tsx	dialog composition and toggle components › toggles unchecked and checked state for uncontrolled toggle buttons	99
+unit/ui/dialog-focus-test.tsx	Dialog focus › does not restore focus to the dialog element	61
+unit/ui/dialog-focus-test.tsx	Dialog focus › falls back when the previously focused element cannot be focused	87
+unit/ui/dialog-focus-test.tsx	Dialog focus › restores initial focus when dialog contents change while nested	115
+unit/ui/email-attribution-warning-test.tsx	GitEmailNotFoundWarning › renders nothing when there are no accounts or the email is blank	32
+unit/ui/email-attribution-warning-test.tsx	GitEmailNotFoundWarning › renders a mismatch warning, learn-more link, and screen-reader message	50
+unit/ui/email-attribution-warning-test.tsx	GitEmailNotFoundWarning › renders a success indicator without the learn-more link when the email matches	82
+unit/ui/helper-side-effect-surfaces-test.tsx	helper side-effect surfaces › applies theme classes, updates color scheme, and clears theme classes on unmount	32
+unit/ui/helper-side-effect-surfaces-test.tsx	helper side-effect surfaces › deletes the config lock file and retries when deletion succeeds or file is already gone	70
+unit/ui/helper-side-effect-surfaces-test.tsx	helper side-effect surfaces › reports config lock deletion failures other than ENOENT	119
+unit/ui/input-description-and-textarea-test.tsx	input description and textarea surfaces › renders caption, warning, and error variants with the expected semantics	13
+unit/ui/input-description-and-textarea-test.tsx	input description and textarea surfaces › renders an aria-live helper for tracked warning and error messages	55
+unit/ui/input-description-and-textarea-test.tsx	input description and textarea surfaces › renders textareas with labels, rows, refs, and value change callbacks	100
+unit/ui/input-description-and-textarea-test.tsx	input description and textarea surfaces › does not call onValueChanged when textarea onChange prevents default	136
+unit/ui/layout-and-message-components-test.tsx	layout and message components › renders row and errors wrappers with expected semantics	15
+unit/ui/layout-and-message-components-test.tsx	layout and message components › renders platform-specific keyboard shortcuts	37
+unit/ui/layout-and-message-components-test.tsx	layout and message components › renders warning variants with the expected icon styling and suppresses context menus	59
+unit/ui/password-text-box-test.tsx	PasswordTextBox › toggles password visibility, keeps focus on the input, and forwards value changes	9
+unit/ui/path-and-selection-surfaces-test.tsx	path and selection surfaces › renders a simple path label for non-rename statuses	14
+unit/ui/path-and-selection-surfaces-test.tsx	path and selection surfaces › renders old and new paths for renamed files with a rename arrow	38
+unit/ui/path-and-selection-surfaces-test.tsx	path and selection surfaces › renders the multiple-selection blank slate with the selected file count	64
+unit/ui/path-text-and-link-button-test.tsx	path text and link button surfaces › truncates text and paths using the exported helpers	39
+unit/ui/path-text-and-link-button-test.tsx	path text and link button surfaces › renders path text without a tooltip when the full path fits	62
+unit/ui/path-text-and-link-button-test.tsx	path text and link button surfaces › does not exceed React update depth while looking for a fitting truncation	83
+unit/ui/path-text-and-link-button-test.tsx	path text and link button surfaces › treats uri links as links and callback-only links as buttons	108
+unit/ui/relative-time-test.tsx	RelativeTime › renders recent relative text without a tooltip wrapper when disabled	25
+unit/ui/relative-time-test.tsx	RelativeTime › renders recent relative text with the default tooltip-enabled path	34
+unit/ui/relative-time-test.tsx	RelativeTime › updates its rendered text when the date prop changes	42
+unit/ui/relative-time-test.tsx	RelativeTime › refreshes once the scheduled timeout elapses	56
+unit/ui/relative-time-test.tsx	RelativeTime › renders an absolute date for older timestamps when onlyRelative is false	66
+unit/ui/repository-list-item-test.tsx	RepositoryListItem › renders the repository name and status indicators	42
+unit/ui/repository-list-item-test.tsx	RepositoryListItem › renders owner prefix and alias when disambiguation is required	66
+unit/ui/repository-list-item-test.tsx	RepositoryListItem › shows tooltip content for the repository full name, alias, and path	85
+unit/ui/rulesets-and-publish-surfaces-test.tsx	rulesets and publish surfaces › renders a branch rulesets link when both repository and branch are present	22
+unit/ui/rulesets-and-publish-surfaces-test.tsx	rulesets and publish surfaces › renders raw children instead of a link when repository or branch are missing	41
+unit/ui/rulesets-and-publish-surfaces-test.tsx	rulesets and publish surfaces › renders the no-remote publish call to action and invokes publish	64
+unit/ui/section-list-scroll-test.tsx	SectionList scrolling › never makes per-section grids independently scrollable	111
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › starts line selection on primary-button mousedown events	185
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › starts line deselection when the line is already selected	195
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › ignores non-primary mousedown events on line gutters	207
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › infers the modified row column from the clicked line gutter	217
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › dispatches line number checkbox changes with row and column	232
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › dispatches context menus from line number labels with diff line numbers	246
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › dispatches hunk checkbox changes with the hunk start line	254
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › dispatches hunk checkbox changes as deselection when the row is selected	266
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › dispatches context menus from hunk handles with the hunk start line	279
+unit/ui/side-by-side-diff-row-test.tsx	SideBySideDiffRow › dispatches hunk expansion clicks with the expansion type	292
+unit/ui/small-action-and-dialog-surfaces-test.tsx	small action and dialog surfaces › renders the no-step check-run state and invokes the external-view callback	16
+unit/ui/small-action-and-dialog-surfaces-test.tsx	small action and dialog surfaces › renders the cli-installed dialog and dismisses through the default button	43
+unit/ui/static-status-and-link-components-test.tsx	static status and link components › renders repo ruleset links with the expected ruleset url	46
+unit/ui/static-status-and-link-components-test.tsx	static status and link components › renders fork settings descriptions for self and parent contribution targets	70
+unit/ui/static-status-and-link-components-test.tsx	static status and link components › renders action status icons for each computed state and hides null status	104
+unit/ui/static-status-and-link-components-test.tsx	static status and link components › renders segmented item titles and optional descriptions	137
+unit/ui/structural-and-text-components-test.tsx	structural and text components › renders form, dialog content, and ui view wrappers and prevents default submit behavior	24
+unit/ui/structural-and-text-components-test.tsx	structural and text components › renders commit attribution for one, two, and many authors	71
+unit/ui/structural-and-text-components-test.tsx	structural and text components › renders access text with a screen-reader fallback and optional highlighting	100
+unit/ui/structural-and-text-components-test.tsx	structural and text components › renders contiguous highlight runs as mark elements	116
+unit/ui/tab-bar-item-test.tsx	TabBarItem › renders tab accessibility attributes based on selected state	77
+unit/ui/tab-bar-item-test.tsx	TabBarItem › clicks, hovers, and leaves with the configured item index	87
+unit/ui/tab-bar-item-test.tsx	TabBarItem › selects adjacent tabs with horizontal arrow keys	104
+unit/ui/tab-bar-item-test.tsx	TabBarItem › selects adjacent tabs with vertical arrow keys when rendered vertically	119
+unit/ui/tab-bar-test.tsx	TabBar › renders a tablist and marks the selected tab	48
+unit/ui/tab-bar-test.tsx	TabBar › moves focus and emits selection when navigating with the keyboard	61
+unit/ui/tab-bar-test.tsx	TabBar › switches tabs after hovering during a drag operation	72
+unit/ui/test-copilot-snapshot-card-dialog-test.tsx	TestCopilotSnapshotCardDialog › renders a configurable snapshot card preview	43
+unit/ui/test-copilot-snapshot-card-dialog-test.tsx	TestCopilotSnapshotCardDialog › keeps the preview separate from the scrollable controls	56
+unit/ui/test-copilot-snapshot-card-dialog-test.tsx	TestCopilotSnapshotCardDialog › uses the first available account as the fake account default	74
+unit/ui/test-copilot-snapshot-card-dialog-test.tsx	TestCopilotSnapshotCardDialog › updates the fake account displayed in the preview	91
+unit/ui/test-copilot-snapshot-card-dialog-test.tsx	TestCopilotSnapshotCardDialog › previews token-based billing data	105
+unit/ui/test-copilot-snapshot-card-dialog-test.tsx	TestCopilotSnapshotCardDialog › previews rate limit data	119
+unit/ui/text-box-test.tsx	TextBox › renders textbox labels, prefixed icons, and forwards focus or blur, key, change, and enter callbacks	10
+unit/ui/text-box-test.tsx	TextBox › clears search text through the clear button and announces that the input was cleared	79
+unit/ui/text-box-test.tsx	TextBox › clears or blurs search inputs when escape is pressed	116
+unit/ui/tutorial-welcome-surfaces-test.tsx	tutorial welcome surfaces › renders the tutorial welcome definitions and images	47
+unit/ui/tutorial-welcome-surfaces-test.tsx	tutorial welcome surfaces › renders tutorial step instructions with step state, skip content, and toggle callbacks	68
+unit/ui/tutorial-welcome-surfaces-test.tsx	tutorial welcome surfaces › focuses tutorial completion once and routes suggested actions through the dispatcher	135
+unit/ui/visual-helper-surfaces-test.tsx	visual helper surfaces › renders octicons and creates octicon wrapper elements	26
+unit/ui/visual-helper-surfaces-test.tsx	visual helper surfaces › renders donut segments for non-zero values and preserves the aria label	45
+unit/ui/visual-helper-surfaces-test.tsx	visual helper surfaces › renders remote-tracking and duplicate-name branch warnings when applicable	66
+unit/ui/visual-helper-surfaces-test.tsx	visual helper surfaces › returns no branch warning markup when warning conditions are absent	98
+unit/ui/welcome-and-sign-in-wrappers-test.tsx	welcome and sign-in wrappers › submits enterprise endpoints through the shared sign-in wrapper	76
+unit/ui/welcome-and-sign-in-wrappers-test.tsx	welcome and sign-in wrappers › renders warning and browser-authentication states in the shared sign-in wrapper	102
+unit/ui/welcome-and-sign-in-wrappers-test.tsx	welcome and sign-in wrappers › renders the enterprise welcome step only when sign-in state exists and its cancel button returns to start	138
+unit/ui/welcome-and-sign-in-wrappers-test.tsx	welcome and sign-in wrappers › renders the configure-git welcome step and returns to start when cancelled	170
+unit/unique-coauthors-as-authors-test.ts	getUniqueCoauthorsAsAuthors › can returns empty array for no coauthors	9
+unit/unique-coauthors-as-authors-test.ts	getUniqueCoauthorsAsAuthors › gets coauthor from commit with coauthor	24
+unit/unique-coauthors-as-authors-test.ts	getUniqueCoauthorsAsAuthors › does not return duplicate authors	37
+unit/unique-coauthors-as-authors-test.ts	getUniqueCoauthorsAsAuthors › does not return duplicate authors when name is different and email is the same	55
+unit/unique-coauthors-as-authors-test.ts	getUniqueCoauthorsAsAuthors › does not return duplicate authors when email is different and name is the same	71
+unit/unique-coauthors-as-authors-test.ts	getUniqueCoauthorsAsAuthors › can get multiple coauthors on multiple commits	88
+unit/welcome-test.ts	Welcome › hasShownWelcomeFlow › defaults to false when no value found	16
+unit/welcome-test.ts	Welcome › hasShownWelcomeFlow › returns false for some non-numeric value	20
+unit/welcome-test.ts	Welcome › hasShownWelcomeFlow › returns false when zero found	25
+unit/welcome-test.ts	Welcome › hasShownWelcomeFlow › returns true when one found	30
+unit/welcome-test.ts	Welcome › markWelcomeFlowComplete › sets localStorage to 1	37
+unit/wrap-rich-text-commit-message-test.ts	wrapRichTextCommitMessage › doesn't wrap at exactly 72 chars	31
+unit/wrap-rich-text-commit-message-test.ts	wrapRichTextCommitMessage › hard wraps text longer than 72 chars	43
+unit/wrap-rich-text-commit-message-test.ts	wrapRichTextCommitMessage › hard wraps text longer than 72 chars and joins it with the body	62
+unit/wrap-rich-text-commit-message-test.ts	wrapRichTextCommitMessage › handles summaries which are exactly 72 chars after link shortening	82
+unit/wrap-rich-text-commit-message-test.ts	wrapRichTextCommitMessage › takes issue link shortening into consideration	99
+unit/wrap-rich-text-commit-message-test.ts	wrapRichTextCommitMessage › handles multiple links	120
+unit/wrap-rich-text-commit-message-test.ts	wrapRichTextCommitMessage › wraps links properly	132
+unit/write-default-readme-test.ts	repository setup › writeDefaultReadme › writes a default README without a description	11
+unit/write-default-readme-test.ts	repository setup › writeDefaultReadme › writes a README with description when provided	21

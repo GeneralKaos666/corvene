@@ -148,7 +148,7 @@ impl Dispatcher {
     /// Settings › Advanced › Use Git Credential Manager: only for remotes that
     /// are not GitHub (GHD `useExternalCredentialHelper`). Also arms the
     /// stalled-transfer timeout of flag `network-stall-timeout` (0 = none).
-    fn arm_credential_helper(remote_url: &str, cx: &App) {
+    pub(crate) fn arm_credential_helper(remote_url: &str, cx: &App) {
         let s = Self::state(cx).read(cx);
         let host = host_of(remote_url);
         let github = host == "github.com" || s.accounts.iter().any(|a| a.host() == host);
@@ -611,6 +611,11 @@ impl Dispatcher {
                 .bool(crate::flags::ids::PUSH_DURING_BACKGROUND_FETCH);
         Self::arm_credential_helper(&remote.url, cx);
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         let title = format!("Fetching {}", remote.name);
         if quiet {
             Self::state(cx).update(cx, |s, _| {
@@ -684,7 +689,11 @@ impl Dispatcher {
                         description: Some("Fast-forwarding branches".into()),
                         value: 0.9,
                     });
-                    let _ = corvene_git::fast_forward_branches(git.clone(), &workdir);
+                    let _ = corvene_git::fast_forward_branches_with(
+                        git.clone(),
+                        &workdir,
+                        skip_worktree_branches,
+                    );
                     // `246-background-fetch-fast-forwards`: a clean branch
                     // that is only behind catches up (GHD leaves it for Pull)
                     if fast_forward_current {
@@ -749,6 +758,11 @@ impl Dispatcher {
             return;
         }
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         spawn_bg(
             cx,
             move || {
@@ -779,7 +793,11 @@ impl Dispatcher {
                         &mut |_, _| {},
                     ) {
                         Ok(()) => {
-                            let _ = corvene_git::fast_forward_branches(git.clone(), &info.workdir);
+                            let _ = corvene_git::fast_forward_branches_with(
+                                git.clone(),
+                                &info.workdir,
+                                skip_worktree_branches,
+                            );
                         }
                         Err(err) => failures.push(format!("{name}: {err}")),
                     }
@@ -843,6 +861,11 @@ impl Dispatcher {
         }
         Self::arm_credential_helper(&remote.url, cx);
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         let title = format!("Pulling {}", remote.name);
         let keep_remote_head = Self::state(cx)
             .read(cx)
@@ -921,18 +944,23 @@ impl Dispatcher {
                         description: Some("Fast-forwarding branches".into()),
                         value: 0.9,
                     });
-                    let _ = corvene_git::fast_forward_branches(git.clone(), &workdir);
+                    let _ = corvene_git::fast_forward_branches_with(
+                        git.clone(),
+                        &workdir,
+                        skip_worktree_branches,
+                    );
                 }
-                let status = corvene_git::get_status(git, &workdir, None).ok();
+                let status = corvene_git::get_status(git, &workdir).ok();
                 (result, status)
             },
             move |(result, status), cx| {
-                if let Some(status) = status {
+                if let Some(mut status) = status {
+                    status.sort_files();
                     Self::state(cx).update(cx, |s, cx| {
                         let rs = s.repo_state_mut(id);
                         rs.conflict_state =
                             crate::mco::derive_conflict_state(&status, rs.conflict_state.as_ref());
-                        rs.status = Some(status);
+                        rs.status = Some(std::sync::Arc::new(status));
                         cx.notify();
                     });
                 }
@@ -1178,6 +1206,11 @@ impl Dispatcher {
         }
         Self::arm_credential_helper(&remote.url, cx);
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         let remote_name = branch
             .upstream_remote_name()
             .map(str::to_string)
@@ -1281,7 +1314,11 @@ impl Dispatcher {
                         description: Some("Fast-forwarding branches".into()),
                         value: 0.9,
                     });
-                    let _ = corvene_git::fast_forward_branches(git, &workdir);
+                    let _ = corvene_git::fast_forward_branches_with(
+                        git,
+                        &workdir,
+                        skip_worktree_branches,
+                    );
                 }
                 result
             },
@@ -1386,6 +1423,20 @@ impl Dispatcher {
 
     // ---- publish ----
 
+    /// `Publish.componentDidMount`: the repository's description
+    /// (`getGitDescription`, `""` when it has none or git's default text),
+    /// read in the background, for the Publish Repository dialog to prefill.
+    pub fn git_description(id: u64, then: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+        let Some(path) = Self::state(cx)
+            .read(cx)
+            .repository(id)
+            .map(|r| r.path.clone())
+        else {
+            return then(String::new(), cx);
+        };
+        spawn_bg(cx, move || corvene_git::get_git_description(&path), then);
+    }
+
     /// `_publishRepository`: create the GitHub repository, add `origin`, push.
     /// `team_id`: flag `329-publish-team`.
     #[allow(clippy::too_many_arguments)]
@@ -1453,7 +1504,11 @@ impl Dispatcher {
                             let _ = s.store.save_repositories(&s.repositories);
                             cx.notify();
                         });
-                        Self::close_popup(cx);
+                        // the dialog, wherever it is in the popup stack
+                        Self::close_popups_where(
+                            |p| matches!(p, Popup::PublishRepository { .. }),
+                            cx,
+                        );
                         Self::refresh_repository(id, cx);
                         // push the current branch (and set its upstream)
                         Self::push_after_publish(id, cx);
@@ -1550,7 +1605,7 @@ impl Dispatcher {
                 }
             },
             move |needs_init, cx| {
-                if needs_init && Self::state(cx).read(cx).popup.is_none() {
+                if needs_init && Self::state(cx).read(cx).popup().is_none() {
                     Self::show_popup(Popup::InitializeLFS { repos: vec![id] }, cx);
                 }
             },
@@ -1782,7 +1837,7 @@ impl Dispatcher {
                     let Ok(info) = corvene_git::open_repository(&path) else {
                         continue;
                     };
-                    let changed = corvene_git::get_status(git.clone(), &info.workdir, None)
+                    let changed = corvene_git::get_status(git.clone(), &info.workdir)
                         .map(|st| st.files.len())
                         .unwrap_or(0);
                     let ahead_behind = info.current_branch().and_then(|b| {

@@ -840,6 +840,12 @@ pub fn checkbox_tristate(
 
 /// `.counter` pill used in the Changes tab and list rows.
 pub fn counter(count: usize, cx: &App) -> Div {
+    counter_text(count.to_string(), cx)
+}
+
+/// [`counter`] with its text given, such as the Changes tab's
+/// [`crate::format::files_changed_badge`].
+pub fn counter_text(text: impl Into<SharedString>, cx: &App) -> Div {
     let t = cx.ghd();
     div()
         .ml(zpx(4.))
@@ -851,7 +857,7 @@ pub fn counter(count: usize, cx: &App) -> Div {
         .text_size(FONT_SIZE_XS())
         .font_weight(FontWeight::SEMIBOLD)
         .line_height(zpx(11.))
-        .child(count.to_string())
+        .child(text.into())
 }
 
 /// `kbd` - one key cap: radius 6, base border, 1/2 px padding, min 16 px tall,
@@ -897,6 +903,13 @@ pub fn platform_key(key: &'static str) -> &'static str {
 /// by a `+`.
 pub fn kbd_group(keys: &[&'static str], cx: &App) -> Div {
     kbd_group_sized(keys, FONT_SIZE(), cx)
+}
+
+/// The text of [`kbd_group`] (GHD `KeyboardShortcut`'s `textContent`):
+/// `⌘⇧N` on macOS, `Ctrl+Shift+N` elsewhere, for the macOS `darwin_keys`.
+pub fn keyboard_shortcut_text(darwin_keys: &[&'static str]) -> String {
+    let keys: Vec<&str> = darwin_keys.iter().map(|k| platform_key(k)).collect();
+    keys.join(if cfg!(target_os = "macos") { "" } else { "+" })
 }
 
 /// [`kbd_group`] in `size` text (the caps inherit it, as in a `.protip`).
@@ -1069,6 +1082,61 @@ pub fn filter_text_box(
                     }),
             )
         })
+}
+
+/// GHD `PasswordTextBox` (`ui/lib/password-text-box.tsx`): a [`text_box`]
+/// over a masked `state` whose text stops `--spacing-triple` (30 px) before
+/// the end, where a 30 px button (`.password-text-box button`: no border or
+/// fill, `--text-secondary-color` icon) shows `eye-closed` while the value
+/// is hidden and `eye` while it shows. Clicking flips the mask and puts focus
+/// back in the field.
+pub fn password_text_box(
+    id: impl Into<ElementId>,
+    state: &Entity<InputState>,
+    window: &Window,
+    cx: &App,
+) -> Stateful<Div> {
+    let t = cx.ghd();
+    let shown = !state.read(cx).presentation().is_masked();
+    let toggle_state = state.clone();
+    text_box_with_menu(id, state, None, None, window, cx)
+        .relative()
+        // `padding-right: var(--spacing-triple)`, less the kit's 4 px
+        .pr(zpx(26.))
+        .child(
+            // a `Button` tooltip: north of the button by default
+            with_directed_tooltip(
+                div()
+                    .id("toggle-password-visibility")
+                    .a11y_button("Toggle password visibility"),
+                "Toggle password visibility",
+                TooltipDirection::North,
+            )
+            .aria_toggled(if shown { Toggled::True } else { Toggled::False })
+            .absolute()
+            .right(zpx(-1.))
+            .top(zpx(-1.))
+            .w(zpx(30.))
+            .h(TEXT_FIELD_HEIGHT())
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .child(crate::icons::octicon(
+                if shown {
+                    crate::icons::Octicon::Eye
+                } else {
+                    crate::icons::Octicon::EyeClosed
+                },
+                t.text_secondary,
+            ))
+            .on_click(move |_, window, cx| {
+                toggle_state.update(cx, |input, cx| {
+                    input.toggle_masked(window, cx);
+                    input.focus(window, cx);
+                });
+            }),
+        )
 }
 
 /// A custom right-click menu for an input (the kit's native edit menu is
@@ -1636,15 +1704,17 @@ pub trait ListRowA11y: StatefulInteractiveElement + Sized {
 
 impl<E: StatefulInteractiveElement> ListRowA11y for E {}
 
-/// A file status as VoiceOver reads it (GHD `mapStatus`).
-pub fn status_label(kind: corvene_core::FileStatusKind) -> &'static str {
+/// A file status as VoiceOver reads it (GHD `mapStatus`, `lib/status.ts`):
+/// a text conflict with no markers left reads "Resolved".
+pub fn status_label(status: &corvene_core::FileStatus) -> &'static str {
     use corvene_core::FileStatusKind::*;
-    match kind {
+    match status.kind {
         New | Untracked => "New",
         Modified => "Modified",
         Deleted => "Deleted",
         Copied => "Copied",
         Renamed => "Renamed",
+        Conflicted if status.conflict_markers == Some(0) => "Resolved",
         Conflicted => "Conflicted",
     }
 }

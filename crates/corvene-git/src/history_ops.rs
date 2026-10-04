@@ -1,4 +1,5 @@
-//! History operations - GHD `lib/git/{revert,reset,checkout,tag}.ts`.
+//! History operations - GHD `lib/git/{revert,reset,checkout,tag,
+//! format-patch}.ts`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -109,6 +110,26 @@ pub fn format_patches(
     Ok(written)
 }
 
+/// GHD `formatPatch(repository, base, head)` (`lib/git/format-patch.ts`):
+/// the patch series of `base..head` as one string (`git format-patch
+/// --unified=1 --minimal --stdout`), empty for an empty range. GHD 3.6.6
+/// itself no longer calls it; [`format_patches`] writes Create Patch File's
+/// files. Not to be confused with `corvene_git::format_patch`
+/// (`lib/patch-formatter.ts`).
+pub fn format_patch_range(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    base: &str,
+    head: &str,
+) -> Result<String> {
+    let out = GitCommand::new(git)
+        .args(["format-patch", "--unified=1", "--minimal", "--stdout"])
+        .arg(format!("{base}..{head}"))
+        .current_dir(workdir)
+        .run()?;
+    out.stdout_string()
+}
+
 /// Corvene addition (flag `814`): undo one file's changes from `sha` in the
 /// working tree - the file's diff against the first parent (the empty tree
 /// for a root commit), `-M` so a rename goes back to `old_path`, applied in
@@ -157,25 +178,69 @@ pub enum ResetMode {
     Soft,
 }
 
-/// `reset(repository, mode, ref)`
-pub fn reset_to(git: Arc<GitBinary>, workdir: &Path, mode: ResetMode, sha: &str) -> Result<()> {
+/// GHD `resetModeToArgs`: `reset [--hard | --soft] <ref>`.
+fn reset_command(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    mode: ResetMode,
+    reference: &str,
+) -> GitCommand {
     let mut cmd = GitCommand::new(git).args(["reset"]).current_dir(workdir);
     match mode {
         ResetMode::Hard => cmd = cmd.arg("--hard"),
         ResetMode::Mixed => {}
         ResetMode::Soft => cmd = cmd.arg("--soft"),
     }
-    cmd.arg(sha).run()?;
+    cmd.arg(reference)
+}
+
+/// `reset(repository, mode, ref)`
+pub fn reset_to(git: Arc<GitBinary>, workdir: &Path, mode: ResetMode, sha: &str) -> Result<()> {
+    reset_command(git, workdir, mode, sha).run()?;
     Ok(())
 }
 
-/// `checkoutCommit`: detached HEAD at `sha`.
+/// GHD `resetPaths`: `git reset [--hard | --soft] <ref> -- <paths>`, the
+/// index entries of `paths` set from `reference`; nothing for no paths. On
+/// Windows a mixed reset reads the paths from stdin, which no command line
+/// length limit cuts short: `--pathspec-from-file=- --pathspec-file-nul`
+/// (git 2.26+) where GHD passes Git for Windows' deprecated `--stdin -z`.
+pub fn reset_paths<P: AsRef<std::ffi::OsStr>>(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    mode: ResetMode,
+    reference: &str,
+    paths: &[P],
+) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let cmd = reset_command(git, workdir, mode, reference);
+    if cfg!(windows) && mode == ResetMode::Mixed {
+        let mut list: Vec<u8> = Vec::new();
+        for (i, path) in paths.iter().enumerate() {
+            if i > 0 {
+                list.push(0);
+            }
+            list.extend_from_slice(path.as_ref().to_string_lossy().as_bytes());
+        }
+        cmd.args(["--pathspec-from-file=-", "--pathspec-file-nul"])
+            .stdin(list)
+            .run()?;
+    } else {
+        cmd.arg("--").args(paths).run()?;
+    }
+    Ok(())
+}
+
+/// `checkoutCommit`: detached HEAD at `sha`, then the submodules follow
+/// (GHD 3.6.6 `updateSubmodulesAfterOperation`, as after a branch checkout).
 pub fn checkout_commit(git: Arc<GitBinary>, workdir: &Path, sha: &str) -> Result<()> {
-    GitCommand::new(git)
+    GitCommand::new(git.clone())
         .args(["checkout", sha])
         .current_dir(workdir)
         .run()?;
-    Ok(())
+    crate::submodule::update_submodules_after_operation(git, workdir, false, None)
 }
 
 /// `createTag`: annotated tag with an empty message, as GHD creates them.

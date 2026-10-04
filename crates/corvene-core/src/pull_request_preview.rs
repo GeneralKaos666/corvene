@@ -122,7 +122,7 @@ impl Dispatcher {
             cx.notify();
             generation
         });
-        if Self::state(cx).read(cx).popup != Some(Popup::StartPullRequest { repo: id }) {
+        if Self::state(cx).read(cx).popup() != Some(&Popup::StartPullRequest { repo: id }) {
             Self::show_popup(Popup::StartPullRequest { repo: id }, cx);
         }
         let Some(base) = base else {

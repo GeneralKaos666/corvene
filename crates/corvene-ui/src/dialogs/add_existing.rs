@@ -27,7 +27,7 @@ use gpui_kit::*;
 
 use crate::autocompletion::{self, Autocompletion, PickHandler};
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, dialog};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{button, labeled, text_box};
@@ -183,6 +183,8 @@ impl AddExistingRepositoryDialog {
         let status = self.status(cx);
         match (self.resolved_path(cx), status) {
             (Some(path), Some(PathStatus::Repository)) => {
+                // a subdirectory adds its repository (`Dispatcher::add_repository`
+                // resolves the top level, as GHD `_addRepositories`)
                 Dispatcher::close_popup(cx);
                 if self
                     .state
@@ -263,6 +265,9 @@ impl Render for AddExistingRepositoryDialog {
                         "Would you like to ".into(),
                         crate::widgets::link_button("create-instead", "create a repository", cx)
                             .on_click(move |_, _, cx| {
+                                // GHD `onCreateRepositoryClicked`: this
+                                // dialog closes first
+                                Dispatcher::close_popup(cx);
                                 Dispatcher::show_popup(
                                     Popup::CreateRepository { path: path.clone() },
                                     cx,
@@ -368,24 +373,24 @@ impl Render for AddExistingRepositoryDialog {
                         cx,
                     ))
                 }),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "add-existing-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "add-existing-ok",
                     label: mac_or("Add Repository", "Add repository").into(),
-                    primary: true,
                     disabled: add_disabled,
                     on_click: Box::new(move |_, cx| {
                         this.update(cx, |d, cx| d.submit(cx));
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

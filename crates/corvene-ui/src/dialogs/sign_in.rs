@@ -6,11 +6,24 @@
 //! in the browser (`ui/sign-in/sign-in.tsx`); a GHES server does not know
 //! Corvene's, so its client ID has to come from the user.
 //!
+//! The steps are GHD's sign-in store's (`AppState::sign_in_store`,
+//! `corvene_core::sign_in`): EndpointEntry, ExistingAccountWarning and
+//! Authentication. At the last two the dialog offers Corvene's ways of
+//! authenticating ([`Method`]). The ExistingAccountWarning step shows GHD's
+//! warning (`ui/sign-in/sign-in.tsx` `renderExistingAccountWarningStep`)
+//! above them; GHD's dialog then has a "Continue With Browser" button that
+//! signs the account out and moves to the Authentication step, where the
+//! browser is opened by a second click. Here the warning stays above the
+//! Authentication step's form and starting any authentication signs the
+//! account out first (what GHD's shared `SignIn`, `ui/lib/sign-in.tsx`,
+//! does with its "Sign in using your browser" button).
+//!
 //! Deviation (flag `enterprise-plain-http`, off in every preset): an
-//! Enterprise address typed with `http://` keeps plain HTTP (GHD forces
-//! HTTPS since 3.4.7).
+//! Enterprise address typed with `http://` keeps plain HTTP (GHD's
+//! `validateURL` refuses any scheme but `https`, "Unsupported protocol").
 
-use corvene_core::{AppState, Dispatcher, SignInStep};
+use corvene_core::sign_in::{SignInState, SignInStep};
+use corvene_core::{AppState, AuthenticationStep, Dispatcher};
 use corvene_github::Endpoint;
 use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::*;
@@ -20,12 +33,87 @@ use crate::dialog::{DialogButton, dialog};
 use crate::icons::{Octicon, octicon};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
-use crate::widgets::{button, labeled, primary_button, text_box};
+use crate::widgets::{button, labeled, password_text_box, primary_button, text_box};
 
+/// What a link or button of the sign-in form does (GHD `SignIn`'s
+/// callbacks).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignInAction {
+    /// `dispatcher.setSignInEndpoint(url)`
+    SetEndpoint,
+    /// `dispatcher.requestBrowserAuthentication()` (Corvene:
+    /// `Dispatcher::begin_sign_in`)
+    RequestBrowserAuthentication,
+}
+
+/// GHD's `.existing-account-warning` paragraph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExistingAccountWarning {
+    /// The whole paragraph.
+    pub text: String,
+    /// The endpoint's host (GHD's first `Ref`).
+    pub host: String,
+    /// The signed-in account's login (the second `Ref`).
+    pub login: String,
+}
+
+/// What the sign-in form shows for a sign-in store state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignInContent {
+    pub existing_account_warning: Option<ExistingAccountWarning>,
+    /// The form's main button: label and what it does.
+    pub actions: Vec<(String, SignInAction)>,
+}
+
+/// GHD `SignIn` (`ui/lib/sign-in.tsx`): the endpoint form at
+/// EndpointEntry, the authentication form at Authentication, the latter
+/// under the existing-account warning at ExistingAccountWarning, and
+/// nothing at Success.
+pub fn sign_in_content(state: &SignInState) -> Option<SignInContent> {
+    let browser = (
+        "Sign in using your browser".to_string(),
+        SignInAction::RequestBrowserAuthentication,
+    );
+    match state.kind {
+        SignInStep::EndpointEntry => Some(SignInContent {
+            existing_account_warning: None,
+            actions: vec![("Continue".to_string(), SignInAction::SetEndpoint)],
+        }),
+        SignInStep::ExistingAccountWarning => {
+            let host = state
+                .endpoint
+                .as_deref()
+                .map(|endpoint| Endpoint::from_api_base(endpoint).host().to_string())
+                .unwrap_or_default();
+            let login = state
+                .existing_account
+                .as_ref()
+                .map(|account| account.login.clone())
+                .unwrap_or_default();
+            Some(SignInContent {
+                existing_account_warning: Some(ExistingAccountWarning {
+                    text: format!(
+                        "You're already signed in to {host} with the account {login}. If you \
+                         continue, you will first be signed out."
+                    ),
+                    host,
+                    login,
+                }),
+                actions: vec![browser],
+            })
+        }
+        SignInStep::Authentication => Some(SignInContent {
+            existing_account_warning: None,
+            actions: vec![browser],
+        }),
+        SignInStep::Success => None,
+    }
+}
+
+/// How the Authentication step signs in (Corvene's choices; GHD only has
+/// the browser).
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Step {
-    /// GHES only: enter the server address.
-    EndpointEntry,
+enum Method {
     /// Device flow, with the browser flow and a token as alternatives.
     Authentication,
     TokenEntry,
@@ -36,8 +124,7 @@ enum Step {
 pub struct SignInDialog {
     state: Entity<AppState>,
     enterprise: bool,
-    step: Step,
-    endpoint: Option<Endpoint>,
+    method: Method,
     address: Entity<InputState>,
     token: Entity<InputState>,
     client_id: Entity<InputState>,
@@ -68,18 +155,14 @@ impl SignInDialog {
         for e in [&address, &token, &client_id, &client_secret] {
             cx.observe(e, |_, _, cx| cx.notify()).detach();
         }
-        let (step, endpoint) = if enterprise {
+        if enterprise {
             let handle = address.read(cx).focus_handle(cx);
             window.focus(&handle, cx);
-            (Step::EndpointEntry, None)
-        } else {
-            (Step::Authentication, Some(Endpoint::github_com()))
-        };
+        }
         Self {
             state,
             enterprise,
-            step,
-            endpoint,
+            method: Method::Authentication,
             address,
             token,
             client_id,
@@ -95,32 +178,44 @@ impl SignInDialog {
         }
     }
 
+    /// The sign-in store's state (`None` once the sign-in is over).
+    fn store_state(&self, cx: &App) -> Option<SignInState> {
+        self.state.read(cx).sign_in_store.get_state().cloned()
+    }
+
+    /// GHD `setSignInEndpoint`; a host without an OAuth app goes on to the
+    /// personal access token.
     fn continue_endpoint(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let raw = self.address.read(cx).value().to_string();
-        let allow_http = self
-            .state
-            .read(cx)
-            .flags
-            .bool(corvene_core::flags::ids::ENTERPRISE_PLAIN_HTTP);
-        if let Some(endpoint) = Endpoint::enterprise(&raw, allow_http) {
-            let has_app = Dispatcher::oauth_client_id(&endpoint, cx).is_some();
-            self.endpoint = Some(endpoint);
-            if has_app {
-                self.step = Step::Authentication;
+        Dispatcher::set_sign_in_endpoint(raw, cx);
+        let authenticating = self.store_state(cx).is_some_and(|s| {
+            matches!(
+                s.kind,
+                SignInStep::Authentication | SignInStep::ExistingAccountWarning
+            )
+        });
+        if authenticating {
+            if Dispatcher::oauth_client_id(&self.endpoint(cx), cx).is_some() {
+                self.method = Method::Authentication;
             } else {
                 self.show_token_entry(window, cx);
             }
-            cx.notify();
         }
+        cx.notify();
     }
 
-    fn endpoint(&self) -> Endpoint {
-        self.endpoint.clone().unwrap_or_else(Endpoint::github_com)
+    /// The endpoint the store is signing in to (GitHub.com until there is
+    /// one).
+    fn endpoint(&self, cx: &App) -> Endpoint {
+        self.store_state(cx)
+            .and_then(|s| s.endpoint)
+            .map(|api| Endpoint::from_api_base(&api))
+            .unwrap_or_else(Endpoint::github_com)
     }
 
     fn show_token_entry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         Dispatcher::cancel_sign_in(cx);
-        self.step = Step::TokenEntry;
+        self.method = Method::TokenEntry;
         let handle = self.token.read(cx).focus_handle(cx);
         window.focus(&handle, cx);
         cx.notify();
@@ -129,12 +224,12 @@ impl SignInDialog {
     /// The OAuth app step, prefilled with the host's current client ID.
     fn show_oauth_app_entry(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         Dispatcher::cancel_sign_in(cx);
-        let current = Dispatcher::oauth_client_id(&self.endpoint(), cx).unwrap_or_default();
+        let current = Dispatcher::oauth_client_id(&self.endpoint(cx), cx).unwrap_or_default();
         self.client_id
             .update(cx, |input, cx| input.set_value(current, window, cx));
         self.client_secret
             .update(cx, |input, cx| input.set_value("", window, cx));
-        self.step = Step::OAuthAppEntry;
+        self.method = Method::OAuthAppEntry;
         let handle = self.client_id.read(cx).focus_handle(cx);
         window.focus(&handle, cx);
         cx.notify();
@@ -146,28 +241,42 @@ impl SignInDialog {
             return;
         }
         let secret = self.client_secret.read(cx).value().to_string();
-        Dispatcher::set_enterprise_oauth_app(&self.endpoint(), client_id, secret, cx);
-        self.step = Step::Authentication;
+        Dispatcher::set_enterprise_oauth_app(&self.endpoint(cx), client_id, secret, cx);
+        self.method = Method::Authentication;
         cx.notify();
     }
 
     fn submit_token(&mut self, cx: &mut Context<Self>) {
         let token = self.token.read(cx).value().trim().to_string();
-        if let (Some(endpoint), false) = (self.endpoint.clone(), token.is_empty()) {
-            Dispatcher::sign_in_with_token(endpoint, token, cx);
+        if !token.is_empty() {
+            Dispatcher::sign_in_with_token(self.endpoint(cx), token, cx);
         }
     }
 
     fn authentication_body(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
-        let endpoint = self.endpoint();
+        let endpoint = self.endpoint(cx);
         let enterprise = self.enterprise;
         // `307-sign-in-flow`: which flow the primary button starts; the
         // other one stays a link away
         let browser_first = Dispatcher::browser_sign_in_first(&endpoint, cx);
-        let sign_in = self.state.read(cx).sign_in.clone();
+        let authentication = self.state.read(cx).authentication.clone();
+        let browser_label = self
+            .store_state(cx)
+            .as_ref()
+            .and_then(sign_in_content)
+            .and_then(|content| {
+                content
+                    .actions
+                    .into_iter()
+                    .find(|(_, action)| *action == SignInAction::RequestBrowserAuthentication)
+            })
+            .map_or_else(
+                || "Sign in using your browser".to_string(),
+                |(label, _)| label,
+            );
         let this = cx.entity();
-        match sign_in.map(|s| s.step) {
+        match authentication.map(|s| s.step) {
             None => div()
                 .flex()
                 .flex_col()
@@ -181,11 +290,10 @@ impl SignInDialog {
                      Enter the code there to authorise this app."
                 })
                 .child(
-                    primary_button("sign-in-browser", "Sign in using your browser", false, cx)
-                        .on_click({
-                            let endpoint = endpoint.clone();
-                            move |_, _, cx| Dispatcher::begin_sign_in(endpoint.clone(), cx)
-                        }),
+                    primary_button("sign-in-browser", browser_label, false, cx).on_click({
+                        let endpoint = endpoint.clone();
+                        move |_, _, cx| Dispatcher::begin_sign_in(endpoint.clone(), cx)
+                    }),
                 )
                 .child(
                     div()
@@ -236,11 +344,11 @@ impl SignInDialog {
                     )
                 })
                 .into_any_element(),
-            Some(SignInStep::Requesting) => div()
+            Some(AuthenticationStep::Requesting) => div()
                 .text_color(t.text_secondary)
                 .child("Requesting a sign-in code from GitHub…")
                 .into_any_element(),
-            Some(SignInStep::DeviceCode {
+            Some(AuthenticationStep::DeviceCode {
                 user_code,
                 verification_uri,
             }) => {
@@ -303,11 +411,11 @@ impl SignInDialog {
                     )
                     .into_any_element()
             }
-            Some(SignInStep::Verifying) => div()
+            Some(AuthenticationStep::Verifying) => div()
                 .text_color(t.text_secondary)
                 .child("Signing in…")
                 .into_any_element(),
-            Some(SignInStep::Browser { authorize_url }) => {
+            Some(AuthenticationStep::Browser { authorize_url }) => {
                 let url = authorize_url.clone();
                 div()
                     .flex()
@@ -332,7 +440,7 @@ impl SignInDialog {
                     )
                     .into_any_element()
             }
-            Some(SignInStep::Error(message)) => div()
+            Some(AuthenticationStep::Error(message)) => div()
                 .flex()
                 .flex_col()
                 .items_start()
@@ -379,23 +487,35 @@ impl SignInDialog {
 impl Render for SignInDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.ghd();
+        // GHD `onDismissed`: `resetSignInState` (closing the SignIn popup
+        // also stops the authentication flow) + `closePopup`
         let close = |_: &mut Window, cx: &mut App| {
-            Dispatcher::cancel_sign_in(cx);
             Dispatcher::close_popup(cx);
         };
         let this = cx.entity();
-        let sign_in_error = self
-            .state
-            .read(cx)
-            .sign_in
+        let sign_in_error =
+            self.state
+                .read(cx)
+                .authentication
+                .as_ref()
+                .and_then(|s| match &s.step {
+                    AuthenticationStep::Error(m) => Some(m.clone()),
+                    _ => None,
+                });
+        let store_state = self.store_state(cx);
+        let at_endpoint_entry = match store_state.as_ref().map(|s| s.kind) {
+            Some(kind) => kind == SignInStep::EndpointEntry,
+            None => self.enterprise,
+        };
+        let address_error = store_state.as_ref().and_then(|s| s.error.clone());
+        let address_loading = store_state.as_ref().is_some_and(|s| s.loading);
+        let warning = store_state
             .as_ref()
-            .and_then(|s| match &s.step {
-                SignInStep::Error(m) => Some(m.clone()),
-                _ => None,
-            });
+            .and_then(sign_in_content)
+            .and_then(|content| content.existing_account_warning);
 
-        let (body, buttons): (AnyElement, Vec<DialogButton>) = match self.step {
-            Step::EndpointEntry => (
+        let (body, buttons): (AnyElement, Vec<DialogButton>) = match self.method {
+            _ if at_endpoint_entry => (
                 div()
                     .flex()
                     .flex_col()
@@ -405,6 +525,9 @@ impl Render for SignInDialog {
                         text_box("sign-in-address", &self.address, None, window, cx),
                         cx,
                     ))
+                    .when_some(address_error, |d, m| {
+                        d.child(div().text_color(t.error).child(m))
+                    })
                     .into_any_element(),
                 vec![
                     DialogButton {
@@ -418,14 +541,16 @@ impl Render for SignInDialog {
                         id: "sign-in-continue",
                         label: "Continue".into(),
                         primary: true,
-                        disabled: false,
+                        // GHD: an empty address, or a check in progress
+                        disabled: address_loading
+                            || self.address.read(cx).value().trim().is_empty(),
                         on_click: Box::new(move |window, cx| {
                             this.update(cx, |d, cx| d.continue_endpoint(window, cx))
                         }),
                     },
                 ],
             ),
-            Step::TokenEntry => (
+            Method::TokenEntry => (
                 div()
                     .flex()
                     .flex_col()
@@ -436,7 +561,7 @@ impl Render for SignInDialog {
                     )
                     .child(labeled(
                         "Personal access token",
-                        text_box("sign-in-token", &self.token, None, window, cx),
+                        password_text_box("sign-in-token", &self.token, window, cx),
                         cx,
                     ))
                     .when_some(sign_in_error, |d, m| {
@@ -477,7 +602,7 @@ impl Render for SignInDialog {
                     },
                 ],
             ),
-            Step::OAuthAppEntry => (
+            Method::OAuthAppEntry => (
                 div()
                     .flex()
                     .flex_col()
@@ -486,7 +611,7 @@ impl Render for SignInDialog {
                         "Register an OAuth app on {} (Settings › Developer settings › OAuth Apps) \
                          with the callback URL {} and Enable Device Flow ticked, then enter its \
                          client ID. The client secret is only needed for the browser flow.",
-                        self.endpoint().host(),
+                        self.endpoint(cx).host(),
                         corvene_github::auth::SCHEME_REDIRECT_URI
                     ))
                     .child(labeled(
@@ -496,13 +621,7 @@ impl Render for SignInDialog {
                     ))
                     .child(labeled(
                         "Client secret",
-                        text_box(
-                            "sign-in-client-secret",
-                            &self.client_secret,
-                            None,
-                            window,
-                            cx,
-                        ),
+                        password_text_box("sign-in-client-secret", &self.client_secret, window, cx),
                         cx,
                     ))
                     .into_any_element(),
@@ -525,7 +644,7 @@ impl Render for SignInDialog {
                     },
                 ],
             ),
-            Step::Authentication => (
+            Method::Authentication => (
                 self.authentication_body(cx),
                 vec![DialogButton {
                     id: "sign-in-cancel",
@@ -537,14 +656,18 @@ impl Render for SignInDialog {
             ),
         };
 
-        dialog(
-            "sign-in",
-            self.title(),
-            div().w_full().child(body),
-            buttons,
-            close,
-            window,
-            cx,
-        )
+        // GHD `renderExistingAccountWarningStep`: the warning above the
+        // authentication form
+        let body = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .when_some(warning.filter(|_| !at_endpoint_entry), |d, warning| {
+                d.child(div().id("existing-account-warning").child(warning.text))
+            })
+            .child(body);
+
+        dialog("sign-in", self.title(), body, buttons, close, window, cx)
     }
 }

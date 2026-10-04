@@ -623,38 +623,83 @@ pub(crate) fn check_run_steps(
                 }))
                 .into_any_element()
         }
-        None => div()
-            .size_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .p(SPACING_DOUBLE())
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .text_size(FONT_SIZE())
-                    .child("There are no steps to display for this check.")
-                    .child(
-                        button("check-no-steps-view", "", cx)
-                            .mt(SPACING())
-                            .gap(SPACING_HALF())
-                            .child("View check details")
-                            .child(octicon(Octicon::LinkExternal, t.secondary_button_text))
-                            .on_click(move |_, _, cx| {
-                                corvene_core::Dispatcher::open_url(&view_url, cx)
-                            }),
-                    ),
-            )
-            .child(
-                // `ci-check-run-no-steps`: a plain <img>, no dark filter
-                img("illustrations/paper-stack.svg")
-                    .flex_1()
-                    .ml(SPACING_DOUBLE())
-                    .h(zpx(120.)),
-            )
-            .into_any_element(),
+        None => {
+            let CheckRunNoStepContent {
+                text,
+                button: (label, CheckRunNoStepAction::ViewCheckExternally),
+                image_alt,
+            } = ci_check_run_no_step_item();
+            div()
+                .size_full()
+                .flex()
+                .flex_row()
+                .items_center()
+                .p(SPACING_DOUBLE())
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .text_size(FONT_SIZE())
+                        .child(text)
+                        .child(
+                            button("check-no-steps-view", "", cx)
+                                // GHD `role="link"`, named by its label
+                                .role(Role::Link)
+                                .aria_label(label.clone())
+                                .mt(SPACING())
+                                .gap(SPACING_HALF())
+                                .child(label)
+                                .child(octicon(Octicon::LinkExternal, t.secondary_button_text))
+                                .on_click(move |_, _, cx| {
+                                    corvene_core::Dispatcher::open_url(&view_url, cx)
+                                }),
+                        ),
+                )
+                .when(image_alt.is_some(), |d| {
+                    d.child(
+                        // `ci-check-run-no-steps`: a plain decorative <img>
+                        // (`alt=""`), no dark filter
+                        img("illustrations/paper-stack.svg")
+                            .flex_1()
+                            .ml(SPACING_DOUBLE())
+                            .h(zpx(120.)),
+                    )
+                })
+                .into_any_element()
+        }
+    }
+}
+
+/// What a button of `CICheckRunNoStepItem` does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckRunNoStepAction {
+    /// `onViewCheckExternally`: the check's page.
+    ViewCheckExternally,
+}
+
+/// What GHD `CICheckRunNoStepItem` (`ui/check-runs/ci-check-run-no-steps.tsx`)
+/// shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckRunNoStepContent {
+    /// The paragraph's text (the button's label excluded).
+    pub text: String,
+    /// The button: its label and what it does.
+    pub button: (String, CheckRunNoStepAction),
+    /// The paper-stack image's alternative text (`Some("")`: decorative),
+    /// `None` when there is no image.
+    pub image_alt: Option<String>,
+}
+
+/// GHD `CICheckRunNoStepItem`.
+pub fn ci_check_run_no_step_item() -> CheckRunNoStepContent {
+    CheckRunNoStepContent {
+        text: "There are no steps to display for this check.".into(),
+        button: (
+            "View check details".into(),
+            CheckRunNoStepAction::ViewCheckExternally,
+        ),
+        image_alt: Some(String::new()),
     }
 }
 

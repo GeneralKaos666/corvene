@@ -133,7 +133,7 @@ fn show_item_with_file_manager(path: &Path) -> std::io::Result<()> {
             "/org/freedesktop/FileManager1",
             Some("org.freedesktop.FileManager1"),
             "ShowItems",
-            &(vec![file_uri(path)], ""),
+            &(vec![crate::file_url::file_uri(path)], ""),
         )
         .map(drop)
     });
@@ -151,31 +151,61 @@ fn show_item_with_file_manager(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// `file://` URI with every byte outside RFC 3986's unreserved set and `/`
-/// percent-encoded (what GLib's `g_filename_to_uri` produces).
-#[cfg(not(any(target_os = "macos", windows)))]
-pub fn file_uri(path: &Path) -> String {
-    use std::os::unix::ffi::OsStrExt;
-    let mut uri = String::from("file://");
-    for &b in path.as_os_str().as_bytes() {
-        if b.is_ascii_alphanumeric() || b"-._~/".contains(&b) {
-            uri.push(b as char);
-        } else {
-            uri.push_str(&format!("%{b:02X}"));
-        }
+/// GHD `isApplicationBundleFromMetadata` (`lib/is-application-bundle.ts`):
+/// whether Spotlight metadata (`mdls -name kMDItemContentType -name
+/// kMDItemContentTypeTree` output) identifies an application bundle. Output
+/// naming an application bundle, an application or an executable (quoted)
+/// is one; a primary content type of `public.folder` is not; anything else
+/// is inconclusive, an error (GHD throws).
+pub fn is_application_bundle_from_metadata(metadata: &str) -> Result<bool, String> {
+    const PROBABLE_BUNDLE_IDENTIFIERS: [&str; 3] = [
+        "com.apple.application-bundle",
+        "com.apple.application",
+        "public.executable",
+    ];
+    if PROBABLE_BUNDLE_IDENTIFIERS
+        .iter()
+        .any(|id| metadata.contains(&format!("\"{id}\"")))
+    {
+        return Ok(true);
     }
-    uri
+    // `^[ \t]*kMDItemContentType\s*=\s*"([^"]+)"\s*$` on any line
+    let primary = metadata.lines().find_map(|line| {
+        let rest = line
+            .trim_start_matches([' ', '\t'])
+            .strip_prefix("kMDItemContentType")?;
+        let value = rest.trim_start().strip_prefix('=')?.trim();
+        let value = value.strip_prefix('"')?.strip_suffix('"')?;
+        (!value.is_empty() && !value.contains('"')).then_some(value)
+    });
+    if primary == Some("public.folder") {
+        return Ok(false);
+    }
+    Err("Metadata did not conclusively identify a directory".to_string())
 }
 
-#[cfg(all(test, not(any(target_os = "macos", windows))))]
-mod linux_tests {
-    #[test]
-    fn file_uris_are_escaped() {
-        assert_eq!(
-            super::file_uri(std::path::Path::new("/home/a b/ü#.txt")),
-            "file:///home/a%20b/%C3%BC%23.txt"
-        );
+/// GHD `isApplicationBundle(path)`: on macOS a directory can be an
+/// application, which opening would run, so `mdls -name kMDItemContentType
+/// -name kMDItemContentTypeTree <path>` is read by
+/// [`is_application_bundle_from_metadata`]; always `false` elsewhere.
+pub fn is_application_bundle(path: &Path) -> Result<bool, String> {
+    if !cfg!(target_os = "macos") {
+        return Ok(false);
     }
+    let output = Command::new("/usr/bin/mdls")
+        .args([
+            "-name",
+            "kMDItemContentType",
+            "-name",
+            "kMDItemContentTypeTree",
+        ])
+        .arg(path)
+        .output()
+        .map_err(|err| err.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    is_application_bundle_from_metadata(&String::from_utf8_lossy(&output.stdout))
 }
 
 #[cfg(all(test, target_os = "macos"))]

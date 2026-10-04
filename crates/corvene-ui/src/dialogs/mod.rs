@@ -1,5 +1,8 @@
-//! Dialog host: turns `AppState::popup` into a live dialog view, recreating
-//! it only when the popup value changes.
+//! Dialog host: turns `AppState::popups` (GHD `PopupManager`) into live
+//! dialog views. As in GHD (`app/src/ui/app.tsx` `renderPopups`), every
+//! popup of the stack keeps its view, so one a newer popup covered comes
+//! back as it was left, and only the top one (`isTopMost`) is shown. A
+//! view is recreated only when its popup's value changes.
 
 mod acknowledgements;
 mod add_existing;
@@ -25,6 +28,7 @@ mod import_github_desktop;
 mod language_extensions;
 mod mco_dialogs;
 mod move_to_applications_folder;
+mod move_to_shared_storage;
 mod open_pull_request;
 mod preferences;
 mod pull_request_notifications;
@@ -49,9 +53,15 @@ use gpui_kit::*;
 
 pub use add_existing::AddExistingRepositoryDialog;
 pub use app_dialogs::{AboutDialog, ConfirmRemoveRepositoryDialog, IntegrationErrorDialog};
+#[doc(hidden)]
+pub use branch_dialogs::sanitize_ref_name;
 pub use branch_dialogs::{
     ConfirmOverwriteStashDialog, ConfirmSwitchBranchDialog, CreateBranchDialog, DeleteBranchDialog,
     MergeBranchDialog, RenameBranchDialog, StashAndSwitchBranchDialog,
+};
+pub use branch_dialogs::{
+    StartPoint, get_start_point, render_branch_has_remote_warning,
+    render_branch_name_exists_on_remote_warning,
 };
 pub use ci_check_run_rerun::CiCheckRunRerunDialog;
 pub use clone_repository::CloneRepositoryDialog;
@@ -60,7 +70,10 @@ pub use create_repository::CreateRepositoryDialog;
 pub use discard_changes::DiscardChangesDialog;
 pub use discard_selection::DiscardSelectionDialog;
 pub use flags::FlagsDialog;
-pub use fork_dialogs::{ChooseForkSettingsDialog, CreateForkDialog, fork_settings_description};
+pub use fork_dialogs::{
+    ChooseForkSettingsDialog, CreateForkDialog, fork_settings_description,
+    fork_settings_description_items, fork_settings_description_parts,
+};
 pub use history_dialogs::{
     CheckoutCommitDialog, ConfirmDeletePushedTagDialog, ConfirmDiscardStashDialog, CreateTagDialog,
     ResetToCommitDialog, ResetToRemoteDialog, UnreachableCommitsDialog,
@@ -77,13 +90,19 @@ pub use push_protection::{BypassPushProtectionDialog, PushProtectionErrorDialog}
 pub use reauth_dialogs::{
     InvalidatedTokenDialog, SamlReauthRequiredDialog, WorkflowPushRejectedDialog,
 };
+#[doc(hidden)]
+pub use remote_dialogs::sanitized_repository_name;
 pub use remote_dialogs::{
     ConfirmForcePushDialog, GenericGitAuthDialog, InitializeLfsDialog, PublishRepositoryDialog,
     PushNeedsPullDialog,
 };
-pub use repository_settings::RepositorySettingsDialog;
-pub use sign_in::SignInDialog;
-pub use simple::SimpleDialog;
+pub use repository_settings::{
+    NoRemoteAction, NoRemoteContent, RepositorySettingsDialog, no_remote,
+};
+pub use sign_in::{
+    ExistingAccountWarning, SignInAction, SignInContent, SignInDialog, sign_in_content,
+};
+pub use simple::{CliInstalledAction, CliInstalledContent, SimpleDialog, cli_installed};
 pub use unknown_authors::UnknownAuthorsDialog;
 pub use worktree_dialogs::{
     AddWorktreeDialog, DeleteWorktreeDialog, DeleteWorktreeFailedDialog, RenameWorktreeDialog,
@@ -91,7 +110,8 @@ pub use worktree_dialogs::{
 
 pub struct DialogHost {
     state: Entity<AppState>,
-    current: Option<(Popup, AnyView)>,
+    /// The view of each popup on the stack, by stack id.
+    views: Vec<(u64, Popup, AnyView)>,
 }
 
 impl DialogHost {
@@ -99,7 +119,7 @@ impl DialogHost {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
             state,
-            current: None,
+            views: Vec::new(),
         }
     }
 
@@ -611,11 +631,22 @@ impl DialogHost {
             Popup::ExternalEditorError { .. } | Popup::ShellError { .. } => cx
                 .new(|_| IntegrationErrorDialog::new(popup.clone()))
                 .into(),
+            Popup::MoveToSharedStorage { repo, then } => cx
+                .new(|cx| {
+                    move_to_shared_storage::MoveToSharedStorageDialog::new(
+                        state,
+                        *repo,
+                        then.clone(),
+                        window,
+                        cx,
+                    )
+                })
+                .into(),
             Popup::UnreachableCommits { repo, tab } => cx
                 .new(|_| UnreachableCommitsDialog::new(state, *repo, *tab))
                 .into(),
-            Popup::ConfirmQuit { busy, previous } => cx
-                .new(|_| confirm_quit::ConfirmQuitDialog::new(busy, previous.as_deref().cloned()))
+            Popup::ConfirmQuit { busy } => cx
+                .new(|_| confirm_quit::ConfirmQuitDialog::new(busy))
                 .into(),
         }
     }
@@ -623,25 +654,37 @@ impl DialogHost {
 
 impl Render for DialogHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let popup = self.state.read(cx).popup.clone();
-        match popup {
-            None => {
-                self.current = None;
-                div()
+        let stack: Vec<(u64, Popup)> = self
+            .state
+            .read(cx)
+            .popups
+            .all_popups()
+            .iter()
+            .filter_map(|p| Some((p.id?, p.popup.clone())))
+            .collect();
+        // views of popups that left the stack go
+        self.views
+            .retain(|(id, _, _)| stack.iter().any(|(open, _)| open == id));
+        // the top popup's view, built (again) when new or changed
+        let Some((id, popup)) = stack.last().cloned() else {
+            return div();
+        };
+        match self.views.iter().position(|(open, _, _)| *open == id) {
+            Some(ix) if self.views[ix].1 == popup => {}
+            Some(ix) => {
+                let view = self.build(&popup, window, cx);
+                self.views[ix] = (id, popup, view);
             }
-            Some(popup) => {
-                let stale = self
-                    .current
-                    .as_ref()
-                    .map(|(p, _)| *p != popup)
-                    .unwrap_or(true);
-                if stale {
-                    let view = self.build(&popup, window, cx);
-                    self.current = Some((popup, view));
-                }
-                let view = self.current.as_ref().map(|(_, v)| v.clone());
-                div().children(view)
+            None => {
+                let view = self.build(&popup, window, cx);
+                self.views.push((id, popup, view));
             }
         }
+        let view = self
+            .views
+            .iter()
+            .find(|(open, _, _)| *open == id)
+            .map(|(_, _, view)| view.clone());
+        div().children(view)
     }
 }

@@ -13,7 +13,43 @@ pub fn search(query: &str) -> Result<Vec<Candidate>, ExtensionError> {
         "{BASE}/-/search?query={}&size=20&sortBy=relevance&includeAllVersions=false",
         encode(query.trim())
     );
-    parse_search(&crate::http::get_text(&url)?)
+    let mut found = parse_search(&crate::http::get_text(&url)?)?;
+    fill_suffixes(&mut found);
+    Ok(found)
+}
+
+/// The search answer carries no tags; each extension's detail does
+/// (`__ext_<suffix>` from its `contributes.languages`). Fetched a few at a
+/// time so the Find tab shows what every result covers.
+fn fill_suffixes(found: &mut [Candidate]) {
+    let ids: Vec<(usize, String)> = found
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.suffixes.is_empty())
+        .map(|(i, c)| (i, c.id.clone()))
+        .collect();
+    let mut details: Vec<(usize, Vec<String>)> = Vec::new();
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in ids.chunks(4) {
+            handles.push(scope.spawn(move || {
+                chunk
+                    .iter()
+                    .filter_map(|(i, id)| latest(id).ok().flatten().map(|c| (*i, c.suffixes)))
+                    .collect::<Vec<_>>()
+            }));
+        }
+        for handle in handles {
+            if let Ok(part) = handle.join() {
+                details.extend(part);
+            }
+        }
+    });
+    for (i, suffixes) in details {
+        if let Some(candidate) = found.get_mut(i) {
+            candidate.suffixes = suffixes;
+        }
+    }
 }
 
 pub fn for_suffix(suffix: &str) -> Result<Vec<Candidate>, ExtensionError> {

@@ -15,10 +15,12 @@ pub enum GitError {
         .0.display()
     )]
     MissingWorkdir(PathBuf),
-    #[error("git {args} failed with exit code {code:?}: {stderr}")]
+    #[error("git {args} failed with exit code {code:?}: {}", .stderr.trim_end())]
     Failed {
         args: String,
         code: Option<i32>,
+        /// What git wrote (GHD's `terminalOutput`): stdout and stderr, the
+        /// last 256 KiB, untrimmed (see `process.rs`).
         stderr: String,
     },
     #[error("git output was not valid UTF-8")]
@@ -34,6 +36,13 @@ pub enum GitError {
     /// The command was stopped through its [`crate::CancelToken`].
     #[error("git {0} was cancelled")]
     Cancelled(String),
+    /// GHD `clone`'s `isClonePathSensitive` backstop: the destination is the
+    /// home directory or a credentials / configuration folder in it.
+    #[error(
+        "The clone destination \"{}\" targets a sensitive system location. Cloning into this directory is not allowed.",
+        .0.display()
+    )]
+    SensitiveClonePath(PathBuf),
 }
 
 impl From<gix::Error> for GitError {

@@ -813,7 +813,7 @@ registry! {
         corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(12222)],
-        code: &["crates/corvene/src/menus.rs", "crates/corvene-ui/src/dialogs/add_license.rs", "crates/corvene-core/src/templates.rs"],
+        code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/dialogs/add_license.rs", "crates/corvene-core/src/templates.rs"],
     },
 
     /// Add Local Repository › Choose… picks several folders.
@@ -1212,7 +1212,7 @@ registry! {
         corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(13700)],
-        code: &["crates/corvene/src/menus.rs", "crates/corvene-core/src/remote.rs"],
+        code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene-core/src/remote.rs"],
     },
 
     /// Fetch deletes local tags the remote no longer has.
@@ -1448,15 +1448,16 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/repository_list.rs"],
     },
 
-    /// Submodules are updated (and new ones initialised) after a checkout or merge.
+    /// Submodules follow merges too, and changed ones are spared.
     SUBMODULES_FOLLOW_CHECKOUT = 263 "submodules-follow-checkout" {
-        title: "Update submodules after checkout and merge",
-        summary: "After switching branches or a merge (including Update from Default Branch), \
-                  submodules are checked out at the commits the branch records and new ones are \
-                  cloned (git submodule update --init --recursive). Submodules that showed \
-                  changes beforehand are left alone.",
-        ghd_behaviour: "Submodules stay at their old commits (and new ones uninitialised), so \
-                        they show as changed and are easily committed back.",
+        title: "Update submodules after merges, sparing changed ones",
+        summary: "After a merge (including Update from Default Branch) submodules are checked \
+                  out at the commits the branch records and new ones are cloned (git submodule \
+                  update --init --recursive), as after switching branches. Submodules that \
+                  showed changes beforehand are left alone, after a merge or a switch.",
+        ghd_behaviour: "Updates every submodule after switching branches, changed ones included \
+                        (their checked-out commit moves back), and none after a merge, so they \
+                        show as changed and are easily committed back.",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
@@ -1728,6 +1729,38 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs"],
     },
 
+    /// Clone progress through git's "Updating files" step.
+    CLONE_UPDATING_FILES_STEP = 281 "clone-updating-files-step" {
+        title: "Clone progress covers checking out the files",
+        summary: "The clone progress bar counts git's \"Updating files\" lines as the checkout \
+                  step, so it keeps moving through the last fifth while the files are written.",
+        ghd_behaviour: "Waits for \"Checking out files\", which current git no longer prints, so \
+                        the bar stops at 80 % while the files are checked out.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
+    /// Fast-forwarding after a fetch leaves out other worktrees' branches.
+    FAST_FORWARD_SKIPS_WORKTREE_BRANCHES = 282 "fast-forward-skips-worktree-branches" {
+        title: "Fast-forward branches checked out in other worktrees",
+        summary: "After a fetch, pull or push the branches that are behind their upstream are \
+                  fast-forwarded without the ones checked out in another worktree, which git \
+                  refuses to move.",
+        ghd_behaviour: "Hands git every branch that differs from its upstream; when one is \
+                        checked out in another worktree git refuses the whole update, so no \
+                        branch is fast-forwarded.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
@@ -1879,10 +1912,12 @@ registry! {
     /// Publish errors name the failed validation.
     API_ERROR_DETAILS = 311 "api-error-details" {
         title: "Publish errors say what GitHub rejected",
-        summary: "When publishing a repository fails validation, the error adds GitHub's reasons \
-                  (e.g. \"description is too long (maximum is 350 characters)\") to its message.",
-        ghd_behaviour: "Shows only the top-level message (\"Repository creation failed.\"), or \
-                        for an organization a hint to check its permissions.",
+        summary: "When publishing a repository fails, the error names every reason GitHub gave: \
+                  a validation error without a message shows its field and code (\"name \
+                  invalid\"), and publishing to an organization shows GitHub's error.",
+        ghd_behaviour: "Lists only the reasons that have a message, leaving an empty item for \
+                        the others (\"Repository creation failed. (…, )\"), and for an \
+                        organization shows a hint to check its permissions instead.",
         nature: Nature::BugFix,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: ON, max: ON,
@@ -1928,7 +1963,8 @@ registry! {
         summary: "An Enterprise address typed with http:// stays on plain HTTP, for servers \
                   without TLS. The token then crosses the network unencrypted; an address \
                   without a scheme still uses HTTPS.",
-        ghd_behaviour: "Always connects over HTTPS (plain HTTP was removed in 3.4.7).",
+        ghd_behaviour: "Refuses an http:// address with \"Unsupported protocol\" and connects \
+                        over HTTPS only (plain HTTP was removed in 3.4.7).",
         nature: Nature::Feature,
         kind: Kind::Bool,
         corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
@@ -2035,7 +2071,7 @@ registry! {
         corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(13533)],
-        code: &["crates/corvene/src/menus.rs", "crates/corvene-core/src/integrations.rs"],
+        code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
     /// After sign-in, say when the Git email won't link commits.
@@ -2185,6 +2221,22 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/clone_repository.rs"],
     },
 
+    /// github.com repositories without a GitHub.com account.
+    GITHUB_WITHOUT_ACCOUNT = 331 "github-without-account" {
+        title: "github.com repositories without an account",
+        summary: "A repository whose origin is on github.com is a GitHub repository when it is \
+                  added even without a GitHub.com account, so View on GitHub, the pull request \
+                  links and the Pull Requests tab work.",
+        ghd_behaviour: "Only the hosts of signed-in accounts count, so such a repository is a \
+                        plain git repository.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/app_url.rs", "crates/corvene-models/src/lib.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
@@ -2197,7 +2249,7 @@ registry! {
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
         upstream: &[],
-        code: &["crates/corvene/src/menus.rs"],
+        code: &["crates/corvene-ui/src/app_menu.rs"],
     },
 
     /// About's architecture suffix and Source code link.
@@ -2251,7 +2303,7 @@ registry! {
         corvene: ON, ghd: OFF, familiar: OFF, max: ON,
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(17647)],
-        code: &["crates/corvene/src/menus.rs", "crates/corvene/src/main.rs"],
+        code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene/src/main.rs"],
     },
 
     /// `--hidden` launches with the window hidden.
@@ -2381,7 +2433,7 @@ registry! {
         corvene: ON, ghd: OFF, familiar: ON, max: ON,
         restart: false, visible: true, availability: linux_only,
         upstream: &[],
-        code: &["crates/corvene/src/menus.rs", "crates/corvene-platform/src/cli.rs"],
+        code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene-platform/src/cli.rs"],
     },
 
     /// Git error dialogs show the command, its exit code and output.
@@ -3044,7 +3096,7 @@ registry! {
             "crates/corvene-ui/src/keymap.rs",
             "crates/corvene-ui/src/workspace.rs",
             "crates/corvene/src/main.rs",
-            "crates/corvene/src/menus.rs",
+            "crates/corvene-ui/src/app_menu.rs",
         ],
     },
 
@@ -3429,8 +3481,9 @@ registry! {
         summary: "Discarding a submodule that has changes inside checks out its modified files \
                   and moves its untracked files to the Trash, so the submodule is clean \
                   afterwards.",
-        ghd_behaviour: "The submodule stays in the list: untracked files and edits inside it are \
-                        not discarded.",
+        ghd_behaviour: "Edits to tracked files inside and a moved submodule commit are reset \
+                        (git submodule update --force), but untracked files inside stay, so \
+                        such a submodule stays in the list.",
         nature: Nature::BugFix,
         kind: Kind::Bool,
         corvene: ON, ghd: OFF, familiar: ON, max: ON,
@@ -4252,7 +4305,7 @@ registry! {
         code: &[
             "crates/corvene-ui/src/workspace.rs",
             "crates/corvene-ui/src/selected_commit.rs",
-            "crates/corvene/src/menus.rs",
+            "crates/corvene-ui/src/app_menu.rs",
         ],
     },
 

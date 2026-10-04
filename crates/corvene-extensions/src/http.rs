@@ -18,6 +18,8 @@ const USER_AGENT: &str = concat!("Corvene/", env!("CARGO_PKG_VERSION"));
 /// own host for that one download ([`download`]'s `extra_host`).
 pub const ALLOWED_HOSTS: &[&str] = &[
     "open-vsx.org",
+    // Open VSX serves the files themselves from here
+    "openvsx.eclipsecontent.org",
     "api.zed.dev",
     "zed.dev",
     "api.pulsar-edit.dev",

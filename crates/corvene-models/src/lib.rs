@@ -79,7 +79,8 @@ impl Repository {
         }
     }
 
-    /// Alias, else GitHub repo name, else the directory name.
+    /// Alias, else GitHub repo name, else the directory name (GHD
+    /// `repository.alias ?? repository.name`, the list's display title).
     pub fn name(&self) -> String {
         if let Some(alias) = &self.alias {
             return alias.clone();
@@ -88,6 +89,15 @@ impl Repository {
             return gh.name.clone();
         }
         dir_name(&self.path)
+    }
+}
+
+/// GHD `nameOf` (`models/repository.ts`): `owner/name` of the GitHub
+/// repository, else the directory name; the alias plays no part.
+pub fn name_of(repository: &Repository) -> String {
+    match &repository.github {
+        Some(gh) => gh.full_name(),
+        None => dir_name(&repository.path),
     }
 }
 
@@ -197,9 +207,20 @@ impl Branch {
                 .remote_name
                 .as_deref()
                 .and_then(|remote| self.name.strip_prefix(remote)?.strip_prefix('/'))
-                .or_else(|| self.name.split_once('/').map(|(_, n)| n))
+                .or_else(|| remove_remote_prefix(&self.name))
                 .unwrap_or(&self.name),
         }
+    }
+
+    /// `upstreamWithoutRemote`: the upstream's branch name without its
+    /// remote (`refs/remotes/origin/feature` → `feature`), `None` without an
+    /// upstream. Splits after [`Branch::upstream_remote_name`], so a remote
+    /// name with slashes stays whole (flag `remote-names-with-slashes`).
+    pub fn upstream_without_remote(&self) -> Option<&str> {
+        let upstream = self.upstream_short()?;
+        self.upstream_remote_name()
+            .and_then(|remote| upstream.strip_prefix(remote)?.strip_prefix('/'))
+            .or_else(|| remove_remote_prefix(upstream))
     }
 
     /// `upstreamRemoteName`
@@ -236,6 +257,13 @@ impl Branch {
             .as_deref()
             .map(|u| u.strip_prefix("refs/remotes/").unwrap_or(u))
     }
+}
+
+/// GHD `removeRemotePrefix` (`lib/remove-remote-prefix.ts`): everything
+/// after the first `/` (`origin/thing/my-branch` → `thing/my-branch`),
+/// `None` without one.
+pub fn remove_remote_prefix(name: &str) -> Option<&str> {
+    name.split_once('/').map(|(_, rest)| rest)
 }
 
 /// `IStashEntry`
@@ -352,7 +380,9 @@ impl Account {
             || legacy_stealth_email(&self.login, &self.endpoint).to_lowercase() == needle
     }
 
-    /// Host for keychain keys and remote matching (`github.com`, `ghe.corp`).
+    /// Host for keychain keys and remote matching (`github.com`, `ghe.corp`):
+    /// the web host (GHD `getHTMLURL`), so a `*.ghe.com` account on the
+    /// `api.` subdomain (`https://api.x.ghe.com/`) is `x.ghe.com`.
     pub fn host(&self) -> String {
         let trimmed = self
             .endpoint
@@ -361,6 +391,10 @@ impl Account {
         let host = trimmed.split('/').next().unwrap_or(trimmed);
         if host == "api.github.com" {
             "github.com".to_string()
+        } else if host.to_ascii_lowercase().ends_with(".ghe.com")
+            && let Some(web) = host.strip_prefix("api.")
+        {
+            web.to_string()
         } else {
             host.to_string()
         }
@@ -420,15 +454,19 @@ pub fn git_author_name_is_valid(name: &str) -> bool {
 pub const INVALID_GIT_AUTHOR_NAME_MESSAGE: &str =
     "Name is invalid, it consists only of disallowed characters.";
 
-/// Parse `owner/name` + host out of a remote URL if it points at GitHub.
-/// Handles `https://github.com/o/n(.git)`, `git@github.com:o/n(.git)`,
-/// `ssh://git@github.com/o/n` and GHES hosts when `ghes_hosts` lists them.
-pub fn github_from_remote(url: &str, ghes_hosts: &[String]) -> Option<GitHubRepository> {
+/// GHD `matchGitHubRepository` (`lib/repository-matching.ts`): `owner/name`
+/// and host of a remote URL whose host is one of `hosts`, the web hosts of
+/// the signed-in accounts (GHD `getHTMLURL(account.endpoint)`; see
+/// [`github_hosts`]). Handles every URL [`split_remote`] takes
+/// (`https://github.com/o/n(.git)`, `git@github.com:o/n(.git)`,
+/// `git:github.com/o/n`, `ssh://git@github.com/o/n`…). `github.com` only
+/// matches when it is listed, as in GHD.
+pub fn github_from_remote(url: &str, hosts: &[String]) -> Option<GitHubRepository> {
     let (host, path) = split_remote(url)?;
-    let is_dotcom = host.eq_ignore_ascii_case("github.com");
-    if !is_dotcom && !ghes_hosts.iter().any(|h| h.eq_ignore_ascii_case(&host)) {
+    if !hosts.iter().any(|h| h.eq_ignore_ascii_case(&host)) {
         return None;
     }
+    let is_dotcom = host.eq_ignore_ascii_case("github.com");
     let path = path.trim_matches('/');
     let path = path.strip_suffix(".git").unwrap_or(path);
     let mut parts = path.splitn(2, '/');
@@ -437,8 +475,11 @@ pub fn github_from_remote(url: &str, ghes_hosts: &[String]) -> Option<GitHubRepo
     if owner.is_empty() || name.is_empty() || name.contains('/') {
         return None;
     }
+    // GHD `getEnterpriseAPIURL`: `*.ghe.com` serves its API on `api.`
     let endpoint = if is_dotcom {
         "https://api.github.com".to_string()
+    } else if host.to_ascii_lowercase().ends_with(".ghe.com") {
+        format!("https://api.{host}/")
     } else {
         format!("https://{host}/api/v3")
     };
@@ -458,15 +499,32 @@ pub fn github_from_remote(url: &str, ghes_hosts: &[String]) -> Option<GitHubRepo
     })
 }
 
-/// `(host, path)` of a remote URL (`https://`, `http://`, `ssh://`, `git://`
-/// or scp-style `git@host:path`); `None` for anything else (GHD `parseRemote`).
+/// The hosts [`github_from_remote`] matches for these accounts: GHD
+/// `matchGitHubRepository` matches the web host of each signed-in account
+/// (`Account::host`). With `dotcom`, `github.com` is listed even without a
+/// GitHub.com account (Corvene, flag `331-github-without-account`: a
+/// github.com remote is a GitHub repository when signed out, so View on
+/// GitHub, the pull request links and the signed-out Pull Requests tab
+/// work; GHD leaves it a plain repository).
+pub fn github_hosts(accounts: &[Account], dotcom: bool) -> Vec<String> {
+    let mut hosts: Vec<String> = accounts.iter().map(Account::host).collect();
+    if dotcom && !hosts.iter().any(|h| h.eq_ignore_ascii_case("github.com")) {
+        hosts.push("github.com".to_string());
+    }
+    hosts
+}
+
+/// `(host, path)` of a remote URL (GHD `parseRemote`, `lib/remote-parsing.ts`):
+/// `https://`, `http://`, `ssh://` and `git://` URLs, `git:host/path`, and
+/// scp-style `git@host:path` (any user for `*.ghe.com` hosts, as GHD).
+/// `None` for anything else.
+///
+/// Deviation: GHD reads owner and name out of the URL with its regexes, so
+/// it takes `ssh://` URLs with the `git` user only, keeps a port in the
+/// host and reads `git://host/o/n` as host `//host`; Corvene takes any
+/// user, drops the port and returns the whole path for any host.
 pub fn split_remote(url: &str) -> Option<(String, String)> {
     let url = url.trim();
-    if let Some(rest) = url.strip_prefix("git@") {
-        // git@host:owner/name
-        let (host, path) = rest.split_once(':')?;
-        return Some((host.to_string(), path.to_string()));
-    }
     for scheme in ["https://", "http://", "ssh://", "git://"] {
         if let Some(rest) = url.strip_prefix(scheme) {
             let rest = rest.split_once('@').map(|(_, r)| r).unwrap_or(rest);
@@ -475,7 +533,21 @@ pub fn split_remote(url: &str) -> Option<(String, String)> {
             return Some((host, path.to_string()));
         }
     }
-    None
+    if let Some(rest) = url.strip_prefix("git:") {
+        // git:host/owner/name
+        let (host, path) = rest.split_once('/')?;
+        return Some((host.to_string(), path.to_string()));
+    }
+    if let Some(rest) = url.strip_prefix("git@") {
+        // git@host:owner/name
+        let (host, path) = rest.split_once(':')?;
+        return Some((host.to_string(), path.to_string()));
+    }
+    // user@host.ghe.com:owner/name
+    let (prefix, path) = url.split_once(':')?;
+    let (user, host) = prefix.rsplit_once('@')?;
+    let ghe = host.len() > ".ghe.com".len() && host.to_ascii_lowercase().ends_with(".ghe.com");
+    (!user.is_empty() && ghe && !prefix.contains('/')).then(|| (host.to_string(), path.to_string()))
 }
 
 #[cfg(test)]
@@ -554,6 +626,10 @@ mod tests {
         assert!(!a.is_attributable_email("someone@example.com"));
     }
 
+    fn dotcom() -> Vec<String> {
+        github_hosts(&[], true)
+    }
+
     #[test]
     fn parses_github_remotes() {
         for url in [
@@ -562,8 +638,9 @@ mod tests {
             "git@github.com:wasi-master/corvene.git",
             "ssh://git@github.com/wasi-master/corvene.git",
             "https://user@github.com/wasi-master/corvene/",
+            "git:github.com/wasi-master/corvene.git",
         ] {
-            let gh = github_from_remote(url, &[]).unwrap_or_else(|| panic!("{url}"));
+            let gh = github_from_remote(url, &dotcom()).unwrap_or_else(|| panic!("{url}"));
             assert_eq!(gh.owner, "wasi-master");
             assert_eq!(gh.name, "corvene");
             assert_eq!(gh.html_url, "https://github.com/wasi-master/corvene");
@@ -573,10 +650,42 @@ mod tests {
 
     #[test]
     fn ignores_non_github_and_ghes_without_config() {
-        assert!(github_from_remote("https://gitlab.com/a/b.git", &[]).is_none());
-        assert!(github_from_remote("git@ghe.corp:a/b.git", &[]).is_none());
+        assert!(github_from_remote("https://gitlab.com/a/b.git", &dotcom()).is_none());
+        assert!(github_from_remote("git@ghe.corp:a/b.git", &dotcom()).is_none());
         let gh = github_from_remote("git@ghe.corp:a/b.git", &["ghe.corp".into()]).unwrap();
         assert_eq!(gh.endpoint, "https://ghe.corp/api/v3");
+        // GHD: only the hosts of signed-in accounts match
+        assert!(github_from_remote("git@github.com:a/b.git", &[]).is_none());
+        assert!(github_from_remote("git@github.com:a/b.git", &["ghe.corp".into()]).is_none());
+    }
+
+    #[test]
+    fn splits_scp_style_remotes_like_parse_remote() {
+        assert_eq!(
+            split_remote("niik@niik.ghe.com:hubot/repo.git"),
+            Some(("niik.ghe.com".into(), "hubot/repo.git".into()))
+        );
+        assert_eq!(split_remote("work@gh-alias:team/app"), None);
+        assert_eq!(split_remote("@x.ghe.com:o/n"), None);
+        assert_eq!(
+            split_remote("git:github.com/hubot/repo/"),
+            Some(("github.com".into(), "hubot/repo/".into()))
+        );
+        assert_eq!(
+            split_remote("git://github.com/hubot/repo"),
+            Some(("github.com".into(), "hubot/repo".into()))
+        );
+        assert_eq!(split_remote("/local/path"), None);
+        assert_eq!(split_remote("C:\\repos\\x"), None);
+    }
+
+    #[test]
+    fn github_hosts_add_dotcom_once() {
+        let mut ghes = account(&[], false);
+        ghes.endpoint = "https://ghe.corp/api/v3".into();
+        assert_eq!(github_hosts(&[ghes.clone()], false), ["ghe.corp"]);
+        assert_eq!(github_hosts(&[ghes], true), ["ghe.corp", "github.com"]);
+        assert_eq!(github_hosts(&[account(&[], false)], true), ["github.com"]);
     }
 
     #[test]
@@ -626,10 +735,10 @@ mod tests {
 
     #[test]
     fn detects_wiki_remotes() {
-        let wiki = github_from_remote("https://github.com/o/n.wiki.git", &[]).unwrap();
+        let wiki = github_from_remote("https://github.com/o/n.wiki.git", &dotcom()).unwrap();
         assert!(wiki.is_wiki());
         assert!(
-            !github_from_remote("git@github.com:o/n.git", &[])
+            !github_from_remote("git@github.com:o/n.git", &dotcom())
                 .unwrap()
                 .is_wiki()
         );
@@ -639,7 +748,7 @@ mod tests {
     fn repository_name_precedence() {
         let mut repo = Repository::new(1, "/tmp/my-dir");
         assert_eq!(repo.name(), "my-dir");
-        repo.github = github_from_remote("git@github.com:o/gh-name.git", &[]);
+        repo.github = github_from_remote("git@github.com:o/gh-name.git", &dotcom());
         assert_eq!(repo.name(), "gh-name");
         repo.alias = Some("Alias".into());
         assert_eq!(repo.name(), "Alias");
@@ -738,14 +847,31 @@ pub struct FileStatus {
 }
 
 impl FileStatus {
+    /// GHD `isConflictedFile` (`lib/status.ts`)
+    pub fn is_conflicted(&self) -> bool {
+        self.kind == FileStatusKind::Conflicted
+    }
+
     /// GHD `isConflictWithMarkers`
     pub fn is_text_conflict(&self) -> bool {
-        self.kind == FileStatusKind::Conflicted && self.conflict_markers.is_some()
+        self.is_conflicted() && self.conflict_markers.is_some()
     }
 
     /// GHD `isManualConflict`
     pub fn is_manual_conflict(&self) -> bool {
-        self.kind == FileStatusKind::Conflicted && self.conflict_markers.is_none()
+        self.is_conflicted() && self.conflict_markers.is_none()
+    }
+
+    /// GHD `CopiedOrRenamedFileStatus.renameIncludesModifications`
+    /// (`models/status.ts`): a rename whose contents changed too. Status
+    /// (`lib/git/status.ts` `convertToAppStatus`): modified in the working
+    /// tree or a similarity score under 100; history (`lib/git/log.ts`
+    /// `mapStatus`): `R<score>` other than `R100`, never a bare `R`. Always
+    /// false for copies and every other kind.
+    pub fn rename_includes_modifications(&self) -> bool {
+        self.kind == FileStatusKind::Renamed
+            && (self.working_tree == GitStatusEntry::Modified
+                || self.score.is_some_and(|score| score < 100))
     }
 
     /// GHD `hasUnresolvedConflicts`: a manual choice resolves anything; text
@@ -1047,16 +1173,25 @@ pub struct WorkingDirectoryFileChange {
     pub selection: DiffSelection,
 }
 
+/// GHD `extract` (`ui/lib/path-text.tsx`): the file name and the directory
+/// (with its trailing `/`) of a repository path. A trailing `/`, which git
+/// gives an untracked nested repository (`some/submodule/path/`), is dropped
+/// first.
+pub fn file_name_and_directory(path: &str) -> (&str, &str) {
+    let path = path.strip_suffix('/').unwrap_or(path);
+    match path.rfind('/') {
+        Some(ix) => (&path[ix + 1..], &path[..=ix]),
+        None => (path, ""),
+    }
+}
+
 impl WorkingDirectoryFileChange {
     pub fn file_name(&self) -> &str {
-        self.path.rsplit('/').next().unwrap_or(&self.path)
+        file_name_and_directory(&self.path).0
     }
 
     pub fn directory(&self) -> &str {
-        match self.path.rfind('/') {
-            Some(ix) => &self.path[..=ix],
-            None => "",
-        }
+        file_name_and_directory(&self.path).1
     }
 }
 
@@ -1081,6 +1216,12 @@ pub struct WorkingDirectoryStatus {
     pub squash_msg_found: bool,
     #[serde(default)]
     pub rebase_internal_state: Option<RebaseInternalState>,
+    /// The index has an entry `files` leaves out: GHD `buildStatusMap`
+    /// skips a file added to the index and then deleted from the working
+    /// directory. A commit must reset the index first (GHD `unstageAll`),
+    /// or that file would be committed.
+    #[serde(default)]
+    pub hidden_index_entries: bool,
 }
 
 impl WorkingDirectoryStatus {
@@ -1107,9 +1248,16 @@ impl WorkingDirectoryStatus {
     }
 
     pub fn has_conflicts(&self) -> bool {
+        self.files.iter().any(|f| f.status.is_conflicted())
+    }
+
+    /// GHD `updateChangedFiles` (`lib/stores/updates/changes-state.ts`):
+    /// the changes list orders files by `caseInsensitiveCompare` of their
+    /// paths, not in the order `git status` gives them (tracked before
+    /// untracked).
+    pub fn sort_files(&mut self) {
         self.files
-            .iter()
-            .any(|f| f.status.kind == FileStatusKind::Conflicted)
+            .sort_by_cached_key(|file| file.path.to_lowercase());
     }
 }
 
@@ -1136,15 +1284,69 @@ impl CommitIdentity {
     }
 }
 
+/// GHD `ITrailer` (`lib/git/interpret-trailers.ts`): a commit message
+/// trailer as `(token, value)`, e.g. `("Co-Authored-By", "Name <email>")`.
+pub type Trailer = (String, String);
+
+/// GHD `isCoAuthoredByTrailer`: the token is `Co-Authored-By` (any case).
+pub fn is_co_authored_by_trailer(trailer: &Trailer) -> bool {
+    trailer.0.eq_ignore_ascii_case("co-authored-by")
+}
+
+/// GHD `GitAuthor` (`models/git-author.ts`): a `Name <email>` pair.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GitAuthor {
+    pub name: String,
+    pub email: String,
+}
+
+impl GitAuthor {
+    /// GHD `GitAuthor.parse`: the regular expression `^(.*?)\s+<(.*?)>`, so
+    /// the shortest name (one line) followed by whitespace, then the
+    /// address up to the first `>` on its line; anything after that is
+    /// ignored.
+    pub fn parse(name_addr: &str) -> Option<GitAuthor> {
+        // JavaScript's `.` stops at these line terminators
+        let line_end = |c: char| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}');
+        for (name_end, c) in name_addr
+            .char_indices()
+            .chain(std::iter::once((name_addr.len(), '\n')))
+        {
+            let rest = &name_addr[name_end..];
+            let after_space = rest.trim_start_matches(char::is_whitespace);
+            if after_space.len() < rest.len()
+                && let Some(addr) = after_space.strip_prefix('<')
+                && let Some(close) = addr.find(|c: char| c == '>' || line_end(c))
+                && addr[close..].starts_with('>')
+            {
+                return Some(GitAuthor {
+                    name: name_addr[..name_end].to_string(),
+                    email: addr[..close].to_string(),
+                });
+            }
+            if line_end(c) {
+                break;
+            }
+        }
+        None
+    }
+}
+
 /// `Commit` (trimmed to what the history views need).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Commit {
     pub sha: String,
     pub summary: String,
+    /// git's `%b`: the message after the summary paragraph and the blank
+    /// lines that follow it, verbatim (trailers and the final newline
+    /// included).
     pub body: String,
     pub author: CommitIdentity,
     pub committer: CommitIdentity,
     pub parents: Vec<String>,
+    /// The message's trailers, unfolded (git's `%(trailers:unfold,only)`).
+    #[serde(default)]
+    pub trailers: Vec<Trailer>,
     pub tags: Vec<String>,
 }
 
@@ -1155,6 +1357,31 @@ impl Commit {
 
     pub fn is_merge(&self) -> bool {
         self.parents.len() > 1
+    }
+
+    /// GHD `Commit.coAuthors` (`extractCoAuthors`): the `Co-Authored-By`
+    /// trailers that parse as `Name <email>`.
+    pub fn co_authors(&self) -> Vec<GitAuthor> {
+        self.trailers
+            .iter()
+            .filter(|t| is_co_authored_by_trailer(t))
+            .filter_map(|(_, value)| GitAuthor::parse(value))
+            .collect()
+    }
+
+    /// GHD `Commit.bodyNoCoAuthors` (`trimCoAuthorsTrailers`): the body with
+    /// the first `token: value` text of each `Co-Authored-By` trailer
+    /// removed (its line break stays).
+    pub fn body_no_co_authors(&self) -> String {
+        let mut body = self.body.clone();
+        for (token, value) in self
+            .trailers
+            .iter()
+            .filter(|t| is_co_authored_by_trailer(t))
+        {
+            body = body.replacen(&format!("{token}: {value}"), "", 1);
+        }
+        body
     }
 }
 
@@ -1203,14 +1430,11 @@ pub struct ChangesetData {
 
 impl CommittedFileChange {
     pub fn file_name(&self) -> &str {
-        self.path.rsplit('/').next().unwrap_or(&self.path)
+        file_name_and_directory(&self.path).0
     }
 
     pub fn directory(&self) -> &str {
-        match self.path.rfind('/') {
-            Some(i) => &self.path[..=i],
-            None => "",
-        }
+        file_name_and_directory(&self.path).1
     }
 }
 
@@ -1858,38 +2082,47 @@ impl CombinedRefCheck {
     }
 }
 
-/// `formatPreciseDuration`: `1h 2m 3s`.
-pub fn format_precise_duration(ms: u64) -> String {
-    let secs = ms / 1000;
-    let (d, h, m, s) = (secs / 86_400, secs / 3600 % 24, secs / 60 % 60, secs % 60);
-    let mut parts = Vec::new();
-    if d > 0 {
-        parts.push(format!("{d}d"));
-    }
-    if h > 0 {
-        parts.push(format!("{h}h"));
-    }
-    if m > 0 {
-        parts.push(format!("{m}m"));
-    }
-    if s > 0 || parts.is_empty() {
-        parts.push(format!("{s}s"));
+/// `formatPreciseDuration` (`lib/format-duration.ts`): `1h 2m 3s` of the
+/// absolute value of `ms`. Every unit after the first whole one is shown,
+/// zeros included (`1h 0m 0s`), and seconds always are (`0s`).
+pub fn format_precise_duration(ms: i64) -> String {
+    const UNITS: [(char, u64); 4] = [
+        ('d', 86_400_000),
+        ('h', 3_600_000),
+        ('m', 60_000),
+        ('s', 1000),
+    ];
+    let mut ms = ms.unsigned_abs();
+    let mut parts: Vec<String> = Vec::new();
+    for (unit, unit_ms) in UNITS {
+        if !parts.is_empty() || ms >= unit_ms || unit == 's' {
+            let qty = ms / unit_ms;
+            ms -= qty * unit_ms;
+            parts.push(format!("{qty}{unit}"));
+        }
     }
     parts.join(" ")
 }
 
-/// `getCheckDurationInMilliseconds`
-pub fn check_duration_ms(started_at: Option<&str>, completed_at: Option<&str>) -> Option<u64> {
-    let start = parse_iso8601(started_at?)?;
-    let end = parse_iso8601(completed_at?)?;
-    end.duration_since(start).ok().map(|d| d.as_millis() as u64)
+/// `getCheckDurationInMilliseconds`: `completed_at` minus `started_at`,
+/// negative when the check run completed before it started; `None` when
+/// either is missing or unparsable (GHD `NaN`).
+pub fn check_duration_ms(started_at: Option<&str>, completed_at: Option<&str>) -> Option<i64> {
+    let millis = |t: std::time::SystemTime| {
+        t.duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|d| i64::try_from(d.as_millis()).ok())
+    };
+    let start = millis(parse_iso8601(started_at?)?)?;
+    let end = millis(parse_iso8601(completed_at?)?)?;
+    Some(end - start)
 }
 
 /// `getCheckRunShortDescription`
 pub fn check_short_description(
     status: CheckStatus,
     conclusion: Option<CheckConclusion>,
-    duration_ms: Option<u64>,
+    duration_ms: Option<i64>,
 ) -> String {
     let Some(conclusion) = conclusion.filter(|_| status == CheckStatus::Completed) else {
         return "In progress".to_string();
@@ -2100,6 +2333,7 @@ mod github_layer_tests {
             author: id.clone(),
             committer: id.clone(),
             parents: vec![String::new(); parents],
+            trailers: Vec::new(),
             tags: Vec::new(),
         };
         let commits = [
@@ -2216,5 +2450,93 @@ mod github_layer_tests {
             negate: true,
         };
         assert_eq!(rule.human_description(), "must not start with \"feat\"");
+    }
+}
+
+#[cfg(test)]
+mod commit_and_status_tests {
+    use super::*;
+
+    #[test]
+    fn git_author_parse_follows_ghd_regex() {
+        let author = |name: &str, email: &str| GitAuthor {
+            name: name.to_string(),
+            email: email.to_string(),
+        };
+        assert_eq!(
+            GitAuthor::parse("Jane Q. Doe <jane@example.com>"),
+            Some(author("Jane Q. Doe", "jane@example.com"))
+        );
+        // shortest name, address up to the first `>`, the rest ignored
+        assert_eq!(GitAuthor::parse("a <b> <c>"), Some(author("a", "b")));
+        assert_eq!(GitAuthor::parse(" <x@y>"), Some(author("", "x@y")));
+        assert_eq!(GitAuthor::parse("Jane<jane@example.com>"), None);
+        assert_eq!(GitAuthor::parse("Jane <jane@example.com"), None);
+        assert_eq!(GitAuthor::parse("Ja\nne <j@x>"), None);
+    }
+
+    #[test]
+    fn co_authors_and_body_without_them() {
+        let id = CommitIdentity {
+            name: String::new(),
+            email: String::new(),
+            seconds: 0,
+            offset: 0,
+        };
+        let commit = Commit {
+            sha: String::new(),
+            summary: "s".into(),
+            body: "desc\n\nCo-authored-by: A <a@x>\nSigned-off-by: B <b@x>\n".into(),
+            author: id.clone(),
+            committer: id,
+            parents: Vec::new(),
+            trailers: vec![
+                ("Co-authored-by".into(), "A <a@x>".into()),
+                ("Signed-off-by".into(), "B <b@x>".into()),
+            ],
+            tags: Vec::new(),
+        };
+        assert_eq!(
+            commit.co_authors(),
+            [GitAuthor {
+                name: "A".into(),
+                email: "a@x".into()
+            }]
+        );
+        assert_eq!(
+            commit.body_no_co_authors(),
+            "desc\n\n\nSigned-off-by: B <b@x>\n"
+        );
+    }
+
+    #[test]
+    fn rename_includes_modifications_per_ghd() {
+        let status = |kind, working_tree, score| FileStatus {
+            kind,
+            index: GitStatusEntry::Renamed,
+            working_tree,
+            score,
+            code: String::new(),
+            submodule: false,
+            submodule_status: None,
+            conflict_markers: None,
+        };
+        use FileStatusKind::{Copied, Renamed};
+        use GitStatusEntry::{Modified, Unchanged};
+        assert!(!status(Renamed, Unchanged, Some(100)).rename_includes_modifications());
+        assert!(!status(Renamed, Unchanged, None).rename_includes_modifications());
+        assert!(status(Renamed, Unchanged, Some(85)).rename_includes_modifications());
+        assert!(status(Renamed, Modified, Some(100)).rename_includes_modifications());
+        assert!(!status(Copied, Modified, Some(50)).rename_includes_modifications());
+    }
+
+    #[test]
+    fn file_name_and_directory_drop_a_trailing_slash() {
+        assert_eq!(file_name_and_directory("a/b/c.txt"), ("c.txt", "a/b/"));
+        assert_eq!(file_name_and_directory("c.txt"), ("c.txt", ""));
+        assert_eq!(
+            file_name_and_directory("some/submodule/path/"),
+            ("path", "some/submodule/")
+        );
     }
 }

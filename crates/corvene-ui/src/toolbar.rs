@@ -211,15 +211,9 @@ pub fn toolbar_models(
             && state
                 .flags
                 .bool(corvene_core::flags::ids::ALIAS_ITALIC_IN_TOOLBAR),
-        // GHD `iconForRepository`
-        icon: match repo.and_then(|r| r.github.as_ref()) {
-            _ if repo.is_some_and(|r| r.missing) => Octicon::Alert,
-            Some(gh) if gh.private => Octicon::Lock,
-            Some(gh) if gh.fork => Octicon::RepoForked,
-            Some(_) => Octicon::Repo,
-            None if repo.is_some() => Octicon::DeviceDesktop,
-            None => Octicon::Repo,
-        },
+        icon: repo.map_or(Octicon::Repo, |r| {
+            crate::icons::icon_for_repository(crate::icons::RepositoryOrCloning::Repository(r))
+        }),
         // Corvene (`409-owner-in-repository-button`): a GitHub repository's
         // owner in place of "Current Repository"
         description: match repo.and_then(|r| r.github.as_ref()) {
@@ -414,7 +408,7 @@ pub fn toolbar_models(
         .unwrap_or(corvene_core::ForcePushState::NotAvailable);
     let pull_with_rebase = repo_state.is_some_and(|s| s.pull_with_rebase);
     let rebase_in_progress = repo_state
-        .and_then(|s| s.status.as_ref())
+        .and_then(|s| s.status.as_deref())
         .is_some_and(|st| st.rebase_in_progress);
     let base = ToolbarButtonModel {
         id: "toolbar-push-pull",
@@ -820,13 +814,6 @@ pub fn toolbar_button(
             )
         })
         .when_some(model.badge, |d, ab| {
-            let (ahead, behind) = {
-                let s = AppState::global(cx).read(cx);
-                (
-                    ahead_behind_count(ab.ahead, s),
-                    ahead_behind_count(ab.behind, s),
-                )
-            };
             // `.ahead-behind` pill: 13 px tall (darwin; elsewhere no height
             // is set and the 16 px octicons make it 16), radius 8, 9 px text
             d.child(
@@ -843,13 +830,20 @@ pub fn toolbar_button(
                     .bg(t.toolbar_badge_background)
                     .text_size(FONT_SIZE_XS())
                     .line_height(zpx(11.))
+                    // GHD `formatCompactNumber` (1.2k)
                     .when(ab.ahead > 0, |d| {
-                        d.child(ahead)
-                            .child(octicon(Octicon::ArrowUp, text).size(zpx(9.)))
+                        d.child(crate::format::format_compact_number(
+                            f64::from(ab.ahead),
+                            &Default::default(),
+                        ))
+                        .child(octicon(Octicon::ArrowUp, text).size(zpx(9.)))
                     })
                     .when(ab.behind > 0, |d| {
-                        d.child(behind)
-                            .child(octicon(Octicon::ArrowDown, text).size(zpx(9.)))
+                        d.child(crate::format::format_compact_number(
+                            f64::from(ab.behind),
+                            &Default::default(),
+                        ))
+                        .child(octicon(Octicon::ArrowDown, text).size(zpx(9.)))
                     }),
             )
         })

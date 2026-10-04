@@ -1,0 +1,85 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import CodeBlock from "../../components/CodeBlock.astro";
+import { REPO_URL } from "../../lib/github";
+
+const presets = [
+  ["GitHub Desktop", "github-desktop", "Exactly GitHub Desktop 3.6.6, its bugs included. For side-by-side comparison, or to keep your habits as they are. The parity harness runs with it."],
+  ["Familiar", "familiar", "Looks like GitHub Desktop, keeps the improvements you cannot see: bug fixes, refreshes, smooth scrolling, commit templates. Nothing moves and nothing new appears."],
+  ["Corvene", "corvene", "The default. Every finished, broadly useful deviation is on, bug fixes included. Extras that change the look or workflow more strongly stay off."],
+  ["Max", "max", "Corvene plus every extra most people would want: more buttons, menu items, shortcuts and background work. Matters of taste stay off."],
+];
+
+const examples = [
+  ["101-high-contrast-theme", "A High Contrast theme in Settings › Appearance; the System theme switches to it while macOS's Increase contrast is on.", "on"],
+  ["105-tree-sitter-highlighting", "Tree-sitter grammars for the languages GitHub Desktop does not highlight, downloaded as an optional component.", "off"],
+  ["106-calendar-relative-dates", "Relative dates count weeks, then calendar months, instead of days ÷ 30.", "on"],
+  ["201-commit-templates", "The repository's commit.template prefills the commit description.", "on"],
+  ["202-fs-watcher", "A filesystem watcher refreshes the repository when files change.", "on"],
+  ["206-import-from-github-desktop", "File › Import Repositories from GitHub Desktop…", "on"],
+  ["211-regex-repository-filter", "/pattern/ in the repository filter matches as a regular expression.", "on"],
+];
+---
+
+<DocsLayout
+  currentSlug="flags"
+  title="Flags"
+  description="Every deviation from GitHub Desktop 3.6.6, and every Corvene-only extra, is a flag with a numeric id, a slug and a value per preset."
+>
+  <p>
+    A flag is shown as <code>201-commit-templates</code>: a numeric id in a category block (100 appearance, 200 repository,
+    300 changes, and so on; ids are never reused) and a slug. "On" always means Corvene's deviation is active. There are
+    about 250 of them, each pointing at the GitHub Desktop issue or source file it relates to, in
+    <a href={`${REPO_URL}/blob/main/crates/corvene-core/src/flags/registry.rs`} target="_blank" rel="noopener noreferrer">the registry</a>.
+  </p>
+
+  <h2 id="dialog">The Flags dialog</h2>
+  <p>
+    <strong>Corvene › Flags…</strong> (<kbd>⌘⇧,</kbd>; under File on Windows and Linux) lists every flag with its
+    description, what GitHub Desktop does instead and the upstream issues. It can also be opened with
+    <code>x-corvene://flags?q=&lt;search&gt;</code>. Flags tagged <strong>Bug fix</strong> fix behaviour GitHub Desktop plainly
+    gets wrong and are hidden until <strong>Show bug fixes</strong> is ticked.
+  </p>
+
+  <h2 id="presets">Presets</h2>
+  <p>A preset is the base layer; flags you change by hand sit on top ("Custom"). Picking a preset clears the overrides, after asking.</p>
+  <table>
+    <thead>
+      <tr><th>Preset</th><th>Slug</th><th>What it does</th></tr>
+    </thead>
+    <tbody>
+      {presets.map(([name, slug, text]) => (
+        <tr>
+          <td><strong>{name}</strong></td>
+          <td><code>{slug}</code></td>
+          <td>{text}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+
+  <h2 id="env">CORVENE_FLAGS</h2>
+  <p>
+    Flag values for one session, never persisted; the flags it names are locked in the dialog. Comma-separated entries of
+    <code>preset=&lt;slug&gt;</code>, <code>&lt;id&gt;-&lt;slug&gt;=&lt;value&gt;</code>, <code>&lt;slug&gt;=&lt;value&gt;</code>,
+    <code>&lt;id&gt;=&lt;value&gt;</code>, or a bare key for "on". Toggle values: <code>on|off|true|false|1|0|yes|no</code>.
+  </p>
+  <CodeBlock code='CORVENE_FLAGS="preset=familiar,105-tree-sitter-highlighting=on" corvene' />
+
+  <h2 id="examples">A few flags</h2>
+  <table>
+    <thead>
+      <tr><th>Flag</th><th>Does</th><th>Corvene preset</th></tr>
+    </thead>
+    <tbody>
+      {examples.map(([flag, text, value]) => (
+        <tr>
+          <td><code>{flag}</code></td>
+          <td>{text}</td>
+          <td><code>{value}</code></td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  <p>The full list, with every preset's value and the code behind each flag, is in the Flags dialog and the registry.</p>
+</DocsLayout>

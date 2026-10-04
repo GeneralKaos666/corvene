@@ -402,9 +402,30 @@ pub fn no_changes(actions: Vec<SuggestedAction>, cx: &App) -> impl IntoElement {
         )
 }
 
-/// GHD `MultipleSelection` (`.panel.blankslate`): "N files selected".
+/// What GHD `MultipleSelection` (`ui/changes/multiple-selection.tsx`) shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MultipleSelectionContent {
+    /// The blank-slate image's alternative text (`Some("")`: decorative),
+    /// `None` when there is no image.
+    pub image_alt: Option<String>,
+    /// The pane's text.
+    pub text: String,
+}
+
+/// GHD `MultipleSelection` for `count` selected files.
+pub fn multiple_selection_content(count: usize) -> MultipleSelectionContent {
+    MultipleSelectionContent {
+        image_alt: Some(String::new()),
+        text: format!("{count} files selected"),
+    }
+}
+
+/// GHD `MultipleSelection` (`.panel.blankslate`): "N files selected", from
+/// [`multiple_selection_content`] (the image is decorative, out of the
+/// accessibility tree).
 pub fn multiple_selection(count: usize, cx: &App) -> impl IntoElement {
     let t = cx.ghd();
+    let MultipleSelectionContent { image_alt, text } = multiple_selection_content(count);
     div()
         .id("multiple-selection")
         .size_full()
@@ -416,10 +437,12 @@ pub fn multiple_selection(count: usize, cx: &App) -> impl IntoElement {
         .bg(t.background)
         .text_color(t.text_secondary)
         .text_size(FONT_SIZE())
-        .child(
-            crate::widgets::blankslate_image("multiple-files-selected.svg", cx)
-                .w(zpx(200.))
-                .h(zpx(120.)),
-        )
-        .child(format!("{count} files selected"))
+        .when(image_alt.is_some(), |d| {
+            d.child(
+                crate::widgets::blankslate_image("multiple-files-selected.svg", cx)
+                    .w(zpx(200.))
+                    .h(zpx(120.)),
+            )
+        })
+        .child(text)
 }

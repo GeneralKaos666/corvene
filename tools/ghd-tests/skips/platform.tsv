@@ -1,0 +1,32 @@
+# Lane `platform`: GitHub Desktop cases with no Corvene counterpart to test.
+# Build and repository tooling
+unit/git-info-test.ts	*	n/a: app/git-info.ts is GHD's webpack build script that stamps __SHA__ into development builds; Corvene's cargo build embeds no source SHA and reads no HEAD at build time
+unit/script/version-test.ts	*	n/a: script/draft-release/version.ts is GHD's release-drafting script (repository tooling, not app code); Corvene's release flow (packaging/release.md) has no next-version logic
+# Electron main process, IPC and node streams
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › leaves explicitly specified ids	n/a: ensureItemIds derives ids for Electron menu items from their labels; Corvene's menu items are GPUI actions with the fixed corvene_core::menu_state::MenuId ids, nothing derives ids
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › assigns ids to items which lack it	n/a: ensureItemIds derives ids for Electron menu items from their labels; Corvene's menu items are GPUI actions with the fixed corvene_core::menu_state::MenuId ids, nothing derives ids
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › assigns ids recursively	n/a: ensureItemIds derives ids for Electron menu items from their labels; Corvene's menu items are GPUI actions with the fixed corvene_core::menu_state::MenuId ids, nothing derives ids
+unit/main-process/menu-test.ts	main-process menu › ensureItemIds › handles duplicate generated ids	n/a: ensureItemIds derives ids for Electron menu items from their labels; Corvene's menu items are GPUI actions with the fixed corvene_core::menu_state::MenuId ids, nothing derives ids
+unit/ipc-contract-test.ts	*	n/a: Electron IPC channel lists (lib/ipc-shared.ts) checked against TypeScript union types; Corvene is one process with no IPC
+unit/desktop-console-transport-test.ts	*	n/a: installBrokenPipeErrorHandler handles node EventEmitter 'error' events (EPIPE) on stdio streams; Rust ignores SIGPIPE and tracing's fmt layer does not panic on a failed write, there is no error event to handle
+# Browser storage and IndexedDB
+unit/database-migration-test.ts	*	n/a: Dexie (IndexedDB) schema versions and indexes (lib/databases/base-database.ts); corvene_store is a redb key-value file of JSON values with no versioned table schemas or indexes
+unit/local-storage-test.ts	local storage › getBoolean parsing › returns default value when malformed string encountered	n/a: writes a raw string with localStorage.setItem and parses it; corvene_store::Store only holds JSON values written by Store::set, there is no raw string to parse
+unit/local-storage-test.ts	local storage › getBoolean parsing › returns false if found and ignores default value	n/a: writes a raw string with localStorage.setItem and parses it; corvene_store::Store only holds JSON values written by Store::set, there is no raw string to parse
+unit/local-storage-test.ts	local storage › getBoolean parsing › can parse the string 'true' if found	n/a: writes a raw string with localStorage.setItem and parses it; corvene_store::Store only holds JSON values written by Store::set, there is no raw string to parse
+unit/local-storage-test.ts	local storage › getBoolean parsing › can parse the string 'false' if found	n/a: writes a raw string with localStorage.setItem and parses it; corvene_store::Store only holds JSON values written by Store::set, there is no raw string to parse
+unit/local-storage-test.ts	local storage › getNumber parsing › returns default value when malformed string encountered	n/a: writes a raw string with localStorage.setItem and parses it; corvene_store::Store only holds JSON values written by Store::set, there is no raw string to parse
+unit/local-storage-test.ts	local storage › getNumber parsing › returns zero if found and ignores default value	n/a: writes a raw string with localStorage.setItem and parses it; corvene_store::Store only holds JSON values written by Store::set, there is no raw string to parse
+# Test helpers of GitHub Desktop's own suite
+unit/mock-api-test.ts	*	n/a: tests GHD's test helper helpers/mock-api.ts (a Proxy that rejects unmocked API methods); Corvene's API client (corvene_github::api) is plain functions with no mock layer, and corvene-test-support has no port of the helper
+unit/app-store-test-harness-test.ts	*	n/a: tests GHD's test helper helpers/app-store-test-harness.ts (in-memory store factories); Corvene's state is one AppState entity and corvene-test-support has no store harness
+# Updater, telemetry
+unit/squirrel-error-parser-test.ts	*	n/a: parses Squirrel.Windows error messages; Corvene's updater (corvene_platform::updater) downloads GitHub release assets and runs no Squirrel
+unit/stats-store-test.ts	*	omitted: usage statistics are left out by design (no telemetry; deviations.md: Advanced › Usage is omitted)
+# Spellcheck language
+unit/main-process/spell-checker-menu-test.ts	*	deviation: deviations.md › Editor / commit form: "Spellcheck language follows NSSpellChecker's automatic identification; there is no per-language picker" (Linux checks the locale's Hunspell dictionary), so GHD's non-macOS Set spellcheck to English / system language item has no counterpart
+# TypeScript and JavaScript language helpers
+unit/enum-test.ts	*	n/a: generic lookup over a TypeScript enum object (Object.values, prototype chains); Rust enums parse per type (FromStr / serde)
+unit/fatal-error-test.ts	*	n/a: forceUnwrap asserts a TypeScript value is not null or undefined; Rust's Option is the language counterpart (Option::expect) and Corvene has no such helper
+unit/promise-test.ts	*	n/a: timeout races a JavaScript Promise against window.setTimeout under node's mock timers (and GHD's app code never calls it); Corvene runs async work as GPUI tasks and has no promise helpers
+unit/promise-with-timeout-test.ts	*	n/a: promiseWithMinimumTimeout joins a JavaScript Promise with window.setTimeout under node's mock timers; Corvene runs async work as GPUI tasks and has no promise helpers (GHD's 500 ms minimum on the merge and rebase previews has no Corvene counterpart)

@@ -1,0 +1,5 @@
+//! GitHub Desktop 3.6.6 unit tests ported to Corvene. Each module is one
+//! GitHub Desktop test file (`app/test/unit/...`); `*_support` modules hold
+//! helpers shared inside this crate. See `tools/ghd-tests/README.md`.
+
+mod local_storage;

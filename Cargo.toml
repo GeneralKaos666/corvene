@@ -32,6 +32,8 @@ corvene-models = { path = "crates/corvene-models" }
 corvene-packs = { path = "crates/corvene-packs" }
 corvene-platform = { path = "crates/corvene-platform" }
 corvene-store = { path = "crates/corvene-store" }
+# test-only (GitHub Desktop test port): dev-dependency of the crates below
+corvene-test-support = { path = "crates/corvene-test-support" }
 corvene-ui = { path = "crates/corvene-ui" }
 
 # Git

@@ -28,3 +28,6 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 objc = "0.2"
 cocoa = "0.26"
 raw-window-handle = "0.6"
+
+[dev-dependencies]
+corvene-test-support.workspace = true

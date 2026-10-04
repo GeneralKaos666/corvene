@@ -100,6 +100,12 @@ pub fn parse_list(text: &str) -> Result<Vec<Candidate>, ExtensionError> {
 
 fn candidate(item: &Value) -> Option<Candidate> {
     let id = item.str_of("id")?;
+    // Zed records no file types; its suggestion table knows some
+    let suffixes: Vec<String> = SUGGESTIONS
+        .iter()
+        .find(|(i, _)| *i == id)
+        .map(|(_, s)| s.iter().map(|s| s.to_ascii_lowercase()).collect())
+        .unwrap_or_default();
     let version = item.str_of("version")?;
     let provides = item.strings_of("provides");
     let grammar = if provides.iter().any(|p| p == "grammars") {
@@ -124,7 +130,7 @@ fn candidate(item: &Value) -> Option<Candidate> {
         repository: item.str_of("repository").map(str::to_string),
         download_url: download_url(id, version),
         grammar,
-        suffixes: Vec::new(),
+        suffixes,
         downloads: item
             .get("download_count")
             .and_then(|d| match d {

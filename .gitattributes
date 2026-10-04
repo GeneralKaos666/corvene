@@ -3,3 +3,7 @@
 # (license and .gitignore templates, shaders, test fixtures).
 * text=auto eol=lf
 packaging/windows/*.bat text eol=crlf
+# GitHub Desktop's test fixtures are repositories (objects, index, refs)
+# and working files kept byte for byte, as GitHub Desktop's own
+# .gitattributes does for app/test/fixtures
+crates/corvene-test-support/fixtures/** -text

@@ -1,29 +1,67 @@
 //! Write-side operations via the git CLI: init, initial commit, clone with
 //! progress, path validation. Semantics follow GitHub Desktop's `lib/git/*`.
+//!
+//! Clone (`lib/git/clone.ts`) refuses a destination in a sensitive location
+//! before anything is created, passes `-c init.defaultBranch` (the caller's
+//! or the user's default branch) and `GIT_CLONE_PROTECTION_ACTIVE=false`,
+//! the proxy of the system ([`crate::proxy`]), and reports progress through
+//! GHD's `CloneProgressParser` with Git LFS progress merged in
+//! (`executionOptionsWithProgress` with `trackLFSProgress`). The gits
+//! Corvene supports name the checkout step `Updating files`, which GHD's
+//! step list still calls `Checking out files`: GHD shows that step as
+//! context, at the 80 % the steps before it reached. Deviation
+//! ([`CloneOptions::updating_files_step`], flag
+//! `281-clone-updating-files-step`): `Updating files` counts as the
+//! checkout step, so the bar moves on to 100 %.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, MAIN_SEPARATOR_STR, Path, PathBuf};
 use std::sync::Arc;
 
 use tracing::info;
 
 use crate::detect::GitBinary;
-use crate::error::Result;
+use crate::error::{GitError, Result};
 use crate::process::GitCommand;
+use crate::remote_ops::{AskpassEnv, GitProgressEvent, ProgressParser};
 
-/// What a user-typed path looks like for Add / Create dialogs.
+/// What a user-typed path looks like for Add / Create dialogs: GHD
+/// `getRepositoryType`'s kind, read from the file system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathStatus {
     /// Nothing there (or not a directory).
     Missing,
-    /// Directory exists but has no `.git`.
+    /// A directory with no repository in it or above it.
     NotARepository,
     /// Bare repository (GHD: "Bare repositories are not currently supported").
     Bare,
-    /// A worktree with a `.git` directory or file (submodule/worktree pointer).
+    /// Inside a working directory: `path` or a directory above it has a
+    /// `.git` directory or file (submodule / worktree pointer).
     Repository,
 }
 
+/// GHD `getRepositoryType(path)`'s kind: like `git rev-parse` run in
+/// `path`, the repository is looked for in `path` and the directories above
+/// it, so a subdirectory of a working directory is `Repository`
+/// ([`crate::top_level_working_directory`] names its top level). Read from
+/// the file system rather than by running git, as the dialogs ask on every
+/// keystroke: a repository's `.git` folder itself counts as bare (git calls
+/// it regular), and `GIT_CEILING_DIRECTORIES` is not honoured.
 pub fn path_status(path: &Path) -> PathStatus {
+    if !path.is_dir() {
+        return PathStatus::Missing;
+    }
+    path.ancestors()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(root_path_status)
+        .find(|status| matches!(status, PathStatus::Repository | PathStatus::Bare))
+        .unwrap_or(PathStatus::NotARepository)
+}
+
+/// [`path_status`] of `path` itself, not looking above it: `Repository`
+/// only for a working directory's top level. For the checks that need the
+/// folder itself to be the repository (creating a repository there,
+/// cloning from it).
+pub fn root_path_status(path: &Path) -> PathStatus {
     if !path.is_dir() {
         return PathStatus::Missing;
     }
@@ -72,6 +110,19 @@ pub fn explain_stale_worktree(picked: &Path, workdir: &Path) -> Option<String> {
 
 /// Whether `dir` already has a `README.md` that "Initialize this repository
 /// with a README" would replace (GHD `readMeExists`).
+/// `git update-index -q --refresh`: records the files' current stat data in
+/// the index, so the first status after the files were copied or moved does
+/// not re-read every one of them. Modified files make git exit 1, which is
+/// not a failure here.
+pub fn refresh_index(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
+    GitCommand::new(git)
+        .args(["update-index", "-q", "--refresh"])
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .run()?;
+    Ok(())
+}
+
 pub fn readme_exists(dir: &Path) -> bool {
     dir.join("README.md").exists()
 }
@@ -104,19 +155,18 @@ pub fn normalize_clone_url(input: &str) -> Option<String> {
     }
 }
 
-/// Last path segment of a clone URL without `.git` (GHD `getDefaultDir`).
+/// GHD `sanitizeCloneName` (`lib/remote-parsing.ts`): the folder the Clone
+/// dialog names after a URL, on every platform the last non-empty `/`, `\`
+/// or `:` separated part without `.git`; `None` when that is empty, `.` or
+/// `..`, so a crafted URL cannot make the clone land outside the chosen
+/// directory. Surrounding white space of the typed URL is ignored.
 pub fn repository_name_from_url(url: &str) -> Option<String> {
-    let trimmed = url.trim().trim_end_matches('/');
-    // Windows: a local source is a path with backslashes
-    #[cfg(windows)]
-    let last = trimmed
-        .trim_end_matches('\\')
-        .rsplit(['/', ':', '\\'])
-        .next()?;
-    #[cfg(not(windows))]
-    let last = trimmed.rsplit(['/', ':']).next()?;
+    let last = url
+        .trim()
+        .split(['/', '\\', ':'])
+        .rfind(|component| !component.is_empty())?;
     let name = last.strip_suffix(".git").unwrap_or(last);
-    if name.is_empty() {
+    if name.is_empty() || name == "." || name == ".." {
         None
     } else {
         Some(name.to_string())
@@ -152,8 +202,12 @@ pub fn init_repository(git: Arc<GitBinary>, opts: InitOptions) -> Result<PathBuf
         .args(args)
         .current_dir(&opts.path)
         .run()?;
-    if let Some(desc) = &opts.description {
-        let _ = std::fs::write(opts.path.join(".git/description"), format!("{desc}\n"));
+    // GHD `createRepository`: `writeGitDescription` of a non-empty
+    // description, as typed (no newline added)
+    if let Some(desc) = opts.description.as_deref().filter(|d| !d.is_empty())
+        && let Err(err) = crate::write_git_description(&opts.path, desc)
+    {
+        tracing::warn!(%err, "could not write the repository description");
     }
     let mut wrote_files = false;
     let writable = |name: &str| !(opts.keep_existing && opts.path.join(name).exists());
@@ -235,51 +289,156 @@ pub fn set_global_identity(git: Arc<GitBinary>, name: &str, email: &str) -> Resu
     Ok(())
 }
 
-/// Progress reported while cloning: phase text + overall fraction (0..1).
+/// Progress reported while cloning: GHD's `ICloneProgress` (the line to show
+/// and the overall fraction, 0..1).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CloneProgress {
     pub description: String,
-    /// `None` = indeterminate.
+    /// From [`CloneProgressParser::parse`]: `None` for a line that is not
+    /// progress of a clone step (GHD's `{ kind: 'context' }`). The clone's
+    /// own reports always have a value: such a line keeps the fraction the
+    /// steps before it reached, as GHD's do.
     pub value: Option<f32>,
 }
 
-/// GHD `CloneProgressParser` phase weights (`lib/progress/clone.ts`).
-const PHASES: &[(&str, f32)] = &[
-    ("remote: Compressing objects", 0.1),
-    ("Receiving objects", 0.6),
-    ("Resolving deltas", 0.1),
-    ("Checking out files", 0.2),
-    ("Updating files", 0.2),
-];
+/// GHD `CloneProgressParser` (`lib/progress/clone.ts`): a
+/// [`ProgressParser`] over the clone steps, which keeps the highest step it
+/// has seen and treats a line of an earlier step as context. One parser per
+/// clone.
+#[derive(Clone, Debug)]
+pub struct CloneProgressParser(ProgressParser);
 
-pub fn parse_clone_progress(line: &str) -> CloneProgress {
-    let line = line.trim();
-    let mut start = 0.0f32;
-    for (title, weight) in PHASES {
-        if let Some(rest) = line.strip_prefix(title) {
-            let percent = rest
-                .trim_start_matches(':')
-                .trim()
-                .split('%')
-                .next()
-                .and_then(|p| p.trim().parse::<f32>().ok())
-                .unwrap_or(0.0)
-                / 100.0;
-            return CloneProgress {
-                description: line.to_string(),
-                value: Some((start + weight * percent).clamp(0.0, 1.0)),
-            };
-        }
-        start += weight;
-    }
-    CloneProgress {
-        description: line.to_string(),
-        value: None,
+impl Default for CloneProgressParser {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-/// `git clone --progress --recurse-submodules <url> <path>` streaming progress;
-/// `depth` adds `--depth <n>` (a shallow clone, `233-shallow-clone`). A
+impl CloneProgressParser {
+    pub fn new() -> Self {
+        Self(ProgressParser::for_clone())
+    }
+
+    /// [`Self::new`] that counts `Updating files` as the `Checking out
+    /// files` step (`281-clone-updating-files-step`).
+    pub fn with_updating_files_step() -> Self {
+        Self(ProgressParser::for_clone().with_alias("Updating files", "Checking out files"))
+    }
+
+    /// GHD `parse(line)`: the line's progress, `value` the overall fraction
+    /// for a line of a clone step and `None` for context.
+    pub fn parse(&mut self, line: &str) -> CloneProgress {
+        clone_progress(&self.0.parse_event(line), false)
+    }
+}
+
+/// What the clone callback gets for a parser event: the line, and for
+/// `reports` (the clone's own reports) the last fraction for context too.
+fn clone_progress(event: &GitProgressEvent, reports: bool) -> CloneProgress {
+    let value = match event {
+        GitProgressEvent::Progress { .. } => Some(event.percent() as f32),
+        GitProgressEvent::Context { .. } => reports.then(|| event.percent() as f32),
+    };
+    CloneProgress {
+        description: event.text().to_string(),
+        value,
+    }
+}
+
+/// [`CloneProgressParser::parse`] of one line by a fresh parser.
+pub fn parse_clone_progress(line: &str) -> CloneProgress {
+    CloneProgressParser::new().parse(line)
+}
+
+/// GHD `CloneOptions` (`models/clone-options.ts`) and the rest of what a
+/// clone takes.
+#[derive(Default)]
+pub struct CloneOptions {
+    /// `-b <branch>`: the branch to check out after cloning.
+    pub branch: Option<String>,
+    /// `init.defaultBranch` for an empty repository; the user's
+    /// `init.defaultBranch`, else `main`, when `None` (GHD `getDefaultBranch`).
+    pub default_branch: Option<String>,
+    /// `--depth <n>`: a shallow clone (`233-shallow-clone`).
+    pub depth: Option<u32>,
+    /// Credentials for the clone (GHD `envForAuthentication`).
+    pub askpass: Option<AskpassEnv>,
+    /// Count git's `Updating files` lines as GHD's `Checking out files`
+    /// step (`281-clone-updating-files-step`); off is GHD's parser.
+    pub updating_files_step: bool,
+}
+
+/// GHD `isClonePathSensitive`: `path`, resolved and lower-cased, is the
+/// home directory, or `.ssh`, `.gnupg`, `.config`, `.config/git` or
+/// `.gitconfig` in it or anything below them (Windows also `%APPDATA%` and
+/// `%APPDATA%\gnupg`). A backstop against a crafted URL that made the Clone
+/// dialog derive a path outside the chosen directory.
+pub fn is_clone_path_sensitive(path: &Path) -> bool {
+    let Some(home) = std::env::home_dir() else {
+        return false;
+    };
+    let lower = |path: &Path| path.to_string_lossy().to_lowercase();
+    let clone_path = lower(&resolve(path));
+    let home = resolve(&home);
+    if clone_path == lower(&home) {
+        return true;
+    }
+    #[allow(unused_mut)]
+    let mut sensitive: Vec<String> = [
+        home.join(".ssh"),
+        home.join(".gnupg"),
+        home.join(".config"),
+        home.join(".config").join("git"),
+        home.join(".gitconfig"),
+    ]
+    .iter()
+    .map(|path| lower(path))
+    .collect();
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA").filter(|a| !a.is_empty()) {
+        let app_data = PathBuf::from(app_data);
+        sensitive.push(lower(&app_data));
+        sensitive.push(lower(&resolve(&app_data.join("gnupg"))));
+    }
+    sensitive.iter().any(|location| {
+        clone_path == *location
+            || clone_path
+                .strip_prefix(location.as_str())
+                .is_some_and(|rest| rest.starts_with(MAIN_SEPARATOR_STR))
+    })
+}
+
+/// Node's `Path.resolve(path)`: absolute (against the current directory),
+/// `.` and `..` folded lexically, no symbolic links followed. Also used by
+/// [`crate::parse_config_lock_file_path_from_error`].
+pub(crate) fn resolve(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let mut resolved = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !matches!(
+                    resolved.components().next_back(),
+                    None | Some(Component::RootDir | Component::Prefix(_))
+                ) {
+                    resolved.pop();
+                }
+            }
+            other => resolved.push(other),
+        }
+    }
+    resolved
+}
+
+/// `git clone --progress --recurse-submodules <url> <path>` streaming
+/// progress, with `default_branch` and `depth` as in [`CloneOptions`]. A
 /// cancelled `cancel` token stops git, which removes what it created
 /// (Windows: a terminated git removes nothing, so Corvene does).
 pub fn clone(
@@ -289,33 +448,76 @@ pub fn clone(
     default_branch: Option<&str>,
     depth: Option<u32>,
     cancel: Option<crate::CancelToken>,
+    on_progress: impl FnMut(CloneProgress),
+) -> Result<()> {
+    let options = CloneOptions {
+        default_branch: default_branch.map(str::to_string),
+        depth,
+        ..CloneOptions::default()
+    };
+    clone_with_options(git, url, path, &options, cancel, on_progress)
+}
+
+/// GHD `clone(url, path, options, progressCallback)`: refuses a sensitive
+/// destination ([`is_clone_path_sensitive`]) before creating anything, then
+/// `git -c init.defaultBranch=<branch> clone --progress
+/// --recurse-submodules [--depth <n>] [-b <branch>] -- <url> <path>`.
+pub fn clone_with_options(
+    git: Arc<GitBinary>,
+    url: &str,
+    path: &Path,
+    options: &CloneOptions,
+    cancel: Option<crate::CancelToken>,
     mut on_progress: impl FnMut(CloneProgress),
 ) -> Result<()> {
+    if is_clone_path_sensitive(path) {
+        return Err(GitError::SensitiveClonePath(path.to_path_buf()));
+    }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(crate::error::GitError::Spawn)?;
+        std::fs::create_dir_all(parent).map_err(GitError::Spawn)?;
     }
     info!(url, path = %path.display(), "cloning");
-    let mut cmd = GitCommand::new(git);
-    // GHD `clone`: `-c init.defaultBranch=<the repository's default branch>`
+    // GHD: `-c init.defaultBranch=<options.defaultBranch ?? getDefaultBranch()>`
     // so an empty repository starts on the right branch
-    if let Some(branch) = default_branch {
-        cmd = cmd.args(["-c".to_string(), format!("init.defaultBranch={branch}")]);
+    let default_branch = match &options.default_branch {
+        Some(branch) => branch.clone(),
+        None => crate::branch_ops::configured_default_branch(git.clone()),
+    };
+    let mut cmd = GitCommand::new(git)
+        .args([
+            "-c".to_string(),
+            format!("init.defaultBranch={default_branch}"),
+        ])
+        .env("GIT_CLONE_PROTECTION_ACTIVE", "false");
+    for (key, value) in crate::proxy::env_for_remote_operation(url) {
+        cmd = cmd.env(key, value);
+    }
+    if let Some(askpass) = &options.askpass {
+        cmd = askpass.apply(cmd);
     }
     if let Some(token) = cancel {
         cmd = cmd.cancel_token(token);
     }
     cmd = cmd.args(["clone", "--progress", "--recurse-submodules"]);
-    if let Some(depth) = depth {
+    if let Some(depth) = options.depth {
         cmd = cmd.args(["--depth".to_string(), depth.to_string()]);
+    }
+    if let Some(branch) = &options.branch {
+        cmd = cmd.args(["-b", branch.as_str()]);
     }
     #[cfg(windows)]
     let existed = path.exists();
-    let cloned = cmd
-        .args(["--", url])
-        .arg(path)
-        .run_streaming(|line| on_progress(parse_clone_progress(line)));
+    let cmd = cmd.args(["--", url]).arg(path);
+    let mut parser = if options.updating_files_step {
+        CloneProgressParser::with_updating_files_step()
+    } else {
+        CloneProgressParser::new()
+    };
+    let cloned = crate::lfs_progress::run_with_progress(cmd, &mut parser.0, &mut |event| {
+        on_progress(clone_progress(&event, true))
+    });
     #[cfg(windows)]
-    if matches!(cloned, Err(crate::error::GitError::Cancelled(_))) && !existed {
+    if matches!(cloned, Err(GitError::Cancelled(_))) && !existed {
         // the killed processes let go of their files a moment later
         for _ in 0..20 {
             if std::fs::remove_dir_all(path).is_ok() || !path.exists() {
@@ -409,6 +611,12 @@ mod tests {
             repository_name_from_url("https://x/y/").as_deref(),
             Some("y")
         );
+        assert_eq!(
+            repository_name_from_url("x..\\..\\.ssh.git").as_deref(),
+            Some(".ssh")
+        );
+        assert_eq!(repository_name_from_url("https://x/.."), None);
+        assert_eq!(repository_name_from_url("https://x/.git"), None);
     }
 
     #[test]
@@ -460,6 +668,28 @@ mod tests {
         assert_eq!(path_status(dir.path()), PathStatus::NotARepository);
         std::fs::create_dir(dir.path().join(".git")).unwrap();
         assert_eq!(path_status(dir.path()), PathStatus::Repository);
+        // a subdirectory is inside the repository, but not its top level
+        let sub = dir.path().join("src").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+        assert_eq!(path_status(&sub), PathStatus::Repository);
+        assert_eq!(root_path_status(&sub), PathStatus::NotARepository);
+        assert_eq!(root_path_status(dir.path()), PathStatus::Repository);
+    }
+
+    #[test]
+    fn sensitive_clone_paths() {
+        let Some(home) = std::env::home_dir() else {
+            return;
+        };
+        assert!(is_clone_path_sensitive(&home));
+        assert!(is_clone_path_sensitive(&home.join(".ssh")));
+        assert!(is_clone_path_sensitive(&home.join(".SSH").join("x")));
+        assert!(is_clone_path_sensitive(
+            &home.join("GitHub").join("..").join(".gnupg").join("y")
+        ));
+        assert!(is_clone_path_sensitive(&home.join(".config").join("git")));
+        assert!(!is_clone_path_sensitive(&home.join("GitHub").join("repo")));
+        assert!(!is_clone_path_sensitive(&home.join(".sshkeys-repo")));
     }
 
     #[test]

@@ -614,9 +614,11 @@ pub fn knows_grammar(name: &str) -> bool {
 
 /// Register an extension's grammars under its id. `preferred` ranks them
 /// before the built-in grammars for the files they claim. Replaces an
-/// earlier registration of the same extension.
+/// earlier registration of the same extension at the same rank (`insert`
+/// replaces by source name).
 pub fn register_user(extension: &str, preferred: bool, grammars: Vec<UserGrammar>) {
-    unregister_user_quiet(extension);
+    // the other rank's registration of the same extension stays: an
+    // extension may prefer its grammar for some languages only
     let lower = |v: &[String]| v.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
     let entries = grammars
         .into_iter()

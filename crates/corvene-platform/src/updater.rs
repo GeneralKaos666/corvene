@@ -36,7 +36,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
@@ -563,17 +562,7 @@ pub fn download(
 
 /// Check that `file` hashes to `sha256` ([`ReleaseInfo::sha256`]).
 pub fn verify(file: &Path, sha256: &str) -> Result<(), UpdateError> {
-    let mut hasher = Sha256::new();
-    let mut file = std::fs::File::open(file)?;
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    let actual = format!("{:x}", hasher.finalize());
+    let actual = crate::file_hash::get_file_hash(file, crate::file_hash::HashAlgorithm::Sha256)?;
     if actual.eq_ignore_ascii_case(sha256.trim()) {
         Ok(())
     } else {

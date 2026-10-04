@@ -66,6 +66,12 @@ impl Dispatcher {
             move |result, cx| match result {
                 Ok(()) => {
                     bypassed.push(secret.id.clone());
+                    // the bypass dialog closes; the push-protection dialog
+                    // under it shows the secret as bypassed
+                    Self::close_popups_where(
+                        |p| matches!(p, Popup::BypassPushProtection { .. }),
+                        cx,
+                    );
                     Self::show_popup(
                         Popup::PushProtectionError {
                             repo: id,

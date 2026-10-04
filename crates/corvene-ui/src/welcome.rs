@@ -89,15 +89,82 @@ fn linux_text_height() -> f32 {
     (14. * SCALE() * 1.369).round()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Step {
+/// GHD `WelcomeStep` (the steps Corvene's flow has; GHD's sign-in steps are
+/// the sign-in dialog here).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WelcomeStep {
     Start,
     ConfigureGit,
 }
 
+/// What a button of a Welcome step does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WelcomeAction {
+    /// `advance(step)`
+    Advance(WelcomeStep),
+    /// `done()`: save the identity and leave the Welcome flow.
+    Done,
+}
+
+/// What GHD `ConfigureGit` (`ui/welcome/configure-git.tsx`) shows, with the
+/// first state of its `ConfigureGitUser` form.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConfigureGitContent {
+    /// The `<h1>`.
+    pub title: String,
+    /// The `.welcome-text` paragraph.
+    pub text: String,
+    /// `useGitHubAuthorInfo`: signed in, the account's name and email are
+    /// offered (and chosen).
+    pub use_github_author_info: bool,
+    /// `manualName` / `manualEmail`: the global config's, else the first
+    /// account's name (or login) and preferred email.
+    pub manual_name: String,
+    pub manual_email: String,
+    /// The form's buttons: label and what each does.
+    pub buttons: Vec<(String, WelcomeAction)>,
+}
+
+/// GHD `ConfigureGit` for `accounts` and the global `user.name` /
+/// `user.email` (`ConfigureGitUser`'s constructor for the form).
+pub fn configure_git_content(
+    accounts: &[corvene_core::Account],
+    global_user_name: Option<&str>,
+    global_user_email: Option<&str>,
+) -> ConfigureGitContent {
+    let account = accounts.first();
+    let account_name = account.map(|a| {
+        a.name
+            .clone()
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| a.login.clone())
+    });
+    ConfigureGitContent {
+        title: "Configure Git".into(),
+        text: "This is used to identify the commits you create. Anyone will be able to see \
+               this information if you publish commits."
+            .into(),
+        use_github_author_info: account.is_some(),
+        manual_name: global_user_name
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .or(account_name)
+            .unwrap_or_default(),
+        manual_email: global_user_email
+            .filter(|e| !e.is_empty())
+            .map(str::to_string)
+            .or_else(|| account.map(|a| a.preferred_email()))
+            .unwrap_or_default(),
+        buttons: vec![
+            ("Finish".into(), WelcomeAction::Done),
+            ("Cancel".into(), WelcomeAction::Advance(WelcomeStep::Start)),
+        ],
+    }
+}
+
 pub struct WelcomeView {
     state: Entity<AppState>,
-    step: Step,
+    step: WelcomeStep,
     /// "Configure manually" name and email.
     name: Entity<InputState>,
     email: Entity<InputState>,
@@ -129,7 +196,7 @@ impl WelcomeView {
         // A successful sign-in advances to Configure Git (GHD `Welcome.componentWillReceiveProps`).
         cx.observe_in(&state, window, |this, state, window, cx| {
             let has_account = !state.read(cx).accounts.is_empty();
-            if has_account && !this.had_account && this.step == Step::Start {
+            if has_account && !this.had_account && this.step == WelcomeStep::Start {
                 this.advance(window, cx);
             } else if this.prefilled {
                 this.sync_account(window, cx);
@@ -140,7 +207,7 @@ impl WelcomeView {
         .detach();
         Self {
             state,
-            step: Step::Start,
+            step: WelcomeStep::Start,
             name,
             email,
             use_github: false,
@@ -157,7 +224,7 @@ impl WelcomeView {
 
     /// Configure Git › Cancel (`WelcomeStep.Start`).
     fn back_to_start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.step = Step::Start;
+        self.step = WelcomeStep::Start;
         window.focus(&self.sign_in_focus, cx);
         self.sign_in_focus_visible = true;
         self.autofocus = true;
@@ -165,7 +232,7 @@ impl WelcomeView {
     }
 
     fn advance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.step = Step::ConfigureGit;
+        self.step = WelcomeStep::ConfigureGit;
         if !self.prefilled {
             self.prefilled = true;
             let (git, account) = {
@@ -175,24 +242,21 @@ impl WelcomeView {
             let identity = git.map(corvene_git::global_identity).unwrap_or_default();
             // `ConfigureGitUser` constructor: the global config first, then
             // the account's name / login and preferred email
-            let name = identity
-                .name
-                .clone()
-                .filter(|n| !n.is_empty())
-                .or_else(|| account.as_ref().and_then(|a| a.name.clone()))
-                .filter(|n| !n.is_empty())
-                .or_else(|| account.as_ref().map(|a| a.login.clone()))
-                .unwrap_or_default();
-            let email = identity
-                .email
-                .clone()
-                .filter(|e| !e.is_empty())
-                .or_else(|| account.as_ref().map(|a| a.preferred_email()))
-                .unwrap_or_default();
-            self.name.update(cx, |s, cx| s.set_value(name, window, cx));
+            let ConfigureGitContent {
+                use_github_author_info,
+                manual_name,
+                manual_email,
+                ..
+            } = configure_git_content(
+                account.as_slice(),
+                identity.name.as_deref(),
+                identity.email.as_deref(),
+            );
+            self.name
+                .update(cx, |s, cx| s.set_value(manual_name, window, cx));
             self.email
-                .update(cx, |s, cx| s.set_value(email, window, cx));
-            self.use_github = account.is_some();
+                .update(cx, |s, cx| s.set_value(manual_email, window, cx));
+            self.use_github = use_github_author_info;
             if let Some(account) = &account {
                 self.set_github_info(account, window, cx);
             }
@@ -507,20 +571,23 @@ impl WelcomeView {
 
     fn configure_git(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let t = cx.ghd();
-        let finish = cx.entity();
-        let cancel = cx.entity();
-        let account = self.state.read(cx).accounts.first().cloned();
+        let this = cx.entity();
+        let accounts = self.state.read(cx).accounts.clone();
+        let account = accounts.first().cloned();
         let use_github = self.use_github && account.is_some();
         let (name, email) = self.author(cx);
         let when = std::time::SystemTime::now() - std::time::Duration::from_secs(30 * 60);
+        let ConfigureGitContent {
+            title,
+            text,
+            buttons,
+            ..
+        } = configure_git_content(&accounts, None, None);
         div()
             .flex()
             .flex_col()
-            .child(welcome_title("Configure Git"))
-            .child(welcome_text(
-                "This is used to identify the commits you create. Anyone will be able to see \
-                 this information if you publish commits.",
-            ))
+            .child(welcome_title(title))
+            .child(welcome_text(text))
             .child(
                 // `#configure-git-user`: the author options, the form (20 px
                 // margins), then the example commit
@@ -586,29 +653,30 @@ impl WelcomeView {
                             .child(
                                 // `Row`: Finish (submit) and Cancel; the inputs'
                                 // 10 px bottom margin + the row's 10 px top one
-                                div()
-                                    .mt(px(20.))
-                                    .flex()
-                                    .flex_row()
-                                    .child(
-                                        welcome_button("welcome-finish", true, false, cx)
+                                div().mt(px(20.)).flex().flex_row().children(
+                                    buttons.into_iter().map(|(label, action)| {
+                                        let (id, primary) = match action {
+                                            WelcomeAction::Done => ("welcome-finish", true),
+                                            WelcomeAction::Advance(_) => ("welcome-cancel", false),
+                                        };
+                                        let this = this.clone();
+                                        welcome_button(id, primary, false, cx)
                                             .px(px(10.))
                                             .mr(px(10.))
-                                            .child("Finish")
-                                            .on_click(move |_, _, cx| {
-                                                finish.update(cx, |w, cx| w.finish(cx))
-                                            }),
-                                    )
-                                    .child(
-                                        welcome_button("welcome-cancel", false, false, cx)
-                                            .px(px(10.))
-                                            .mr(px(10.))
-                                            .child("Cancel")
+                                            .child(label)
                                             .on_click(move |_, window, cx| {
-                                                cancel
-                                                    .update(cx, |w, cx| w.back_to_start(window, cx))
-                                            }),
-                                    ),
+                                                this.update(cx, |w, cx| match action {
+                                                    WelcomeAction::Done => w.finish(cx),
+                                                    WelcomeAction::Advance(
+                                                        WelcomeStep::ConfigureGit,
+                                                    ) => w.advance(window, cx),
+                                                    WelcomeAction::Advance(WelcomeStep::Start) => {
+                                                        w.back_to_start(window, cx)
+                                                    }
+                                                })
+                                            })
+                                    }),
+                                ),
                             ),
                     )
                     .child(
@@ -871,66 +939,23 @@ fn welcome_radio_row(id: &'static str, selected: bool, cx: &App) -> Stateful<Div
         )
 }
 
-/// `GitEmailNotFoundWarning` in the welcome: 10 px under the email box,
-/// ⚠️ and "Learn more." when commits with `email` would not be linked to the
-/// account, a green check when they would; nothing for an empty email.
+/// `GitEmailNotFoundWarning` in the welcome (`ConfigureGitUser` passes the
+/// first account): 10 px under the email box, from
+/// [`git_email_not_found_warning`](crate::git_email_not_found_warning::git_email_not_found_warning).
 fn email_not_found_warning(account: &corvene_core::Account, email: &str, cx: &App) -> Option<Div> {
-    let email = email.trim();
-    if email.is_empty() {
-        return None;
-    }
-    let t = cx.ghd();
-    let kind = if account.is_dotcom() {
-        "GitHub"
-    } else {
-        "GitHub Enterprise"
+    use crate::git_email_not_found_warning::{
+        git_email_not_found_warning, git_email_not_found_warning_element,
     };
-    let attributable = account.is_attributable_email(email);
-    let mut parts: Vec<Inline> = Vec::new();
-    if attributable {
-        parts.push(
-            div()
-                .size(px(12.))
-                .mr(px(5.))
-                .rounded_full()
-                .bg(t.color_new)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(octicon(Octicon::Check, t.background).size(px(10.)))
-                .into_any_element()
-                .into(),
-        );
-        parts.push(format!("This email address matches your {kind} account.").into());
-    } else {
-        parts.push(Inline::Element(
-            crate::widgets::emoji("⚠️").into_any_element(),
-        ));
-        parts.push(
-            format!(
-                "This email address does not match your {kind} account. Your commits \
-                 will be wrongly attributed. "
-            )
-            .into(),
-        );
-        parts.push(
-            link_button("welcome-email-learn-more", "Learn more.", cx)
-                .text_size(px(WELCOME_FONT_MD()))
-                .on_click(|_, _, cx| {
-                    corvene_core::Dispatcher::open_url(
-                        "https://docs.github.com/en/github/committing-changes-to-your-project/\
-                         why-are-my-commits-linked-to-the-wrong-user",
-                        cx,
-                    )
-                })
-                .into_any_element()
-                .into(),
-        );
-    }
+    let content = git_email_not_found_warning(std::slice::from_ref(account), email)?;
     Some(
-        paragraph(parts)
-            .mt(px(10.))
-            .line_height(px(WELCOME_FONT_MD() * 1.5)),
+        git_email_not_found_warning_element(
+            "welcome-email",
+            content,
+            px(WELCOME_FONT_MD()),
+            px(WELCOME_FONT_MD() * 1.5),
+            cx,
+        )
+        .mt(px(10.)),
     )
 }
 
@@ -980,19 +1005,19 @@ fn welcome_button(id: &'static str, primary: bool, focused: bool, cx: &App) -> S
 impl Render for WelcomeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         WELCOME_SCALE.set(welcome_scale(crate::theme::page_size(window)));
-        if self.autofocus && self.step == Step::Start {
+        if self.autofocus && self.step == WelcomeStep::Start {
             self.autofocus = false;
             window.focus(&self.sign_in_focus, cx);
         }
-        if self.step == Step::ConfigureGit {
+        if self.step == WelcomeStep::ConfigureGit {
             // the example commit's avatar, as `CommitListItem` fetches it
             let (_, email) = self.author(cx);
             Dispatcher::request_avatar_for_email(&email, cx);
         }
         let t = cx.ghd();
         let content: AnyElement = match self.step {
-            Step::Start => self.start(window, cx).into_any_element(),
-            Step::ConfigureGit => self.configure_git(window, cx).into_any_element(),
+            WelcomeStep::Start => self.start(window, cx).into_any_element(),
+            WelcomeStep::ConfigureGit => self.configure_git(window, cx).into_any_element(),
         };
         let viewport = crate::theme::page_size(window);
         // a phone has no room for the illustration column

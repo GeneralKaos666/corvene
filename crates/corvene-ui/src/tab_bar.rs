@@ -8,7 +8,7 @@ use gpui_kit::*;
 use crate::icons::{Octicon, octicon};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
-use crate::widgets::counter;
+use crate::widgets::counter_text;
 
 /// `.tab-bar.vertical` item: 16 px icon + label.
 pub struct VerticalTab {
@@ -96,7 +96,8 @@ pub fn vertical_tab_bar_sized(
 pub struct TabModel {
     pub id: &'static str,
     pub label: SharedString,
-    pub count: Option<usize>,
+    /// The `.counter` text after the label.
+    pub count: Option<SharedString>,
     /// Corvene (`727-stash-dot-on-changes-tab`): a blue dot after the label.
     pub dot: bool,
 }
@@ -157,7 +158,7 @@ pub fn tab_bar_focus(
                         .flex()
                         .items_center()
                         .child(tab.label)
-                        .when_some(tab.count, |d, n| d.child(counter(n, cx)))
+                        .when_some(tab.count, |d, n| d.child(counter_text(n, cx)))
                         .when(tab.dot, |d| {
                             d.child(
                                 octicon(Octicon::DotFill, t.tab_bar_active)

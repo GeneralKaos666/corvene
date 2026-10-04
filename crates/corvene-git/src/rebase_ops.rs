@@ -10,7 +10,9 @@
 //! `commit.cleanup=scissors` so `#` message lines survive a conflict
 //! (GHD `lib/git/rebase.ts` keeps git's `strip`); cherry-picks likewise
 //! (flag `836`, GHD `lib/git/cherry-pick.ts`). Squash can `--autostash`
-//! (flag `829`; GHD refuses to start with local changes).
+//! (flag `829`; GHD refuses to start with local changes). [`binary_paths`]
+//! counts a renamed binary file under its new path, where GHD's
+//! `binaryListRegex` (`lib/git/diff.ts`) captures an empty one.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -360,27 +362,73 @@ pub fn parse_conflict_markers(stdout: &str) -> HashMap<String, u32> {
     counts
 }
 
-/// GHD `getBinaryPaths`: paths whose numstat is `-\t-`.
-pub fn binary_paths(git: Arc<GitBinary>, workdir: &Path, paths: &[String]) -> Result<Vec<String>> {
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    let out = GitCommand::new(git)
-        .args(["diff", "--numstat", "-z", "--"])
-        .args(paths)
+/// GHD `getBinaryPaths` (`lib/git/diff.ts`): the files git detects as
+/// binary when diffing the working tree against `reference`
+/// (`getDetectedBinaryFiles`: `diff --numstat -z <reference>` records of
+/// `-\t-`), then the `conflicted` paths whose `merge` attribute is `binary`
+/// (`getFilesUsingBinaryMergeDriver`: `check-attr --stdin -z merge`), each
+/// once. Fails when git does (an unborn `HEAD`, a missing `MERGE_HEAD`).
+///
+/// Deviation: a renamed binary file counts with its new path. GHD's
+/// `binaryListRegex` runs on across the NUL-separated records there and
+/// captures an empty path, losing the binary files listed after it.
+pub fn binary_paths(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    reference: &str,
+    conflicted: &[String],
+) -> Result<Vec<String>> {
+    let out = GitCommand::new(git.clone())
+        .args(["diff", "--numstat", "-z", reference])
         .current_dir(workdir)
         .run()?;
     let text = String::from_utf8_lossy(&out.stdout);
-    Ok(text
-        .split('\0')
-        .filter_map(|record| {
-            let mut parts = record.splitn(3, '\t');
-            let added = parts.next()?;
-            let deleted = parts.next()?;
-            let path = parts.next()?;
-            (added == "-" && deleted == "-").then(|| path.to_string())
-        })
-        .collect())
+    let mut fields = text.split('\0');
+    let mut paths: Vec<String> = Vec::new();
+    let mut push = |path: &str| {
+        if !paths.iter().any(|p| p == path) {
+            paths.push(path.to_string());
+        }
+    };
+    while let Some(record) = fields.next() {
+        let mut parts = record.splitn(3, '\t');
+        let (Some(added), Some(deleted), Some(path)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        // a rename: "added\tdeleted\t" NUL old NUL new
+        let path = if path.is_empty() {
+            fields.next();
+            fields.next().unwrap_or_default()
+        } else {
+            path
+        };
+        if added == "-" && deleted == "-" {
+            push(path);
+        }
+    }
+    if !conflicted.is_empty() {
+        let mut stdin: Vec<u8> = Vec::new();
+        for path in conflicted {
+            stdin.extend_from_slice(path.as_bytes());
+            stdin.push(0);
+        }
+        let out = GitCommand::new(git)
+            .args(["check-attr", "--stdin", "-z", "merge"])
+            .current_dir(workdir)
+            .stdin(stdin)
+            .run()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        // `<path> NUL <attribute> NUL <value> NUL` per path
+        let records: Vec<&str> = text.split('\0').collect();
+        let (records, _) = records.as_chunks::<3>();
+        for [path, attribute, value] in records {
+            if *attribute == "merge" && *value == "binary" {
+                push(path);
+            }
+        }
+    }
+    Ok(paths)
 }
 
 /// GHD `stageManualConflictResolution`: take one side of a conflicted file.
@@ -391,7 +439,7 @@ pub fn stage_manual_conflict_resolution(
     resolution: ManualConflictResolution,
 ) -> Result<()> {
     let status = &file.status;
-    if status.kind != FileStatusKind::Conflicted {
+    if !status.is_conflicted() {
         warn!(path = %file.path, "tried to manually resolve an unconflicted file");
         return Ok(());
     }
@@ -480,42 +528,21 @@ fn stage_for_continue(
     stage_all(git, workdir, &others)
 }
 
-/// `update-index --add --remove --replace` for every given file (ignores the
-/// partial-selection state, unlike `commit::stage_files`).
+/// GHD `stageFiles` for every given file (ignores the partial-selection
+/// state, unlike `commit::stage_files`).
 fn stage_all(
     git: Arc<GitBinary>,
     workdir: &Path,
     files: &[WorkingDirectoryFileChange],
 ) -> Result<()> {
-    let mut paths: Vec<u8> = Vec::new();
-    for file in files {
-        if let Some(old) = &file.old_path {
-            paths.extend_from_slice(old.as_bytes());
-            paths.push(0);
-        }
-        paths.extend_from_slice(file.path.as_bytes());
-        paths.push(0);
-    }
-    if paths.is_empty() {
-        return Ok(());
-    }
-    GitCommand::new(git)
-        .args([
-            "update-index",
-            "--add",
-            "--remove",
-            "--replace",
-            "-z",
-            "--stdin",
-        ])
-        .current_dir(workdir)
-        .stdin(paths)
-        .run()?;
-    Ok(())
+    crate::commit::stage_whole_files(git, workdir, files)
 }
 
 /// GHD `createMergeCommit`: stage the conflicted files (with resolutions) and
-/// commit with the prepared `MERGE_MSG` / `SQUASH_MSG`. Returns the new HEAD.
+/// commit with the prepared `MERGE_MSG` / `SQUASH_MSG`. `--cleanup=strip`
+/// drops its `#` commentary (the `# Conflicts:` list), which git keeps with
+/// `--no-edit` otherwise. Returns `parse_commit_sha` of git's output (the
+/// abbreviated sha), as GHD does.
 pub fn create_merge_commit(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -523,12 +550,14 @@ pub fn create_merge_commit(
     resolutions: &BTreeMap<String, ManualConflictResolution>,
 ) -> Result<String> {
     stage_for_continue(git.clone(), workdir, conflicted, resolutions)?;
-    GitCommand::new(git.clone())
-        .args(["commit", "--no-edit"])
+    let out = GitCommand::new(git)
+        .args(["commit", "--no-edit", "--cleanup=strip"])
         .env("GIT_EDITOR", ":")
         .current_dir(workdir)
         .run()?;
-    crate::commit::head_sha(git, workdir)
+    Ok(crate::commit::parse_commit_sha(&String::from_utf8_lossy(
+        &out.stdout,
+    )))
 }
 
 /// GHD `_abortSquashMerge`: a `merge --squash` has no `MERGE_HEAD` to abort,
@@ -691,6 +720,10 @@ pub fn abort_rebase(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
 
 /// GHD `continueRebase`: stage the (resolved) tracked files, then
 /// `rebase --continue`, or `--skip` when nothing is left to commit.
+/// `git_editor` is `GIT_EDITOR` for git (GHD `opts.gitEditor`, e.g. `cat
+/// "<message file>" >` to reword the stopped commit); `None` is `:`, which
+/// keeps the prepared message.
+#[allow(clippy::too_many_arguments)]
 pub fn continue_rebase(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -698,6 +731,7 @@ pub fn continue_rebase(
     resolutions: &BTreeMap<String, ManualConflictResolution>,
     commits: &[CommitOneLine],
     keep_messages: bool,
+    git_editor: Option<&str>,
     mut on_progress: impl FnMut(McoProgress),
 ) -> Result<RebaseResult> {
     stage_for_continue(git.clone(), workdir, files, resolutions)?;
@@ -705,7 +739,7 @@ pub fn continue_rebase(
         return Ok(RebaseResult::Aborted);
     }
     let keep_messages = keep_messages && rebase_keeps_messages(workdir);
-    let status = crate::status::get_status(git.clone(), workdir, None)?;
+    let status = crate::status::get_status(git.clone(), workdir)?;
     let tracked_after = status
         .files
         .iter()
@@ -720,7 +754,7 @@ pub fn continue_rebase(
     let result = GitCommand::new(git)
         .args(cleanup_config(keep_messages))
         .args(["rebase", action])
-        .env("GIT_EDITOR", ":")
+        .env("GIT_EDITOR", git_editor.unwrap_or(":"))
         .current_dir(workdir)
         .run_streaming(|line| {
             if let Some(p) = parse_rebase_progress(line, commits) {
@@ -891,7 +925,8 @@ pub fn reorder_todo(
     Some(todo)
 }
 
-fn temp_file(prefix: &str, contents: &str) -> Result<PathBuf> {
+#[doc(hidden)]
+pub fn temp_file(prefix: &str, contents: &str) -> Result<PathBuf> {
     let path = std::env::temp_dir().join(format!(
         "corvene-{prefix}-{}-{}",
         std::process::id(),
@@ -1215,7 +1250,7 @@ pub fn continue_cherry_pick(
     if !cherry_pick_head_found(workdir) {
         return Ok(CherryPickResult::UnableToStart);
     }
-    let status = crate::status::get_status(git.clone(), workdir, None)?;
+    let status = crate::status::get_status(git.clone(), workdir)?;
     let (commits, mut count) = match cherry_pick_snapshot(git.clone(), workdir) {
         Some(s) => (s.commits, s.cherry_picked_count),
         None => return Ok(CherryPickResult::UnableToStart),
@@ -1387,6 +1422,33 @@ mod tests {
     }
 
     #[test]
+    fn binary_paths_reads_a_renamed_binary_files_new_path() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        let blob = |seed: u8| -> Vec<u8> { (0..4096u32).map(|i| (i % 251) as u8 ^ seed).collect() };
+        std::fs::write(path.join("old.bin"), blob(0)).unwrap();
+        std::fs::write(path.join("z.bin"), blob(1)).unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-q", "-m", "binaries"]);
+        run(path, &["mv", "old.bin", "new.bin"]);
+        let mut renamed = blob(0);
+        renamed[0] = 0xff;
+        std::fs::write(path.join("new.bin"), renamed).unwrap();
+        run(path, &["add", "new.bin"]);
+        std::fs::write(path.join("z.bin"), blob(2)).unwrap();
+        assert_eq!(
+            binary_paths(git.clone(), path, "HEAD", &[]).unwrap(),
+            ["new.bin", "z.bin"]
+        );
+        // `merge=binary` adds conflicted text files, each path once
+        std::fs::write(path.join(".gitattributes"), "*.txt merge=binary\n").unwrap();
+        assert_eq!(
+            binary_paths(git, path, "HEAD", &["a.txt".into(), "z.bin".into()]).unwrap(),
+            ["new.bin", "z.bin", "a.txt"]
+        );
+    }
+
+    #[test]
     fn rebase_completes_and_reports_up_to_date() {
         let (dir, git) = repo();
         let path = dir.path();
@@ -1434,7 +1496,7 @@ mod tests {
             ),
             Some("main".to_string())
         );
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let conflicted = status
             .files
             .iter()
@@ -1453,6 +1515,7 @@ mod tests {
             &resolutions,
             &[],
             false,
+            None,
             |_| {},
         )
         .unwrap();
@@ -1496,7 +1559,7 @@ mod tests {
             rebase(git.clone(), path, "main", "feature", &[], true, |_| {}),
             RebaseResult::ConflictsEncountered
         );
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let mut resolutions = BTreeMap::new();
         resolutions.insert("a.txt".to_string(), ManualConflictResolution::Theirs);
         let result = continue_rebase(
@@ -1506,6 +1569,7 @@ mod tests {
             &resolutions,
             &[],
             true,
+            None,
             |_| {},
         )
         .unwrap();
@@ -1543,6 +1607,7 @@ mod tests {
             author: identity.clone(),
             committer: identity.clone(),
             parents: Vec::new(),
+            trailers: Vec::new(),
             tags: Vec::new(),
         };
         // squash "third" onto "second", keeping "first"
@@ -1647,7 +1712,7 @@ mod tests {
                 .unwrap()
         };
         let resolve = |side: ManualConflictResolution| {
-            let status = crate::status::get_status(git.clone(), path, None).unwrap();
+            let status = crate::status::get_status(git.clone(), path).unwrap();
             let mut resolutions = BTreeMap::new();
             resolutions.insert("a.txt".to_string(), side);
             continue_cherry_pick(git.clone(), path, &status.files, &resolutions, true, |_| {})
@@ -1699,6 +1764,7 @@ mod tests {
             author: identity.clone(),
             committer: identity.clone(),
             parents: Vec::new(),
+            trailers: Vec::new(),
             tags: Vec::new(),
         };
         std::fs::write(path.join("a.txt"), "local\n").unwrap();
@@ -1764,7 +1830,7 @@ mod tests {
                 .unwrap(),
             crate::MergeOutcome::Conflicts
         );
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let conflicted: Vec<_> = status
             .files
             .iter()
@@ -1790,7 +1856,7 @@ mod tests {
             crate::MergeOutcome::Conflicts
         );
         assert!(merge_head_set(path));
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let conflicted: Vec<_> = status
             .files
             .iter()
@@ -1801,7 +1867,13 @@ mod tests {
         let mut resolutions = BTreeMap::new();
         resolutions.insert("a.txt".to_string(), ManualConflictResolution::Ours);
         let sha = create_merge_commit(git.clone(), path, &conflicted, &resolutions).unwrap();
-        assert_eq!(sha.len(), 40);
+        // git's abbreviated sha (GHD `parseCommitSHA`)
+        assert!(
+            crate::head_sha(git.clone(), path)
+                .unwrap()
+                .starts_with(&sha)
+        );
+        assert!(sha.len() >= 7);
         assert!(!merge_head_set(path));
         assert_eq!(
             std::fs::read_to_string(path.join("a.txt")).unwrap(),

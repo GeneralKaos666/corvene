@@ -318,12 +318,9 @@ pub(crate) fn main() {
                 .bool(corvene_core::flags::ids::CONFIRM_QUIT_WHILE_BUSY)
                 .then(|| s.busy_for_quit())
                 .flatten()
-                .filter(|_| !matches!(s.popup, Some(Popup::ConfirmQuit { .. })));
+                .filter(|_| !matches!(s.popup(), Some(Popup::ConfirmQuit { .. })));
             match busy {
-                Some(busy) => {
-                    let previous = s.popup.clone().map(Box::new);
-                    Dispatcher::show_popup(Popup::ConfirmQuit { busy, previous }, cx)
-                }
+                Some(busy) => Dispatcher::show_popup(Popup::ConfirmQuit { busy }, cx),
                 None => cx.quit(),
             }
         });
@@ -515,6 +512,17 @@ pub(crate) fn main() {
                 Dispatcher::request_remove_repository(id, cx);
             }
         });
+        on_menu_action(cx, |_: &MoveToSharedStorage, cx| {
+            if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                Dispatcher::show_popup(
+                    Popup::MoveToSharedStorage {
+                        repo: id,
+                        then: corvene_core::AfterSharedStorageMove::Nothing,
+                    },
+                    cx,
+                );
+            }
+        });
         on_menu_action(cx, |_: &OpenFlags, cx| Dispatcher::open_flags(None, cx));
         // Corvene (`610-diff-mode-shortcut`): Diff Settings › Unified / Split
         on_menu_action(cx, |_: &ToggleDiffDisplayMode, cx| {
@@ -590,7 +598,7 @@ pub(crate) fn main() {
             MenuId::OpenWorkingDirectory,
             move |_: &ShowInFinder, cx| {
                 if let Some((_, path)) = selected_path(cx) {
-                    Dispatcher::show_in_finder(&path, cx);
+                    Dispatcher::show_repository(&path, cx);
                 }
             },
         );
@@ -1064,9 +1072,17 @@ pub(crate) fn main() {
                 );
             }
         });
+        // GHD's push item emits `force-push` (and reads Force Push) whenever
+        // a force push is possible (`build-default-menu.ts`, `app.tsx#push`)
         on_menu_action(cx, move |_: &Push, cx| {
             if let Some(id) = selected(cx) {
-                Dispatcher::push(id, false, None, cx);
+                if Dispatcher::force_push_state(id, cx)
+                    != corvene_core::ForcePushState::NotAvailable
+                {
+                    Dispatcher::confirm_or_force_push(id, cx);
+                } else {
+                    Dispatcher::push(id, false, None, cx);
+                }
             }
         });
         on_menu_action(cx, move |_: &Pull, cx| {
@@ -1125,7 +1141,7 @@ pub(crate) fn main() {
                     .read(cx)
                     .repo_states
                     .get(&id)
-                    .and_then(|r| r.status.as_ref())
+                    .and_then(|r| r.status.as_deref())
                     .map(|st| st.files.iter().map(|f| f.path.clone()).collect())
                     .unwrap_or_default();
                 Dispatcher::request_discard_changes(id, paths, cx);
@@ -1250,7 +1266,11 @@ fn resolve_theme_with(
 /// field in the dialog keeps the key (⌘⌫ deletes to the line start).
 fn on_menu_action<A: Action>(cx: &mut App, f: impl Fn(&A, &mut App) + 'static) {
     cx.on_action(move |action: &A, cx| {
-        if corvene_core::AppState::global(cx).read(cx).popup.is_none() {
+        if corvene_core::AppState::global(cx)
+            .read(cx)
+            .popup()
+            .is_none()
+        {
             f(action, cx)
         }
     });
@@ -1262,7 +1282,7 @@ fn on_menu_action<A: Action>(cx: &mut App, f: impl Fn(&A, &mut App) + 'static) {
 fn on_kept_menu_action<A: Action>(cx: &mut App, id: MenuId, f: impl Fn(&A, &mut App) + 'static) {
     cx.on_action(move |action: &A, cx| {
         let state = corvene_core::AppState::global(cx).read(cx);
-        if state.popup.is_none() || corvene_core::menu_state::is_enabled(state, id) {
+        if state.popup().is_none() || corvene_core::menu_state::is_enabled(state, id) {
             f(action, cx)
         }
     });
@@ -1564,6 +1584,27 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         // the sign-in dialog (device flow by default, browser flow link)
         ("sign-in", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx),
         ("sign-in-enterprise", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx),
+        // `GenericGitAuthentication` after a failed fetch (`:user` with the
+        // login known, so only the password is asked for)
+        (name @ ("generic-git-auth" | "generic-git-auth:user"), Some(id)) => {
+            Dispatcher::show_popup(
+                Popup::GenericGitAuthentication {
+                    repo: id,
+                    remote_url: "https://git.example.com/octocat/spoon-knife.git".into(),
+                    host: "git.example.com".into(),
+                    username: name.ends_with(":user").then(|| "octocat".into()),
+                    retry: corvene_core::RetryAction::Fetch,
+                },
+                cx,
+            )
+        }
+        ("ssh-key-passphrase", _) => Dispatcher::show_popup(
+            Popup::SshKeyPassphrase {
+                path: "/Users/octocat/.ssh/id_ed25519".into(),
+                wrong: false,
+            },
+            cx,
+        ),
         ("test-notifications", Some(id)) => {
             Dispatcher::show_popup(Popup::TestNotifications { repo: id }, cx)
         }

@@ -1,9 +1,9 @@
 //! Worktrees (GHD `lib/git/worktree.ts`): `git worktree list/add/remove/move`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use corvene_models::{WorktreeEntry, WorktreeType};
+use corvene_models::{Repository, WorktreeEntry, WorktreeType};
 
 use crate::detect::GitBinary;
 use crate::error::Result;
@@ -62,6 +62,59 @@ pub fn list_worktrees(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<Worktre
         .current_dir(workdir)
         .run()?;
     Ok(parse_worktree_porcelain(&out.stdout))
+}
+
+/// GHD `listWorktreesFromGitDir`: `git --git-dir <git_dir> worktree list
+/// --porcelain -z` run in `git_dir`, which still answers once a linked
+/// worktree's directory is gone (the main worktree comes back as its real
+/// path, the deleted one as prunable) as long as its admin dir is there.
+pub fn list_worktrees_from_git_dir(
+    git: Arc<GitBinary>,
+    git_dir: &Path,
+) -> Result<Vec<WorktreeEntry>> {
+    let out = GitCommand::new(git)
+        .arg("--git-dir")
+        .arg(git_dir)
+        .args(["worktree", "list", "--porcelain", "-z"])
+        .current_dir(git_dir)
+        .run()?;
+    Ok(parse_worktree_porcelain(&out.stdout))
+}
+
+/// GHD `resolveMainWorktreePath`: the main worktree of the worktree set
+/// `repository` belongs to, `None` when it is the main worktree itself or
+/// nothing resolves. The recorded `main_worktree_path` wins while it
+/// exists; otherwise the worktree's admin `git_dir` is asked
+/// ([`list_worktrees_from_git_dir`]), which only works while that metadata
+/// is there (`git worktree remove` and `prune` delete it).
+///
+/// Corvene's `Repository` keeps no git dir, so `Dispatcher` passes `None`
+/// (`.docs/deviations.md`, "A deleted linked worktree falls back to its
+/// main worktree").
+pub fn resolve_main_worktree_path(
+    git: Arc<GitBinary>,
+    repository: &Repository,
+    git_dir: Option<&Path>,
+) -> Result<Option<PathBuf>> {
+    let path = repository.path.as_path();
+    let recorded = repository.main_worktree_path.as_deref();
+    if recorded == Some(path) {
+        return Ok(None);
+    }
+    // a recorded path can outlive the location it names: a hint, not the answer
+    if let Some(recorded) = recorded
+        && recorded.exists()
+    {
+        return Ok(Some(recorded.to_path_buf()));
+    }
+    let Some(git_dir) = git_dir else {
+        return Ok(None);
+    };
+    Ok(list_worktrees_from_git_dir(git, git_dir)?
+        .into_iter()
+        .find(|wt| wt.kind == WorktreeType::Main)
+        .map(|wt| wt.path)
+        .filter(|main| main != path))
 }
 
 /// GHD `addWorktree`: `git worktree add [-b <branch>] <path> [<commitish>]`.

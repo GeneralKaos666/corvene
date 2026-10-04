@@ -1,0 +1,37 @@
+# `GenericGitAuthentication` (GHD has no test hook for it: the popup is shown
+# through the AppStore found on the root React fiber, as accounts.py does).
+name: generic-git-auth
+description: Authentication failed dialog, password masked and revealed
+setup: repo
+steps:
+  - ghd: {eval: "(() => { const root = document.getElementById('desktop-app-container'); const key = Object.keys(root).find(k => k.startsWith('__reactContainer') || k === '_reactRootContainer'); const stack = [key === '_reactRootContainer' ? root._reactRootContainer._internalRoot.current : root[key]]; let store = null; while (stack.length && !store) { const f = stack.pop(); if (!f) continue; if (f.stateNode && f.stateNode.props && f.stateNode.props.appStore) store = f.stateNode.props.appStore; if (f.sibling) stack.push(f.sibling); if (f.child) stack.push(f.child); } store._showPopup({type: 'GenericGitAuthentication', remoteUrl: 'https://git.example.com/octocat/spoon-knife.git', onSubmit: () => {}, onDismiss: () => store._closePopup()}); })()"}
+    corvene: {popup: generic-git-auth}
+    wait: 700
+  - dump: {name: open, root: dialog}
+  - snap: open
+  - type: octocat
+  - click: {css: "dialog .password-text-box input"}
+  - type: hunter2
+  - dump: {name: masked, root: dialog}
+  - snap: masked
+  - hover: {css: "dialog .password-text-box button"}
+  - snap: toggle-hover
+  - click: {css: "dialog .password-text-box button"}
+  - dump: {name: revealed, root: dialog}
+  - snap: revealed
+  - click: {css: "dialog .password-text-box button"}
+  - snap: masked-again
+---
+name: generic-git-auth-user
+description: Authentication failed dialog for a known user (password only)
+setup: repo
+steps:
+  - ghd: {eval: "(() => { const root = document.getElementById('desktop-app-container'); const key = Object.keys(root).find(k => k.startsWith('__reactContainer') || k === '_reactRootContainer'); const stack = [key === '_reactRootContainer' ? root._reactRootContainer._internalRoot.current : root[key]]; let store = null; while (stack.length && !store) { const f = stack.pop(); if (!f) continue; if (f.stateNode && f.stateNode.props && f.stateNode.props.appStore) store = f.stateNode.props.appStore; if (f.sibling) stack.push(f.sibling); if (f.child) stack.push(f.child); } store._showPopup({type: 'GenericGitAuthentication', remoteUrl: 'https://git.example.com/octocat/spoon-knife.git', username: 'octocat', onSubmit: () => {}, onDismiss: () => store._closePopup()}); })()"}
+    corvene: {popup: "generic-git-auth:user"}
+    wait: 700
+  - dump: {name: open, root: dialog}
+  - snap: open
+  - type: hunter2
+  - snap: masked
+  - click: {css: "dialog .password-text-box button"}
+  - snap: revealed

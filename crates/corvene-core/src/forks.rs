@@ -31,7 +31,7 @@
 
 use corvene_github::Client;
 use corvene_models::{
-    ForkContributionTarget, GitHubRepository, clone_url_like_remote, url_matches_remote,
+    ForkContributionTarget, GitHubRepository, Remote, clone_url_like_remote, url_matches_remote,
 };
 use gpui_kit::App;
 use tracing::{info, warn};
@@ -42,6 +42,20 @@ use crate::state::Popup;
 
 /// `UpstreamRemoteName`
 pub const UPSTREAM_REMOTE_NAME: &str = "upstream";
+
+/// GHD `findUpstreamRemote(parent, remotes)`
+/// (`lib/stores/helpers/find-upstream-remote.ts`): the remote named
+/// `upstream` when it points at `parent` (`repositoryMatchesRemote`: its
+/// `html_url` or `clone_url`, ignoring case and protocol).
+pub fn find_upstream_remote<'a>(
+    parent: &GitHubRepository,
+    remotes: &'a [Remote],
+) -> Option<&'a Remote> {
+    let upstream = remotes.iter().find(|r| r.name == UPSTREAM_REMOTE_NAME)?;
+    (url_matches_remote(&parent.html_url, &upstream.url)
+        || url_matches_remote(&parent.clone_url, &upstream.url))
+    .then_some(upstream)
+}
 
 /// GHD `getIgnoreExistingUpstreamRemoteKey` (a localStorage key there, a
 /// store key here).
@@ -75,15 +89,15 @@ impl Dispatcher {
             move |result, cx| match result {
                 Ok(fresh) => {
                     let changed = Self::state(cx).update(cx, |s, cx| {
-                        let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) else {
+                        let Some(repo) = s.repository(id).cloned() else {
                             return false;
                         };
                         if repo.github.as_ref() == Some(&fresh) {
                             return false;
                         }
                         info!(id, permissions = ?fresh.permissions, "refreshed GitHub repository");
-                        repo.github = Some(fresh);
-                        crate::dispatcher::persist_repositories(s);
+                        // GHD `RepositoriesStore.setGitHubRepository`
+                        s.repositories_store().set_github_repository(&repo, fresh);
                         cx.notify();
                         true
                     });
@@ -219,6 +233,8 @@ impl Dispatcher {
                     });
                     Self::refresh_repository(id, cx);
                     then(None, cx);
+                    // GHD's `CreateForkDialog` closes, then asks for the settings
+                    Self::close_popups_where(|p| matches!(p, Popup::CreateFork { .. }), cx);
                     Self::show_popup(Popup::ChooseForkSettings { repo: id }, cx);
                 }
                 Err(err) => then(Some(err), cx),
@@ -240,8 +256,9 @@ impl Dispatcher {
     }
 
     /// `addUpstreamRemoteIfNeeded`: a fork gets an `upstream` remote for its
-    /// parent unless one of the remotes already points there (or the name
-    /// is taken by something else).
+    /// parent unless its `upstream` remote already points there
+    /// ([`find_upstream_remote`]; with `fork-remotes-keep-ssh`, also at the
+    /// parent's SSH URL) or the name is taken by something else.
     pub(crate) fn add_upstream_remote_if_needed(id: u64, cx: &mut App) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -257,7 +274,7 @@ impl Dispatcher {
         if ignored {
             return;
         }
-        let (parent_url, remotes) = {
+        let (parent, parent_url, remotes) = {
             let s = Self::state(cx).read(cx);
             let Some(parent) = s
                 .repository(id)
@@ -273,6 +290,7 @@ impl Dispatcher {
                 return;
             }
             (
+                (**parent).clone(),
                 Self::parent_remote_url(s, id, parent),
                 rs.info
                     .as_ref()
@@ -281,10 +299,13 @@ impl Dispatcher {
             )
         };
         Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).upstream_checked = true);
-        if remotes
-            .iter()
-            .any(|r| url_matches_remote(&r.url, &parent_url))
-        {
+        // `parent_url` is the SSH URL `fork-remotes-keep-ssh` set (an SSH
+        // host alias would not match the parent's URLs)
+        let points_at_parent = find_upstream_remote(&parent, &remotes).is_some()
+            || remotes
+                .iter()
+                .any(|r| r.name == UPSTREAM_REMOTE_NAME && url_matches_remote(&r.url, &parent_url));
+        if points_at_parent {
             return;
         }
         if let Some(existing) = remotes.iter().find(|r| r.name == UPSTREAM_REMOTE_NAME) {

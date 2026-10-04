@@ -5,6 +5,11 @@
 //! optional "Undo" / "View conflicts" link and, when dismissable, an ✕.
 //! `update_banner` is GHD's `UpdateAvailable` banner.
 //!
+//! [`BannerView`] is GHD's generic `Banner` (`ui/banners/banner.tsx`): 200 ms
+//! after a banner appears focus moves to its first link (else its close
+//! button), and the banner is dismissed `Banner::timeout()` after focus
+//! leaves it (`corvene_core::banner_focus`).
+//!
 //! Deviation (`861-undo-delete-branch`): "Deleted branch" / "Restored
 //! branch" banners, with an Undo that recreates the deleted branch, are
 //! Corvene's (GHD deletes branches without a way back).
@@ -18,7 +23,12 @@
 //! banner over the bottom-right corner instead of pushing the views down
 //! (GHD `ui/app.tsx` `renderBanner` puts it in the layout flow).
 
-use corvene_core::{AvailableUpdate, Banner, Dispatcher, PackageManager, Popup, PreferencesTab};
+use std::time::Instant;
+
+use corvene_core::banner_focus::{BannerFocus, BannerFocusEvent};
+use corvene_core::{
+    AppState, AvailableUpdate, Banner, Dispatcher, PackageManager, Popup, PreferencesTab,
+};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -44,7 +54,8 @@ fn plural(count: usize) -> &'static str {
 }
 
 /// The message as text runs (`true` = bold, for branch names).
-fn parts(banner: &Banner) -> Vec<(String, bool)> {
+#[doc(hidden)]
+pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
     let t = |s: &str| (s.to_string(), false);
     let b = |s: &String| (s.clone(), true);
     match banner {
@@ -185,9 +196,143 @@ fn plain_message(banner: &Banner) -> String {
         .replace('\u{a0}', " ")
 }
 
-/// `renderBanner`
-pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
+/// GHD `Banner.renderCloseButton`'s accessible name.
+pub const DISMISS_LABEL: &str = "Dismiss this message";
+
+/// GHD `Banner.renderCloseButton`: the close button's accessible name, `None`
+/// for a banner that is not dismissable (no button).
+pub fn close_button_label(dismissable: bool) -> Option<&'static str> {
+    dismissable.then_some(DISMISS_LABEL)
+}
+
+/// GHD `Banner`: [`banner_bar`] for the app's banner, with its focus and
+/// dismissal timers.
+pub struct BannerView {
+    state: Entity<AppState>,
+    /// The banner's element (`this.banner`).
+    container: FocusHandle,
+    /// Its first suitable element: the first link, else the close button.
+    first: FocusHandle,
+    /// The shown banner's nonce and timers.
+    focus: Option<(u64, BannerFocus)>,
+    /// The banner drawn last, by nonce: focus only moves into a drawn one.
+    drawn: Option<u64>,
+    timer: Option<Task<()>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl BannerView {
+    pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let container = cx.focus_handle();
+        let first = cx.focus_handle();
+        let subscriptions = vec![
+            cx.observe_in(&state, window, |this, _, window, cx| this.sync(window, cx)),
+            // `onFocusIn`
+            cx.on_focus_in(&container, window, |this, window, cx| {
+                if let Some((_, focus)) = this.focus.as_mut() {
+                    focus.focus_in();
+                }
+                this.schedule(window, cx);
+            }),
+            // `onFocusOut`: focus left the banner (moves inside it do not
+            // leave it)
+            cx.on_focus_out(&container, window, |this, _, window, cx| {
+                if let Some((_, focus)) = this.focus.as_mut() {
+                    focus.focus_out(Instant::now(), false);
+                }
+                this.schedule(window, cx);
+            }),
+        ];
+        let mut this = Self {
+            state,
+            container,
+            first,
+            focus: None,
+            drawn: None,
+            timer: None,
+            _subscriptions: subscriptions,
+        };
+        this.sync(window, cx);
+        this
+    }
+
+    /// `componentDidMount` for a new banner; nothing pending without one.
+    fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let s = self.state.read(cx);
+        let nonce = s.banner_nonce;
+        match &s.banner {
+            Some(banner) => {
+                if self.focus.as_ref().map(|(n, _)| *n) != Some(nonce) {
+                    let focus =
+                        BannerFocus::mount(Instant::now(), banner.timeout(), banner.dismissable());
+                    self.focus = Some((nonce, focus));
+                    self.schedule(window, cx);
+                }
+            }
+            None => {
+                self.focus = None;
+                self.timer = None;
+            }
+        }
+    }
+
+    /// Wait for the next due timer.
+    fn schedule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(deadline) = self.focus.as_ref().and_then(|(_, f)| f.next_deadline()) else {
+            self.timer = None;
+            return;
+        };
+        let delay = deadline.saturating_duration_since(Instant::now());
+        self.timer = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            this.update_in(cx, |this, window, cx| this.fire(window, cx))
+                .ok();
+        }));
+    }
+
+    fn fire(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((nonce, focus)) = self.focus.as_mut() else {
+            return;
+        };
+        let nonce = *nonce;
+        for event in focus.advance(Instant::now()) {
+            match event {
+                // `focusOnFirstSuitableElement`
+                BannerFocusEvent::FocusFirstElement => {
+                    if self.drawn == Some(nonce) {
+                        window.focus(&self.first, cx);
+                    }
+                }
+                BannerFocusEvent::Dismiss => Dispatcher::dismiss_banner(nonce, cx),
+            }
+        }
+        self.schedule(window, cx);
+    }
+}
+
+impl Render for BannerView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let s = self.state.read(cx);
+        let (banner, nonce) = (s.banner.clone(), s.banner_nonce);
+        self.drawn = banner.is_some().then_some(nonce);
+        match banner {
+            Some(banner) => {
+                banner_bar(&banner, Some((&self.container, &self.first)), cx).into_any_element()
+            }
+            None => div().into_any_element(),
+        }
+    }
+}
+
+/// `renderBanner`: the banner strip; `focus`: the [`BannerView`]'s
+/// container and first-suitable-element handles.
+pub fn banner_bar(
+    banner: &Banner,
+    focus: Option<(&FocusHandle, &FocusHandle)>,
+    cx: &App,
+) -> impl IntoElement {
     let t = cx.ghd();
+    let (container, first) = focus.map_or((None, None), |(c, f)| (Some(c), Some(f)));
     let is_conflicts = matches!(
         banner,
         Banner::ConflictsFound { .. } | Banner::GitEmailMismatch { .. }
@@ -204,6 +349,7 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
             let repo = *repo;
             Some(
                 link_button("banner-undo", "Undo", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
                     .ml(SPACING_HALF())
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
@@ -216,6 +362,7 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
             let (repo, branch, sha) = (*repo, branch.clone(), sha.clone());
             Some(
                 link_button("banner-undo", "Undo", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
                     .ml(SPACING_HALF())
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
@@ -228,6 +375,7 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
             let repo = *repo;
             Some(
                 link_button("banner-view-conflicts", "View conflicts", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
                     .ml(SPACING_HALF())
                     .on_click(move |_, _, cx| Dispatcher::show_conflicts(repo, cx))
                     .into_any_element(),
@@ -239,6 +387,7 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
                 mac_or("Open Git Settings", "Open Git settings"),
                 cx,
             )
+            .when_some(first, |d, first| d.track_focus(first))
             .ml(SPACING_HALF())
             .on_click(|_, _, cx| {
                 Dispatcher::clear_banner(cx);
@@ -253,10 +402,12 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
         ),
         _ => None,
     };
+    let has_link = action.is_some();
     let close_color = t.text_secondary;
     let close_hover = t.text;
     div()
         .id("banner")
+        .when_some(container, |d, container| d.track_focus(container))
         // announced when it appears (GHD renders banners in an aria-live region)
         .a11y_live(plain_message(banner))
         .w_full()
@@ -292,11 +443,13 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
                         .children(action),
                 ),
         )
-        .when(banner.dismissable(), |d| {
+        .when_some(close_button_label(banner.dismissable()), |d, label| {
             d.child(
                 div()
                     .id("banner-close")
-                    .icon_button_label("Dismiss this message")
+                    // the first suitable element when there is no link
+                    .when_some(first.filter(|_| !has_link), |d, first| d.track_focus(first))
+                    .icon_button_label(label)
                     .mx(SPACING())
                     .flex_none()
                     .size(zpx(16.))
@@ -312,13 +465,6 @@ pub fn banner_bar(banner: &Banner, cx: &App) -> impl IntoElement {
         })
 }
 
-/// GHD `ui/banners/update-available.tsx` (`#update-available`,
-/// `banners/_update-available.scss`): a desktop-download icon in the warning
-/// icon colour, "Corvene N is available", "what's new" opens the release
-/// notes and "install and restart" installs (`updateNow`). A Homebrew
-/// install is told to `brew upgrade corvene` instead (Linux: any other
-/// package manager install is told to update with it). Always dismissable
-/// (Corvene has no prioritised updates).
 /// `422-banner-as-toast`: a banner as a card in the window's bottom-right
 /// corner, over the content. The banner's own bottom border is clipped (the
 /// card has a full border).
@@ -347,6 +493,13 @@ pub fn banner_toast_frame(banner: impl IntoElement, cx: &App) -> impl IntoElemen
         .child(div().mb(-zpx(1.)).child(banner))
 }
 
+/// GHD `ui/banners/update-available.tsx` (`#update-available`,
+/// `banners/_update-available.scss`): a desktop-download icon in the warning
+/// icon colour, "Corvene N is available", "what's new" opens the release
+/// notes and "install and restart" installs (`updateNow`). A Homebrew
+/// install is told to `brew upgrade corvene` instead (Linux: any other
+/// package manager install is told to update with it). Always dismissable
+/// (Corvene has no prioritised updates).
 pub fn update_banner(
     update: &AvailableUpdate,
     manager: Option<PackageManager>,
@@ -428,7 +581,7 @@ pub fn update_banner(
         .child(
             div()
                 .id("update-banner-close")
-                .icon_button_label("Dismiss this message")
+                .icon_button_label(DISMISS_LABEL)
                 .mx(SPACING())
                 .flex_none()
                 .size(zpx(16.))

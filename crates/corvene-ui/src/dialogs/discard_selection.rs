@@ -6,7 +6,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog_with_kind};
+use crate::dialog::{DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind};
 use crate::theme::mono_font;
 use crate::theme::sizes::*;
 use crate::widgets::checkbox;
@@ -75,18 +75,17 @@ impl Render for DiscardSelectionDialog {
             DialogKind::Warning,
             mac_or("Confirm Discard Changes", "Confirm discard changes"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "discard-selection-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "discard-selection-ok",
                     label: mac_or("Discard Changes", "Discard changes").into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
@@ -96,7 +95,8 @@ impl Render for DiscardSelectionDialog {
                         Dispatcher::discard_selection(repo, path.clone(), selection.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

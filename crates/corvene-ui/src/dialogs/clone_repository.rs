@@ -55,7 +55,7 @@ use crate::cloneable_repositories::{
     refresh_button, repository_list,
 };
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogFrame, dialog_loading_framed};
+use crate::dialog::{DialogFrame, GroupButtonSpec, OkCancelButtonGroup, dialog_loading_framed};
 use crate::icons::{Octicon, octicon};
 use crate::tab_bar::TabModel;
 use crate::theme::ActiveGhdTheme;
@@ -388,7 +388,8 @@ impl CloneRepositoryDialog {
             .bool(corvene_core::flags::ids::CLONE_OFFER_ADD_EXISTING);
         self.existing_repo = (offer_add
             && self.path_error.is_some()
-            && corvene_git::path_status(Path::new(&path)) == corvene_git::PathStatus::Repository)
+            && corvene_git::root_path_status(Path::new(&path))
+                == corvene_git::PathStatus::Repository)
             .then(|| PathBuf::from(&path));
     }
 
@@ -1042,18 +1043,17 @@ impl Render for CloneRepositoryDialog {
             if !has_footer {
                 Vec::new()
             } else {
-                vec![
-                    DialogButton {
+                OkCancelButtonGroup {
+                    destructive: false,
+                    cancel: GroupButtonSpec {
                         id: "clone-cancel",
                         label: "Cancel".into(),
-                        primary: false,
                         disabled: false,
                         on_click: Box::new(close),
                     },
-                    DialogButton {
+                    ok: GroupButtonSpec {
                         id: "clone-ok",
                         label: "Clone".into(),
-                        primary: true,
                         disabled: !can_clone,
                         on_click: Box::new(move |_, cx| {
                             if can_clone {
@@ -1061,7 +1061,8 @@ impl Render for CloneRepositoryDialog {
                             }
                         }),
                     },
-                ]
+                }
+                .into_buttons()
             },
             DialogFrame {
                 content_padding: false,

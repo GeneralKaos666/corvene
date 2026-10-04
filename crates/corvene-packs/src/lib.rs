@@ -27,6 +27,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
+pub use corvene_platform::file_hash::{HashAlgorithm, get_file_hash};
+
 /// Where the manifest is published: the `packs` release, next to the pack
 /// archives (`packaging/release.md`).
 pub const MANIFEST_URL: &str =
@@ -589,19 +591,9 @@ fn unpack(archive: &Path, into: &Path) -> Result<(), PackError> {
 }
 
 /// Hex sha256 of a file (used by the release script's test and callers
-/// that build manifests).
+/// that build manifests): GHD `getFileHash(path, 'sha256')`.
 pub fn sha256_file(path: &Path) -> std::io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
+    get_file_hash(path, HashAlgorithm::Sha256)
 }
 
 fn parse_version(text: &str) -> Option<[u64; 3]> {

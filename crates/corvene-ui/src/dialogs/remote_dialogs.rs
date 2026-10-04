@@ -14,13 +14,16 @@ use gpui_kit::*;
 
 use crate::context_menu::MenuItem;
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind,
+};
 use crate::icons::{Octicon, octicon};
 use crate::tab_bar::{TabModel, tab_bar};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
-    Inline, button, checkbox, code_ref, link_button, paragraph, primary_button, text_box,
+    Inline, button, checkbox, code_ref, labeled, link_button, paragraph, password_text_box,
+    primary_button, text_box,
 };
 
 /// GHD `sanitizedRepositoryName`: only `[A-Za-z0-9_.-]`, others become `-`.
@@ -37,7 +40,10 @@ pub fn sanitized_repository_name(name: &str) -> String {
 }
 
 /// `Publish`: GitHub.com / GitHub Enterprise tabs, name, description,
-/// private checkbox, organisation.
+/// private checkbox, organisation. The name, description and private
+/// checkbox are shared by both tabs; GHD keeps them per tab, so its
+/// description prefill reaches only the tab it opens on
+/// (`ui/publish-repository/publish.tsx`).
 pub struct PublishRepositoryDialog {
     state: Entity<AppState>,
     repo: u64,
@@ -79,6 +85,34 @@ impl PublishRepositoryDialog {
         cx.observe(&name, |_, _, cx| cx.notify()).detach();
         cx.observe(&description, |_, _, cx| cx.notify()).detach();
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
+        // `componentDidMount`: prefill the description from the repository's
+        // `description` file (`getGitDescription`)
+        let handle = window.window_handle();
+        let weak = cx.weak_entity();
+        Dispatcher::git_description(
+            repo,
+            move |text, cx| {
+                // a text box keeps one line, as an HTML text input strips
+                // line breaks from its value
+                let text = text.replace(['\r', '\n'], "");
+                if text.is_empty() {
+                    return;
+                }
+                handle
+                    .update(cx, |_, window, cx| {
+                        weak.update(cx, |this, cx| {
+                            // keeps text typed before the read finished (GHD
+                            // puts back the tab's earlier settings)
+                            if this.description.read(cx).value().is_empty() {
+                                this.description
+                                    .update(cx, |s, cx| s.set_value(text, window, cx));
+                            }
+                        })
+                    })
+                    .ok();
+            },
+            cx,
+        );
         let has_dotcom = state.read(cx).accounts.iter().any(is_dotcom);
         let has_enterprise = state.read(cx).accounts.iter().any(|a| !is_dotcom(a));
         Self {
@@ -533,25 +567,25 @@ impl Render for PushNeedsPullDialog {
             div().w(crate::theme::fit_width(450.)).child(
                 "Corvene is unable to push commits to this branch because there are commits on the remote that are not present on your local branch. Fetch these new commits before pushing in order to reconcile them with your local commits.",
             ),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "needs-pull-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "needs-pull-fetch",
                     label: "Fetch".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::fetch(repo, false, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -611,18 +645,17 @@ impl Render for ConfirmForcePushDialog {
             DialogKind::Warning,
             "Are you sure you want to force push?",
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "force-push-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "force-push-ok",
                     label: "I'm sure".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_ask {
@@ -632,7 +665,8 @@ impl Render for ConfirmForcePushDialog {
                         Dispatcher::push(repo, true, None, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -668,9 +702,18 @@ impl GenericGitAuthDialog {
         if let Some(u) = &username {
             username_state.update(cx, |s, cx| s.set_value(u.clone(), window, cx));
         }
-        let password = cx.new(|cx| InputState::new(window, cx));
+        // GHD `PasswordTextBox` (`type="password"`)
+        let password = cx.new(|cx| InputState::new(window, cx).masked(true));
         cx.observe(&username_state, |_, _, cx| cx.notify()).detach();
         cx.observe(&password, |_, _, cx| cx.notify()).detach();
+        // `Dialog.focusFirstSuitableChild`: the first input that is shown
+        let first = if username.is_some() {
+            &password
+        } else {
+            &username_state
+        };
+        let handle = first.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
         Self {
             repo,
             remote_url,
@@ -685,7 +728,6 @@ impl GenericGitAuthDialog {
 
 impl Render for GenericGitAuthDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = cx.ghd();
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let username = self
             .fixed_username
@@ -694,28 +736,20 @@ impl Render for GenericGitAuthDialog {
         let password = self.password.read(cx).value().to_string();
         let disabled = username.is_empty() || password.is_empty();
         let (repo, host, retry) = (self.repo, self.host.clone(), self.retry.clone());
-        let mono = |text: String| {
-            div()
-                .font_family(crate::theme::mono_font())
-                .px(zpx(3.))
-                .rounded(zpx(3.))
-                .bg(t.box_alt_background)
-                .child(text)
-        };
+        // `dialog#generic-git-auth { width: 450px }` sizes the box
         let content = div()
-            .w(crate::theme::fit_width(450.))
             .flex()
             .flex_col()
             .gap(SPACING())
             .child({
                 let mut parts: Vec<Inline> = vec![
                     "We were unable to authenticate with ".into(),
-                    mono(self.remote_url.clone()).into_any_element().into(),
+                    code_ref(self.remote_url.clone(), cx).into_any_element().into(),
                 ];
                 match &self.fixed_username {
                     Some(u) => {
                         parts.push(". Please enter the password for the user ".into());
-                        parts.push(mono(u.clone()).into_any_element().into());
+                        parts.push(code_ref(u.clone(), cx).into_any_element().into());
                         parts.push(" to try again.".into());
                     }
                     None => parts
@@ -724,28 +758,21 @@ impl Render for GenericGitAuthDialog {
                 paragraph(parts)
             })
             .when(self.fixed_username.is_none(), |d| {
-                d.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(SPACING_HALF())
-                        .child("Username")
-                        .child(text_box("auth-username", &self.username, None, window, cx)),
-                )
+                d.child(labeled(
+                    "Username",
+                    text_box("auth-username", &self.username, None, window, cx),
+                    cx,
+                ))
             })
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(SPACING_HALF())
-                    .child("Password")
-                    .child(text_box("auth-password", &self.password, None, window, cx)),
-            )
+            .child(labeled(
+                "Password",
+                password_text_box("auth-password", &self.password, window, cx),
+                cx,
+            ))
             .child(
                 paragraph(vec![
                     "Depending on your repository's hosting service, you might need to use a Personal Access Token (PAT) as your password. Learn more about creating a PAT in the ".into(),
                     link_button("auth-docs", "integration docs", cx)
-                        .text_size(FONT_SIZE_SM())
                         .on_click(|_, _, cx| {
                             Dispatcher::open_url(
                                 "https://github.com/desktop/desktop/tree/development/docs/integrations",
@@ -755,26 +782,23 @@ impl Render for GenericGitAuthDialog {
                         .into_any_element()
                         .into(),
                     ".".into(),
-                ])
-                .text_size(FONT_SIZE_SM())
-                .text_color(t.text_secondary),
+                ]),
             );
         dialog(
             "dialog-generic-git-auth",
             mac_or("Authentication Failed", "Authentication failed"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "auth-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "auth-save",
                     label: "Save and Retry".into(),
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if disabled {
@@ -790,7 +814,8 @@ impl Render for GenericGitAuthDialog {
                         );
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

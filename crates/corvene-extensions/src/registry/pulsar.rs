@@ -43,6 +43,12 @@ fn candidate(item: &Value) -> Option<Candidate> {
     let metadata = item.get("metadata");
     let repository = crate::manifest::repository_url(item.get("repository"))
         .or_else(|| metadata.and_then(|m| crate::manifest::repository_url(m.get("repository"))));
+    // the registry has no suffix index; `language-<x>` names its language
+    let suffixes: Vec<String> = name
+        .strip_prefix("language-")
+        .filter(|s| !s.is_empty() && !s.contains('-'))
+        .map(|s| vec![s.to_ascii_lowercase()])
+        .unwrap_or_default();
     let tree_sitter = metadata
         .and_then(|m| m.get("dependencies"))
         .and_then(Value::as_map)
@@ -72,7 +78,7 @@ fn candidate(item: &Value) -> Option<Candidate> {
         } else {
             GrammarHint::TextMate
         },
-        suffixes: Vec::new(),
+        suffixes,
         downloads: item
             .get("downloads")
             .and_then(|d| match d {

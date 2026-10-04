@@ -15,7 +15,7 @@ use gpui_kit::*;
 
 use crate::autocompletion::{self, Autocompletion, PickHandler};
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
+use crate::dialog::{DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind};
 use crate::dialogs::branch_dialogs::{ref_chip, sanitize_branch_name};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
@@ -353,22 +353,21 @@ impl Render for AddWorktreeDialog {
                 )
                 .children(branch_hint)
                 .children(path_message),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "add-worktree-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "add-worktree-ok",
                     label: if self.creating {
                         "Creating Worktree…".into()
                     } else {
                         mac_or("Create Worktree", "Create worktree").into()
                     },
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if !disabled {
@@ -376,7 +375,8 @@ impl Render for AddWorktreeDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -431,18 +431,17 @@ impl Render for RenameWorktreeDialog {
                 text_box("rename-worktree-name", &self.name, None, window, cx),
                 cx,
             )),
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "rename-worktree-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "rename-worktree-ok",
                     label: format!("Rename {current}").into(),
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if !disabled {
@@ -450,7 +449,8 @@ impl Render for RenameWorktreeDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -521,15 +521,15 @@ impl Render for DeleteWorktreeDialog {
             DialogKind::Warning,
             mac_or("Delete Worktree", "Delete worktree"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "delete-worktree-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "delete-worktree-ok",
                     label: crate::dialog::confirm_label(
                         "Delete",
@@ -537,7 +537,6 @@ impl Render for DeleteWorktreeDialog {
                         "Delete worktree",
                         cx,
                     ),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
@@ -547,7 +546,8 @@ impl Render for DeleteWorktreeDialog {
                         Dispatcher::delete_worktree(repo, path.clone(), false, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -629,25 +629,25 @@ impl Render for DeleteWorktreeFailedDialog {
             DialogKind::Error,
             mac_or("Delete Worktree Failed", "Delete worktree failed"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "delete-worktree-failed-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(dismiss.clone()),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "delete-worktree-failed-ok",
                     label: "Forcefully delete".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::delete_worktree(repo, path.clone(), true, cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             dismiss,
             window,
             cx,

@@ -61,7 +61,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use corvene_core::filter::{filtered_files, no_results_message, option_count};
+use corvene_core::filter::{no_results_message, option_count};
 use corvene_core::{
     AppState, Author, DiffSelectionType, Dispatcher, FileListFilter, FileStatusKind, FilterOption,
     Foldout, Popup, RepoRuleEnforced, RepoRulesMetadataFailures, RepoRulesMetadataStatus, Tip,
@@ -164,6 +164,9 @@ pub struct ChangesSidebar {
     /// (`738-clear-message-after-outside-commit`).
     seen_head: (Option<u64>, Option<String>),
     seen_amend_nonce: u64,
+    /// Repository and `commit_message_nonce` last seen: a new message from
+    /// the dispatcher (Undo Commit) goes into the form.
+    seen_commit_message: (Option<u64>, u64),
     /// Repository and `commit.template` text the form was last prefilled for.
     seen_template: (Option<u64>, Option<String>),
     context_menu: Option<Entity<ContextMenu>>,
@@ -212,12 +215,222 @@ pub struct ChangesSidebar {
     summary_placeholder: SharedString,
     /// `766-persist-commit-drafts`: the repository the form's text belongs to.
     draft_repo: Option<u64>,
+    /// The filtered list, rebuilt only when the status or a filter changes
+    /// (every render and scroll frame reads it; 100,000 changed files are
+    /// too many to filter and copy per frame).
+    visible_cache: RefCell<Option<Rc<VisibleData>>>,
+    /// The selected paths as a set for the rows, while the selection is large.
+    selected_cache: RefCell<Option<Rc<SelectedPaths>>>,
+    /// `716-windows-invalid-names-warning` for the current status.
+    windows_names_cache: RefCell<Option<(std::sync::Weak<Status>, WindowsNames)>>,
+}
+
+/// Included files Windows cannot check out: how many, and the first one
+/// with the reason.
+type WindowsNames = Option<(usize, String, &'static str)>;
+
+type Status = corvene_core::WorkingDirectoryStatus;
+type LineStatsMap = std::collections::HashMap<String, corvene_git::LineStats>;
+
+/// What [`VisibleData`] was built from.
+#[derive(Clone, PartialEq)]
+struct VisibleKey {
+    status: Option<usize>,
+    text: String,
+    /// View › Show Changes Filter: while hidden, neither the text nor the
+    /// options filter (GHD `applyFilters`).
+    show_filter: bool,
+    filter: FileListFilter,
+    hide: String,
+    order: String,
+    /// `703-changes-sort-order` "order-file": the `diff.orderFile`
+    /// patterns (empty for any other order).
+    order_file: Vec<String>,
+    mode: String,
+}
+
+/// The cached part of [`VisibleFiles`]. It keeps the status only weakly:
+/// a strong reference would make every checkbox click copy all files
+/// (`Arc::make_mut`), while a weak one still pins the pointer the key holds.
+struct VisibleData {
+    key: VisibleKey,
+    /// Pins the allocation `key.status` points at (never read).
+    _status: Option<std::sync::Weak<Status>>,
+    indices: Vec<usize>,
+    /// `getCheckAllValue` of the visible files.
+    include_all: Option<bool>,
+    /// Files included in the commit, and whether one of them is filtered out
+    /// (GHD `isCommittingFileHiddenByFilter`).
+    included: usize,
+    included_hidden: bool,
+    /// `changes-line-counts` totals for one line-stats map.
+    line_totals: RefCell<Option<(std::sync::Weak<LineStatsMap>, corvene_git::LineStats)>>,
+}
+
+/// The files passing the text + option filters, in list order, as indices
+/// into the shared status, with what the header derives from them. Lives
+/// for one render: listeners must not keep it (see [`VisibleData`]).
+pub(crate) struct VisibleFiles {
+    status: Option<std::sync::Arc<Status>>,
+    data: Rc<VisibleData>,
+}
+
+impl VisibleData {
+    fn build(key: VisibleKey, status: Option<&std::sync::Arc<Status>>) -> Self {
+        let files = status.map_or(&[][..], |s| &s.files[..]);
+        // `706-changes-hide-globs`
+        let hide = corvene_core::filter::hide_patterns(&key.hide);
+        // `703-changes-sort-order`
+        let order = corvene_core::filter::sorted_indices_with(files, &key.order, &key.order_file);
+        // `704-changes-filter-match`
+        let indices = corvene_core::filter::filtered_indices(
+            files,
+            order.as_deref(),
+            &key.text,
+            key.show_filter,
+            &key.filter,
+            &hide,
+            &key.mode,
+        );
+        let kind = |i: &usize| files[*i].selection.kind();
+        // `getCheckAllValue`: the box reflects only the files passing the filter
+        let include_all = if indices.iter().all(|i| kind(i) == DiffSelectionType::All) {
+            Some(true)
+        } else if indices.iter().all(|i| kind(i) == DiffSelectionType::None) {
+            Some(false)
+        } else {
+            None
+        };
+        let is_included =
+            |f: &WorkingDirectoryFileChange| f.selection.kind() != DiffSelectionType::None;
+        let included = files.iter().filter(|f| is_included(f)).count();
+        let included_hidden = indices.len() != files.len() && {
+            let mut shown = vec![false; files.len()];
+            for &i in &indices {
+                shown[i] = true;
+            }
+            files
+                .iter()
+                .zip(&shown)
+                .any(|(f, shown)| !shown && is_included(f))
+        };
+        Self {
+            key,
+            _status: status.map(std::sync::Arc::downgrade),
+            indices,
+            include_all,
+            included,
+            included_hidden,
+            line_totals: RefCell::new(None),
+        }
+    }
+}
+
+impl VisibleFiles {
+    fn files(&self) -> &[WorkingDirectoryFileChange] {
+        self.status.as_deref().map_or(&[][..], |s| &s.files[..])
+    }
+
+    fn len(&self) -> usize {
+        self.data.indices.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.data.indices.is_empty()
+    }
+
+    /// Every changed file, filtered or not.
+    fn total(&self) -> usize {
+        self.files().len()
+    }
+
+    fn include_all(&self) -> Option<bool> {
+        self.data.include_all
+    }
+
+    fn get(&self, ix: usize) -> Option<&WorkingDirectoryFileChange> {
+        self.data.indices.get(ix).map(|&i| &self.files()[i])
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &WorkingDirectoryFileChange> {
+        let files = self.files();
+        self.data.indices.iter().map(move |&i| &files[i])
+    }
+
+    fn paths(&self) -> Vec<String> {
+        self.iter().map(|f| f.path.clone()).collect()
+    }
+
+    fn position(&self, path: &str) -> Option<usize> {
+        self.iter().position(|f| f.path == path)
+    }
+
+    /// Lines added / deleted by the visible files.
+    fn line_totals(&self, stats: &std::sync::Arc<LineStatsMap>) -> corvene_git::LineStats {
+        if let Some((map, totals)) = &*self.data.line_totals.borrow()
+            && std::ptr::eq(map.as_ptr(), std::sync::Arc::as_ptr(stats))
+        {
+            return *totals;
+        }
+        let totals = self.iter().filter_map(|f| stats.get(&f.path)).fold(
+            corvene_git::LineStats::default(),
+            |acc, s| corvene_git::LineStats {
+                added: acc.added + s.added,
+                deleted: acc.deleted + s.deleted,
+            },
+        );
+        *self.data.line_totals.borrow_mut() = Some((std::sync::Arc::downgrade(stats), totals));
+        totals
+    }
+}
+
+/// `selectedFileIDs` for the rows: a set once there are more than a few
+/// (⌘A over 100,000 files would make every row search them all).
+pub(crate) struct SelectedPaths {
+    list: Vec<String>,
+    set: Option<std::collections::HashSet<String>>,
+}
+
+impl SelectedPaths {
+    fn new(list: Vec<String>) -> Self {
+        let set = (list.len() > 16).then(|| list.iter().cloned().collect());
+        Self { list, set }
+    }
+
+    fn contains(&self, path: &str) -> bool {
+        match &self.set {
+            Some(set) => set.contains(path),
+            None => self.list.iter().any(|p| p == path),
+        }
+    }
+}
+
+/// GHD `RepoRulesetsForBranchLink`
+/// (`ui/repository-rules/repo-rulesets-for-branch-link.tsx`): the rulesets
+/// page for `branch`, `None` (the children without a link) when the
+/// repository or the branch is missing.
+pub fn repo_rulesets_for_branch_link(
+    repository: Option<&corvene_core::GitHubRepository>,
+    branch: Option<&str>,
+) -> Option<String> {
+    let (repository, branch) = (repository?, branch.filter(|b| !b.is_empty())?);
+    Some(format!(
+        "{}/rules/?ref={}",
+        repository.html_url,
+        corvene_core::integrations::encode_component(&format!("refs/heads/{branch}"))
+    ))
+}
+
+/// GHD `RepoRulesetLink` (`ui/repository-rules/repo-ruleset-link.tsx`): the
+/// page of the ruleset `ruleset_id`.
+pub fn repo_ruleset_link(repository: &corvene_core::GitHubRepository, ruleset_id: u64) -> String {
+    format!("{}/rules/{ruleset_id}", repository.html_url)
 }
 
 /// What the repository rules say about the commit being written
 /// (`renderBranchProtectionsRepoRulesCommitWarning` inputs).
 struct RulesSnapshot {
-    html_url: String,
+    github: corvene_core::GitHubRepository,
     branch: Option<String>,
     /// `aheadBehind === null`: the branch is unpublished.
     unpublished: bool,
@@ -344,6 +557,30 @@ impl ChangesSidebar {
                     cx.notify();
                 }
             }
+            // GHD `commitMessage` (after `undoCommit`): load it into the form
+            let (repo, message_nonce, message) = {
+                let s = state.read(cx);
+                let rs = s.selected_state();
+                (
+                    s.selected,
+                    rs.map_or(0, |rs| rs.commit_message_nonce),
+                    rs.map(|rs| rs.commit_message.clone()),
+                )
+            };
+            let seen = std::mem::replace(&mut this.seen_commit_message, (repo, message_nonce));
+            if seen.0 == repo
+                && seen.1 != message_nonce
+                && let Some(message) = message
+            {
+                this.summary
+                    .update(cx, |s, cx| s.set_value(message.summary, window, cx));
+                this.description.update(cx, |s, cx| {
+                    s.set_value(message.description.unwrap_or_default(), window, cx)
+                });
+                this.refresh_spelling(CommitField::Summary, cx);
+                this.refresh_spelling(CommitField::Description, cx);
+                cx.notify();
+            }
         })
         .detach();
         let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
@@ -419,6 +656,7 @@ impl ChangesSidebar {
             tag,
             pending_tag: None,
             seen_amend_nonce: 0,
+            seen_commit_message: (None, 0),
             seen_template: (None, None),
             context_menu: None,
             filter_popover_open: false,
@@ -444,6 +682,9 @@ impl ChangesSidebar {
             co_author_hint: None,
             summary_placeholder: "Summary (required)".into(),
             draft_repo: None,
+            visible_cache: RefCell::new(None),
+            selected_cache: RefCell::new(None),
+            windows_names_cache: RefCell::new(None),
         }
     }
 
@@ -1471,7 +1712,7 @@ impl ChangesSidebar {
 
     /// Arrow keys move the selection through the visible files.
     pub(crate) fn select_relative(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let (files, _) = self.visible_files(cx);
+        let files = self.visible(cx);
         if files.is_empty() {
             return;
         }
@@ -1491,11 +1732,14 @@ impl ChangesSidebar {
             )
         };
         let index = current
-            .and_then(|p| files.iter().position(|f| f.path == p))
+            .and_then(|p| files.position(&p))
             // GHD `List.moveSelection` wraps around the ends
             .map(|i| crate::filter_list::wrap_step(i, delta, files.len()))
             .unwrap_or(0);
-        Dispatcher::select_file(id, files[index].path.clone(), cx);
+        let Some(file) = files.get(index) else {
+            return;
+        };
+        Dispatcher::select_file(id, file.path.clone(), cx);
         self.list_scroll
             .scroll_to_item(index, ScrollStrategy::Nearest);
     }
@@ -1537,7 +1781,7 @@ impl ChangesSidebar {
     fn highlighted_file_on_disk(&self, cx: &App) -> Option<PathBuf> {
         let (id, paths) = self.highlighted_files(cx)?;
         let s = self.state.read(cx);
-        let status = s.repo_states.get(&id)?.status.as_ref()?;
+        let status = s.repo_states.get(&id)?.status.as_deref()?;
         let first = paths.first()?;
         let file = status.files.iter().find(|f| &f.path == first)?;
         (file.status.kind != FileStatusKind::Deleted)
@@ -1576,13 +1820,15 @@ impl ChangesSidebar {
             {
                 paths.push(one);
             }
-            let Some(status) = rs.status.as_ref() else {
+            let Some(status) = rs.status.as_deref() else {
                 return;
             };
+            let wanted: std::collections::HashSet<&str> =
+                paths.iter().map(String::as_str).collect();
             let all_included = status
                 .files
                 .iter()
-                .filter(|f| paths.contains(&f.path))
+                .filter(|f| wanted.contains(f.path.as_str()))
                 .all(|f| f.selection.kind() == corvene_core::DiffSelectionType::All);
             (id, paths, all_included)
         };
@@ -1594,11 +1840,10 @@ impl ChangesSidebar {
 
     /// ⇧↑ / ⇧↓: extend the range selection (GHD `List.addSelection`).
     fn extend_relative(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let (files, _) = self.visible_files(cx);
+        let order = self.visible(cx).paths();
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
-        let order: Vec<String> = files.into_iter().map(|f| f.path).collect();
         Dispatcher::extend_file_selection_by(id, delta, order.clone(), cx);
         let end = self
             .state
@@ -1681,44 +1926,65 @@ impl ChangesSidebar {
         self.open_menu(items, position, window, cx);
     }
 
-    /// Files that pass the text + option filters, plus the unfiltered total.
-    fn visible_files(&self, cx: &App) -> (Vec<WorkingDirectoryFileChange>, usize) {
-        let text = self.filter.read(cx).value().to_string();
+    /// Files that pass the text + option filters (cached until the status
+    /// or a filter changes).
+    fn visible(&self, cx: &App) -> Rc<VisibleFiles> {
         let s = self.state.read(cx);
-        let Some(rs) = s.selected_state() else {
-            return (Vec::new(), 0);
-        };
-        let Some(status) = rs.status.as_ref() else {
-            return (Vec::new(), 0);
-        };
-        // `706-changes-hide-globs`
-        let hide = corvene_core::filter::hide_patterns(
-            s.flags.text(corvene_core::flags::ids::CHANGES_HIDE_GLOBS),
-        );
-        // `703-changes-sort-order`
+        let rs = s.selected_state();
+        let status = rs.and_then(|rs| rs.status.clone());
         let order = s.flags.text(corvene_core::flags::ids::CHANGES_SORT_ORDER);
-        let mut sorted = None;
-        if order == "order-file" {
-            // `diff.orderFile` (path order when unset)
-            let patterns = rs.info.as_ref().map(|i| i.diff_order.as_slice());
-            if let Some(patterns) = patterns.filter(|p| !p.is_empty()) {
-                let mut files = status.files.clone();
-                corvene_core::filter::sort_files_by_order_file(&mut files, patterns);
-                sorted = Some(files);
-            }
-        } else if order != "path" {
-            let mut files = status.files.clone();
-            corvene_core::filter::sort_files(&mut files, order);
-            sorted = Some(files);
+        // `diff.orderFile` (path order when unset)
+        let order_file = match order {
+            "order-file" => rs
+                .and_then(|rs| rs.info.as_ref())
+                .map(|i| i.diff_order.clone())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let key = VisibleKey {
+            status: status.as_ref().map(|s| std::sync::Arc::as_ptr(s) as usize),
+            text: self.filter.read(cx).value().to_string(),
+            show_filter: self.filter_visible,
+            filter: rs.map(|rs| rs.file_list_filter).unwrap_or_default(),
+            hide: s
+                .flags
+                .text(corvene_core::flags::ids::CHANGES_HIDE_GLOBS)
+                .to_string(),
+            order: order.to_string(),
+            order_file,
+            mode: s
+                .flags
+                .text(corvene_core::flags::ids::CHANGES_FILTER_MATCH)
+                .to_string(),
+        };
+        let cached = self
+            .visible_cache
+            .borrow()
+            .as_ref()
+            .filter(|data| data.key == key)
+            .cloned();
+        let data = cached.unwrap_or_else(|| {
+            let data = Rc::new(VisibleData::build(key, status.as_ref()));
+            *self.visible_cache.borrow_mut() = Some(data.clone());
+            data
+        });
+        Rc::new(VisibleFiles { status, data })
+    }
+
+    /// The selection for the rows (cached while it does not change).
+    fn selected_paths(&self, cx: &App) -> Rc<SelectedPaths> {
+        let s = self.state.read(cx);
+        let list = s
+            .selected_state()
+            .map_or(&[][..], |rs| &rs.selected_files[..]);
+        if let Some(cached) = self.selected_cache.borrow().as_ref()
+            && cached.list == list
+        {
+            return cached.clone();
         }
-        let files = sorted.as_deref().unwrap_or(&status.files);
-        // `704-changes-filter-match`
-        let mode = s.flags.text(corvene_core::flags::ids::CHANGES_FILTER_MATCH);
-        let visible = filtered_files(files, &text, &rs.file_list_filter, &hide, mode)
-            .into_iter()
-            .cloned()
-            .collect();
-        (visible, status.files.len())
+        let selected = Rc::new(SelectedPaths::new(list.to_vec()));
+        *self.selected_cache.borrow_mut() = Some(selected.clone());
+        selected
     }
 
     /// GHD `createStateUpdate` (augmented-filter-list.tsx): when a non-empty
@@ -1727,16 +1993,13 @@ impl ChangesSidebar {
         if self.filter.read(cx).value().trim().is_empty() {
             return;
         }
-        let (visible, _) = self.visible_files(cx);
-        let s = self.state.read(cx);
-        let (Some(id), Some(rs)) = (s.selected, s.selected_state()) else {
+        let visible = self.visible(cx);
+        let selected = self.selected_paths(cx);
+        let Some(id) = self.state.read(cx).selected else {
             return;
         };
-        let hidden = !rs
-            .selected_files
-            .iter()
-            .any(|p| visible.iter().any(|f| &f.path == p));
-        if hidden && let Some(first) = visible.first() {
+        let hidden = !visible.iter().any(|f| selected.contains(&f.path));
+        if hidden && let Some(first) = visible.get(0) {
             Dispatcher::select_file(id, first.path.clone(), cx);
         }
     }
@@ -1745,27 +2008,16 @@ impl ChangesSidebar {
     /// is active, not every file is listed, and a file included in the
     /// commit is among the hidden ones. Returns the included count.
     fn committing_hidden_files(&self, cx: &App) -> Option<usize> {
-        let text_active = !self.filter.read(cx).value().trim().is_empty();
-        if !text_active && self.filter_options(cx).count_active() == 0 {
+        let text = self.filter.read(cx).value().to_string();
+        let filter = self.filter_options(cx);
+        if !corvene_core::filter::has_active_filters(&text, &filter) {
             return None;
         }
-        let (visible, total) = self.visible_files(cx);
-        if visible.len() == total {
-            return None;
-        }
-        let s = self.state.read(cx);
-        let status = s.selected_state()?.status.as_ref()?;
-        let included: Vec<&str> = status
-            .files
-            .iter()
-            .filter(|f| f.selection.kind() != DiffSelectionType::None)
-            .map(|f| f.path.as_str())
-            .collect();
-        let hidden = included.len() > visible.len()
-            || included
-                .iter()
-                .any(|p| !visible.iter().any(|f| f.path == *p));
-        hidden.then_some(included.len())
+        let visible = self.visible(cx);
+        visible
+            .data
+            .included_hidden
+            .then_some(visible.data.included)
     }
 
     /// `.hidden-changes-warning` between the list and the commit form.
@@ -1834,14 +2086,11 @@ impl ChangesSidebar {
         let t = cx.ghd();
         let s = self.state.read(cx);
         let id = s.selected?;
-        let files = s
-            .selected_state()
-            .and_then(|rs| rs.status.as_ref())
-            .map(|st| st.files.clone())
-            .unwrap_or_default();
+        let status = s.selected_state().and_then(|rs| rs.status.clone());
+        let files = status.as_deref().map_or(&[][..], |st| &st.files[..]);
         let filter = self.filter_options(cx);
-        let text_active = !self.filter.read(cx).value().trim().is_empty();
-        let active = filter.count_active() > 0 || text_active;
+        let active =
+            corvene_core::filter::has_active_filters(&self.filter.read(cx).value(), &filter);
         // `705-renamed-files-filter` (kept while active, to be cleared)
         let renamed_option =
             s.flags.bool(corvene_core::flags::ids::RENAMED_FILES_FILTER) || filter.renamed;
@@ -1853,7 +2102,7 @@ impl ChangesSidebar {
             };
         let option_row = |option: FilterOption, label: &str| {
             let checked = filter.get(option);
-            let count = option_count(option, &files);
+            let count = option_count(option, files);
             div()
                 .id(SharedString::from(format!("filter-opt-{label}")))
                 .flex()
@@ -2023,7 +2272,7 @@ impl ChangesSidebar {
                     .as_ref()
                     .is_some_and(|c| matches!(c.kind, corvene_core::ConflictKind::Rebase { .. })),
                 rs.status
-                    .as_ref()
+                    .as_deref()
                     .map(|st| st.files.clone())
                     .unwrap_or_default(),
                 s.flags.bool(corvene_core::flags::ids::OPEN_MULTIPLE_FILES),
@@ -2151,9 +2400,11 @@ impl ChangesSidebar {
         };
         // `getDefaultContextMenu`
         let targets: Vec<WorkingDirectoryFileChange> = if selected_files.contains(&path) {
+            let selected: std::collections::HashSet<&str> =
+                selected_files.iter().map(String::as_str).collect();
             status_files
                 .iter()
-                .filter(|f| selected_files.contains(&f.path))
+                .filter(|f| selected.contains(f.path.as_str()))
                 .cloned()
                 .collect()
         } else {
@@ -2410,7 +2661,7 @@ impl ChangesSidebar {
             }
             let paths: Vec<String> = rs
                 .status
-                .as_ref()
+                .as_deref()
                 .map(|st| st.files.iter().map(|f| f.path.clone()).collect())
                 .unwrap_or_default();
             // `712-open-multiple-files`: every changed file still on disk
@@ -2420,7 +2671,7 @@ impl ChangesSidebar {
                 .then(|| {
                     let root = s.repository(id).map(|r| r.path.clone()).unwrap_or_default();
                     rs.status
-                        .as_ref()
+                        .as_deref()
                         .map(|st| {
                             st.files
                                 .iter()
@@ -2676,9 +2927,14 @@ impl ChangesSidebar {
                     .gap(zpx(7.))
                     // GHD shows the include-all box checked but disabled when there is nothing to commit.
                     .child({
-                        let (visible, total, include_all, repo_id) = self.header_state(cx);
-                        let paths: Vec<String> = visible.iter().map(|f| f.path.clone()).collect();
-                        let disabled = total == 0 || visible.is_empty();
+                        let visible = self.visible(cx);
+                        let repo_id = self.state.read(cx).selected;
+                        let include_all = if visible.is_empty() {
+                            Some(true)
+                        } else {
+                            visible.include_all()
+                        };
+                        let disabled = visible.total() == 0 || visible.is_empty();
                         let include = include_all != Some(true);
                         let focus = self.check_all_focus.clone();
                         checkbox_tristate("check-all", include_all, disabled, cx)
@@ -2687,27 +2943,26 @@ impl ChangesSidebar {
                                 window.focus(&focus, cx)
                             })
                             .when_some(repo_id.filter(|_| !disabled), |d, id| {
+                                // the paths are read on click: a listener
+                                // holding the list would pin the status
+                                let weak = cx.weak_entity();
                                 d.on_click(move |_, _, cx| {
-                                    Dispatcher::set_files_included(id, paths.clone(), include, cx)
+                                    if let Some(this) = weak.upgrade() {
+                                        let paths = this.read(cx).visible(cx).paths();
+                                        Dispatcher::set_files_included(id, paths, include, cx)
+                                    }
                                 })
                             })
                     })
                     .child({
-                        let (visible, total, _, _) = self.header_state(cx);
+                        let visible = self.visible(cx);
                         div()
                             .text_size(FONT_SIZE())
                             .truncate()
-                            .child(changed_files_label(visible.len(), total))
+                            .child(changed_files_label(visible.len(), visible.total()))
                     })
                     .when_some(self.line_stats(cx), |d, stats| {
-                        let (visible, _, _, _) = self.header_state(cx);
-                        let totals = visible.iter().filter_map(|f| stats.get(&f.path)).fold(
-                            corvene_git::LineStats::default(),
-                            |acc, s| corvene_git::LineStats {
-                                added: acc.added + s.added,
-                                deleted: acc.deleted + s.deleted,
-                            },
-                        );
+                        let totals = self.visible(cx).line_totals(&stats);
                         d.child(div().flex_1())
                             .child(line_stats_label(totals, None, t))
                     })
@@ -2768,39 +3023,6 @@ impl ChangesSidebar {
             .into()
     }
 
-    /// (visible files, total, include-all tri-state of the visible files, repo id)
-    fn header_state(
-        &self,
-        cx: &App,
-    ) -> (
-        Vec<WorkingDirectoryFileChange>,
-        usize,
-        Option<bool>,
-        Option<u64>,
-    ) {
-        let (visible, total) = self.visible_files(cx);
-        let id = self.state.read(cx).selected;
-        // `getCheckAllValue`: the box reflects only the files passing the filter
-        let include_all = if visible.is_empty() {
-            Some(true)
-        } else {
-            let all = visible
-                .iter()
-                .all(|f| f.selection.kind() == DiffSelectionType::All);
-            let none = visible
-                .iter()
-                .all(|f| f.selection.kind() == DiffSelectionType::None);
-            if all {
-                Some(true)
-            } else if none {
-                Some(false)
-            } else {
-                None
-            }
-        };
-        (visible, total, include_all, id)
-    }
-
     /// `ChangesList`: 29 px rows - checkbox, dimmed directory + bold name, status icon.
     /// `ChangesList`: 29 px rows - checkbox, dimmed directory + bold name,
     /// status icon. Virtualized with `uniform_list` (GHD uses react-virtualized).
@@ -2810,26 +3032,19 @@ impl ChangesSidebar {
         let list_focused = self.list_focus.is_focused(window);
         let s = self.state.read(cx);
         let repo_id = s.selected;
-        let rs = s.selected_state();
-        let (files, _) = self.visible_files(cx);
+        let files = self.visible(cx);
         let empty_message = if files.is_empty() {
             no_results_message(&self.filter.read(cx).value(), &self.filter_options(cx))
         } else {
             None
         };
-        let selected: Rc<Vec<String>> =
-            Rc::new(rs.map(|r| r.selected_files.clone()).unwrap_or_default());
-        let order: Rc<Vec<String>> = Rc::new(files.iter().map(|f| f.path.clone()).collect());
-        let files = Rc::new(files);
+        let selected = self.selected_paths(cx);
         let query: SharedString = self.filter.read(cx).value().trim().to_string().into();
         let weak = cx.weak_entity();
         let list_focus = self.list_focus.clone();
         let line_stats = self.line_stats(cx);
         // `ariaLabelledBy="changes-list-check-all-label"`: the header's text
-        let label = {
-            let (visible, total, _, _) = self.header_state(cx);
-            changed_files_label(visible.len(), total)
-        };
+        let label = changed_files_label(files.len(), files.total());
         div()
             .id("changes-list")
             .role(Role::List)
@@ -2852,21 +3067,20 @@ impl ChangesSidebar {
                 uniform_list("changes-list-rows", files.len(), move |range, _, cx| {
                     let query = query.clone();
                     range
-                        .map(|ix| {
-                            let file = &files[ix];
+                        .filter_map(|ix| {
+                            let file = files.get(ix)?;
                             let is_selected = selected.contains(&file.path);
-                            file_row(
+                            Some(file_row(
                                 file,
                                 line_stats.as_ref().and_then(|m| m.get(&file.path)).copied(),
                                 is_selected,
                                 list_focused,
                                 &query,
-                                order.clone(),
                                 repo_id,
                                 weak.clone(),
                                 list_focus.clone(),
                                 cx,
-                            )
+                            ))
                         })
                         .collect()
                 })
@@ -2976,7 +3190,7 @@ impl ChangesSidebar {
             .map(|b| failed_rules(&info.branch_name_patterns, b))
             .unwrap_or_default();
         Some(RulesSnapshot {
-            html_url: github.html_url.clone(),
+            github: github.clone(),
             branch,
             unpublished: rs.ahead_behind.is_none(),
             protected: rs.current_branch_protected,
@@ -3062,7 +3276,7 @@ impl ChangesSidebar {
             let id = s.selected?;
             let repo = s.repository(id)?;
             let github = repo.github.as_ref()?;
-            let files = s.selected_state()?.status.as_ref()?.files.len();
+            let files = s.selected_state()?.status.as_deref()?.files.len();
             if github.has_write_permission()
                 || files == 0
                 || Dispatcher::fork_offer_blocked(s, github)
@@ -3164,20 +3378,35 @@ impl ChangesSidebar {
         {
             return None;
         }
-        let files = &s.selected_state()?.status.as_ref()?.files;
-        let bad: Vec<(&str, &str)> = files
-            .iter()
-            .filter(|f| {
-                f.status.kind != FileStatusKind::Deleted
-                    && f.selection.kind() != DiffSelectionType::None
-            })
-            .filter_map(|f| {
-                corvene_core::portable_paths::windows_invalid_reason(&f.path)
-                    .map(|why| (f.path.as_str(), why))
-            })
-            .collect();
-        let (path, why) = *bad.first()?;
-        let message = match bad.len() {
+        let status = s.selected_state()?.status.as_ref()?;
+        // checked once per status, not per frame
+        let cached = self
+            .windows_names_cache
+            .borrow()
+            .as_ref()
+            .filter(|(seen, _)| std::ptr::eq(seen.as_ptr(), std::sync::Arc::as_ptr(status)))
+            .map(|(_, names)| names.clone());
+        let names = cached.unwrap_or_else(|| {
+            let mut bad = status
+                .files
+                .iter()
+                .filter(|f| {
+                    f.status.kind != FileStatusKind::Deleted
+                        && f.selection.kind() != DiffSelectionType::None
+                })
+                .filter_map(|f| {
+                    corvene_core::portable_paths::windows_invalid_reason(&f.path)
+                        .map(|why| (f.path.as_str(), why))
+                });
+            let names = bad
+                .next()
+                .map(|(path, why)| (1 + bad.count(), path.to_string(), why));
+            *self.windows_names_cache.borrow_mut() =
+                Some((std::sync::Arc::downgrade(status), names.clone()));
+            names
+        });
+        let (count, path, why) = names?;
+        let message = match count {
             1 => format!("\"{path}\" {why}, so it can't be checked out on Windows."),
             n => format!(
                 "{n} files can't be checked out on Windows: \"{path}\" {why}, among others."
@@ -3236,11 +3465,8 @@ impl ChangesSidebar {
                 .into_any_element()
         };
         let rulesets_link = |label: &'static str| {
-            let url = format!(
-                "{}/rules/?ref={}",
-                rules.html_url,
-                corvene_core::integrations::encode_component(&format!("refs/heads/{branch}"))
-            );
+            let url = repo_rulesets_for_branch_link(Some(&rules.github), Some(&branch))
+                .unwrap_or_default();
             crate::widgets::link_button("commit-warning-rulesets", label, cx)
                 .on_click(move |_, _, cx| corvene_core::Dispatcher::open_url(&url, cx))
                 .into_any_element()
@@ -3444,12 +3670,9 @@ impl ChangesSidebar {
         } else {
             ".".to_string()
         };
-        let all_url = format!(
-            "{}/rules/?ref={}",
-            rules.html_url,
-            corvene_core::integrations::encode_component(&format!("refs/heads/{branch}"))
-        );
-        let html_url = rules.html_url.clone();
+        let all_url =
+            repo_rulesets_for_branch_link(Some(&rules.github), Some(&branch)).unwrap_or_default();
+        let github = rules.github.clone();
         let list = |label: &'static str, items: &[corvene_core::RepoRulesMetadataFailure]| {
             if items.is_empty() {
                 return None;
@@ -3464,7 +3687,7 @@ impl ChangesSidebar {
                             .child(format!("{label} {}:", mac_or("Rules", "rules"))),
                     )
                     .children(items.iter().enumerate().map(|(ix, f)| {
-                        let url = format!("{html_url}/rules/{}", f.ruleset_id);
+                        let url = repo_ruleset_link(&github, f.ruleset_id);
                         div()
                             .flex()
                             .flex_row()
@@ -3671,14 +3894,7 @@ impl ChangesSidebar {
     fn commit_disabled(&self, cx: &App) -> bool {
         let s = self.state.read(cx);
         let rs = s.selected_state();
-        let any_included = rs
-            .and_then(|r| r.status.as_ref())
-            .map(|st| {
-                st.files
-                    .iter()
-                    .any(|f| f.selection.kind() != DiffSelectionType::None)
-            })
-            .unwrap_or(false);
+        let any_included = self.visible(cx).data.included > 0;
         let committing = rs.map(|r| r.committing).unwrap_or(false);
         let allow_empty = s
             .selected
@@ -3696,14 +3912,9 @@ impl ChangesSidebar {
     fn commit_disabled_tooltip(&self, cx: &App) -> Option<&'static str> {
         let s = self.state.read(cx);
         let rs = s.selected_state();
-        let files = rs
-            .and_then(|r| r.status.as_ref())
-            .map(|st| st.files.as_slice());
-        let any_available = files.is_some_and(|f| !f.is_empty());
-        let any_included = files.is_some_and(|f| {
-            f.iter()
-                .any(|f| f.selection.kind() != DiffSelectionType::None)
-        });
+        let visible = self.visible(cx);
+        let any_available = visible.total() > 0;
+        let any_included = visible.data.included > 0;
         let allow_empty = s
             .selected
             .and_then(|id| s.repository(id))
@@ -3912,7 +4123,7 @@ impl ChangesSidebar {
         if !matches!(conflict.kind, corvene_core::ConflictKind::Rebase { .. }) {
             return None;
         }
-        let status = rs.status.as_ref()?;
+        let status = rs.status.as_deref()?;
         let conflicted = corvene_core::conflicted_files(status, &conflict.manual_resolutions).len();
         let untracked = status
             .files
@@ -4272,20 +4483,13 @@ impl ChangesSidebar {
                             .and_then(|id| s.repository(id))
                             .is_some_and(|r| r.commit_options.push_after_commit)
                 };
-                let (amending, committing, included) = self
+                let included = self.visible(cx).data.included;
+                let (amending, committing) = self
                     .state
                     .read(cx)
                     .selected_state()
-                    .map(|r| {
-                        let included = r.status.as_ref().map_or(0, |st| {
-                            st.files
-                                .iter()
-                                .filter(|f| f.selection.kind() != DiffSelectionType::None)
-                                .count()
-                        });
-                        (r.commit_to_amend.is_some(), r.committing, included)
-                    })
-                    .unwrap_or((false, false, 0));
+                    .map(|r| (r.commit_to_amend.is_some(), r.committing))
+                    .unwrap_or((false, false));
                 // GHD `getFilesToBeCommittedButtonText`: "Commit 4 files to main"
                 let files = match included {
                     0 => String::new(),
@@ -4436,13 +4640,9 @@ impl Render for ChangesSidebar {
                         },
                     ))
                     .on_action(cx.listener(|this, _: &SelectAllFiles, _, cx| {
-                        let (files, _) = this.visible_files(cx);
+                        let paths = this.visible(cx).paths();
                         if let Some(id) = this.state.read(cx).selected {
-                            Dispatcher::select_all_files(
-                                id,
-                                files.into_iter().map(|f| f.path).collect(),
-                                cx,
-                            );
+                            Dispatcher::select_all_files(id, paths, cx);
                         }
                     }))
                     .flex_1()
@@ -4548,7 +4748,6 @@ fn file_row(
     is_selected: bool,
     list_focused: bool,
     query: &str,
-    order: Rc<Vec<String>>,
     repo_id: Option<u64>,
     weak: WeakEntity<ChangesSidebar>,
     list_focus: FocusHandle,
@@ -4571,6 +4770,7 @@ fn file_row(
         DiffSelectionType::None => Some(false),
         DiffSelectionType::Partial => None,
     };
+    let weak_for_order = weak.clone();
     let file_for_menu = file.clone();
     let checkbox_focus = list_focus.clone();
     // `HighlightText`: the filter's fuzzy hits in bold (`<mark>`), split
@@ -4592,7 +4792,6 @@ fn file_row(
         .map(|(_, hits)| hits)
         .unwrap_or_default();
     let dir_len = directory.chars().count();
-    let dir_hits: Vec<usize> = hits.iter().copied().filter(|&h| h < dir_len).collect();
     let name_hits: Vec<usize> = hits
         .iter()
         .filter(|&&h| h >= dir_len)
@@ -4604,7 +4803,7 @@ fn file_row(
             format!(
                 "{}, {}{}",
                 file.path,
-                crate::widgets::status_label(file.status.kind),
+                crate::widgets::status_label(&file.status),
                 match include_value {
                     Some(true) => "",
                     Some(false) => ", not included",
@@ -4681,12 +4880,11 @@ fn file_row(
                 if modifiers.secondary() {
                     Dispatcher::toggle_file_selection(id, path_for_select.clone(), cx)
                 } else if modifiers.shift {
-                    Dispatcher::extend_file_selection(
-                        id,
-                        path_for_select.clone(),
-                        order.as_ref().clone(),
-                        cx,
-                    )
+                    let order = weak_for_order
+                        .upgrade()
+                        .map(|this| this.read(cx).visible(cx).paths())
+                        .unwrap_or_default();
+                    Dispatcher::extend_file_selection(id, path_for_select.clone(), order, cx)
                 } else {
                     Dispatcher::select_file(id, path_for_select.clone(), cx)
                 }
@@ -4712,37 +4910,34 @@ fn file_row(
                 }),
             ),
         )
-        .child(
-            // GHD `PathText` keeps the file name visible and truncates the
-            // directory part when the row is too narrow.
+        .child(if names_only {
             div()
                 .flex_1()
                 .min_w_0()
-                .flex()
-                .flex_row()
                 .text_size(FONT_SIZE())
-                .when(!names_only, |d| {
-                    d.child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            // `.list-item.selected .dirname` inherits the row colour
-                            .text_color(match (is_selected, list_focused) {
-                                (true, true) => t.box_selected_active_text,
-                                (true, false) => t.box_selected_text,
-                                _ => t.text_secondary,
-                            })
-                            .child(crate::autocompletion::highlighted(&directory, &dir_hits)),
-                    )
-                })
-                .child(
-                    div()
-                        .flex_none()
-                        .max_w_full()
-                        .truncate()
-                        .child(crate::autocompletion::highlighted(&file_name, &name_hits)),
+                .truncate()
+                .child(crate::autocompletion::highlighted(&file_name, &name_hits))
+        } else {
+            // GHD `PathLabel`: `PathText` keeps the file name and shortens
+            // the directory from its middle when the row is too narrow;
+            // `.list-item.selected .dirname` inherits the row colour
+            let (directory_color, arrow_color) = match (is_selected, list_focused) {
+                (true, true) => (t.box_selected_active_text, t.box_selected_active_text),
+                (true, false) => (t.box_selected_text, t.box_selected_text),
+                _ => (t.text_secondary, t.text),
+            };
+            crate::path_label::path_label_element(
+                crate::path_label::path_label(
+                    &file.path,
+                    file.status.kind,
+                    file.old_path.as_deref(),
                 ),
-        )
+                hits,
+                directory_color,
+                arrow_color,
+            )
+            .text_size(FONT_SIZE())
+        })
         .when_some(line_stats, |d, stats| {
             let colours = (is_selected && list_focused).then_some(t.box_selected_active_text);
             d.child(line_stats_label(stats, colours, t))

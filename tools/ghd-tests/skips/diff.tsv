@@ -1,0 +1,2 @@
+# GitHub Desktop test port, lane `diff`.
+unit/git/diff-stage-test.ts	*	omitted: getResolutionDiff (lib/git/diff.ts) only backs the Copilot conflicts dialog (ui/multi-commit-operation/dialog/copilot-conflicts-changes.tsx) and Copilot is left out by design (.docs/TODO.md › Copilot); Corvene has no stage-blob against working-copy diff

@@ -26,6 +26,8 @@ pub enum Octicon {
     SyncClockwise,
     ArrowUp,
     ArrowDown,
+    /// GHD `arrowRight`: a rename's `.rename-arrow`.
+    ArrowRight,
     Upload,
     TriangleDown,
     ChevronDown,
@@ -74,6 +76,7 @@ pub enum Octicon {
     Undo,
     CloudOffline,
     Eye,
+    EyeClosed,
     DesktopDownload,
     FileSymlinkFile,
     FileSubmodule,
@@ -118,6 +121,7 @@ impl Octicon {
             Octicon::SyncClockwise => "octicons/sync-clockwise-16.svg",
             Octicon::ArrowUp => "octicons/arrow-up-16.svg",
             Octicon::ArrowDown => "octicons/arrow-down-16.svg",
+            Octicon::ArrowRight => "octicons/arrow-right-16.svg",
             Octicon::Upload => "octicons/upload-16.svg",
             Octicon::TriangleDown => "octicons/triangle-down-16.svg",
             Octicon::ChevronDown => "octicons/chevron-down-16.svg",
@@ -184,6 +188,7 @@ impl Octicon {
             Octicon::Undo => "octicons/undo-16.svg",
             Octicon::CloudOffline => "octicons/cloud-offline-16.svg",
             Octicon::Eye => "octicons/eye-16.svg",
+            Octicon::EyeClosed => "octicons/eye-closed-16.svg",
             Octicon::DesktopDownload => "octicons/desktop-download-16.svg",
             Octicon::FileSymlinkFile => "octicons/file-symlink-file-16.svg",
             Octicon::FileSubmodule => "octicons/file-submodule-16.svg",
@@ -218,4 +223,32 @@ pub fn spin(icon: Svg, id: impl Into<ElementId>) -> AnyElement {
 /// GHD `Loading` (`ui/lib/loading.tsx`): a spinning `syncClockwise`.
 pub fn loading(id: impl Into<ElementId>, color: Hsla) -> AnyElement {
     spin(octicon(Octicon::SyncClockwise, color), id)
+}
+
+/// GHD `Repository | CloningRepository`, what [`icon_for_repository`]
+/// takes.
+#[derive(Clone, Copy)]
+pub enum RepositoryOrCloning<'a> {
+    Repository(&'a corvene_core::Repository),
+    /// A clone in progress (GHD `CloningRepository`).
+    Cloning(&'a corvene_core::CloneState),
+}
+
+/// GHD `iconForRepository` (`ui/octicons/repository.ts`): download for a
+/// clone in progress, alert for a missing repository, computer without a
+/// GitHub repository, lock when private, fork for a fork, else repo.
+pub fn icon_for_repository(repository: RepositoryOrCloning<'_>) -> Octicon {
+    let repository = match repository {
+        RepositoryOrCloning::Cloning(_) => return Octicon::DesktopDownload,
+        RepositoryOrCloning::Repository(r) => r,
+    };
+    if repository.missing {
+        return Octicon::Alert;
+    }
+    match &repository.github {
+        None => Octicon::DeviceDesktop,
+        Some(gh) if gh.private => Octicon::Lock,
+        Some(gh) if gh.fork => Octicon::RepoForked,
+        Some(_) => Octicon::Repo,
+    }
 }

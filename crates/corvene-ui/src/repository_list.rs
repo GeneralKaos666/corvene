@@ -1,16 +1,18 @@
 //! Repository foldout: filter + "Add ▾", then grouped 29 px rows
 //! (`ui/repositories-list/*.tsx`, `styles/ui/_repository-list.scss`).
+//! The groups are GHD `groupRepositories` ([`group_repositories`]); the
+//! filter then keeps each group's matches, as GHD `FilterList` does.
 
 use std::collections::HashMap;
 
-use corvene_core::{AppState, Dispatcher, Popup, Repository};
+use corvene_core::{AheadBehind, AppState, Dispatcher, Popup, RepoIndicator, Repository};
 use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::actions::{FilterListPick, SelectNextFile, SelectPreviousFile};
 use crate::context_menu::mac_or;
-use crate::icons::{Octicon, octicon};
+use crate::icons::{Octicon, RepositoryOrCloning, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
@@ -37,6 +39,8 @@ pub struct RepositoryFoldout {
 
 struct Group {
     title: SharedString,
+    /// GHD's `recent` group.
+    recent: bool,
     /// Corvene (`266-collapsible-repository-groups`): the name the collapsed
     /// set stores, `None` when the header has no chevron (flag off, a
     /// filtered list, the flat result list).
@@ -44,18 +48,301 @@ struct Group {
     /// Hidden rows: `repos` is empty and the header shows a right chevron.
     collapsed: bool,
     /// Each repository with the char positions of its name the filter
-    /// matched (`HighlightText`).
-    repos: Vec<(Repository, Vec<usize>)>,
+    /// matched (`HighlightText`) and whether it needs its owner prefix
+    /// (`needsDisambiguation`).
+    repos: Vec<(Repository, Vec<usize>, bool)>,
+}
+
+/// GHD `RepositoryListGroup` (`ui/repositories-list/group-repositories.ts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RepositoryListGroup {
+    Recent,
+    /// GitHub.com repositories of one owner (the login).
+    Dotcom {
+        owner: String,
+    },
+    /// The repositories of one GitHub Enterprise host.
+    Enterprise {
+        host: String,
+    },
+    Other,
+}
+
+impl RepositoryListGroup {
+    /// GHD `getGroupKey`: unique, and the case-sensitive order of the keys
+    /// is the order of the groups.
+    pub fn key(&self) -> String {
+        match self {
+            Self::Recent => "0:recent".into(),
+            Self::Dotcom { owner } => format!("1:dotcom:{owner}"),
+            Self::Enterprise { host } => format!("2:enterprise:{host}"),
+            Self::Other => "3:other".into(),
+        }
+    }
+
+    /// GHD `getGroupLabel` (`repositories-list.tsx`): the group header.
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Recent => "Recent",
+            Self::Dotcom { owner } => owner,
+            Self::Enterprise { host } => host,
+            Self::Other => "Other",
+        }
+    }
+}
+
+/// GHD `IRepositoryListItem`.
+#[derive(Clone, Debug)]
+pub struct RepositoryListItem {
+    /// The texts the filter matches: the display title (alias, else name)
+    /// and `nameOf` (`owner/name`, else the folder).
+    pub text: Vec<String>,
+    pub id: String,
+    pub repository: Repository,
+    /// The row shows its owner prefix (a duplicate title in an Enterprise
+    /// group, or anywhere for the Recent group).
+    pub needs_disambiguation: bool,
+    pub ahead_behind: Option<AheadBehind>,
+    pub changed_files_count: usize,
+}
+
+/// GHD `IFilterListGroup<IRepositoryListItem, RepositoryListGroup>`.
+#[derive(Clone, Debug)]
+pub struct RepositoryGroup {
+    pub identifier: RepositoryListGroup,
+    pub items: Vec<RepositoryListItem>,
+}
+
+/// GHD `recentRepositoriesThreshold`: more repositories than this get a
+/// Recent group.
+pub const RECENT_REPOSITORIES_THRESHOLD: usize = 7;
+
+/// GHD `isDotCom` (`lib/endpoint-capabilities.ts`).
+fn is_dot_com(endpoint: &str) -> bool {
+    endpoint == "https://api.github.com" || {
+        let host = corvene_core::host_of(endpoint);
+        host == "api.github.com" || host == "github.com"
+    }
+}
+
+/// GHD `getGroupForRepository`.
+fn group_for_repository(repository: &Repository) -> RepositoryListGroup {
+    match &repository.github {
+        Some(gh) if is_dot_com(&gh.endpoint) => RepositoryListGroup::Dotcom {
+            owner: gh.owner.clone(),
+        },
+        // `getHostForRepository`: the host of `getHTMLURL(endpoint)`, which
+        // is the endpoint's scheme and host name alone
+        Some(gh) => RepositoryListGroup::Enterprise {
+            host: corvene_core::host_of(
+                corvene_github::Endpoint::from_api_base(&gh.endpoint).host(),
+            ),
+        },
+        None => RepositoryListGroup::Other,
+    }
+}
+
+/// GHD `groupRepositories(repositories, localRepositoryStateLookup,
+/// recentRepositories)`: the Recent group (with more than
+/// [`RECENT_REPOSITORIES_THRESHOLD`] repositories), one group per GitHub.com
+/// owner, one per Enterprise host, then Other, ordered by
+/// [`RepositoryListGroup::key`]; each group's items sorted by title,
+/// ignoring case.
+pub fn group_repositories(
+    repositories: &[Repository],
+    local_repository_state_lookup: &HashMap<u64, RepoIndicator>,
+    recent_repositories: &[u64],
+) -> Vec<RepositoryGroup> {
+    let include_recent = repositories.len() > RECENT_REPOSITORIES_THRESHOLD;
+    let mut groups: Vec<(String, RepositoryListGroup, Vec<&Repository>)> = Vec::new();
+    let mut add = |group: RepositoryListGroup, repository| {
+        let key = group.key();
+        match groups.iter_mut().find(|(k, _, _)| *k == key) {
+            Some((_, _, repos)) => repos.push(repository),
+            None => groups.push((key, group, vec![repository])),
+        }
+    };
+    for repository in repositories {
+        if include_recent && recent_repositories.contains(&repository.id) {
+            add(RepositoryListGroup::Recent, repository);
+        }
+        add(group_for_repository(repository), repository);
+    }
+    groups.sort_by(|(x, _, _), (y, _, _)| x.cmp(y));
+
+    // the titles of every group but Recent (its items are in another group
+    // too), all together and per group
+    let mut all_names: HashMap<String, usize> = HashMap::new();
+    for (_, group, repos) in &groups {
+        if *group != RepositoryListGroup::Recent {
+            for r in repos {
+                *all_names.entry(r.name()).or_default() += 1;
+            }
+        }
+    }
+    groups
+        .iter()
+        .map(|(_, group, repos)| {
+            let mut group_names: HashMap<String, usize> = HashMap::new();
+            if *group != RepositoryListGroup::Recent {
+                for r in repos {
+                    *group_names.entry(r.name()).or_default() += 1;
+                }
+            }
+            let mut items: Vec<RepositoryListItem> = repos
+                .iter()
+                .map(|r| {
+                    let title = r.name();
+                    let state = local_repository_state_lookup.get(&r.id);
+                    let needs_disambiguation = match group {
+                        RepositoryListGroup::Enterprise { .. } => {
+                            group_names.get(&title).copied().unwrap_or(0) > 1
+                        }
+                        RepositoryListGroup::Recent => {
+                            all_names.get(&title).copied().unwrap_or(0) > 1
+                        }
+                        _ => false,
+                    };
+                    RepositoryListItem {
+                        text: vec![title, corvene_core::name_of(r)],
+                        id: r.id.to_string(),
+                        repository: (*r).clone(),
+                        needs_disambiguation,
+                        ahead_behind: state.and_then(|s| s.ahead_behind),
+                        changed_files_count: state.map_or(0, |s| s.changed_files),
+                    }
+                })
+                .collect();
+            // `caseInsensitiveCompare` of the titles (stable)
+            items.sort_by_cached_key(|item| item.text[0].to_lowercase());
+            RepositoryGroup {
+                identifier: group.clone(),
+                items,
+            }
+        })
+        .collect()
+}
+
+/// What GHD `RepositoryListItem` draws in its `.name` element.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepositoryListItemName {
+    /// The dimmed `.prefix` (`<owner>/`), when the row needs it.
+    pub prefix: Option<String>,
+    /// The whole text: the prefix, then the alias or name.
+    pub text: String,
+}
+
+/// GHD `RepositoryListItem`'s name: the alias or name, after the GitHub
+/// owner's `owner/` when `needs_disambiguation`.
+pub fn repository_list_item_name(
+    repository: &Repository,
+    needs_disambiguation: bool,
+) -> RepositoryListItemName {
+    let prefix = repository
+        .github
+        .as_ref()
+        .filter(|_| needs_disambiguation)
+        .map(|gh| format!("{}/", gh.owner));
+    RepositoryListItemName {
+        text: format!("{}{}", prefix.as_deref().unwrap_or(""), repository.name()),
+        prefix,
+    }
+}
+
+/// What GHD `renderRepoIndicators` draws.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepoIndicators {
+    /// The `.ahead-behind` arrows (up, then down), `None` when nothing is
+    /// ahead or behind.
+    pub ahead_behind: Option<Vec<Octicon>>,
+    /// The arrows' tooltip (`aheadBehindTooltip`).
+    pub ahead_behind_tooltip: Option<String>,
+    /// The `.change-indicator-wrapper` dot.
+    pub changes: bool,
+}
+
+/// GHD `renderRepoIndicators` with `RepositoryListItem`'s `hasChanges`
+/// (`changedFilesCount > 0`).
+pub fn render_repo_indicators(
+    ahead_behind: Option<AheadBehind>,
+    changed_files_count: usize,
+) -> RepoIndicators {
+    render_repo_indicators_with(ahead_behind, changed_files_count, &|n| n.to_string())
+}
+
+/// [`render_repo_indicators`] with the tooltip's commit counts written by
+/// `count` (`272-grouped-ahead-behind-counts`).
+pub fn render_repo_indicators_with(
+    ahead_behind: Option<AheadBehind>,
+    changed_files_count: usize,
+    count: &dyn Fn(u32) -> String,
+) -> RepoIndicators {
+    let ab = ahead_behind.filter(|ab| ab.ahead > 0 || ab.behind > 0);
+    RepoIndicators {
+        ahead_behind: ab.map(|ab| {
+            [
+                (ab.ahead > 0).then_some(Octicon::ArrowUp),
+                (ab.behind > 0).then_some(Octicon::ArrowDown),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        }),
+        ahead_behind_tooltip: ab.map(|ab| {
+            format!(
+                "The currently checked out branch is{}{}{}its tracked branch.",
+                if ab.behind > 0 {
+                    format!(" {} behind ", commit_grammar(ab.behind, count))
+                } else {
+                    String::new()
+                },
+                if ab.behind > 0 && ab.ahead > 0 {
+                    "and"
+                } else {
+                    ""
+                },
+                if ab.ahead > 0 {
+                    format!(" {} ahead of ", commit_grammar(ab.ahead, count))
+                } else {
+                    String::new()
+                },
+            )
+        }),
+        changes: changed_files_count > 0,
+    }
+}
+
+/// What GHD `RepositoryListItem.renderTooltip` shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RepositoryListItemTooltip {
+    /// The bold GitHub full name, else the repository's name.
+    pub full_name: String,
+    /// The alias, in parentheses after it.
+    pub alias: Option<String>,
+    /// The second line.
+    pub path: String,
+}
+
+/// GHD `RepositoryListItem.renderTooltip`.
+pub fn repository_list_item_tooltip(repository: &Repository) -> RepositoryListItemTooltip {
+    RepositoryListItemTooltip {
+        // `gitHubRepo ? gitHubRepo.fullName : repo.name` (not the alias)
+        full_name: corvene_core::name_of(repository),
+        alias: repository.alias.clone(),
+        path: repository.path.to_string_lossy().into_owned(),
+    }
 }
 
 impl Group {
+    /// A group that is not GHD's Recent one.
     fn new(
         title: impl Into<SharedString>,
         key: Option<String>,
-        repos: Vec<(Repository, Vec<usize>)>,
+        repos: Vec<(Repository, Vec<usize>, bool)>,
     ) -> Self {
         Self {
             title: title.into(),
+            recent: false,
             key,
             collapsed: false,
             repos,
@@ -121,7 +408,7 @@ impl RepositoryFoldout {
                     groups
                         .iter()
                         .flat_map(|g| &g.repos)
-                        .position(|(r, _)| r.id == selected)
+                        .position(|(r, _, _)| r.id == selected)
                 })
                 .flatten()
         });
@@ -164,15 +451,16 @@ impl RepositoryFoldout {
             .into_iter()
             .flat_map(|g| g.repos)
             .nth(ix)
-            .map(|(r, _)| r.id);
+            .map(|(r, _, _)| r.id);
         if let Some(id) = id {
             Dispatcher::select_repository(id, cx);
         }
     }
 
-    /// GHD `groupRepositories`: Recent, then one group per GitHub owner, then
-    /// Other. A filter fuzzy-matches the name or `owner/name` and sorts each group best match
-    /// first (`FilterList`'s `match`; ties keep the list order).
+    /// GHD `groupRepositories` ([`group_repositories`]): Recent, one group
+    /// per GitHub.com owner and per Enterprise host, then Other. A filter
+    /// fuzzy-matches the name or `owner/name` and sorts each group best
+    /// match first (`FilterList`'s `match`; ties keep the list order).
     fn groups(&self, cx: &App) -> Vec<Group> {
         let state = self.state.read(cx);
         let raw_query = self.filter.read(cx).value().trim().to_string();
@@ -196,8 +484,8 @@ impl RepositoryFoldout {
         // the status / fork filters; the query is matched below
         let passes_filters = |r: &Repository| {
             (!status_filter || {
-                let (ahead_behind, has_changes) = indicators(state, r.id);
-                (self.only_changed && has_changes)
+                let (ahead_behind, changed_files) = indicators(state, r.id);
+                (self.only_changed && changed_files > 0)
                     || (self.only_ahead_behind && ahead_behind.is_some())
             }) && (!fork_filter || {
                 let fork = r.github.as_ref().is_some_and(|gh| gh.fork);
@@ -214,6 +502,26 @@ impl RepositoryFoldout {
                 .bool(corvene_core::flags::ids::COLLAPSIBLE_REPOSITORY_GROUPS);
         let key = |k: String| collapsible.then_some(k);
 
+        // Corvene (`209-recent-repositories-count`; GHD remembers 3); the
+        // Recent group is left out while a status or fork filter is on
+        let recent: Vec<u64> = if status_filter || fork_filter {
+            Vec::new()
+        } else {
+            let shown = usize::try_from(
+                state
+                    .flags
+                    .number(corvene_core::flags::ids::RECENT_REPOSITORIES_COUNT),
+            )
+            .unwrap_or(3);
+            state.recent.iter().take(shown).copied().collect()
+        };
+        let repositories: Vec<Repository> = state
+            .repositories
+            .iter()
+            .filter(|r| passes_filters(r))
+            .cloned()
+            .collect();
+
         let mut groups: Vec<Group> = Vec::new();
         // Corvene (`267-pinned-repositories`): the pinned repositories, by
         // name, above Recent (they stay in their owner groups too)
@@ -226,98 +534,74 @@ impl RepositoryFoldout {
                 .sorted_repositories()
                 .into_iter()
                 .filter(|r| r.pinned)
-                .map(|r| (r.clone(), Vec::new()))
+                .map(|r| (r.clone(), Vec::new(), false))
                 .collect();
             if !pinned.is_empty() {
                 groups.push(Group::new("Pinned", key(":pinned".into()), pinned));
             }
         }
-        if !filtering {
-            // Corvene (`209-recent-repositories-count`; GHD shows 3)
-            let shown = usize::try_from(
-                state
-                    .flags
-                    .number(corvene_core::flags::ids::RECENT_REPOSITORIES_COUNT),
-            )
-            .unwrap_or(3);
-            let recent: Vec<_> = state
-                .recent
-                .iter()
-                .take(shown)
-                .filter_map(|id| state.repository(*id).cloned())
-                .map(|r| (r, Vec::new()))
-                .collect();
-            if !recent.is_empty() && state.repositories.len() > 1 {
-                groups.push(Group::new("Recent", key(":recent".into()), recent));
-            }
-        }
-
-        type Hits = Vec<(f32, Repository, Vec<usize>)>;
-        let mut owners: Vec<(String, Hits)> = Vec::new();
-        let mut other: Hits = Vec::new();
-        for repo in state.sorted_repositories() {
-            if !passes_filters(repo) {
-                continue;
-            }
-            let hit = match &regex {
-                // a `/pattern/` filter matches the name, no bold chars
-                Some(re) => re.is_match(&repo.name()).then(|| (1.0, Vec::new())),
-                None => {
-                    // GHD's texts are `[title, nameOf(r)]`; only the title is
-                    // highlighted, so an `owner/name` hit shows no bold chars
-                    let title = corvene_core::filter::fuzzy_match(&query, &repo.name());
-                    let full_name = repo.github.as_ref().and_then(|gh| {
-                        corvene_core::filter::fuzzy_match(&query, &gh.full_name())
-                            .map(|(score, _)| (score, Vec::new()))
-                    });
-                    match (title, full_name) {
-                        (Some(t), Some(f)) if f.0 > t.0 => Some((f.0, t.1)),
-                        (t, f) => t.or(f),
-                    }
-                }
-            };
-            let Some((score, positions)) = hit else {
-                continue;
-            };
-            let hit = (score, repo.clone(), positions);
-            match &repo.github {
-                Some(gh) => match owners.iter_mut().find(|(o, _)| *o == gh.owner) {
-                    Some((_, list)) => list.push(hit),
-                    None => owners.push((gh.owner.clone(), vec![hit])),
-                },
-                None => other.push(hit),
-            }
-        }
-        let ranked = |mut hits: Hits| {
-            if !query.is_empty() {
-                hits.sort_by(|a, b| b.0.total_cmp(&a.0));
-            }
-            hits.into_iter().map(|(_, r, p)| (r, p)).collect()
-        };
-        owners.sort_by_key(|(o, _)| o.to_lowercase());
         // Corvene (`268-ungrouped-repository-list`): without a typed filter,
-        // one alphabetical group instead of the owner groups and Other
-        if query.is_empty()
+        // one alphabetical group instead of the owner, host and Other groups
+        let ungrouped = query.is_empty()
             && state
                 .flags
-                .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST)
-        {
-            let mut all: Hits = owners.into_iter().flat_map(|(_, hits)| hits).collect();
-            all.extend(other);
-            all.sort_by_key(|(_, r, _)| r.name().to_lowercase());
-            if !all.is_empty() {
-                let k = key(":all".into());
-                groups.push(Group::new("Repositories", k, ranked(all)));
+                .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST);
+        let mut all: Vec<(Repository, Vec<usize>, bool)> = Vec::new();
+        for group in group_repositories(&repositories, &state.indicators, &recent) {
+            // GHD `FilterList`: each group's matches, best first
+            let mut hits: Vec<(f32, Repository, Vec<usize>, bool)> = Vec::new();
+            for item in group.items {
+                let hit = match &regex {
+                    // a `/pattern/` filter matches the name, no bold chars
+                    Some(re) => re.is_match(&item.text[0]).then(|| (1.0, Vec::new())),
+                    None if query.is_empty() => Some((1.0, Vec::new())),
+                    // GHD `match` over the texts `[title, nameOf(r)]`; only
+                    // the title is highlighted, so an `owner/name` hit shows
+                    // no bold chars
+                    None => corvene_core::filter::match_keys(&query, &item.text)
+                        .map(|(score, matches)| (score, matches.title)),
+                };
+                if let Some((score, positions)) = hit {
+                    hits.push((score, item.repository, positions, item.needs_disambiguation));
+                }
             }
-            owners = Vec::new();
-            other = Vec::new();
+            if hits.is_empty() {
+                continue;
+            }
+            if !query.is_empty() {
+                // stable: ties keep the list order
+                hits.sort_by(|a, b| b.0.total_cmp(&a.0));
+            }
+            if ungrouped && group.identifier != RepositoryListGroup::Recent {
+                all.extend(hits.into_iter().map(|(_, r, p, _)| (r, p, false)));
+                continue;
+            }
+            let k = key(match &group.identifier {
+                RepositoryListGroup::Recent => ":recent".to_string(),
+                RepositoryListGroup::Dotcom { owner } => format!("owner:{owner}"),
+                RepositoryListGroup::Enterprise { host } => format!("host:{host}"),
+                RepositoryListGroup::Other => ":other".to_string(),
+            });
+            groups.push(Group {
+                title: group.identifier.label().to_string().into(),
+                recent: group.identifier == RepositoryListGroup::Recent,
+                key: k,
+                collapsed: false,
+                repos: hits.into_iter().map(|(_, r, p, d)| (r, p, d)).collect(),
+            });
         }
-        for (owner, hits) in owners {
-            let k = key(format!("owner:{owner}"));
-            groups.push(Group::new(owner, k, ranked(hits)));
-        }
-        if !other.is_empty() {
-            groups.push(Group::new("Other", key(":other".into()), ranked(other)));
+        if !all.is_empty() {
+            // by name, ignoring case (stable); a name shown twice gets its
+            // owner prefix
+            all.sort_by_cached_key(|(r, _, _)| r.name().to_lowercase());
+            let mut names: HashMap<String, usize> = HashMap::new();
+            for (r, _, _) in &all {
+                *names.entry(r.name()).or_default() += 1;
+            }
+            for (r, _, disambiguate) in &mut all {
+                *disambiguate = names.get(&r.name()).copied().unwrap_or(0) > 1;
+            }
+            groups.push(Group::new("Repositories", key(":all".into()), all));
         }
         // Corvene (`212-flat-repository-results`): while a query is typed,
         // one list without group headers, best match first
@@ -326,8 +610,12 @@ impl RepositoryFoldout {
                 .flags
                 .bool(corvene_core::flags::ids::FLAT_REPOSITORY_RESULTS)
         {
-            let mut repos: Vec<(Repository, Vec<usize>)> =
-                groups.into_iter().flat_map(|g| g.repos).collect();
+            // the Recent group's repositories are in their own groups too
+            let mut repos: Vec<(Repository, Vec<usize>, bool)> = groups
+                .into_iter()
+                .filter(|g| !g.recent)
+                .flat_map(|g| g.repos)
+                .collect();
             let score = |r: &Repository| {
                 corvene_core::filter::fuzzy_score(&query, &r.name()).unwrap_or(0.0)
             };
@@ -362,24 +650,19 @@ impl RepositoryFoldout {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn row(
         &self,
         repo: &Repository,
         matched: &[usize],
+        needs_disambiguation: bool,
         selected: bool,
         highlighted: bool,
         detail: Option<String>,
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let t = cx.ghd();
-        // GHD `iconForRepository`
-        let icon = match &repo.github {
-            _ if repo.missing => Octicon::Alert,
-            Some(gh) if gh.private => Octicon::Lock,
-            Some(gh) if gh.fork => Octicon::RepoForked,
-            Some(_) => Octicon::Repo,
-            None => Octicon::DeviceDesktop,
-        };
+        let icon = crate::icons::icon_for_repository(RepositoryOrCloning::Repository(repo));
         let id = repo.id;
         let hover_bg = t.list_item_hover_background;
         let behind_accent = self
@@ -387,7 +670,12 @@ impl RepositoryFoldout {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::REPOSITORY_LIST_BEHIND_ACCENT);
-        let (ahead_behind, has_changes) = indicators(self.state.read(cx), id);
+        let (ahead_behind, changed_files) = indicators(self.state.read(cx), id);
+        let has_changes = changed_files > 0;
+        // `272-grouped-ahead-behind-counts` in the arrows' tooltip
+        let repo_indicators = render_repo_indicators_with(ahead_behind, changed_files, &|n| {
+            crate::toolbar::ahead_behind_count(n, self.state.read(cx))
+        });
         // Corvene (`270-repository-list-stash-icon`): the loaded state's
         // stash count for an opened repository, else the indicator refresh
         let has_stash = {
@@ -435,6 +723,24 @@ impl RepositoryFoldout {
                 count(ab.behind)
             ));
         }
+        let (badge_bg, badge_text) = if selected {
+            (
+                t.list_item_selected_badge_background,
+                t.list_item_selected_badge_text,
+            )
+        } else {
+            (t.list_item_badge_background, t.list_item_badge_text)
+        };
+        // `.prefix` and the flag-213 / 214 detail: `--text-secondary-color`,
+        // the selected text colour in a selected row
+        let dim = HighlightStyle {
+            color: Some(if selected || highlighted {
+                t.box_selected_text
+            } else {
+                t.text_secondary
+            }),
+            ..Default::default()
+        };
         div()
             .id(("repo-row", id))
             .a11y_row(label, selected)
@@ -462,18 +768,14 @@ impl RepositoryFoldout {
             // `renderTooltip`: the GitHub full name (or name) in bold, the
             // alias in parentheses, then the path
             .tooltip({
-                let real = repo
-                    .github
-                    .as_ref()
-                    .map(|gh| format!("{}/{}", gh.owner, gh.name))
-                    .unwrap_or_else(|| repo.name());
-                let bold = 0..real.len();
-                let mut text = real;
-                if let Some(alias) = &repo.alias {
+                let tooltip = repository_list_item_tooltip(repo);
+                let bold = 0..tooltip.full_name.len();
+                let mut text = tooltip.full_name;
+                if let Some(alias) = &tooltip.alias {
                     text.push_str(&format!(" ({alias})"));
                 }
                 text.push('\n');
-                text.push_str(&repo.path.to_string_lossy());
+                text.push_str(&tooltip.path);
                 // Corvene (`273-fork-parent-in-tooltip`)
                 if let Some(parent) = crate::toolbar::fork_parent(repo, self.state.read(cx)) {
                     text.push_str(&format!("\nFork of {parent}"));
@@ -503,32 +805,26 @@ impl RepositoryFoldout {
                     .text_size(FONT_SIZE())
                     .when(repo.alias.is_some(), |d| d.italic())
                     .child({
-                        // Corvene (`213-duplicate-names-show-path`): the
-                        // telling folders, dimmed, after the name;
-                        // `HighlightText`: the filter's matched chars in bold
-                        let name = repo.name();
-                        match detail {
-                            Some(detail) => {
-                                let start = name.len() + 2;
-                                let text = format!("{name}  {detail}");
-                                let end = text.len();
-                                let dim = HighlightStyle {
-                                    color: Some(if selected || highlighted {
-                                        t.box_selected_text
-                                    } else {
-                                        t.text_secondary
-                                    }),
-                                    ..Default::default()
-                                };
-                                let mut highlights = bold_ranges(&name, matched);
-                                highlights.push((start..end, dim));
-                                StyledText::new(text)
-                                    .with_highlights(highlights)
-                                    .into_any_element()
-                            }
-                            None => crate::autocompletion::highlighted(&name, matched)
-                                .into_any_element(),
+                        // the `owner/` prefix (`needsDisambiguation`), the
+                        // name with the filter's matched chars in bold
+                        // (`HighlightText`), then Corvene's
+                        // (`213-duplicate-names-show-path`) telling folders
+                        let name = repository_list_item_name(repo, needs_disambiguation);
+                        let prefix_len = name.prefix.as_ref().map_or(0, String::len);
+                        let mut text = name.text;
+                        let mut highlights: Vec<_> = bold_ranges(&text[prefix_len..], matched)
+                            .into_iter()
+                            .map(|(r, style)| (r.start + prefix_len..r.end + prefix_len, style))
+                            .collect();
+                        if prefix_len > 0 {
+                            highlights.insert(0, (0..prefix_len, dim));
                         }
+                        if let Some(detail) = detail {
+                            let start = text.len() + 2;
+                            text.push_str(&format!("  {detail}"));
+                            highlights.push((start..text.len(), dim));
+                        }
+                        StyledText::new(text).with_highlights(highlights)
                     }),
             )
             .when(has_stash, |d| {
@@ -549,88 +845,74 @@ impl RepositoryFoldout {
                 )
             })
             // `.repo-indicators`: ahead / behind arrows, then the changes dot
-            .when(has_changes || ahead_behind.is_some(), |d| {
-                let (badge_bg, badge_text) = if selected {
-                    (
-                        t.list_item_selected_badge_background,
-                        t.list_item_selected_badge_text,
-                    )
-                } else {
-                    (t.list_item_badge_background, t.list_item_badge_text)
-                };
-                d.child(
-                    div()
-                        .flex_none()
-                        .ml_auto()
-                        .mr(SPACING_HALF())
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .when_some(ahead_behind, |d, ab| {
-                            // `renderAheadBehindIndicator`: arrows only, 12 px tall
-                            // (darwin; the base rule's 16 px elsewhere)
-                            let tooltip = format!(
-                                "The currently checked out branch is{}{}{}its tracked branch.",
-                                if ab.behind > 0 {
-                                    format!(" {} behind ", commit_grammar(ab.behind, &count))
-                                } else {
-                                    String::new()
+            .when(
+                repo_indicators.changes || repo_indicators.ahead_behind.is_some(),
+                |d| {
+                    d.child(
+                        div()
+                            .flex_none()
+                            .ml_auto()
+                            .mr(SPACING_HALF())
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .when_some(
+                                repo_indicators
+                                    .ahead_behind
+                                    .zip(repo_indicators.ahead_behind_tooltip),
+                                |d, (arrows, tooltip)| {
+                                    // `renderAheadBehindIndicator`: arrows only, 12 px
+                                    // tall (darwin; the base rule's 16 px elsewhere)
+                                    d.child(
+                                        div()
+                                            .id(("repo-ahead-behind", id))
+                                            .ghd_tooltip(tooltip)
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .h(zpx(if cfg!(target_os = "macos") {
+                                                12.
+                                            } else {
+                                                16.
+                                            }))
+                                            .px(zpx(6.))
+                                            .rounded(zpx(8.))
+                                            .bg(badge_bg)
+                                            .children(arrows.into_iter().map(|arrow| {
+                                                // flag `215-repository-list-behind-accent`:
+                                                // commits to pull show in the success colour
+                                                let color = if arrow == Octicon::ArrowDown
+                                                    && behind_accent
+                                                    && !selected
+                                                {
+                                                    t.status_success
+                                                } else {
+                                                    badge_text
+                                                };
+                                                octicon(arrow, color).size(zpx(12.))
+                                            })),
+                                    )
                                 },
-                                if ab.behind > 0 && ab.ahead > 0 {
-                                    "and"
-                                } else {
-                                    ""
-                                },
-                                if ab.ahead > 0 {
-                                    format!(" {} ahead of ", commit_grammar(ab.ahead, &count))
-                                } else {
-                                    String::new()
-                                },
-                            );
-                            d.child(
-                                div()
-                                    .id(("repo-ahead-behind", id))
-                                    .ghd_tooltip(tooltip)
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .h(zpx(if cfg!(target_os = "macos") { 12. } else { 16. }))
-                                    .px(zpx(6.))
-                                    .rounded(zpx(8.))
-                                    .bg(badge_bg)
-                                    .when(ab.ahead > 0, |d| {
-                                        d.child(
-                                            octicon(Octicon::ArrowUp, badge_text).size(zpx(12.)),
+                            )
+                            .when(repo_indicators.changes, |d| {
+                                // `.change-indicator-wrapper`: 5 px in, at least 12 px wide
+                                d.child(
+                                    div()
+                                        .id(("repo-changes", id))
+                                        .ghd_tooltip(
+                                            "There are uncommitted changes in this repository",
                                         )
-                                    })
-                                    .when(ab.behind > 0, |d| {
-                                        // flag `215-repository-list-behind-accent`:
-                                        // commits to pull show in the success colour
-                                        let color = if behind_accent && !selected {
-                                            t.status_success
-                                        } else {
-                                            badge_text
-                                        };
-                                        d.child(octicon(Octicon::ArrowDown, color).size(zpx(12.)))
-                                    }),
-                            )
-                        })
-                        .when(has_changes, |d| {
-                            // `.change-indicator-wrapper`: 5 px in, at least 12 px wide
-                            d.child(
-                                div()
-                                    .id(("repo-changes", id))
-                                    .ghd_tooltip("There are uncommitted changes in this repository")
-                                    .ml(SPACING_HALF())
-                                    .min_w(zpx(12.))
-                                    .flex()
-                                    .justify_center()
-                                    .items_center()
-                                    .child(octicon(Octicon::DotFill, t.tab_bar_active)),
-                            )
-                        }),
-                )
-            })
+                                        .ml(SPACING_HALF())
+                                        .min_w(zpx(12.))
+                                        .flex()
+                                        .justify_center()
+                                        .items_center()
+                                        .child(octicon(Octicon::DotFill, t.tab_bar_active)),
+                                )
+                            }),
+                    )
+                },
+            )
     }
 
     /// Corvene (`207-repository-status-filter`): the filter options menu.
@@ -839,7 +1121,7 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
         })
         .enabled(!missing),
         MenuItem::new(labels::REVEAL_IN_FILE_MANAGER, move |_, cx| {
-            Dispatcher::show_in_finder(&reveal, cx)
+            Dispatcher::show_repository(&reveal, cx)
         })
         .enabled(!missing),
         MenuItem::new(labels::open_in(&editor), move |_, cx| {
@@ -1074,7 +1356,7 @@ impl Render for RepositoryFoldout {
                         let first = row_ix;
                         row_ix += group.repos.len();
                         let mut details = if show_paths {
-                            duplicate_name_paths(group.repos.iter().map(|(r, _)| r))
+                            duplicate_name_paths(group.repos.iter().map(|(r, _, _)| r))
                         } else {
                             HashMap::new()
                         };
@@ -1123,10 +1405,11 @@ impl Render for RepositoryFoldout {
                                 )
                             })
                             .children(group.repos.iter().enumerate().map(
-                                |(ix, (repo, matched))| {
+                                |(ix, (repo, matched, needs_disambiguation))| {
                                     self.row(
                                         repo,
                                         matched,
+                                        *needs_disambiguation,
                                         selected == Some(repo.id),
                                         highlighted == Some(first + ix),
                                         details.remove(&repo.id),
@@ -1143,7 +1426,11 @@ impl Render for RepositoryFoldout {
 
 /// `HighlightText`'s bold ranges (bytes of `text`) for the matched char
 /// `positions`, as `crate::autocompletion::highlighted` draws them.
-fn bold_ranges(text: &str, positions: &[usize]) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
+#[doc(hidden)]
+pub fn bold_ranges(
+    text: &str,
+    positions: &[usize],
+) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
     let bold = HighlightStyle {
         font_weight: Some(FontWeight::BOLD),
         ..Default::default()
@@ -1162,22 +1449,22 @@ fn bold_ranges(text: &str, positions: &[usize]) -> Vec<(std::ops::Range<usize>, 
     ranges.into_iter().map(|r| (r, bold)).collect()
 }
 
-/// The row's indicators: ahead / behind (when either is non-zero) and
-/// whether there are uncommitted changes, from the loaded state or the
-/// background indicator refresh.
-fn indicators(s: &AppState, id: u64) -> (Option<corvene_core::AheadBehind>, bool) {
+/// The row's indicators: ahead / behind (when either is non-zero) and the
+/// number of uncommitted changes, from the loaded state or the background
+/// indicator refresh.
+fn indicators(s: &AppState, id: u64) -> (Option<corvene_core::AheadBehind>, usize) {
     let indicator = s.indicators.get(&id);
     let rs = s.repo_states.get(&id);
     let ab = rs
         .and_then(|r| r.ahead_behind)
         .or_else(|| indicator.and_then(|i| i.ahead_behind))
         .filter(|ab| ab.ahead > 0 || ab.behind > 0);
-    let changes = rs
-        .and_then(|r| r.status.as_ref())
-        .map(|st| !st.files.is_empty())
-        .or_else(|| indicator.map(|i| i.changed_files > 0))
-        .unwrap_or(false);
-    (ab, changes)
+    let changed_files = rs
+        .and_then(|r| r.status.as_deref())
+        .map(|st| st.files.len())
+        .or_else(|| indicator.map(|i| i.changed_files))
+        .unwrap_or(0);
+    (ab, changed_files)
 }
 
 /// Corvene (`213-duplicate-names-show-path`): for repositories whose names
@@ -1226,22 +1513,21 @@ fn duplicate_name_paths<'a>(
 }
 
 /// Corvene (`612-navigation-shortcuts`): the repositories in the list's
-/// order without the Recent group (owner groups by owner, then Other; by
-/// name within a group; by name alone with `268-ungrouped-repository-list`),
-/// for ⇧⌘] / ⇧⌘[.
+/// order without the Recent group ([`group_repositories`]: owner groups,
+/// Enterprise hosts, then Other; by name within a group; by name alone with
+/// `268-ungrouped-repository-list`), for ⇧⌘] / ⇧⌘[.
 pub fn list_order(state: &AppState) -> Vec<u64> {
-    let mut repos = state.sorted_repositories();
     if state
         .flags
         .bool(corvene_core::flags::ids::UNGROUPED_REPOSITORY_LIST)
     {
-        return repos.iter().map(|r| r.id).collect();
+        return state.sorted_repositories().iter().map(|r| r.id).collect();
     }
-    repos.sort_by_key(|r| match &r.github {
-        Some(gh) => (0, gh.owner.to_lowercase()),
-        None => (1, String::new()),
-    });
-    repos.iter().map(|r| r.id).collect()
+    group_repositories(&state.repositories, &HashMap::new(), &[])
+        .into_iter()
+        .flat_map(|g| g.items)
+        .map(|item| item.repository.id)
+        .collect()
 }
 
 /// The repository `step` places after `current` in `order`, wrapping.
@@ -1291,6 +1577,46 @@ mod tests {
         assert_eq!(paths.get(&3).map(String::as_str), Some("x/src"));
         assert_eq!(paths.get(&4).map(String::as_str), Some("y/src"));
         assert!(!paths.contains_key(&5));
+    }
+
+    #[test]
+    fn enterprise_groups_are_named_by_host() {
+        let github = |endpoint: &str| corvene_core::GitHubRepository {
+            endpoint: endpoint.into(),
+            owner: "o".into(),
+            name: "n".into(),
+            html_url: String::new(),
+            clone_url: String::new(),
+            default_branch: None,
+            private: false,
+            fork: false,
+            parent: None,
+            archived: false,
+            permissions: None,
+            allow_forking: None,
+        };
+        let group = |endpoint: &str| {
+            let mut r = repo(1, "/w/n");
+            r.github = Some(github(endpoint));
+            super::group_for_repository(&r)
+        };
+        // `getHTMLURL` keeps the scheme and host name alone
+        assert_eq!(
+            group("https://GHE.example.com:8443/api/v3"),
+            super::RepositoryListGroup::Enterprise {
+                host: "ghe.example.com".into()
+            }
+        );
+        assert_eq!(
+            group("https://api.octo.ghe.com"),
+            super::RepositoryListGroup::Enterprise {
+                host: "octo.ghe.com".into()
+            }
+        );
+        assert_eq!(
+            group("https://api.github.com"),
+            super::RepositoryListGroup::Dotcom { owner: "o".into() }
+        );
     }
 
     #[test]

@@ -137,6 +137,18 @@ pub fn write_report(dir: &Path, at: SystemTime, report: &Report<'_>) -> std::io:
 
 /// `YYYY-MM-DD-HHMMSS` in UTC.
 pub fn timestamp(at: SystemTime) -> String {
+    let (year, month, day, rem) = utc_civil(at);
+    format!(
+        "{year:04}-{month:02}-{day:02}-{:02}{:02}{:02}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+/// `at` in UTC as (year, month, day, seconds into the day); instants before
+/// the epoch count as the epoch.
+pub(crate) fn utc_civil(at: SystemTime) -> (i64, i64, i64, u64) {
     let secs = at
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -152,12 +164,7 @@ pub fn timestamp(at: SystemTime) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}-{:02}{:02}{:02}",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
+    (year, month, day, rem)
 }
 
 /// `macOS 15.3 (arm64)` from `SystemVersion.plist`, without spawning.

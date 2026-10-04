@@ -33,7 +33,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, dialog};
+use crate::dialog::{GroupButtonSpec, OkCancelButtonGroup, dialog};
 use crate::icons::Octicon;
 use crate::tab_bar::{TabModel, VerticalTab, tab_bar};
 use crate::theme::ActiveGhdTheme;
@@ -447,7 +447,11 @@ impl PreferencesDialog {
                     "Sign in to your GitHub.com account to access your repositories.",
                     mac_or("Sign Into GitHub.com", "Sign into GitHub.com"),
                     self.preferred_focus_visible,
-                    |_, cx| Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx),
+                    // GHD `onDotComSignIn`: Settings closes first
+                    |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx)
+                    },
                     cx,
                 )
                 .mb(SPACING())
@@ -465,13 +469,17 @@ impl PreferencesDialog {
                     "If you are using GitHub Enterprise at work, sign in to it to get access to your repositories.",
                     mac_or("Sign Into GitHub Enterprise", "Sign into GitHub Enterprise"),
                     false,
-                    |_, cx| Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx),
+                    |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx)
+                    },
                     cx,
                 )
                 .into_any_element()
             } else {
                 button("prefs-add-enterprise", "Add GitHub Enterprise account", cx)
                     .on_click(|_, _, cx| {
+                        Dispatcher::close_popup(cx);
                         Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx)
                     })
                     .into_any_element()
@@ -870,11 +878,17 @@ impl PreferencesDialog {
                     .ok();
                 });
                 let email_value = self.email.read(cx).value().to_string();
-                let warn = !emails.is_empty()
-                    && !email_value.trim().is_empty()
-                    && !emails
-                        .iter()
-                        .any(|e| e.eq_ignore_ascii_case(email_value.trim()));
+                // `GitConfigUserForm`: `GitEmailNotFoundWarning` for every
+                // account while "Other email" (the text box) is shown
+                let email_is_other = emails.is_empty() || self.email_choice.is_none();
+                let warning = email_is_other
+                    .then(|| {
+                        crate::git_email_not_found_warning::git_email_not_found_warning(
+                            &self.state.read(cx).accounts,
+                            &email_value,
+                        )
+                    })
+                    .flatten();
                 div()
                     .flex()
                     .flex_col()
@@ -922,22 +936,15 @@ impl PreferencesDialog {
                                 .into_any_element()
                         })
                     })
-                    .when(warn, |d| {
-                        // `GitEmailNotFoundWarning`
+                    .when_some(warning, |d, warning| {
                         d.child(
-                            paragraph(vec![
-                                "This email address doesn't match your GitHub account, so your commits will be wrongly attributed. ".into(),
-                                link_button("prefs-email-learn-more", "Learn more", cx)
-                                    .text_size(FONT_SIZE_SM())
-                                    .on_click(|_, _, cx| {
-                                        Dispatcher::open_url(
-                                            "https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-personal-account-on-github/managing-email-preferences/setting-your-commit-email-address",
-                                            cx,
-                                        )
-                                    })
-                                    .into_any_element()
-                                    .into(),
-                            ])
+                            crate::git_email_not_found_warning::git_email_not_found_warning_element(
+                                "prefs-email",
+                                warning,
+                                FONT_SIZE_SM(),
+                                zpx(18.),
+                                cx,
+                            )
                             .text_size(FONT_SIZE_SM())
                             .text_color(t.text_secondary),
                         )
@@ -958,9 +965,8 @@ impl PreferencesDialog {
                     .read(cx)
                     .flags
                     .bool(corvene_core::flags::ids::PATH_GIT_SETTINGS);
-                let warning =
-                    crate::dialogs::branch_dialogs::ref_name_warning(&value, &sanitized, quiet)
-                        .then(|| format!("Will be saved as {sanitized}."));
+                let warning = crate::dialogs::branch_dialogs::ref_name_warning(&value, "", quiet)
+                    .then(|| format!("Will be saved as {sanitized}."));
                 div()
                     .flex()
                     .flex_col()
@@ -2308,24 +2314,24 @@ impl Render for PreferencesDialog {
             "dialog-preferences",
             corvene_platform::editors::SETTINGS_LABEL,
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "prefs-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "prefs-save",
                     label: "Save".into(),
-                    primary: true,
                     disabled: !name_valid,
                     on_click: Box::new(move |_, cx| {
                         weak.update(cx, |this, cx| this.save(cx)).ok();
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

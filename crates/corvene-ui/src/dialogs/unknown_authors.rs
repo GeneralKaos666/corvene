@@ -6,7 +6,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog_with_kind};
+use crate::dialog::{DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind};
 use crate::theme::mono_font;
 use crate::theme::sizes::*;
 
@@ -64,25 +64,25 @@ impl Render for UnknownAuthorsDialog {
             DialogKind::Warning,
             mac_or("Unknown Co-Authors", "Unknown co-authors"),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "unknown-authors-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "unknown-authors-ok",
                     label: mac_or("Commit Anyway", "Commit anyway").into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
                         Dispatcher::commit(repo, summary.clone(), description.clone(), cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

@@ -1,0 +1,133 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import CodeBlock from "../../components/CodeBlock.astro";
+import BenchmarkComparison from "../../components/BenchmarkComparison";
+import { BENCHMARK_METRICS, COMPARED, LATENCY_PASS, SYSTEM_SPECS, formatMetric } from "../../data/benchmarks";
+
+const compared = BENCHMARK_METRICS.filter((m) => m.githubDesktop !== null);
+const ratio = (a: number, b: number) => `${(b / a).toFixed(b / a >= 10 ? 0 : 1)}×`;
+---
+
+<DocsLayout
+  currentSlug="benchmarks"
+  title="Performance"
+  description="Corvene against GitHub Desktop and GitKraken on one machine, the budgets it holds itself to, and how to reproduce every number."
+>
+  <p>
+    Every number here was measured on {COMPARED.date}, on an {SYSTEM_SPECS.machine}: Corvene's release build against
+    {COMPARED.githubDesktop} and {COMPARED.gitKraken}, launch and memory on each app's own repository, interaction
+    latencies on the same large fixture repository ({SYSTEM_SPECS.fixture}).
+  </p>
+
+  <h2 id="comparison">Against GitHub Desktop and GitKraken</h2>
+  <p>
+    <code>tools/perf/apps.py</code> starts each application's executable directly and measures from the outside, the same
+    way for all three: the time until its first window is on screen (CGWindowList), the Electron apps' first contentful
+    paint over the DevTools protocol (within 60 ms of their window every time), and after a minute idle the physical memory
+    footprint of the process and its helpers (Activity Monitor's Memory column). Five rounds, the apps taking turns so each
+    met the same machine conditions; the 1-minute load average sat between 9 and 15 throughout, other builds being
+    under way, so the absolute times are a little pessimistic for all three. Each app opened the repository it had open
+    last.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Corvene</th><th>{COMPARED.githubDesktop}</th><th>{COMPARED.gitKraken}</th></tr>
+    </thead>
+    <tbody>
+      {compared.map((m) => (
+        <tr>
+          <td>{m.name}</td>
+          <td><strong>{formatMetric(m.corvene, m.unit)}</strong></td>
+          <td>{formatMetric(m.githubDesktop!, m.unit)} <span class="text-fg-subtle">({ratio(m.corvene, m.githubDesktop!)})</span></td>
+          <td>
+            {m.gitKraken === null ? (
+              <span class="text-fg-subtle">no keyboard navigation</span>
+            ) : (
+              <>{formatMetric(m.gitKraken, m.unit)} <span class="text-fg-subtle">({ratio(m.corvene, m.gitKraken)})</span></>
+            )}
+          </td>
+        </tr>
+      ))}
+      <tr>
+        <td>Processes while idle</td><td><strong>1</strong></td><td>4</td><td>7</td>
+      </tr>
+      <tr>
+        <td>Resident set size (RSS), for reference</td><td><strong>109 MB</strong></td><td>486 MB</td><td>1,026 MB</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Medians of five. Fastest single launches: Corvene 231 ms, GitHub Desktop 1,782 ms, GitKraken 2,958 ms. RSS counts
+    shared framework pages once per process, which is why it overstates the Electron apps; the footprint is the fair
+    column.
+  </p>
+  <h3 id="interaction">Interaction latency</h3>
+  <p>
+    The two interaction rows above come from the same actions on the same repository. Corvene is driven over its control
+    socket by <code>tools/perf/bench.py</code>, which times each input until the frame that draws the state it asked for.
+    GitHub Desktop and GitKraken are driven by <code>tools/perf/apps_latency.py</code> over the DevTools protocol with real
+    Chromium input events, timed inside the renderer from the event's own timestamp to the first animation frame whose
+    diff shows the selected file (its path in the header, new rows in the body), so the clock stops at the same place:
+    the first frame with the result on screen. "Select a file" clicks rows 3, 0 and 5 of the changes list; row 0 is the
+    5,000-line file, which is why the Electron apps' click median hides a 2 to 4 second outlier in every round.
+    GitKraken's file list cannot be walked with the keyboard, so it has no "next file" figure.
+  </p>
+
+  <div class="not-prose my-8">
+    <BenchmarkComparison client:visible />
+  </div>
+
+  <h2 id="budgets">Budgets</h2>
+  <table>
+    <thead>
+      <tr><th>Metric</th><th>Budget</th><th>Measured</th></tr>
+    </thead>
+    <tbody>
+      {BENCHMARK_METRICS.filter((m) => m.budget !== undefined).map((m) => (
+        <tr>
+          <td>{m.name}</td>
+          <td>≤ {formatMetric(m.budget!, m.unit)}</td>
+          <td><strong>{formatMetric(m.corvene, m.unit)}</strong></td>
+        </tr>
+      ))}
+      <tr><td>Idle CPU</td><td>0 %</td><td>0.4–1.1 % focused, 0.0 % unfocused (still being chased)</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="latency">Latency on a large repository</h2>
+  <p>
+    The actions people use most, on a synthetic worst case ({SYSTEM_SPECS.fixture}), before and after the optimisation
+    pass of 2026-09-30. Both columns are Corvene; milliseconds are medians.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Action</th><th>Before (ms)</th><th>After (ms)</th></tr>
+    </thead>
+    <tbody>
+      {LATENCY_PASS.map((row) => (
+        <tr>
+          <td>{row.action}</td>
+          <td>{row.before}</td>
+          <td><strong>{row.after}</strong></td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  <p>
+    What changed: git work fans out on threads and reads come from gitoxide; diffs and changesets are cached by object id
+    so a refresh that changed nothing draws nothing; views are cached and long lists virtualized; text shaping keeps its
+    fonts between frames.
+  </p>
+
+  <h2 id="reproduce">Reproducing</h2>
+  <p>The application comparison needs the release build and the two other apps installed:</p>
+  <CodeBlock code={"cargo build --release -p corvene\npython3 tools/perf/apps.py --runs 5 --idle 60 --corvene-data <data dir with a repository added>"} />
+  <p>The fixture generator and the latency bench live in <code>tools/perf</code> too. The bench speaks to a profiling build over <code>CORVENE_CONTROL</code>:</p>
+  <CodeBlock
+    code={"cargo build --profile profiling -p corvene --features snapshots\npython3 tools/perf/fixture.py big target/perf/big\npython3 tools/perf/bench.py target/perf/big"}
+  />
+  <p>
+    Besides wall time the bench records the main thread's retired instructions per action, which does not move with
+    machine load. The raw output of the application comparison is kept in <code>tools/perf/results/</code>.
+  </p>
+</DocsLayout>

@@ -14,16 +14,50 @@
 //! sentence, then shows the command, its exit code and its output in a box.
 
 use corvene_core::{AppState, Dispatcher, Popup};
-use corvene_git::{GitErrorDetails, GitFailure};
+use corvene_git::{GitErrorDetails, GitFailure, KnownGitError};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogKind, dialog, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind,
+};
 use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, mono_font};
+
+/// What a button of `CLIInstalled` does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CliInstalledAction {
+    /// `onDismissed`
+    Dismiss,
+}
+
+/// What GHD `CLIInstalled` (`ui/cli-installed/cli-installed.tsx`) shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CliInstalledContent {
+    pub title: String,
+    /// "The command line tool has been installed at <path>.": the text
+    /// before the bold path, the path and the text after it.
+    pub text: (String, String, String),
+    /// The footer's buttons (`DefaultDialogFooter`): label and what each
+    /// does.
+    pub buttons: Vec<(String, CliInstalledAction)>,
+}
+
+/// GHD `CLIInstalled` for the linked `path` (`InstalledCLIPath`).
+pub fn cli_installed(path: &std::path::Path) -> CliInstalledContent {
+    CliInstalledContent {
+        title: mac_or("Command Line Tool Installed", "Command line tool installed").into(),
+        text: (
+            "The command line tool has been installed at ".into(),
+            path.display().to_string(),
+            ".".into(),
+        ),
+        buttons: vec![("Ok".into(), CliInstalledAction::Dismiss)],
+    }
+}
 
 pub struct SimpleDialog {
     popup: Popup,
@@ -60,25 +94,25 @@ impl Render for SimpleDialog {
                          `brew install git`, then click Retry.",
                         "Install Git with your distribution's package manager, then click Retry.",
                     )),
-                vec![
-                    DialogButton {
+                OkCancelButtonGroup {
+                    destructive: false,
+                    cancel: GroupButtonSpec {
                         id: "install-git-cancel",
                         label: "Cancel".into(),
-                        primary: false,
                         disabled: false,
                         on_click: Box::new(close),
                     },
-                    DialogButton {
+                    ok: GroupButtonSpec {
                         id: "install-git-retry",
                         label: "Retry".into(),
-                        primary: true,
                         disabled: false,
                         on_click: Box::new(|_, cx| {
                             Dispatcher::close_popup(cx);
                             Dispatcher::detect_git(cx);
                         }),
                     },
-                ],
+                }
+                .into_buttons(),
                 close,
                 window,
                 cx,
@@ -101,8 +135,22 @@ impl Render for SimpleDialog {
                         },
                     )
                 };
-                let body = match git {
-                    Some(git) if structured => {
+                // GHD `ConfigLockFileExists` (Settings › Git, Configure Git):
+                // the lock file, with a link that deletes it
+                let config_lock = git
+                    .as_ref()
+                    .filter(|g| g.known == Some(KnownGitError::ConfigLockFileAlreadyExists))
+                    .and_then(|g| {
+                        let base = AppState::global(cx)
+                            .read(cx)
+                            .selected_repository()
+                            .map(|r| r.path.clone())
+                            .unwrap_or_default();
+                        corvene_git::parse_config_lock_file_path_from_error(&g.output, &base)
+                    });
+                let body = match (config_lock, git) {
+                    (Some(lock), _) => config_lock_file_exists(lock, cx),
+                    (None, Some(git)) if structured => {
                         let details = git.details();
                         let show_output = self.show_output.unwrap_or(details.is_empty());
                         let toggle = cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
@@ -119,8 +167,8 @@ impl Render for SimpleDialog {
                             cx,
                         )
                     }
-                    Some(git) => ghd_git_error(message, git, &settings_menu),
-                    None => div().child(message.clone()).into_any_element(),
+                    (None, Some(git)) => ghd_git_error(message, git, &settings_menu),
+                    (None, None) => div().child(message.clone()).into_any_element(),
                 };
                 let mut buttons = Vec::new();
                 if copy {
@@ -213,33 +261,75 @@ impl Render for SimpleDialog {
                 )
                 .into_any_element()
             }
-            Popup::CLIInstalled { path } => dialog(
-                "cli-installed",
-                mac_or("Command Line Tool Installed", "Command line tool installed"),
-                crate::widgets::paragraph(vec![
-                    "The command line tool has been installed at ".into(),
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(path.display().to_string())
-                        .into_any_element()
-                        .into(),
-                    ".".into(),
-                ]),
-                vec![DialogButton {
-                    id: "cli-installed-ok",
-                    label: "Ok".into(),
-                    primary: true,
-                    disabled: false,
-                    on_click: Box::new(close),
-                }],
-                close,
-                window,
-                cx,
-            )
-            .into_any_element(),
+            Popup::CLIInstalled { path } => {
+                let CliInstalledContent {
+                    title,
+                    text: (lead, path, tail),
+                    buttons,
+                } = cli_installed(path);
+                dialog(
+                    "cli-installed",
+                    title,
+                    crate::widgets::paragraph(vec![
+                        lead.into(),
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(path)
+                            .into_any_element()
+                            .into(),
+                        tail.into(),
+                    ]),
+                    buttons
+                        .into_iter()
+                        .map(|(label, CliInstalledAction::Dismiss)| DialogButton {
+                            id: "cli-installed-ok",
+                            label: label.into(),
+                            primary: true,
+                            disabled: false,
+                            on_click: Box::new(close),
+                        })
+                        .collect(),
+                    close,
+                    window,
+                    cx,
+                )
+                .into_any_element()
+            }
             _ => div().into_any_element(),
         }
     }
+}
+
+/// GHD `ConfigLockFileExists` (`ui/lib/config-lock-file-exists.tsx`): the
+/// existing lock file and a "delete the lock file" link
+/// (`Dispatcher::delete_config_lock_file`, `onDeleteLockFile`).
+///
+/// Deviation: GHD shows it inside Settings › Git and Configure Git, which
+/// stay open; Corvene's Settings and Welcome are gone by the time the save
+/// fails, so it shows in the save's error dialog.
+fn config_lock_file_exists(lock: std::path::PathBuf, cx: &App) -> AnyElement {
+    let path = lock.display().to_string();
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACING())
+        .child(crate::widgets::paragraph(vec![
+            "Failed to update Git configuration file. A lock file already exists at ".into(),
+            crate::widgets::code_ref(path, cx).into_any_element().into(),
+            ".".into(),
+        ]))
+        .child(crate::widgets::paragraph(vec![
+            "This can happen if another tool is currently modifying the Git configuration or if \
+             a Git process has terminated earlier without cleaning up the lock file. Do you want \
+             to "
+            .into(),
+            crate::widgets::link_button("config-lock-delete", "delete the lock file", cx)
+                .on_click(move |_, _, cx| Dispatcher::delete_config_lock_file(lock.clone(), cx))
+                .into_any_element()
+                .into(),
+            " and try again?".into(),
+        ]))
+        .into_any_element()
 }
 
 /// GHD's `AppError` content for a failed git command: the lead (Corvene's
@@ -263,7 +353,11 @@ fn ghd_git_error(lead: &str, git: &GitFailure, settings_menu: &str) -> AnyElemen
         .gap(SPACING())
         .children(lead.map(|lead| div().child(lead)))
         .when(raw, |d| {
-            d.child(div().font_family(mono_font()).child(git.output.clone()))
+            d.child(
+                div()
+                    .font_family(mono_font())
+                    .child(git.output.trim_end().to_string()),
+            )
         })
         .with_scrollbar()
         .into_any_element()
@@ -464,10 +558,10 @@ fn structured_git_error(
         .text_size(FONT_SIZE())
         .line_height(zpx(18.))
         .text_color(t.text)
-        .child(if git.output.is_empty() {
+        .child(if git.output.trim_end().is_empty() {
             "(no output)".to_string()
         } else {
-            git.output.clone()
+            git.output.trim_end().to_string()
         })
         .with_scrollbar();
     body.child(

@@ -1,0 +1,2 @@
+# Lane refs (branches, refs, reflog, rev-parse)
+unit/pull-request-refs-test.ts	*	omitted: extractPullRequestNumbersFromCommits and findPullRequestsByNumbers (lib/pull-request-refs.ts) only gather pull request context for Copilot conflict resolution (app-store.ts), and Copilot is left out by design (.docs/TODO.md › Copilot)

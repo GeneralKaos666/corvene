@@ -176,8 +176,10 @@ pub fn working_directory_patch(
         .iter()
         .partition(|f| !f.status.submodule && f.status.kind.is_new_or_untracked());
     let mut patch = Vec::new();
-    if !tracked.is_empty() {
-        let paths = tracked
+    // in batches: every path of a huge change set would pass the system's
+    // argument size limit
+    for batch in tracked.chunks(1000) {
+        let paths = batch
             .iter()
             .flat_map(|f| std::iter::once(&f.path).chain(f.old_path.as_ref()));
         let out = GitCommand::new(git.clone())
@@ -315,6 +317,18 @@ pub fn working_file_lines(
         return Some(file_lines(target.to_string_lossy().as_bytes()));
     }
     std::fs::read(full).ok().map(|b| file_lines(&b))
+}
+
+/// GHD `readPartialFile` (`lib/file-system.ts`): bytes `start..=end` of the
+/// file at `path` (fewer when the file ends first).
+pub fn read_partial_file(path: &Path, start: u64, end: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(end.saturating_add(1).saturating_sub(start))
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 /// A committed blob as lines (`None` when the path is not in that commit).
@@ -583,7 +597,7 @@ mod tests {
         std::fs::write(path.join("skip.txt"), "changed\n").unwrap();
         std::fs::write(path.join("new.txt"), "fresh\n").unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         let files: Vec<_> = status
             .files
             .into_iter()
@@ -629,7 +643,7 @@ mod tests {
             crate::config_value(git.clone(), path, "diff.tool").as_deref(),
             Some("fake")
         );
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         open_difftool(git, path, &status.files[0]).unwrap();
         assert_eq!(
             std::fs::read_to_string(path.join("seen.txt")).unwrap(),
@@ -707,7 +721,7 @@ mod tests {
         std::fs::write(path.join("a.txt"), "one\nTWO\n").unwrap();
         std::fs::write(path.join("b.txt"), "new\n").unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         for file in &status.files {
             let diff =
                 working_directory_diff(git.clone(), path, file, false, false, false, None).unwrap();
@@ -827,7 +841,7 @@ mod tests {
         run(&["commit", "-q", "-m", "init"]);
         std::fs::write(path.join("data.bin"), b"one\0\nTWO\n").unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         let file = &status.files[0];
         let binary =
             working_directory_diff(git.clone(), path, file, false, false, false, None).unwrap();

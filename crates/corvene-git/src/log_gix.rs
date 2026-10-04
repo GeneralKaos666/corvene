@@ -1,13 +1,17 @@
 //! Corvene `907-in-process-commit-files`: a commit's (or a range's) changed
 //! files and line counts read by gitoxide in-process instead of
 //! `git log -1 -m --first-parent -C -M --raw --numstat` / `git diff -C -M
-//! --raw --numstat` (`log.rs`). Renames and copies use git's defaults (50 %
-//! similarity, copies from the commit's modified files, at most 1,000
-//! candidates). `None` (any error) means the caller runs git as before.
+//! --raw --numstat` (`log.rs`). `None` (an error, or a commit gitoxide
+//! cannot answer the way git does) means the caller runs git as before.
 //!
-//! Differences from git kept on purpose: a rename's similarity score is only
-//! known when the content is identical (`R100`); other renames carry
-//! gitoxide's estimate, which nothing reads.
+//! It must give what `log.rs` parses from git, field for field (checked by
+//! the tests below and by every GHD test that reads a commit's files,
+//! `corvene_test_support::get_changed_files`). Left to git: commits that
+//! may hold an inexact or ambiguous rename (only renames of identical
+//! content, empty files included, are paired here), `diff.renames=copies`,
+//! submodule changes where a submodule may be ignored
+//! ([`submodules_may_be_ignored`]), a configured external diff, SHA-256
+//! repositories, and any gitoxide error.
 
 use std::path::Path;
 
@@ -22,6 +26,22 @@ use gix::prelude::TreeDiffChangeExt;
 pub(crate) fn changed_files(workdir: &Path, oldest: &str, newest: &str) -> Option<ChangesetData> {
     let started = std::time::Instant::now();
     let repo = crate::handle::open_trusted(workdir)?;
+    // `diff.renames=copies` turns the command's `-C` into
+    // `--find-copies-harder` (git `diff.c` `diff_opt_find_copies`): copies
+    // of files the commit left alone, which this reader does not look for
+    // (GHD `log-test.ts` "detect copies")
+    if repo
+        .config_snapshot()
+        .string("diff.renames")
+        .is_some_and(|v| {
+            matches!(
+                v.to_str_lossy().to_ascii_lowercase().as_str(),
+                "copies" | "copy"
+            )
+        })
+    {
+        return None;
+    }
     let commit = |rev: &str| {
         repo.rev_parse_single(rev)
             .ok()?
@@ -60,7 +80,8 @@ pub(crate) fn changed_files(workdir: &Path, oldest: &str, newest: &str) -> Optio
                 copies: None,
                 percentage: None,
                 limit: 0,
-                ..Default::default()
+                // git pairs empty files too (`R100`)
+                track_empty: true,
             }),
         },
     )
@@ -68,6 +89,7 @@ pub(crate) fn changed_files(workdir: &Path, oldest: &str, newest: &str) -> Optio
     .ok()?;
     if outcome.is_some_and(|o| o.num_similarity_checks_skipped_for_rename_tracking_due_to_limit > 0)
         || !renames_are_settled(&changes)
+        || (changes.iter().any(touches_submodule) && submodules_may_be_ignored(&repo))
     {
         return None;
     }
@@ -131,11 +153,16 @@ pub(crate) fn changed_files(workdir: &Path, oldest: &str, newest: &str) -> Optio
         }
         let is_submodule = modes.1.is_commit() || modes.0.is_some_and(|m| m.is_commit());
         let (added, deleted) = if is_submodule {
-            // git counts the "Subproject commit <sha>" line on each side
-            (
-                u64::from(!matches!(change, Change::Deletion { .. })),
-                u64::from(!matches!(change, Change::Addition { .. })),
-            )
+            // git counts the "Subproject commit <sha>" line on each side;
+            // a moved submodule (only paired with its own commit) has the
+            // same line on both
+            match change {
+                Change::Rewrite { .. } => (0, 0),
+                _ => (
+                    u64::from(!matches!(change, Change::Deletion { .. })),
+                    u64::from(!matches!(change, Change::Addition { .. })),
+                ),
+            }
         } else {
             line_counts(&repo, &change, &mut cache)?
         };
@@ -149,7 +176,11 @@ pub(crate) fn changed_files(workdir: &Path, oldest: &str, newest: &str) -> Optio
                 Some(old) => Some(old.to_str().ok()?.to_string()),
                 None => None,
             },
-            is_submodule,
+            crate::log::map_submodule_status_file_modes(
+                letter,
+                modes.0.is_some_and(|m| m.is_commit()),
+                modes.1.is_commit(),
+            ),
             newest,
         ));
         cache.clear_resource_cache_keep_allocation();
@@ -235,6 +266,49 @@ fn renames_are_settled(changes: &[Change]) -> bool {
     })
 }
 
+/// Whether a submodule is on either side of `change`.
+fn touches_submodule(change: &Change) -> bool {
+    match change {
+        Change::Addition { entry_mode, .. } | Change::Deletion { entry_mode, .. } => {
+            entry_mode.is_commit()
+        }
+        Change::Modification {
+            previous_entry_mode,
+            entry_mode,
+            ..
+        } => previous_entry_mode.is_commit() || entry_mode.is_commit(),
+        Change::Rewrite {
+            source_entry_mode,
+            entry_mode,
+            ..
+        } => source_entry_mode.is_commit() || entry_mode.is_commit(),
+    }
+}
+
+/// git's tree diffs leave out a submodule whose `ignore` is `all` (its own
+/// setting in the repository's configuration or `.gitmodules`, else
+/// `diff.ignoreSubmodules`; git `diff.c` `is_submodule_ignored`), which
+/// gitoxide lists: with any such setting, commits that touch a submodule
+/// are left to git.
+fn submodules_may_be_ignored(repo: &gix::Repository) -> bool {
+    let config = repo.config_snapshot();
+    if config.string("diff.ignoreSubmodules").is_some() {
+        return true;
+    }
+    if config
+        .plumbing()
+        .sections_by_name("submodule")
+        .is_some_and(|mut sections| sections.any(|s| s.value("ignore").is_some()))
+    {
+        return true;
+    }
+    match repo.submodules() {
+        Ok(None) => false,
+        Ok(Some(mut submodules)) => submodules.any(|s| !matches!(s.ignore(), Ok(None))),
+        Err(_) => true,
+    }
+}
+
 /// File, symlink or submodule: a change between them is git's `T`.
 fn kind_of(mode: gix::object::tree::EntryMode) -> EntryKind {
     match mode.kind() {
@@ -284,7 +358,8 @@ mod tests {
         out
     }
 
-    /// `false` when gitoxide left the commit to git.
+    /// `false` when gitoxide left the commit to git; otherwise its files
+    /// must be git's, field for field.
     fn assert_same(dir: &Path, shas: &[String]) -> bool {
         let git = Arc::new(crate::find_git().unwrap());
         let (cli, gix) = if shas.len() == 1 {
@@ -307,11 +382,8 @@ mod tests {
             "{shas:?} in {}",
             dir.display()
         );
-        for (a, b) in gix.files.iter().zip(&cli.files) {
-            if a.status.score == Some(100) {
-                assert_eq!(b.status.score, Some(100), "{}", a.path);
-            }
-        }
+        // and everything else: kinds, scores, submodule states, commitish
+        assert_eq!(gix, cli, "{shas:?} in {}", dir.display());
         true
     }
 
@@ -389,6 +461,13 @@ mod tests {
         run(&root, &["mv", "b2.txt", "b3.txt"]);
         run(&root, &["commit", "-q", "-m", "exact"]);
         assert!(assert_same(&root, &[head(&root)]));
+        // git pairs a moved empty file too (`R100`)
+        std::fs::write(root.join("e.txt"), "").unwrap();
+        run(&root, &["add", "e.txt"]);
+        run(&root, &["commit", "-q", "-m", "empty"]);
+        run(&root, &["mv", "e.txt", "e2.txt"]);
+        run(&root, &["commit", "-q", "-m", "empty moved"]);
+        assert!(assert_same(&root, &[head(&root)]));
 
         // a merge: compared with its first parent
         run(&root, &["checkout", "-q", "-b", "side", &first]);
@@ -429,6 +508,28 @@ mod tests {
         run(&lib, &["commit", "-q", "-am", "t"]);
         run(&root, &["commit", "-q", "-am", "bump"]);
         assert!(assert_same(&root, &[head(&root)]));
+        // git leaves out a submodule set to be ignored: left to git
+        for (file, key) in [
+            (None, "submodule.lib.ignore"),
+            (Some(".gitmodules"), "submodule.lib.ignore"),
+            (None, "diff.ignoreSubmodules"),
+        ] {
+            let mut set = vec!["config"];
+            set.extend(file.map(|f| ["-f", f]).into_iter().flatten());
+            let mut unset = set.clone();
+            set.extend([key, "all"]);
+            unset.extend(["--unset", key]);
+            run(&root, &set);
+            assert!(!assert_same(&root, &[head(&root)]), "{key}");
+            run(&root, &unset);
+        }
+        assert!(assert_same(&root, &[head(&root)]));
+        // a moved submodule: git's `R100` with no lines counted
+        run(&root, &["mv", "lib", "lib2"]);
+        run(&root, &["commit", "-q", "-m", "move sub"]);
+        assert!(assert_same(&root, &[head(&root)]));
+        run(&root, &["mv", "lib2", "lib"]);
+        run(&root, &["commit", "-q", "-m", "move sub back"]);
         run(&root, &["rm", "-q", "lib"]);
         run(&root, &["commit", "-q", "-m", "drop sub"]);
         assert!(assert_same(&root, &[head(&root)]));
@@ -551,6 +652,27 @@ mod tests {
             text,
             edited,
         );
+        // a copy of a file the commit left alone: no copy for git's `-C -M`,
+        // but `diff.renames=copies` turns `-C` into `--find-copies-harder`
+        // (GHD `log-test.ts` "detect copies"): left to git
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path();
+            run(root, &["init", "-q", "-b", "main"]);
+            run(root, &["config", "commit.gpgsign", "false"]);
+            let body = "the same content\nfor a copy\n";
+            std::fs::write(root.join("initial.md"), body).unwrap();
+            run(root, &["add", "."]);
+            run(root, &["commit", "-q", "-m", "initial"]);
+            std::fs::write(root.join("duplicate.md"), body).unwrap();
+            run(root, &["add", "."]);
+            run(root, &["commit", "-q", "-m", "copy"]);
+            assert!(assert_same(root, &[head(root)]));
+            for value in ["copies", "copy"] {
+                run(root, &["config", "diff.renames", value]);
+                assert!(!assert_same(root, &[head(root)]));
+            }
+        }
         // empty files
         commit_and_compare(&[], "", &[("e.txt", b"")], &[("e.txt", b"now\n")]);
         commit_and_compare(&[], "", &[("e.txt", b"x\n")], &[("e.txt", b"")]);

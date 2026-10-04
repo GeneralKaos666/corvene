@@ -561,7 +561,7 @@ fn predicate(until: &str, cx: &mut App) -> Result<bool, String> {
             rs.info.is_some()
                 && rs
                     .status
-                    .as_ref()
+                    .as_deref()
                     .is_some_and(|st| st.files.len() == arg.parse::<usize>().unwrap_or(0))
         }
         other => return Err(format!("unknown predicate {other:?}")),
@@ -578,7 +578,7 @@ fn state_summary(cx: &mut App) -> Value {
         "selected_file": rs.selected_file,
         "selected_commit": rs.selected_commit,
         "commits": rs.commits.iter().take(200).map(|c| c.sha.clone()).collect::<Vec<_>>(),
-        "files": rs.status.as_ref().map(|s| s.files.len()),
+        "files": rs.status.as_deref().map(|s| s.files.len()),
         // the "Committed … Undo" bar moves the commit form up
         "undo_bar": rs.last_commit.is_some(),
     })

@@ -91,7 +91,13 @@ pub fn load_shell_env() -> std::io::Result<HashMap<String, String>> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
-    let mut stdout = child.stdout.take().expect("piped stdout");
+    let Some(mut stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(std::io::Error::other(
+            "the shell was started without its stdout pipe",
+        ));
+    };
     let reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stdout.read_to_end(&mut buf);

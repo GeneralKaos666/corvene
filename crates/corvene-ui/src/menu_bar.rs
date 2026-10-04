@@ -708,7 +708,7 @@ impl MenuBarShell {
         // a dialog's backdrop lies over GHD's whole page, title bar included
         // (drawn here, not by the dialog, so the window controls stay usable)
         let dialog_open = corvene_core::AppState::try_global(cx)
-            .is_some_and(|state| state.read(cx).popup.is_some());
+            .is_some_and(|state| state.read(cx).popup().is_some());
         if mode == Mode::Dark {
             use crate::theme::ActiveGhdTheme;
             shell

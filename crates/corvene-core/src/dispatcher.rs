@@ -12,13 +12,12 @@ use gpui_kit::{App, AppContext, AsyncApp, Entity};
 use tracing::{error, info, warn};
 
 use crate::persistence::{Settings, StoreExt, UncommittedChangesStrategy};
+use crate::sign_in::{ResultCallback, SignInResult, SignInStore};
 use crate::state::{
-    AppState, CloneState, ErrorMessage, Foldout, LastCommit, Popup, RepositoryState, RetryAction,
-    SignInState, SignInStep,
+    AppState, AuthenticationFlow, AuthenticationStep, CloneState, ErrorMessage, Foldout,
+    LastCommit, Popup, RepositoryState, RetryAction,
 };
-use corvene_models::{
-    Account, DiffSelectionType, Repository, Section, WorkingDirectoryFileChange, github_from_remote,
-};
+use corvene_models::{DiffSelectionType, Section, WorkingDirectoryFileChange, github_from_remote};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const RECENT_REPOSITORIES_LENGTH: usize = 3;
@@ -55,7 +54,9 @@ impl Dispatcher {
             .filter(|id| repositories.iter().any(|r| r.id == *id))
             .or_else(|| recent.first().copied())
             .or_else(|| repositories.first().map(|r| r.id));
-        let accounts = store.accounts().unwrap_or_default();
+        // `AccountsStore.loadFromStore` sorts GitHub.com first
+        let accounts = crate::accounts::sort_accounts(store.accounts().unwrap_or_default());
+        let sign_in_accounts = std::rc::Rc::new(std::cell::RefCell::new(accounts.clone()));
         let generic_logins = store.generic_logins().unwrap_or_default();
         let enterprise_oauth_apps = store.enterprise_oauth_apps().unwrap_or_default();
 
@@ -69,18 +70,16 @@ impl Dispatcher {
                 .or_else(|| std::env::var_os("USERPROFILE"))
                 .map(PathBuf::from),
         );
-        let (git, git_error, popup) =
+        let mut popups = crate::popup_manager::PopupManager::new();
+        let (git, git_error) =
             match corvene_git::find_git_prefetched_preferring(preferred.as_deref()) {
-                Ok(bin) => (Some(Arc::new(bin)), None, None),
+                Ok(bin) => (Some(Arc::new(bin)), None),
                 Err(err) => {
                     warn!(%err, "git not usable");
-                    (
-                        None,
-                        Some(err.to_string()),
-                        Some(Popup::InstallGit {
-                            reason: err.to_string(),
-                        }),
-                    )
+                    popups.add_popup(Popup::InstallGit {
+                        reason: err.to_string(),
+                    });
+                    (None, Some(err.to_string()))
                 }
             };
         // Corvene (`271-persist-repository-indicators`): last launch's
@@ -129,11 +128,15 @@ impl Dispatcher {
             repo_states: Default::default(),
             accounts,
             foldout: None,
-            popup,
-            cloning: None,
+            popups,
+            cloning: Default::default(),
+            ahead_behind: Default::default(),
+            branch_pruner_generation: 0,
+            shared_storage_move: None,
             pending_aliases: Vec::new(),
-            sign_in: None,
-            retry_after_sign_in: None,
+            sign_in_store: SignInStore::new(sign_in_accounts.clone()),
+            sign_in_accounts,
+            authentication: None,
             watcher: None,
             watched_repo: None,
             banner: None,
@@ -178,6 +181,7 @@ impl Dispatcher {
 
         if let Some(id) = state.read(cx).selected {
             Self::refresh_repository(id, cx);
+            Self::start_background_pruner(id, cx);
             Self::start_watching(id, cx);
         }
         state
@@ -282,9 +286,12 @@ impl Dispatcher {
                             warn!(%err, "git not usable");
                             s.git = None;
                             s.git_error = Some(err.to_string());
-                            s.popup = Some(Popup::InstallGit {
-                                reason: err.to_string(),
-                            });
+                            show_popup_in(
+                                s,
+                                Popup::InstallGit {
+                                    reason: err.to_string(),
+                                },
+                            );
                         }
                     }
                     cx.notify();
@@ -338,9 +345,11 @@ impl Dispatcher {
         });
     }
 
+    /// GHD `_showPopup`: put `popup` on the popup stack (see
+    /// [`show_popup_in`]).
     pub fn show_popup(popup: Popup, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            s.popup = Some(popup);
+            show_popup_in(s, popup);
             cx.notify();
         });
     }
@@ -379,23 +388,138 @@ impl Dispatcher {
         .detach();
     }
 
+    /// GHD `ConfigLockFileExists.onDeleteLockFile`
+    /// (`ui/lib/config-lock-file-exists.tsx`), from the error of a Git
+    /// configuration save: close the error and delete `lock` in the
+    /// background (one already gone counts as deleted), so the save can be
+    /// tried again; a failure shows its own error (GHD `postError`).
+    pub fn delete_config_lock_file(lock: PathBuf, cx: &mut App) {
+        Self::close_popup(cx);
+        let task = cx
+            .background_executor()
+            .spawn(async move { corvene_git::delete_config_lock_file(&lock) });
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            if let Err(err) = task.await {
+                cx.update(|cx| {
+                    Self::show_error("Could not delete the lock file", err.to_string(), cx)
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// GHD `_closePopup()`: close the popup on top of the stack, the one
+    /// shown; the one below it (if any) shows again.
     pub fn close_popup(cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(popup) = s.popup.take() {
-                if matches!(popup, Popup::SignIn { .. }) {
-                    s.retry_after_sign_in = None;
-                }
+            if let Some(popup) = s.popups.current_popup().cloned() {
+                s.popups.remove_popup(popup.clone());
+                closed_popup(s, &popup.popup);
                 cx.notify();
             }
         });
     }
 
+    /// GHD `_closePopup(popupType)`: when the popup shown is of the type
+    /// `is` picks, close every popup of its type.
+    pub fn close_popup_if(is: impl Fn(&Popup) -> bool, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            let Some(current) = s.popups.current_popup().cloned() else {
+                return;
+            };
+            if !is(&current.popup) {
+                return;
+            }
+            s.popups.remove_popup_by_type(current.popup_type());
+            closed_popup(s, &current.popup);
+            cx.notify();
+        });
+    }
+
+    /// Close every popup `is` picks, wherever it is in the stack: what a
+    /// GHD dialog's own `onDismissed` (`closePopupById`) does once its work
+    /// is done, for callers that do not keep the popup's id.
+    pub fn close_popups_where(is: impl Fn(&Popup) -> bool, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            let closing: Vec<crate::popup_manager::StackedPopup> = s
+                .popups
+                .all_popups()
+                .iter()
+                .filter(|p| is(&p.popup))
+                .cloned()
+                .collect();
+            if closing.is_empty() {
+                return;
+            }
+            for popup in closing {
+                s.popups.remove_popup(popup.clone());
+                closed_popup(s, &popup.popup);
+            }
+            cx.notify();
+        });
+    }
+
+    /// GHD `_closePopupById`: close the popup with that stack id, wherever
+    /// it is in the stack.
+    pub fn close_popup_by_id(popup_id: u64, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            let Some(popup) = s
+                .popups
+                .all_popups()
+                .iter()
+                .find(|p| p.id == Some(popup_id))
+                .cloned()
+            else {
+                return;
+            };
+            s.popups.remove_popup_by_id(popup_id);
+            closed_popup(s, &popup.popup);
+            cx.notify();
+        });
+    }
+
     /// The re-authorization prompts' "Sign in" / "Continue in browser": open
     /// the sign-in dialog and run `retry` in repository `id` once it succeeds.
+    /// GHD `beginBrowserBasedSignIn(endpoint, resultCallback)` from the
+    /// SAML and workflow prompts: the callback performs `retry` once the
+    /// sign-in succeeds (`performRetry`).
     pub fn sign_in_then_retry(enterprise: bool, id: u64, retry: Option<RetryAction>, cx: &mut App) {
-        Self::show_popup(Popup::SignIn { enterprise }, cx);
-        Self::state(cx).update(cx, |s, _| {
-            s.retry_after_sign_in = retry.map(|retry| (id, retry));
+        let async_cx = cx.to_async();
+        let mut retry = retry;
+        let callback: ResultCallback = Box::new(move |result| {
+            if let (SignInResult::Success { .. }, Some(retry)) = (&result, retry.take()) {
+                // the store calls back in the middle of an `AppState` update
+                async_cx
+                    .spawn(async move |cx: &mut AsyncApp| {
+                        cx.update(|cx| Self::perform_retry(id, retry, cx));
+                    })
+                    .detach();
+            }
+        });
+        Self::show_sign_in_dialog(enterprise, Some(callback), cx);
+    }
+
+    /// GHD `showDotComSignInDialog` / `showEnterpriseSignInDialog`: begin
+    /// the sign-in store's flow and show the SignIn dialog.
+    pub fn show_sign_in_dialog(
+        enterprise: bool,
+        result_callback: Option<ResultCallback>,
+        cx: &mut App,
+    ) {
+        Self::state(cx).update(cx, |s, cx| {
+            begin_sign_in_store(s, enterprise, result_callback);
+            add_popup_in(s, Popup::SignIn { enterprise });
+            cx.notify();
+        });
+    }
+
+    /// GHD `setSignInEndpoint`: the Enterprise address step's Continue.
+    pub fn set_sign_in_endpoint(url: String, cx: &mut App) {
+        Self::state(cx).update(cx, |s, cx| {
+            s.sign_in_store.allow_plain_http =
+                s.flags.bool(crate::flags::ids::ENTERPRISE_PLAIN_HTTP);
+            sign_in_store(s).set_endpoint(&url);
+            cx.notify();
         });
     }
 
@@ -520,10 +644,12 @@ impl Dispatcher {
     }
 
     /// GHD `_relocateRepository` (the missing view's "Locate…"): pick a
-    /// directory and point the entry at the repository there. The entry stays
-    /// missing until the refresh reads it; an unsafe repository then gets the
-    /// "Trust Repository" view. The main worktree is resolved again by that
-    /// refresh (the recorded one belongs to the old location).
+    /// directory and point the entry at the repository there
+    /// (`RepositoriesStore::update_repository_path`). The entry stays missing
+    /// until the refresh reads it; an unsafe repository then gets the "Trust
+    /// Repository" view. The main worktree is resolved again from the new
+    /// location (the recorded one belongs to the old one), by gitoxide, so
+    /// also for an unsafe repository, where GHD clears it.
     pub fn relocate_repository(id: u64, cx: &mut App) {
         Self::pick_directory("Locate", cx, move |picked, cx| {
             let Some(picked) = picked else {
@@ -535,9 +661,11 @@ impl Dispatcher {
                     // `getRepositoryType`: a subdirectory resolves to its
                     // repository's top level; bare repositories are refused
                     let workdir = corvene_git::top_level_working_directory(&picked);
-                    (picked, workdir)
+                    // GHD `findMainWorktreePath(topLevelWorkingDirectory)`
+                    let main = workdir.as_deref().and_then(corvene_git::main_worktree_path);
+                    (picked, workdir, main)
                 },
-                move |(picked, workdir), cx| {
+                move |(picked, workdir, main), cx| {
                     let Some(workdir) = workdir else {
                         // GHD `getInvalidRepoPathsMessage` for one path
                         Self::show_error(
@@ -548,13 +676,16 @@ impl Dispatcher {
                         return;
                     };
                     let changed = Self::state(cx).update(cx, |s, cx| {
-                        let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) else {
+                        let Some(repo) = s.repository(id).cloned() else {
                             return false;
                         };
                         info!(id, path = %workdir.display(), "relocated repository");
-                        repo.path = workdir;
-                        repo.main_worktree_path = None;
-                        persist_repositories(s);
+                        s.repositories_store().update_repository_path(
+                            &repo,
+                            &workdir,
+                            main.as_deref(),
+                            repo.missing,
+                        );
                         let rs = s.repo_state_mut(id);
                         rs.unsafe_path = None;
                         rs.worktrees.clear();
@@ -640,6 +771,10 @@ impl Dispatcher {
             .flags
             .bool(crate::flags::ids::STALE_CORE_WORKTREE_HINT);
         let probe = cx.background_executor().spawn(async move {
+            // GHD `_addRepositories`: a subdirectory of a working directory
+            // adds the repository (`getRepositoryType`'s
+            // `topLevelWorkingDirectory`)
+            let path = corvene_git::top_level_working_directory(&path).unwrap_or(path);
             #[cfg(target_os = "android")]
             if let Some(git) = git.clone() {
                 android_prepare_repository(git, &path);
@@ -671,20 +806,31 @@ impl Dispatcher {
                 Ok((path, info)) => {
                     let state = Self::state(cx);
                     let id = state.update(cx, |s, cx| {
-                        let id = s.store.next_repository_id().unwrap_or_else(|_| {
-                            s.repositories.iter().map(|r| r.id).max().unwrap_or(0) + 1
-                        });
-                        let mut repo = Repository::new(id, info.workdir.clone());
+                        // GHD `addRepository` hands back the entry already at
+                        // that path (a subdirectory of a listed repository
+                        // was picked)
+                        if let Some(existing) = s.repositories_store().find_by_path(&info.workdir) {
+                            return existing.id;
+                        }
                         let wiki_not_github = s.flags.bool(crate::flags::ids::WIKI_NOT_GITHUB);
-                        repo.github = info
+                        // GHD `matchGitHubRepository`: the signed-in accounts'
+                        // hosts, plus github.com when signed out
+                        // (`331-github-without-account`)
+                        let dotcom = s.flags.bool(crate::flags::ids::GITHUB_WITHOUT_ACCOUNT);
+                        let hosts = corvene_models::github_hosts(&s.accounts, dotcom);
+                        let github = info
                             .remote("origin")
-                            .and_then(|r| github_from_remote(&r.url, &[]))
+                            .and_then(|r| github_from_remote(&r.url, &hosts))
                             .filter(|gh| !(wiki_not_github && gh.is_wiki()));
-                        s.repositories.push(repo);
+                        let mut repositories = s.repositories_store();
+                        let repo = repositories.add_repository(&info.workdir);
+                        if let Some(github) = github {
+                            repositories.set_github_repository(&repo, github);
+                        }
+                        let id = repo.id;
                         let repo_state = s.repo_state_mut(id);
                         repo_state.info = Some(info);
                         repo_state.last_refresh = Some(Instant::now());
-                        persist_repositories(s);
                         info!(id, path = %path.display(), "added repository");
                         cx.notify();
                         id
@@ -729,16 +875,24 @@ impl Dispatcher {
             // prompt) keeps its dialog
             if s.flags
                 .bool(crate::flags::ids::CLOSE_DIALOGS_ON_REPOSITORY_SWITCH)
-                && s.popup.as_ref().is_some_and(|p| {
-                    p.repository().is_some_and(|repo| repo != id)
-                        && !matches!(
-                            p,
-                            Popup::MultiCommitOperation { .. }
-                                | Popup::GenericGitAuthentication { .. }
-                        )
-                })
             {
-                s.popup = None;
+                let other_repository: Vec<u64> = s
+                    .popups
+                    .all_popups()
+                    .iter()
+                    .filter(|p| {
+                        p.popup.repository().is_some_and(|repo| repo != id)
+                            && !matches!(
+                                p.popup,
+                                Popup::MultiCommitOperation { .. }
+                                    | Popup::GenericGitAuthentication { .. }
+                            )
+                    })
+                    .filter_map(|p| p.id)
+                    .collect();
+                for popup_id in other_repository {
+                    s.popups.remove_popup_by_id(popup_id);
+                }
             }
             let _ = s.store.save_selected_repository(Some(id));
             let _ = s.store.save_recent_repositories(&s.recent);
@@ -747,6 +901,7 @@ impl Dispatcher {
         });
         if changed {
             Self::refresh_repository(id, cx);
+            Self::start_background_pruner(id, cx);
             Self::start_watching(id, cx);
             Self::check_lfs(id, cx);
             Self::ensure_pull_requests(id, cx);
@@ -758,11 +913,12 @@ impl Dispatcher {
 
     pub fn remove_repository(id: u64, cx: &mut App) {
         let state = Self::state(cx);
-        let next = state.update(cx, |s, cx| {
+        let (next, moved) = state.update(cx, |s, cx| {
             s.repositories.retain(|r| r.id != id);
             s.recent.retain(|r| *r != id);
-            s.repo_states.remove(&id);
-            let next = if s.selected == Some(id) {
+            s.remove_repo_state(id);
+            let moved = s.selected == Some(id);
+            let next = if moved {
                 s.recent
                     .first()
                     .copied()
@@ -775,12 +931,97 @@ impl Dispatcher {
             let _ = s.store.save_recent_repositories(&s.recent);
             let _ = s.store.save_selected_repository(next);
             cx.notify();
-            next
+            (next, moved)
         });
         if let Some(next) = next {
             Self::refresh_repository(next, cx);
+            // GHD `updateRepositorySelectionAfterRepositoriesChanged` selects
+            // the next repository through `_selectRepository`, which starts
+            // its branch pruner
+            if moved {
+                Self::start_background_pruner(next, cx);
+            }
         }
         Self::restart_pull_request_updater(cx);
+    }
+
+    /// GHD `startBackgroundPruner` (`_selectRepositoryRefreshTasks`, which
+    /// stops the previous repository's first): prune the repository's merged
+    /// branches (`crate::branch_pruner`) once the refresh selecting it
+    /// started has finished, then every `BACKGROUND_PRUNE_MINIMUM_INTERVAL`
+    /// while it stays selected.
+    fn start_background_pruner(id: u64, cx: &mut App) {
+        let state = Self::state(cx);
+        let (generation, loading) = state.update(cx, |s, _| {
+            s.branch_pruner_generation += 1;
+            let generation = s.branch_pruner_generation;
+            let rs = s.repo_state_mut(id);
+            rs.prune_after_refresh = rs.loading;
+            (generation, rs.loading)
+        });
+        if !loading {
+            Self::prune_branches(id, cx);
+        }
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            loop {
+                cx.background_executor()
+                    .timer(crate::branch_pruner::BACKGROUND_PRUNE_MINIMUM_INTERVAL)
+                    .await;
+                let current = state.read_with(cx, |s, _| {
+                    s.branch_pruner_generation == generation && s.selected == Some(id)
+                });
+                if !current {
+                    break;
+                }
+                cx.update(|cx| Self::prune_branches(id, cx));
+            }
+        })
+        .detach();
+    }
+
+    /// GHD `BranchPruner.pruneLocalBranches` for a GitHub repository, at
+    /// most once a day: the last prune date is stored first, the pruning
+    /// runs on the background executor with the default branch and branches
+    /// of the last refresh, and the repository is refreshed when it got to
+    /// its end (GHD `onPruneCompleted`).
+    fn prune_branches(id: u64, cx: &mut App) {
+        let now = std::time::SystemTime::now();
+        let prepared = Self::state(cx).update(cx, |s, _| {
+            let git = s.git.clone()?;
+            let repo = s.repository(id).filter(|r| !r.missing)?.clone();
+            let github = repo.github.clone()?;
+            let rs = s.repo_states.get(&id)?;
+            let branches = rs.info.as_ref()?.branches.clone();
+            let default_branch = rs.default_branch.clone();
+            let last = crate::repositories_store::last_prune_date(&s.store, &github);
+            if !crate::branch_pruner::is_due(last, now) {
+                return None;
+            }
+            // GHD updates the last prune date first thing after checking it
+            crate::repositories_store::update_last_prune_date(&s.store, &github, now);
+            Some((git, repo, branches, default_branch, last))
+        });
+        let Some((git, repo, branches, default_branch, last)) = prepared else {
+            return;
+        };
+        crate::remote::spawn_bg(
+            cx,
+            move || {
+                crate::branch_pruner::BranchPruner::new(
+                    git,
+                    &repo,
+                    &branches,
+                    default_branch.as_deref(),
+                    last,
+                )
+                .prune_local_branches(crate::branch_pruner::PruneOptions::DEFAULT, now)
+            },
+            move |run, cx| {
+                if run.completed {
+                    Self::refresh_repository(id, cx);
+                }
+            },
+        );
     }
 
     /// GHD `_refreshRepository`: re-read tip/branches/remotes, ahead/behind
@@ -790,7 +1031,6 @@ impl Dispatcher {
         let (
             path,
             git,
-            previous_status,
             line_counts,
             status_options,
             recent_count,
@@ -808,7 +1048,6 @@ impl Dispatcher {
             (
                 repo.path.clone(),
                 s.git.clone(),
-                s.repo_states.get(&id).and_then(|r| r.status.clone()),
                 s.flags.bool(crate::flags::ids::CHANGES_LINE_COUNTS),
                 corvene_git::StatusOptions {
                     respect_show_untracked_files: s
@@ -841,20 +1080,25 @@ impl Dispatcher {
             Self::recover_missing_worktree(id, path, cx);
             return;
         }
-        let already_running = state.update(cx, |s, _| {
+        let started = Instant::now();
+        // the status the new one is merged with off the main thread
+        // (`changes_state::merge_changed_files`), and whether that merge
+        // drops partial selections
+        let starting = state.update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
             if rs.loading {
                 rs.refresh_pending = true;
-                return true;
+                return None;
             }
             rs.loading = true;
-            rs.refresh_started = Some(Instant::now());
+            rs.refresh_started = Some(started);
             // no notify: a refresh that changes nothing re-renders nothing
-            false
+            Some((rs.status.clone(), rs.clear_partial_state))
         });
-        if already_running {
+        let Some((previous_status, merged_clearing)) = starting else {
             return;
-        }
+        };
+        let merged_from = previous_status.clone();
         // `708-changes-busy-indicator`: the spinner shows once a refresh has
         // taken this long
         if state
@@ -876,6 +1120,9 @@ impl Dispatcher {
             })
             .detach();
         }
+        // the branch and worktrees are ready long before a big tree's
+        // status: they are shown as soon as they are read
+        let (early_tx, early_rx) = async_channel::bounded(1);
         let work = cx.background_executor().spawn(async move {
             let result = (|| {
                 let Some(git) = git else {
@@ -887,15 +1134,20 @@ impl Dispatcher {
                 // processes. GHD runs these one after another.
                 std::thread::scope(|scope| {
                     let path = path.as_path();
-                    let previous = previous_status.as_ref();
+                    let previous = previous_status.as_deref();
                     let status = spawn_git(scope, &git, move |git| {
                         let started = Instant::now();
-                        let status = corvene_git::get_status_with(
-                            git.clone(),
-                            path,
-                            previous,
-                            status_options,
-                        );
+                        let status =
+                            corvene_git::get_status_with(git.clone(), path, status_options)
+                                // GHD `updateChangedFiles`' merge, here: it
+                                // copies and sorts every file
+                                .map(|status| {
+                                    crate::changes_state::merge_changed_files(
+                                        status,
+                                        previous,
+                                        merged_clearing,
+                                    )
+                                });
                         // `903-refresh-stale-index`: a slow status is most often
                         // one re-reading files whose stat data went stale
                         if refresh_stale_index
@@ -928,12 +1180,9 @@ impl Dispatcher {
                     });
                     let configured = spawn_git(scope, &git, corvene_git::configured_default_branch);
                     let info = open_repository(path)?;
-                    let remote = info
-                        .remotes
-                        .iter()
-                        .find(|r| r.name == "origin")
-                        .or_else(|| info.remotes.first())
-                        .map(|r| r.name.clone());
+                    let worktrees = join(worktrees);
+                    let _ = early_tx.try_send((info.clone(), worktrees.clone()));
+                    let remote = crate::git_store::default_remote_name(&info).map(str::to_string);
                     let head = remote.clone().map(|remote| {
                         let workdir = info.workdir.clone();
                         spawn_git(scope, &git, move |git| {
@@ -974,6 +1223,19 @@ impl Dispatcher {
                     let cherry_pick_snapshot = status
                         .cherry_pick_head_found
                         .then(|| corvene_git::cherry_pick_snapshot(git.clone(), &info.workdir))
+                        .flatten();
+                    // GHD `getMergeConflictsTheirBranch`: the local branches
+                    // at `MERGE_HEAD` (not for a squash merge)
+                    let merge_head_branches = (status.merge_head_found && !status.squash_msg_found)
+                        .then(|| {
+                            corvene_git::get_branches_pointed_at(
+                                git.clone(),
+                                &info.workdir,
+                                "MERGE_HEAD",
+                            )
+                            .ok()
+                            .flatten()
+                        })
                         .flatten();
                     // `257`: what a pull would bring in
                     let incoming_commits = info
@@ -1017,9 +1279,10 @@ impl Dispatcher {
                     let current = info.current_branch().map(|b| b.name.clone());
                     let stashed_branches =
                         stashes.iter().filter_map(|s| s.branch.clone()).collect();
-                    let desktop_stash = stashes
-                        .iter()
-                        .position(|s| s.branch.is_some() && s.branch == current);
+                    // `getLastDesktopStashEntryForBranch`
+                    let desktop_stash = current.as_deref().and_then(|current| {
+                        corvene_git::last_desktop_stash_entry_index(&stashes, current)
+                    });
                     // Corvene (`728-show-latest-other-stash`): without one of
                     // its own, the branch shows the newest stash that no
                     // Desktop made (`git stash` on the command line)
@@ -1042,6 +1305,7 @@ impl Dispatcher {
                         stashed_branches,
                         rebase_snapshot,
                         cherry_pick_snapshot,
+                        merge_head_branches,
                         // `253-clone-counts-as-fetch`: a clone writes no
                         // FETCH_HEAD, so GHD says "never fetched" until the
                         // first fetch
@@ -1054,7 +1318,7 @@ impl Dispatcher {
                                     .flatten()
                             }),
                         pull_with_rebase: join(pull_with_rebase),
-                        worktrees: join(worktrees),
+                        worktrees,
                         upstream_rewritten,
                         last_local_commit: last_local_commit.map(|c| crate::state::LastCommit {
                             at: std::time::UNIX_EPOCH
@@ -1062,6 +1326,14 @@ impl Dispatcher {
                             sha: c.sha,
                             summary: c.summary,
                         }),
+                    };
+                    // an unchanged status keeps the previous allocation, so
+                    // the swap below is a pointer compare and views keep
+                    // their caches (100,000 files take a while to compare
+                    // and re-filter)
+                    let status = match previous_status.as_ref() {
+                        Some(previous) if **previous == status => previous.clone(),
+                        _ => Arc::new(status),
                     };
                     Ok((info, ahead_behind, Some(status), Some(extras)))
                 })
@@ -1076,13 +1348,52 @@ impl Dispatcher {
             (result, unsafe_main)
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
+            let Ok((mut info, worktrees)) = early_rx.recv().await else {
+                return;
+            };
+            cx.update(|cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let slash_remotes = s.flags.bool(crate::flags::ids::REMOTE_NAMES_WITH_SLASHES);
+                    let rs = s.repo_state_mut(id);
+                    if rs.refresh_started != Some(started) {
+                        return;
+                    }
+                    if !slash_remotes {
+                        forget_remote_names(&mut info);
+                    }
+                    let mut changed = set(&mut rs.info, Some(info));
+                    changed |= set(&mut rs.worktrees, worktrees);
+                    if changed {
+                        cx.notify();
+                    }
+                })
+            });
+        })
+        .detach();
+        cx.spawn(async move |cx: &mut AsyncApp| {
             let (result, unsafe_main) = work.await;
             cx.update(|cx| {
+                // a worktree switch abandons the running refresh (it read
+                // the old directory) and starts its own
+                let superseded = Self::state(cx)
+                    .read(cx)
+                    .repo_states
+                    .get(&id)
+                    .is_none_or(|rs| rs.refresh_started != Some(started));
+                if superseded {
+                    return;
+                }
                 let snapshots = result
                     .as_ref()
                     .ok()
                     .and_then(|(_, _, _, extras)| extras.as_ref())
-                    .map(|e| (e.rebase_snapshot.clone(), e.cherry_pick_snapshot.clone()));
+                    .map(|e| {
+                        (
+                            e.rebase_snapshot.clone(),
+                            e.cherry_pick_snapshot.clone(),
+                            e.merge_head_branches.clone(),
+                        )
+                    });
                 let selected_file = Self::state(cx).update(cx, |s, cx| {
                     let slash_remotes = s.flags.bool(crate::flags::ids::REMOTE_NAMES_WITH_SLASHES);
                     let exclude_untracked = s
@@ -1158,43 +1469,42 @@ impl Dispatcher {
                                 }
                             }
                             if let Some(mut status) = status {
-                                if exclude_untracked {
-                                    exclude_new_untracked(&mut status, repo_state.status.as_ref());
+                                let same = repo_state
+                                    .status
+                                    .as_ref()
+                                    .is_some_and(|s| Arc::ptr_eq(s, &status));
+                                if exclude_untracked && !same {
+                                    exclude_new_untracked(
+                                        Arc::make_mut(&mut status),
+                                        repo_state.status.as_deref(),
+                                    );
                                 }
+                                // `767-persist-file-selection`
                                 if let Some(excluded) = &restore_excluded {
-                                    crate::drafts::apply_excluded(&mut status, excluded);
+                                    crate::drafts::apply_excluded(
+                                        Arc::make_mut(&mut status),
+                                        excluded,
+                                    );
                                 }
                                 status_applied = true;
-                                // keep the selection if the file is still changed, else first file
-                                let keep = repo_state
-                                    .selected_file
-                                    .as_ref()
-                                    .filter(|p| status.files.iter().any(|f| &f.path == *p))
-                                    .cloned();
-                                changed |= set(
-                                    &mut repo_state.selected_file,
-                                    keep.or_else(|| status.files.first().map(|f| f.path.clone())),
-                                );
-                                let before = repo_state.selected_files.len();
-                                repo_state
-                                    .selected_files
-                                    .retain(|p| status.files.iter().any(|f| &f.path == p));
-                                changed |= repo_state.selected_files.len() != before;
-                                if repo_state.selected_files.is_empty()
-                                    && let Some(p) = repo_state.selected_file.clone()
-                                {
-                                    changed |= set(&mut repo_state.selected_files, vec![p]);
-                                }
-                                if repo_state.selected_file.is_none() {
-                                    changed |= set(&mut repo_state.diff, None);
-                                }
-                                selected = repo_state.selected_file.clone();
                                 let conflict_state = crate::mco::derive_conflict_state(
                                     &status,
                                     repo_state.conflict_state.as_ref(),
                                 );
+                                // GHD `updateChangedFiles`: selections carried
+                                // over, sorted, the selection and diff kept
+                                // while their files are still changed
+                                let clear_partial_state =
+                                    std::mem::take(&mut repo_state.clear_partial_state);
+                                changed |= crate::changes_state::apply_merged_files(
+                                    repo_state,
+                                    status,
+                                    merged_from.as_ref(),
+                                    merged_clearing,
+                                    clear_partial_state,
+                                );
+                                selected = repo_state.selected_file.clone();
                                 changed |= set(&mut repo_state.conflict_state, conflict_state);
-                                changed |= set(&mut repo_state.status, Some(status));
                             }
                             changed |= set(&mut repo_state.unsafe_path, None);
                             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
@@ -1253,18 +1563,32 @@ impl Dispatcher {
                 // GHD `GitStore.loadFilesForCurrentStashEntry`, run with every
                 // stash entry load (the no-changes "View stash" card counts them)
                 Self::load_stash_files(id, cx);
-                if let Some((rebase_snapshot, cherry_pick_snapshot)) = snapshots {
-                    Self::sync_conflicts(id, rebase_snapshot, cherry_pick_snapshot, cx);
+                if let Some((rebase_snapshot, cherry_pick_snapshot, merge_head_branches)) =
+                    snapshots
+                {
+                    Self::sync_conflicts(
+                        id,
+                        rebase_snapshot,
+                        cherry_pick_snapshot,
+                        merge_head_branches,
+                        cx,
+                    );
                 }
                 Self::load_commits(id, false, cx);
                 Self::refresh_compare(id, cx);
                 Self::subscribe_current_pull_request_status(id, cx);
                 Self::add_upstream_remote_if_needed(id, cx);
                 Self::refresh_branch_protection(id, cx);
-                let rerun = Self::state(cx).update(cx, |s, _| {
+                let (rerun, prune) = Self::state(cx).update(cx, |s, _| {
                     let rs = s.repo_state_mut(id);
-                    std::mem::take(&mut rs.refresh_pending)
+                    (
+                        std::mem::take(&mut rs.refresh_pending),
+                        std::mem::take(&mut rs.prune_after_refresh),
+                    )
                 });
+                if prune {
+                    Self::prune_branches(id, cx);
+                }
                 if rerun {
                     Self::refresh_repository(id, cx);
                 }
@@ -1430,7 +1754,7 @@ impl Dispatcher {
             let Some(path) = rs.selected_file.as_ref() else {
                 return;
             };
-            let Some(status) = rs.status.as_ref() else {
+            let Some(status) = rs.status.as_deref() else {
                 return;
             };
             let Some(file) = status.files.iter().find(|f| &f.path == path).cloned() else {
@@ -1543,13 +1867,17 @@ impl Dispatcher {
                     .collect(),
                 _ => Default::default(),
             };
-            if let Some(f) = rs
-                .status
-                .as_mut()
-                .and_then(|st| st.files.iter_mut().find(|f| f.path == path))
+            // usually unchanged: only then copy the shared status
+            let update = rs.status.as_deref().and_then(|st| {
+                let i = st.files.iter().position(|f| f.path == path)?;
+                let selection = st.files[i].selection.with_selectable_lines(selectable);
+                (selection != st.files[i].selection).then_some((i, selection))
+            });
+            if let Some((i, selection)) = update
+                && let Some(st) = rs.status.as_mut().map(Arc::make_mut)
             {
-                let selection = f.selection.with_selectable_lines(selectable);
-                changed |= set(&mut f.selection, selection);
+                st.files[i].selection = selection;
+                changed = true;
             }
             // the same diff again (a refresh): nothing to draw
             if changed {
@@ -1667,7 +1995,7 @@ impl Dispatcher {
         };
         let (Some(info), Some(status), Some(selected)) = (
             rs.info.as_ref(),
-            rs.status.as_ref(),
+            rs.status.as_deref(),
             rs.selected_file.as_ref(),
         ) else {
             return;
@@ -2281,7 +2609,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|rs| rs.status.as_ref())
+            .and_then(|rs| rs.status.as_deref())
             .is_some_and(|st| !st.files.is_empty())
     }
 
@@ -2671,7 +2999,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|rs| rs.status.as_ref())
+            .and_then(|rs| rs.status.as_deref())
             .map(|st| {
                 st.files
                     .iter()
@@ -2788,6 +3116,7 @@ impl Dispatcher {
             return;
         };
         let branch_name = name.clone();
+        let checkout_options = Self::checkout_options(id, cx);
         let task = cx.background_executor().spawn(async move {
             if unborn {
                 return corvene_git::checkout_new_branch(git, &workdir, &name);
@@ -2808,7 +3137,7 @@ impl Dispatcher {
                 tip_time: None,
                 remote_name: None,
             };
-            corvene_git::checkout_branch(git, &workdir, &branch)
+            corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
         });
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).checkout_target = Some(branch_name);
@@ -2859,7 +3188,7 @@ impl Dispatcher {
             let rs = s.repo_states.get(&id);
             let info = rs.and_then(|r| r.info.as_ref());
             (
-                rs.and_then(|r| r.status.as_ref())
+                rs.and_then(|r| r.status.as_deref())
                     .is_some_and(|st| !st.files.is_empty()),
                 rs.is_some_and(|r| r.desktop_stash().is_some()),
                 info.is_some_and(|i| matches!(i.tip, corvene_models::Tip::Valid { .. })),
@@ -2907,7 +3236,7 @@ impl Dispatcher {
             .repo_states
             .get(&id)
             .and_then(|r| r.desktop_stash())
-            .map(|s| s.name.clone());
+            .map(|s| s.sha.clone());
         let target = branch.name.clone();
         // Corvene (`869-stash-protects-assume-unchanged`): no stash while it
         // would reset assume-unchanged files with local changes
@@ -2915,7 +3244,14 @@ impl Dispatcher {
             .read(cx)
             .flags
             .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED);
-        let submodules = Self::submodule_update_plan(id, cx);
+        // GHD 3.6.6 `checkoutBranch` updates every submodule after the
+        // checkout; Corvene runs that below, after the stash steps, and
+        // reports a failure on its own while the checkout stands
+        let submodule_options = Self::checkout_options(id, cx);
+        let checkout_options = corvene_git::CheckoutOptions {
+            submodules: corvene_git::SubmoduleUpdate::None,
+            ..Default::default()
+        };
         let git_for_submodules = git.clone();
         let workdir_for_submodules = workdir.clone();
         // Corvene (`729-pop-stash-on-return`): coming back to a branch with
@@ -2943,15 +3279,21 @@ impl Dispatcher {
                         }
                         // `createStashAndDropPreviousEntry`
                         if let Some(old) = previous_stash {
-                            let _ = corvene_git::drop_stash(git.clone(), &workdir, &old);
+                            let _ =
+                                corvene_git::drop_desktop_stash_entry(git.clone(), &workdir, &old);
                         }
                         corvene_git::create_desktop_stash(git.clone(), &workdir, current, false)?;
                     }
-                    corvene_git::checkout_branch(git, &workdir, &branch)
+                    corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
                 }
                 _ => {
                     // `checkoutAndBringChanges`: plain checkout, else stash → checkout → pop
-                    match corvene_git::checkout_branch(git.clone(), &workdir, &branch) {
+                    match corvene_git::checkout_branch_with(
+                        git.clone(),
+                        &workdir,
+                        &branch,
+                        &checkout_options,
+                    ) {
                         Ok(()) => Ok(()),
                         Err(err) if corvene_git::is_local_changes_overwritten(&err) => {
                             let target = branch.name_without_remote().to_string();
@@ -2963,13 +3305,20 @@ impl Dispatcher {
                             )? {
                                 return Err(err);
                             }
-                            corvene_git::checkout_branch(git.clone(), &workdir, &branch)?;
-                            let (stashes, _) = corvene_git::get_stashes(git.clone(), &workdir)?;
-                            if let Some(entry) = stashes
-                                .iter()
-                                .find(|s| s.branch.as_deref() == Some(target.as_str()))
+                            corvene_git::checkout_branch_with(
+                                git.clone(),
+                                &workdir,
+                                &branch,
+                                &checkout_options,
+                            )?;
+                            if let Some(entry) =
+                                corvene_git::get_last_desktop_stash_entry_for_branch(
+                                    git.clone(),
+                                    &workdir,
+                                    &target,
+                                )?
                             {
-                                corvene_git::pop_stash(git, &workdir, &entry.name)?;
+                                corvene_git::pop_stash_entry(git, &workdir, &entry.sha)?;
                             }
                             Ok(())
                         }
@@ -2977,33 +3326,28 @@ impl Dispatcher {
                     }
                 }
             })();
-            let submodule_error = match (&result, submodules) {
-                (Ok(()), Some((skip, askpass))) => corvene_git::update_submodules(
+            let submodule_error = result.as_ref().ok().and_then(|()| {
+                corvene_git::update_submodules_after_checkout(
                     git_for_submodules,
                     &workdir_for_submodules,
-                    &skip,
-                    askpass.as_ref(),
+                    &submodule_options,
                 )
-                .err(),
-                _ => None,
-            };
+                .err()
+            });
             let pop_error = match (&result, pop_stash_for) {
                 (Ok(()), Some((git, target))) => {
-                    corvene_git::get_stashes(git.clone(), &workdir_for_submodules)
-                        .and_then(|(stashes, _)| {
-                            match stashes
-                                .iter()
-                                .find(|s| s.branch.as_deref() == Some(target.as_str()))
-                            {
-                                Some(entry) => corvene_git::pop_stash(
-                                    git,
-                                    &workdir_for_submodules,
-                                    &entry.name,
-                                ),
-                                None => Ok(()),
-                            }
-                        })
-                        .err()
+                    corvene_git::get_last_desktop_stash_entry_for_branch(
+                        git.clone(),
+                        &workdir_for_submodules,
+                        &target,
+                    )
+                    .and_then(|entry| match entry {
+                        Some(entry) => {
+                            corvene_git::pop_stash_entry(git, &workdir_for_submodules, &entry.sha)
+                        }
+                        None => Ok(()),
+                    })
+                    .err()
                 }
                 _ => None,
             };
@@ -3048,7 +3392,7 @@ impl Dispatcher {
         let skip = s
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| {
                 st.files
                     .iter()
@@ -3058,6 +3402,24 @@ impl Dispatcher {
             })
             .unwrap_or_default();
         Some((skip, Self::askpass_env(cx)))
+    }
+
+    /// How a branch checkout's submodules follow it: GHD 3.6.6
+    /// `checkoutBranch` updates every one with the askpass environment
+    /// (`envForRemoteOperation`); with `263-submodules-follow-checkout` on,
+    /// the changed ones are spared ([`Self::submodule_update_plan`]).
+    pub(crate) fn checkout_options(id: u64, cx: &App) -> corvene_git::CheckoutOptions {
+        match Self::submodule_update_plan(id, cx) {
+            Some((skip, askpass)) => corvene_git::CheckoutOptions {
+                submodules: corvene_git::SubmoduleUpdate::AllExcept(skip),
+                askpass,
+                ..Default::default()
+            },
+            None => corvene_git::CheckoutOptions {
+                askpass: Self::askpass_env(cx),
+                ..Default::default()
+            },
+        }
     }
 
     pub fn rename_branch(id: u64, old: String, new: String, cx: &mut App) {
@@ -3126,6 +3488,40 @@ impl Dispatcher {
             .filter(|_| fetch_after)
             .map(|d| d.upstream_remote_name().map(str::to_owned));
         let deleted = branch.name.clone();
+        // GHD runs the checkout as a failable operation of its own: a failed
+        // submodule update after it is reported and the branch still deleted
+        let submodule_options = default.is_some().then(|| Self::checkout_options(id, cx));
+        let submodule_error =
+            std::sync::Arc::new(std::sync::Mutex::new(None::<corvene_git::GitError>));
+        let submodule_error_bg = submodule_error.clone();
+        // GHD `deleteRemoteBranch` pushes with `envForRemoteOperation(remote.url)`:
+        // the signed-in accounts' credentials
+        let remote_name = match branch.kind {
+            corvene_models::BranchKind::Local => branch
+                .upstream_remote_name()
+                .filter(|_| include_remote)
+                .map(str::to_string),
+            corvene_models::BranchKind::Remote => Some(
+                branch
+                    .name
+                    .split_once('/')
+                    .map_or("origin", |(remote, _)| remote)
+                    .to_string(),
+            ),
+        };
+        let askpass = remote_name.and_then(|name| {
+            let url = Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .and_then(|r| r.info.as_ref())
+                .and_then(|i| i.remotes.iter().find(|r| r.name == name))
+                .map(|r| r.url.clone());
+            if let Some(url) = url {
+                Self::arm_credential_helper(&url, cx);
+            }
+            Self::askpass_env(cx)
+        });
         Self::run_history_op_then(
             id,
             "Could not delete branch",
@@ -3157,23 +3553,44 @@ impl Dispatcher {
                     _ => err,
                 };
                 if let Some(default) = default {
-                    corvene_git::checkout_branch(git.clone(), &workdir, &default)
-                        .map_err(|err| explain(err, true))?;
+                    let checkout_options = corvene_git::CheckoutOptions {
+                        submodules: corvene_git::SubmoduleUpdate::None,
+                        ..Default::default()
+                    };
+                    corvene_git::checkout_branch_with(
+                        git.clone(),
+                        &workdir,
+                        &default,
+                        &checkout_options,
+                    )
+                    .map_err(|err| explain(err, true))?;
+                    if let Some(options) = &submodule_options
+                        && let Err(err) = corvene_git::update_submodules_after_checkout(
+                            git.clone(),
+                            &workdir,
+                            options,
+                        )
+                        && let Ok(mut slot) = submodule_error_bg.lock()
+                    {
+                        *slot = Some(err);
+                    }
                 }
                 match branch.kind {
                     corvene_models::BranchKind::Local => {
                         corvene_git::delete_local_branch(git.clone(), &workdir, &branch.name)
                             .map_err(|err| explain(err, false))?;
                         if include_remote
-                            && let (Some(remote), Some(upstream)) =
-                                (branch.upstream_remote_name(), branch.upstream_short())
-                            && let Some((_, remote_branch)) = upstream.split_once('/')
+                            && let (Some(remote), Some(remote_branch)) = (
+                                branch.upstream_remote_name(),
+                                branch.upstream_without_remote(),
+                            )
                         {
-                            corvene_git::delete_remote_branch(
+                            corvene_git::delete_remote_branch_with(
                                 git,
                                 &workdir,
                                 remote,
                                 &remote_ref(remote_branch),
+                                askpass.as_ref(),
                             )?;
                         }
                         Ok(())
@@ -3183,16 +3600,21 @@ impl Dispatcher {
                             .name
                             .split_once('/')
                             .unwrap_or(("origin", &branch.name));
-                        corvene_git::delete_remote_branch(
+                        corvene_git::delete_remote_branch_with(
                             git,
                             &workdir,
                             remote,
                             &remote_ref(remote_branch),
+                            askpass.as_ref(),
                         )
                     }
                 }
             },
             move |cx| {
+                let submodule_error = submodule_error.lock().ok().and_then(|mut slot| slot.take());
+                if let Some(err) = submodule_error {
+                    Self::show_error("Could not update submodules", &err, cx);
+                }
                 if let Some(banner) = undo {
                     Self::set_banner(banner, cx);
                 }
@@ -3270,11 +3692,12 @@ impl Dispatcher {
                     .unwrap_or(0)
             };
             let has_stash = local
-                && corvene_git::get_stashes(git, &workdir).is_ok_and(|(stashes, _)| {
-                    stashes
-                        .iter()
-                        .any(|s| s.branch.as_deref() == Some(branch.name.as_str()))
-                });
+                && corvene_git::get_last_desktop_stash_entry_for_branch(
+                    git,
+                    &workdir,
+                    &branch.name,
+                )
+                .is_ok_and(|entry| entry.is_some());
             crate::state::DeleteBranchPreview {
                 branch: branch.name,
                 unmerged_commits: unmerged,
@@ -3416,7 +3839,7 @@ impl Dispatcher {
             .repo_states
             .get(&id)
             .and_then(|r| r.desktop_stash())
-            .map(|s| s.name.clone());
+            .map(|s| s.sha.clone());
         let guard = Self::state(cx)
             .read(cx)
             .flags
@@ -3429,7 +3852,7 @@ impl Dispatcher {
                     corvene_git::ensure_no_modified_assume_unchanged(git.clone(), &workdir)?;
                 }
                 if let Some(old) = previous {
-                    let _ = corvene_git::drop_stash(git.clone(), &workdir, &old);
+                    let _ = corvene_git::drop_desktop_stash_entry(git.clone(), &workdir, &old);
                 }
                 corvene_git::create_desktop_stash(git, &workdir, &current, false).map(|_| ())
             },
@@ -3638,7 +4061,7 @@ impl Dispatcher {
                 (true, Some(branch)) => {
                     corvene_git::pop_stash_on_branch(git, &workdir, &stash.sha, branch)
                 }
-                _ => corvene_git::pop_stash(git, &workdir, &stash.name),
+                _ => corvene_git::pop_stash_entry(git, &workdir, &stash.sha),
             },
             cx,
         );
@@ -3654,19 +4077,19 @@ impl Dispatcher {
     }
 
     pub fn drop_stash(id: u64, cx: &mut App) {
-        let Some(name) = Self::state(cx)
+        let Some(sha) = Self::state(cx)
             .read(cx)
             .repo_states
             .get(&id)
             .and_then(|r| r.stash.as_ref())
-            .map(|s| s.name.clone())
+            .map(|s| s.sha.clone())
         else {
             return;
         };
         Self::run_history_op(
             id,
             "Could not discard stash",
-            move |git, workdir| corvene_git::drop_stash(git, &workdir, &name),
+            move |git, workdir| corvene_git::drop_desktop_stash_entry(git, &workdir, &sha),
             cx,
         );
     }
@@ -3681,7 +4104,7 @@ impl Dispatcher {
     /// Toggle the include checkbox of one file (`_changeFileIncluded`).
     pub fn toggle_file_included(id: u64, path: String, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(status) = s.repo_state_mut(id).status.as_mut() {
+            if let Some(status) = s.repo_state_mut(id).status.as_mut().map(Arc::make_mut) {
                 if let Some(f) = status.files.iter_mut().find(|f| f.path == path) {
                     // GHD: an indeterminate checkbox click checks it (Partial -> All)
                     f.selection = if f.selection.kind() == DiffSelectionType::All {
@@ -3724,6 +4147,7 @@ impl Dispatcher {
                 .repo_state_mut(id)
                 .status
                 .as_mut()
+                .map(Arc::make_mut)
                 .and_then(|st| st.files.iter_mut().find(|f| f.path == path))
             {
                 f.selection = edit(&f.selection);
@@ -3737,8 +4161,15 @@ impl Dispatcher {
     /// the files currently visible through the filter.
     pub fn set_files_included(id: u64, paths: Vec<String>, include: bool, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(status) = s.repo_state_mut(id).status.as_mut() {
-                for f in status.files.iter_mut().filter(|f| paths.contains(&f.path)) {
+            if let Some(status) = s.repo_state_mut(id).status.as_mut().map(Arc::make_mut) {
+                // a set: the header checkbox passes every visible path
+                let paths: std::collections::HashSet<&str> =
+                    paths.iter().map(String::as_str).collect();
+                for f in status
+                    .files
+                    .iter_mut()
+                    .filter(|f| paths.contains(f.path.as_str()))
+                {
                     f.selection = if include {
                         f.selection.select_all()
                     } else {
@@ -3772,7 +4203,7 @@ impl Dispatcher {
     /// Header checkbox (`_changeIncludeAllFiles`).
     pub fn toggle_include_all(id: u64, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(status) = s.repo_state_mut(id).status.as_mut() {
+            if let Some(status) = s.repo_state_mut(id).status.as_mut().map(Arc::make_mut) {
                 let select_all = status.include_all() != Some(true);
                 for f in &mut status.files {
                     f.selection = if select_all {
@@ -3941,7 +4372,8 @@ impl Dispatcher {
         .detach();
     }
 
-    /// GHD `cloneRepository`: streams progress into `AppState::cloning`,
+    /// GHD `cloneRepository`: streams progress into `AppState::cloning` (GHD
+    /// `CloningRepositoriesStore.clone`),
     /// adds the repository when done.
     pub fn clone_repository(
         url: String,
@@ -3967,37 +4399,39 @@ impl Dispatcher {
             return;
         };
         Self::close_popup(cx);
-        let cancel = corvene_git::CancelToken::new();
-        corvene_git::set_network_stall_timeout(
-            u32::try_from(
-                state
-                    .read(cx)
-                    .flags
-                    .number(crate::flags::ids::NETWORK_STALL_TIMEOUT),
-            )
-            .unwrap_or(0),
-        );
+        // GHD `new CloningRepository(path, url)`
+        let mut clone = CloneState::new(path.clone(), url.clone());
+        clone.description = "Cloning…".into();
+        let clone_id = clone.id;
+        let cancel = clone.cancel.clone();
         state.update(cx, |s, cx| {
-            s.cloning = Some(CloneState {
-                url: url.clone(),
-                path: path.clone(),
-                description: "Cloning…".into(),
-                value: None,
-                cancel: cancel.clone(),
-            });
+            s.cloning.push(clone);
             cx.notify();
         });
 
+        // GHD `envForRemoteOperation`: the signed-in accounts' credentials
+        // (and the stalled-transfer timeout of `network-stall-timeout`)
+        Self::arm_credential_helper(&url, cx);
+        let options = corvene_git::CloneOptions {
+            default_branch,
+            depth,
+            askpass: Self::askpass_env(cx),
+            // `281-clone-updating-files-step`
+            updating_files_step: state
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::CLONE_UPDATING_FILES_STEP),
+            ..corvene_git::CloneOptions::default()
+        };
         let (tx, rx) = std::sync::mpsc::channel::<corvene_git::CloneProgress>();
         let clone_path = path.clone();
         let clone_url = url.clone();
         let task = cx.background_executor().spawn(async move {
-            corvene_git::clone(
+            corvene_git::clone_with_options(
                 git,
                 &clone_url,
                 &clone_path,
-                default_branch.as_deref(),
-                depth,
+                &options,
                 Some(cancel),
                 |p| {
                     let _ = tx.send(p);
@@ -4014,14 +4448,11 @@ impl Dispatcher {
                 }
                 if let Some(p) = latest {
                     let done = pump_state.update(cx, |s, cx| {
-                        if let Some(c) = s.cloning.as_mut().filter(|c| !c.cancel.is_cancelled()) {
-                            c.description = p.description;
-                            c.value = p.value;
+                        let updated = s.cloning.update_progress(clone_id, p.description, p.value);
+                        if updated {
                             cx.notify();
-                            false
-                        } else {
-                            true
                         }
+                        !updated
                     });
                     if done {
                         break;
@@ -4030,7 +4461,7 @@ impl Dispatcher {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(33))
                     .await;
-                if pump_state.read_with(cx, |s, _| s.cloning.is_none()) {
+                if pump_state.read_with(cx, |s, _| s.cloning.get(clone_id).is_none()) {
                     break;
                 }
             }
@@ -4041,7 +4472,7 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
-                    s.cloning = None;
+                    s.cloning.remove_id(clone_id);
                     cx.notify();
                 });
                 if result.is_err() {
@@ -4092,10 +4523,10 @@ impl Dispatcher {
             return;
         }
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(c) = s.cloning.as_mut() {
-                c.cancel.cancel();
-                c.description = "Cancelling…".into();
-                c.value = None;
+            // the clone the content area shows
+            if let Some(id) = s.cloning.latest().map(|c| c.id)
+                && s.cloning.cancel(id)
+            {
                 cx.notify();
             }
         });
@@ -4123,10 +4554,11 @@ impl Dispatcher {
     }
 
     /// Android: the system page where the user grants "All files access",
-    /// so repositories on shared storage can be used in place.
-    #[cfg(target_os = "android")]
+    /// so repositories on shared storage can be used in place. Nothing
+    /// elsewhere.
     pub fn request_all_files_access(cx: &mut App) {
         let _ = cx;
+        #[cfg(target_os = "android")]
         if let Some(bridge) = corvene_platform::android::bridge() {
             bridge.request_all_files_access();
         }
@@ -4174,7 +4606,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| {
                 st.files
                     .iter()
@@ -4185,14 +4617,16 @@ impl Dispatcher {
             .unwrap_or_default();
         // every changed file goes in whole: `reset -- .` would only unstage
         // what `update-index` stages again (one index rewrite fewer, ~120 ms
-        // on a 50,000-file index)
+        // on a 50,000-file index). Not with an index entry the list leaves
+        // out (added, then deleted from disk), which only the reset drops.
         let restages_everything = Self::state(cx)
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .is_some_and(|st| {
                 !st.has_conflicts()
+                    && !st.hidden_index_entries
                     && st
                         .files
                         .iter()
@@ -4272,7 +4706,7 @@ impl Dispatcher {
             corvene_git::stage_files(git.clone(), &workdir, &files)?;
             corvene_git::stage_partial_files(git.clone(), &workdir, &files)?;
             corvene_git::commit(
-                git,
+                git.clone(),
                 &workdir,
                 &message,
                 &corvene_git::CommitOptions {
@@ -4281,8 +4715,10 @@ impl Dispatcher {
                     signoff: options.sign_off_commits,
                     allow_empty: options.allow_empty_commit,
                 },
-            )
-            .map(|sha| (sha, rewrites_pushed))
+            )?;
+            // `commit` returns git's abbreviated sha (GHD `parseCommitSHA`);
+            // the undo bar and the force-push list keep the full one
+            corvene_git::head_sha(git, &workdir).map(|sha| (sha, rewrites_pushed))
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = task.await;
@@ -4312,6 +4748,10 @@ impl Dispatcher {
                         rs.commit_to_amend = None;
                         rs.co_authors.clear();
                         rs.commit_nonce += 1;
+                        // GHD `refreshChangesSection({ clearPartialState:
+                        // true })`: what stays partially selected after a
+                        // partial commit starts unselected
+                        rs.clear_partial_state = true;
                     }
                     cx.notify();
                 });
@@ -4343,18 +4783,31 @@ impl Dispatcher {
         });
     }
 
+    /// GHD `undoCommit` (`GitStore.undoCommit`) for the `HEAD` commit: the
+    /// commit form gets its message back.
     pub fn undo_commit(id: u64, cx: &mut App) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let task = cx
-            .background_executor()
-            .spawn(async move { corvene_git::undo_last_commit(git, &workdir) });
+        let task = cx.background_executor().spawn(async move {
+            let head = corvene_git::get_commits(&workdir, "HEAD", 0, 1)?
+                .into_iter()
+                .next();
+            match head {
+                Some(commit) => crate::git_store::undo_commit(git, &workdir, &commit).map(Some),
+                None => corvene_git::undo_last_commit(git, &workdir).map(|()| None),
+            }
+        });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
-                    s.repo_state_mut(id).last_commit = None;
+                    let rs = s.repo_state_mut(id);
+                    rs.last_commit = None;
+                    if let Ok(Some(message)) = &result {
+                        rs.commit_message = message.clone();
+                        rs.commit_message_nonce += 1;
+                    }
                     cx.notify();
                 });
                 if let Err(err) = result {
@@ -4375,11 +4828,14 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| {
+                // Discard All passes every path: a set, not a search per file
+                let paths: std::collections::HashSet<&str> =
+                    paths.iter().map(String::as_str).collect();
                 st.files
                     .iter()
-                    .filter(|f| paths.contains(&f.path))
+                    .filter(|f| paths.contains(f.path.as_str()))
                     .cloned()
                     .collect()
             })
@@ -4426,27 +4882,53 @@ impl Dispatcher {
         .detach();
     }
 
-    /// GHD `DiscardChangesError` → `DiscardChangesRetry`: new files the Trash
-    /// refused are kept until the user agrees to delete them for good.
+    /// GHD `DiscardChangesError` → `DiscardChangesRetry`: files the Trash
+    /// refused keep their changes until the user agrees to lose them.
     fn confirm_delete_untrashable(id: u64, paths: Vec<String>, cx: &mut App) {
         if !paths.is_empty() {
             Self::show_popup(Popup::ConfirmDeleteUntrashable { repo: id, paths }, cx);
         }
     }
 
-    /// `DiscardChangesRetry` › Permanently Discard Changes.
+    /// `DiscardChangesRetry` › Permanently Discard Changes: discard `paths`
+    /// again without the Trash (GHD `discardChanges(files, false, true)`).
     pub fn delete_untrashable(id: u64, paths: Vec<String>, cx: &mut App) {
-        let Some((_git, workdir)) = Self::repo_context(id, cx) else {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let task = cx
-            .background_executor()
-            .spawn(async move { corvene_git::delete_worktree_paths(&workdir, &paths) });
+        let (files, clean_submodules) = {
+            let s = Self::state(cx).read(cx);
+            let files: Vec<_> = s
+                .repo_states
+                .get(&id)
+                .and_then(|r| r.status.as_deref())
+                .map(|st| {
+                    st.files
+                        .iter()
+                        .filter(|f| paths.contains(&f.path))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            (
+                files,
+                s.flags.bool(crate::flags::ids::DISCARD_SUBMODULE_CHANGES),
+            )
+        };
+        let task = cx.background_executor().spawn(async move {
+            if files.is_empty() {
+                // gone from the status meanwhile: delete what is left
+                corvene_git::delete_worktree_paths(&workdir, &paths)
+            } else {
+                corvene_git::discard_changes(git, &workdir, &files, false, clean_submodules, false)
+                    .map(|_| ())
+            }
+        });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = task.await;
             cx.update(|cx| {
                 if let Err(err) = result {
-                    Self::show_error("Could not delete files", &err, cx);
+                    Self::show_error("Could not discard changes", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             });
@@ -4465,7 +4947,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.status.as_ref())
+            .and_then(|r| r.status.as_deref())
             .map(|st| st.files.clone())
             .unwrap_or_default();
         let flags = &Self::state(cx).read(cx).flags;
@@ -4525,7 +5007,7 @@ impl Dispatcher {
             let total = s
                 .repo_states
                 .get(&id)
-                .and_then(|r| r.status.as_ref())
+                .and_then(|r| r.status.as_deref())
                 .map(|st| st.files.len())
                 .unwrap_or(0);
             (s.settings.confirm_discard_changes, total)
@@ -4636,6 +5118,9 @@ impl Dispatcher {
 
     /// Diff Settings › Hide Whitespace Changes, per tab
     /// (`_setHideWhitespaceInChangesDiff` / `…HistoryDiff`); reloads the diff.
+    /// In Changes it refreshes the status with partial selections cleared
+    /// (GHD `refreshChangesSection({ clearPartialState: true })`): the line
+    /// numbers they name belong to the other diff.
     pub fn set_hide_whitespace_in_diff(history: bool, hide: bool, cx: &mut App) {
         Self::update_settings(cx, |s| {
             if history {
@@ -4649,7 +5134,11 @@ impl Dispatcher {
                 Self::load_commit_diff(id, cx);
                 Self::load_stash_diff(id, cx);
             } else {
+                Self::state(cx).update(cx, |s, _| {
+                    s.repo_state_mut(id).clear_partial_state = true;
+                });
                 Self::load_diff(id, cx);
+                Self::refresh_repository(id, cx);
             }
         }
     }
@@ -4691,11 +5180,13 @@ impl Dispatcher {
             };
             let files: Vec<_> = rs
                 .status
-                .as_ref()
+                .as_deref()
                 .map(|st| {
+                    let paths: std::collections::HashSet<&str> =
+                        paths.iter().map(String::as_str).collect();
                     st.files
                         .iter()
-                        .filter(|f| paths.contains(&f.path))
+                        .filter(|f| paths.contains(f.path.as_str()))
                         .cloned()
                         .collect()
                 })
@@ -4832,28 +5323,61 @@ impl Dispatcher {
 
     // ---- sign-in (GHD `SignInStore`) ----
 
-    pub(crate) fn set_sign_in_step(step: SignInStep, cx: &mut App) {
+    pub(crate) fn set_sign_in_step(step: AuthenticationStep, cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(si) = s.sign_in.as_mut() {
+            if let AuthenticationStep::Error(message) = &step {
+                // GHD's `onAuthError`: the Authentication step shows it
+                sign_in_store(s).authentication_failed(message.clone());
+            }
+            if let Some(si) = s.authentication.as_mut() {
                 si.step = step;
                 cx.notify();
             }
         });
     }
 
+    /// GHD `authenticateWithBrowser`, before the browser opens: the sign-in
+    /// store moves to Authentication (loading), and the account an
+    /// ExistingAccountWarning named is signed out first. Every
+    /// authentication flow starts here.
+    pub(crate) fn start_authentication(cx: &mut App) {
+        let failed = Self::state(cx).update(cx, |s, cx| {
+            let existing = match sign_in_store(s).authenticate_with_browser() {
+                Ok(existing) => existing,
+                Err(err) => {
+                    // a flow started without the sign-in dialog
+                    info!(%err, "authentication outside the sign-in store");
+                    return None;
+                }
+            };
+            cx.notify();
+            crate::accounts::remove_account(
+                &s.store,
+                &mut s.accounts,
+                &existing?,
+                &crate::accounts::Keychain,
+            )
+            .err()
+        });
+        if let Some(err) = failed {
+            Self::show_error("Could not sign out", err.to_string(), cx);
+        }
+    }
+
     /// OAuth device flow against GitHub.com, or a GitHub Enterprise host
     /// with an OAuth app (`oauth_client_id`). Runs on its own thread;
     /// progress is pumped to the foreground.
     pub fn sign_in_device_flow(endpoint: corvene_github::Endpoint, cx: &mut App) {
+        Self::start_authentication(cx);
         let client_id = Self::oauth_client_id(&endpoint, cx);
         let cancel = Arc::new(AtomicBool::new(false));
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(existing) = s.sign_in.as_ref() {
+            if let Some(existing) = s.authentication.as_ref() {
                 existing.cancel.store(true, Ordering::SeqCst);
             }
-            s.sign_in = Some(SignInState {
+            s.authentication = Some(AuthenticationFlow {
                 endpoint: endpoint.api_base.clone(),
-                step: SignInStep::Requesting,
+                step: AuthenticationStep::Requesting,
                 web_flow: None,
                 cancel: cancel.clone(),
             });
@@ -4945,7 +5469,7 @@ impl Dispatcher {
                             let uri = code.verification_uri.clone();
                             cx.update(|cx| {
                                 Self::set_sign_in_step(
-                                    SignInStep::DeviceCode {
+                                    AuthenticationStep::DeviceCode {
                                         user_code: code.user_code.clone(),
                                         verification_uri: uri.clone(),
                                     },
@@ -4972,7 +5496,9 @@ impl Dispatcher {
                             finished = true;
                         }
                         Msg::Failed(err) => {
-                            cx.update(|cx| Self::set_sign_in_step(SignInStep::Error(err), cx));
+                            cx.update(|cx| {
+                                Self::set_sign_in_step(AuthenticationStep::Error(err), cx)
+                            });
                             finished = true;
                         }
                     }
@@ -5051,10 +5577,11 @@ impl Dispatcher {
 
     /// Personal access token (GHES, or the fallback link on GitHub.com).
     pub fn sign_in_with_token(endpoint: corvene_github::Endpoint, token: String, cx: &mut App) {
+        Self::start_authentication(cx);
         Self::state(cx).update(cx, |s, cx| {
-            s.sign_in = Some(SignInState {
+            s.authentication = Some(AuthenticationFlow {
                 endpoint: endpoint.api_base.clone(),
-                step: SignInStep::Verifying,
+                step: AuthenticationStep::Verifying,
                 web_flow: None,
                 cancel: Arc::new(AtomicBool::new(false)),
             });
@@ -5073,53 +5600,60 @@ impl Dispatcher {
         Self::finish_sign_in(endpoint, token, scopes, cx);
     }
 
-    /// Token → account (background), keychain + store, then close the dialog.
+    /// Token → account (background), then GHD's `_addAccount`
+    /// (`AccountsStore.addAccount`: keychain + store) and the sign-in
+    /// store's Success, which closes the dialog (GHD's `SignIn` dismisses
+    /// itself at Success: `resetSignInState` + `closePopup`).
     fn finish_sign_in(
         endpoint: corvene_github::Endpoint,
         token: String,
         scopes: Vec<String>,
         cx: &mut App,
     ) {
-        Self::set_sign_in_step(SignInStep::Verifying, cx);
+        Self::set_sign_in_step(AuthenticationStep::Verifying, cx);
         let task = cx.background_executor().spawn({
             let endpoint = endpoint.clone();
             let token = token.clone();
-            async move {
-                let client = corvene_github::Client::new(endpoint, token.clone());
-                let account = client.current_user(scopes)?;
-                corvene_platform::keychain::store_token(&account.host(), &account.login, &token)
-                    .map_err(|e| corvene_github::GitHubError::Auth(e.to_string()))?;
-                Ok::<Account, corvene_github::GitHubError>(account)
-            }
+            async move { corvene_github::Client::new(endpoint, token).current_user(scopes) }
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = task.await;
-            cx.update(|cx| match result {
-                Ok(account) => {
-                    info!(login = %account.login, endpoint = %account.endpoint, "signed in");
-                    Self::check_git_email_after_sign_in(account.clone(), cx);
-                    let retry = Self::state(cx).update(cx, |s, cx| {
-                        s.accounts.retain(|a| a.endpoint != account.endpoint);
-                        s.accounts.push(account);
-                        if let Err(err) = s.store.save_accounts(&s.accounts) {
-                            error!(?err, "could not save accounts");
-                        }
-                        s.sign_in = None;
-                        if matches!(s.popup, Some(Popup::SignIn { .. })) {
-                            s.popup = None;
-                        }
-                        cx.notify();
-                        s.retry_after_sign_in.take()
-                    });
-                    // `refreshSelectedRepositoryAfterAccountChange`
-                    if let Some(id) = Self::state(cx).read(cx).selected {
-                        Self::refresh_github_repository(id, cx);
+            cx.update(|cx| {
+                let account = match result {
+                    Ok(account) => account,
+                    Err(err) => {
+                        Self::set_sign_in_step(AuthenticationStep::Error(err.to_string()), cx);
+                        return;
                     }
-                    if let Some((id, retry)) = retry {
-                        Self::perform_retry(id, retry, cx);
+                };
+                let added = Self::state(cx).update(cx, |s, cx| {
+                    let added = crate::accounts::add_account(
+                        &s.store,
+                        &mut s.accounts,
+                        account,
+                        &token,
+                        &crate::accounts::Keychain,
+                    );
+                    if let Ok(account) = &added {
+                        info!(login = %account.login, endpoint = %account.endpoint, "signed in");
+                        s.authentication = None;
+                        sign_in_store(s).authentication_succeeded(account.clone());
+                        close_sign_in_popups(s);
+                        cx.notify();
+                    }
+                    added
+                });
+                match added {
+                    Ok(account) => Self::check_git_email_after_sign_in(account, cx),
+                    Err(err) => {
+                        Self::set_sign_in_step(AuthenticationStep::Error(err.to_string()), cx);
+                        return;
                     }
                 }
-                Err(err) => Self::set_sign_in_step(SignInStep::Error(err.to_string()), cx),
+                // `refreshSelectedRepositoryAfterAccountChange`
+                if let Some(id) = Self::state(cx).read(cx).selected {
+                    Self::refresh_github_repository(id, cx);
+                }
             });
         })
         .detach();
@@ -5129,7 +5663,7 @@ impl Dispatcher {
     /// flow (which asks for the identity itself), a banner when the global
     /// `user.email` is unset or would not link commits to `account`. Reads
     /// only; Settings › Git changes it.
-    fn check_git_email_after_sign_in(account: Account, cx: &mut App) {
+    fn check_git_email_after_sign_in(account: corvene_models::Account, cx: &mut App) {
         let (enabled, git) = {
             let s = Self::state(cx).read(cx);
             (
@@ -5198,24 +5732,37 @@ impl Dispatcher {
         }
     }
 
+    /// Stop the authentication flow in progress (the sign-in store's
+    /// Authentication step stays, no longer loading).
     pub fn cancel_sign_in(cx: &mut App) {
         Self::state(cx).update(cx, |s, cx| {
-            if let Some(si) = s.sign_in.take() {
-                si.cancel.store(true, Ordering::SeqCst);
+            if cancel_authentication(s) {
+                sign_in_store(s).authentication_stopped();
                 cx.notify();
             }
         });
     }
 
+    /// GHD `removeAccount` for the account signed in to `endpoint`.
     pub fn sign_out(endpoint: String, cx: &mut App) {
-        Self::state(cx).update(cx, |s, cx| {
-            if let Some(account) = s.accounts.iter().find(|a| a.endpoint == endpoint).cloned() {
-                let _ = corvene_platform::keychain::delete_token(&account.host(), &account.login);
-            }
-            s.accounts.retain(|a| a.endpoint != endpoint);
-            let _ = s.store.save_accounts(&s.accounts);
+        let failed = Self::state(cx).update(cx, |s, cx| {
+            let account = s
+                .accounts
+                .iter()
+                .find(|a| a.endpoint == endpoint)
+                .cloned()?;
+            let removed = crate::accounts::remove_account(
+                &s.store,
+                &mut s.accounts,
+                &account,
+                &crate::accounts::Keychain,
+            );
             cx.notify();
+            removed.err()
         });
+        if let Some(err) = failed {
+            Self::show_error("Could not sign out", err.to_string(), cx);
+        }
     }
 
     // ---- welcome / identity ----
@@ -5236,8 +5783,13 @@ impl Dispatcher {
         .detach();
     }
 
+    /// `_endWelcomeFlow` → `markWelcomeFlowComplete`.
     pub fn complete_welcome(cx: &mut App) {
-        Self::update_settings(cx, |s| s.welcome_completed = true);
+        Self::state(cx).update(cx, |s, cx| {
+            s.settings.welcome_completed = true;
+            crate::persistence::mark_welcome_flow_complete(&s.store);
+            cx.notify();
+        });
     }
 
     /// `onHighlightShas`: dim every history row except `shas` (empty = none).
@@ -5273,7 +5825,11 @@ impl Dispatcher {
             cx.notify();
             let err = s.store.save_settings(&s.settings).err()?;
             error!(?err, "could not save settings");
-            let shown = matches!(&s.popup, Some(Popup::Error { title, .. }) if title == TITLE);
+            let shown = s
+                .popups
+                .all_popups()
+                .iter()
+                .any(|p| matches!(&p.popup, Popup::Error { title, .. } if title == TITLE));
             (s.flags.bool(crate::flags::ids::REPORT_SETTINGS_SAVE_ERRORS) && !shown)
                 .then(|| err.to_string())
         });
@@ -5281,6 +5837,94 @@ impl Dispatcher {
             Self::show_error(TITLE, message, cx);
         }
     }
+}
+
+/// GHD `_showPopup` (`PopupManager.addPopup`) on `s`.
+///
+/// Deviation: a popup of a type already on the stack replaces that one in
+/// place (it keeps its id and its place in the stack), where GitHub
+/// Desktop leaves the stack alone (`app/src/lib/popup-manager.ts`
+/// `addPopup`): Corvene keeps a dialog's data in its `Popup` value, so
+/// showing the dialog again is how that data changes (GitHub Desktop
+/// changes it with `updatePopup` or in the repository state). Error popups
+/// repeat, as in GitHub Desktop.
+pub(crate) fn show_popup_in(s: &mut AppState, popup: Popup) {
+    // GHD `showDotComSignInDialog` / `showEnterpriseSignInDialog`
+    if let Popup::SignIn { enterprise } = popup {
+        begin_sign_in_store(s, enterprise, None);
+    }
+    add_popup_in(s, popup);
+}
+
+/// [`show_popup_in`] without its side effects.
+fn add_popup_in(s: &mut AppState, popup: Popup) {
+    if !popup.is_error()
+        && let Some(existing) = s
+            .popups
+            .all_popups()
+            .iter()
+            .find(|p| p.popup_type() == popup.popup_type())
+    {
+        let id = existing.id;
+        s.popups
+            .update_popup(crate::popup_manager::StackedPopup { id, popup });
+        return;
+    }
+    s.popups.add_popup(popup);
+}
+
+/// What closing `popup` ends: a closed sign-in dialog stops its
+/// authentication flow and resets the sign-in store (GHD's `SignIn`
+/// `onDismissed` → `resetSignInState`, whose result callback hears
+/// `Cancelled`).
+fn closed_popup(s: &mut AppState, popup: &Popup) {
+    if matches!(popup, Popup::SignIn { .. }) {
+        cancel_authentication(s);
+        sign_in_store(s).reset();
+    }
+}
+
+/// The sign-in store with its accounts brought up to date first (GHD's
+/// follows `AccountsStore.onDidUpdate`).
+fn sign_in_store(s: &mut AppState) -> &mut SignInStore {
+    s.sign_in_accounts.replace(s.accounts.clone());
+    &mut s.sign_in_store
+}
+
+/// GHD `beginDotComSignIn` / `beginEnterpriseSignIn`.
+fn begin_sign_in_store(s: &mut AppState, enterprise: bool, callback: Option<ResultCallback>) {
+    cancel_authentication(s);
+    let store = sign_in_store(s);
+    if enterprise {
+        store.begin_enterprise_sign_in(callback);
+    } else {
+        store.begin_dot_com_sign_in(callback);
+    }
+}
+
+/// Stops the authentication flow in progress; `false` when there is none.
+fn cancel_authentication(s: &mut AppState) -> bool {
+    let Some(flow) = s.authentication.take() else {
+        return false;
+    };
+    flow.cancel.store(true, Ordering::SeqCst);
+    true
+}
+
+/// The sign-in succeeded: the SignIn dialog closes and the store resets
+/// (GHD's `SignIn` dismisses itself at the Success step).
+fn close_sign_in_popups(s: &mut AppState) {
+    let open: Vec<u64> = s
+        .popups
+        .all_popups()
+        .iter()
+        .filter(|p| matches!(p.popup, Popup::SignIn { .. }))
+        .filter_map(|p| p.id)
+        .collect();
+    for popup_id in open {
+        s.popups.remove_popup_by_id(popup_id);
+    }
+    sign_in_store(s).reset();
 }
 
 pub(crate) fn persist_repositories(s: &mut AppState) {
@@ -5322,6 +5966,8 @@ struct RefreshExtras {
     stashed_branches: Vec<String>,
     rebase_snapshot: Option<corvene_git::RebaseSnapshot>,
     cherry_pick_snapshot: Option<corvene_git::CherryPickSnapshot>,
+    /// The local branches at `MERGE_HEAD` (`getBranchesPointedAt`).
+    merge_head_branches: Option<Vec<String>>,
     last_fetched: Option<std::time::SystemTime>,
     pull_with_rebase: bool,
     worktrees: Vec<corvene_models::WorktreeEntry>,
@@ -5333,7 +5979,7 @@ struct RefreshExtras {
 /// GHD parses a branch's remote name up to the first `/`
 /// (`remote-names-with-slashes` off): drop the names matched against the
 /// configured remotes so [`corvene_models::Branch`] falls back to that split.
-fn forget_remote_names(info: &mut corvene_models::RepositoryInfo) {
+pub(crate) fn forget_remote_names(info: &mut corvene_models::RepositoryInfo) {
     for branch in &mut info.branches {
         branch.remote_name = None;
     }
@@ -5531,9 +6177,12 @@ fn exclude_new_untracked(
     status: &mut corvene_models::WorkingDirectoryStatus,
     previous: Option<&corvene_models::WorkingDirectoryStatus>,
 ) {
+    let known: std::collections::HashSet<&str> = previous
+        .map(|p| p.files.iter().map(|f| f.path.as_str()).collect())
+        .unwrap_or_default();
     for file in &mut status.files {
         if file.status.kind == corvene_models::FileStatusKind::Untracked
-            && !previous.is_some_and(|p| p.files.iter().any(|f| f.path == file.path))
+            && !known.contains(file.path.as_str())
         {
             file.selection = corvene_models::DiffSelection::none();
         }
@@ -5542,7 +6191,7 @@ fn exclude_new_untracked(
 
 /// Node's `path.resolve(path)`: made absolute against the current directory,
 /// with `.` and `..` components folded lexically (symlinks untouched).
-fn resolve_path(path: &std::path::Path) -> PathBuf {
+pub(crate) fn resolve_path(path: &std::path::Path) -> PathBuf {
     use std::path::Component;
     let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     let mut out = PathBuf::new();
@@ -5605,7 +6254,8 @@ pub(crate) fn replace_diff(
 
 /// Whether any of `committed` is among `local` (flag `818`).
 fn paths_overlap<'a>(mut committed: impl Iterator<Item = &'a String>, local: &[String]) -> bool {
-    committed.any(|p| local.contains(p))
+    let local: std::collections::HashSet<&str> = local.iter().map(String::as_str).collect();
+    committed.any(|p| local.contains(p.as_str()))
 }
 
 #[cfg(test)]
@@ -5730,12 +6380,12 @@ mod replace_diff_tests {
 
 /// Android: what a repository outside the app-private filesystem needs
 /// before git will work in it. Shared storage belongs to another user id
-/// (git's "dubious ownership") and keeps neither file modes nor symbolic
-/// links; a folder imported through the Storage Access Framework arrived
-/// without its file modes. Failures are left for the commands that follow to
-/// report.
+/// (git's "dubious ownership"), keeps neither file modes nor symbolic
+/// links and folds case; a folder imported through the Storage Access
+/// Framework arrived without its file modes. Failures are left for the
+/// commands that follow to report.
 #[cfg(target_os = "android")]
-fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
+pub(crate) fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
     if !path.join(".git").exists() {
         return;
     }
@@ -5746,7 +6396,10 @@ fn android_prepare_repository(git: Arc<corvene_git::GitBinary>, path: &Path) {
             let _ = corvene_git::add_safe_directory(git.clone(), path);
         }
         let _ = corvene_git::set_local_config_value(git.clone(), path, "core.symlinks", "false");
-        let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
+        let _ = corvene_git::set_local_config_value(git.clone(), path, "core.filemode", "false");
+        if crate::shared_storage::folds_case(&path.join(".git")) {
+            let _ = corvene_git::set_local_config_value(git, path, "core.ignorecase", "true");
+        }
     } else if imported {
         let _ = corvene_git::set_local_config_value(git, path, "core.filemode", "false");
     }

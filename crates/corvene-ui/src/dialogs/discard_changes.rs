@@ -15,7 +15,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogButton, DialogFrame, DialogKind, dialog_with_kind_framed};
+use crate::dialog::{
+    DialogFrame, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind_framed,
+};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::mono_font;
@@ -26,7 +28,7 @@ const MAX_FILES_TO_LIST: usize = 10;
 
 pub struct DiscardChangesDialog {
     repo: u64,
-    paths: Vec<String>,
+    paths: std::rc::Rc<Vec<String>>,
     all: bool,
     dont_show_again: bool,
     /// `723-discard-confirm-snooze`
@@ -39,7 +41,7 @@ impl DiscardChangesDialog {
     pub fn new(repo: u64, paths: Vec<String>, all: bool) -> Self {
         Self {
             repo,
-            paths,
+            paths: std::rc::Rc::new(paths),
             all,
             dont_show_again: false,
             snooze: false,
@@ -79,12 +81,16 @@ impl Render for DiscardChangesDialog {
                 .bool(corvene_core::flags::ids::DISCARD_SUBMODULE_NO_TRASH_HINT)
                 && s.repo_states
                     .get(&self.repo)
-                    .and_then(|rs| rs.status.as_ref())
+                    .and_then(|rs| rs.status.as_deref())
                     .is_some_and(|st| {
+                        let submodules: std::collections::HashSet<&str> = st
+                            .files
+                            .iter()
+                            .filter(|f| f.status.submodule)
+                            .map(|f| f.path.as_str())
+                            .collect();
                         !self.paths.is_empty()
-                            && self.paths.iter().all(|p| {
-                                st.files.iter().any(|f| &f.path == p && f.status.submodule)
-                            })
+                            && self.paths.iter().all(|p| submodules.contains(p.as_str()))
                     })
         };
         // `723-discard-confirm-snooze` (not for Discard All)
@@ -201,18 +207,17 @@ impl Render for DiscardChangesDialog {
             DialogKind::Warning,
             title,
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "discard-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "discard-ok",
                     label: ok_label.into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         if dont_show_again {
@@ -220,11 +225,12 @@ impl Render for DiscardChangesDialog {
                         } else if snooze && !all {
                             Dispatcher::snooze_discard_confirm(repo, cx);
                         }
-                        Dispatcher::discard_changes(repo, paths.clone(), cx);
+                        Dispatcher::discard_changes(repo, paths.to_vec(), cx);
                         Dispatcher::close_popup(cx);
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             DialogFrame {
                 focus_primary: all,
                 ..DialogFrame::default()

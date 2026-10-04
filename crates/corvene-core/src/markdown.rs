@@ -263,6 +263,39 @@ pub fn commit_message_rich_text(
     out
 }
 
+/// GHD `ExpandableCommitSummary`'s title and description
+/// (`wrapRichTextCommitMessage`, [`crate::text_tokens::wrap_rich_text_commit_message`]):
+/// a summary longer than 72 characters continues at the start of the
+/// description. `extras` and `commit_base` as in [`commit_message_rich_text`];
+/// once the summary wraps, `code` spans show their backticks (the wrap works
+/// on GHD's tokens, which have no code spans). `options` as in
+/// [`commit_message_rich_text`].
+pub fn commit_summary_rich_text(
+    summary: &str,
+    body: &str,
+    repository: Option<&TokenRepository>,
+    options: TokenOptions,
+    extras: bool,
+    commit_base: Option<&str>,
+) -> (RichText, RichText) {
+    let (title, description) =
+        crate::text_tokens::wrap_rich_text_commit_message_with(summary, body, repository, options);
+    if title == tokenize_with(summary.trim_end(), repository, options) {
+        // nothing moved
+        return (
+            commit_message_rich_text(summary.trim_end(), repository, options, extras, commit_base),
+            commit_message_rich_text(body.trim_end(), repository, options, extras, commit_base),
+        );
+    }
+    let extras = extras.then_some(commit_base);
+    let rich = |tokens: Vec<Token>| {
+        let mut out = RichText::default();
+        push_token_list(&mut out, tokens, extras);
+        out
+    };
+    (rich(title), rich(description))
+}
+
 /// GHD's tokens for `text`; `extras` (with the SHA base) as in
 /// [`commit_message_rich_text`].
 fn push_tokens(
@@ -272,8 +305,13 @@ fn push_tokens(
     options: TokenOptions,
     extras: Option<Option<&str>>,
 ) {
+    push_token_list(out, tokenize_with(text, repository, options), extras);
+}
+
+/// [`push_tokens`] of tokens already found.
+fn push_token_list(out: &mut RichText, tokens: Vec<Token>, extras: Option<Option<&str>>) {
     let plain = InlineStyle::default();
-    for token in tokenize_with(text, repository, options) {
+    for token in tokens {
         match (&token, extras) {
             (Token::Text(text), Some(commit_base)) => push_autolinked(out, text, commit_base),
             (Token::Link { text, url }, Some(_)) if text == url => {

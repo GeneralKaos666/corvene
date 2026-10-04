@@ -6,7 +6,7 @@ use corvene_core::{Dispatcher, Popup};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::dialog::{DialogButton, DialogKind, dialog_with_kind};
+use crate::dialog::{DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind};
 
 pub struct ConfirmCommitToDefaultBranchDialog {
     repo: u64,
@@ -53,18 +53,17 @@ impl Render for ConfirmCommitToDefaultBranchDialog {
             DialogKind::Warning,
             "Commit to Default Branch",
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "confirm-commit-to-default-branch-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "confirm-commit-to-default-branch-ok",
                     label: "Commit".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
@@ -84,7 +83,8 @@ impl Render for ConfirmCommitToDefaultBranchDialog {
                         }
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

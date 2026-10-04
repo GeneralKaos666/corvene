@@ -51,6 +51,17 @@ pub fn answer(prompt: &str) -> Option<String> {
 /// [`answer`] with the host → login map given (Android: the helper process
 /// passes its `CORVENE_ASKPASS_LOGINS` along with the prompt).
 pub fn answer_with(prompt: &str, logins: HashMap<String, String>) -> Option<String> {
+    // GHD `handleSSHHostAuthenticity`: ssh's unknown host question goes to the
+    // AddSSHHost dialog, which Corvene does not have yet; declining makes ssh
+    // refuse the host (`Host key verification failed.`)
+    if let Some(info) = corvene_git::parse_add_ssh_host_prompt(prompt) {
+        tracing::info!(
+            host = %info.host,
+            key_type = %info.key_type,
+            "declined ssh's unknown host question"
+        );
+        return None;
+    }
     let (kind, host, user) = parse_prompt(prompt)?;
     // git names the port (`host:8443`); logins and stored credentials are
     // kept by host name alone
@@ -106,6 +117,17 @@ mod tests {
             Some(("password", "github.com".into(), Some("octocat".into())))
         );
         assert_eq!(parse_prompt("Enter passphrase for key '/x': "), None);
+    }
+
+    #[test]
+    fn declines_the_unknown_host_question() {
+        let prompt = "The authenticity of host 'github.com (140.82.121.3)' can't be established.\n\
+                      ED25519 key fingerprint is SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU.\n\
+                      Are you sure you want to continue connecting (yes/no/[fingerprint])? ";
+        assert_eq!(
+            answer_with(prompt, parse_logins("github.com=octocat")),
+            None
+        );
     }
 
     #[test]

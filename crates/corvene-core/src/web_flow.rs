@@ -25,7 +25,7 @@ use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
-use crate::state::{PendingWebFlow, SignInState, SignInStep};
+use crate::state::{AuthenticationFlow, AuthenticationStep, PendingWebFlow};
 
 /// Whether the callback must come over the loopback listener.
 fn use_loopback() -> bool {
@@ -67,24 +67,28 @@ impl Dispatcher {
     /// `authenticateWithBrowser`: start the web flow for `endpoint` and open
     /// GitHub's authorize page.
     pub fn sign_in_web_flow(endpoint: Endpoint, cx: &mut App) {
+        Self::start_authentication(cx);
         let client_id = Self::oauth_client_id(&endpoint, cx);
         let state = Self::state(cx);
         state.update(cx, |s, cx| {
-            if let Some(existing) = s.sign_in.as_ref() {
+            if let Some(existing) = s.authentication.as_ref() {
                 existing
                     .cancel
                     .store(true, std::sync::atomic::Ordering::SeqCst);
             }
-            s.sign_in = Some(SignInState {
+            s.authentication = Some(AuthenticationFlow {
                 endpoint: endpoint.api_base.clone(),
-                step: SignInStep::Requesting,
+                step: AuthenticationStep::Requesting,
                 cancel: Arc::new(AtomicBool::new(false)),
                 web_flow: None,
             });
             cx.notify();
         });
         let Some(client_id) = client_id else {
-            Self::set_sign_in_step(SignInStep::Error(no_oauth_app_message(&endpoint)), cx);
+            Self::set_sign_in_step(
+                AuthenticationStep::Error(no_oauth_app_message(&endpoint)),
+                cx,
+            );
             return;
         };
         let (flow, loopback) = if use_loopback() {
@@ -94,7 +98,7 @@ impl Dispatcher {
             }) {
                 Ok(listener) => listener,
                 Err(err) => {
-                    Self::set_sign_in_step(SignInStep::Error(err.to_string()), cx);
+                    Self::set_sign_in_step(AuthenticationStep::Error(err.to_string()), cx);
                     return;
                 }
             };
@@ -110,7 +114,7 @@ impl Dispatcher {
             match WebFlow::new(listener.redirect_uri.clone()) {
                 Ok(flow) => (flow, Some(Arc::new(listener))),
                 Err(err) => {
-                    Self::set_sign_in_step(SignInStep::Error(err.to_string()), cx);
+                    Self::set_sign_in_step(AuthenticationStep::Error(err.to_string()), cx);
                     return;
                 }
             }
@@ -118,7 +122,7 @@ impl Dispatcher {
             match WebFlow::new(SCHEME_REDIRECT_URI) {
                 Ok(flow) => (flow, None),
                 Err(err) => {
-                    Self::set_sign_in_step(SignInStep::Error(err.to_string()), cx);
+                    Self::set_sign_in_step(AuthenticationStep::Error(err.to_string()), cx);
                     return;
                 }
             }
@@ -126,9 +130,9 @@ impl Dispatcher {
         let authorize_url = flow.authorize_url(&endpoint, &client_id);
         info!(redirect = %flow.redirect_uri, "starting the browser sign-in");
         state.update(cx, |s, cx| {
-            if let Some(sign_in) = s.sign_in.as_mut() {
+            if let Some(sign_in) = s.authentication.as_mut() {
                 sign_in.web_flow = Some(PendingWebFlow { flow, loopback });
-                sign_in.step = SignInStep::Browser {
+                sign_in.step = AuthenticationStep::Browser {
                     authorize_url: authorize_url.clone(),
                 };
             }
@@ -142,7 +146,7 @@ impl Dispatcher {
     pub fn complete_web_flow(code: String, state: String, cx: &mut App) {
         let pending = {
             let s = Self::state(cx).read(cx);
-            s.sign_in.as_ref().and_then(|si| {
+            s.authentication.as_ref().and_then(|si| {
                 si.web_flow
                     .as_ref()
                     .map(|w| (w.flow.clone(), Endpoint::from_api_base(&si.endpoint)))
@@ -155,7 +159,7 @@ impl Dispatcher {
         if flow.state != state {
             // "This is likely due to a browser reloading the callback URL."
             Self::set_sign_in_step(
-                SignInStep::Error(
+                AuthenticationStep::Error(
                     "The sign-in response did not match this sign-in attempt. Start again from Corvene."
                         .into(),
                 ),
@@ -164,10 +168,13 @@ impl Dispatcher {
             return;
         }
         let Some(client_id) = Self::oauth_client_id(&endpoint, cx) else {
-            Self::set_sign_in_step(SignInStep::Error(no_oauth_app_message(&endpoint)), cx);
+            Self::set_sign_in_step(
+                AuthenticationStep::Error(no_oauth_app_message(&endpoint)),
+                cx,
+            );
             return;
         };
-        Self::set_sign_in_step(SignInStep::Verifying, cx);
+        Self::set_sign_in_step(AuthenticationStep::Verifying, cx);
         let exchange_endpoint = endpoint.clone();
         spawn_bg(
             cx,
@@ -180,7 +187,7 @@ impl Dispatcher {
             move |(result, had_secret), cx| match result {
                 Ok((token, scopes)) => {
                     Self::state(cx).update(cx, |s, _| {
-                        if let Some(sign_in) = s.sign_in.as_mut() {
+                        if let Some(sign_in) = s.authentication.as_mut() {
                             sign_in.web_flow = None;
                         }
                     });
@@ -194,7 +201,7 @@ impl Dispatcher {
                     } else {
                         " (no client secret is set for this OAuth app; enter it, or use the device flow)"
                     };
-                    Self::set_sign_in_step(SignInStep::Error(format!("{err}{hint}")), cx);
+                    Self::set_sign_in_step(AuthenticationStep::Error(format!("{err}{hint}")), cx);
                 }
             },
         );

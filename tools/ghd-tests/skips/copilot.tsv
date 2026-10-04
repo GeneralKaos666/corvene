@@ -1,0 +1,13 @@
+# Copilot is omitted by design (.docs/TODO.md › Copilot)
+unit/copilot-byok-test.ts	*	omitted: Copilot is left out by design
+unit/copilot-commit-message-prompt-test.ts	*	omitted: Copilot is left out by design
+unit/copilot-conflict-context-test.ts	*	omitted: Copilot is left out by design
+unit/copilot-conflict-resolution-model-test.ts	*	omitted: Copilot is left out by design
+unit/copilot-conflict-resolution-test.ts	*	omitted: Copilot is left out by design
+unit/copilot-error-test.ts	*	omitted: Copilot is left out by design
+unit/copilot-in-memory-session-fs-provider-test.ts	*	omitted: Copilot is left out by design
+unit/copilot-resolution-helpers-test.ts	*	omitted: Copilot is left out by design
+unit/stores/copilot-store-test.ts	*	omitted: Copilot is left out by design
+unit/ui/copilot-custom-providers-dialog-test.tsx	*	omitted: Copilot is left out by design
+unit/ui/copilot-preferences-test.tsx	*	omitted: Copilot is left out by design
+unit/ui/test-copilot-snapshot-card-dialog-test.tsx	*	omitted: Copilot is left out by design

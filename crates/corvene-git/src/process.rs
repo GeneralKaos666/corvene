@@ -1,8 +1,23 @@
 //! The single choke point for spawning `git` (never spawn it elsewhere).
 //! Environment mirrors GitHub Desktop's `lib/git/core.ts`.
+//!
+//! A failed command is GitHub Desktop's `GitError`: [`GitError::Failed`]
+//! carries the command's terminal output (stdout and stderr, the last
+//! [`TERMINAL_CAPACITY`] UTF-16 code units, untrimmed), which is the message
+//! GitHub Desktop shows when it has no description for the error. GitHub
+//! Desktop keeps the output in the order git wrote it; [`GitCommand::run`]
+//! and the streamed runs collect stdout and stderr apart, so their output is
+//! stdout followed by stderr ([`GitCommand::run_with_terminal_output`] keeps
+//! the order). A known error the caller expects
+//! ([`GitCommand::expected_errors`]) is looked for in stderr, then in stdout
+//! (`parseError`), and is a result, not a failure. The known error of a
+//! failure (`GitError::known`, `GitFailure::known`) is looked for in its
+//! terminal output, the only text the error keeps: where stdout and stderr
+//! name different known errors, the one listed first wins rather than
+//! stderr's (`.docs/deviations.md`).
 
 use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -13,6 +28,8 @@ use tracing::{debug, warn};
 
 use crate::detect::GitBinary;
 use crate::error::{GitError, Result};
+use crate::git_errors::{KnownGitError, known_git_error};
+use crate::terminal::{LiveOutput, TERMINAL_CAPACITY, TerminalBuffer, TerminalOutputCallback};
 
 #[derive(Debug)]
 pub struct GitOutput {
@@ -36,12 +53,16 @@ pub struct GitCommand {
     env: Vec<(OsString, OsString)>,
     /// Exit codes that are not failures (e.g. `diff --exit-code` → 1).
     ok_codes: Vec<i32>,
+    /// Every exit code counts as success ([`GitCommand::allow_any_exit_code`]).
+    any_code: bool,
     /// Bytes written to git's stdin (`commit -F -`, `update-index --stdin`).
     stdin: Option<Vec<u8>>,
     /// Variables removed from the inherited environment (`GIT_SEQUENCE_EDITOR`).
     env_removed: Vec<OsString>,
     /// Lets another thread stop a streamed command ([`GitCommand::cancel_token`]).
     cancel: Option<CancelToken>,
+    /// Known errors that are results ([`GitCommand::expected_errors`]).
+    expected_errors: Vec<KnownGitError>,
 }
 
 /// Stops a running [`GitCommand::run_streaming`] from another thread with
@@ -164,6 +185,58 @@ pub fn set_network_stall_timeout(seconds: u32) {
     LOW_SPEED_TIME.store(seconds, Ordering::Relaxed);
 }
 
+thread_local! {
+    /// Variables [`with_env`] adds to the git commands of this thread.
+    static SCOPED_ENV: std::cell::RefCell<Vec<(OsString, OsString)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Run `f` with `env` added to the environment of every git command it
+/// starts on the current thread, as if the variables were in the process
+/// environment: a command's own [`GitCommand::env`] /
+/// [`GitCommand::env_remove`] still win. Commands started on other threads,
+/// and after `f` returns, do not see them.
+///
+/// This is how GitHub Desktop's tests that set `process.env` around one call
+/// (`GIT_CONFIG_PARAMETERS`, …) are ported without touching the environment
+/// of the other tests, which run on parallel threads of the same process.
+pub fn with_env<R>(env: &[(&str, &str)], f: impl FnOnce() -> R) -> R {
+    /// Drops the variables again, also when `f` panics.
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SCOPED_ENV.with(|scoped| scoped.borrow_mut().truncate(self.0));
+        }
+    }
+    let _restore = SCOPED_ENV.with(|scoped| {
+        let mut scoped = scoped.borrow_mut();
+        let len = scoped.len();
+        scoped.extend(
+            env.iter()
+                .map(|(k, v)| (OsString::from(k), OsString::from(v))),
+        );
+        Restore(len)
+    });
+    f()
+}
+
+/// The [`with_env`] variables of the current thread, for a git command this
+/// thread has another thread run (`lfs_progress::run_with_progress`).
+pub(crate) fn scoped_env() -> Vec<(String, String)> {
+    SCOPED_ENV.with(|scoped| {
+        scoped
+            .borrow()
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.to_string_lossy().into_owned(),
+                )
+            })
+            .collect()
+    })
+}
+
 /// Told when a network command starts (`true`) and ends (`false`): Android
 /// keeps the process alive with a foreground service while one runs.
 static NETWORK_OBSERVER: std::sync::OnceLock<fn(bool)> = std::sync::OnceLock::new();
@@ -178,13 +251,7 @@ struct NetworkGuard(fn(bool));
 impl NetworkGuard {
     fn for_command(command: &GitCommand) -> Option<Self> {
         let observer = *NETWORK_OBSERVER.get()?;
-        // the subcommand follows any `-c name=value` pairs (clone)
-        let mut args = command.args.iter();
-        let mut subcommand = args.next();
-        while subcommand.is_some_and(|arg| arg == "-c") {
-            subcommand = args.nth(1);
-        }
-        is_network_command(subcommand).then(|| {
+        is_network_command(command.subcommand()).then(|| {
             observer(true);
             Self(observer)
         })
@@ -215,10 +282,21 @@ impl GitCommand {
             cwd: None,
             env: Vec::new(),
             ok_codes: vec![0],
+            any_code: false,
             stdin: None,
             env_removed: Vec::new(),
             cancel: None,
+            expected_errors: Vec::new(),
         }
+    }
+
+    /// GHD `IGitExecutionOptions.expectedErrors`: when the command exits
+    /// with a code that is not a success and its output (stderr, then
+    /// stdout) is one of these errors, it returns its [`GitOutput`] instead
+    /// of failing.
+    pub fn expected_errors(mut self, errors: impl IntoIterator<Item = KnownGitError>) -> Self {
+        self.expected_errors.extend(errors);
+        self
     }
 
     /// Stop the streamed command when `token` is cancelled.
@@ -287,6 +365,30 @@ impl GitCommand {
         }
     }
 
+    /// Return [`GitOutput`] for whatever code git exits with, so the caller
+    /// reads `status` itself (dugite's `exec`, which the ported GitHub
+    /// Desktop tests assert on). A process killed by a signal, without an
+    /// exit code, is still an error.
+    pub fn allow_any_exit_code(mut self) -> Self {
+        self.any_code = true;
+        self
+    }
+
+    /// The git subcommand: the first argument after any `-c name=value`
+    /// pairs (clone always starts with `-c init.defaultBranch=…`).
+    fn subcommand(&self) -> Option<&OsString> {
+        let mut args = self.args.iter();
+        let mut subcommand = args.next();
+        while subcommand.is_some_and(|arg| arg == "-c") {
+            subcommand = args.nth(1);
+        }
+        subcommand
+    }
+
+    fn exit_ok(&self, code: Option<i32>) -> bool {
+        code.is_some_and(|c| self.any_code || self.ok_codes.contains(&c))
+    }
+
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.bin.path);
         #[cfg(windows)]
@@ -296,7 +398,7 @@ impl GitCommand {
         }
         // Settings › Advanced › Use Git Credential Manager: `-c credential.helper=manager`
         // for the network commands (GHD `useExternalCredentialHelper`).
-        let network = is_network_command(self.args.first());
+        let network = is_network_command(self.subcommand());
         if CREDENTIAL_HELPER.load(Ordering::Relaxed) && network {
             cmd.args(["-c", "credential.helper=manager"]);
         }
@@ -311,6 +413,12 @@ impl GitCommand {
                 cmd.env(k, v);
             }
         }
+        // `with_env`: part of the inherited environment for this thread
+        SCOPED_ENV.with(|scoped| {
+            for (k, v) in scoped.borrow().iter() {
+                cmd.env(k, v);
+            }
+        });
         // GHD: never let git prompt on a terminal; force stable English output.
         cmd.env("GIT_TERMINAL_PROMPT", "0")
             .env("LC_ALL", "en_US.UTF-8")
@@ -395,28 +503,60 @@ impl GitCommand {
             return Err(GitError::Cancelled(args));
         }
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        let code = output.status.code();
         debug!(
             git = %args,
             cwd = ?self.cwd,
-            code,
+            code = output.status.code(),
             ms = started.elapsed().as_millis(),
             "git finished"
         );
-        if code.is_some_and(|c| self.ok_codes.contains(&c)) {
-            Ok(GitOutput {
-                status: output.status,
-                stdout: output.stdout,
+        self.finish(
+            args,
+            output.status,
+            output.stdout,
+            stderr,
+            |stdout, stderr| terminal_output(stdout, stderr.as_bytes()),
+        )
+    }
+
+    /// The end of every run: the output, or GHD's `GitError` when the exit
+    /// code is not a success and the error is not expected. `terminal`
+    /// builds the error's terminal output from stdout and stderr.
+    fn finish(
+        &self,
+        args: String,
+        status: ExitStatus,
+        stdout: Vec<u8>,
+        stderr: String,
+        terminal: impl FnOnce(&[u8], &str) -> String,
+    ) -> Result<GitOutput> {
+        let code = status.code();
+        if self.exit_ok(code) {
+            return Ok(GitOutput {
+                status,
+                stdout,
                 stderr,
-            })
-        } else {
-            warn!(git = %args, code, stderr = %stderr.trim(), "git failed");
-            Err(GitError::Failed {
-                args,
-                code,
-                stderr: stderr.trim().to_string(),
-            })
+            });
         }
+        if !self.expected_errors.is_empty() {
+            let known = known_git_error(&stderr)
+                .or_else(|| known_git_error(&String::from_utf8_lossy(&stdout)));
+            if known.is_some_and(|known| self.expected_errors.contains(&known)) {
+                return Ok(GitOutput {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+        }
+        let output = terminal(&stdout, &stderr);
+        // GHD logs even less of the output than it keeps
+        warn!(git = %args, code, output = %js_tail(&output, 1024), "git failed");
+        Err(GitError::Failed {
+            args,
+            code,
+            stderr: output,
+        })
     }
 
     /// Run with `--progress`-style stderr streamed line by line (clone, fetch, push).
@@ -459,16 +599,21 @@ impl GitCommand {
         }
 
         // the pipe that is not streamed is drained on a thread so git never blocks
+        let (Some(stdout_pipe), Some(stderr_pipe)) = (child.stdout.take(), child.stderr.take())
+        else {
+            let _ = child.kill();
+            let _ = child.wait();
+            if let Some(token) = &cancel {
+                token.detach();
+            }
+            return Err(GitError::Spawn(std::io::Error::other(
+                "git was started without its output pipes",
+            )));
+        };
         let (streamed, drained): (Box<dyn std::io::Read + Send>, Box<dyn std::io::Read + Send>) =
             match pipe {
-                StreamedPipe::Stderr => (
-                    Box::new(child.stderr.take().expect("piped")),
-                    Box::new(child.stdout.take().expect("piped")),
-                ),
-                StreamedPipe::Stdout => (
-                    Box::new(child.stdout.take().expect("piped")),
-                    Box::new(child.stderr.take().expect("piped")),
-                ),
+                StreamedPipe::Stderr => (Box::new(stderr_pipe), Box::new(stdout_pipe)),
+                StreamedPipe::Stdout => (Box::new(stdout_pipe), Box::new(stderr_pipe)),
             };
         let drain_thread = std::thread::spawn(move || {
             let mut buf = Vec::new();
@@ -513,34 +658,154 @@ impl GitCommand {
                 String::from_utf8_lossy(&drained).into_owned(),
             ),
         };
-        let code = status.code();
-        debug!(git = %args, code, ms = started.elapsed().as_millis(), "git finished (streamed)");
-        if code.is_some_and(|c| self.ok_codes.contains(&c)) {
-            Ok(GitOutput {
-                status,
-                stdout,
-                stderr,
-            })
-        } else {
-            // GHD's `GitError` shows the combined terminal output: what a
-            // pre-push hook prints to stdout (git passes it through) comes
-            // before git's own error lines
-            let mut message = stderr.trim().to_string();
-            if matches!(pipe, StreamedPipe::Stderr) {
-                let out = String::from_utf8_lossy(&stdout);
-                let out = out.trim();
-                if !out.is_empty() {
-                    message = format!("{out}\n{message}");
-                }
+        debug!(
+            git = %args,
+            code = status.code(),
+            ms = started.elapsed().as_millis(),
+            "git finished (streamed)"
+        );
+        // GHD's `GitError` shows the combined terminal output: what a
+        // pre-push hook prints to stdout (git passes it through) comes
+        // before git's own error lines
+        self.finish(args, status, stdout, stderr, |stdout, stderr| {
+            terminal_output(stdout, stderr.as_bytes())
+        })
+    }
+
+    /// GHD `git()` with `onTerminalOutputAvailable`: runs to completion like
+    /// [`GitCommand::run`] and hands `on_terminal_output_available` a
+    /// listener once git has started. A subscriber first receives the output
+    /// buffered so far, then every chunk of stdout and stderr as git writes
+    /// it; the callbacks run on this thread. The error of a failed command
+    /// carries the output in the order git wrote it.
+    pub fn run_with_terminal_output(
+        &self,
+        on_terminal_output_available: &TerminalOutputCallback,
+    ) -> Result<GitOutput> {
+        let started = Instant::now();
+        let _network = NetworkGuard::for_command(self);
+        let args = self.describe();
+        // a streamed run: the default token stops it too
+        let cancel = self.cancel.clone().or_else(default_cancel_token);
+        #[cfg(not(target_os = "android"))]
+        let mut child = self
+            .command()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|err| self.spawn_error(err))?;
+        #[cfg(target_os = "android")]
+        let mut child = crate::spawn::spawn(self.command(), self.stdin.is_some())
+            .map_err(|err| self.spawn_error(err))?;
+        if let Some(token) = &cancel {
+            token.attach(child.id());
+        }
+        // stdin on a thread of its own: git may fill its output pipes first
+        let stdin_thread = match (&self.stdin, child.stdin.take()) {
+            (Some(bytes), Some(mut stdin)) => {
+                let bytes = bytes.clone();
+                Some(std::thread::spawn(move || {
+                    use std::io::Write;
+                    // git may exit early; a broken pipe shows in the exit code
+                    let _ = stdin.write_all(&bytes);
+                }))
             }
-            warn!(git = %args, code, stderr = %message, "git failed");
-            Err(GitError::Failed {
-                args,
-                code,
-                stderr: message,
+            _ => None,
+        };
+        let (tx, rx) = std::sync::mpsc::channel::<(StreamedPipe, Vec<u8>)>();
+        let readers: Vec<_> = [
+            child
+                .stdout
+                .take()
+                .map(|pipe| (StreamedPipe::Stdout, Box::new(pipe) as Box<dyn Read + Send>)),
+            child
+                .stderr
+                .take()
+                .map(|pipe| (StreamedPipe::Stderr, Box::new(pipe) as Box<dyn Read + Send>)),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|(kind, mut pipe)| {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let mut buf = vec![0u8; 64 * 1024];
+                loop {
+                    match pipe.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if tx.send((kind, buf[..n].to_vec())).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
             })
+        })
+        .collect();
+        drop(tx);
+
+        // GHD calls `onTerminalOutputAvailable` from `processCallback`, as
+        // soon as the process exists
+        let live = LiveOutput::new(TERMINAL_CAPACITY);
+        on_terminal_output_available(live.listener());
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        // ends once both pipes are closed
+        for (kind, chunk) in rx {
+            match kind {
+                StreamedPipe::Stdout => stdout.extend_from_slice(&chunk),
+                StreamedPipe::Stderr => stderr.extend_from_slice(&chunk),
+            }
+            live.push(&chunk);
+        }
+        let status = child.wait();
+        if let Some(token) = &cancel {
+            token.detach();
+        }
+        let status = status.map_err(GitError::Spawn)?;
+        for reader in readers {
+            let _ = reader.join();
+        }
+        if let Some(thread) = stdin_thread {
+            let _ = thread.join();
+        }
+        if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+            debug!(git = %args, "git cancelled");
+            return Err(GitError::Cancelled(args));
+        }
+        debug!(
+            git = %args,
+            code = status.code(),
+            ms = started.elapsed().as_millis(),
+            "git finished (terminal output)"
+        );
+        let stderr = String::from_utf8_lossy(&stderr).into_owned();
+        self.finish(args, status, stdout, stderr, |_, _| live.joined())
+    }
+}
+
+/// GHD's terminal output of a command whose stdout and stderr were read
+/// apart: stdout, then stderr, the last [`TERMINAL_CAPACITY`] code units.
+fn terminal_output(stdout: &[u8], stderr: &[u8]) -> String {
+    let mut buffer = TerminalBuffer::new(TERMINAL_CAPACITY);
+    // a UTF-16 code unit takes at most 3 bytes of UTF-8: only the tail of a
+    // long output can be kept, so only the tail is decoded
+    let tail = |bytes: &[u8]| -> usize { bytes.len().saturating_sub(4 * TERMINAL_CAPACITY) };
+    buffer.push(&stdout[tail(stdout)..]);
+    buffer.push(&stderr[tail(stderr)..]);
+    buffer.joined()
+}
+
+/// JavaScript's `s.slice(-units)`, at a character boundary.
+fn js_tail(s: &str, units: usize) -> &str {
+    let mut kept = 0;
+    for (at, c) in s.char_indices().rev() {
+        kept += c.len_utf16();
+        if kept > units {
+            return &s[at + c.len_utf8()..];
         }
     }
+    s
 }
 
 #[derive(Clone, Copy)]
@@ -646,7 +911,80 @@ mod tests {
             ]
         );
         assert!(envs(&status).is_empty());
+        // the subcommand follows `-c name=value` pairs
+        let clone = GitCommand::new(git.clone()).args(["-c", "init.defaultBranch=main", "clone"]);
+        assert_eq!(envs(&clone).len(), 2);
         set_network_stall_timeout(0);
         assert!(envs(&fetch).is_empty());
+    }
+
+    #[test]
+    fn failures_keep_the_output_and_expected_errors_are_results() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let cmd = GitCommand::new(git)
+            .args(["rev-parse", "--git-dir"])
+            .current_dir(dir.path());
+        let err = cmd.run().unwrap_err();
+        let GitError::Failed { code, stderr, .. } = &err else {
+            panic!("{err}");
+        };
+        assert_eq!(*code, Some(128));
+        assert!(
+            stderr.starts_with("fatal: not a git repository"),
+            "{stderr}"
+        );
+        assert!(stderr.ends_with('\n'), "untrimmed: {stderr:?}");
+        let output = cmd
+            .clone()
+            .expected_errors([KnownGitError::NotAGitRepository])
+            .run()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(128));
+        assert!(
+            cmd.expected_errors([KnownGitError::BadRevision])
+                .run()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn terminal_output_keeps_the_tail() {
+        assert_eq!(terminal_output(b"out\n", b"err\n"), "out\nerr\n");
+        let long = vec![b'a'; 5 * TERMINAL_CAPACITY];
+        let kept = terminal_output(&long, b"end");
+        assert_eq!(kept.len(), TERMINAL_CAPACITY);
+        assert!(kept.ends_with("aend"));
+        assert_eq!(js_tail("ab👋", 2), "👋");
+        assert_eq!(js_tail("ab👋", 3), "b👋");
+        assert_eq!(js_tail("ab", 9), "ab");
+    }
+
+    fn env_value(cmd: &GitCommand, key: &str) -> Option<String> {
+        cmd.command()
+            .get_envs()
+            .find(|(k, _)| *k == OsStr::new(key))
+            .and_then(|(_, v)| Some(v?.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn with_env_reaches_this_threads_commands_inside_the_call_only() {
+        const KEY: &str = "GIT_CONFIG_PARAMETERS";
+        let git = Arc::new(crate::find_git().unwrap());
+        let plain = GitCommand::new(git.clone()).args(["status"]);
+        let own = plain.clone().env(KEY, "'a.b=own'");
+        with_env(&[(KEY, "'protocol.version=0'")], || {
+            assert_eq!(
+                env_value(&plain, KEY).as_deref(),
+                Some("'protocol.version=0'")
+            );
+            assert_eq!(env_value(&own, KEY).as_deref(), Some("'a.b=own'"));
+            let other_thread = plain.clone();
+            let seen = std::thread::spawn(move || env_value(&other_thread, KEY))
+                .join()
+                .unwrap();
+            assert_eq!(seen, None);
+        });
+        assert_eq!(env_value(&plain, KEY), None);
     }
 }

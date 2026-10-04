@@ -13,6 +13,14 @@
 //! repository through the editor's command line tool with the repository
 //! folder, in that folder's window (GHD `launchExternalEditor` opens the
 //! file alone).
+//!
+//! Repository › Show in Finder ([`Dispatcher::show_repository`]) is GHD's
+//! `showFolderContents` (`ui/main-process-proxy.ts`, [`show_folder_contents`]):
+//! a directory opens in the file manager, except that on macOS a path that
+//! is or may be an application bundle (`lib/is-application-bundle.ts`, read
+//! with `mdls`) is only revealed after a native confirmation. GHD makes
+//! Cancel the confirmation's default button; GPUI's alert makes the first
+//! button (Reveal in Finder) the Return default, Escape cancels.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -30,6 +38,137 @@ use crate::state::{
 };
 use corvene_models::{GitHubRepository, Identity};
 use corvene_platform::{editors, shells, trash};
+
+/// GHD `IFileInformation`: what [`show_folder_contents`] reads of a path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileInformation {
+    pub is_directory: bool,
+}
+
+/// A platform operation on a path that may fail with a message (GHD's
+/// rejected promise).
+pub type PathDependency<T> = Box<dyn Fn(&Path) -> Result<T, String>>;
+
+/// GHD `IShowFolderContentsDependencies`: the platform operations
+/// [`show_folder_contents`] uses, replaceable for tests.
+pub struct ShowFolderContentsDependencies {
+    /// Whether the current platform is macOS.
+    pub is_darwin: bool,
+    /// Reads file information for the target path.
+    pub stat: PathDependency<FileInformation>,
+    /// Determines whether a path is a macOS application bundle.
+    pub is_application_bundle: PathDependency<bool>,
+    /// Requests confirmation before revealing a potentially executable path.
+    pub confirm_reveal: Box<dyn Fn() -> Result<bool, String>>,
+    /// Opens a directory directly in the platform file manager.
+    pub open_directory: Box<dyn Fn(&Path)>,
+    /// Reveals and selects a path in the platform file manager.
+    pub reveal_item: PathDependency<()>,
+}
+
+/// What [`show_folder_contents`] does with a path, decided from its file
+/// information and (on macOS) whether it may be an application.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FolderContentsAction {
+    /// The file information could not be read (not on macOS): nothing.
+    Nothing,
+    /// A conclusively safe directory.
+    OpenDirectory,
+    /// Not a directory (not on macOS).
+    RevealItem,
+    /// Ask first (`revealAfterConfirmation`), then reveal.
+    ConfirmThenReveal,
+}
+
+/// The decision half of GHD `showFolderContents`, with its logging.
+pub fn folder_contents_action(
+    path: &Path,
+    is_darwin: bool,
+    stat: impl Fn(&Path) -> Result<FileInformation, String>,
+    is_application_bundle: impl Fn(&Path) -> Result<bool, String>,
+) -> FolderContentsAction {
+    let shown = path.display();
+    let stats = match stat(path) {
+        Ok(stats) => stats,
+        Err(err) => {
+            error!("Unable to retrieve file information for {shown}: {err}");
+            return if is_darwin {
+                FolderContentsAction::ConfirmThenReveal
+            } else {
+                FolderContentsAction::Nothing
+            };
+        }
+    };
+    if !stats.is_directory {
+        error!("Trying to get the folder contents of a non-folder at '{shown}'");
+        return if is_darwin {
+            FolderContentsAction::ConfirmThenReveal
+        } else {
+            FolderContentsAction::RevealItem
+        };
+    }
+    // on Windows and Linux a directory is just a directory
+    if !is_darwin {
+        return FolderContentsAction::OpenDirectory;
+    }
+    // on macOS opening an app bundle would run it; without readable
+    // metadata, err on the side of caution
+    let can_open_safely = match is_application_bundle(path) {
+        Ok(is_bundle) => !is_bundle,
+        Err(err) => {
+            error!("Failed to load metadata for path '{shown}': {err}");
+            false
+        }
+    };
+    if can_open_safely {
+        FolderContentsAction::OpenDirectory
+    } else {
+        info!(
+            "Preventing direct open of path '{shown}' because it could not be conclusively identified as non-executable"
+        );
+        FolderContentsAction::ConfirmThenReveal
+    }
+}
+
+/// GHD `showFolderContents(path, dependencies)` (`ui/main-process-proxy.ts`):
+/// open a directory in the file manager without executing an application
+/// bundle on macOS ([`folder_contents_action`]). A failed confirmation or
+/// reveal after one is logged; only a failed reveal of a non-directory
+/// (not on macOS) is an error.
+pub fn show_folder_contents(
+    path: &Path,
+    dependencies: &ShowFolderContentsDependencies,
+) -> Result<(), String> {
+    match folder_contents_action(
+        path,
+        dependencies.is_darwin,
+        &dependencies.stat,
+        &dependencies.is_application_bundle,
+    ) {
+        FolderContentsAction::Nothing => {}
+        FolderContentsAction::OpenDirectory => (dependencies.open_directory)(path),
+        FolderContentsAction::RevealItem => (dependencies.reveal_item)(path)?,
+        FolderContentsAction::ConfirmThenReveal => {
+            // `revealAfterConfirmation`: without a confirmation, leave the
+            // path untouched
+            let confirmed = (dependencies.confirm_reveal)().unwrap_or_else(|err| {
+                error!(
+                    "Unable to confirm revealing folder '{}': {err}",
+                    path.display()
+                );
+                false
+            });
+            if confirmed && let Err(err) = (dependencies.reveal_item)(path) {
+                error!("Unable to reveal folder '{}': {err}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// GHD `isApplicationBundle` / `isApplicationBundleFromMetadata`
+/// (`lib/is-application-bundle.ts`, `mdls`) are OS integration.
+pub use corvene_platform::apps::{is_application_bundle, is_application_bundle_from_metadata};
 
 /// What Settings › Save applies (`preferences.tsx#onSave`).
 #[derive(Clone, Debug)]
@@ -61,6 +200,26 @@ pub struct RepositorySettingsSave {
 /// `openIssueCreationPage`: GitHub's issue template chooser.
 pub fn issue_creation_url(html_url: &str) -> String {
     format!("{html_url}/issues/new/choose")
+}
+
+/// GHD `_showGitHubExplore`: `html_url` with its path replaced by
+/// `/explore` (`url.pathname = '/explore'`), `None` for a URL without a
+/// scheme.
+pub fn github_explore_url(html_url: &str) -> Option<String> {
+    let scheme_end = html_url.find("://")? + 3;
+    let rest = &html_url[scheme_end..];
+    let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    if host_end == 0 {
+        return None;
+    }
+    let after_path = rest[host_end..]
+        .find(['?', '#'])
+        .map_or("", |ix| &rest[host_end + ix..]);
+    Some(format!(
+        "{}{}/explore{after_path}",
+        &html_url[..scheme_end],
+        &rest[..host_end]
+    ))
 }
 
 /// The web page of a remote that is not a GitHub repository
@@ -308,6 +467,7 @@ impl Dispatcher {
                                 suggest_default_editor: false,
                                 open_preferences: true,
                             },
+                            None,
                             cx,
                         );
                     }
@@ -318,14 +478,35 @@ impl Dispatcher {
         let editor = match editors::find_editor_or_default(&editors, selected.as_deref()) {
             Ok(Some(editor)) => editor.clone(),
             Ok(None) => {
-                Self::show_editor_error(editors::no_editor_error(), cx);
+                Self::show_editor_error(editors::no_editor_error(), None, cx);
                 return;
             }
             Err(err) => {
-                Self::show_editor_error(err, cx);
+                Self::show_editor_error(err, None, cx);
                 return;
             }
         };
+        // Android: a Termux editor cannot reach Corvene's own storage; the
+        // error offers to move the repository (`shared_storage`)
+        #[cfg(target_os = "android")]
+        if editor.bundle_id.starts_with(editors::TERMUX_PREFIX)
+            && let Some(offer) = Self::shared_storage_move_for(
+                &path,
+                |relative| crate::AfterSharedStorageMove::OpenEditor { relative, line },
+                cx,
+            )
+        {
+            Self::show_editor_error(
+                editors::EditorError {
+                    message: corvene_platform::android::TERMUX_PRIVATE_STORAGE.to_string(),
+                    suggest_default_editor: false,
+                    open_preferences: false,
+                },
+                Some(offer),
+                cx,
+            );
+            return;
+        }
         spawn_bg(
             cx,
             move || {
@@ -347,19 +528,24 @@ impl Dispatcher {
             },
             |result, cx| {
                 if let Err(err) = result {
-                    Self::show_editor_error(err, cx);
+                    Self::show_editor_error(err, None, cx);
                 }
             },
         );
     }
 
-    fn show_editor_error(err: editors::EditorError, cx: &mut App) {
+    fn show_editor_error(
+        err: editors::EditorError,
+        move_to_shared_storage: Option<crate::SharedStorageMove>,
+        cx: &mut App,
+    ) {
         warn!(message = %err.message, "external editor");
         Self::show_popup(
             Popup::ExternalEditorError {
                 message: err.message,
                 suggest_default_editor: err.suggest_default_editor,
                 open_preferences: err.open_preferences,
+                move_to_shared_storage,
             },
             cx,
         );
@@ -398,6 +584,7 @@ impl Dispatcher {
                                     "{message} Please open {} and check your custom shell.",
                                     corvene_platform::editors::SETTINGS_LABEL
                                 ),
+                                move_to_shared_storage: None,
                             },
                             cx,
                         );
@@ -419,12 +606,28 @@ impl Dispatcher {
                         "Could not find shell '{selected}'. Please open {} and choose an installed shell.",
                         corvene_platform::editors::SETTINGS_LABEL
                     ),
+                    move_to_shared_storage: None,
                 },
                 cx,
             );
             return;
         };
         let path = path.to_path_buf();
+        // Android: Termux cannot reach Corvene's own storage; the error
+        // offers to move the repository (`shared_storage`)
+        #[cfg(target_os = "android")]
+        if let Some(offer) =
+            Self::shared_storage_move_for(&path, |_| crate::AfterSharedStorageMove::OpenShell, cx)
+        {
+            Self::show_popup(
+                Popup::ShellError {
+                    message: corvene_platform::android::TERMUX_PRIVATE_STORAGE.to_string(),
+                    move_to_shared_storage: Some(offer),
+                },
+                cx,
+            );
+            return;
+        }
         spawn_bg(
             cx,
             move || shells::launch(&found, &path),
@@ -435,6 +638,7 @@ impl Dispatcher {
                             message: format!(
                                 "Something went wrong while trying to start the shell: {err}"
                             ),
+                            move_to_shared_storage: None,
                         },
                         cx,
                     );
@@ -443,34 +647,138 @@ impl Dispatcher {
         );
     }
 
-    /// Repository › Show in Finder (`revealInFileManager`), and every Reveal
-    /// in Finder item. With a `510-file-manager` application set, it opens
-    /// the folder (a file's parent folder) with `open -a <app>` instead.
-    pub fn show_in_finder(path: &Path, cx: &mut App) {
+    /// Repository › Show in Finder, the repository list's Show in Finder
+    /// and No Changes' suggestion (GHD `app.tsx` `showRepository` →
+    /// [`show_folder_contents`]): open the repository's folder, asking first
+    /// on macOS when it may be an application. With a `510-file-manager`
+    /// application set, [`Self::show_in_finder`] instead.
+    pub fn show_repository(path: &Path, cx: &mut App) {
+        if Self::file_manager_app(cx).is_some() {
+            Self::show_in_finder(path, cx);
+            return;
+        }
+        let path = path.to_path_buf();
+        let classified = path.clone();
+        spawn_bg(
+            cx,
+            move || {
+                folder_contents_action(
+                    &classified,
+                    cfg!(target_os = "macos"),
+                    |path| {
+                        std::fs::metadata(path)
+                            .map(|m| FileInformation {
+                                is_directory: m.is_dir(),
+                            })
+                            .map_err(|err| err.to_string())
+                    },
+                    is_application_bundle,
+                )
+            },
+            move |action, cx| match action {
+                FolderContentsAction::Nothing => {}
+                FolderContentsAction::OpenDirectory => cx.open_with_system(&path),
+                FolderContentsAction::RevealItem => Self::reveal_item(&path, cx),
+                FolderContentsAction::ConfirmThenReveal => {
+                    Self::reveal_after_confirmation(path, cx)
+                }
+            },
+        );
+    }
+
+    /// GHD `revealAfterConfirmation` with the main process's
+    /// `confirm-reveal-directory` warning: reveal `path` only once the user
+    /// picks Reveal in Finder. A confirmation that cannot be shown is logged
+    /// and leaves the path alone.
+    fn reveal_after_confirmation(path: PathBuf, cx: &mut App) {
+        let Some(window) = cx.active_window().or_else(|| cx.windows().first().copied()) else {
+            error!(
+                "Unable to confirm revealing folder '{}': no window",
+                path.display()
+            );
+            return;
+        };
+        let answer = window.update(cx, |_, window, cx| {
+            window.prompt(
+                gpui_kit::PromptLevel::Warning,
+                "This repository might be an application.",
+                Some(
+                    "Opening it directly could run software. You can reveal and select it in Finder without opening it.",
+                ),
+                &[
+                    gpui_kit::PromptButton::ok("Reveal in Finder"),
+                    gpui_kit::PromptButton::cancel("Cancel"),
+                ],
+                cx,
+            )
+        });
+        let answer = match answer {
+            Ok(answer) => answer,
+            Err(err) => {
+                error!(
+                    "Unable to confirm revealing folder '{}': {err}",
+                    path.display()
+                );
+                return;
+            }
+        };
+        cx.spawn(
+            async move |cx: &mut gpui_kit::AsyncApp| match answer.await {
+                Ok(0) => {
+                    cx.update(|cx| Self::reveal_item(&path, cx));
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    error!(
+                        "Unable to confirm revealing folder '{}': {err}",
+                        path.display()
+                    );
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// The `510-file-manager` application, when one is set.
+    fn file_manager_app(cx: &App) -> Option<String> {
         let app = Self::state(cx)
             .read(cx)
             .flags
             .text(crate::flags::ids::FILE_MANAGER)
             .trim()
             .to_string();
-        if app.is_empty() {
-            // Linux: Electron's route (FileManager1, then xdg-open), which
-            // works without a desktop portal too
-            #[cfg(not(target_os = "macos"))]
-            {
-                let path = path.to_path_buf();
-                cx.background_executor()
-                    .spawn(async move {
-                        if let Err(err) = corvene_platform::apps::show_item_in_folder(&path) {
-                            warn!(%err, path = %path.display(), "could not show the item");
-                        }
-                    })
-                    .detach();
-            }
-            #[cfg(target_os = "macos")]
-            cx.reveal_path(path);
-            return;
+        (!app.is_empty()).then_some(app)
+    }
+
+    /// Electron's `shell.showItemInFolder`: reveal and select `path` in the
+    /// file manager.
+    fn reveal_item(path: &Path, cx: &mut App) {
+        // Linux: Electron's route (FileManager1, then xdg-open), which
+        // works without a desktop portal too
+        #[cfg(not(target_os = "macos"))]
+        {
+            let path = path.to_path_buf();
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(err) = corvene_platform::apps::show_item_in_folder(&path) {
+                        warn!(%err, path = %path.display(), "could not show the item");
+                    }
+                })
+                .detach();
         }
+        #[cfg(target_os = "macos")]
+        cx.reveal_path(path);
+    }
+
+    /// Every Reveal in Finder item (`revealInFileManager`,
+    /// `shell.showItemInFolder`). With a `510-file-manager` application set,
+    /// it opens the folder (a file's parent folder) with `open -a <app>`
+    /// instead.
+    pub fn show_in_finder(path: &Path, cx: &mut App) {
+        let Some(app) = Self::file_manager_app(cx) else {
+            Self::reveal_item(path, cx);
+            return;
+        };
         let dir = if path.is_dir() {
             path.to_path_buf()
         } else {
@@ -590,6 +898,17 @@ impl Dispatcher {
             .and_then(|info| info.current_branch())
             .map(|b| b.name.clone());
         Some((gh, branch))
+    }
+
+    /// GHD `_showGitHubExplore` (`lib/stores/app-store.ts`, the tutorial's
+    /// "Open in Browser"): `/explore` on the repository's GitHub host.
+    /// Nothing happens for a repository that is not on GitHub.
+    pub fn show_github_explore(id: u64, cx: &mut App) {
+        if let Some(url) =
+            Self::github_and_branch(id, cx).and_then(|(gh, _)| github_explore_url(&gh.html_url))
+        {
+            Self::open_url(&url, cx);
+        }
     }
 
     /// Repository › View on GitHub; with `262-view-on-remote` a repository
@@ -728,13 +1047,9 @@ impl Dispatcher {
             false,
             None,
             move |outcome, cx| {
-                // an error dialog may have replaced the prompt
-                if matches!(
-                    Self::state(cx).read(cx).popup,
-                    Some(Popup::PushBranchCommits { .. })
-                ) {
-                    Self::close_popup(cx);
-                }
+                // the prompt closes once the push is done (an error dialog
+                // may be on top of it)
+                Self::close_popups_where(|p| matches!(p, Popup::PushBranchCommits { .. }), cx);
                 // `305`: GHD opens the compare page even after a failed push
                 match outcome {
                     PushOutcome::Pushed => Self::open_create_pull_request_in_browser(id, base, cx),
@@ -1137,45 +1452,23 @@ impl Dispatcher {
         );
     }
 
-    /// Settings › Git › "edit your global Git config file": open `~/.gitconfig`
-    /// in the external editor (GHD opens it with the selected editor too),
-    /// or the XDG file when that is the one git uses (GHD asks
-    /// `git config --edit --global`, `lib/git/config.ts` `getGlobalConfigPath`).
+    /// Settings › Git › "edit your global Git config file" (GHD
+    /// `_editGlobalGitConfig`): open the global config file git uses
+    /// (`corvene_git::global_config_path`, which creates it) in the external
+    /// editor.
     pub fn edit_global_git_config(cx: &mut App) {
-        let Some(home) = dirs_home() else { return };
-        let path = global_git_config_path(
-            &home,
-            std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
-            &|p| p.exists(),
+        let Some(git) = Self::state(cx).read(cx).git.clone() else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || corvene_git::global_config_path(git),
+            |result, cx| match result {
+                Ok(path) => Self::open_in_editor(path, cx),
+                Err(err) => warn!(%err, "could not open the global Git config for editing"),
+            },
         );
-        if !path.exists()
-            && let Err(err) = std::fs::write(&path, "")
-        {
-            warn!(%err, "could not create ~/.gitconfig");
-        }
-        Self::open_in_editor(path, cx);
     }
-}
-
-/// The global config file `git config --global` edits: `~/.gitconfig`, or
-/// `$XDG_CONFIG_HOME/git/config` (default `~/.config/git/config`) when
-/// `~/.gitconfig` doesn't exist and that does.
-fn global_git_config_path(
-    home: &Path,
-    xdg_config_home: Option<PathBuf>,
-    exists: &dyn Fn(&Path) -> bool,
-) -> PathBuf {
-    let dot = home.join(".gitconfig");
-    if !exists(&dot) {
-        let base = xdg_config_home
-            .filter(|p| p.is_absolute())
-            .unwrap_or_else(|| home.join(".config"));
-        let config = base.join("git").join("config");
-        if exists(&config) {
-            return config;
-        }
-    }
-    dot
 }
 
 /// A git config boolean (`git-config` "Values": true / yes / on / 1 and
@@ -1186,12 +1479,6 @@ fn config_bool(value: &str, default: bool) -> bool {
         "false" | "no" | "off" | "0" | "" => false,
         _ => default,
     }
-}
-
-fn dirs_home() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
 }
 
 /// Where a file as of commit `short_sha` is written (flag `811`):
@@ -1239,28 +1526,16 @@ mod tests {
     }
 
     #[test]
-    fn global_config_falls_back_to_the_xdg_file() {
-        let home = Path::new("/home/mona");
-        let only = |file: &'static str| move |p: &Path| p == Path::new(file);
-        let xdg_default = "/home/mona/.config/git/config";
+    fn explore_is_on_the_repository_host() {
         assert_eq!(
-            global_git_config_path(home, None, &only(xdg_default)),
-            Path::new(xdg_default)
+            github_explore_url("https://github.com/octocat/hello").as_deref(),
+            Some("https://github.com/explore")
         );
         assert_eq!(
-            global_git_config_path(home, Some("/xdg".into()), &only("/xdg/git/config")),
-            Path::new("/xdg/git/config")
+            github_explore_url("https://ghe.example.com:8443/org/repo").as_deref(),
+            Some("https://ghe.example.com:8443/explore")
         );
-        // ~/.gitconfig wins, and nothing exists: ~/.gitconfig
-        let both = |p: &Path| p.ends_with(".gitconfig") || p == Path::new(xdg_default);
-        assert_eq!(
-            global_git_config_path(home, None, &both),
-            home.join(".gitconfig")
-        );
-        assert_eq!(
-            global_git_config_path(home, None, &|_| false),
-            home.join(".gitconfig")
-        );
+        assert_eq!(github_explore_url("not a url"), None);
     }
 
     fn gh(parent: bool) -> GitHubRepository {

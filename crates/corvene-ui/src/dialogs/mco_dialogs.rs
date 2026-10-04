@@ -15,7 +15,10 @@
 //! go back to the target commit's message (flag `827`); Open in Merge Tool in
 //! a conflicted file's menu (flag `842`); closing the conflicts step asks
 //! whether to abort the operation or keep it in progress, and a line says it
-//! stays in progress (`877-conflicts-dialog-close-guard`).
+//! stays in progress (`877-conflicts-dialog-close-guard`). "Local changes
+//! would be overwritten" lists the first [`MAX_OVERWRITTEN_LISTED`] files and
+//! how many more there are (GHD lists them all,
+//! `local-changes-overwritten-dialog.tsx`).
 
 use corvene_core::{
     AppState, Dispatcher, ManualConflictResolution, McoStep, MultiCommitOperationKind, RetryAction,
@@ -28,7 +31,8 @@ use gpui_kit::*;
 use crate::branch_list::{group_branches, remote_counterparts};
 use crate::context_menu::{IS_MAC, MenuItem, labels, mac_or};
 use crate::dialog::{
-    DialogButton, DialogFrame, DialogKind, dialog, dialog_framed, dialog_with_kind,
+    DialogButton, DialogFrame, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog,
+    dialog_framed, dialog_with_kind,
 };
 use crate::dialogs::branch_dialogs::{CreateBranchDialog, branch_picker, split_button};
 use crate::icons::{Octicon, octicon};
@@ -36,6 +40,9 @@ use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{button, checkbox, link_button, text_box};
+
+/// How many files the overwritten-files list shows.
+const MAX_OVERWRITTEN_LISTED: usize = 500;
 
 /// `MultiCommitOperation`: renders the dialog for the current step.
 pub struct McoDialog {
@@ -466,24 +473,24 @@ impl McoDialog {
                 format!("{label} will require force push")
             },
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "force-push-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "force-push-begin",
                     label: format!("Begin {label}").into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::begin_after_force_push_warning(repo, !dont_ask, cx)
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -933,15 +940,15 @@ impl McoDialog {
                 format!("Confirm abort {}", kind.label().to_lowercase())
             },
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: true,
+                cancel: GroupButtonSpec {
                     id: "abort-cancel",
                     label: "Cancel".into(),
-                    primary: true,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "abort-ok",
                     label: if IS_MAC {
                         format!("Abort {}", kind.label())
@@ -949,11 +956,11 @@ impl McoDialog {
                         format!("Abort {}", kind.label().to_lowercase())
                     }
                     .into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(move |_, cx| Dispatcher::abort_mco(repo, cx)),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,
@@ -1406,7 +1413,20 @@ impl Render for LocalChangesOverwrittenDialog {
                         .font_family(crate::theme::mono_font())
                         .text_size(FONT_SIZE_SM())
                         .text_color(t.text_secondary)
-                        .children(self.files.iter().map(|f| div().truncate().child(f.clone())))
+                        // the first few hundred: 100,000 rows would stall
+                        // every frame of the dialog
+                        .children(
+                            self.files
+                                .iter()
+                                .take(MAX_OVERWRITTEN_LISTED)
+                                .map(|f| div().truncate().child(f.clone())),
+                        )
+                        .when(self.files.len() > MAX_OVERWRITTEN_LISTED, |d| {
+                            d.child(format!(
+                                "and {} more",
+                                self.files.len() - MAX_OVERWRITTEN_LISTED
+                            ))
+                        })
                         .with_scrollbar(),
                 )
             })
@@ -1558,18 +1578,17 @@ impl Render for SquashCommitMessageDialog {
             "dialog-squash-message",
             title.clone(),
             content,
-            vec![
-                DialogButton {
+            OkCancelButtonGroup {
+                destructive: false,
+                cancel: GroupButtonSpec {
                     id: "squash-cancel",
                     label: "Cancel".into(),
-                    primary: false,
                     disabled: false,
                     on_click: Box::new(close),
                 },
-                DialogButton {
+                ok: GroupButtonSpec {
                     id: "squash-ok",
                     label: title.into(),
-                    primary: true,
                     disabled,
                     on_click: Box::new(move |_, cx| {
                         if disabled {
@@ -1587,7 +1606,8 @@ impl Render for SquashCommitMessageDialog {
                         );
                     }),
                 },
-            ],
+            }
+            .into_buttons(),
             close,
             window,
             cx,

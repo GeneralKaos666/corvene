@@ -411,7 +411,7 @@ mod tests {
         run(&["commit", "-q", "-m", "init"]);
         std::fs::write(path.join("f.txt"), "ONE\ntwo\nTHREE\n").unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let mut status = crate::get_status(git.clone(), path, None).unwrap();
+        let mut status = crate::get_status(git.clone(), path).unwrap();
         let file = &mut status.files[0];
         let diff =
             crate::working_directory_diff(git.clone(), path, file, false, false, false, None)
@@ -430,7 +430,7 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&shown.stdout), "ONE\ntwo\nthree\n");
-        let after = crate::get_status(git, path, None).unwrap();
+        let after = crate::get_status(git, path).unwrap();
         assert_eq!(after.files.len(), 1, "the other change stays unstaged");
     }
 
@@ -466,7 +466,7 @@ mod tests {
         )
         .unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let mut status = crate::get_status(git.clone(), path, None).unwrap();
+        let mut status = crate::get_status(git.clone(), path).unwrap();
         assert_eq!(status.files.len(), 1);
         let file = &mut status.files[0];
         assert_eq!(file.status.kind, FileStatusKind::Renamed);
@@ -509,7 +509,7 @@ mod tests {
             String::from_utf8_lossy(&show("HEAD:new.txt").stdout),
             body.replace("a\n", "A\n")
         );
-        let after = crate::get_status(git, path, None).unwrap();
+        let after = crate::get_status(git, path).unwrap();
         assert_eq!(after.files.len(), 1, "the other change stays unstaged");
     }
 }

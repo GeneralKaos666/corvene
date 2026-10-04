@@ -455,7 +455,7 @@ impl MenuInputs {
         let conflicts_dialog_open = state
             .flags
             .bool(crate::flags::ids::CONFLICTS_DIALOG_KEEPS_OPEN_ITEMS)
-            && match &state.popup {
+            && match state.popup() {
                 Some(crate::state::Popup::MultiCommitOperation { repo, .. }) => state
                     .repo_states
                     .get(repo)
@@ -464,7 +464,7 @@ impl MenuInputs {
                 _ => false,
             };
         Self {
-            popup_open: state.popup.is_some(),
+            popup_open: state.popups.is_a_popup_open(),
             conflicts_dialog_open,
             // `AppState` has no hidden-window state (⌘W hides the window in
             // the UI layer only): treat the window as open.
@@ -502,7 +502,7 @@ fn repository_facts(
         push_pull_fetch_in_progress: repo_state.is_some_and(|r| r.push_pull_in_progress),
         has_remote: info.is_some_and(|i| corvene_git::find_default_remote(&i.remotes).is_some()),
         conflict_state: repo_state.and_then(|r| r.conflict_state.as_ref()),
-        working_directory: repo_state.and_then(|r| r.status.as_ref()),
+        working_directory: repo_state.and_then(|r| r.status.as_deref()),
     })
 }
 
@@ -1142,6 +1142,7 @@ mod tests {
         let tip = valid("feature", None);
         let conflict = ConflictState {
             kind: ConflictKind::Rebase {
+                current_tip: "c".into(),
                 target_branch: "feature".into(),
                 base_branch_tip: "a".into(),
                 original_branch_tip: "b".into(),
