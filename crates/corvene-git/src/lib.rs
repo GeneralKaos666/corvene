@@ -37,6 +37,7 @@ pub mod repo;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;
 pub mod ssh;
+pub mod stash_ops;
 pub mod status;
 mod status_gix;
 pub mod submodule;
@@ -155,6 +156,10 @@ pub use repo::{
     top_level_working_directory,
 };
 pub use ssh::{AddSshHostInfo, parse_add_ssh_host_prompt};
+pub use stash_ops::{
+    StashPop, StashPopOptions, mark_conflicts_resolved, pop_stash_entry_with, stash_entry,
+    unmerged_paths,
+};
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,
     map_status, parse_porcelain_v2, refresh_stale_index, working_directory_line_stats,

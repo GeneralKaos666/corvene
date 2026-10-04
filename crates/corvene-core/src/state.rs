@@ -458,6 +458,12 @@ pub enum Popup {
     ConfirmDiscardStash {
         repo: u64,
     },
+    /// Corvene (`774-stash-conflict-flow`): every conflict a restore left is
+    /// resolved; drop the entry git kept?
+    DropKeptStash {
+        repo: u64,
+        stash: corvene_models::StashEntry,
+    },
     /// `MultiCommitOperation`: the dialog for the current `RepositoryState::mco` step.
     /// `flow` changes per operation so the dialog view is rebuilt (no stale
     /// branch selection from an earlier flow).
@@ -615,6 +621,7 @@ impl Popup {
             | Self::ConfirmOverwriteStash { repo, .. }
             | Self::MergeBranch { repo, .. }
             | Self::ConfirmDiscardStash { repo, .. }
+            | Self::DropKeptStash { repo, .. }
             | Self::MultiCommitOperation { repo, .. }
             | Self::LocalChangesOverwritten { repo, .. }
             | Self::PushBranchCommits { repo, .. }
@@ -1096,6 +1103,9 @@ pub struct RepositoryState {
     pub branch_tracking: Arc<std::collections::HashMap<String, corvene_git::BranchTracking>>,
     /// Total stash entries (`stashEntryCount`).
     pub stash_count: usize,
+    /// `774-stash-conflict-flow`: the entry git kept after a restore that
+    /// conflicted (this session).
+    pub kept_stash: Option<crate::stash_flows::KeptStash>,
     /// Branches with a GitHub Desktop / Corvene stash (the branch list's
     /// stash icon, `854-branch-list-stash-icon`).
     pub stashed_branches: Vec<String>,

@@ -3539,8 +3539,12 @@ impl Dispatcher {
                 || (strategy == UncommittedChangesStrategy::StashOnCurrentBranch
                     && current.is_some())))
         .then(|| (git.clone(), branch.name_without_remote().to_string()));
+        // `774-stash-conflict-flow`: a conflicted pop keeps the entry
+        let pop_options = Self::stash_pop_options(cx);
+        let kept_workdir = workdir.clone();
         let task = cx.background_executor().spawn(async move {
-            let result = (move || match strategy {
+            let mut kept: Option<(corvene_models::StashEntry, Vec<String>)> = None;
+            let result = (|| match strategy {
                 UncommittedChangesStrategy::StashOnCurrentBranch => {
                     if let Some(current) = current.as_deref()
                         && has_changes
@@ -3592,7 +3596,13 @@ impl Dispatcher {
                                     &target,
                                 )?
                             {
-                                corvene_git::pop_stash_entry(git, &workdir, &entry.sha)?;
+                                let pop = corvene_git::pop_stash_entry_with(
+                                    git.clone(),
+                                    &workdir,
+                                    &entry.sha,
+                                    pop_options,
+                                )?;
+                                kept = Self::kept_after_pop(git.clone(), &workdir, &entry, pop);
                             }
                             Ok(())
                         }
@@ -3616,16 +3626,22 @@ impl Dispatcher {
                         &target,
                     )
                     .and_then(|entry| match entry {
-                        Some(entry) => {
-                            corvene_git::pop_stash_entry(git, &workdir_for_submodules, &entry.sha)
-                        }
+                        Some(entry) => corvene_git::pop_stash_entry_with(
+                            git.clone(),
+                            &workdir_for_submodules,
+                            &entry.sha,
+                            pop_options,
+                        )
+                        .map(|pop| {
+                            kept = Self::kept_after_pop(git, &workdir_for_submodules, &entry, pop);
+                        }),
                         None => Ok(()),
                     })
                     .err()
                 }
                 _ => None,
             };
-            (result, submodule_error, pop_error)
+            (result, submodule_error, pop_error, kept)
         });
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).checkout_target = Some(target);
@@ -3633,7 +3649,7 @@ impl Dispatcher {
             cx.notify();
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let (result, submodule_error, pop_error) = task.await;
+            let (result, submodule_error, pop_error, kept) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
                 if let Err(err) = result {
@@ -3645,6 +3661,7 @@ impl Dispatcher {
                 if let Some(err) = pop_error {
                     Self::show_error("Could not restore stash", &err, cx);
                 }
+                Self::note_stash_pop(id, kept_workdir, kept, cx);
                 Self::show_section(id, Section::Changes, cx);
                 Self::refresh_repository(id, cx);
             });
@@ -4350,13 +4367,23 @@ impl Dispatcher {
         // its commit and only while its branch is still checked out (GHD pops
         // `stash@{n}` from the last refresh, which may be another branch's)
         let check_branch = s.flags.bool(crate::flags::ids::STASH_RESTORE_CHECKS_BRANCH);
+        // `774-stash-conflict-flow`: a conflicted restore keeps the entry
+        if s.flags.bool(crate::flags::ids::STASH_CONFLICT_FLOW) {
+            Self::pop_stash_keeping_conflicts(id, stash, check_branch, cx);
+            return;
+        }
         Self::run_history_op(
             id,
             "Could not restore stash",
             move |git, workdir| match (check_branch, stash.branch.as_deref()) {
-                (true, Some(branch)) => {
-                    corvene_git::pop_stash_on_branch(git, &workdir, &stash.sha, branch)
-                }
+                (true, Some(branch)) => corvene_git::pop_stash_on_branch(
+                    git,
+                    &workdir,
+                    &stash.sha,
+                    branch,
+                    Default::default(),
+                )
+                .map(|_| ()),
                 _ => corvene_git::pop_stash_entry(git, &workdir, &stash.sha),
             },
             cx,

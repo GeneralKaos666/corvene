@@ -59,7 +59,7 @@ pub use app_dialogs::{AboutDialog, ConfirmRemoveRepositoryDialog, IntegrationErr
 pub use branch_dialogs::sanitize_ref_name;
 pub use branch_dialogs::{
     ConfirmOverwriteStashDialog, ConfirmSwitchBranchDialog, CreateBranchDialog, DeleteBranchDialog,
-    MergeBranchDialog, RenameBranchDialog, StashAndSwitchBranchDialog,
+    DropKeptStashDialog, MergeBranchDialog, RenameBranchDialog, StashAndSwitchBranchDialog,
 };
 pub use branch_dialogs::{
     StartPoint, get_start_point, render_branch_has_remote_warning,
@@ -464,6 +464,9 @@ impl DialogHost {
             Popup::ConfirmDiscardStash { repo } => {
                 cx.new(|_| ConfirmDiscardStashDialog::new(*repo)).into()
             }
+            Popup::DropKeptStash { repo, stash } => cx
+                .new(|_| DropKeptStashDialog::new(*repo, stash.clone()))
+                .into(),
             Popup::PublishRepository { repo } => cx
                 .new(|cx| PublishRepositoryDialog::new(state, *repo, window, cx))
                 .into(),

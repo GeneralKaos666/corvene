@@ -55,6 +55,9 @@
 //!   (`616-accept-summary-placeholder`).
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
 //!   pattern before it is added to `.gitignore` (`768-ignore-custom-pattern`).
+//! - conflicts left by restoring a stash replace the commit form with a list
+//!   of the files to resolve (`774-stash-conflict-flow`,
+//!   `crate::stash_conflicts`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -4686,10 +4689,15 @@ impl Render for ChangesSidebar {
                     .children(self.stash_button(cx)),
             )
             .children(self.hidden_changes_warning(cx))
-            .child(match self.continue_rebase(cx) {
-                Some(block) => block,
-                None => self.commit_form(window, cx).into_any_element(),
-            })
+            .child(
+                match self
+                    .continue_rebase(cx)
+                    .or_else(|| crate::stash_conflicts::stash_conflicts_block(&self.state, cx))
+                {
+                    Some(block) => block,
+                    None => self.commit_form(window, cx).into_any_element(),
+                },
+            )
             .children(self.context_menu.clone())
             .children(self.filter_popover(cx))
     }

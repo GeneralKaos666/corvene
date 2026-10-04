@@ -22,6 +22,7 @@
 //! Branch names can have more characters replaced with `-`
 //! (`873-branch-name-forbidden-chars`).
 //! `ConfirmSwitchBranchDialog` is a Corvene addition (`864-confirm-branch-switch`).
+//! `DropKeptStashDialog` is a Corvene addition (`774-stash-conflict-flow`).
 //! Switch Branch can discard the changes instead (`865-switch-branch-discard`).
 //! Squash and merge has commit message fields (flag `837`).
 
@@ -1388,6 +1389,63 @@ impl Render for ConfirmOverwriteStashDialog {
                             Some(UncommittedChangesStrategy::StashOnCurrentBranch),
                             cx,
                         );
+                    }),
+                },
+            ],
+            close,
+            window,
+            cx,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Corvene addition (`774-stash-conflict-flow`): every conflict a stash
+/// restore left is resolved; drop the entry git kept, or keep it.
+pub struct DropKeptStashDialog {
+    repo: u64,
+    stash: corvene_core::StashEntry,
+}
+
+impl DropKeptStashDialog {
+    pub fn new(repo: u64, stash: corvene_core::StashEntry) -> Self {
+        Self { repo, stash }
+    }
+}
+
+impl Render for DropKeptStashDialog {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
+        let (repo, sha) = (self.repo, self.stash.sha.clone());
+        let which = match &self.stash.branch {
+            Some(branch) => format!("the stash of {branch}"),
+            None => format!("the stash \"{}\"", self.stash.message),
+        };
+        dialog_with_kind(
+            "dialog-drop-kept-stash",
+            DialogKind::Warning,
+            mac_or("Drop the Stash?", "Drop the stash?"),
+            div().w(crate::theme::fit_width(408.)).child(format!(
+                "Every conflict from restoring {which} is resolved. Git kept the stash in case \
+                 the restore went wrong; drop it now, or keep it to restore again later."
+            )),
+            vec![
+                DialogButton {
+                    id: "drop-kept-stash-keep",
+                    label: mac_or("Keep Stash", "Keep stash").into(),
+                    primary: false,
+                    disabled: false,
+                    on_click: Box::new(close),
+                },
+                DialogButton {
+                    id: "drop-kept-stash-drop",
+                    label: mac_or("Drop Stash", "Drop stash").into(),
+                    primary: true,
+                    disabled: false,
+                    on_click: Box::new(move |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::drop_stash_entry(repo, sha.clone(), cx);
                     }),
                 },
             ],

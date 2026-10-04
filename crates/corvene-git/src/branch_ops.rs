@@ -14,7 +14,7 @@ use corvene_models::{Branch, BranchKind, StashEntry};
 
 use crate::detect::GitBinary;
 use crate::error::{GitError, Result};
-use crate::git_errors::{KnownGitError, known_git_error};
+use crate::git_errors::KnownGitError;
 use crate::process::GitCommand;
 use crate::remote_ops::AskpassEnv;
 
@@ -818,7 +818,8 @@ pub fn pop_stash_on_branch(
     workdir: &Path,
     sha: &str,
     branch: &str,
-) -> Result<()> {
+    options: crate::stash_ops::StashPopOptions,
+) -> Result<crate::stash_ops::StashPop> {
     let head = GitCommand::new(git.clone())
         .args(["symbolic-ref", "--short", "-q", "HEAD"])
         .current_dir(workdir)
@@ -841,7 +842,7 @@ pub fn pop_stash_on_branch(
             "The stash is no longer there; it may have been restored or discarded already.".into(),
         ));
     }
-    pop_stash_entry(git, workdir, sha)
+    crate::stash_ops::pop_stash_entry_with(git, workdir, sha, options)
 }
 
 /// `getLastDesktopStashEntryForBranch`: the newest Desktop stash entry made
@@ -858,7 +859,7 @@ pub fn get_last_desktop_stash_entry_for_branch(
 /// `getStashEntryMatchingSha`: the entry whose commit is `sha`. GHD looks
 /// among the Desktop entries only; Corvene takes any, since the branch can
 /// show a stash Desktop did not make (`728-show-latest-other-stash`).
-fn stash_entry_matching_sha(
+pub(crate) fn stash_entry_matching_sha(
     git: Arc<GitBinary>,
     workdir: &Path,
     sha: &str,
@@ -876,30 +877,13 @@ fn stash_entry_matching_sha(
 /// applied, so the entry is dropped as GHD does. Merge conflicts git names
 /// (`MergeConflicts`) are expected and keep the entry.
 pub fn pop_stash_entry(git: Arc<GitBinary>, workdir: &Path, stash_sha: &str) -> Result<()> {
-    let Some(entry) = stash_entry_matching_sha(git.clone(), workdir, stash_sha)? else {
-        return Ok(());
-    };
-    let out = GitCommand::new(git.clone())
-        .args(["stash", "pop", "--quiet", &entry.name])
-        .current_dir(workdir)
-        .allow_any_exit_code()
-        .run()?;
-    if out.status.success() {
-        return Ok(());
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let known = known_git_error(&out.stderr).or_else(|| known_git_error(&stdout));
-    if known == Some(KnownGitError::MergeConflicts) {
-        return Ok(());
-    }
-    if out.status.code() == Some(1) && out.stderr.is_empty() {
-        return drop_desktop_stash_entry(git, workdir, stash_sha);
-    }
-    Err(GitError::Failed {
-        args: format!("stash pop --quiet {}", entry.name),
-        code: out.status.code(),
-        stderr: out.stderr.trim().to_string(),
-    })
+    crate::stash_ops::pop_stash_entry_with(
+        git,
+        workdir,
+        stash_sha,
+        crate::stash_ops::StashPopOptions::default(),
+    )
+    .map(|_| ())
 }
 
 /// `dropDesktopStashEntry`: `git stash drop <name>` of the entry whose
@@ -1188,7 +1172,8 @@ eeee commit: something\n";
         let (stashes, _) = get_stashes(git.clone(), path).unwrap();
         let sha = stashes[0].sha.clone();
         checkout_new_branch(git.clone(), path, "other").unwrap();
-        let err = pop_stash_on_branch(git.clone(), path, &sha, "main").unwrap_err();
+        let err =
+            pop_stash_on_branch(git.clone(), path, &sha, "main", Default::default()).unwrap_err();
         assert!(
             err.to_string().contains("\"other\" is checked out"),
             "{err}"
@@ -1199,9 +1184,9 @@ eeee commit: something\n";
             .current_dir(path)
             .run()
             .unwrap();
-        pop_stash_on_branch(git.clone(), path, &sha, "main").unwrap();
+        pop_stash_on_branch(git.clone(), path, &sha, "main", Default::default()).unwrap();
         assert_eq!(get_stashes(git.clone(), path).unwrap().1, 0);
-        assert!(pop_stash_on_branch(git, path, &sha, "main").is_err());
+        assert!(pop_stash_on_branch(git, path, &sha, "main", Default::default()).is_err());
     }
 
     #[test]

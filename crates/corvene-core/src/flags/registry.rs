@@ -4410,6 +4410,26 @@ registry! {
         code: &["crates/corvene-git/src/log.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// Conflicts left by restoring a stash can be resolved, and the stash is kept.
+    STASH_CONFLICT_FLOW = 774 "stash-conflict-flow" {
+        title: "Resolve conflicts from restoring a stash",
+        summary: "When restoring a stash (Restore, bringing changes to another branch, or the \
+                  restore on returning to a branch) conflicts with the files, git's kept copy of \
+                  the stash stays and the commit form gives way to a list of the conflicted \
+                  files: Open in your editor or merge tool, then Mark as Resolved (git reset on \
+                  that file: the index only). Once every file is resolved Corvene asks whether \
+                  to drop the stash or keep it.",
+        ghd_behaviour: "The stash is dropped as if it had applied cleanly; the files stay \
+                        conflicted in git's index with no way to mark them resolved, so a later \
+                        pull fails even after the markers are gone.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13542), Upstream::issue(11959)],
+        code: &["crates/corvene-git/src/stash_ops.rs", "crates/corvene-core/src/stash_flows.rs", "crates/corvene-ui/src/stash_conflicts.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

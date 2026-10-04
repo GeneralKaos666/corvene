@@ -56,6 +56,7 @@ pub mod round;
 pub mod samples;
 pub mod shared_storage;
 pub mod sign_in;
+pub mod stash_flows;
 pub mod state;
 pub mod templates;
 pub mod text_tokens;
