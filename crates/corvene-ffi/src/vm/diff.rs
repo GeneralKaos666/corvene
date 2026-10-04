@@ -182,7 +182,7 @@ pub fn diff_rows(
     if rs.diff_generation != generation {
         return Vec::new();
     }
-    let Some(hunks) = rs.diff.as_ref().and_then(|d| d.hunks()) else {
+    let Some(diff) = rs.diff.as_ref() else {
         return Vec::new();
     };
     let selection = rs
@@ -196,7 +196,52 @@ pub fn diff_rows(
         })
         .map(|f| f.selection.clone())
         .unwrap_or_else(DiffSelection::all);
-    let path = rs.selected_file.clone().unwrap_or_default();
+    rows_of(
+        diff,
+        Some(&selection),
+        rs.selected_file.as_deref().unwrap_or(""),
+        start,
+        count,
+    )
+}
+
+/// Rows of the selected commit's selected file (History tab); nothing is
+/// selectable there.
+pub fn commit_diff_rows(
+    s: &AppState,
+    repo: u64,
+    generation: u64,
+    start: u32,
+    count: u32,
+) -> Vec<DiffRowVm> {
+    let Some(rs) = s.repo_states.get(&repo) else {
+        return Vec::new();
+    };
+    if rs.commit_diff_generation != generation {
+        return Vec::new();
+    }
+    let Some(diff) = rs.commit_diff.as_ref() else {
+        return Vec::new();
+    };
+    rows_of(
+        diff,
+        None,
+        rs.commit_selected_file.as_deref().unwrap_or(""),
+        start,
+        count,
+    )
+}
+
+fn rows_of(
+    diff: &Diff,
+    selection: Option<&DiffSelection>,
+    path: &str,
+    start: u32,
+    count: u32,
+) -> Vec<DiffRowVm> {
+    let Some(hunks) = diff.hunks() else {
+        return Vec::new();
+    };
     let start = start as usize;
     let end = start.saturating_add(count as usize);
 
@@ -230,13 +275,13 @@ pub fn diff_rows(
                 old_line: line.old_line,
                 new_line: line.new_line,
                 selected: matches!(kind, DiffRowKindVm::Add | DiffRowKindVm::Delete)
-                    && selection.is_selected(line_index),
+                    && selection.is_some_and(|sel| sel.is_selected(line_index)),
                 no_trailing_newline: line.no_trailing_newline,
                 spans: Vec::new(),
             });
         }
     }
-    highlight(&path, &mut rows);
+    highlight(path, &mut rows);
     rows
 }
 

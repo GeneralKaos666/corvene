@@ -12,8 +12,8 @@ use crate::runtime::Services;
 use crate::vm::{
     BannerVm, BranchesVm, ChangesVm, CommitDetailVm, ConflictsVm, DesignStyleVm, DiffHeaderVm,
     DiffRowVm, HistoryVm, McoVm, PopupVm, PullRequestsVm, RepoListVm, ResolutionVm, SessionVm,
-    SettingsVm, ThemeVm, banner, branches, changes, commit_detail, conflicts, diff_header,
-    diff_rows, history, mco, popup, pull_requests, repo_list, session, settings,
+    SettingsVm, ThemeVm, banner, branches, changes, commit_detail, commit_diff_rows, conflicts,
+    diff_header, diff_rows, history, mco, popup, pull_requests, repo_list, session, settings,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -727,5 +727,81 @@ impl Corvene {
     pub fn set_global_identity(&self, name: String, email: String) {
         self.loop_
             .post(move |host| Dispatcher::set_global_identity(name, email, host));
+    }
+
+    // ---- more of the diff, dialogs that answer with data, publishing ----
+
+    /// Rows of the selected commit's selected file (`CommitDetailVm.diff_generation`).
+    pub async fn commit_diff_rows(
+        &self,
+        repo: u64,
+        generation: u64,
+        start: u32,
+        count: u32,
+    ) -> Vec<DiffRowVm> {
+        self.loop_
+            .query(move |host| commit_diff_rows(host.state_ref(), repo, generation, start, count))
+            .await
+    }
+
+    /// Includes or excludes `len` lines of `path` from `from` (drag selection).
+    pub fn set_diff_lines(&self, repo: u64, path: String, from: u32, len: u32, selected: bool) {
+        self.loop_
+            .post(move |host| Dispatcher::set_diff_lines(repo, path, from, len, selected, host));
+    }
+
+    /// `GenericGitAuthentication` › Save: stores the credentials and retries
+    /// the operation the open dialog came from.
+    pub fn submit_generic_auth(&self, username: String, password: String) {
+        self.loop_.post(move |host| {
+            let Some(corvene_core::state::Popup::GenericGitAuthentication {
+                repo,
+                host: git_host,
+                retry,
+                ..
+            }) = host.state_ref().popup.clone()
+            else {
+                return;
+            };
+            Dispatcher::close_popup(host);
+            Dispatcher::save_generic_credentials(git_host, username, password, repo, retry, host);
+        });
+    }
+
+    /// `LocalChangesOverwritten` › the retry button of the open dialog.
+    pub fn retry_popup_action(&self) {
+        self.loop_.post(move |host| {
+            let Some(corvene_core::state::Popup::LocalChangesOverwritten { repo, retry, .. }) =
+                host.state_ref().popup.clone()
+            else {
+                return;
+            };
+            Dispatcher::close_popup(host);
+            Dispatcher::perform_retry(repo, retry, host);
+        });
+    }
+
+    /// Publishes the repository to GitHub under the account of `endpoint`.
+    pub fn publish_repository(
+        &self,
+        repo: u64,
+        name: String,
+        description: String,
+        private: bool,
+        endpoint: String,
+        org: Option<String>,
+    ) {
+        self.loop_.post(move |host| {
+            let Some(account) = host
+                .state_ref()
+                .accounts
+                .iter()
+                .find(|a| a.endpoint == endpoint)
+                .cloned()
+            else {
+                return;
+            };
+            Dispatcher::publish_repository(repo, name, description, private, account, org, host);
+        });
     }
 }
