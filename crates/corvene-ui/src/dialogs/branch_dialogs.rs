@@ -25,7 +25,9 @@
 //! `DropKeptStashDialog` is a Corvene addition (`774-stash-conflict-flow`).
 //! Overwrite Stash can add the changes to the stash instead
 //! (`776-stash-add-to-existing`).
-//! Switch Branch can discard the changes instead (`865-switch-branch-discard`).
+//! Switch Branch can discard the changes instead (`865-switch-branch-discard`)
+//! and warns when the branch the changes go to is behind its upstream
+//! (`1207-switch-warns-target-behind`).
 //! Squash and merge has commit message fields (flag `837`).
 
 use corvene_core::{
@@ -1197,7 +1199,7 @@ impl Render for StashAndSwitchBranchDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let t = cx.ghd();
-        let (current, has_stash) = {
+        let (current, has_stash, behind) = {
             let s = self.state.read(cx);
             let rs = s.repo_states.get(&self.repo);
             (
@@ -1206,6 +1208,13 @@ impl Render for StashAndSwitchBranchDialog {
                     .map(|b| b.name.clone())
                     .unwrap_or_default(),
                 rs.is_some_and(|r| r.desktop_stash().is_some()),
+                // `1207-switch-warns-target-behind`
+                rs.and_then(|r| r.switch_target_behind.clone())
+                    .filter(|(branch, _, _)| *branch == self.branch)
+                    .filter(|_| {
+                        s.flags
+                            .bool(corvene_core::flags::ids::SWITCH_WARNS_TARGET_BEHIND)
+                    }),
             )
         };
         let (repo, branch, action) = (self.repo, self.branch.clone(), self.action);
@@ -1243,6 +1252,24 @@ impl Render for StashAndSwitchBranchDialog {
                         .child("Changes to tracked files can't be recovered once discarded"),
                 )
             })
+            .when_some(
+                behind.filter(|_| !discard && action == UncommittedChangesStrategy::MoveToNewBranch),
+                |d, (branch, upstream, count)| {
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_start()
+                            .gap(SPACING_HALF())
+                            .child(octicon(Octicon::Alert, t.dialog_warning))
+                            .child(div().flex_1().min_w_0().child(format!(
+                                "{branch} is {count} {} behind {upstream}. Pull it before \
+                                 bringing your changes to avoid conflicts.",
+                                if count == 1 { "commit" } else { "commits" }
+                            ))),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex()

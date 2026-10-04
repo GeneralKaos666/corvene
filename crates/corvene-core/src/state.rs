@@ -1110,6 +1110,10 @@ pub struct RepositoryState {
     pub branch_tracking: Arc<std::collections::HashMap<String, corvene_git::BranchTracking>>,
     /// Total stash entries (`stashEntryCount`).
     pub stash_count: usize,
+    /// `1207-switch-warns-target-behind`: (branch, its upstream, how many
+    /// of the upstream's commits the branch lacks) for the Switch Branch
+    /// dialog, read when it opens.
+    pub switch_target_behind: Option<(String, String, u32)>,
     /// `774-stash-conflict-flow`: the entry git kept after a restore that
     /// conflicted (this session).
     pub kept_stash: Option<crate::stash_flows::KeptStash>,

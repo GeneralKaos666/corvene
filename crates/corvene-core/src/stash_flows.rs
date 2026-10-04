@@ -36,6 +36,10 @@
 //! another worktree of the repository
 //! ([`Dispatcher::move_changes_to_worktree`]); GHD 3.6's worktree switch
 //! leaves them where they are.
+//!
+//! Deviation (`1207-switch-warns-target-behind`): the Switch Branch dialog
+//! warns when the branch is behind its upstream (read by
+//! [`Dispatcher::load_switch_target_behind`]); GHD does not look.
 
 use std::path::PathBuf;
 
@@ -621,6 +625,47 @@ impl Dispatcher {
                     Err(err) => Self::show_error("Could not move the changes", &err, cx),
                 }
                 Self::refresh_repository(id, cx);
+            },
+        );
+    }
+
+    /// `1207-switch-warns-target-behind`: count the commits of `branch`'s
+    /// upstream (as of the last fetch) that `branch` lacks, for the Switch
+    /// Branch dialog's warning.
+    pub(crate) fn load_switch_target_behind(
+        id: u64,
+        branch: &corvene_models::Branch,
+        cx: &mut App,
+    ) {
+        Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).switch_target_behind = None);
+        if branch.kind != corvene_models::BranchKind::Local
+            || !Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::SWITCH_WARNS_TARGET_BEHIND)
+        {
+            return;
+        }
+        let Some(upstream) = branch.upstream_short().map(str::to_string) else {
+            return;
+        };
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let name = branch.name.clone();
+        spawn_bg(
+            cx,
+            {
+                let (name, upstream) = (name.clone(), upstream.clone());
+                move || corvene_git::commits_ahead(git, &workdir, &name, &upstream).ok()
+            },
+            move |behind, cx| {
+                if let Some(behind) = behind.filter(|n| *n > 0) {
+                    Self::state(cx).update(cx, |s, cx| {
+                        s.repo_state_mut(id).switch_target_behind = Some((name, upstream, behind));
+                        cx.notify();
+                    });
+                }
             },
         );
     }

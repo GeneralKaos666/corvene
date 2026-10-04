@@ -6304,6 +6304,23 @@ registry! {
         code: &["crates/corvene-core/src/mco.rs", "crates/corvene-git/src/git_errors.rs"],
     },
 
+    /// Switch Branch warns that the branch the changes go to is behind.
+    SWITCH_WARNS_TARGET_BEHIND = 1207 "switch-warns-target-behind" {
+        title: "Warn before bringing changes to a branch that is behind",
+        summary: "In the Switch Branch dialog, with \"Bring my changes\" chosen, a warning says \
+                  when the branch is behind its upstream (as of the last fetch): \"<branch> is \
+                  N commits behind <upstream>. Pull it before bringing your changes to avoid \
+                  conflicts.\"",
+        ghd_behaviour: "The changes are brought over without a word; pulling afterwards may \
+                        conflict with them.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18090)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-core/src/stash_flows.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

@@ -3496,6 +3496,8 @@ impl Dispatcher {
             strategy = UncommittedChangesStrategy::MoveToNewBranch;
         }
         if strategy == UncommittedChangesStrategy::AskForConfirmation && has_changes {
+            // `1207-switch-warns-target-behind`
+            Self::load_switch_target_behind(id, &branch, cx);
             Self::show_popup(
                 Popup::StashAndSwitchBranch {
                     repo: id,
