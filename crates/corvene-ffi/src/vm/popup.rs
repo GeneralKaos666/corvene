@@ -90,11 +90,26 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             message,
             git,
         } => {
-            f.put("title", title).put("message", message);
+            // `text`: what the dialog body says, as the desktop derives it
+            // (the message, else the git failure's explanation, else its
+            // first line); `details`: the full failure behind "Show details"
+            let text = if !message.is_empty() {
+                message.clone()
+            } else if let Some(git) = git {
+                git.lead("Settings")
+                    .or_else(|| git.description("Settings"))
+                    .unwrap_or_else(|| git.output.lines().next().unwrap_or("").to_string())
+            } else {
+                String::new()
+            };
+            f.put("title", title)
+                .put("message", message)
+                .put("text", text);
             if let Some(git) = git {
                 f.put("command", &git.command)
                     .opt("exit_code", git.exit_code)
-                    .put("output", &git.output);
+                    .put("output", &git.output)
+                    .put("details", git.summary());
             }
         }
         Popup::IndexLockExists {
