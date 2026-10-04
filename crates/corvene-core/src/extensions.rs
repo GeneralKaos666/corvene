@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 
 use std::sync::Arc;
 
+use crate::host::{AsyncCtx, Host};
 use corvene_extensions::github::RepoRef;
 use corvene_extensions::importer::ImportCandidate;
 use corvene_extensions::index::Index;
@@ -26,7 +27,6 @@ use corvene_extensions::registry::{self, Candidate, Registry};
 use corvene_extensions::tsbuild::{self, BuildPlan, Stage, compiler::Compiler};
 use corvene_highlight::treesitter::{self, UserGrammar, UserLanguage};
 use corvene_highlight::user;
-use gpui_kit::{App, AsyncApp};
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -311,14 +311,14 @@ struct Rebuilt {
 }
 
 impl Dispatcher {
-    fn extensions_enabled(cx: &App) -> bool {
+    fn extensions_enabled(cx: &dyn Host) -> bool {
         Self::state(cx)
             .read(cx)
             .flags
             .bool(ids::LANGUAGE_EXTENSIONS)
     }
 
-    fn save_extension_prefs(cx: &mut App) {
+    fn save_extension_prefs(cx: &mut dyn Host) {
         let (store, prefs) = {
             let s = Self::state(cx).read(cx);
             (s.store.clone(), s.extensions.prefs.clone())
@@ -331,7 +331,7 @@ impl Dispatcher {
     /// At launch (and when `111-language-extensions` turns on): read the
     /// installed extensions and load their grammars. Honours
     /// `CORVENE_INSTALL_EXTENSION` afterwards.
-    pub fn load_language_extensions(cx: &mut App) {
+    pub fn load_language_extensions(cx: &mut dyn Host) {
         if !Self::extensions_enabled(cx) {
             return;
         }
@@ -375,7 +375,7 @@ impl Dispatcher {
 
     /// `111-language-extensions` turned off: drop the user grammars from
     /// the highlighter (the folders stay).
-    pub(crate) fn unload_language_extensions(cx: &mut App) {
+    pub(crate) fn unload_language_extensions(cx: &mut dyn Host) {
         let registered = Self::state(cx).update(cx, |s, cx| {
             s.extensions.loaded = false;
             cx.notify();
@@ -389,7 +389,7 @@ impl Dispatcher {
 
     /// Rebuild the user grammar set from the enabled extensions and hand it
     /// to the highlighter; register their tree-sitter grammars.
-    pub fn rebuild_user_syntaxes(cx: &mut App) {
+    pub fn rebuild_user_syntaxes(cx: &mut dyn Host) {
         let state = Self::state(cx);
         let enabled: Vec<Installed> = state.read(cx).extensions.enabled().cloned().collect();
         let switches = state.read(cx).extensions.prefs.switches.clone();
@@ -431,7 +431,7 @@ impl Dispatcher {
 
     /// Install an extension from `source`: download or copy, unpack, read,
     /// convert, then rebuild the user grammars.
-    pub fn install_extension(source: InstallSource, cx: &mut App) {
+    pub fn install_extension(source: InstallSource, cx: &mut dyn Host) {
         let key = source.key();
         let state = Self::state(cx);
         if state.read(cx).extensions.progress.contains_key(&key) {
@@ -452,9 +452,8 @@ impl Dispatcher {
         });
         let (tx, rx) = async_channel::unbounded::<ExtensionProgress>();
         cx.spawn({
-            let state = state.clone();
             let key = key.clone();
-            async move |cx: &mut AsyncApp| {
+            async move |cx: &mut AsyncCtx| {
                 while let Ok(progress) = rx.recv().await {
                     state.update(cx, |s, cx| {
                         if let Some(slot) = s.extensions.progress.get_mut(&key) {
@@ -510,7 +509,7 @@ impl Dispatcher {
 
     /// Search the registries (the Find tab). Each registry answers on its
     /// own; a later search drops the earlier one's late answers.
-    pub fn search_extensions(query: String, cx: &mut App) {
+    pub fn search_extensions(query: String, cx: &mut dyn Host) {
         let query = query.trim().to_string();
         let suffix = query
             .strip_prefix('.')
@@ -600,7 +599,7 @@ impl Dispatcher {
 
     /// Read the offline index from disk (in the background) and fetch a
     /// fresh one when it is missing or older than a week.
-    pub fn load_extension_index(cx: &mut App) {
+    pub fn load_extension_index(cx: &mut dyn Host) {
         let path = Self::index_path();
         let refreshed_at = Self::state(cx).read(cx).extensions.prefs.index_refreshed_at;
         spawn_bg(
@@ -633,7 +632,7 @@ impl Dispatcher {
     }
 
     /// Fetch the index the packs manifest lists (sha256-checked) and use it.
-    pub fn refresh_extension_index(cx: &mut App) {
+    pub fn refresh_extension_index(cx: &mut dyn Host) {
         let state = Self::state(cx);
         if state.read(cx).extensions.index.refreshing {
             return;
@@ -692,7 +691,7 @@ impl Dispatcher {
     /// The registries' extensions for files with `suffix` (the diff hint):
     /// the offline index answers at once when it knows the suffix, else the
     /// registries are asked.
-    pub fn lookup_extensions_for_suffix(suffix: &str, cx: &mut App) {
+    pub fn lookup_extensions_for_suffix(suffix: &str, cx: &mut dyn Host) {
         let suffix = suffix.trim_start_matches('.').to_ascii_lowercase();
         let state = Self::state(cx);
         if state
@@ -771,7 +770,7 @@ impl Dispatcher {
 
     /// Scan the editors installed on this machine for grammar extensions
     /// (the Import tab).
-    pub fn scan_installed_editors(cx: &mut App) {
+    pub fn scan_installed_editors(cx: &mut dyn Host) {
         let state = Self::state(cx);
         if state.read(cx).extensions.import_scanning {
             return;
@@ -797,7 +796,7 @@ impl Dispatcher {
     }
 
     /// Ask each registry-installed extension's registry for a newer version.
-    pub fn check_extension_updates(cx: &mut App) {
+    pub fn check_extension_updates(cx: &mut dyn Host) {
         let state = Self::state(cx);
         if state.read(cx).extensions.checking_updates {
             return;
@@ -863,7 +862,7 @@ impl Dispatcher {
     /// `1001-build-grammars-from-source`: offer to build `grammar` of
     /// extension `id`. Shows the consent sheet unless the user remembered
     /// their answer for this repository and commit.
-    pub fn request_grammar_build(id: &str, grammar: &str, cx: &mut App) {
+    pub fn request_grammar_build(id: &str, grammar: &str, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (plan, remembered) = {
             let s = state.read(cx);
@@ -932,7 +931,7 @@ impl Dispatcher {
 
     /// `CORVENE_POPUP=language-extensions:consent`: offer the first grammar
     /// waiting for a build (dev / snapshot convenience).
-    pub fn request_first_grammar_build(cx: &mut App) {
+    pub fn request_first_grammar_build(cx: &mut dyn Host) {
         let found = Self::state(cx)
             .read(cx)
             .extensions
@@ -951,7 +950,7 @@ impl Dispatcher {
     }
 
     /// The consent sheet's answer.
-    pub fn respond_to_build_consent(accept: bool, remember: bool, cx: &mut App) {
+    pub fn respond_to_build_consent(accept: bool, remember: bool, cx: &mut dyn Host) {
         let consent = Self::state(cx).update(cx, |s, cx| {
             cx.notify();
             s.extensions.pending_consent.take()
@@ -979,7 +978,7 @@ impl Dispatcher {
 
     /// Download, compile, verify (in a helper process) and register a
     /// grammar; on success the extension's metadata records the library.
-    fn build_grammar(plan: BuildPlan, compiler: Compiler, cx: &mut App) {
+    fn build_grammar(plan: BuildPlan, compiler: Compiler, cx: &mut dyn Host) {
         let key = format!("{}/{}", plan.extension, plan.grammar);
         let state = Self::state(cx);
         if state.read(cx).extensions.builds.contains_key(&key) {
@@ -1000,9 +999,8 @@ impl Dispatcher {
         });
         let (tx, rx) = async_channel::unbounded::<Stage>();
         cx.spawn({
-            let state = state.clone();
             let key = key.clone();
-            async move |cx: &mut AsyncApp| {
+            async move |cx: &mut AsyncCtx| {
                 while let Ok(stage) = rx.recv().await {
                     state.update(cx, |s, cx| {
                         if let Some(build) = s.extensions.builds.get_mut(&key) {
@@ -1075,7 +1073,7 @@ impl Dispatcher {
     }
 
     /// Turn an extension on or off.
-    pub fn set_extension_enabled(id: &str, enabled: bool, cx: &mut App) {
+    pub fn set_extension_enabled(id: &str, enabled: bool, cx: &mut dyn Host) {
         Self::update_switches(id, cx, |switches| switches.enabled = enabled);
         Self::rebuild_user_syntaxes(cx);
     }
@@ -1083,7 +1081,7 @@ impl Dispatcher {
     /// Whether an extension's grammars win over the built-in highlighting
     /// for the files they claim: the default for every language of the
     /// extension (per-language answers are cleared).
-    pub fn set_extension_preferred(id: &str, preferred: bool, cx: &mut App) {
+    pub fn set_extension_preferred(id: &str, preferred: bool, cx: &mut dyn Host) {
         Self::update_switches(id, cx, |switches| {
             switches.prefer_over_builtin = preferred;
             switches.languages.clear();
@@ -1092,7 +1090,7 @@ impl Dispatcher {
     }
 
     /// One language's own answer.
-    pub fn set_language_preferred(id: &str, language: &str, preferred: bool, cx: &mut App) {
+    pub fn set_language_preferred(id: &str, language: &str, preferred: bool, cx: &mut dyn Host) {
         let language = language.to_string();
         Self::update_switches(id, cx, |switches| {
             switches.languages.insert(language, preferred);
@@ -1100,7 +1098,7 @@ impl Dispatcher {
         Self::rebuild_user_syntaxes(cx);
     }
 
-    fn update_switches(id: &str, cx: &mut App, change: impl FnOnce(&mut ExtensionSwitches)) {
+    fn update_switches(id: &str, cx: &mut dyn Host, change: impl FnOnce(&mut ExtensionSwitches)) {
         let changed = Self::state(cx).update(cx, |s, cx| {
             let installed = s
                 .extensions
@@ -1140,7 +1138,7 @@ impl Dispatcher {
     }
 
     /// Delete an extension.
-    pub fn remove_extension(id: &str, cx: &mut App) {
+    pub fn remove_extension(id: &str, cx: &mut dyn Host) {
         let removed = Self::state(cx).update(cx, |s, cx| {
             let index = s
                 .extensions
@@ -1185,7 +1183,7 @@ impl Dispatcher {
     pub fn open_language_extensions(
         focus: Option<ExtensionsFocus>,
         return_to: Option<crate::PreferencesTab>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if !Self::state(cx).read(cx).extensions.loaded {
             Self::load_language_extensions(cx);
@@ -1195,7 +1193,7 @@ impl Dispatcher {
 
     /// Close the Language Extensions dialog, back to Settings when it was
     /// opened from there.
-    pub fn close_language_extensions(cx: &mut App) {
+    pub fn close_language_extensions(cx: &mut dyn Host) {
         let (return_to, settings_below) = {
             let s = Self::state(cx).read(cx);
             let return_to = match s.popup() {
@@ -1216,7 +1214,7 @@ impl Dispatcher {
     }
 
     /// The details panel's row.
-    pub fn select_extension(id: Option<String>, cx: &mut App) {
+    pub fn select_extension(id: Option<String>, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.extensions.selected != id {
                 s.extensions.selected = id;
@@ -1227,7 +1225,7 @@ impl Dispatcher {
 
     /// `756-missing-highlighting-hint`: never show the hint for this
     /// suffix again.
-    pub fn dismiss_suffix_hint(suffix: &str, cx: &mut App) {
+    pub fn dismiss_suffix_hint(suffix: &str, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.extensions
                 .prefs

@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
+use crate::host::Host;
 use corvene_models::{ChangesetData, Diff, Mergeability};
-use gpui_kit::App;
 use tracing::warn;
 
 use crate::dispatcher::Dispatcher;
@@ -60,7 +60,7 @@ impl PullRequestPreview {
 
 impl Dispatcher {
     /// Branch › Preview Pull Request (`_startPullRequest`).
-    pub fn start_pull_request(id: u64, cx: &mut App) {
+    pub fn start_pull_request(id: u64, cx: &mut dyn Host) {
         let (current, default_branch) = {
             let s = Self::state(cx).read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
@@ -84,7 +84,7 @@ impl Dispatcher {
 
     /// `1203-compare-branch-files`: the compare view's Show Changed Files:
     /// the preview dialog with `base` (the compared branch) as its base.
-    pub fn compare_branch_files(id: u64, base: String, cx: &mut App) {
+    pub fn compare_branch_files(id: u64, base: String, cx: &mut dyn Host) {
         let current = Self::state(cx)
             .read(cx)
             .repo_states
@@ -98,7 +98,7 @@ impl Dispatcher {
     }
 
     /// `_updatePullRequestBaseBranch`
-    pub fn update_pull_request_base_branch(id: u64, base: String, cx: &mut App) {
+    pub fn update_pull_request_base_branch(id: u64, base: String, cx: &mut dyn Host) {
         let current = Self::state(cx)
             .read(cx)
             .repo_states
@@ -111,7 +111,7 @@ impl Dispatcher {
     }
 
     /// Drop the preview state when the dialog closes.
-    pub fn close_pull_request_preview(id: u64, cx: &mut App) {
+    pub fn close_pull_request_preview(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(rs) = s.repo_states.get_mut(&id)
                 && rs.pull_request_preview.take().is_some()
@@ -129,7 +129,7 @@ impl Dispatcher {
         base: Option<String>,
         current: String,
         compare_only: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let generation = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
@@ -241,7 +241,7 @@ impl Dispatcher {
         generation: u64,
         base: String,
         current: String,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -276,7 +276,7 @@ impl Dispatcher {
 
     /// `_changePullRequestFileSelection`: select a file and load its
     /// merge-base diff.
-    pub fn select_pull_request_file(id: u64, path: String, cx: &mut App) {
+    pub fn select_pull_request_file(id: u64, path: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -362,7 +362,7 @@ impl Dispatcher {
 
     /// Diff Settings › Hide Whitespace Changes inside the dialog
     /// (`onHideWhitespaceInPullRequestDiffChanged`).
-    pub fn set_hide_whitespace_in_pull_request_diff(hide: bool, cx: &mut App) {
+    pub fn set_hide_whitespace_in_pull_request_diff(hide: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.hide_whitespace_in_pull_request_diff = hide);
         let Some(id) = Self::state(cx).read(cx).selected else {
             return;

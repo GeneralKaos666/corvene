@@ -16,6 +16,9 @@
 use std::path::{Component, Path, PathBuf};
 
 #[cfg(target_os = "android")]
+use crate::host::AsyncCtx;
+use crate::host::Host;
+#[cfg(target_os = "android")]
 use corvene_git::CancelToken;
 
 /// Whether shared storage can be used in place on this device and build.
@@ -293,7 +296,7 @@ impl crate::Dispatcher {
     pub fn shared_storage_move_for(
         path: &Path,
         then: impl FnOnce(PathBuf) -> crate::AfterSharedStorageMove,
-        cx: &gpui_kit::App,
+        cx: &dyn Host,
     ) -> Option<crate::SharedStorageMove> {
         #[cfg(target_os = "android")]
         {
@@ -322,7 +325,7 @@ impl crate::Dispatcher {
     }
 
     /// `<root>/Corvene/<folder name>` for repository `repo`.
-    pub fn default_shared_storage_destination(repo: u64, cx: &gpui_kit::App) -> Option<PathBuf> {
+    pub fn default_shared_storage_destination(repo: u64, cx: &dyn Host) -> Option<PathBuf> {
         let SharedStorageAccess::Granted { root } = Self::shared_storage_access() else {
             return None;
         };
@@ -336,7 +339,7 @@ impl crate::Dispatcher {
     pub fn check_shared_storage_destination(
         repo: u64,
         text: &str,
-        cx: &gpui_kit::App,
+        cx: &dyn Host,
     ) -> SharedStorageDestination {
         let SharedStorageAccess::Granted { root } = Self::shared_storage_access() else {
             return Err("Shared storage is not available.".to_string());
@@ -356,7 +359,7 @@ impl crate::Dispatcher {
         repo: u64,
         destination: PathBuf,
         then: crate::AfterSharedStorageMove,
-        cx: &mut gpui_kit::App,
+        cx: &mut dyn Host,
     ) {
         #[cfg(not(target_os = "android"))]
         {
@@ -365,7 +368,6 @@ impl crate::Dispatcher {
         #[cfg(target_os = "android")]
         {
             use crate::state::{SharedStorageMoveStage, SharedStorageMoveState};
-            use gpui_kit::AsyncApp;
             use tracing::{info, warn};
 
             let state = Self::state(cx);
@@ -437,8 +439,8 @@ impl crate::Dispatcher {
             });
 
             // progress pump, as for a clone
-            let pump_state = state.clone();
-            cx.spawn(async move |cx: &mut AsyncApp| {
+            let pump_state = state;
+            cx.spawn(async move |cx: &mut AsyncCtx| {
                 loop {
                     let mut latest = None;
                     while let Ok(stage) = rx.try_recv() {
@@ -473,7 +475,7 @@ impl crate::Dispatcher {
             })
             .detach();
 
-            cx.spawn(async move |cx: &mut AsyncApp| {
+            cx.spawn(async move |cx: &mut AsyncCtx| {
                 let result = task.await;
                 cx.update(|cx| match result {
                     Ok(moved) => {
@@ -532,7 +534,7 @@ impl crate::Dispatcher {
         destination: PathBuf,
         moved: Moved,
         then: crate::AfterSharedStorageMove,
-        cx: &mut gpui_kit::App,
+        cx: &mut dyn Host,
     ) {
         use crate::state::Popup;
 
@@ -598,7 +600,7 @@ impl crate::Dispatcher {
     }
 
     /// The dialog's Cancel while copying: the partial copy is removed.
-    pub fn cancel_shared_storage_move(cx: &mut gpui_kit::App) {
+    pub fn cancel_shared_storage_move(cx: &mut dyn Host) {
         if let Some(m) = Self::state(cx).read(cx).shared_storage_move.as_ref() {
             m.cancel.cancel();
         }
@@ -606,7 +608,7 @@ impl crate::Dispatcher {
 
     /// The dialog closed: a failed move's message is dropped (a move in
     /// progress goes on and shows again when the dialog reopens).
-    pub fn dismiss_shared_storage_move(cx: &mut gpui_kit::App) {
+    pub fn dismiss_shared_storage_move(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.shared_storage_move
                 .as_ref()

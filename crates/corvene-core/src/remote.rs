@@ -39,9 +39,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
+use crate::host::{AsyncCtx, Host};
 use corvene_git::{AskpassEnv, RemoteFailure};
 use corvene_models::{Account, AheadBehind, Remote, Tip};
-use gpui_kit::{App, AsyncApp};
 use tracing::{debug, info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -130,12 +130,12 @@ thread_local! {
 }
 
 pub(crate) fn spawn_bg<T: Send + 'static>(
-    cx: &mut App,
+    cx: &mut dyn Host,
     work: impl FnOnce() -> T + Send + 'static,
-    then: impl FnOnce(T, &mut App) + 'static,
+    then: impl FnOnce(T, &mut dyn Host) + 'static,
 ) {
     let task = cx.background_executor().spawn(async move { work() });
-    cx.spawn(async move |cx: &mut AsyncApp| {
+    cx.spawn(async move |cx: &mut AsyncCtx| {
         let result = task.await;
         cx.update(|cx| then(result, cx));
     })
@@ -148,7 +148,7 @@ impl Dispatcher {
     /// Settings › Advanced › Use Git Credential Manager: only for remotes that
     /// are not GitHub (GHD `useExternalCredentialHelper`). Also arms the
     /// stalled-transfer timeout of flag `network-stall-timeout` (0 = none).
-    pub(crate) fn arm_credential_helper(remote_url: &str, cx: &App) {
+    pub(crate) fn arm_credential_helper(remote_url: &str, cx: &dyn Host) {
         let s = Self::state(cx).read(cx);
         let host = host_of(remote_url);
         let github = host == "github.com" || s.accounts.iter().any(|a| a.host() == host);
@@ -160,7 +160,7 @@ impl Dispatcher {
 
     /// `GIT_ASKPASS` environment: one login per host from the signed-in
     /// accounts and the generic credentials the user saved.
-    pub(crate) fn askpass_env(cx: &App) -> Option<AskpassEnv> {
+    pub(crate) fn askpass_env(cx: &dyn Host) -> Option<AskpassEnv> {
         let s = Self::state(cx).read(cx);
         let mut logins: Vec<String> = s
             .accounts
@@ -177,7 +177,7 @@ impl Dispatcher {
 
     /// GHD `currentRemote`: the branch's upstream remote, else `origin`, else
     /// the first remote.
-    pub fn current_remote(id: u64, cx: &App) -> Option<Remote> {
+    pub fn current_remote(id: u64, cx: &dyn Host) -> Option<Remote> {
         Self::current_remote_in(Self::state(cx).read(cx), id)
     }
 
@@ -195,7 +195,7 @@ impl Dispatcher {
     /// Flag `826`: delete a tag that may have been pushed - from `remote`
     /// first (`push --delete`, so a failure keeps the local tag), then
     /// locally; with `remote` `None` only locally.
-    pub fn delete_pushed_tag(id: u64, tag: String, remote: Option<Remote>, cx: &mut App) {
+    pub fn delete_pushed_tag(id: u64, tag: String, remote: Option<Remote>, cx: &mut dyn Host) {
         let Some(remote) = remote else {
             return Self::delete_tag(id, tag, cx);
         };
@@ -238,7 +238,7 @@ impl Dispatcher {
     }
 
     /// GHD `getCurrentBranchForcePushState`
-    pub fn force_push_state(id: u64, cx: &App) -> ForcePushState {
+    pub fn force_push_state(id: u64, cx: &dyn Host) -> ForcePushState {
         Self::force_push_state_in(Self::state(cx).read(cx), id)
     }
 
@@ -269,7 +269,7 @@ impl Dispatcher {
         }
     }
 
-    fn set_progress(id: u64, progress: Option<PushPullProgress>, cx: &mut App) {
+    fn set_progress(id: u64, progress: Option<PushPullProgress>, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).push_pull_progress = progress;
             cx.notify();
@@ -277,7 +277,7 @@ impl Dispatcher {
     }
 
     /// GHD `withPushPullFetch`: one network operation at a time per repository.
-    fn begin_network(id: u64, cx: &mut App) -> bool {
+    fn begin_network(id: u64, cx: &mut dyn Host) -> bool {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if rs.push_pull_in_progress {
@@ -292,7 +292,7 @@ impl Dispatcher {
     /// `245-push-during-background-fetch`: a push, pull or fetch asked for
     /// while a background fetch runs waits for it (GHD disables the button
     /// and drops the request).
-    fn behind_background_fetch(id: u64, cx: &App) -> bool {
+    fn behind_background_fetch(id: u64, cx: &dyn Host) -> bool {
         Self::state(cx)
             .read(cx)
             .repo_states
@@ -301,8 +301,8 @@ impl Dispatcher {
     }
 
     /// Run `then` once the repository's network operation finished.
-    fn after_network(id: u64, cx: &mut App, then: impl FnOnce(&mut App) + 'static) {
-        cx.spawn(async move |cx: &mut AsyncApp| {
+    fn after_network(id: u64, cx: &mut dyn Host, then: impl FnOnce(&mut dyn Host) + 'static) {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             loop {
                 cx.background_executor()
                     .timer(Duration::from_millis(200))
@@ -323,7 +323,7 @@ impl Dispatcher {
         .detach();
     }
 
-    fn end_network(id: u64, cx: &mut App) {
+    fn end_network(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             rs.push_pull_in_progress = false;
@@ -337,9 +337,9 @@ impl Dispatcher {
     /// into the push/pull button, then handle the outcome.
     fn run_network<T: Send + 'static>(
         id: u64,
-        cx: &mut App,
+        cx: &mut dyn Host,
         work: impl FnOnce(&mut dyn FnMut(PushPullProgress)) -> T + Send + 'static,
-        then: impl FnOnce(T, &mut App) + 'static,
+        then: impl FnOnce(T, &mut dyn Host) + 'static,
     ) {
         let (tx, rx) = async_channel::unbounded::<PushPullProgress>();
         let task = cx.background_executor().spawn(async move {
@@ -348,7 +348,7 @@ impl Dispatcher {
             };
             work(&mut report)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             while let Ok(progress) = rx.recv().await {
                 cx.update(|cx| Self::set_progress(id, Some(progress), cx));
             }
@@ -370,7 +370,7 @@ impl Dispatcher {
         remote_url: String,
         retry: RetryAction,
         background: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if background {
             warn!(id, %err, "background remote operation failed");
@@ -564,7 +564,7 @@ impl Dispatcher {
     }
 
     /// `_fetch(FetchType::UserInitiatedTask | BackgroundTask)`
-    pub fn fetch(id: u64, background: bool, cx: &mut App) {
+    pub fn fetch(id: u64, background: bool, cx: &mut dyn Host) {
         Self::fetch_remote_then(id, None, background, |_, _| {}, cx);
     }
 
@@ -574,8 +574,8 @@ impl Dispatcher {
         id: u64,
         remote: Option<&str>,
         background: bool,
-        then: impl FnOnce(bool, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(bool, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         if !background && Self::behind_background_fetch(id, cx) {
             let remote = remote.map(str::to_string);
@@ -729,7 +729,7 @@ impl Dispatcher {
     /// GHD has none): fetch every listed repository with a remote, one at a
     /// time on a background thread, skipping those with a network operation
     /// running; failures are collected into one error.
-    pub fn fetch_all_repositories(cx: &mut App) {
+    pub fn fetch_all_repositories(cx: &mut dyn Host) {
         static RUNNING: AtomicBool = AtomicBool::new(false);
         let (git, repos, use_helper, github_hosts, selected) = {
             let s = Self::state(cx).read(cx);
@@ -824,7 +824,7 @@ impl Dispatcher {
     // ---- pull ----
 
     /// `_pull`
-    pub fn pull(id: u64, cx: &mut App) {
+    pub fn pull(id: u64, cx: &mut dyn Host) {
         if Self::behind_background_fetch(id, cx) {
             return Self::after_network(id, cx, move |cx| Self::pull(id, cx));
         }
@@ -993,7 +993,7 @@ impl Dispatcher {
 
     /// The branch list's "Update from <upstream>" (`857-update-branch-from-upstream`;
     /// GHD has none): fast-forward a local branch that is not checked out.
-    pub fn update_branch_from_upstream(id: u64, name: String, cx: &mut App) {
+    pub fn update_branch_from_upstream(id: u64, name: String, cx: &mut dyn Host) {
         let target = {
             let s = Self::state(cx).read(cx);
             if !s.flags.bool(crate::flags::ids::UPDATE_BRANCH_FROM_UPSTREAM) {
@@ -1090,7 +1090,7 @@ impl Dispatcher {
     // ---- push ----
 
     /// `_push` (+ `performPush`): publish the branch when it has no upstream.
-    pub fn push(id: u64, force_with_lease: bool, branch: Option<String>, cx: &mut App) {
+    pub fn push(id: u64, force_with_lease: bool, branch: Option<String>, cx: &mut dyn Host) {
         Self::push_then(id, force_with_lease, branch, |_, _| {}, cx);
     }
 
@@ -1099,8 +1099,8 @@ impl Dispatcher {
         id: u64,
         force_with_lease: bool,
         branch: Option<String>,
-        then: impl FnOnce(PushOutcome, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(PushOutcome, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         Self::push_inner(id, force_with_lease, branch, None, then, cx);
     }
@@ -1110,7 +1110,7 @@ impl Dispatcher {
     /// `push <remote> <sha>:refs/heads/<upstream branch>`. No force, so a
     /// commit that is not ahead of the upstream is refused by git; unpushed
     /// tags stay behind (they may point past `sha`).
-    pub fn push_up_to(id: u64, sha: String, cx: &mut App) {
+    pub fn push_up_to(id: u64, sha: String, cx: &mut dyn Host) {
         Self::push_inner(id, false, None, Some(sha), |_, _| {}, cx);
     }
 
@@ -1119,8 +1119,8 @@ impl Dispatcher {
         force_with_lease: bool,
         branch: Option<String>,
         up_to: Option<String>,
-        then: impl FnOnce(PushOutcome, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(PushOutcome, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         if Self::behind_background_fetch(id, cx) {
             return Self::after_network(id, cx, move |cx| {
@@ -1360,7 +1360,7 @@ impl Dispatcher {
     }
 
     /// The toolbar button's main click (`PushPullButton.renderButton`).
-    pub fn push_pull_action(id: u64, cx: &mut App) {
+    pub fn push_pull_action(id: u64, cx: &mut dyn Host) {
         let (has_remote, tip, upstream, ab) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
@@ -1396,7 +1396,7 @@ impl Dispatcher {
     }
 
     /// `confirmOrForcePush`
-    pub fn confirm_or_force_push(id: u64, cx: &mut App) {
+    pub fn confirm_or_force_push(id: u64, cx: &mut dyn Host) {
         let upstream = Self::state(cx)
             .read(cx)
             .repo_states
@@ -1426,7 +1426,11 @@ impl Dispatcher {
     /// `Publish.componentDidMount`: the repository's description
     /// (`getGitDescription`, `""` when it has none or git's default text),
     /// read in the background, for the Publish Repository dialog to prefill.
-    pub fn git_description(id: u64, then: impl FnOnce(String, &mut App) + 'static, cx: &mut App) {
+    pub fn git_description(
+        id: u64,
+        then: impl FnOnce(String, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
+    ) {
         let Some(path) = Self::state(cx)
             .read(cx)
             .repository(id)
@@ -1448,7 +1452,7 @@ impl Dispatcher {
         account: Account,
         org: Option<String>,
         team_id: Option<u64>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -1519,9 +1523,9 @@ impl Dispatcher {
         );
     }
 
-    fn push_after_publish(id: u64, cx: &mut App) {
+    fn push_after_publish(id: u64, cx: &mut dyn Host) {
         // the remote list is refreshed asynchronously; push once it is there
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             for _ in 0..20 {
                 cx.background_executor()
                     .timer(Duration::from_millis(250))
@@ -1552,7 +1556,7 @@ impl Dispatcher {
         password: String,
         id: u64,
         retry: RetryAction,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if let Err(err) =
             corvene_platform::keychain::store_generic_password(&host, &username, &password)
@@ -1572,7 +1576,7 @@ impl Dispatcher {
 
     /// GHD `_addRepositories` › `InitializeLFS`: offer to install the hooks
     /// when the repository tracks paths with LFS but has no hooks yet.
-    pub fn check_lfs(id: u64, cx: &mut App) {
+    pub fn check_lfs(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -1613,7 +1617,7 @@ impl Dispatcher {
     }
 
     /// `_installLFSHooks`
-    pub fn install_lfs_hooks(repos: Vec<u64>, cx: &mut App) {
+    pub fn install_lfs_hooks(repos: Vec<u64>, cx: &mut dyn Host) {
         let contexts: Vec<_> = repos
             .iter()
             .filter_map(|id| Self::repo_context(*id, cx))
@@ -1641,7 +1645,7 @@ impl Dispatcher {
 
     /// Start the periodic background fetch and sidebar indicator refresh
     /// (`BackgroundFetcher`, `RepositoryIndicatorUpdater`). Call once.
-    pub fn start_background_tasks(cx: &mut App) {
+    pub fn start_background_tasks(cx: &mut dyn Host) {
         // Android: WorkManager wakes the process about once an hour, also
         // while its timers are frozen in the background
         #[cfg(target_os = "android")]
@@ -1651,7 +1655,7 @@ impl Dispatcher {
             corvene_platform::android::set_background_fetch_handler(move || {
                 let _ = tx.try_send(());
             });
-            cx.spawn(async move |cx: &mut AsyncApp| {
+            cx.spawn(async move |cx: &mut AsyncCtx| {
                 while rx.recv().await.is_ok() {
                     info!("background fetch woken by WorkManager");
                     cx.update(Self::background_fetch_tick);
@@ -1659,7 +1663,7 @@ impl Dispatcher {
             })
             .detach();
         }
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             // skew the first run so several instances do not sync up
             cx.background_executor()
                 .timer(Duration::from_secs(20))
@@ -1689,7 +1693,7 @@ impl Dispatcher {
         } else {
             Duration::from_secs(45)
         };
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             cx.background_executor().timer(first_indicators).await;
             loop {
                 if !crate::pull_requests::android_in_background() {
@@ -1705,7 +1709,8 @@ impl Dispatcher {
 
     /// Fetch the selected GitHub repository (see `244-background-fetch`) when
     /// its last fetch is older than the interval (`shouldBackgroundFetch`).
-    fn background_fetch_tick(cx: &mut App) {
+    /// One background fetch round (the hourly timer, WorkManager on Android).
+    pub fn background_fetch_tick(cx: &mut dyn Host) {
         let (id, last_fetched, busy, known_push) = {
             let s = Self::state(cx).read(cx);
             let Some(id) = s.selected else { return };
@@ -1789,7 +1794,7 @@ impl Dispatcher {
     /// [`Self::refresh_indicators`] unless indicators were refreshed less
     /// than a minute ago (`217-prompt-indicator-refresh`, on opening the
     /// repository list).
-    pub fn refresh_indicators_if_stale(cx: &mut App) {
+    pub fn refresh_indicators_if_stale(cx: &mut dyn Host) {
         let fresh = LAST_INDICATOR_REFRESH
             .with(|last| last.get())
             .is_some_and(|at| at.elapsed() < INDICATOR_REFRESH_MINIMUM);
@@ -1800,7 +1805,7 @@ impl Dispatcher {
 
     /// `refreshIndicatorForRepository` for every repository: changed files
     /// and ahead/behind, shown in the repository list.
-    pub fn refresh_indicators(cx: &mut App) {
+    pub fn refresh_indicators(cx: &mut dyn Host) {
         LAST_INDICATOR_REFRESH.with(|last| last.set(Some(Instant::now())));
         let enabled = Self::state(cx)
             .read(cx)
@@ -1870,7 +1875,7 @@ impl Dispatcher {
     }
 
     /// Clone dialog: fetch the account's repositories (`ApiRepositoriesStore.loadRepositories`).
-    pub fn load_api_repositories(account: Account, cx: &mut App) {
+    pub fn load_api_repositories(account: Account, cx: &mut dyn Host) {
         let endpoint = account.endpoint.clone();
         let already = Self::state(cx).update(cx, |s, cx| {
             if s.api_repositories_loading.contains(&endpoint) {
@@ -1941,7 +1946,7 @@ impl Dispatcher {
     }
 }
 
-fn r_loading(cx: &App, id: u64) -> bool {
+fn r_loading(cx: &dyn Host, id: u64) -> bool {
     Dispatcher::state(cx)
         .read(cx)
         .repo_states

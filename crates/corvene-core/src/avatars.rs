@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use gpui_kit::App;
+use crate::host::Host;
 use tracing::debug;
 
 use crate::dispatcher::Dispatcher;
@@ -112,7 +112,7 @@ fn fetch(candidates: Vec<String>) -> Option<PathBuf> {
 }
 
 impl Dispatcher {
-    fn request_avatar(key: String, candidates: Vec<String>, cx: &mut App) {
+    fn request_avatar(key: String, candidates: Vec<String>, cx: &mut dyn Host) {
         let started = Self::state(cx).update(cx, |s, cx| {
             if s.avatars.contains_key(&key) {
                 return false;
@@ -149,7 +149,7 @@ impl Dispatcher {
     }
 
     /// Commit author / committer avatar by e-mail (no-op once requested).
-    pub fn request_avatar_for_email(email: &str, cx: &mut App) {
+    pub fn request_avatar_for_email(email: &str, cx: &mut dyn Host) {
         let email = email.trim().to_lowercase();
         if email.is_empty() {
             return;
@@ -167,7 +167,7 @@ impl Dispatcher {
     }
 
     /// An account's own `avatar_url`.
-    pub fn request_avatar_url(url: &str, cx: &mut App) {
+    pub fn request_avatar_url(url: &str, cx: &mut dyn Host) {
         let key = format!("url:{url}");
         if Self::state(cx).read(cx).avatars.contains_key(&key) {
             return;

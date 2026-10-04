@@ -28,6 +28,8 @@ use corvene_models::{Account, Repository, SyntaxHighlighter, ThemeSetting};
 #[serde(default)]
 pub struct Settings {
     pub theme: ThemeSetting,
+    /// Corvene: the Android app's design language (flag `113-design-style`).
+    pub design_style: corvene_models::DesignStyle,
     pub sidebar_width: f32,
     /// History file-list width (`commitSummaryWidth`, default 250).
     pub commit_summary_width: f32,
@@ -288,6 +290,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             theme: ThemeSetting::System,
+            design_style: corvene_models::DesignStyle::default(),
             sidebar_width: 250.0,
             branch_dropdown_width: None,
             worktree_dropdown_width: None,

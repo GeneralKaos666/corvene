@@ -14,9 +14,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::host::{AsyncCtx, Host};
 use corvene_github::Client;
 use corvene_models::{Account, Repository, Tip};
-use gpui_kit::{App, AsyncApp};
 use tracing::info;
 
 use crate::dispatcher::Dispatcher;
@@ -203,7 +203,7 @@ impl AppState {
 
 impl Dispatcher {
     /// `showCreateTutorialRepositoryPopup`: GitHub.com's account, else the first.
-    pub fn show_create_tutorial_repository(cx: &mut App) {
+    pub fn show_create_tutorial_repository(cx: &mut dyn Host) {
         let account = {
             let s = Self::state(cx).read(cx);
             s.accounts
@@ -226,7 +226,7 @@ impl Dispatcher {
     /// `_createTutorialRepository`: create `desktop-tutorial` on the account,
     /// initialize it next to the other clones with the README commit, push
     /// it, then add it as the tutorial repository.
-    pub fn create_tutorial_repository(account: Account, cx: &mut App) {
+    pub fn create_tutorial_repository(account: Account, cx: &mut dyn Host) {
         let Some(git) = Self::state(cx).read(cx).git.clone() else {
             Self::show_error("Git is not available", "Install git and retry.", cx);
             return;
@@ -270,7 +270,7 @@ impl Dispatcher {
                 &progress,
             )
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             while let Ok(progress) = rx.recv().await {
                 cx.update(|cx| {
                     Self::state(cx).update(cx, |s, cx| {
@@ -310,7 +310,7 @@ impl Dispatcher {
     fn add_tutorial_repository(
         path: PathBuf,
         github: corvene_models::GitHubRepository,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let id = Self::state(cx).update(cx, |s, cx| {
             let existing = s.repositories.iter().position(|r| r.path == path);
@@ -341,7 +341,7 @@ impl Dispatcher {
     }
 
     /// `_resumeTutorial`
-    pub fn resume_tutorial(cx: &mut App) {
+    pub fn resume_tutorial(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, _| {
             if s.tutorial_step_override == Some(TutorialStep::Paused) {
                 s.tutorial_step_override = None;
@@ -351,23 +351,23 @@ impl Dispatcher {
     }
 
     /// `_pauseTutorial` (Exit Tutorial → back to the blank slate).
-    pub fn pause_tutorial(cx: &mut App) {
+    pub fn pause_tutorial(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, _| s.tutorial_step_override = None);
         Self::update_settings(cx, |s| s.tutorial_paused = true);
     }
 
     /// `_skipPickEditorTutorialStep` ("I have an editor", Skip).
-    pub fn skip_pick_editor_tutorial_step(cx: &mut App) {
+    pub fn skip_pick_editor_tutorial_step(cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.tutorial_install_editor_skipped = true);
     }
 
     /// `_markPullRequestTutorialStepAsComplete`
-    pub fn mark_pull_request_tutorial_step_complete(cx: &mut App) {
+    pub fn mark_pull_request_tutorial_step_complete(cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.tutorial_pull_request_step_complete = true);
     }
 
     /// `_markTutorialCompletionAsAnnounced`
-    pub fn mark_tutorial_completion_announced(cx: &mut App) {
+    pub fn mark_tutorial_completion_announced(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if !s.tutorial_announced {
                 s.tutorial_announced = true;
@@ -378,7 +378,7 @@ impl Dispatcher {
 
     /// App `onExitTutorial`: with only the tutorial repository, confirm and
     /// go back to the blank slate; otherwise open the repository list.
-    pub fn exit_tutorial(cx: &mut App) {
+    pub fn exit_tutorial(cx: &mut dyn Host) {
         let (only_repository, step) = {
             let s = Self::state(cx).read(cx);
             (s.repositories.len() == 1, s.selected_tutorial_step())
@@ -392,7 +392,7 @@ impl Dispatcher {
 
     /// `getCurrentStep`'s side effect: selecting another repository while
     /// the tutorial is paused un-pauses it (GHD #8341).
-    pub(crate) fn resume_tutorial_on_other_repository(id: u64, cx: &mut App) {
+    pub(crate) fn resume_tutorial_on_other_repository(id: u64, cx: &mut dyn Host) {
         let (paused, tutorial) = {
             let s = Self::state(cx).read(cx);
             (

@@ -92,6 +92,7 @@ impl PublishRepositoryDialog {
         Dispatcher::git_description(
             repo,
             move |text, cx| {
+                let Some(cx) = cx.gpui_app() else { return };
                 // a text box keeps one line, as an HTML text input strips
                 // line breaks from its value
                 let text = text.replace(['\r', '\n'], "");

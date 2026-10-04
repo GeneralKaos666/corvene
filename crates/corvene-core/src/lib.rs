@@ -7,6 +7,7 @@ pub mod ahead_behind_store;
 pub mod alive;
 pub mod app_location;
 pub mod app_url;
+pub mod askpass;
 pub mod autocomplete;
 pub mod avatar_users;
 pub mod avatars;
@@ -34,6 +35,7 @@ pub mod git_store;
 #[cfg(any(target_os = "android", test))]
 pub mod headless;
 pub mod history_filter;
+pub mod host;
 pub mod integrations;
 pub mod list_selection;
 pub mod markdown;
@@ -81,6 +83,7 @@ pub use dispatcher::Dispatcher;
 pub use emoji::CustomEmoji;
 pub use flags::{FlagId, FlagOverrides, Flags};
 pub use forks::UPSTREAM_REMOTE_NAME;
+pub use host::{AsyncCtx, Ctx, Host, HostServices, StateCx, StateHandle};
 pub use integrations::{PreferencesSave, RepositorySettingsSave};
 pub use mco::{
     Banner, ConflictKind, ConflictState, McoConflicts, McoDetail, McoStep, McoUndo, MergePreview,

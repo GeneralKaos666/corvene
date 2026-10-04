@@ -1,4 +1,4 @@
-Corvene is a native Git client with the interface of GitHub Desktop, written in Rust. On Android it keeps the desktop layout for tablets, Chromebooks and desktop modes.
+Corvene Legacy is the desktop Corvene application itself on Android: a native Git client with the interface of GitHub Desktop, written in Rust, keeping the desktop layout 1:1 for tablets, Chromebooks and desktop modes. Phones are better served by Corvene for Android, the app built for them; both install side by side.
 
 - Clone, commit, branch, merge, rebase, stash, cherry-pick, push and pull
 - Diffs with syntax highlighting, line and hunk selection

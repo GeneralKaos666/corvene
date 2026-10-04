@@ -9,12 +9,12 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use crate::host::Host;
 use corvene_github::{ApiRepoRule, Client};
 use corvene_models::{
     Account, GitHubRepository, RepoRuleEnforced, RepoRulesInfo, RepoRulesMetadataFailure,
     RepoRulesMetadataFailures, RepoRulesMetadataRule, RuleOperator, Tip,
 };
-use gpui_kit::App;
 use tracing::warn;
 
 use crate::dispatcher::Dispatcher;
@@ -195,7 +195,7 @@ fn remote_branch_name(
 impl Dispatcher {
     /// `refreshBranchProtectionState`: push control + rulesets + branch
     /// rules for the current branch, throttled per branch.
-    pub(crate) fn refresh_branch_protection(id: u64, cx: &mut App) {
+    pub(crate) fn refresh_branch_protection(id: u64, cx: &mut dyn Host) {
         let (github, branch, remote_url, prior_rulesets, rules_enabled) = {
             let s = Self::state(cx).read(cx);
             let Some(gh) = s.repository(id).and_then(|r| r.github.clone()) else {

@@ -18,9 +18,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::host::{AsyncCtx, Host};
 use corvene_git::{CancelToken, HistoryQuery, LoggedCommit};
 use corvene_models::Commit;
-use gpui_kit::{App, AsyncApp};
 use tracing::warn;
 
 use crate::dispatcher::Dispatcher;
@@ -144,7 +144,7 @@ fn tokens(text: &str) -> Vec<String> {
 impl Dispatcher {
     /// The History filter box was edited: search after a pause, or go back
     /// to the plain History once nothing is left to filter by.
-    pub fn set_history_filter_text(id: u64, text: String, cx: &mut App) {
+    pub fn set_history_filter_text(id: u64, text: String, cx: &mut dyn Host) {
         let request = Self::state(cx).update(cx, |s, cx| {
             let filter = &mut s.repo_state_mut(id).history_filter;
             if filter.text == text {
@@ -165,7 +165,7 @@ impl Dispatcher {
             return;
         }
         let state = Self::state(cx);
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             cx.background_executor()
                 .timer(HISTORY_FILTER_DEBOUNCE)
                 .await;
@@ -185,7 +185,7 @@ impl Dispatcher {
 
     /// `887-file-history`: History of `path` only (with the filter box's
     /// terms), shown at once.
-    pub fn show_file_history(id: u64, path: String, cx: &mut App) {
+    pub fn show_file_history(id: u64, path: String, cx: &mut dyn Host) {
         Self::exit_compare(id, cx);
         Self::show_section(id, corvene_models::Section::History, cx);
         let query = Self::state(cx).update(cx, |s, cx| {
@@ -199,7 +199,7 @@ impl Dispatcher {
     }
 
     /// `887-file-history`: the chip's ×; the filter box's terms stay.
-    pub fn clear_file_history(id: u64, cx: &mut App) {
+    pub fn clear_file_history(id: u64, cx: &mut dyn Host) {
         let query = Self::state(cx).update(cx, |s, cx| {
             let filter = &mut s.repo_state_mut(id).history_filter;
             filter.path = None;
@@ -215,7 +215,7 @@ impl Dispatcher {
     }
 
     /// Drop the filter: the plain History list and its selection come back.
-    pub fn clear_history_filter(id: u64, cx: &mut App) {
+    pub fn clear_history_filter(id: u64, cx: &mut dyn Host) {
         let reselect = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             let was_active = rs.history_filter.is_active();
@@ -256,7 +256,7 @@ impl Dispatcher {
     }
 
     /// Run the search for `query` (the box's current text) in the background.
-    fn run_history_filter(id: u64, query: HistoryQuery, cx: &mut App) {
+    fn run_history_filter(id: u64, query: HistoryQuery, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -306,7 +306,7 @@ impl Dispatcher {
             commits.extend(page);
             Ok::<_, corvene_git::GitError>((Some(tip), logged, sha_matches, commits, next))
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
                 let select = Self::state(cx).update(cx, |s, cx| {
@@ -359,7 +359,7 @@ impl Dispatcher {
     }
 
     /// The filtered list scrolled near its end: build the next page.
-    pub fn load_more_history_filter(id: u64, cx: &mut App) {
+    pub fn load_more_history_filter(id: u64, cx: &mut dyn Host) {
         let Some((_, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -392,7 +392,7 @@ impl Dispatcher {
             );
             (page, logged.len())
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             let (result, total) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
@@ -421,7 +421,7 @@ impl Dispatcher {
 
     /// After History reloaded: search again when HEAD moved (or `force`, when
     /// what History lists changed, like first-parent mode).
-    pub(crate) fn refresh_history_filter(id: u64, force: bool, cx: &mut App) {
+    pub(crate) fn refresh_history_filter(id: u64, force: bool, cx: &mut dyn Host) {
         let query = {
             let s = Self::state(cx).read(cx);
             let Some(rs) = s.repo_states.get(&id) else {

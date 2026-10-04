@@ -4,7 +4,7 @@
 //! the Electron calls in `main-process/main.ts`
 //! (`corvene_platform::app_location`).
 
-use gpui_kit::App;
+use crate::host::Host;
 use tracing::info;
 
 use crate::dispatcher::Dispatcher;
@@ -15,7 +15,7 @@ impl Dispatcher {
     /// At launch: offer the move when running from a bundle outside the
     /// Applications folders, unless the user said "don't ask again". Like
     /// GHD (`__DEV__ === false`), development builds never ask.
-    pub fn check_move_to_applications_folder(cx: &mut App) {
+    pub fn check_move_to_applications_folder(cx: &mut dyn Host) {
         if cfg!(debug_assertions) {
             return;
         }
@@ -37,13 +37,13 @@ impl Dispatcher {
     }
 
     /// `setAskToMoveToApplicationsFolderSetting`.
-    pub fn set_ask_to_move_to_applications_folder(ask: bool, cx: &mut App) {
+    pub fn set_ask_to_move_to_applications_folder(ask: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.ask_to_move_to_applications_folder = ask);
     }
 
     /// "Move and Restart": move the bundle to /Applications, then quit and
     /// open it from there.
-    pub fn move_to_applications_folder(cx: &mut App) {
+    pub fn move_to_applications_folder(cx: &mut dyn Host) {
         let Some(bundle) = corvene_platform::app_location::running_bundle() else {
             Self::show_error(
                 "Could not move Corvene",
@@ -80,7 +80,7 @@ impl Dispatcher {
     /// `installDarwinCLI` (GHD `install-cli.ts`): link the bundle's
     /// `corvene` script into `/usr/local/bin`, asking for administrator
     /// rights when needed, then `CLIInstalled`; a failure is a plain error.
-    pub fn install_cli(cx: &mut App) {
+    pub fn install_cli(cx: &mut dyn Host) {
         let Some(packaged) = corvene_platform::cli::packaged_path() else {
             Self::show_error(
                 "Could not install the command line tool",

@@ -5,6 +5,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::host::Host;
 use corvene_github::api::{
     ApiIdentity, ApiIssueComment, ApiPullRequestReview, ApiPullRequestReviewState,
 };
@@ -12,9 +13,6 @@ use corvene_models::{
     CheckConclusion, CheckStatus, GitHubRepository, JobStep, PullRequest, PullRequestRef, RefCheck,
     WorkflowRun,
 };
-use gpui_kit::App;
-
-use crate::AppState;
 
 /// `seconds` ago as the API's ISO-8601 UTC timestamp.
 pub fn iso_ago(seconds: u64) -> String {
@@ -74,15 +72,14 @@ fn stand_in_github_repository() -> GitHubRepository {
 }
 
 /// The selected repository's GitHub repository, or a stand-in.
-pub fn github_repository(repo: u64, cx: &App) -> GitHubRepository {
-    AppState::global(cx)
-        .read(cx)
+pub fn github_repository(repo: u64, cx: &dyn Host) -> GitHubRepository {
+    cx.state_ref()
         .repository(repo)
         .and_then(|r| r.github.clone())
         .unwrap_or_else(stand_in_github_repository)
 }
 
-pub fn pull_request(repo: u64, cx: &App) -> PullRequest {
+pub fn pull_request(repo: u64, cx: &dyn Host) -> PullRequest {
     pull_request_in(github_repository(repo, cx))
 }
 
@@ -232,7 +229,7 @@ pub fn failed_checks() -> Vec<RefCheck> {
 pub fn notification(
     kind: crate::notifications::TestNotificationType,
     repo: u64,
-    cx: &App,
+    cx: &dyn Host,
 ) -> crate::notifications::PullRequestNotification {
     use crate::notifications::{NotificationKind, TestNotificationType};
     let github = github_repository(repo, cx);

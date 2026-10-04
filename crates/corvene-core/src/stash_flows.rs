@@ -43,9 +43,9 @@
 
 use std::path::PathBuf;
 
+use crate::host::Host;
 use corvene_git::{StashPop, StashPopOptions};
 use corvene_models::{StashEntry, WorkingDirectoryFileChange};
-use gpui_kit::App;
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
@@ -86,7 +86,7 @@ impl RepositoryState {
 
 impl Dispatcher {
     /// The [`StashPopOptions`] the flags ask for.
-    pub(crate) fn stash_pop_options(cx: &App) -> StashPopOptions {
+    pub(crate) fn stash_pop_options(cx: &dyn Host) -> StashPopOptions {
         let flags = &Self::state(cx).read(cx).flags;
         StashPopOptions {
             keep_on_conflict: flags.bool(crate::flags::ids::STASH_CONFLICT_FLOW),
@@ -100,7 +100,7 @@ impl Dispatcher {
         id: u64,
         workdir: PathBuf,
         kept: Option<(StashEntry, Vec<String>)>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((entry, files)) = kept else {
             return;
@@ -142,7 +142,7 @@ impl Dispatcher {
         id: u64,
         stash: StashEntry,
         check_branch: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -182,7 +182,7 @@ impl Dispatcher {
     /// `774` › Mark as Resolved: unstage the unmerged entries of `paths`
     /// (the files stay as they are), then ask about the kept stash once no
     /// conflicted file is left.
-    pub fn mark_stash_conflicts_resolved(id: u64, paths: Vec<String>, cx: &mut App) {
+    pub fn mark_stash_conflicts_resolved(id: u64, paths: Vec<String>, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -208,7 +208,7 @@ impl Dispatcher {
     /// `774`: `git mergetool` on a file a restore left conflicted (it stages
     /// the file when the tool reports success), then as
     /// [`Self::mark_stash_conflicts_resolved`] once none is left.
-    pub fn open_stash_conflict_in_merge_tool(id: u64, file: String, cx: &mut App) {
+    pub fn open_stash_conflict_in_merge_tool(id: u64, file: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -234,7 +234,7 @@ impl Dispatcher {
     /// No conflicted file is left in `workdir` after resolving `resolved`:
     /// when the kept stash recorded there conflicted in one of them and
     /// still exists, ask whether to drop it (the record is used up).
-    fn ask_drop_kept_stash(id: u64, workdir: PathBuf, resolved: Vec<String>, cx: &mut App) {
+    fn ask_drop_kept_stash(id: u64, workdir: PathBuf, resolved: Vec<String>, cx: &mut dyn Host) {
         let kept = Self::state(cx).update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
             let matches = rs.kept_stash_for(&workdir).is_some_and(|k| {
@@ -269,8 +269,8 @@ impl Dispatcher {
     /// there was nothing to add), `then(false)` when nothing changed.
     pub(crate) fn add_to_stash_then(
         id: u64,
-        then: impl FnOnce(bool, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(bool, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let (repo, branch, old, guard) = {
             let s = Self::state(cx).read(cx);
@@ -317,13 +317,13 @@ impl Dispatcher {
     }
 
     /// Branch › Stash All Changes › Add to Stash (`776`).
-    pub fn add_to_stash(id: u64, cx: &mut App) {
+    pub fn add_to_stash(id: u64, cx: &mut dyn Host) {
         Self::add_to_stash_then(id, |_, _| {}, cx);
     }
 
     /// Switch Branch › Overwrite Stash › Add to Stash (`776`): the changes
     /// join the stash, then `branch` is checked out.
-    pub fn add_to_stash_and_checkout(id: u64, branch: String, cx: &mut App) {
+    pub fn add_to_stash_and_checkout(id: u64, branch: String, cx: &mut dyn Host) {
         Self::add_to_stash_then(
             id,
             move |ok, cx| {
@@ -342,7 +342,7 @@ impl Dispatcher {
 
     /// "Unable to … when changes are present" › Add to Stash and Continue
     /// (`776`): the changes join the stash, then the operation runs again.
-    pub fn add_to_stash_and_retry(id: u64, retry: crate::state::RetryAction, cx: &mut App) {
+    pub fn add_to_stash_and_retry(id: u64, retry: crate::state::RetryAction, cx: &mut dyn Host) {
         Self::close_popup(cx);
         Self::add_to_stash_then(
             id,
@@ -360,7 +360,7 @@ impl Dispatcher {
     /// `777-stash-selected-files` › Stash N Selected Files: a Desktop stash
     /// of `paths` only, on the current branch. Refused while the branch has
     /// a stash (the menu item is disabled then).
-    pub fn stash_selected_files(id: u64, paths: Vec<String>, cx: &mut App) {
+    pub fn stash_selected_files(id: u64, paths: Vec<String>, cx: &mut dyn Host) {
         let (branch, files, has_stash, guard) = {
             let s = Self::state(cx).read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
@@ -413,7 +413,7 @@ impl Dispatcher {
         id: u64,
         paths: Vec<String>,
         retry: crate::state::RetryAction,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::close_popup(cx);
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
@@ -483,7 +483,7 @@ impl Dispatcher {
     /// newest Desktop stash made on `branch` onto the current branch, as
     /// Restore does (only with no local changes; a conflicted restore keeps
     /// the entry under `774`).
-    pub fn restore_stash_from_branch(id: u64, branch: String, cx: &mut App) {
+    pub fn restore_stash_from_branch(id: u64, branch: String, cx: &mut dyn Host) {
         let has_changes = Self::state(cx)
             .read(cx)
             .repo_states
@@ -533,7 +533,7 @@ impl Dispatcher {
 
     /// `283-move-changes-to-worktree`: Move Changes to Worktree… (changes
     /// list menu, Branch menu).
-    pub fn show_move_changes_to_worktree(id: u64, cx: &mut App) {
+    pub fn show_move_changes_to_worktree(id: u64, cx: &mut dyn Host) {
         let ready = Self::state(cx)
             .read(cx)
             .repo_states
@@ -550,7 +550,7 @@ impl Dispatcher {
     /// switch to it when `switch`. Refused while `target` has changes of
     /// its own. A conflicted restore keeps the stash there (`774`); any other
     /// failure after stashing keeps it too, and says so.
-    pub fn move_changes_to_worktree(id: u64, target: PathBuf, switch: bool, cx: &mut App) {
+    pub fn move_changes_to_worktree(id: u64, target: PathBuf, switch: bool, cx: &mut dyn Host) {
         let Some((git, source)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -635,7 +635,7 @@ impl Dispatcher {
     pub(crate) fn load_switch_target_behind(
         id: u64,
         branch: &corvene_models::Branch,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).switch_target_behind = None);
         if branch.kind != corvene_models::BranchKind::Local
@@ -671,7 +671,7 @@ impl Dispatcher {
     }
 
     /// `DropKeptStash` › Drop Stash: drop the entry whose commit is `sha`.
-    pub fn drop_stash_entry(id: u64, sha: String, cx: &mut App) {
+    pub fn drop_stash_entry(id: u64, sha: String, cx: &mut dyn Host) {
         Self::run_history_op(
             id,
             "Could not discard stash",

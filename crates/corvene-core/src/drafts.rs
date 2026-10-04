@@ -8,8 +8,8 @@
 
 use std::time::Duration;
 
+use crate::host::{AsyncCtx, Host, StateCx};
 use corvene_models::{DiffSelectionType, WorkingDirectoryStatus};
-use gpui_kit::{App, AsyncApp};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -70,8 +70,9 @@ pub fn apply_excluded(status: &mut WorkingDirectoryStatus, excluded: &[String]) 
 }
 
 /// `767-persist-file-selection`: record `id`'s unticked files and save them
-/// when they changed. Call after anything that ticks or unticks files.
-pub(crate) fn note_excluded(s: &mut AppState, id: u64, cx: &mut App) {
+/// when they changed. Call after anything that ticks or unticks files; it
+/// runs inside a state update, so the save goes to its own thread.
+pub(crate) fn note_excluded(s: &mut AppState, id: u64, _cx: &mut StateCx) {
     if !s.flags.bool(crate::flags::ids::PERSIST_FILE_SELECTION) {
         return;
     }
@@ -93,20 +94,22 @@ pub(crate) fn note_excluded(s: &mut AppState, id: u64, cx: &mut App) {
     }
     let store = s.store.clone();
     let excluded = s.excluded_files.clone();
-    cx.background_executor()
-        .spawn(async move {
+    std::thread::Builder::new()
+        .name("excluded-files".into())
+        .spawn(move || {
             if let Err(err) = store.save_excluded_files(&excluded) {
                 warn!(?err, "could not save the unticked files");
             }
         })
-        .detach();
+        .map(drop)
+        .unwrap_or_else(|err| warn!(?err, "could not save the unticked files"));
 }
 
 impl Dispatcher {
     /// `766-persist-commit-drafts`: the commit form of `id` now holds
     /// `draft` (`None`: nothing typed); written after [`DRAFT_SAVE_DELAY`]
     /// without further edits.
-    pub fn set_commit_draft(id: u64, draft: Option<CommitDraft>, cx: &mut App) {
+    pub fn set_commit_draft(id: u64, draft: Option<CommitDraft>, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let nonce = state.update(cx, |s, _| {
             if !s.flags.bool(crate::flags::ids::PERSIST_COMMIT_DRAFTS)
@@ -122,7 +125,7 @@ impl Dispatcher {
             Some(s.commit_drafts_nonce)
         });
         let Some(nonce) = nonce else { return };
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             cx.background_executor().timer(DRAFT_SAVE_DELAY).await;
             let pending = state.read_with(cx, |s, _| {
                 (s.commit_drafts_nonce == nonce).then(|| (s.store.clone(), s.commit_drafts.clone()))

@@ -20,9 +20,9 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::host::{AsyncCtx, Host};
 pub use corvene_platform::updater::PackageManager;
 use corvene_platform::updater::{self, ReleaseInfo, UpdateError};
-use gpui_kit::{App, AsyncApp};
 use tracing::{error, info};
 
 use crate::dispatcher::Dispatcher;
@@ -151,7 +151,7 @@ impl Dispatcher {
     /// At launch: restore the last check time, drop the `.old` bundle a
     /// previous update left, then check after a jittered delay and every
     /// four hours (`setInterval(() => this.checkForUpdates(true), …)`).
-    pub fn start_update_checks(cx: &mut App) {
+    pub fn start_update_checks(cx: &mut dyn Host) {
         let last = Self::state(cx)
             .read(cx)
             .settings
@@ -180,7 +180,7 @@ impl Dispatcher {
                 .unwrap_or(0);
             Duration::from_secs(15 + u64::from(nanos % 45))
         };
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             cx.background_executor().timer(jitter).await;
             loop {
                 cx.update(|cx| {
@@ -203,7 +203,7 @@ impl Dispatcher {
     /// `checkForUpdates`: ask the feed; download and verify a newer release.
     /// A check while an update is downloading or ready does nothing (GHD
     /// returns early on `UpdateReady`).
-    pub fn check_for_updates(user_initiated: bool, cx: &mut App) {
+    pub fn check_for_updates(user_initiated: bool, cx: &mut dyn Host) {
         let nonce = {
             let state = Self::state(cx);
             let s = state.read(cx);
@@ -232,7 +232,7 @@ impl Dispatcher {
         nonce: u64,
         user_initiated: bool,
         result: Result<Option<ReleaseInfo>, UpdateError>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let state = Self::state(cx);
         if state.read(cx).update.nonce != nonce {
@@ -276,13 +276,17 @@ impl Dispatcher {
     }
 
     /// Download the zip and its signature, verify, then `Ready`.
-    fn download_update(nonce: u64, release: ReleaseInfo, update: AvailableUpdate, cx: &mut App) {
+    fn download_update(
+        nonce: u64,
+        release: ReleaseInfo,
+        update: AvailableUpdate,
+        cx: &mut dyn Host,
+    ) {
         let state = Self::state(cx);
         let (tx, rx) = async_channel::unbounded::<(u64, Option<u64>)>();
         // progress feed for About's "Downloading update…"
         cx.spawn({
-            let state = state.clone();
-            async move |cx: &mut AsyncApp| {
+            async move |cx: &mut AsyncCtx| {
                 while let Ok((received, total)) = rx.recv().await {
                     state.update(cx, |s, cx| {
                         if s.update.nonce == nonce
@@ -354,7 +358,7 @@ impl Dispatcher {
     }
 
     /// `504-release-notes-heading-kinds`
-    fn heading_kinds(cx: &App) -> bool {
+    fn heading_kinds(cx: &dyn Host) -> bool {
         Self::state(cx)
             .read(cx)
             .flags
@@ -364,7 +368,13 @@ impl Dispatcher {
     /// GHD `onAutoUpdaterError`: back to `UpdateNotAvailable`; user-initiated
     /// checks show the error (`postError`), background ones only log it
     /// (`503-quiet-background-update-errors`).
-    fn update_failed(nonce: u64, user_initiated: bool, what: &str, err: UpdateError, cx: &mut App) {
+    fn update_failed(
+        nonce: u64,
+        user_initiated: bool,
+        what: &str,
+        err: UpdateError,
+        cx: &mut dyn Host,
+    ) {
         error!(%err, "could not {what}");
         Self::state(cx).update(cx, |s, cx| {
             if s.update.nonce == nonce {
@@ -387,14 +397,14 @@ impl Dispatcher {
     }
 
     /// `touchLastChecked`
-    fn touch_last_update_check(cx: &mut App) {
+    fn touch_last_update_check(cx: &mut dyn Host) {
         let now = SystemTime::now();
         Self::state(cx).update(cx, |s, _| s.update.last_successful_check = Some(now));
         Self::update_settings(cx, |s| s.last_successful_update_check = Some(now_secs()));
     }
 
     /// The banner's ✕ (`setUpdateBannerVisibility(false)`).
-    pub fn dismiss_update_banner(cx: &mut App) {
+    pub fn dismiss_update_banner(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.update.banner_visible {
                 s.update.banner_visible = false;
@@ -405,7 +415,7 @@ impl Dispatcher {
 
     /// "what's new": the new release's notes; the dialog offers "Install and
     /// Restart" while the update is ready.
-    pub fn show_update_release_notes(cx: &mut App) {
+    pub fn show_update_release_notes(cx: &mut dyn Host) {
         let summary = Self::state(cx)
             .read(cx)
             .update
@@ -421,7 +431,7 @@ impl Dispatcher {
 
     /// `quitAndInstallUpdate`: swap the bundle (Linux: rename the AppImage
     /// over `$APPIMAGE`), relaunch it after this process exits, quit.
-    pub fn install_update(cx: &mut App) {
+    pub fn install_update(cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (zip, sha256) = match &state.read(cx).update.status {
             UpdateStatus::Ready { zip, sha256, .. } => (zip.clone(), sha256.clone()),
@@ -493,7 +503,7 @@ impl Dispatcher {
     /// `CORVENE_POPUP=update-available[:brew|:pkg]`: a sample update in the
     /// ready (or Homebrew / package manager) state so the banner, About and
     /// Release Notes can be seen without a release feed.
-    pub fn install_sample_update(manager: Option<PackageManager>, cx: &mut App) {
+    pub fn install_sample_update(manager: Option<PackageManager>, cx: &mut dyn Host) {
         let running = env!("CARGO_PKG_VERSION");
         let version = bump_patch(running);
         let body = format!(

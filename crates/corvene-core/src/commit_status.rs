@@ -15,12 +15,12 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use crate::host::{AsyncCtx, Host};
 use corvene_github::{ApiRefCheckRun, Client};
 use corvene_models::{
     CheckConclusion, CheckStatus, CombinedRefCheck, GitHubRepository, JobStep, PullRequest,
     RefCheck, WorkflowRun, check_duration_ms, check_short_description,
 };
-use gpui_kit::{App, AsyncApp};
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
@@ -340,7 +340,7 @@ impl Dispatcher {
         gh: &GitHubRepository,
         git_ref: &str,
         branch_name: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let key = status_key(gh, git_ref);
         let needs_fetch = Self::state(cx).update(cx, |s, _| {
@@ -383,7 +383,7 @@ impl Dispatcher {
 
     /// The current branch's pull request keeps its status subscribed with
     /// the branch name so the popover can show Actions job steps.
-    pub fn subscribe_current_pull_request_status(id: u64, cx: &mut App) {
+    pub fn subscribe_current_pull_request_status(id: u64, cx: &mut dyn Host) {
         let target = {
             let s = Self::state(cx).read(cx);
             s.current_pull_request(id).and_then(|pr| {
@@ -425,8 +425,8 @@ impl Dispatcher {
 
     /// `startBackgroundRefresh`: refresh the eligible subscriptions every
     /// 3 minutes.
-    pub fn start_commit_status_refresh(cx: &mut App) {
-        cx.spawn(async move |cx: &mut AsyncApp| {
+    pub fn start_commit_status_refresh(cx: &mut dyn Host) {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             loop {
                 cx.background_executor()
                     .timer(BACKGROUND_REFRESH_INTERVAL)
@@ -441,7 +441,7 @@ impl Dispatcher {
     }
 
     /// `refreshEligibleSubscriptions`
-    fn refresh_eligible_commit_statuses(cx: &mut App) {
+    fn refresh_eligible_commit_statuses(cx: &mut dyn Host) {
         let keys: Vec<String> = Self::state(cx).update(cx, |s, _| {
             // `308-ci-status-idle-minutes`: a key nobody rendered for this
             // long stops refreshing (0: never, as GHD's mount / unmount)
@@ -473,7 +473,7 @@ impl Dispatcher {
 
     /// `refreshSubscription`: statuses + check runs, then (for the
     /// current PR) the Actions workflows and job steps.
-    fn refresh_commit_status(key: String, cx: &mut App) {
+    fn refresh_commit_status(key: String, cx: &mut dyn Host) {
         let Some(sub) = Self::state(cx).update(cx, |s, _| {
             let store = &mut s.commit_statuses;
             if store.in_flight.contains(&key) || store.in_flight.len() >= MAX_CONCURRENT_FETCHES {
@@ -572,7 +572,7 @@ impl Dispatcher {
         gh: &GitHubRepository,
         git_ref: &str,
         pending: Vec<RefCheck>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let key = status_key(gh, git_ref);
         Self::state(cx).update(cx, |s, cx| {
@@ -592,7 +592,7 @@ impl Dispatcher {
     }
 
     /// `setShowCIStatusPopover`
-    pub fn set_show_ci_status_popover(show: bool, cx: &mut App) {
+    pub fn set_show_ci_status_popover(show: bool, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.show_ci_status_popover != show {
                 s.show_ci_status_popover = show;
@@ -608,8 +608,8 @@ impl Dispatcher {
         gh: GitHubRepository,
         checks: Vec<RefCheck>,
         failed_only: bool,
-        then: impl FnOnce(bool, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(bool, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let Some((endpoint, token, _)) = Self::api_for(&gh, cx) else {
             then(false, cx);
@@ -654,8 +654,8 @@ impl Dispatcher {
     pub fn determine_rerunnable_checks(
         gh: GitHubRepository,
         checks: Vec<RefCheck>,
-        then: impl FnOnce(Vec<RefCheck>, Vec<RefCheck>, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(Vec<RefCheck>, Vec<RefCheck>, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let Some((endpoint, token, _)) = Self::api_for(&gh, cx) else {
             then(Vec::new(), checks, cx);

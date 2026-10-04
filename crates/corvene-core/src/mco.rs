@@ -33,12 +33,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::host::{AsyncCtx, Host};
 use corvene_git::{CherryPickResult, RebaseResult};
 use corvene_models::{
     Branch, BranchKind, Commit, CommitOneLine, ManualConflictResolution, McoProgress, Mergeability,
     MultiCommitOperationKind, Section, WorkingDirectoryFileChange, WorkingDirectoryStatus,
 };
-use gpui_kit::{App, AsyncApp};
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -521,12 +521,12 @@ pub struct RebasePreview {
 }
 
 fn spawn_bg<T: Send + 'static>(
-    cx: &mut App,
+    cx: &mut dyn Host,
     work: impl FnOnce() -> T + Send + 'static,
-    then: impl FnOnce(T, &mut App) + 'static,
+    then: impl FnOnce(T, &mut dyn Host) + 'static,
 ) {
     let task = cx.background_executor().spawn(async move { work() });
-    cx.spawn(async move |cx: &mut AsyncApp| {
+    cx.spawn(async move |cx: &mut AsyncCtx| {
         let result = task.await;
         cx.update(|cx| then(result, cx));
     })
@@ -548,7 +548,7 @@ impl Dispatcher {
     /// cherry-pick and `838-no-merge-while-conflicted` is on: the merge,
     /// rebase and update-from-default entry points then do not start another
     /// operation (GHD starts it and shows git's error).
-    pub fn merge_blocked_by_conflicts(id: u64, cx: &App) -> bool {
+    pub fn merge_blocked_by_conflicts(id: u64, cx: &dyn Host) -> bool {
         let s = Self::state(cx).read(cx);
         s.flags.bool(crate::flags::ids::NO_MERGE_WHILE_CONFLICTED)
             && s.repo_states
@@ -557,7 +557,7 @@ impl Dispatcher {
     }
 
     /// [`Self::merge_blocked_by_conflicts`], explaining why when it is.
-    pub fn refuse_merge_while_conflicted(id: u64, cx: &mut App) -> bool {
+    pub fn refuse_merge_while_conflicted(id: u64, cx: &mut dyn Host) -> bool {
         if !Self::merge_blocked_by_conflicts(id, cx) {
             return false;
         }
@@ -575,7 +575,7 @@ impl Dispatcher {
     /// `_setBanner`. Its view (`corvene_ui::banner::BannerView`, GHD
     /// `Banner`) focuses it and dismisses it `Banner::timeout()` after focus
     /// leaves it (`crate::banner_focus`).
-    pub fn set_banner(banner: Banner, cx: &mut App) {
+    pub fn set_banner(banner: Banner, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.banner_nonce += 1;
             s.banner = Some(banner);
@@ -585,7 +585,7 @@ impl Dispatcher {
 
     /// GHD `Banner`'s dismissal timeout (`onDismissed`) for the banner shown
     /// as `nonce`: it goes unless another banner has replaced it.
-    pub fn dismiss_banner(nonce: u64, cx: &mut App) {
+    pub fn dismiss_banner(nonce: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.banner_nonce == nonce && s.banner.take().is_some() {
                 cx.notify();
@@ -593,7 +593,7 @@ impl Dispatcher {
         });
     }
 
-    pub fn clear_banner(cx: &mut App) {
+    pub fn clear_banner(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if s.banner.take().is_some() {
                 cx.notify();
@@ -601,7 +601,7 @@ impl Dispatcher {
         });
     }
 
-    fn clear_conflicts_banner(cx: &mut App) {
+    fn clear_conflicts_banner(cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             if matches!(s.banner, Some(Banner::ConflictsFound { .. })) {
                 s.banner = None;
@@ -612,7 +612,7 @@ impl Dispatcher {
 
     // ---- operation state ----
 
-    fn mco(id: u64, cx: &App) -> Option<MultiCommitOperation> {
+    fn mco(id: u64, cx: &dyn Host) -> Option<MultiCommitOperation> {
         Self::state(cx)
             .read(cx)
             .repo_states
@@ -620,7 +620,7 @@ impl Dispatcher {
             .and_then(|r| r.mco.clone())
     }
 
-    fn update_mco(id: u64, cx: &mut App, edit: impl FnOnce(&mut MultiCommitOperation)) {
+    fn update_mco(id: u64, cx: &mut dyn Host, edit: impl FnOnce(&mut MultiCommitOperation)) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(mco) = s.repo_state_mut(id).mco.as_mut() {
                 edit(mco);
@@ -629,7 +629,7 @@ impl Dispatcher {
         });
     }
 
-    pub fn set_mco_step(id: u64, step: McoStep, cx: &mut App) {
+    pub fn set_mco_step(id: u64, step: McoStep, cx: &mut dyn Host) {
         Self::update_mco(id, cx, |m| m.step = step);
     }
 
@@ -639,7 +639,7 @@ impl Dispatcher {
         target_branch: Option<String>,
         original_branch_tip: Option<String>,
         step: McoStep,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let (first_summary, total) = match &detail {
             McoDetail::Rebase { commits, .. } | McoDetail::CherryPick { commits, .. } => (
@@ -678,7 +678,7 @@ impl Dispatcher {
         });
     }
 
-    fn show_mco_popup(id: u64, cx: &mut App) {
+    fn show_mco_popup(id: u64, cx: &mut dyn Host) {
         let flow = Self::state(cx)
             .read(cx)
             .repo_states
@@ -697,7 +697,7 @@ impl Dispatcher {
             .any(|p| matches!(p.popup, Popup::MultiCommitOperation { repo, .. } if repo == id))
     }
 
-    fn close_mco_popup(id: u64, cx: &mut App) {
+    fn close_mco_popup(id: u64, cx: &mut dyn Host) {
         Self::close_popups_where(
             |p| matches!(p, Popup::MultiCommitOperation { repo, .. } if *repo == id),
             cx,
@@ -705,7 +705,7 @@ impl Dispatcher {
     }
 
     /// `_endMultiCommitOperation` (+ closing its dialog).
-    pub fn end_mco(id: u64, cx: &mut App) {
+    pub fn end_mco(id: u64, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).mco = None;
             cx.notify();
@@ -715,12 +715,12 @@ impl Dispatcher {
 
     pub(crate) fn current_branch_and_tip_pub(
         id: u64,
-        cx: &App,
+        cx: &dyn Host,
     ) -> Option<(String, Option<String>)> {
         Self::current_branch_and_tip(id, cx)
     }
 
-    fn current_branch_and_tip(id: u64, cx: &App) -> Option<(String, Option<String>)> {
+    fn current_branch_and_tip(id: u64, cx: &dyn Host) -> Option<(String, Option<String>)> {
         let s = Self::state(cx).read(cx);
         let branch = s.repo_states.get(&id)?.info.as_ref()?.current_branch()?;
         Some((branch.name.clone(), branch.tip.clone()))
@@ -732,7 +732,7 @@ impl Dispatcher {
     fn current_branch_or_explain(
         id: u64,
         title: &str,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) -> Option<(String, Option<String>)> {
         let found = Self::current_branch_and_tip(id, cx);
         if found.is_none() {
@@ -759,7 +759,7 @@ impl Dispatcher {
     }
 
     /// Flag `834`: rebases keep `#` lines in commit messages.
-    fn rebase_keeps_messages(cx: &App) -> bool {
+    fn rebase_keeps_messages(cx: &dyn Host) -> bool {
         Self::state(cx)
             .read(cx)
             .flags
@@ -767,14 +767,14 @@ impl Dispatcher {
     }
 
     /// Flag `836`: cherry-picks keep `#` lines and drop git's conflict note.
-    fn cherry_pick_keeps_messages(cx: &App) -> bool {
+    fn cherry_pick_keeps_messages(cx: &dyn Host) -> bool {
         Self::state(cx)
             .read(cx)
             .flags
             .bool(crate::flags::ids::CHERRY_PICK_KEEPS_MESSAGES)
     }
 
-    fn working_directory_files(id: u64, cx: &App) -> Vec<WorkingDirectoryFileChange> {
+    fn working_directory_files(id: u64, cx: &dyn Host) -> Vec<WorkingDirectoryFileChange> {
         Self::state(cx)
             .read(cx)
             .repo_states
@@ -784,7 +784,7 @@ impl Dispatcher {
             .unwrap_or_default()
     }
 
-    fn manual_resolutions(id: u64, cx: &App) -> BTreeMap<String, ManualConflictResolution> {
+    fn manual_resolutions(id: u64, cx: &dyn Host) -> BTreeMap<String, ManualConflictResolution> {
         Self::state(cx)
             .read(cx)
             .repo_states
@@ -804,7 +804,7 @@ impl Dispatcher {
 
     /// `_checkForUncommittedChanges`: rebase-style operations need a clean
     /// working directory; offer to stash and retry.
-    fn blocked_by_local_changes(id: u64, retry: RetryAction, cx: &mut App) -> bool {
+    fn blocked_by_local_changes(id: u64, retry: RetryAction, cx: &mut dyn Host) -> bool {
         let files: Vec<String> = Self::working_directory_files(id, cx)
             .into_iter()
             .map(|f| f.path)
@@ -824,7 +824,7 @@ impl Dispatcher {
     }
 
     /// `LocalChangesOverwrittenDialog` › Stash Changes and Continue.
-    pub fn stash_and_retry(id: u64, retry: RetryAction, cx: &mut App) {
+    pub fn stash_and_retry(id: u64, retry: RetryAction, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -859,7 +859,7 @@ impl Dispatcher {
     }
 
     /// `performRetry`
-    pub fn perform_retry(id: u64, retry: RetryAction, cx: &mut App) {
+    pub fn perform_retry(id: u64, retry: RetryAction, cx: &mut dyn Host) {
         match retry {
             RetryAction::CherryPick { target } => Self::cherry_pick_to_branch(id, target, cx),
             RetryAction::CherryPickNewBranch { name, start_point } => {
@@ -920,7 +920,7 @@ impl Dispatcher {
     // ---- shared result processing ----
 
     /// `completeMultiCommitOperation`: banner, force-push bookkeeping, refresh.
-    fn complete_mco(id: u64, count: usize, cx: &mut App) {
+    fn complete_mco(id: u64, count: usize, cx: &mut dyn Host) {
         let Some(mco) = Self::mco(id, cx) else {
             return;
         };
@@ -979,7 +979,7 @@ impl Dispatcher {
     }
 
     /// `startMultiCommitOperationConflictFlow`
-    fn start_conflict_flow(id: u64, our: Option<String>, their: Option<String>, cx: &mut App) {
+    fn start_conflict_flow(id: u64, our: Option<String>, their: Option<String>, cx: &mut dyn Host) {
         let has_conflict_state = Self::state(cx)
             .read(cx)
             .repo_states
@@ -1005,7 +1005,7 @@ impl Dispatcher {
     /// Show the conflicts step of `id`'s operation: the dialog, or with
     /// `878-conflicts-open-as-banner` the conflicts banner (as if the dialog
     /// had been closed).
-    fn reveal_conflicts(id: u64, cx: &mut App) {
+    fn reveal_conflicts(id: u64, cx: &mut dyn Host) {
         if Self::state(cx)
             .read(cx)
             .flags
@@ -1025,7 +1025,7 @@ impl Dispatcher {
         count: usize,
         our: Option<String>,
         their: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if let Some(status) = status {
             Self::state(cx).update(cx, |s, cx| {
@@ -1096,14 +1096,14 @@ impl Dispatcher {
     // ---- rebase ----
 
     /// Branch › Rebase Current Branch…: open the choose-branch step.
-    pub fn start_rebase_flow(id: u64, cx: &mut App) {
+    pub fn start_rebase_flow(id: u64, cx: &mut dyn Host) {
         Self::start_rebase_flow_onto(id, None, cx);
     }
 
     /// The choose-branch step with `base_branch` already selected (the
     /// branch list's "Rebase Current Branch onto…",
     /// `856-branch-menu-rebase-onto`).
-    pub fn start_rebase_flow_onto(id: u64, base_branch: Option<String>, cx: &mut App) {
+    pub fn start_rebase_flow_onto(id: u64, base_branch: Option<String>, cx: &mut dyn Host) {
         // `showRebaseDialog` → `getMultiCommitOperationChooseBranchStep`
         let step = {
             let s = Self::state(cx).read(cx);
@@ -1138,14 +1138,14 @@ impl Dispatcher {
     }
 
     /// `updateRebasePreview`
-    pub fn preview_rebase(id: u64, base_branch: String, cx: &mut App) {
+    pub fn preview_rebase(id: u64, base_branch: String, cx: &mut dyn Host) {
         Self::preview_rebase_then(id, base_branch, |_, _| {}, cx);
     }
 
     /// Update from Default Branch with `pull.rebase` set
     /// (`859-update-from-default-rebases`): rebase the current branch onto
     /// `base_branch` without the choose-branch step.
-    pub(crate) fn rebase_onto(id: u64, base_branch: String, cx: &mut App) {
+    pub(crate) fn rebase_onto(id: u64, base_branch: String, cx: &mut dyn Host) {
         let Some((current, _)) = Self::current_branch_and_tip(id, cx) else {
             return;
         };
@@ -1179,8 +1179,8 @@ impl Dispatcher {
     fn preview_rebase_then(
         id: u64,
         base_branch: String,
-        then: impl FnOnce(RebasePreview, &mut App) + 'static,
-        cx: &mut App,
+        then: impl FnOnce(RebasePreview, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -1218,7 +1218,7 @@ impl Dispatcher {
     }
 
     /// `startRebase`: warn about a force push when needed, then rebase.
-    pub fn start_rebase(id: u64, base_branch: String, force_push_checked: bool, cx: &mut App) {
+    pub fn start_rebase(id: u64, base_branch: String, force_push_checked: bool, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -1295,7 +1295,7 @@ impl Dispatcher {
         base_branch: String,
         target_branch: String,
         commits: Vec<CommitOneLine>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -1344,9 +1344,9 @@ impl Dispatcher {
     /// mirroring it into the operation state as it arrives.
     fn run_with_progress<T: Send + 'static>(
         id: u64,
-        cx: &mut App,
+        cx: &mut dyn Host,
         work: impl FnOnce(&mut dyn FnMut(McoProgress)) -> T + Send + 'static,
-        then: impl FnOnce(T, &mut App) + 'static,
+        then: impl FnOnce(T, &mut dyn Host) + 'static,
     ) {
         let (tx, rx) = async_channel::unbounded::<McoProgress>();
         let task = cx.background_executor().spawn(async move {
@@ -1355,7 +1355,7 @@ impl Dispatcher {
             };
             work(&mut report)
         });
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             while let Ok(progress) = rx.recv().await {
                 cx.update(|cx| Self::update_mco(id, cx, |m| m.progress = progress));
             }
@@ -1366,7 +1366,7 @@ impl Dispatcher {
     }
 
     /// `WarnForcePushDialog` › Begin: remember the checkbox, run the operation.
-    pub fn begin_after_force_push_warning(id: u64, ask_again: bool, cx: &mut App) {
+    pub fn begin_after_force_push_warning(id: u64, ask_again: bool, cx: &mut dyn Host) {
         if !ask_again {
             Self::update_settings(cx, |s| s.confirm_force_push = false);
         }
@@ -1416,7 +1416,7 @@ impl Dispatcher {
         id: u64,
         path: String,
         resolution: Option<ManualConflictResolution>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(conflict) = s.repo_state_mut(id).conflict_state.as_mut() {
@@ -1436,7 +1436,11 @@ impl Dispatcher {
     /// Conflicts dialog › Resolve All (flag `839`): `resolution` for every
     /// file that still has conflicts. Nothing is written until Continue, and
     /// each file keeps its Undo.
-    pub fn set_all_manual_resolutions(id: u64, resolution: ManualConflictResolution, cx: &mut App) {
+    pub fn set_all_manual_resolutions(
+        id: u64,
+        resolution: ManualConflictResolution,
+        cx: &mut dyn Host,
+    ) {
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             let Some(status) = rs.status.as_deref() else {
@@ -1458,7 +1462,7 @@ impl Dispatcher {
 
     /// Conflicts dialog › Open in Merge Tool (flag `842`): the user's
     /// `merge.tool` on one file; refresh once it closes.
-    pub fn open_in_merge_tool(id: u64, path: String, cx: &mut App) {
+    pub fn open_in_merge_tool(id: u64, path: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -1474,7 +1478,7 @@ impl Dispatcher {
         );
     }
 
-    fn note_resolved_conflicts(id: u64, cx: &mut App) {
+    fn note_resolved_conflicts(id: u64, cx: &mut dyn Host) {
         let any_resolved = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
@@ -1495,7 +1499,7 @@ impl Dispatcher {
 
     /// Conflicts dialog dismissed (`onInvokeConflictsDialogDismissed`): keep
     /// the operation, show the "Resolve conflicts to continue…" banner.
-    pub fn hide_conflicts(id: u64, cx: &mut App) {
+    pub fn hide_conflicts(id: u64, cx: &mut dyn Host) {
         Self::note_resolved_conflicts(id, cx);
         let Some(mco) = Self::mco(id, cx) else {
             Self::close_mco_popup(id, cx);
@@ -1522,7 +1526,7 @@ impl Dispatcher {
     }
 
     /// Banner › View conflicts.
-    pub fn show_conflicts(id: u64, cx: &mut App) {
+    pub fn show_conflicts(id: u64, cx: &mut dyn Host) {
         Self::clear_conflicts_banner(cx);
         if Self::mco(id, cx).is_none() {
             return;
@@ -1532,7 +1536,7 @@ impl Dispatcher {
     }
 
     /// Conflicts dialog › Abort: confirm first when work would be lost.
-    pub fn request_abort_mco(id: u64, cx: &mut App) {
+    pub fn request_abort_mco(id: u64, cx: &mut dyn Host) {
         Self::note_resolved_conflicts(id, cx);
         let Some(mco) = Self::mco(id, cx) else {
             return;
@@ -1545,12 +1549,12 @@ impl Dispatcher {
     }
 
     /// Confirm-abort dialog › Cancel.
-    pub fn return_to_conflicts(id: u64, cx: &mut App) {
+    pub fn return_to_conflicts(id: u64, cx: &mut dyn Host) {
         Self::set_mco_step(id, McoStep::ShowConflicts, cx);
     }
 
     /// `onAbort` per operation kind.
-    pub fn abort_mco(id: u64, cx: &mut App) {
+    pub fn abort_mco(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -1619,7 +1623,7 @@ impl Dispatcher {
     }
 
     /// Conflicts dialog › Continue.
-    pub fn continue_after_conflicts(id: u64, cx: &mut App) {
+    pub fn continue_after_conflicts(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -1803,7 +1807,7 @@ impl Dispatcher {
     // ---- merge ----
 
     /// `_mergeBranch` (+ `initializeMergeOperation`).
-    pub fn merge_branch(id: u64, branch: String, squash: bool, cx: &mut App) {
+    pub fn merge_branch(id: u64, branch: String, squash: bool, cx: &mut dyn Host) {
         Self::merge_branch_with_message(id, branch, squash, None, cx)
     }
 
@@ -1814,7 +1818,7 @@ impl Dispatcher {
         branch: String,
         squash: bool,
         message: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -1913,7 +1917,7 @@ impl Dispatcher {
     // ---- cherry-pick ----
 
     /// History › Cherry-pick Commit(s)…: open the choose-target-branch step.
-    pub fn start_cherry_pick_flow(id: u64, shas: Vec<String>, cx: &mut App) {
+    pub fn start_cherry_pick_flow(id: u64, shas: Vec<String>, cx: &mut dyn Host) {
         let Some((current, tip)) = Self::current_branch_or_explain(id, "Could not cherry-pick", cx)
         else {
             return;
@@ -1959,7 +1963,7 @@ impl Dispatcher {
     }
 
     /// `orderCommitsByHistory`: the given commits in log order, oldest first.
-    fn commits_oldest_first(id: u64, shas: &[String], cx: &App) -> Vec<CommitOneLine> {
+    fn commits_oldest_first(id: u64, shas: &[String], cx: &dyn Host) -> Vec<CommitOneLine> {
         let s = Self::state(cx).read(cx);
         let Some(rs) = s.repo_states.get(&id) else {
             return Vec::new();
@@ -1977,7 +1981,7 @@ impl Dispatcher {
     }
 
     /// Choose-target-branch › New Branch: switch to the create-branch step.
-    pub fn cherry_pick_show_create_branch(id: u64, initial_name: String, cx: &mut App) {
+    pub fn cherry_pick_show_create_branch(id: u64, initial_name: String, cx: &mut dyn Host) {
         Self::update_mco(id, cx, |m| {
             if let McoDetail::CherryPick { branch_created, .. } = &mut m.detail {
                 *branch_created = true;
@@ -1991,7 +1995,7 @@ impl Dispatcher {
         id: u64,
         name: String,
         start_point: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -2032,7 +2036,7 @@ impl Dispatcher {
 
     /// `894-cherry-pick-into-worktree-branch`: the other worktree that has
     /// `branch` checked out, when the flag is on.
-    fn worktree_with_branch(id: u64, branch: &str, cx: &App) -> Option<PathBuf> {
+    fn worktree_with_branch(id: u64, branch: &str, cx: &dyn Host) -> Option<PathBuf> {
         let s = Self::state(cx).read(cx);
         if !s
             .flags
@@ -2066,7 +2070,7 @@ impl Dispatcher {
         target: String,
         path: PathBuf,
         commits: Vec<CommitOneLine>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         enum Outcome {
             Done,
@@ -2172,7 +2176,7 @@ impl Dispatcher {
     }
 
     /// `cherryPick`: check out the target branch, then copy the commits.
-    pub fn cherry_pick_to_branch(id: u64, target_name: String, cx: &mut App) {
+    pub fn cherry_pick_to_branch(id: u64, target_name: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2285,7 +2289,7 @@ impl Dispatcher {
         status: Option<WorkingDirectoryStatus>,
         commits: Vec<CommitOneLine>,
         source_branch: Option<String>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         if let Some(status) = status {
             Self::state(cx).update(cx, |s, cx| {
@@ -2357,7 +2361,7 @@ impl Dispatcher {
 
     /// History › Squash N Commits… (and drag-onto-commit): ask for the
     /// combined message after checking for merge commits in the range.
-    pub fn request_squash(id: u64, to_squash: Vec<String>, onto: String, cx: &mut App) {
+    pub fn request_squash(id: u64, to_squash: Vec<String>, onto: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2435,7 +2439,7 @@ impl Dispatcher {
         onto: String,
         message: String,
         force_push_checked: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -2515,7 +2519,7 @@ impl Dispatcher {
             keep_messages: Self::rebase_keeps_messages(cx),
             autostash,
         };
-        let run = move |cx: &mut App| {
+        let run = move |cx: &mut dyn Host| {
             let (git, workdir) = (git.clone(), workdir.clone());
             let branch = branch.clone();
             let (commits, target_commit, last_retained, message) = (
@@ -2583,8 +2587,8 @@ impl Dispatcher {
         id: u64,
         force_push_checked: bool,
         oldest_commit_ref: Option<String>,
-        run: impl FnOnce(&mut App) + 'static,
-        cx: &mut App,
+        run: impl FnOnce(&mut dyn Host) + 'static,
+        cx: &mut dyn Host,
     ) {
         let confirm = Self::state(cx).read(cx).settings.confirm_force_push;
         if !confirm || force_push_checked {
@@ -2623,7 +2627,7 @@ impl Dispatcher {
         to_move: Vec<String>,
         before: Option<String>,
         force_push_checked: bool,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
@@ -2694,7 +2698,7 @@ impl Dispatcher {
         let count = commits.len();
         let last_retained_for_run = last_retained.clone();
         let keep_messages = Self::rebase_keeps_messages(cx);
-        let run = move |cx: &mut App| {
+        let run = move |cx: &mut dyn Host| {
             let (git, workdir) = (git.clone(), workdir.clone());
             let branch = branch.clone();
             let (commits, before_commit, last_retained) = (
@@ -2738,7 +2742,7 @@ impl Dispatcher {
     }
 
     /// Banner › Undo (`_undoMultiCommitOperation`).
-    pub fn undo_mco(id: u64, cx: &mut App) {
+    pub fn undo_mco(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2833,7 +2837,7 @@ impl Dispatcher {
         rebase_snapshot: Option<corvene_git::RebaseSnapshot>,
         cherry_pick_snapshot: Option<corvene_git::CherryPickSnapshot>,
         merge_head_branches: Option<Vec<String>>,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let (conflict, mco, current, selected, mco_popup_open, banner_is_conflicts) = {
             let s = Self::state(cx).read(cx);
@@ -3003,7 +3007,7 @@ impl Dispatcher {
     /// `892-edit-commit-message`: History › Edit Commit Message… opens the
     /// squash message dialog on the commit's message (no commits to squash
     /// marks the edit), unless a merge commit follows it.
-    pub fn request_edit_commit_message(id: u64, sha: String, cx: &mut App) {
+    pub fn request_edit_commit_message(id: u64, sha: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -3043,7 +3047,7 @@ impl Dispatcher {
     /// `892-edit-commit-message`: give commit `sha` `message`: an amend of
     /// HEAD's message, else a `reword` interactive rebase; the rewritten
     /// commit stays selected.
-    pub fn edit_commit_message(id: u64, sha: String, message: String, cx: &mut App) {
+    pub fn edit_commit_message(id: u64, sha: String, message: String, cx: &mut dyn Host) {
         let (commit, is_head) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);

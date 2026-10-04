@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::{LazyLock, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use gpui_kit::App;
+use crate::host::Host;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -159,7 +159,7 @@ fn load_custom_emoji_blocking() -> Vec<CustomEmoji> {
 
 impl Dispatcher {
     /// Startup: make `:shipit:` and friends available to the autocompletion.
-    pub fn load_custom_emoji(cx: &mut App) {
+    pub fn load_custom_emoji(cx: &mut dyn Host) {
         spawn_bg(cx, load_custom_emoji_blocking, |list, cx| {
             if let Ok(mut c) = CUSTOM.write() {
                 *c = list;

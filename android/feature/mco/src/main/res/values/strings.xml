@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mco_close">Close</string>
+    <string name="mco_cancel">Cancel</string>
+    <string name="mco_filter">Filter</string>
+    <string name="mco_branches">Branches</string>
+    <string name="mco_no_branches">No other branches</string>
+    <string name="mco_new_branch">New branch</string>
+    <string name="mco_new_branch_title">New branch</string>
+    <string name="mco_new_branch_confirm">Create branch and cherry-pick</string>
+    <string name="mco_name">Name</string>
+    <string name="mco_choose_rebase">Rebase %1$s onto…</string>
+    <string name="mco_choose_cherry_pick">Cherry-pick %1$d commit(s) to a branch</string>
+    <string name="mco_progress_title">%1$s %2$s</string>
+    <string name="mco_progress_step">Commit %1$d of %2$d: %3$s</string>
+    <string name="mco_conflicts_title">Resolve conflicts</string>
+    <string name="mco_conflicts_body_branch">Resolve conflicts to continue %1$s %2$s.</string>
+    <string name="mco_conflicts_body">Resolve conflicts to continue %1$s.</string>
+    <plurals name="mco_unresolved">
+        <item quantity="one">%1$d conflicted file</item>
+        <item quantity="other">%1$d conflicted files</item>
+    </plurals>
+    <string name="mco_all_resolved">All conflicts resolved</string>
+    <string name="mco_file_conflicted">Conflicted</string>
+    <string name="mco_file_resolved">Resolved</string>
+    <string name="mco_using_ours">Using our changes</string>
+    <string name="mco_using_theirs">Using their changes</string>
+    <string name="mco_has_conflicts">Conflicts to resolve</string>
+    <string name="mco_no_conflicts">No conflicts remaining</string>
+    <string name="mco_ours">Use ours</string>
+    <string name="mco_theirs">Use theirs</string>
+    <string name="mco_open_editor">Open in editor</string>
+    <string name="mco_abort">Abort %1$s</string>
+    <string name="mco_continue">Continue %1$s</string>
+    <string name="mco_confirm_abort_title">Confirm abort %1$s</string>
+    <string name="mco_confirm_abort_body">Are you sure you want to abort this %1$s? This will take you back to the original branch state and the conflicts you have already resolved will be discarded.</string>
+    <string name="mco_warn_force_title">%1$s will require force push</string>
+    <string name="mco_warn_force_body">Are you sure you want to continue? This branch has been pushed and its history will be rewritten, so the next push needs a force push.</string>
+    <string name="mco_warn_force_begin">Begin %1$s</string>
+    <string name="mco_kind_merge">Merge</string>
+    <string name="mco_kind_rebase">Rebase</string>
+    <string name="mco_kind_cherry_pick">Cherry-pick</string>
+    <string name="mco_kind_squash">Squash</string>
+    <string name="mco_kind_reorder">Reorder</string>
+    <string name="mco_verb_merge">merging</string>
+    <string name="mco_verb_rebase">rebasing</string>
+    <string name="mco_verb_cherry_pick">cherry-picking onto</string>
+    <string name="mco_verb_squash">squashing</string>
+    <string name="mco_verb_reorder">reordering</string>
+    <string name="mco_noun_merge">merge</string>
+    <string name="mco_noun_rebase">rebase</string>
+    <string name="mco_noun_cherry_pick">cherry-pick</string>
+    <string name="mco_noun_squash">squash</string>
+    <string name="mco_noun_reorder">reorder</string>
+</resources>

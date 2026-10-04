@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use gpui_kit::App;
+use crate::host::Host;
 
 use crate::Dispatcher;
 use crate::remote::spawn_bg;
@@ -13,7 +13,7 @@ use crate::remote::spawn_bg;
 impl Dispatcher {
     /// Reads the repository's tags (name, commit) into
     /// `RepositoryState::branch_list_tags`, for the branch list's Tags group.
-    pub fn load_branch_list_tags(id: u64, cx: &mut App) {
+    pub fn load_branch_list_tags(id: u64, cx: &mut dyn Host) {
         let Some((_, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -37,7 +37,7 @@ impl Dispatcher {
 
     /// Repository › Fetch All Tags: `git fetch --tags` from the current
     /// branch's remote (else the default remote), then a refresh.
-    pub fn fetch_all_tags(id: u64, cx: &mut App) {
+    pub fn fetch_all_tags(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };

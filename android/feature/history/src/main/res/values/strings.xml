@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hist_close">Close</string>
+    <string name="hist_cancel">Cancel</string>
+    <string name="hist_filter">Filter</string>
+    <string name="hist_empty">No history</string>
+    <string name="hist_compare_empty">No commits to show</string>
+    <string name="hist_compare">Compare to branch</string>
+    <string name="hist_compare_title">Compare to branch</string>
+    <string name="hist_compare_branches">Branches</string>
+    <string name="hist_compare_end">Stop comparing</string>
+    <string name="hist_comparing">Comparing with %1$s</string>
+    <string name="hist_behind">Behind</string>
+    <string name="hist_ahead">Ahead</string>
+    <plurals name="hist_behind_count">
+        <item quantity="one">%1$d commit on %2$s not on this branch</item>
+        <item quantity="other">%1$d commits on %2$s not on this branch</item>
+    </plurals>
+    <plurals name="hist_ahead_count">
+        <item quantity="one">%1$d commit on this branch not on %2$s</item>
+        <item quantity="other">%1$d commits on this branch not on %2$s</item>
+    </plurals>
+    <string name="hist_merge_into">Merge %1$s into %2$s</string>
+    <plurals name="hist_selected">
+        <item quantity="one">%1$d commit selected</item>
+        <item quantity="other">%1$d commits selected</item>
+    </plurals>
+    <string name="hist_cherry_pick_short">Cherry-pick…</string>
+    <string name="hist_done">Done</string>
+    <string name="hist_byline">%1$s · %2$s</string>
+    <string name="hist_merge_commit">Merge commit</string>
+    <string name="hist_menu_select">Select multiple</string>
+    <string name="hist_menu_revert">Revert changes in commit</string>
+    <string name="hist_menu_cherry_pick">Cherry-pick commit…</string>
+    <string name="hist_menu_branch">Create branch from commit</string>
+    <string name="hist_menu_tag">Create tag…</string>
+    <string name="hist_menu_checkout">Checkout commit</string>
+    <string name="hist_menu_reset">Reset to commit…</string>
+    <string name="hist_menu_copy_sha">Copy SHA</string>
+    <string name="hist_menu_github">View on GitHub</string>
+    <string name="hist_copied">Copied %1$s</string>
+    <string name="hist_tag_title">Create a tag</string>
+    <string name="hist_tag_confirm">Create tag</string>
+    <string name="hist_tag_body">The tag will point at commit %1$s.</string>
+    <string name="hist_tag_name">Name</string>
+    <string name="hist_tag_sanitized">Will be created as %1$s</string>
+    <string name="hist_tag_message">Message (optional)</string>
+    <string name="hist_checkout_title">Checkout a commit?</string>
+    <string name="hist_checkout_body">Checking out a commit will create a detached HEAD, and you will no longer be on any branch. Are you sure you want to checkout this commit?</string>
+    <string name="hist_checkout_confirm">Checkout commit</string>
+    <string name="hist_reset_title">Reset to commit?</string>
+    <string name="hist_reset_body">The branch will point at this commit. The changes of the commits after it stay in your working directory as uncommitted changes.</string>
+    <string name="hist_reset_confirm">Reset to commit</string>
+    <plurals name="hist_files_changed">
+        <item quantity="one">%1$d changed file</item>
+        <item quantity="other">%1$d changed files</item>
+    </plurals>
+    <plurals name="hist_range">
+        <item quantity="one">%1$d commit</item>
+        <item quantity="other">%1$d commits selected</item>
+    </plurals>
+    <string name="hist_show_more">Show more</string>
+    <string name="hist_show_less">Show less</string>
+    <string name="hist_authored">%1$s authored %2$s</string>
+    <string name="hist_copy_sha">Copy SHA</string>
+    <string name="hist_status_new">New</string>
+    <string name="hist_status_modified">Modified</string>
+    <string name="hist_status_deleted">Deleted</string>
+    <string name="hist_status_renamed">Renamed</string>
+    <string name="hist_status_conflicted">Conflicted</string>
+</resources>

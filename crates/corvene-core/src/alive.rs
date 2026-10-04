@@ -19,11 +19,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::host::{AsyncCtx, Host};
 use corvene_github::alive::{AliveEvent, CommentSubtype};
 use corvene_github::api::ApiPullRequestReviewState;
 use corvene_github::{Client, Endpoint};
 use corvene_models::{Account, GitHubRepository, PullRequest, RefCheck};
-use gpui_kit::{App, AsyncApp};
 use tracing::{debug, info, warn};
 
 use crate::dispatcher::Dispatcher;
@@ -69,10 +69,10 @@ impl Dispatcher {
     /// Start delivering Alive events to the foreground and subscribe for the
     /// signed-in accounts. Call once at launch; `sync_alive_subscriptions`
     /// follows account and settings changes afterwards.
-    pub fn start_alive(cx: &mut App) {
+    pub fn start_alive(cx: &mut dyn Host) {
         let (tx, rx) = async_channel::unbounded::<AliveEvent>();
         Self::state(cx).update(cx, |s, _| s.alive.sender = Some(tx));
-        cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.spawn(async move |cx: &mut AsyncCtx| {
             while let Ok(event) = rx.recv().await {
                 cx.update(|cx| Self::handle_alive_event(event, AliveEventData::Api, cx));
             }
@@ -83,7 +83,7 @@ impl Dispatcher {
 
     /// `AliveStore.setEnabled` + `subscribeToAccounts`: one subscription per
     /// GitHub.com account while notifications are enabled, none otherwise.
-    pub fn sync_alive_subscriptions(cx: &mut App) {
+    pub fn sync_alive_subscriptions(cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (enabled, accounts, sender) = {
             let s = state.read(cx);
@@ -193,7 +193,7 @@ impl Dispatcher {
     /// Deviation (`337-notifications-all-repositories`): an event of another
     /// listed repository counts too; its pull request comes from that
     /// repository's cache, else from the API.
-    pub fn handle_alive_event(event: AliveEvent, data: AliveEventData, cx: &mut App) {
+    pub fn handle_alive_event(event: AliveEvent, data: AliveEventData, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (id, github, cached, account, repo_path) = {
             let s = state.read(cx);
@@ -321,7 +321,7 @@ impl Dispatcher {
         pull_request: PullRequest,
         account: Option<Account>,
         repo_path: std::path::PathBuf,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let state = Self::state(cx);
         // what the API lookups need, before `notify` takes ownership
@@ -331,7 +331,7 @@ impl Dispatcher {
             pull_request.number,
             pull_request.commit_ref(),
         );
-        let notify = move |kind: NotificationKind, cx: &mut App| {
+        let notify = move |kind: NotificationKind, cx: &mut dyn Host| {
             Self::notify_pull_request_event(
                 PullRequestNotification {
                     repo: id,
@@ -521,7 +521,7 @@ impl Dispatcher {
         id: u64,
         kind: TestNotificationType,
         data: AliveEventData,
-        cx: &mut App,
+        cx: &mut dyn Host,
     ) {
         let (github, number) = {
             let s = Self::state(cx).read(cx);

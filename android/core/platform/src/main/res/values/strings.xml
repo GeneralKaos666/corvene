@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="plt_pick_needs_all_files">Corvene can only use folders in its own storage. To use a folder on shared storage in place, allow \"All files access\" first.</string>
+    <string name="plt_pick_not_repository">That folder is not a Git repository. Corvene imports (copies) a folder that is one.</string>
+    <string name="plt_pick_own_storage_only">Corvene can only write to folders in its own storage.</string>
+    <string name="plt_pick_unreadable">That folder is not in Corvene\'s storage.</string>
+    <string name="plt_importing">Importing %1$s into Corvene…</string>
+    <string name="plt_import_failed">The folder could not be imported: %1$s</string>
+    <string name="plt_pick_file_failed">Could not read the file: %1$s</string>
+    <string name="plt_no_folder_picker">No folder picker is available on this device.</string>
+    <string name="plt_no_file_picker">No file picker is available on this device.</string>
+    <string name="plt_no_app_for_url">No app can open %1$s</string>
+    <string name="plt_no_browser">No browser is installed.</string>
+    <string name="plt_no_all_files_settings">This device has no \"All files access\" settings page.</string>
+    <string name="plt_cannot_share">Other apps cannot open %1$s.</string>
+    <string name="plt_no_app_for_file">No app on this device can open %1$s.</string>
+    <string name="plt_documents_title">Corvene</string>
+    <string name="plt_documents_summary">Repositories</string>
+    <string name="plt_home_title">Corvene settings</string>
+    <string name="plt_home_summary">Git configuration and SSH keys</string>
+    <string name="plt_channel_pull_requests">Pull requests</string>
+    <string name="plt_channel_transfers">Network operations</string>
+    <string name="plt_transfer_running">Corvene is talking to a remote</string>
+    <string name="plt_transfer_stop">Stop</string>
+    <string name="plt_termux_missing">Termux is not installed.</string>
+    <string name="plt_termux_private">Termux cannot read Corvene\'s own storage. Open a repository on shared storage in Termux instead.</string>
+    <string name="plt_termux_permission">Allow Corvene to run commands in Termux, then try again.</string>
+    <string name="plt_termux_failed">Could not reach Termux: %1$s</string>
+</resources>
