@@ -219,3 +219,15 @@ measured yet: M-A0 ran fossDebug only.
   wrap mode (compact default) measuring with IntrinsicSize.Min, all under debug Compose.
   Next: measure the `fast` build; then one Text per row with Canvas-drawn gutters and a
   fixed row height in wrap-off mode, `stringResource` hoisted (done), and a baseline profile.
+- **Fast build (`installFossFast`, non-debuggable, release Rust) on the same 6000-line diff:
+  672 frames per 8 flings, 1.19 % janky, p90 15 ms, p95 16 ms, p99 22 ms; composition
+  p50 1.5 ms, p90 3.8 ms.** The debug numbers above were debug-Compose overhead. Cold start
+  (fast, empty store) 497-988 ms; with one repository 716 ms.
+- The fast variant installs as `com.wasimaster.corvene` (no suffix outside debug), a separate
+  store; `run-as` is unavailable, so repositories come in through the folder picker. The
+  picker's `primary:` tree is accepted only with "All files access" (the SAF import copy is
+  M-A3); with the permission granted in Settings, Corvene/demo2 on shared storage was added
+  and shows its full path. `appops set … MANAGE_EXTERNAL_STORAGE allow` is refused on ColorOS.
+- `generateUniffiRelease` failed with "No UniFFI metadata found": the workspace release
+  profile has `strip = true`, and library-mode bindgen reads the static symbol table. The
+  cargo task now sets `CARGO_PROFILE_RELEASE_STRIP=false` and strips itself (98c0e33b).
