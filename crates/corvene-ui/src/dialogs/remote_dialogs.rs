@@ -6,6 +6,8 @@
 //! Deviation (flag `publish-team`): publishing to an organization offers an
 //! optional Team picker (`GET /orgs/{org}/teams`) whose team is granted
 //! access to the new repository; GHD's `publish-repository.tsx` has no team.
+//! Newer Commits on Remote also offers "Pull and Push"
+//! (`297-push-needs-pull-offers-pull`; GHD offers Fetch only).
 
 use corvene_core::{Account, AppState, Dispatcher, RetryAction};
 use gpui_kit::component::input::InputState;
@@ -561,6 +563,46 @@ impl Render for PushNeedsPullDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let repo = self.repo;
+        let mut buttons = OkCancelButtonGroup {
+            destructive: false,
+            cancel: GroupButtonSpec {
+                id: "needs-pull-cancel",
+                label: "Cancel".into(),
+                disabled: false,
+                on_click: Box::new(close),
+            },
+            ok: GroupButtonSpec {
+                id: "needs-pull-fetch",
+                label: "Fetch".into(),
+                disabled: false,
+                on_click: Box::new(move |_, cx| {
+                    Dispatcher::close_popup(cx);
+                    Dispatcher::fetch(repo, false, cx);
+                }),
+            },
+        }
+        .into_buttons();
+        // Corvene (`297-push-needs-pull-offers-pull`): next to Fetch
+        if AppState::global(cx)
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::PUSH_NEEDS_PULL_OFFERS_PULL)
+        {
+            let at = buttons.iter().position(|b| b.primary).unwrap_or(0);
+            buttons.insert(
+                at,
+                DialogButton {
+                    id: "needs-pull-pull-and-push",
+                    label: mac_or("Pull and Push", "Pull and push").into(),
+                    primary: false,
+                    disabled: false,
+                    on_click: Box::new(move |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::pull_and_push(repo, cx);
+                    }),
+                },
+            );
+        }
         dialog_with_kind(
             "dialog-push-needs-pull",
             DialogKind::Warning,
@@ -568,25 +610,7 @@ impl Render for PushNeedsPullDialog {
             div().w(crate::theme::fit_width(450.)).child(
                 "Corvene is unable to push commits to this branch because there are commits on the remote that are not present on your local branch. Fetch these new commits before pushing in order to reconcile them with your local commits.",
             ),
-            OkCancelButtonGroup {
-                destructive: false,
-                cancel: GroupButtonSpec {
-                    id: "needs-pull-cancel",
-                    label: "Cancel".into(),
-                    disabled: false,
-                    on_click: Box::new(close),
-                },
-                ok: GroupButtonSpec {
-                    id: "needs-pull-fetch",
-                    label: "Fetch".into(),
-                    disabled: false,
-                    on_click: Box::new(move |_, cx| {
-                        Dispatcher::close_popup(cx);
-                        Dispatcher::fetch(repo, false, cx);
-                    }),
-                },
-            }
-            .into_buttons(),
+            buttons,
             close,
             window,
             cx,

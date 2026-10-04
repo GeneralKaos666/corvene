@@ -34,6 +34,8 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! The Newer Commits on Remote dialog can pull and push in one go
+//! (`297-push-needs-pull-offers-pull`).
 //! A running fetch, push or pull (until it merges) can be stopped from the
 //! push/pull button (`295-cancel-network-operations`; GHD `push-pull-button.tsx`
 //! only disables itself), and waking from sleep stops a background fetch
@@ -987,15 +989,45 @@ impl Dispatcher {
 
     /// `_pull`
     pub fn pull(id: u64, cx: &mut dyn Host) {
+        Self::pull_then(id, |_, _| {}, cx);
+    }
+
+    /// The Newer Commits on Remote dialog's "Pull and Push"
+    /// (`297-push-needs-pull-offers-pull`; GHD `push-needs-pull-warning.tsx`
+    /// offers Fetch only): pull, then push when the pull went through without
+    /// conflicts. A conflicted pull ends in the usual conflicts flow and
+    /// pushes nothing.
+    pub fn pull_and_push(id: u64, cx: &mut dyn Host) {
+        if !Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::PUSH_NEEDS_PULL_OFFERS_PULL)
+        {
+            return;
+        }
+        Self::pull_then(
+            id,
+            move |pulled, cx| {
+                if pulled {
+                    Self::push(id, false, None, cx);
+                }
+            },
+            cx,
+        );
+    }
+
+    /// `pull`, then `then(pulled)` once it finished (or did not start);
+    /// `pulled` is false after any error, conflicts included.
+    pub fn pull_then(id: u64, then: impl FnOnce(bool, &mut dyn Host) + 'static, cx: &mut dyn Host) {
         if Self::behind_background_fetch(id, cx) {
-            return Self::after_network(id, cx, move |cx| Self::pull(id, cx));
+            return Self::after_network(id, cx, move |cx| Self::pull_then(id, then, cx));
         }
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
-            return;
+            return then(false, cx);
         };
         let Some(remote) = Self::current_remote(id, cx) else {
             Self::show_error("Could not pull", "The repository has no remotes.", cx);
-            return;
+            return then(false, cx);
         };
         let tip = Self::state(cx)
             .read(cx)
@@ -1006,7 +1038,7 @@ impl Dispatcher {
         match tip {
             Some(Tip::Unborn { .. }) => {
                 Self::show_error("Could not pull", "The current branch is unborn.", cx);
-                return;
+                return then(false, cx);
             }
             Some(Tip::Detached { .. }) => {
                 Self::show_error(
@@ -1014,12 +1046,12 @@ impl Dispatcher {
                     "The current repository is in a detached HEAD state.",
                     cx,
                 );
-                return;
+                return then(false, cx);
             }
             _ => {}
         }
         if !Self::begin_network(id, cx) {
-            return;
+            return then(false, cx);
         }
         Self::arm_credential_helper(&remote.url, cx);
         let askpass = Self::askpass_env(cx);
@@ -1123,6 +1155,7 @@ impl Dispatcher {
                 })
             },
             move |(result, status), cx| {
+                let pulled = result.is_ok();
                 if let Some(mut status) = status {
                     status.sort_files();
                     Self::state(cx).update(cx, |s, cx| {
@@ -1154,6 +1187,8 @@ impl Dispatcher {
                     }
                 }
                 Self::refresh_repository(id, cx);
+                // a pull that left conflicts failed (`pulled` is false then)
+                then(pulled, cx);
             },
         );
     }

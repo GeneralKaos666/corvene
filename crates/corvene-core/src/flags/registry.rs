@@ -2075,6 +2075,23 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene/src/main.rs"],
     },
 
+    /// Newer Commits on Remote offers to pull and push.
+    PUSH_NEEDS_PULL_OFFERS_PULL = 297 "push-needs-pull-offers-pull" {
+        title: "Pull and push when the remote moved on",
+        summary: "The Newer Commits on Remote dialog (a push refused because the remote has \
+                  commits the branch lacks) has a Pull and Push button next to Fetch: Corvene \
+                  pulls, and pushes once the pull went through without conflicts. Conflicts \
+                  open the usual conflicts flow and nothing is pushed.",
+        ghd_behaviour: "Offers Fetch only; pulling and pushing again are two more clicks on the \
+                        toolbar button.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8090)],
+        code: &["crates/corvene-ui/src/dialogs/remote_dialogs.rs", "crates/corvene-core/src/remote.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
