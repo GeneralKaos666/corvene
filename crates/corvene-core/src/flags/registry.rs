@@ -2274,6 +2274,23 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-git/src/branch_ops.rs"],
     },
 
+    /// The current branch's checks beside its name when it has no pull request.
+    BRANCH_CI_STATUS = 334 "branch-ci-status" {
+        title: "CI status of branches without a pull request",
+        summary: "When the current branch is pushed to a GitHub repository and has no pull \
+                  request, the branch button shows the status of the checks that ran on its \
+                  pushed commit (statuses and check runs) where the pull request badge would \
+                  be; clicking it opens the check-run popover, with re-run.",
+        ghd_behaviour: "Checks show only on the pull request badge, so a branch's CI status needs \
+                        a pull request or the browser.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10115)],
+        code: &["crates/corvene-core/src/commit_status.rs", "crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/ci_check_popover.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

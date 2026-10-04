@@ -13,6 +13,9 @@
 //!
 //! Corvene addition (flag `319-ci-popover-pull-request-link`): the header's
 //! summary line ends with an "Open #N on GitHub" link to the pull request.
+//!
+//! Corvene addition (flag `334-branch-ci-status`): without a pull request it
+//! lists the checks of the current branch's pushed tip.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -53,14 +56,16 @@ pub struct CiCheckPopover {
     expanded: Option<u64>,
     /// `hasUserToggledCheckRun`
     user_toggled: bool,
-    /// The PR the expansion state belongs to; a new PR resets it.
-    pr_number: Option<u64>,
+    /// The ref (PR head or commit) the expansion state belongs to; another
+    /// one resets it.
+    shown_ref: Option<String>,
 }
 
 struct Snapshot {
     repo: u64,
     github: GitHubRepository,
-    pr_number: u64,
+    /// `None`: the current branch's own checks (`334-branch-ci-status`).
+    pr_number: Option<u64>,
     git_ref: String,
     check: Option<CombinedRefCheck>,
     dotcom: bool,
@@ -81,16 +86,24 @@ impl CiCheckPopover {
             anchor,
             expanded: None,
             user_toggled: false,
-            pr_number: None,
+            shown_ref: None,
         }
     }
 
     fn snapshot(&self, cx: &App) -> Option<Snapshot> {
         let s = self.state.read(cx);
         let id = s.selected?;
-        let pr = s.current_pull_request(id)?;
-        let github = pr.base.repository.clone()?;
-        let git_ref = pr.commit_ref();
+        let (github, git_ref, pr_number) = match s.current_pull_request(id) {
+            Some(pr) => (
+                pr.base.repository.clone()?,
+                pr.commit_ref(),
+                Some(pr.number),
+            ),
+            None => {
+                let (github, sha) = s.branch_ci_ref(id)?;
+                (github, sha, None)
+            }
+        };
         let read_only = s
             .flags
             .bool(corvene_core::flags::ids::RERUN_NEEDS_PUSH_ACCESS)
@@ -104,7 +117,7 @@ impl CiCheckPopover {
                 .is_some_and(|gh| !gh.has_write_permission());
         Some(Snapshot {
             repo: id,
-            pr_number: pr.number,
+            pr_number,
             check: s.commit_status(&github, &git_ref).cloned(),
             dotcom: github.endpoint == "https://api.github.com",
             read_only,
@@ -116,8 +129,8 @@ impl CiCheckPopover {
     /// `setupStateAfterCheckRunPropChange`: the first failed check with job
     /// steps starts expanded.
     fn sync_expansion(&mut self, snap: &Snapshot) {
-        if self.pr_number != Some(snap.pr_number) {
-            self.pr_number = Some(snap.pr_number);
+        if self.shown_ref.as_deref() != Some(snap.git_ref.as_str()) {
+            self.shown_ref = Some(snap.git_ref.clone());
             self.expanded = None;
             self.user_toggled = false;
         }
@@ -280,12 +293,12 @@ impl CiCheckPopover {
                             .text_size(FONT_SIZE_SM())
                             .text_color(t.text_secondary)
                             .child(summary)
-                            .when(pr_link, |d| {
+                            .when_some(snap.pr_number.filter(|_| pr_link), |d, number| {
                                 let repo = snap.repo;
                                 d.child(
                                     crate::widgets::link_button(
                                         "ci-open-pull-request",
-                                        format!("Open #{} on GitHub", snap.pr_number),
+                                        format!("Open #{number} on GitHub"),
                                         cx,
                                     )
                                     .on_click(
@@ -319,7 +332,10 @@ impl CiCheckPopover {
         let external_url = check
             .html_url
             .clone()
-            .unwrap_or_else(|| format!("{}/pull/{}", snap.github.html_url, snap.pr_number));
+            .unwrap_or_else(|| match snap.pr_number {
+                Some(number) => format!("{}/pull/{number}", snap.github.html_url),
+                None => format!("{}/commit/{}", snap.github.html_url, snap.git_ref),
+            });
         let entity = cx.entity().downgrade();
         let row = check_run_row(check, false, expanded, cx).on_click(move |_, _, cx| {
             entity.update(cx, |this, cx| this.toggle(id, cx)).ok();

@@ -144,7 +144,8 @@ pub fn toolbar_widths(
 
 /// `renderPullRequestInfo`
 pub struct PrBadge {
-    pub number: u64,
+    /// `None`: the current branch's own checks (`334-branch-ci-status`).
+    pub number: Option<u64>,
     pub status: Option<(
         corvene_core::CheckStatus,
         Option<corvene_core::CheckConclusion>,
@@ -256,11 +257,22 @@ pub fn toolbar_models(
 
     // `currentPullRequest`: the icon becomes the PR icon and the badge shows
     let current_pr = repo.and_then(|r| state.current_pull_request(r.id));
-    let pr_badge = current_pr.map(|pr| PrBadge {
-        number: pr.number,
-        status: state.commit_status_summary(pr),
-        bounds: pr_badge_bounds.clone(),
-    });
+    let pr_badge = current_pr
+        .map(|pr| PrBadge {
+            number: Some(pr.number),
+            status: state.commit_status_summary(pr),
+            bounds: pr_badge_bounds.clone(),
+        })
+        .or_else(|| {
+            // Corvene (`334-branch-ci-status`): no pull request, the checks
+            // of the branch's pushed tip
+            let status = repo.and_then(|r| state.branch_ci_summary(r.id))?;
+            Some(PrBadge {
+                number: None,
+                status: Some(status),
+                bounds: pr_badge_bounds.clone(),
+            })
+        });
     // Corvene (`275-detached-head-friendly`): the tag HEAD sits on, from the
     // loaded history
     let detached_friendly = state
@@ -802,14 +814,19 @@ pub fn toolbar_button(
                             .absolute()
                             .inset_0(),
                     )
-                    .child(
-                        div()
-                            .text_size(FONT_SIZE_SM())
-                            .line_height(zpx(22.))
-                            .child(format!("#{}", badge.number)),
-                    )
+                    .when_some(badge.number, |d, number| {
+                        d.child(
+                            div()
+                                .text_size(FONT_SIZE_SM())
+                                .line_height(zpx(22.))
+                                .child(format!("#{number}")),
+                        )
+                    })
                     .when_some(badge.status, |d, (status, conclusion)| {
-                        d.child(crate::ci_status::ci_status(status, conclusion).ml(SPACING_HALF()))
+                        d.child(
+                            crate::ci_status::ci_status(status, conclusion)
+                                .when(badge.number.is_some(), |d| d.ml(SPACING_HALF())),
+                        )
                     }),
             )
         })

@@ -6,6 +6,11 @@
 //! Deviation: GHD components subscribe on mount and unsubscribe on
 //! unmount. Views here "touch" a key while they render it; a key nobody
 //! touched for five minutes stops being refreshed.
+//!
+//! Deviation (`334-branch-ci-status`): a current branch without a pull
+//! request subscribes its pushed tip (on the GitHub repository its upstream
+//! belongs to), so the toolbar can show its checks; GHD shows checks only
+//! for pull requests (`ui/branches/ci-status.tsx` via `PullRequestBadge`).
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -281,6 +286,41 @@ impl AppState {
             .as_ref()
     }
 
+    /// `334-branch-ci-status`: the GitHub repository and commit whose checks
+    /// the toolbar shows for the current branch when it has no pull
+    /// request: its upstream's tip, on the repository (or the fork parent)
+    /// that upstream's remote points at.
+    pub fn branch_ci_ref(&self, id: u64) -> Option<(GitHubRepository, String)> {
+        if !self.flags.bool(crate::flags::ids::BRANCH_CI_STATUS)
+            || self.current_pull_request(id).is_some()
+        {
+            return None;
+        }
+        let gh = self.repository(id)?.github.as_ref()?;
+        let info = self.repo_states.get(&id)?.info.as_ref()?;
+        let branch = info.current_branch()?;
+        let upstream = branch.upstream_short()?;
+        let remote_name = branch.upstream_remote_name()?;
+        let remote = info.remotes.iter().find(|r| r.name == remote_name)?;
+        let target = std::iter::once(gh)
+            .chain(gh.parent.as_deref())
+            .find(|g| corvene_models::url_matches_remote(&remote.url, &g.clone_url))?;
+        let tip = info
+            .branches
+            .iter()
+            .find(|b| b.kind == corvene_models::BranchKind::Remote && b.name == upstream)?
+            .tip
+            .clone()?;
+        Some((target.clone(), tip))
+    }
+
+    /// [`Self::branch_ci_ref`]'s status icon, once it has checks.
+    pub fn branch_ci_summary(&self, id: u64) -> Option<(CheckStatus, Option<CheckConclusion>)> {
+        let (gh, sha) = self.branch_ci_ref(id)?;
+        let check = self.commit_status(&gh, &sha)?;
+        (!check.checks.is_empty()).then_some((check.status, check.conclusion))
+    }
+
     /// The status icon of a pull request (its base repository + head ref).
     pub fn commit_status_summary(
         &self,
@@ -363,6 +403,23 @@ impl Dispatcher {
         };
         if let Some((base, git_ref, branch)) = target {
             Self::touch_commit_status(&base, &git_ref, branch, cx);
+            return;
+        }
+        // `334-branch-ci-status`: no pull request, the branch's pushed tip
+        let branch = {
+            let s = Self::state(cx).read(cx);
+            s.branch_ci_ref(id).map(|(gh, sha)| {
+                let name = s
+                    .repo_states
+                    .get(&id)
+                    .and_then(|rs| rs.info.as_ref())
+                    .and_then(|i| i.current_branch())
+                    .and_then(|b| b.upstream_without_remote().map(str::to_string));
+                (gh, sha, name)
+            })
+        };
+        if let Some((gh, sha, name)) = branch {
+            Self::touch_commit_status(&gh, &sha, name, cx);
         }
     }
 

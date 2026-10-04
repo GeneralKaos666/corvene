@@ -1200,9 +1200,11 @@ impl Render for Workspace {
                 state.banner.clone(),
                 worktree_button_visible(state),
                 state.show_ci_status_popover
-                    && state
-                        .selected
-                        .is_some_and(|id| state.current_pull_request(id).is_some()),
+                    && state.selected.is_some_and(|id| {
+                        state.current_pull_request(id).is_some()
+                            // `334-branch-ci-status`
+                            || state.branch_ci_ref(id).is_some()
+                    }),
                 widths,
             )
         };
