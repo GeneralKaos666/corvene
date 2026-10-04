@@ -56,60 +56,40 @@ pub struct SpanVm {
     pub class: TokenClassVm,
 }
 
-/// `corvene_highlight::TokenClass`: GHD's CodeMirror classes.
+/// `corvene_highlight::TokenClass`, one to one.
 #[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenClassVm {
+    Variable,
+    AltVariable,
     Keyword,
     Atom,
-    Number,
-    Def,
-    Variable,
-    Variable2,
-    Variable3,
-    Property,
-    Operator,
-    Comment,
     String,
-    String2,
-    Meta,
     Qualifier,
-    Builtin,
-    Bracket,
+    Type,
+    Comment,
     Tag,
     Attribute,
+    Link,
     Header,
     Quote,
-    Link,
-    Other,
 }
 
 impl From<TokenClass> for TokenClassVm {
     fn from(class: TokenClass) -> Self {
-        // The highlighter's class set is GHD's; anything it adds later lands
-        // in `Other` so the bindings need no change.
-        match format!("{class:?}").as_str() {
-            "Keyword" => TokenClassVm::Keyword,
-            "Atom" => TokenClassVm::Atom,
-            "Number" => TokenClassVm::Number,
-            "Def" => TokenClassVm::Def,
-            "Variable" => TokenClassVm::Variable,
-            "Variable2" => TokenClassVm::Variable2,
-            "Variable3" => TokenClassVm::Variable3,
-            "Property" => TokenClassVm::Property,
-            "Operator" => TokenClassVm::Operator,
-            "Comment" => TokenClassVm::Comment,
-            "String" => TokenClassVm::String,
-            "String2" => TokenClassVm::String2,
-            "Meta" => TokenClassVm::Meta,
-            "Qualifier" => TokenClassVm::Qualifier,
-            "Builtin" => TokenClassVm::Builtin,
-            "Bracket" => TokenClassVm::Bracket,
-            "Tag" => TokenClassVm::Tag,
-            "Attribute" => TokenClassVm::Attribute,
-            "Header" => TokenClassVm::Header,
-            "Quote" => TokenClassVm::Quote,
-            "Link" => TokenClassVm::Link,
-            _ => TokenClassVm::Other,
+        match class {
+            TokenClass::Variable => TokenClassVm::Variable,
+            TokenClass::AltVariable => TokenClassVm::AltVariable,
+            TokenClass::Keyword => TokenClassVm::Keyword,
+            TokenClass::Atom => TokenClassVm::Atom,
+            TokenClass::String => TokenClassVm::String,
+            TokenClass::Qualifier => TokenClassVm::Qualifier,
+            TokenClass::Type => TokenClassVm::Type,
+            TokenClass::Comment => TokenClassVm::Comment,
+            TokenClass::Tag => TokenClassVm::Tag,
+            TokenClass::Attribute => TokenClassVm::Attribute,
+            TokenClass::Link => TokenClassVm::Link,
+            TokenClass::Header => TokenClassVm::Header,
+            TokenClass::Quote => TokenClassVm::Quote,
         }
     }
 }

@@ -62,17 +62,16 @@ fun highlight(row: DiffRowVm, palette: DiffPalette): AnnotatedString {
  */
 internal fun DiffPalette.colorOf(token: TokenClassVm): Color? = when (token) {
     TokenClassVm.KEYWORD -> syntax.keyword
-    TokenClassVm.ATOM, TokenClassVm.NUMBER, TokenClassVm.BUILTIN, TokenClassVm.PROPERTY -> syntax.atom
-    TokenClassVm.DEF, TokenClassVm.VARIABLE -> syntax.variable
-    TokenClassVm.VARIABLE2 -> syntax.altVariable
-    TokenClassVm.VARIABLE3 -> syntax.type
-    TokenClassVm.COMMENT, TokenClassVm.META -> syntax.comment
-    TokenClassVm.STRING, TokenClassVm.STRING2 -> syntax.string
+    TokenClassVm.ATOM -> syntax.atom
+    TokenClassVm.VARIABLE -> syntax.variable
+    TokenClassVm.ALT_VARIABLE -> syntax.altVariable
+    TokenClassVm.TYPE -> syntax.type
+    TokenClassVm.COMMENT -> syntax.comment
+    TokenClassVm.STRING -> syntax.string
     TokenClassVm.QUALIFIER -> syntax.qualifier
     TokenClassVm.TAG -> syntax.tag
     TokenClassVm.ATTRIBUTE -> syntax.attribute
     TokenClassVm.HEADER -> syntax.header
     TokenClassVm.QUOTE -> syntax.quote
     TokenClassVm.LINK -> syntax.link
-    TokenClassVm.OPERATOR, TokenClassVm.BRACKET, TokenClassVm.OTHER -> null
 }

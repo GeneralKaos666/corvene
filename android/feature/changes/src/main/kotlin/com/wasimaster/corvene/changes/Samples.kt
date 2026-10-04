@@ -117,8 +117,8 @@ private const val CLASS = "class Greeter(private val name: String) {"
 private const val HELLO = "\"Hello, \$name\""
 
 private val KEYWORD = TokenClassVm.KEYWORD
-private val DEF = TokenClassVm.DEF
-private val TYPE = TokenClassVm.VARIABLE3
+private val DEF = TokenClassVm.VARIABLE
+private val TYPE = TokenClassVm.TYPE
 private val STRING = TokenClassVm.STRING
 private val ATOM = TokenClassVm.ATOM
 private val COMMENT = TokenClassVm.COMMENT
