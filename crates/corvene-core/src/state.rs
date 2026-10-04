@@ -1278,6 +1278,10 @@ pub struct RepositoryState {
     /// `prepare-commit-msg` or `commit-msg` hook on a commit (read while the
     /// flag is on).
     pub commit_message_hook: bool,
+    /// Corvene `1103-implicit-upstream-push-default`: the current branch has
+    /// no upstream, but `push.default=current` pushes it to this
+    /// remote-tracking branch (`origin/feature`); its ahead/behind counts.
+    pub implicit_upstream: Option<(String, AheadBehind)>,
     pub publishing: bool,
     /// The LFS initialisation prompt was already considered for this repository.
     pub lfs_checked: bool,

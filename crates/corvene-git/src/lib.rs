@@ -57,7 +57,7 @@ pub use branch_ops::{
     is_local_changes_overwritten, last_desktop_stash_entry_index, merge_branch,
     merge_branch_with_message, modified_assume_unchanged, move_branch_back, parse_recent_branches,
     pop_stash_entry, pop_stash_on_branch, recent_branches, remote_head, rename_branch,
-    stashed_files, update_submodules_after_checkout,
+    set_upstream, stashed_files, update_submodules_after_checkout,
 };
 pub use commit::{
     CommitAuthor, CommitOptions, RECEIVE_LIMIT, add_paths, assume_unchanged_paths, commit,
@@ -151,13 +151,13 @@ pub use remote_ops::{
     fast_forward_branches, fast_forward_branches_with, fast_forward_if_only_behind,
     fast_forward_outcome, fast_forward_tracking_branches, fetch, fetch_refspec, fetch_tags,
     fetch_tags_to_push, fetch_with, fetch_with_prune_tags, files_not_tracked_by_lfs,
-    find_default_remote, get_branches_differing_from_upstream, get_remotes, install_lfs_hooks,
-    is_stale_remote_ref_failure, is_tracked_by_lfs, is_using_lfs, is_using_lfs_by_attributes,
-    last_fetched, lfs_available, lfs_hooks_installed, parse_progress_line, prune_remote, pull,
-    pull_merge_started, pull_with_rebase, push, push_size, push_with_progress, remote_failure,
-    remote_head_resolves, remote_read_failure_cause, remote_repository_missing, remove_remote,
-    set_remote_url, strip_vt_control_characters, track_in_lfs, update_remote_head,
-    update_submodules, upstream_tip_in_reflog,
+    find_default_remote, get_branches_differing_from_upstream, get_remotes, implicit_push_remote,
+    install_lfs_hooks, is_stale_remote_ref_failure, is_tracked_by_lfs, is_using_lfs,
+    is_using_lfs_by_attributes, last_fetched, lfs_available, lfs_hooks_installed,
+    parse_progress_line, prune_remote, pull, pull_merge_started, pull_with_rebase, push, push_size,
+    push_with_progress, remote_failure, remote_head_resolves, remote_read_failure_cause,
+    remote_repository_missing, remove_remote, set_remote_url, strip_vt_control_characters,
+    track_in_lfs, update_remote_head, update_submodules, upstream_tip_in_reflog,
 };
 pub use repo::{
     ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,

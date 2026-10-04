@@ -9,6 +9,9 @@
 //! Deviation (`726-restore-stash-suggestion`): with a stash on the branch the
 //! first card is "Restore your stashed changes" with a primary Restore button
 //! in place of GHD's "View your stashed changes" ([`primary_action`]).
+//! Deviation (`1103-implicit-upstream-push-default`): a branch that
+//! `push.default=current` pushes to a same-named remote branch gets the
+//! Push / Pull cards instead of "Publish your branch".
 //! Deviation (`771-blank-slate-pull-says-rebase`): the Pull card's button
 //! says "Pull origin with rebase" when `pull.rebase` is set, like the
 //! toolbar button (GHD `renderPullBranchAction` always says "Pull origin").
@@ -122,9 +125,13 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
         });
     }
     let remote = Dispatcher::current_remote_in(state, id)?.name;
+    // Corvene (`1103-implicit-upstream-push-default`): the same-named branch
+    // `push.default=current` pushes to stands in for a missing upstream
+    let implicit =
+        Dispatcher::implicit_upstream_in(state, id).filter(|_| branch.upstream.is_none());
     // `renderPublishBranchAction` (GHD's `aheadBehind` is null without an
     // upstream)
-    if branch.upstream.is_none() {
+    if branch.upstream.is_none() && implicit.is_none() {
         return Some(SuggestedAction {
             id: "suggested-publish-branch",
             on_click: std::rc::Rc::new(move |_, cx| Dispatcher::push(id, false, None, cx)),
@@ -150,7 +157,7 @@ fn remote_action(state: &AppState, id: u64, branch: &Branch) -> Option<Suggested
             menu: None,
         });
     }
-    let ab = rs.ahead_behind?;
+    let ab = rs.ahead_behind.or_else(|| implicit.map(|(_, ab)| ab))?;
     // no action after a rebase: pulling would tangle the history
     if Dispatcher::force_push_state_in(state, id) == corvene_core::ForcePushState::Recommended {
         return None;

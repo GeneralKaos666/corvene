@@ -1099,6 +1099,7 @@ impl Dispatcher {
             shared_fetch_head,
             read_parent,
             read_message_hooks,
+            read_implicit_upstream,
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -1138,6 +1139,8 @@ impl Dispatcher {
                 s.flags.bool(crate::flags::ids::UPDATE_FROM_PARENT_BRANCH),
                 s.flags
                     .bool(crate::flags::ids::MESSAGE_RULES_DEFER_TO_HOOKS),
+                s.flags
+                    .bool(crate::flags::ids::IMPLICIT_UPSTREAM_PUSH_DEFAULT),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -1346,6 +1349,35 @@ impl Dispatcher {
                                 )
                             })
                         });
+                    // `1103-implicit-upstream-push-default`: a branch without
+                    // an upstream that `push.default=current` pushes to the
+                    // same-named branch of the remote Corvene pushes to
+                    let implicit_upstream = info
+                        .current_branch()
+                        .filter(|b| read_implicit_upstream && b.upstream.is_none())
+                        .and_then(|b| {
+                            let remote = remote.as_deref()?;
+                            let push_remote = corvene_git::implicit_push_remote(
+                                git.clone(),
+                                &info.workdir,
+                                &b.name,
+                                remote,
+                            )?;
+                            if push_remote != remote {
+                                return None;
+                            }
+                            let tracking = format!("refs/remotes/{remote}/{}", b.name);
+                            info.branches.iter().find(|r| r.full_name == tracking)?;
+                            let ab = corvene_git::symmetric_ahead_behind(
+                                git.clone(),
+                                &info.workdir,
+                                &b.full_name,
+                                &tracking,
+                            )
+                            .ok()
+                            .flatten()?;
+                            Some((format!("{remote}/{}", b.name), ab))
+                        });
                     // `1202-update-from-parent-branch`
                     let update_parent = info
                         .current_branch()
@@ -1408,6 +1440,7 @@ impl Dispatcher {
                             }),
                         pull_with_rebase: join(pull_with_rebase),
                         commit_message_hook: message_hook.is_some_and(join),
+                        implicit_upstream,
                         worktrees,
                         upstream_rewritten,
                         update_parent,
@@ -1534,6 +1567,10 @@ impl Dispatcher {
                                 changed |= set(
                                     &mut repo_state.commit_message_hook,
                                     extras.commit_message_hook,
+                                );
+                                changed |= set(
+                                    &mut repo_state.implicit_upstream,
+                                    extras.implicit_upstream,
                                 );
                                 changed |= set(&mut repo_state.worktrees, extras.worktrees);
                                 changed |= set(
@@ -7030,6 +7067,8 @@ struct RefreshExtras {
     /// `340-message-rules-defer-to-hooks`: git runs a `prepare-commit-msg`
     /// or `commit-msg` hook on a commit.
     commit_message_hook: bool,
+    /// `1103-implicit-upstream-push-default`
+    implicit_upstream: Option<(String, corvene_models::AheadBehind)>,
     worktrees: Vec<corvene_models::WorktreeEntry>,
     upstream_rewritten: bool,
     /// `1202-update-from-parent-branch`: the branch the current one was

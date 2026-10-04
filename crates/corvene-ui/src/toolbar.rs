@@ -14,6 +14,9 @@
 //! `push-pull-button.tsx` has none).
 //! While a fetch, pull or push runs, a Stop button takes the ▾'s place
 //! (`295-cancel-network-operations`; GHD only disables the button).
+//! A branch that `push.default=current` pushes to a same-named remote branch
+//! shows Push / Pull / Fetch instead of Publish branch
+//! (`1103-implicit-upstream-push-default`).
 //! The Push button's tooltip can say roughly how much the push sends
 //! (`1101-push-size-tooltip`; GHD has no tooltip there).
 
@@ -436,10 +439,16 @@ pub fn toolbar_models(
         .and_then(|r| Dispatcher::current_remote_in(state, r.id))
         .map(|r| r.name)
         .unwrap_or_else(|| "origin".to_string());
+    // Corvene (`1103-implicit-upstream-push-default`): the same-named branch
+    // `push.default=current` pushes to stands in for a missing upstream
+    let implicit = repo.and_then(|r| Dispatcher::implicit_upstream_in(state, r.id));
     let upstream = info
         .and_then(|i| i.current_branch())
-        .and_then(|b| b.upstream.clone());
-    let ab = repo_state.and_then(|s| s.ahead_behind);
+        .and_then(|b| b.upstream.clone())
+        .or_else(|| implicit.as_ref().map(|(name, _)| name.clone()));
+    let ab = repo_state
+        .and_then(|s| s.ahead_behind)
+        .or_else(|| implicit.map(|(_, ab)| ab));
     let last_fetched: SharedString = match repo_state.and_then(|s| s.last_fetched) {
         Some(at) => format!("Last fetched {}", relative(at)).into(),
         None => "Never fetched".into(),

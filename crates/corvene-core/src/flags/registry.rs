@@ -6987,6 +6987,23 @@ registry! {
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// push.default=current counts as an upstream.
+    IMPLICIT_UPSTREAM_PUSH_DEFAULT = 1103 "implicit-upstream-push-default" {
+        title: "Respect push.default=current",
+        summary: "A branch with no upstream that git pushes to its same-named branch on the \
+                  remote anyway (push.default=current, the branch already pushed with a plain \
+                  git push) shows Push, Pull or Fetch with its ahead/behind counts against that \
+                  branch instead of Publish branch. Pushing or pulling records it as the \
+                  upstream, as publishing would.",
+        ghd_behaviour: "Shows Publish branch, as if the branch were not on the remote.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13737)],
+        code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/no_changes.rs"],
+    },
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.

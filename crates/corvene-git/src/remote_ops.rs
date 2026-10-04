@@ -846,6 +846,27 @@ pub fn fast_forward_branch_from_remote(
     Ok(())
 }
 
+/// Corvene (`1103-implicit-upstream-push-default`): the remote a plain `git
+/// push` of `branch`, which has no upstream, goes to, when it goes to the
+/// same-named branch there (`push.default=current`): `branch.<name>.pushRemote`,
+/// else `remote.pushDefault`, else `default_remote`.
+pub fn implicit_push_remote(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    branch: &str,
+    default_remote: &str,
+) -> Option<String> {
+    let push_default = config_value(git.clone(), workdir, "push.default")?;
+    if !push_default.eq_ignore_ascii_case("current") {
+        return None;
+    }
+    Some(
+        config_value(git.clone(), workdir, &format!("branch.{branch}.pushRemote"))
+            .or_else(|| config_value(git, workdir, "remote.pushDefault"))
+            .unwrap_or_else(|| default_remote.to_string()),
+    )
+}
+
 /// `pull.rebase` is set to anything (GHD `pullWithRebase`).
 pub fn pull_with_rebase(git: Arc<GitBinary>, workdir: &Path) -> bool {
     config_value(git, workdir, "pull.rebase").is_some_and(|v| {

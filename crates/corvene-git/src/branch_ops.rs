@@ -196,6 +196,21 @@ pub fn rename_branch(git: Arc<GitBinary>, workdir: &Path, old: &str, new: &str) 
     Ok(())
 }
 
+/// `git branch --set-upstream-to=<upstream> <name>` (Corvene,
+/// `1103-implicit-upstream-push-default`: a pull records the upstream a
+/// branch had only implicitly, as a push with `--set-upstream` does).
+pub fn set_upstream(git: Arc<GitBinary>, workdir: &Path, name: &str, upstream: &str) -> Result<()> {
+    GitCommand::new(git)
+        .args([
+            "branch".to_string(),
+            format!("--set-upstream-to={upstream}"),
+            name.to_string(),
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
 /// `deleteLocalBranch`: `git branch -D <name>`.
 pub fn delete_local_branch(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
     GitCommand::new(git)

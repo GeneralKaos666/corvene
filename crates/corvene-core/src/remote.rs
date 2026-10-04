@@ -34,6 +34,10 @@
 //! fetched as soon as the API's `pushed_at` is newer than its last fetch
 //! (`278-fetch-on-known-push`; GHD `background-fetcher.ts` waits for its
 //! hourly schedule, so a push made elsewhere shows up to an hour late).
+//! A branch without an upstream that `push.default=current` pushes to the
+//! same-named remote branch shows Push / Pull against that branch instead of
+//! Publish (`1103-implicit-upstream-push-default`; GHD reads only the
+//! configured upstream).
 //! A repository can sign in through git's credential helper instead of the
 //! account (`1102-repository-credential-helper`; GHD
 //! `useExternalCredentialHelper` covers hosts without an account only).
@@ -1210,12 +1214,32 @@ impl Dispatcher {
         );
         let remote_name = remote.name.clone();
         let remote_url = remote.url.clone();
+        // `1103-implicit-upstream-push-default`: the pull records the
+        // implicit upstream first (`git pull <remote>` needs one), as a push
+        // would with `--set-upstream`
+        let record_upstream = {
+            let s = Self::state(cx).read(cx);
+            let branch = s
+                .repo_states
+                .get(&id)
+                .and_then(|r| r.info.as_ref())
+                .and_then(|i| i.current_branch())
+                .filter(|b| b.upstream.is_none())
+                .map(|b| b.name.clone());
+            branch.zip(Self::implicit_upstream_in(s, id).map(|(name, _)| name))
+        };
         let cancel = Self::network_cancel_token(id, PushPullKind::Pull, false, cx);
         Self::run_network(
             id,
             cx,
             move |report| {
                 cancellable(cancel.as_ref(), || {
+                    if let Some((branch, upstream)) = &record_upstream
+                        && let Err(err) =
+                            corvene_git::set_upstream(git.clone(), &workdir, branch, upstream)
+                    {
+                        return (Err(err), None);
+                    }
                     let mut retry = prune_retry;
                     let result = loop {
                         let result = corvene_git::pull(
@@ -1691,18 +1715,37 @@ impl Dispatcher {
         );
     }
 
+    /// Corvene (`1103-implicit-upstream-push-default`): the current branch's
+    /// implicit upstream (`origin/feature`) and ahead/behind counts against
+    /// it, while the flag is on.
+    pub fn implicit_upstream_in(
+        s: &crate::state::AppState,
+        id: u64,
+    ) -> Option<(String, AheadBehind)> {
+        s.flags
+            .bool(crate::flags::ids::IMPLICIT_UPSTREAM_PUSH_DEFAULT)
+            .then(|| s.repo_states.get(&id)?.implicit_upstream.clone())
+            .flatten()
+    }
+
     /// The toolbar button's main click (`PushPullButton.renderButton`).
     pub fn push_pull_action(id: u64, cx: &mut dyn Host) {
         let (has_remote, tip, upstream, ab) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
             let info = rs.and_then(|r| r.info.as_ref());
+            // `1103-implicit-upstream-push-default`: the same-named branch a
+            // plain `git push` updates counts as the upstream (a push still
+            // records it with `--set-upstream`)
+            let implicit = Self::implicit_upstream_in(s, id);
             (
                 info.is_some_and(|i| !i.remotes.is_empty()),
                 info.map(|i| i.tip.clone()),
                 info.and_then(|i| i.current_branch())
-                    .and_then(|b| b.upstream.clone()),
-                rs.and_then(|r| r.ahead_behind),
+                    .and_then(|b| b.upstream.clone())
+                    .or_else(|| implicit.as_ref().map(|(name, _)| name.clone())),
+                rs.and_then(|r| r.ahead_behind)
+                    .or_else(|| implicit.map(|(_, ab)| ab)),
             )
         };
         if !has_remote {
