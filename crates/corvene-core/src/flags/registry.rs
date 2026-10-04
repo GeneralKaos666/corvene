@@ -5621,6 +5621,23 @@ registry! {
         code: &["crates/corvene-ui/src/history.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/dialogs/history_dialogs.rs"],
     },
 
+    /// The compare view lists the files a merge would leave conflicted.
+    COMPARE_SHOWS_CONFLICTS = 889 "compare-shows-conflicts" {
+        title: "Compare lists conflicting files",
+        summary: "Comparing to a branch checks in the background whether merging it would \
+                  conflict (git merge-tree, nothing is touched) and, in both the Behind and the \
+                  Ahead tab, shows \"N conflicting files\" above the commits, opening into the \
+                  files' paths.",
+        ghd_behaviour: "Only the Behind tab's merge button counts the conflicted files, without \
+                        naming them.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18672)],
+        code: &["crates/corvene-core/src/compare.rs", "crates/corvene-git/src/rebase_ops.rs", "crates/corvene-ui/src/history.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

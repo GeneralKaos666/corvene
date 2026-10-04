@@ -3,6 +3,10 @@
 //! `app-store.ts`: the History tab either shows the branch's history or the
 //! commits the current branch is behind / ahead of another branch, with the
 //! merge call to action.
+//!
+//! Deviation (`889-compare-shows-conflicts`): both tabs also list the files
+//! a merge of the compared branch would leave conflicted (GHD only counts
+//! them in the Behind tab's merge call to action).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -49,6 +53,9 @@ pub struct CompareState {
     pub loading: bool,
     /// `mergeStatus` for the merge call to action; `None` while loading.
     pub merge_status: Option<Mergeability>,
+    /// `889-compare-shows-conflicts`: the files merging the compared branch
+    /// would leave conflicted.
+    pub conflicted_files: Vec<String>,
     /// Ahead/behind of every other branch relative to the current one
     /// (`AheadBehindStore`), filled while the list is open.
     pub branch_counts: HashMap<String, AheadBehind>,
@@ -70,6 +77,7 @@ impl Default for CompareState {
             commits: Vec::new(),
             loading: false,
             merge_status: None,
+            conflicted_files: Vec::new(),
             branch_counts: HashMap::new(),
             counts_loaded: false,
             counts_requests: Vec::new(),
@@ -222,6 +230,10 @@ impl Dispatcher {
         let Some((current, _)) = Self::current_branch_and_tip_pub(id, cx) else {
             return;
         };
+        let list_conflicts = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::COMPARE_SHOWS_CONFLICTS);
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             rs.compare.loading = true;
@@ -247,18 +259,42 @@ impl Dispatcher {
                 ComparisonMode::Ahead => (&branch_for_task, &current_for_task, ahead_behind.ahead),
             };
             let commits = corvene_git::get_commits_in_range(&workdir, from, to, count as usize)?;
+            // `889`: the conflicted files, in either tab (the counted
+            // merge status comes from the same merge-tree)
+            let conflicts = (list_conflicts && ahead_behind.behind > 0)
+                .then(|| {
+                    corvene_git::merge_tree_conflicts(
+                        git.clone(),
+                        &workdir,
+                        &current_for_task,
+                        &branch_for_task,
+                    )
+                    .ok()
+                })
+                .flatten();
             let merge_status = if mode == ComparisonMode::Behind && ahead_behind.behind > 0 {
-                corvene_git::determine_mergeability(
-                    git,
-                    &workdir,
-                    &current_for_task,
-                    &branch_for_task,
-                )
-                .ok()
+                match &conflicts {
+                    Some(Some(files)) if files.is_empty() => Some(Mergeability::Clean),
+                    Some(Some(files)) => Some(Mergeability::Conflicts(files.len() as u32)),
+                    Some(None) => Some(Mergeability::Invalid),
+                    None => corvene_git::determine_mergeability(
+                        git,
+                        &workdir,
+                        &current_for_task,
+                        &branch_for_task,
+                    )
+                    .ok(),
+                }
             } else {
                 None
             };
-            Ok::<_, corvene_git::GitError>(Some((ahead_behind, commits, merge_status)))
+            let conflicted_files = conflicts.flatten().unwrap_or_default();
+            Ok::<_, corvene_git::GitError>(Some((
+                ahead_behind,
+                commits,
+                merge_status,
+                conflicted_files,
+            )))
         });
         cx.spawn(async move |cx: &mut AsyncApp| {
             let result = task.await;
@@ -267,7 +303,7 @@ impl Dispatcher {
                     let rs = s.repo_state_mut(id);
                     rs.compare.loading = false;
                     match result {
-                        Ok(Some((ahead_behind, commits, merge_status))) => {
+                        Ok(Some((ahead_behind, commits, merge_status, conflicted_files))) => {
                             rs.compare.form = CompareForm::Branch {
                                 branch: branch.clone(),
                                 mode,
@@ -276,6 +312,7 @@ impl Dispatcher {
                             rs.compare.filter_text = branch.clone();
                             rs.compare.commits = commits;
                             rs.compare.merge_status = merge_status;
+                            rs.compare.conflicted_files = conflicted_files;
                             let first = rs.compare.commits.first().map(|c| c.sha.clone());
                             let keep = rs
                                 .selected_commits
@@ -328,6 +365,7 @@ impl Dispatcher {
             rs.compare.filter_text.clear();
             rs.compare.commits.clear();
             rs.compare.merge_status = None;
+            rs.compare.conflicted_files.clear();
             rs.compare.show_branch_list = false;
             cx.notify();
             was

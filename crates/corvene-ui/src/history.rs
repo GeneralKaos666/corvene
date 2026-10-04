@@ -26,7 +26,8 @@
 //! Cherry-pick Without Committing (flag `820`); Create Patch File(s) (flag
 //! `821`); a filter box under the compare box searches the history (flag
 //! `886`, `corvene_core::history_filter`); a file's history shows as a
-//! removable chip there (flag `887`).
+//! removable chip there (flag `887`); the compare view lists the files a
+//! merge of the compared branch would leave conflicted (flag `889`).
 
 use std::rc::Rc;
 
@@ -273,6 +274,8 @@ pub struct HistorySidebar {
     focused_branch: Option<String>,
     /// Merge call to action dropdown choice (`selectedOperation`).
     merge_option: MultiCommitOperationKind,
+    /// `889-compare-shows-conflicts`: the conflicted file list is open.
+    conflicts_expanded: bool,
     list_scroll: UniformListScrollHandle,
     /// Repository and tip (branch name or detached sha) the list last showed;
     /// a change scrolls it back to the top (flag `808`).
@@ -349,6 +352,7 @@ impl HistorySidebar {
             compare_was_focused: false,
             focused_branch: None,
             merge_option: MultiCommitOperationKind::Merge,
+            conflicts_expanded: false,
             list_scroll: UniformListScrollHandle::new(),
             shown_tip: None,
         }
@@ -833,6 +837,89 @@ impl HistorySidebar {
                 false,
                 ComparisonMode::Ahead,
             ))
+    }
+
+    /// `889-compare-shows-conflicts`: "N conflicting files", opening into
+    /// their paths.
+    fn compare_conflicts(&self, id: u64, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let files = {
+            let s = self.state.read(cx);
+            if !s
+                .flags
+                .bool(corvene_core::flags::ids::COMPARE_SHOWS_CONFLICTS)
+            {
+                return None;
+            }
+            s.repo_states.get(&id)?.compare.conflicted_files.clone()
+        };
+        if files.is_empty() {
+            return None;
+        }
+        let t = cx.ghd().clone();
+        let expanded = self.conflicts_expanded;
+        let n = files.len();
+        Some(
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .border_b_1()
+                .border_color(t.box_border)
+                .text_size(FONT_SIZE())
+                .child(
+                    div()
+                        .id("compare-conflicts")
+                        .a11y_button(format!(
+                            "{n} conflicting {}",
+                            if n == 1 { "file" } else { "files" }
+                        ))
+                        .h(ROW_HEIGHT())
+                        .px(SPACING())
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(SPACING_HALF())
+                        .cursor_pointer()
+                        .hover(|s| s.bg(t.list_item_hover_background))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.conflicts_expanded = !this.conflicts_expanded;
+                            cx.notify();
+                        }))
+                        .child(octicon(Octicon::Alert, t.color_modified))
+                        .child(div().flex_1().child(format!(
+                            "{n} conflicting {}",
+                            if n == 1 { "file" } else { "files" }
+                        )))
+                        .child(octicon(
+                            if expanded {
+                                Octicon::ChevronDown
+                            } else {
+                                Octicon::ChevronRight
+                            },
+                            t.text_secondary,
+                        )),
+                )
+                .when(expanded, |d| {
+                    d.child(
+                        div()
+                            .id("compare-conflict-files")
+                            .max_h(zpx(150.))
+                            .overflow_y_scroll()
+                            .pb(SPACING_HALF())
+                            .children(files.into_iter().map(|file| {
+                                div()
+                                    .pl(SPACING_DOUBLE() + SPACING())
+                                    .pr(SPACING())
+                                    .h(zpx(22.))
+                                    .flex()
+                                    .items_center()
+                                    .text_color(t.text_secondary)
+                                    .child(div().min_w_0().truncate().child(file))
+                            })),
+                    )
+                })
+                .into_any_element(),
+        )
     }
 
     /// `MergeCallToActionWithConflicts` (`.merge-cta`).
@@ -2521,6 +2608,7 @@ impl Render for HistorySidebar {
                 .flex()
                 .flex_col()
                 .child(self.compare_tabs(id, mode, ahead_behind.ahead, ahead_behind.behind, cx))
+                .children(self.compare_conflicts(id, cx))
                 .child(self.commit_list(cx))
                 .when(mode == ComparisonMode::Behind, |d| {
                     d.child(self.merge_cta(id, &branch, ahead_behind.behind, merge_status, cx))

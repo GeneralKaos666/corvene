@@ -295,6 +295,22 @@ pub fn determine_mergeability(
     ours: &str,
     theirs: &str,
 ) -> Result<Mergeability> {
+    Ok(match merge_tree_conflicts(git, workdir, ours, theirs)? {
+        None => Mergeability::Invalid,
+        Some(files) if files.is_empty() => Mergeability::Clean,
+        Some(files) => Mergeability::Conflicts(files.len() as u32),
+    })
+}
+
+/// The files merging `theirs` into `ours` would leave conflicted
+/// ([`determine_mergeability`]'s `merge-tree`); `None` for unrelated
+/// histories. Corvene `889-compare-shows-conflicts` lists them.
+pub fn merge_tree_conflicts(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    ours: &str,
+    theirs: &str,
+) -> Result<Option<Vec<String>>> {
     let out = GitCommand::new(git)
         .args([
             "merge-tree",
@@ -309,21 +325,20 @@ pub fn determine_mergeability(
         .allow_exit_code(1)
         .run();
     match out {
-        Ok(out) => {
-            // "<tree-id>\0[<filename>\0]*"
-            let nuls = out.stdout.iter().filter(|b| **b == 0).count();
-            let conflicted = nuls.saturating_sub(1) as u32;
-            Ok(if conflicted > 0 {
-                Mergeability::Conflicts(conflicted)
-            } else {
-                Mergeability::Clean
-            })
-        }
-        Err(GitError::Failed { stderr, .. }) if stderr.contains("unrelated histories") => {
-            Ok(Mergeability::Invalid)
-        }
+        Ok(out) => Ok(Some(parse_merge_tree_names(&out.stdout))),
+        Err(GitError::Failed { stderr, .. }) if stderr.contains("unrelated histories") => Ok(None),
         Err(err) => Err(err),
     }
+}
+
+/// `merge-tree --write-tree --name-only -z` output: "<tree-id>\0[<filename>\0]*".
+pub fn parse_merge_tree_names(stdout: &[u8]) -> Vec<String> {
+    stdout
+        .split(|b| *b == 0)
+        .skip(1)
+        .filter(|name| !name.is_empty())
+        .map(|name| String::from_utf8_lossy(name).into_owned())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1318,6 +1333,16 @@ pub fn continue_cherry_pick(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn merge_tree_names_skip_the_tree() {
+        assert_eq!(
+            parse_merge_tree_names(b"abc123\0a.txt\0dir/b.txt\0"),
+            vec!["a.txt".to_string(), "dir/b.txt".to_string()]
+        );
+        assert!(parse_merge_tree_names(b"abc123\n").is_empty());
+        assert!(parse_merge_tree_names(b"abc123\0").is_empty());
+    }
 
     fn c(sha: &str, summary: &str) -> CommitOneLine {
         CommitOneLine {
