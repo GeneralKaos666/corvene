@@ -5739,6 +5739,25 @@ registry! {
         code: &["crates/corvene-core/src/mco.rs", "crates/corvene-ui/src/banner.rs"],
     },
 
+    /// Several local branches deleted at once from the branch list.
+    BULK_DELETE_BRANCHES = 895 "bulk-delete-branches" {
+        title: "Delete several branches at once",
+        summary: "⌘-click and ⇧-click select several local branches in the branch list (not the \
+                  current one) and their context menu offers Delete N Branches…: one confirmation \
+                  lists them, marking the default branch, commits the default branch lacks, \
+                  unpushed or unpublished commits, an upstream deleted on the remote and a last \
+                  commit older than 30 days, with \"Also delete the remote branches\". The \
+                  branches are deleted one after another and failures reported together; with \
+                  undo-delete-branch on, one Undo recreates every deleted local branch.",
+        ghd_behaviour: "Branches are deleted one at a time, each with its own confirmation.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(9824), Upstream::issue(13310), Upstream::issue(20603), Upstream::issue(20708)],
+        code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-ui/src/dialogs/delete_branches.rs", "crates/corvene-core/src/delete_branches.rs", "crates/corvene-ui/src/banner.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

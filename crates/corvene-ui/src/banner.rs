@@ -138,6 +138,12 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
         )],
         Banner::BranchDeleted { branch, .. } => vec![t("Deleted branch\u{a0}"), b(branch)],
         Banner::BranchRestored { branch } => vec![t("Restored branch\u{a0}"), b(branch)],
+        Banner::BranchesDeleted { branches, .. } => {
+            vec![(format!("Deleted {} branches", branches.len()), false)]
+        }
+        Banner::BranchesRestored { count } => {
+            vec![(format!("Restored {count} branches"), false)]
+        }
         Banner::ConflictsFound {
             description,
             branch,
@@ -371,6 +377,19 @@ pub fn banner_bar(
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
                         Dispatcher::restore_deleted_branch(repo, branch.clone(), sha.clone(), cx);
+                    })
+                    .into_any_element(),
+            )
+        }
+        Banner::BranchesDeleted { repo, branches } => {
+            let (repo, branches) = (*repo, branches.clone());
+            Some(
+                link_button("banner-undo", "Undo", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
+                    .ml(SPACING_HALF())
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::clear_banner(cx);
+                        Dispatcher::restore_deleted_branches(repo, branches.clone(), cx);
                     })
                     .into_any_element(),
             )

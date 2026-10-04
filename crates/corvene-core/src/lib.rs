@@ -18,6 +18,7 @@ pub mod cloning_repositories_store;
 pub mod commit_status;
 pub mod compare;
 pub mod crash_reports;
+pub mod delete_branches;
 pub mod diff_cache;
 pub mod dispatcher;
 pub mod drafts;

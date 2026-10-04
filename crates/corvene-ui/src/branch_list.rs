@@ -29,6 +29,9 @@
 //! Deviation (`854-branch-list-stash-icon`): a local branch with a Desktop
 //! stash shows the stash icon after its name (GHD `branch-list-item.tsx` does
 //! not).
+//! Deviation (`895-bulk-delete-branches`): ⌘-click / ⇧-click select several
+//! local branches (GHD's list selects one row) and their context menu
+//! deletes them together.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -94,6 +97,10 @@ pub struct BranchFoldout {
     list_focused: bool,
     /// `851-branch-list-remote-only`: the list shows remote branches only.
     remote_only: bool,
+    /// `895-bulk-delete-branches`: the local branches ⌘ / ⇧-clicked, in
+    /// click order, and the row a ⇧-click extends from.
+    multi_selected: Vec<String>,
+    multi_anchor: Option<String>,
     /// GHD `FilterList` keyboard selection: the branch row ↓ / ↑ moved to
     /// from the filter box (an index into the rows as shown, groups
     /// flattened); while set it is the list's selection.
@@ -432,6 +439,8 @@ impl BranchFoldout {
             list_focus: cx.focus_handle(),
             list_focused: false,
             remote_only: false,
+            multi_selected: Vec::new(),
+            multi_anchor: None,
             highlighted: None,
             scroll: UniformListScrollHandle::new(),
             pr_highlighted: None,
@@ -701,6 +710,8 @@ impl BranchFoldout {
     pub fn focus_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // a freshly opened list selects the current branch again
         self.selected_row = None;
+        self.multi_selected.clear();
+        self.multi_anchor = None;
         self.highlighted = None;
         self.pr_highlighted = None;
         let input = if self.pull_requests_tab_shown(cx) {
@@ -941,6 +952,9 @@ impl BranchFoldout {
         let keyboard = self.highlighted.is_some();
         let selected = if keyboard {
             highlighted
+        } else if !self.multi_selected.is_empty() {
+            // `895-bulk-delete-branches`
+            self.multi_selected.contains(&branch.name)
         } else {
             self.shown_selected.as_deref() == Some(branch.name.as_str())
         };
@@ -1018,18 +1032,73 @@ impl BranchFoldout {
                     }
                 })
             })
-            .on_click(move |_, _, cx| checkout_branch_row(id, name.clone(), current, cx))
+            .on_click(cx.listener({
+                let local = branch.kind == BranchKind::Local;
+                move |this, ev: &ClickEvent, _, cx| {
+                    // `895-bulk-delete-branches`: ⌘ / ⇧-click select
+                    let m = ev.modifiers();
+                    if (m.secondary() || m.shift)
+                        && this
+                            .state
+                            .read(cx)
+                            .flags
+                            .bool(corvene_core::flags::ids::BULK_DELETE_BRANCHES)
+                    {
+                        if local && !current {
+                            this.extend_multi_selection(name.clone(), m.shift, cx);
+                        }
+                        return;
+                    }
+                    this.multi_selected.clear();
+                    checkout_branch_row(id, name.clone(), current, cx)
+                }
+            }))
             // GHD `generateBranchContextMenuItems`
             .on_mouse_down(MouseButton::Right, {
                 let branch = branch.clone();
                 let this = cx.entity().downgrade();
                 move |ev: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    this.update(cx, |this, cx| {
-                        this.select_row(branch.name.clone(), window, cx)
-                    })
-                    .ok();
                     use crate::context_menu::{IS_MAC, MenuItem, mac_or};
+                    // `895-bulk-delete-branches`: the menu of a multi-selection
+                    let multi = this
+                        .update(cx, |this, cx| {
+                            if this.multi_selected.len() > 1
+                                && this.multi_selected.contains(&branch.name)
+                            {
+                                cx.notify();
+                                Some(this.multi_selected.clone())
+                            } else {
+                                this.multi_selected.clear();
+                                this.multi_anchor = None;
+                                this.select_row(branch.name.clone(), window, cx);
+                                None
+                            }
+                        })
+                        .ok()
+                        .flatten();
+                    if let Some(names) = multi {
+                        let count = names.len();
+                        let items = vec![MenuItem::new(
+                            if IS_MAC {
+                                format!("Delete {count} Branches…")
+                            } else {
+                                format!("Delete {count} branches…")
+                            },
+                            move |_, cx| {
+                                Dispatcher::close_foldout(cx);
+                                Dispatcher::show_popup(
+                                    Popup::DeleteBranches {
+                                        repo: id,
+                                        names: names.clone(),
+                                    },
+                                    cx,
+                                )
+                            },
+                        )];
+                        crate::native_menu::show_context_menu(items, ev.position, window, cx);
+                        return;
+                    }
                     let local = branch.kind == BranchKind::Local;
                     // `856-branch-menu-rebase-onto`
                     let rebase_onto = AppState::global(cx)
@@ -1244,6 +1313,49 @@ impl BranchFoldout {
                         .child(date),
                 )
             })
+    }
+
+    /// `895-bulk-delete-branches`: ⌘-click toggles `name` in the
+    /// multi-selection, ⇧-click adds the local branches shown between the
+    /// last clicked row and `name`. The current branch is never selected.
+    fn extend_multi_selection(&mut self, name: String, range: bool, cx: &mut Context<Self>) {
+        let current = {
+            let s = self.state.read(cx);
+            s.selected
+                .and_then(|id| s.repo_states.get(&id))
+                .and_then(|rs| rs.info.as_ref())
+                .and_then(|i| i.current_branch())
+                .map(|b| b.name.clone())
+        };
+        let shown: Vec<String> = self
+            .branch_groups(cx)
+            .into_iter()
+            .flat_map(|g| g.branches)
+            .filter(|b| b.kind == BranchKind::Local && Some(&b.name) != current.as_ref())
+            .map(|b| b.name)
+            .collect();
+        let anchor = self
+            .multi_anchor
+            .as_ref()
+            .and_then(|a| shown.iter().position(|n| n == a));
+        match (range, anchor, shown.iter().position(|n| *n == name)) {
+            (true, Some(from), Some(to)) => {
+                for n in &shown[from.min(to)..=from.max(to)] {
+                    if !self.multi_selected.contains(n) {
+                        self.multi_selected.push(n.clone());
+                    }
+                }
+            }
+            _ => {
+                if let Some(ix) = self.multi_selected.iter().position(|n| *n == name) {
+                    self.multi_selected.remove(ix);
+                } else {
+                    self.multi_selected.push(name.clone());
+                }
+                self.multi_anchor = Some(name);
+            }
+        }
+        cx.notify();
     }
 
     fn select_row(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {

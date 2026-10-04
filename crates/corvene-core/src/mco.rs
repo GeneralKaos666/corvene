@@ -410,6 +410,16 @@ pub enum Banner {
     BranchRestored {
         branch: String,
     },
+    /// Corvene (`895-bulk-delete-branches` with `861-undo-delete-branch`):
+    /// "Deleted N branches" + Undo, which recreates each (name, sha).
+    BranchesDeleted {
+        repo: u64,
+        branches: Vec<(String, String)>,
+    },
+    /// After that Undo.
+    BranchesRestored {
+        count: usize,
+    },
     /// "Resolve conflicts to continue {description} **{branch}**."
     ConflictsFound {
         repo: u64,
@@ -435,11 +445,13 @@ impl Banner {
             | Banner::CherryPickUndone { .. }
             | Banner::SquashUndone { .. }
             | Banner::ReorderUndone { .. }
-            | Banner::BranchRestored { .. } => Some(Duration::from_secs(5)),
+            | Banner::BranchRestored { .. }
+            | Banner::BranchesRestored { .. } => Some(Duration::from_secs(5)),
             Banner::SuccessfulCherryPick { .. }
             | Banner::SuccessfulSquash { .. }
             | Banner::SuccessfulReorder { .. }
-            | Banner::BranchDeleted { .. } => Some(Duration::from_secs(15)),
+            | Banner::BranchDeleted { .. }
+            | Banner::BranchesDeleted { .. } => Some(Duration::from_secs(15)),
             Banner::ConflictsFound { .. } | Banner::GitEmailMismatch { .. } => None,
         }
     }

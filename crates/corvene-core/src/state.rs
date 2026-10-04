@@ -421,6 +421,12 @@ pub enum Popup {
         repo: u64,
         name: String,
     },
+    /// Corvene (`895-bulk-delete-branches`): delete the branch list's
+    /// multi-selection of local branches.
+    DeleteBranches {
+        repo: u64,
+        names: Vec<String>,
+    },
     /// `StashAndSwitchBranch`: ask what to do with local changes.
     StashAndSwitchBranch {
         repo: u64,
@@ -597,6 +603,7 @@ impl Popup {
             | Self::DeleteWorktree { repo, .. }
             | Self::DeleteWorktreeFailed { repo, .. }
             | Self::DeleteBranch { repo, .. }
+            | Self::DeleteBranches { repo, .. }
             | Self::StashAndSwitchBranch { repo, .. }
             | Self::ConfirmOverwriteStash { repo, .. }
             | Self::MergeBranch { repo, .. }
@@ -1089,6 +1096,8 @@ pub struct RepositoryState {
     pub merge_preview: Option<crate::mco::MergePreview>,
     /// Delete Branch dialog warnings (`860-delete-branch-warnings`).
     pub delete_branch_preview: Option<DeleteBranchPreview>,
+    /// Delete Branches confirmation marks (`895-bulk-delete-branches`).
+    pub delete_branches_preview: Option<crate::delete_branches::DeleteBranchesPreview>,
     /// `pullRequestState`: the Preview Pull Request dialog's data.
     pub pull_request_preview: Option<crate::pull_request_preview::PullRequestPreview>,
     /// `addUpstreamRemoteIfNeeded` ran for this repository this session.

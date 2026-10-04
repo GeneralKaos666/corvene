@@ -17,6 +17,7 @@ mod confirm_delete_untrashable;
 mod confirm_quit;
 mod crash_report_found;
 mod create_repository;
+mod delete_branches;
 mod discard_changes;
 mod discard_selection;
 mod flags;
@@ -67,6 +68,7 @@ pub use ci_check_run_rerun::CiCheckRunRerunDialog;
 pub use clone_repository::CloneRepositoryDialog;
 pub use confirm_commit_to_default_branch::ConfirmCommitToDefaultBranchDialog;
 pub use create_repository::CreateRepositoryDialog;
+pub use delete_branches::DeleteBranchesDialog;
 pub use discard_changes::DiscardChangesDialog;
 pub use discard_selection::DiscardSelectionDialog;
 pub use flags::FlagsDialog;
@@ -441,6 +443,9 @@ impl DialogHost {
                 .into(),
             Popup::DeleteBranch { repo, name } => cx
                 .new(|cx| DeleteBranchDialog::new(state, *repo, name.clone(), cx))
+                .into(),
+            Popup::DeleteBranches { repo, names } => cx
+                .new(|cx| DeleteBranchesDialog::new(state, *repo, names.clone(), cx))
                 .into(),
             Popup::StashAndSwitchBranch { repo, branch } => cx
                 .new(|_| StashAndSwitchBranchDialog::new(state, *repo, branch.clone()))
