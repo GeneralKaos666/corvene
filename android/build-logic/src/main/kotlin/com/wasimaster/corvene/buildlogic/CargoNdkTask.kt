@@ -153,6 +153,9 @@ abstract class CargoNdkTask @Inject constructor(
             environment("ANDROID_NDK_HOME", ndk.path)
             environment("ANDROID_NDK_ROOT", ndk.path)
             environment("CARGO_INCREMENTAL", "0")
+            // the workspace's release profile strips the symbol table, which
+            // uniffi-bindgen reads the metadata from; this task strips below
+            environment("CARGO_PROFILE_RELEASE_STRIP", "false")
             environment("PATH", "$cargoHome/bin${File.pathSeparator}${System.getenv("PATH").orEmpty()}")
             cargoTargetDir.orNull?.let { environment("CARGO_TARGET_DIR", it.asFile.path) }
             environment("CARGO_PROFILE_DEV_DEBUG", devDebugInfo.get())

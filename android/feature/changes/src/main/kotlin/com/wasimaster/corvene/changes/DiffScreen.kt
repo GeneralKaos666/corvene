@@ -27,6 +27,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.getValue
@@ -254,6 +255,8 @@ private fun DiffRows(pager: DiffPager, cache: DiffLineCache, wrap: Boolean, acti
     val rowHeight = with(density) { code.lineHeight.toDp() }
     val gutter = if (pager.rowCount >= GUTTER_WIDE_ROWS) 44.dp else 36.dp
     val offset = remember(pager) { mutableFloatStateOf(0f) }
+    // resolved once, not per row: the list composes dozens of rows per fling frame
+    val labels = RowLabels(stringResource(R.string.chg_line_include), stringResource(R.string.chg_line_exclude))
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewport = with(density) { (maxWidth - gutter * 2 - SIGN_WIDTH).toPx() }
         val maxOffset = (pager.maxColumns * charWidth - viewport + with(density) { 16.dp.toPx() }).coerceAtLeast(0f)
@@ -283,6 +286,7 @@ private fun DiffRows(pager: DiffPager, cache: DiffLineCache, wrap: Boolean, acti
                         gutter,
                         if (wrap) null else rowHeight,
                         if (wrap) null else offset,
+                        labels,
                         onToggle = { actions.toggleLine(row.index.toInt()) },
                     )
                 }
@@ -301,6 +305,7 @@ private fun DiffRow(
     gutter: Dp,
     height: Dp?,
     offset: MutableFloatState?,
+    labels: RowLabels,
     onToggle: () -> Unit,
 ) {
     val changeable = row.kind == DiffRowKindVm.ADD || row.kind == DiffRowKindVm.DELETE
@@ -313,7 +318,7 @@ private fun DiffRow(
     val selected = changeable && row.selected
     val numberColor = if (selected) palette.selectedText else palette.lineNumber
     val numberBg = if (selected) palette.selectedBg else gutterBg
-    val toggleLabel = stringResource(if (row.selected) R.string.chg_line_exclude else R.string.chg_line_include)
+    val toggleLabel = if (row.selected) labels.exclude else labels.include
     val sized = if (height != null) Modifier.height(height) else Modifier.height(IntrinsicSize.Min)
     Row(
         Modifier
@@ -383,3 +388,7 @@ private const val GUTTER_WIDE_ROWS = 1000
 const val TAG_DIFF_LIST = "chg_diff_list"
 const val TAG_DIFF_ROW = "chg_diff_row_"
 const val TAG_DIFF_INCLUDE = "chg_diff_include"
+
+/** The accessibility labels of a changeable row, resolved once per list. */
+@Immutable
+private data class RowLabels(val include: String, val exclude: String)

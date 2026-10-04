@@ -212,3 +212,10 @@ measured yet: M-A0 ran fossDebug only.
   list is short), as the GPUI app's `theme::short` does.
 - Error dialog from the engine (`popup()` kind Error) displays and closes.
 - New FFI since the agent's run: `setGlobalIdentity(name, email)` (706be347) for Configure Git.
+- Diff fling on the 6000-line `big.py` (debug build): 41-47 frames per 8 flings, 66 % janky,
+  Choreographer "Skipped 61 frames". `gfxinfo framestats`: input/measure/draw tiny, the
+  **animation stage (composition) p50 24 ms, p90 103 ms, max 182 ms** → a composition storm:
+  ~50 new rows per fast-fling frame, each a Row of four Texts + stringResource + semantics,
+  wrap mode (compact default) measuring with IntrinsicSize.Min, all under debug Compose.
+  Next: measure the `fast` build; then one Text per row with Canvas-drawn gutters and a
+  fixed row height in wrap-off mode, `stringResource` hoisted (done), and a baseline profile.

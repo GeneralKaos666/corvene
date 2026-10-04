@@ -43,14 +43,14 @@ fun PopupHost() {
 @Composable
 private fun Error(popup: PopupVm, onClose: () -> Unit) {
     var details by rememberSaveable(popup) { mutableStateOf(false) }
-    val output = popup.field("output")
+    val output = popup.field("details") ?: popup.field("output")
     PrimerDialog(
         title = popup.field("title") ?: stringResource(R.string.app_error),
         onDismissRequest = onClose,
         closeDescription = stringResource(R.string.app_close),
         confirmButton = { PrimerButton(stringResource(R.string.app_close), onClose, variant = PrimerButtonVariant.Primary) },
     ) {
-        Text(popup.field("message").orEmpty(), style = MaterialTheme.typography.bodyMedium, color = CorveneTheme.colors.textPrimary)
+        Text(popup.field("text") ?: popup.field("message").orEmpty(), style = MaterialTheme.typography.bodyMedium, color = CorveneTheme.colors.textPrimary)
         if (!output.isNullOrBlank()) {
             PrimerButton(
                 stringResource(if (details) R.string.app_hide_details else R.string.app_show_details),
