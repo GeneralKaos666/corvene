@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Corvene</string>
-    <string name="app_appearance">Appearance</string>
     <string name="app_settings">Settings</string>
     <string name="app_back">Back</string>
     <string name="app_sign_in">Sign in</string>
     <string name="app_sign_in_enterprise">Sign in to GitHub Enterprise</string>
-    <string name="app_accounts">Accounts</string>
     <string name="app_add_menu">Add a repository</string>
     <string name="app_clone">Clone repository…</string>
     <string name="app_create">Create new repository…</string>
@@ -100,4 +98,22 @@
     <string name="app_banner_conflicts">Resolve conflicts to continue %1$s %2$s.</string>
     <string name="app_banner_conflicts_plain">Resolve conflicts to continue %1$s.</string>
     <string name="app_the_branch">the branch</string>
+    <string name="app_licenses">Open source licences</string>
+    <string name="app_repository_settings">Repository settings</string>
+    <string name="app_rail_branches">Branches</string>
+    <string name="app_rail_repositories">Repositories</string>
+    <string name="app_shortcuts_view">View</string>
+    <string name="app_shortcuts_repository">Repository</string>
+    <string name="app_shortcuts_branch">Branch</string>
+    <string name="app_shortcut_changes">Show changes</string>
+    <string name="app_shortcut_history">Show history</string>
+    <string name="app_shortcut_repositories">Show repository list</string>
+    <string name="app_shortcut_branches">Show branches list</string>
+    <string name="app_shortcut_filter">Filter the list</string>
+    <string name="app_shortcut_close">Close the sheet</string>
+    <string name="app_shortcut_push">Push</string>
+    <string name="app_shortcut_pull">Pull</string>
+    <string name="app_shortcut_fetch">Fetch</string>
+    <string name="app_shortcut_commit">Commit</string>
+    <string name="app_shortcut_new_branch">New branch…</string>
 </resources>

@@ -9,7 +9,7 @@ plugins {
 dependencies {
     listOf(
         ":app", ":core:common", ":core:design", ":core:ffi", ":core:platform",
-        ":feature:repositories", ":feature:changes", ":feature:branches", ":feature:history", ":feature:mco", ":feature:settings",
+        ":feature:repositories", ":feature:changes", ":feature:branches", ":feature:history", ":feature:mco", ":feature:settings", ":feature:onboarding",
     )
         .forEach { "kover"(project(it)) }
 }
@@ -18,7 +18,7 @@ dependencies {
 val androidModules = listOf(
     ":core:common", ":core:design", ":core:ffi", ":core:platform",
     ":feature:repositories", ":feature:changes", ":feature:branches", ":feature:history", ":feature:mco", ":feature:settings",
-    ":app",
+    ":feature:onboarding", ":app",
 )
 
 // Every unit test (Robolectric, Compose, Roborazzi captures, Konsist), under one name.

@@ -34,6 +34,12 @@ work = "2.10.0"
 # Custom Tabs for the sign-in pages; the design's pin.
 browser = "1.9.0"
 profileinstaller = "1.4.1"
+# JankStats (JankMonitor); the design's pin.
+metricsPerformance = "1.0.0"
+# The baseline profile plugin and the macrobenchmarks share benchmark's
+# version; 1.5.0 is the first that knows AGP 9.
+benchmark = "1.5.0"
+uiautomator = "2.4.0"
 # Kotlin-only preferences until the Rust settings carry them (the design style).
 datastore = "1.1.7"
 androidxTracing = "1.3.0"
@@ -84,6 +90,9 @@ androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", versi
 androidx-work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 androidx-browser = { module = "androidx.browser:browser", version.ref = "browser" }
+androidx-metrics-performance = { module = "androidx.metrics:metrics-performance", version.ref = "metricsPerformance" }
+androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
 androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 androidx-tracing = { module = "androidx.tracing:tracing", version.ref = "androidxTracing" }
@@ -117,6 +126,7 @@ gradle-detekt = { module = "io.gitlab.arturbosch.detekt:detekt-gradle-plugin", v
 gradle-roborazzi = { module = "io.github.takahirom.roborazzi:roborazzi-gradle-plugin", version.ref = "roborazzi" }
 gradle-kover = { module = "org.jetbrains.kotlinx:kover-gradle-plugin", version.ref = "kover" }
 gradle-licensee = { module = "app.cash.licensee:licensee-gradle-plugin", version.ref = "licensee" }
+gradle-baselineprofile = { module = "androidx.baselineprofile:androidx.baselineprofile.gradle.plugin", version.ref = "benchmark" }
 gradle-dependency-analysis = { module = "com.autonomousapps:dependency-analysis-gradle-plugin", version.ref = "dependencyAnalysis" }
 
 [plugins]

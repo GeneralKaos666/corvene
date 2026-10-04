@@ -51,6 +51,7 @@ import com.wasimaster.corvene.mco.MultiCommitOperationRoute
 import com.wasimaster.corvene.repositories.AddRepositoryRoute
 import com.wasimaster.corvene.repositories.CloneRoute
 import com.wasimaster.corvene.repositories.CreateRepositoryRoute
+import com.wasimaster.corvene.settings.RepositorySettingsRoute
 
 /**
  * The engine's open dialog (`popup()`, GHD's popup stack) wired to the
@@ -58,7 +59,7 @@ import com.wasimaster.corvene.repositories.CreateRepositoryRoute
  * [CorePopupActions] for what the buttons do. The drawing is [PopupDialog].
  */
 @Composable
-fun PopupHost(onSignIn: (enterprise: Boolean) -> Unit) {
+fun PopupHost(onSignIn: (enterprise: Boolean) -> Unit, onOpenSettings: (section: String) -> Unit) {
     val core = LocalCore.current
     val popup by rememberCoreQuery { popup() ?: NoPopup }
     val value = popup.value?.takeIf { it.kind.isNotEmpty() } ?: return
@@ -77,6 +78,19 @@ fun PopupHost(onSignIn: (enterprise: Boolean) -> Unit) {
         }
         "AddExistingRepository" -> return FullScreenPopup(close) { AddRepositoryRoute(onClose = close, initialPath = value.field("path")) }
         "CreateRepository" -> return FullScreenPopup(close) { CreateRepositoryRoute(onClose = close, initialBase = value.field("path")) }
+        "RepositorySettings" -> {
+            val repo = value.repo ?: return
+            // a dialog on wide windows, the whole screen on compact ones (PrimerDialog's rule)
+            return RepositorySettingsRoute(repo.toLong(), value.field("tab"), onClose = close)
+        }
+        "Preferences", "Flags" -> {
+            // Settings and Flags are destinations; the popup only asks for them
+            LaunchedEffect(value) {
+                close()
+                onOpenSettings(if (value.kind == "Flags") "flags" else value.field("tab").orEmpty())
+            }
+            return
+        }
         "SignIn" -> {
             // the sign-in screen is a destination; the popup only asks for it
             LaunchedEffect(value) {

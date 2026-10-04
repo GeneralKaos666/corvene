@@ -8,9 +8,8 @@ import com.wasimaster.corvene.common.CorveneLog
 import com.wasimaster.corvene.common.CorveneTrace
 import com.wasimaster.corvene.ffi.Core
 import com.wasimaster.corvene.ffi.CoreConfig
-import com.wasimaster.corvene.ffi.gen.HostInfo
 import com.wasimaster.corvene.platform.CorveneFetchWorker
-import com.wasimaster.corvene.platform.FolderResolver
+import com.wasimaster.corvene.platform.HostState
 import com.wasimaster.corvene.platform.Notifications
 
 /**
@@ -29,19 +28,16 @@ class CorveneApp : Application() {
             CoreConfig(
                 filesDir = filesDir.path,
                 env = mapOf("CORVENE_LOG" to "info"),
-                info = HostInfo(
-                    hasAllFilesAccess = FolderResolver.hasAllFilesAccess(this),
-                    canRequestAllFilesAccess = FolderResolver.canRequestAllFilesAccess(this),
-                    allowsDownloadedCode = BuildConfig.DOWNLOADED_CODE,
-                    grammarModuleDir = null,
-                    notificationsAllowed = Notifications.allowed(this),
-                ),
+                info = HostState.info(this),
             )
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        HostState.allowsDownloadedCode = BuildConfig.DOWNLOADED_CODE
+        // RelaunchActivity's process only starts the app again
+        if (processName().endsWith(":relaunch")) return
         CorveneTrace.section(CorveneTrace.STARTUP) {
             CorveneLog.i("Corvene ${BuildConfig.VERSION_NAME} (${BuildConfig.FLAVOR}) starting")
             Notifications.createChannels(this)
@@ -61,3 +57,11 @@ class CorveneApp : Application() {
         )
     }
 }
+
+/** This process's name (`com.wasimaster.corvene` or `…:relaunch`). */
+private fun Application.processName(): String =
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+        Application.getProcessName()
+    } else {
+        runCatching { java.io.File("/proc/self/cmdline").readText().trimEnd('\u0000') }.getOrDefault(packageName)
+    }

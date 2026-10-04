@@ -3,12 +3,15 @@ package com.wasimaster.corvene.design
 
 /** The Octicons the app ships (16 and 24 px each). */
 object Octicons {
+    val Accessibility = OcticonIcon("accessibility", R.drawable.cvd_oct_accessibility_16, R.drawable.cvd_oct_accessibility_24)
     val Alert = OcticonIcon("alert", R.drawable.cvd_oct_alert_16, R.drawable.cvd_oct_alert_24)
     val AlertFill = OcticonIcon("alert-fill", R.drawable.cvd_oct_alert_fill_16, R.drawable.cvd_oct_alert_fill_24)
     val ArrowDown = OcticonIcon("arrow-down", R.drawable.cvd_oct_arrow_down_16, R.drawable.cvd_oct_arrow_down_24)
     val ArrowLeft = OcticonIcon("arrow-left", R.drawable.cvd_oct_arrow_left_16, R.drawable.cvd_oct_arrow_left_24)
     val ArrowSwitch = OcticonIcon("arrow-switch", R.drawable.cvd_oct_arrow_switch_16, R.drawable.cvd_oct_arrow_switch_24)
     val ArrowUp = OcticonIcon("arrow-up", R.drawable.cvd_oct_arrow_up_16, R.drawable.cvd_oct_arrow_up_24)
+    val Beaker = OcticonIcon("beaker", R.drawable.cvd_oct_beaker_16, R.drawable.cvd_oct_beaker_24)
+    val Bell = OcticonIcon("bell", R.drawable.cvd_oct_bell_16, R.drawable.cvd_oct_bell_24)
     val Check = OcticonIcon("check", R.drawable.cvd_oct_check_16, R.drawable.cvd_oct_check_24)
     val CheckCircle = OcticonIcon("check-circle", R.drawable.cvd_oct_check_circle_16, R.drawable.cvd_oct_check_circle_24)
     val CheckCircleFill = OcticonIcon("check-circle-fill", R.drawable.cvd_oct_check_circle_fill_16, R.drawable.cvd_oct_check_circle_fill_24)
@@ -19,6 +22,11 @@ object Octicons {
     val Clock = OcticonIcon("clock", R.drawable.cvd_oct_clock_16, R.drawable.cvd_oct_clock_24)
     val CodeSquare = OcticonIcon("code-square", R.drawable.cvd_oct_code_square_16, R.drawable.cvd_oct_code_square_24)
     val Columns = OcticonIcon("columns", R.drawable.cvd_oct_columns_16, R.drawable.cvd_oct_columns_24)
+    val CommentDiscussion = OcticonIcon(
+        "comment-discussion",
+        R.drawable.cvd_oct_comment_discussion_16,
+        R.drawable.cvd_oct_comment_discussion_24,
+    )
     val Copy = OcticonIcon("copy", R.drawable.cvd_oct_copy_16, R.drawable.cvd_oct_copy_24)
     val Dash = OcticonIcon("dash", R.drawable.cvd_oct_dash_16, R.drawable.cvd_oct_dash_24)
     val DesktopDownload = OcticonIcon("desktop-download", R.drawable.cvd_oct_desktop_download_16, R.drawable.cvd_oct_desktop_download_24)
@@ -62,6 +70,7 @@ object Octicons {
     val Info = OcticonIcon("info", R.drawable.cvd_oct_info_16, R.drawable.cvd_oct_info_24)
     val IssueOpened = OcticonIcon("issue-opened", R.drawable.cvd_oct_issue_opened_16, R.drawable.cvd_oct_issue_opened_24)
     val KebabHorizontal = OcticonIcon("kebab-horizontal", R.drawable.cvd_oct_kebab_horizontal_16, R.drawable.cvd_oct_kebab_horizontal_24)
+    val Law = OcticonIcon("law", R.drawable.cvd_oct_law_16, R.drawable.cvd_oct_law_24)
     val LinkExternal = OcticonIcon("link-external", R.drawable.cvd_oct_link_external_16, R.drawable.cvd_oct_link_external_24)
     val Lock = OcticonIcon("lock", R.drawable.cvd_oct_lock_16, R.drawable.cvd_oct_lock_24)
     val MarkGithub = OcticonIcon("mark-github", R.drawable.cvd_oct_mark_github_16, R.drawable.cvd_oct_mark_github_24)
@@ -87,7 +96,9 @@ object Octicons {
     val Sun = OcticonIcon("sun", R.drawable.cvd_oct_sun_16, R.drawable.cvd_oct_sun_24)
     val Sync = OcticonIcon("sync", R.drawable.cvd_oct_sync_16, R.drawable.cvd_oct_sync_24)
     val Tag = OcticonIcon("tag", R.drawable.cvd_oct_tag_16, R.drawable.cvd_oct_tag_24)
+    val Terminal = OcticonIcon("terminal", R.drawable.cvd_oct_terminal_16, R.drawable.cvd_oct_terminal_24)
     val ThreeBars = OcticonIcon("three-bars", R.drawable.cvd_oct_three_bars_16, R.drawable.cvd_oct_three_bars_24)
+    val Tools = OcticonIcon("tools", R.drawable.cvd_oct_tools_16, R.drawable.cvd_oct_tools_24)
     val Trash = OcticonIcon("trash", R.drawable.cvd_oct_trash_16, R.drawable.cvd_oct_trash_24)
     val TriangleDown = OcticonIcon("triangle-down", R.drawable.cvd_oct_triangle_down_16, R.drawable.cvd_oct_triangle_down_24)
     val Undo = OcticonIcon("undo", R.drawable.cvd_oct_undo_16, R.drawable.cvd_oct_undo_24)

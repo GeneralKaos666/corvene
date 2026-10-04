@@ -2,16 +2,20 @@ package com.wasimaster.corvene
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.KeyboardShortcutGroup
+import android.view.Menu
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
+import androidx.metrics.performance.JankStats
 import com.wasimaster.corvene.common.CorveneLog
 import com.wasimaster.corvene.ffi.Headless
 import com.wasimaster.corvene.ffi.LocalCore
 import com.wasimaster.corvene.ffi.gen.CoreException
 import com.wasimaster.corvene.platform.AppLinks
+import com.wasimaster.corvene.platform.HostState
 import com.wasimaster.corvene.platform.Notifications
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -30,6 +34,8 @@ class MainActivity : ComponentActivity() {
 
     @Volatile
     private var ready = false
+
+    private var jank: JankStats? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // a background fetch WorkManager started in this process lets go
@@ -54,11 +60,31 @@ class MainActivity : ComponentActivity() {
             ready = true
         }
         if (savedInstanceState == null) handleIntent(intent)
+        jank = JankMonitor.install(this)
         setContent {
             CompositionLocalProvider(LocalCore provides core) {
-                CorveneRoot(onQuit = ::finishAndRemoveTask)
+                // the engine quits only to relaunch (a flag that needs a restart)
+                CorveneRoot(onQuit = { RelaunchActivity.relaunch(this) })
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // all-files access or notifications may have been granted in Android's settings meanwhile
+        HostState.refresh(core, this)
+        jank?.isTrackingEnabled = true
+    }
+
+    override fun onPause() {
+        jank?.isTrackingEnabled = false
+        super.onPause()
+    }
+
+    /** The hardware keyboard's shortcuts in the system's list (Meta+/), as GHD's menus show them. */
+    override fun onProvideKeyboardShortcuts(data: MutableList<KeyboardShortcutGroup>, menu: Menu?, deviceId: Int) {
+        super.onProvideKeyboardShortcuts(data, menu, deviceId)
+        data += KeyboardShortcuts.groups(this)
     }
 
     override fun onNewIntent(intent: Intent) {

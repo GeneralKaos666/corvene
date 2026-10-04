@@ -12,6 +12,7 @@ dependencies {
     implementation(libs.gradle.kover)
     implementation(libs.gradle.licensee)
     implementation(libs.gradle.dependency.analysis)
+    implementation(libs.gradle.baselineprofile)
     // The precompiled plugins read the catalog through `libs` (VersionCatalogs.kt).
     implementation(files(libs.javaClass.superclass.protectionDomain.codeSource.location))
     constraints {

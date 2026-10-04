@@ -36,6 +36,9 @@ builds reuse cargo's output. Debug builds install as
 | `recordRoborazziFossDebug` | every module's screenshots to its `src/test/screenshots/` |
 | `verifyRoborazziFossDebug` | compare against them |
 | `:app:checkElfAlignmentFossDebug` | every 64-bit `.so` in the APK aligned to 16 KB |
+| `:app:checkApkSize<Variant>` | the APK by part (engine, git, JNA, dex, fonts, …) against `app/apk-budget.txt`; report in `app/build/reports/apk-size/` |
+| `:app:generateFossReleaseBaselineProfile -Pcorvene.benchmark=true` | the baseline profile from `:benchmark`'s journey on a connected phone (Android 13+ or rooted) |
+| `:benchmark:connectedFossBenchmarkReleaseAndroidTest -Pcorvene.benchmark=true` | StartupBenchmark, DiffScrollBenchmark, HistoryScrollBenchmark on the phone |
 | `:app:licenseeAndroidFossRelease` | licence audit of what the APK ships |
 | `buildHealth` | unused / mis-scoped dependencies (advice only) |
 | `koverHtmlReportUnit` | merged unit-test coverage |
@@ -60,11 +63,19 @@ builds reuse cargo's output. Debug builds install as
 | `corvene.idSuffix` | `.compose` | `applicationIdSuffix` of debug builds |
 | `corvene.versionCode` | `1` (gradle.properties) | versionName comes from `../Cargo.toml` |
 | `corvene.splitApks` | `false` | one APK per ABI plus a universal one |
+| `corvene.benchmark` | `false` | include `:benchmark` (macrobenchmarks, baseline profile generator) |
 | `warningsAsErrors` | `false` | Kotlin warnings fail the build (CI) |
 | `composeMetrics` | `false` | Compose compiler reports under `build/compose/` (with `--rerun`) |
 
 A git worktree has no bundled git of its own (`jniLibs/` is ignored); point
 `corvene.bundledGitDir` at the main checkout's in `local.properties`.
+
+Janky frames, tagged with the Navigation 3 key on top, go to logcat once
+`adb shell setprop log.tag.CorveneJank DEBUG` is set (restart the app):
+`adb logcat -s CorveneJank`. The benchmark journeys open the first
+repository of the list; on a fresh install of the benchmark variant they add
+`/sdcard/Corvene/bench` (instrumentation argument `corvene.benchRepo`) through
+`x-corvene://openLocalRepo`, which needs All files access granted.
 
 Debug builds also accept `--es corvene.debug.addRepository <path>` on the
 `am start` line: the engine adds that folder as if it had been picked
@@ -82,7 +93,7 @@ WorkManager starts for the hourly fetch has no activity and runs
 settings.gradle.kts  build.gradle.kts (unitTests, staticAnalysis)  gradle/libs.versions.toml (every version, with reasons)
 build-logic/                      convention plugins, reading the catalog
   corvene.android.{library,application,compose,feature}   corvene.{detekt,rust,screenshots,root,kotlin-options}
-  com/wasimaster/corvene/buildlogic/{CargoNdkTask,GenerateUniffiTask,BundledGitSyncTask,ElfAlignmentTask}.kt
+  com/wasimaster/corvene/buildlogic/{CargoNdkTask,GenerateUniffiTask,BundledGitSyncTask,ElfAlignmentTask,ApkBudgetTask}.kt
 config/  detekt/detekt.yml  lint/lint.xml  compose/stability.conf
 core/common      logging (tag `corvene`), trace sections (`Corvene:*`), LiveState
 core/design      DesignStyle, PrimerColors + palettes (3 styles × light/dark × contrast), CorveneTheme, DiffPalette,
@@ -101,9 +112,14 @@ feature/changes  ChangesScreen (+ CommitPanel/CommitForm, filters), DiffScreen (
 feature/branches BranchSheet (groups, pull requests, menu), branch dialogs, sync button model/menu/controller, remote dialogs
 feature/history  HistoryScreen (+ CommitPager, compare, commit menu, multi-select), CommitDetailScreen, history dialogs
 feature/mco      ConflictsScreen, MultiCommitOperationRoute (choose branch, progress, abort), ChooseBranchSheet
-feature/settings AppearanceScreen (style cards, theme), AccountsScreen (avatars, sign out, sign in)
-app              CorveneApp (process lifecycle → appVisible/focus), MainActivity (splash, edge to edge), Navigation 3,
-                 CorveneScaffold (repository chrome, list-detail on medium/expanded), PopupHost (PopupDialog), BannerFlash
+feature/settings Settings sections list + SettingsPanes (list-detail on medium/expanded), Accounts, Integrations,
+                 Git, Appearance, Notifications, Prompts, Advanced, Accessibility, About + licences, FlagsScreen
+                 (filter, controls by kind, presets, Reset all, Relaunch), RepositorySettingsDialog
+app              CorveneApp (process lifecycle → appVisible/focus), MainActivity (splash, edge to edge, keyboard shortcut
+                 list, setHostInfo on resume), Navigation 3, CorveneScaffold (repository chrome, NavigationRail, 250 dp
+                 sidebar on expanded, Shortcut keys), PopupHost (PopupDialog), BannerFlash, JankMonitor, RelaunchActivity,
+                 apk-budget.txt
+benchmark        (-Pcorvene.benchmark) BaselineProfileGenerator, StartupBenchmark, DiffScrollBenchmark, HistoryScrollBenchmark
 tools/architecture     Konsist rules        tools/octicons/gen.py + icons.txt        tools/tokens/gen.py
 ```
 

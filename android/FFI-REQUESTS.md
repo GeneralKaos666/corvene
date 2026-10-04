@@ -145,6 +145,22 @@ Kotlin does meanwhile.
     until the live fetch ended (design §4: await busy == false, 2 min cap);
     `backgroundFetch()` is dispatched and the worker returns at once.
 
+## M-A5
+
+42. **`SettingsVm.confirmDiscardChangesPermanently` and `useExternalCredentialHelper`.**
+    `setSetting` writes both keys but the view model does not carry them, so
+    Settings › Prompts has no "Discarding changes permanently" row and
+    Advanced no "Use Git Credential Manager" row (a switch needs its value).
+43. **The global git config without the Preferences popup.** `globalGitConfig()`
+    is filled only by `Dispatcher::open_preferences`, which the FFI does not
+    export, so it answers null; Settings › Git shows the default branch as
+    "main" (read-only). Wanted `loadGlobalGitConfig()` (or `openPreferences(tab)`)
+    and **`setDefaultBranch(name)`** (GHD's Default branch tab writes
+    `init.defaultBranch`).
+44. **`HostEvents.relaunch()`** apart from `quit()`: the Bridge's `relaunch`
+    calls `events.quit()`, so Kotlin treats every Quit as "start again"
+    (RelaunchActivity). A real quit (none on Android today) would restart.
+
 ## Provided by the FFI (2026-10-04, 79678bd4)
 
 - `com.wasimaster.corvene.ffi.NativeContext` must exist in `:core:ffi` as

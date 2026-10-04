@@ -18,9 +18,17 @@ data class Repository(val id: Long) : NavKey
 @Serializable
 data class Diff(val id: Long) : NavKey
 
-/** Settings › Appearance. */
+/** Settings: the sections list (compact), or the list beside the first section (wider). */
 @Serializable
-data object AppearanceSettings : NavKey
+data object Settings : NavKey
+
+/** One Settings section by its key (`SettingsSection.key`): its own screen on compact widths, beside the list wider. */
+@Serializable
+data class SettingsPage(val section: String) : NavKey
+
+/** Settings › About › Open source licences. */
+@Serializable
+data object Licenses : NavKey
 
 /** The selected commit on its own screen (compact widths; wider ones show it beside History). */
 @Serializable
@@ -45,7 +53,3 @@ data object CreateRepository : NavKey
 /** Sign in on its own (Settings › Accounts, the Clone dialog). */
 @Serializable
 data class SignIn(val enterprise: Boolean) : NavKey
-
-/** Settings › Accounts. */
-@Serializable
-data object AccountsSettings : NavKey

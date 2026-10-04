@@ -1,0 +1,20 @@
+# APK size budget per part, in MB of the APK (what each part takes inside
+# it), for one ABI (arm64-v8a). Checked by :app:checkApkSize<Variant>;
+# non-debuggable variants fail over budget, debug builds only report.
+# `<buildType>.<part>` overrides a part for that build type.
+# Design §5: arm64 foss <= 40 MB.
+
+total     40
+engine    18      # libcorvene_ffi.so + askpass (release Rust, stripped)
+git       17      # the bundled git, ssh, ssh-keygen, git-lfs. The design said ~14;
+                  # measured 16.6 (2026-10-04): git-lfs 5.0, git-remote-https 4.8
+                  # (a second copy of libcurl + git), git 2.7, ssh 2.5, ssh-keygen 2.4
+jna       0.5     # libjnidispatch.so
+dex       4       # after R8
+fonts     1.1     # Inter + JetBrains Mono
+resources 2
+assets    1
+
+# fast = release without R8: the dex is not shrunk
+fast.dex  16
+fast.total 52

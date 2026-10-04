@@ -6,9 +6,14 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.LocalActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import com.wasimaster.corvene.design.ColorMode
 import com.wasimaster.corvene.design.CorveneTheme
 import com.wasimaster.corvene.ffi.LocalCore
@@ -40,10 +45,13 @@ fun CorveneRoot(onQuit: () -> Unit) {
     }
     CorveneTheme(style = appearance.style, colorMode = appearance.colorMode, highContrast = appearance.highContrast) {
         HostRequestHandler(core, onQuit = onQuit)
-        if (settings.value?.welcomeCompleted == false) {
-            WelcomeRoute(onFinished = {})
-        } else {
-            CorveneNavigation()
+        // test tags as resource ids: the macrobenchmarks find rows with UiAutomator
+        Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
+            if (settings.value?.welcomeCompleted == false) {
+                WelcomeRoute(onFinished = {})
+            } else {
+                CorveneNavigation()
+            }
         }
     }
 }

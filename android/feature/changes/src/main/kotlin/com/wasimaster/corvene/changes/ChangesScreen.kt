@@ -24,6 +24,7 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import com.wasimaster.corvene.design.Blankslate
 import com.wasimaster.corvene.design.ChipRow
 import com.wasimaster.corvene.design.CorveneTheme
+import com.wasimaster.corvene.design.KeyCommand
+import com.wasimaster.corvene.design.LocalKeyCommands
 import com.wasimaster.corvene.design.FilePath
 import com.wasimaster.corvene.design.Flash
 import com.wasimaster.corvene.design.FlashVariant
@@ -107,6 +110,16 @@ fun ChangesScreen(
     // short windows (phone landscape) keep the chips behind the header's filter button
     val short = isShortHeight()
     var chipsOpen by rememberSaveable { mutableStateOf(false) }
+    // Ctrl+F shows or hides the filter chips (GHD's Show/Hide Changes Filter)
+    var chipsHidden by rememberSaveable { mutableStateOf(false) }
+    val keys = LocalKeyCommands.current
+    LaunchedEffect(keys, short) {
+        keys.commands.collect { command ->
+            if (command == KeyCommand.Filter) {
+                if (short) chipsOpen = !chipsOpen else chipsHidden = !chipsHidden
+            }
+        }
+    }
     val files = remember(changes) { changes.visibleFiles() }
     val active = remember(changes) { changes.activeFilters() }
     val requestDiscard: (String) -> Unit = { path -> if (confirmDiscard) discarding = path else actions.discard(listOf(path)) }
@@ -132,7 +145,7 @@ fun ChangesScreen(
         if (changes.files.isEmpty()) {
             NoChanges(Modifier.weight(1f))
         } else {
-            if (!short || chipsOpen) FilterChips(active, actions)
+            if (if (short) chipsOpen else !chipsHidden) FilterChips(active, actions)
             ListHeader(changes, files.size, onFilter = if (short) ({ chipsOpen = !chipsOpen }) else null, filtered = active.isNotEmpty())
             LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag(TAG_FILES)) {
                 items(files, key = { it.path }, contentType = { "file" }) { file ->

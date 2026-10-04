@@ -24,12 +24,20 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -39,7 +47,9 @@ import androidx.compose.ui.unit.dp
 import com.wasimaster.corvene.design.Avatar
 import com.wasimaster.corvene.design.BranchName
 import com.wasimaster.corvene.design.CorveneTheme
+import com.wasimaster.corvene.design.KeyCommand
 import com.wasimaster.corvene.design.Label
+import com.wasimaster.corvene.design.LocalKeyCommands
 import com.wasimaster.corvene.design.LabelVariant
 import com.wasimaster.corvene.design.Octicon
 import com.wasimaster.corvene.design.OcticonTint
@@ -69,6 +79,20 @@ internal fun CommitPanel(changes: ChangesVm, actions: ChangesActions) {
     var summary by rememberSaveable(changes.commitNonce) { mutableStateOf("") }
     var description by rememberSaveable(changes.commitNonce) { mutableStateOf("") }
     val branch = form.branch ?: stringResource(R.string.chg_no_branch)
+    val commit = {
+        actions.commit(summary.trim(), description.trim())
+        open = false
+    }
+    // Ctrl+Enter (GHD's ⌘Enter): opens the form, or commits once it can
+    val keys = LocalKeyCommands.current
+    val latest by rememberUpdatedState(changes)
+    val latestCommit by rememberUpdatedState(commit)
+    LaunchedEffect(keys) {
+        keys.commands.collect { command ->
+            if (command != KeyCommand.Commit) return@collect
+            if (open && canCommitNow(latest, summary, latest.form)) latestCommit() else if (latest.includedCount > 0u) open = true
+        }
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -115,10 +139,7 @@ internal fun CommitPanel(changes: ChangesVm, actions: ChangesActions) {
                 description = description,
                 onSummary = { summary = it },
                 onDescription = { description = it },
-                onCommit = {
-                    actions.commit(summary.trim(), description.trim())
-                    open = false
-                },
+                onCommit = commit,
                 modifier = Modifier.imePadding(),
             )
         }
@@ -144,9 +165,20 @@ fun CommitForm(
 ) {
     val colors = CorveneTheme.colors
     val branch = form.branch ?: stringResource(R.string.chg_no_branch)
+    val canCommit = includedCount > 0 && summary.isNotBlank() && !form.committing
     Column(
         modifier
             .fillMaxWidth()
+            // the sheet is a window of its own: Ctrl+Enter is handled here, not at the root
+            .onPreviewKeyEvent { event ->
+                val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
+                if (event.type == KeyEventType.KeyDown && enter && event.isCtrlPressed && canCommit) {
+                    onCommit()
+                    true
+                } else {
+                    false
+                }
+            }
             .verticalScroll(rememberScrollState())
             .padding(horizontal = CorveneTheme.metrics.gutter)
             .padding(bottom = 16.dp)
@@ -203,7 +235,7 @@ fun CommitForm(
                 stringResource(R.string.chg_commit),
                 onCommit,
                 variant = PrimerButtonVariant.Primary,
-                enabled = includedCount > 0 && summary.isNotBlank() && !form.committing,
+                enabled = canCommit,
                 modifier = Modifier.testTag(TAG_COMMIT),
             )
         }
@@ -249,3 +281,6 @@ const val TAG_SUMMARY = "chg_summary"
 const val TAG_DESCRIPTION = "chg_description"
 const val TAG_UNDO = "chg_undo"
 const val TAG_UNDO_BAR = "chg_undo_bar"
+
+private fun canCommitNow(changes: ChangesVm, summary: String, form: CommitFormVm): Boolean =
+    changes.includedCount > 0u && summary.isNotBlank() && !form.committing

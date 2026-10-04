@@ -20,33 +20,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-private val Settings = SettingsVm(
-    designStyle = DesignStyleVm.GIT_HUB_MOBILE,
-    designStyleSetting = DesignStyleVm.GIT_HUB_MOBILE,
-    designStylePinned = false,
-    theme = ThemeVm.SYSTEM,
-    welcomeCompleted = true,
-    confirmDiscardChanges = true,
-    confirmForcePush = true,
-    confirmRepositoryRemoval = true,
-    notificationsEnabled = true,
-    repositoryIndicatorsEnabled = true,
-    hideWhitespaceInChangesDiff = false,
-    hideWhitespaceInHistoryDiff = false,
-    showDiffCheckMarks = true,
-    underlineLinks = true,
-    confirmCheckoutCommit = true,
-    confirmUndoCommit = true,
-    confirmDiscardStash = true,
-    confirmCommitFilteredChanges = true,
-    showCommitLengthWarning = false,
-    commitSpellcheckEnabled = false,
-    historyFirstParent = false,
-    uncommittedChangesStrategy = "ask",
-    externalEditor = null,
-    shell = null,
-    cloneDir = null,
-)
+private val Settings = SampleSettings
 
 /** Settings › Appearance: the cards and radios send the engine's values; screenshots in every style. */
 @RunWith(AndroidJUnit4::class)

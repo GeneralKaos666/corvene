@@ -3,6 +3,176 @@
 Status, measurements and every place this build differs from
 `.docs/android/design-compose-app.md`. Newest milestone first.
 
+# M-A5 notes
+
+## Built
+
+- `:feature:settings`: `SettingsSection` (GHD's tabs minus Copilot, plus Flags
+  and About), `SettingsListScreen`, `SettingsPanes` (M3 `ListDetailPaneScaffold`,
+  list pane 220 dp, `calculatePaneScaffoldDirectiveWithTwoPanesOnMediumWidth`),
+  `SettingsSectionRoute`: Integrations (editors = `InstalledApps.textViewers`,
+  the same list the engine's `viewApps()` gets; picks store the label in
+  `external_editor`, "Ask every time" clears it; Termux as the fixed shell),
+  Git (`gitIdentity()` → Save = `setGlobalIdentity`; default branch read-only;
+  Edit global Git config = `openGlobalGitConfig`), Notifications
+  (`notifications_enabled`; turning it on asks POST_NOTIFICATIONS, else opens
+  the app's notification settings; blocked Flash; channels row; `setHostInfo`
+  after the answer), Prompts (the seven confirmations, the branch switch
+  strategy radios, commit length warning), Advanced (status icons; All files
+  access row on foss, re-read on resume), Accessibility (underline links, check
+  marks), About (`versionName (flavour, build type)`, licences page from
+  `assets/notices/`, source + issues links). Every switch is `SwitchRow`/`RadioRow`
+  over `settings()` + `setSetting(key, "true"/"false"/text)` (`SettingKey`).
+- Flags (`FlagsScreen` + `FlagsRoute`): preset row (current preset, ", modified"
+  when anything is overridden) → SelectPanel of the four presets with their
+  descriptions → confirm → `applyPreset`; Reset all (confirm) → `resetAllFlags`;
+  FilterField search (title, summary, GHD behaviour, `NNN-slug`); All / On / Off
+  SegmentedControl; "Show bug fixes" (bug fixes hidden by default, as the
+  desktop dialog); rows grouped by category in the engine's order; toggle =
+  PrimerSwitch, select = chip + ActionMenu, number = − value unit + and a
+  Slider when the range is ≤ 100, text = monospace field + Apply; the engine's
+  refusal (`CoreException.Failed.reason`) under the row; overridden dot + Reset
+  (`resetFlag`); tap the title for GHD's behaviour and value; unavailable flags
+  at half alpha, controls disabled, no reason. Restart Flash with Relaunch
+  (`relaunch()`) when any `restartPending`.
+- Repository settings (`RepositorySettingsDialog` + route): the overflow menu's
+  "Repository settings" → `openRepositorySettings(repo, "remote")` → the engine's
+  `RepositorySettings` popup → PopupHost shows the dialog (`PrimerDialog`
+  full screen on compact, a dialog wider; tab from the popup's `tab` field).
+  Remote URL, `.gitignore` editor, global/local identity + `core.autocrlf`;
+  Save sends only what changed (`RepositorySettingsSave`) → `saveRepositorySettings`.
+  PopupHost also turns `Preferences` / `Flags` popups into the Settings
+  destinations.
+- `:app`: keys `Settings`, `SettingsPage(section)`, `Licenses` (replacing
+  AppearanceSettings / AccountsSettings); the overflow menus have one
+  "Settings" item; on medium/expanded a picked section replaces the entry.
+  `RelaunchActivity` (process `:relaunch`, ProcessPhoenix's approach):
+  `HostRequest.Quit` → start it with the app's pid, `finishAffinity`, kill the
+  process; it kills the old pid if still there, starts MainActivity
+  NEW_TASK|CLEAR_TASK and exits. CorveneApp does nothing in `:relaunch`.
+  `HostState` (`:core:platform`) builds `HostInfo`; MainActivity calls
+  `setHostInfo` on every resume. `JankMonitor` (JankStats 1.0.0, only when
+  `log.tag.CorveneJank` is DEBUG) + `JankScreenTag(backStack.last())`.
+  `testTagsAsResourceId` on the root for UiAutomator.
+- Tablet: `RepositoryRail` (`:core:design`, M3 NavigationRail: Changes [n],
+  History, Branches → sheet, Repositories → picker) for GitHub Mobile and
+  Material on medium/expanded (`usesNavigationRail()`); GitHub Desktop keeps
+  the tab bar, over the list pane when there are two panes (GHD's sidebar).
+  The list pane starts at `PaneExpansionAnchor.Offset.fromStart(250.dp)` on
+  expanded (≥ 840 dp), 50 % on medium; anchors 250 dp / 35 / 50 / 65 %.
+- Keyboard: `Shortcut` (Ctrl+1/2, Ctrl+T, Ctrl+B, Ctrl+F, Esc, Ctrl+Enter,
+  Ctrl+P, Ctrl+Shift+P, Ctrl+Shift+T, Ctrl+Shift+N) handled by the repository
+  root's `onPreviewKeyEvent` over a `focusTarget` it focuses; Ctrl+Enter and
+  Ctrl+F go through `LocalKeyCommands` (`:core:design`) to the commit panel
+  (opens the form, commits once it can) and the changes list (shows/hides the
+  chips); the commit sheet handles Ctrl+Enter itself (its own window).
+  `onProvideKeyboardShortcuts` lists them in three groups (View, Repository,
+  Branch). Ctrl+Shift+N opens Create branch.
+- Performance: `:benchmark` (`com.android.test`, `androidx.baselineprofile`
+  1.5.0, `targetProjectPath ":app"`, foss/play, self-instrumenting, minSdk 28,
+  only with `-Pcorvene.benchmark=true`): `BaselineProfileGenerator` (launch →
+  list → first repository → first diff, flung → History via Ctrl+2, flung →
+  branch sheet via Ctrl+B; also the startup profile), `StartupBenchmark`
+  (cold, no profile vs required profile), `DiffScrollBenchmark`,
+  `HistoryScrollBenchmark` (FrameTimingMetric). `:app` applies the consumer
+  plugin always (`saveInSrc`, no generation during builds, dex layout
+  optimisation) and depends on `:benchmark` only when it is included; tasks
+  `:app:generateFossReleaseBaselineProfile` etc. exist under the flag (checked
+  with `:benchmark:compileFossBenchmarkReleaseKotlin`). `ApkBudgetTask`
+  (`checkApkSize<Variant>`, budget `app/apk-budget.txt`, `<buildType>.<part>`
+  overrides, fails for non-debug single-ABI variants), `NoticesTask` (NOTICE
+  ×2 + font licences → `assets/notices/`).
+- 7 Octicons (bell, beaker, accessibility, comment-discussion, tools, law,
+  terminal). `:feature:onboarding` joined the `unitTests` /
+  kover aggregates (it was missing).
+
+## Deviations (and why)
+
+- **Branch switch strategy in Prompts**, not Advanced as the brief said: GHD
+  3.6.6 has it under Prompts (`.docs/ghd-ui-inventory.md`).
+- **No "Discarding changes permanently" and no "Use Git Credential Manager"
+  rows**: the view model lacks their values (FFI-REQUESTS #42).
+- **Default branch read-only, "main" when unknown**: `globalGitConfig()` is
+  null without the unexported Preferences popup, and there is no setter (#43).
+- **Settings list pane 220 dp**, not GHD's 150: a tile and "Notifications" at
+  phone type sizes do not fit 150.
+- **Every engine Quit relaunches** (#44).
+- **Ctrl+F toggles the filter chips** (Changes has no text filter yet); on
+  short windows it opens/closes them as the filter button does.
+- **autocrlf switch** in Repository settings › Git config is Corvene's (the
+  view model carries it; GHD only uses it when saving `.gitignore`).
+- **Git budget 17 MB**, not the design's ~14: measured 16.6 (git-lfs 5.0,
+  git-remote-https 4.8, git 2.7, ssh 2.5, ssh-keygen 2.4). Fast builds get
+  `fast.dex 16` / `fast.total 52` (no R8).
+- **Benchmark journeys use the keyboard shortcuts** (Ctrl+2, Ctrl+B) to reach
+  History and the branch sheet: no coordinates, same in every style.
+- **The baseline profile is not committed yet** (needs the phone).
+
+## Verification (2026-10-04)
+
+- Release engine: `:core:ffi:cargoNdkRelease :core:ffi:generateUniffiRelease
+  -Pcorvene.abis=arm64-v8a` (`CARGO_INCREMENTAL=0`), 8 m 42 s.
+- `:app:assembleFossDebug -Pcorvene.abis=arm64-v8a`: OK, 57.6 MB, `assets/notices/`
+  has the four texts.
+- `:app:assembleFossFast :app:checkApkSizeFossFast -Pcorvene.abis=arm64-v8a`:
+  OK after the git budget (first run failed on git 16.6 > 14).
+- `-Pcorvene.benchmark=true :benchmark:compileFossBenchmarkReleaseKotlin`: OK;
+  `:app:generateFossReleaseBaselineProfile` is registered (AGP 9.3 + baselineprofile 1.5.0).
+- `unitTests staticAnalysis verifyRoborazziFossDebug`: BUILD SUCCESSFUL, 330
+  tests, 0 failures. New: SettingsScreensTest 11 (every toggle's key and
+  value, strategy radios, editors by label, viewApps parsing, Git Save,
+  sections list, About), FlagsScreenTest 10 (bug fixes, On/Off, search, toggle
+  + Reset, select + number, text + refusal, unavailable, Reset all + preset
+  confirmations, restart bar + Relaunch), FlagsFilterTest 5,
+  RepositorySettingsTest 8 (nothing changed, remote URL, .gitignore, local
+  identity + autocrlf, back to global, no remote, tab names, loading),
+  KeyboardShortcutsTest 3; screenshots settings_list / settings_prompts /
+  settings_integrations / flags / repository_settings × 3 styles × light/dark
+  and settings_expanded (1280×800, GitHub Desktop).
+- Konsist: green (10 rules).
+
+## Phone checks owed (the phone stayed off wireless adb, polled every 2 min for 60 min)
+
+Install `:app:installFossDebug` (`com.wasimaster.corvene.compose`, has `demo`), then:
+(a) every Settings section opens; a toggle round-trips (Prompts › Force
+pushing off → `am force-stop` → relaunch → still off); (b) Flags: On/Off and
+the search filter; `705-renamed-files-filter` toggles and the Changes filter
+follows; a select flag (e.g. `112-design-style`) changes; Reset all restores
+the preset; the restart Flash appears for a restart flag and Relaunch comes
+back in a new process (`pidof` differs); (c) Repository settings › Ignored
+files: add a line, Save, `run-as com.wasimaster.corvene.compose cat
+files/repositories/demo/.gitignore`; (d) `wm size 1280x800 && wm density 200`:
+250 dp sidebar + content in GitHub Desktop, NavigationRail in Mobile and
+Material, Settings list beside the section (then `wm size reset && wm density
+reset`); (e) `input keycombination 113 8` / `113 9` switch Changes/History,
+Meta+/ lists the shortcuts; (f) Notifications toggle asks POST_NOTIFICATIONS;
+All files access row opens the system page and reads back on return;
+(g) `setprop log.tag.CorveneJank DEBUG` → `logcat -s CorveneJank` lines with
+`screen=`; (h) `:app:generateFossReleaseBaselineProfile -Pcorvene.benchmark=true
+-Pcorvene.abis=arm64-v8a` (needs `/sdcard/Corvene/bench` + All files access
+for the benchmark variant), commit the profile, then StartupBenchmark /
+DiffScrollBenchmark / HistoryScrollBenchmark numbers; `android/build/m-a5-*.png`.
+
+## APK composition (2026-10-04)
+
+`:app:assembleFossFast -Pcorvene.abis=arm64-v8a` (release Rust, no R8):
+39.2 MB file, `checkApkSizeFossFast` (MB inside the APK):
+
+| part | MB | budget |
+|---|---|---|
+| engine (`libcorvene_ffi.so` 23.8 MB unpacked + askpass) | 9.88 | 18 |
+| git (git-lfs 5.04, git-remote-https 4.79, git 2.69, ssh 2.53, ssh-keygen 2.35, scripts) | 16.60 | 17 |
+| dex (unshrunk) | 9.22 | fast 16 (release 4) |
+| resources | 0.89 | 2 |
+| fonts | 0.63 | 1.1 |
+| jna (`libjnidispatch.so`) | 0.04 | 0.5 |
+| assets (notices) | 0.02 | 1 |
+| meta + other | 0.05 | – |
+| **total** | **37.39** | fast 52 (release 40) |
+
+With R8 the dex should fall to ~3 MB, ~31 MB in all: under 40. Debug APK
+(dev-profile engine): 57.6 MB.
+
 # M-A3 notes
 
 ## Built

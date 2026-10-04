@@ -56,6 +56,16 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Corvene">
 
+        <!-- Relaunch after a flag that needs a restart (Settings › Flags ›
+             Relaunch): a separate process ends the app's and starts it again -->
+        <activity
+            android:name=".RelaunchActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:process=":relaunch"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

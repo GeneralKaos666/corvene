@@ -4,6 +4,8 @@ plugins {
     id("corvene.rust")
     id("corvene.screenshots")
     id("org.jetbrains.kotlin.plugin.serialization")
+    // the baseline profile's consumer: :benchmark (-Pcorvene.benchmark=true) produces it
+    id("androidx.baselineprofile")
 }
 
 // The application: Application + MainActivity, Navigation 3 over the
@@ -11,6 +13,16 @@ plugins {
 // for the build properties and build-logic/ for what the plugins do.
 android {
     namespace = "com.wasimaster.corvene"
+}
+
+// The startup and scrolling profile from :benchmark's BaselineProfileGenerator,
+// saved under src/<variant>/generated/baselineProfiles and compiled into
+// release builds (profileinstaller installs it). Generate on a connected phone:
+//   ./gradlew :app:generateFossReleaseBaselineProfile -Pcorvene.benchmark=true -Pcorvene.abis=arm64-v8a
+baselineProfile {
+    saveInSrc = true
+    automaticGenerationDuringBuild = false
+    dexLayoutOptimization = true
 }
 
 dependencies {
@@ -39,6 +51,9 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.profileinstaller)
+    implementation(libs.androidx.metrics.performance)
+    // only with -Pcorvene.benchmark=true (settings.gradle.kts includes :benchmark then)
+    if (findProject(":benchmark") != null) "baselineProfile"(project(":benchmark"))
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

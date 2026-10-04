@@ -56,7 +56,8 @@ include(":feature:onboarding")
 // Konsist house rules (a plain JVM module, tests only).
 include(":tools:architecture")
 
-// The on-demand grammar module (Google Play) and the macrobenchmarks come with
-// M-A6 and M-A5; the switches are read here already so the names stay put.
+// The on-demand grammar module (Google Play) comes with M-A6; the switch is
+// read here already so the name stays put.
 if (flag("corvene.play")) logger.info("corvene.play: the :grammars module arrives with M-A6")
-if (flag("corvene.benchmark")) logger.info("corvene.benchmark: the :benchmark module arrives with M-A5")
+// Macrobenchmarks and the baseline profile generator (a phone is needed to run them).
+if (flag("corvene.benchmark")) include(":benchmark")

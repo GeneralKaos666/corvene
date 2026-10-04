@@ -1,11 +1,14 @@
 # Octicons generated into :core:design (gen.py). One name per line, without
 # the size; each gets its 16 and 24 px drawable.
+accessibility
 alert
 alert-fill
 arrow-down
 arrow-left
 arrow-switch
 arrow-up
+beaker
+bell
 check
 check-circle
 check-circle-fill
@@ -16,6 +19,7 @@ circle
 clock
 code-square
 columns
+comment-discussion
 copy
 dash
 desktop-download
@@ -51,6 +55,7 @@ history
 info
 issue-opened
 kebab-horizontal
+law
 link-external
 lock
 mark-github
@@ -76,7 +81,9 @@ stop
 sun
 sync
 tag
+terminal
 three-bars
+tools
 trash
 triangle-down
 undo

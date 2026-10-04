@@ -1,4 +1,9 @@
+import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.dsl.ApplicationExtension
+import com.android.build.api.variant.ApplicationAndroidComponentsExtension
+import com.wasimaster.corvene.buildlogic.ApkBudgetTask
+import com.wasimaster.corvene.buildlogic.NoticesTask
+import com.wasimaster.corvene.buildlogic.capitalized
 import com.wasimaster.corvene.buildlogic.Abis
 import com.wasimaster.corvene.buildlogic.AndroidConfig
 import com.wasimaster.corvene.buildlogic.buildProperty
@@ -162,4 +167,30 @@ licensee {
 
 dependencies {
     "lintChecks"(libs.compose.lint.checks)
+}
+
+// The licence texts for Settings › About (assets/notices/), and per variant
+// checkApkSize<Variant>: the APK's parts against app/apk-budget.txt.
+val notices = tasks.register("collectNotices", NoticesTask::class.java) {
+    description = "Copies the NOTICE files and font licences into the APK's assets."
+    notices.from(
+        File(workspaceDir, "NOTICE"),
+        rootProject.file("NOTICE"),
+        rootProject.file("core/design/licenses/Inter-OFL.txt"),
+        rootProject.file("core/design/licenses/JetBrainsMono-OFL.txt"),
+    )
+    outputDir.set(layout.buildDirectory.dir("generated/notices"))
+}
+extensions.getByType(ApplicationAndroidComponentsExtension::class.java).onVariants { variant ->
+    variant.sources.assets?.addGeneratedSourceDirectory(notices, NoticesTask::outputDir)
+    tasks.register("checkApkSize${variant.name.capitalized()}", ApkBudgetTask::class.java) {
+        description = "Reports the ${variant.name} APK's size by part against apk-budget.txt."
+        group = "verification"
+        apkDir.set(variant.artifacts.get(SingleArtifact.APK))
+        loader.set(variant.artifacts.getBuiltArtifactsLoader())
+        budget.set(layout.projectDirectory.file("apk-budget.txt"))
+        enforce.set(variant.buildType != "debug")
+        buildType.set(variant.buildType ?: "debug")
+        report.set(layout.buildDirectory.file("reports/apk-size/${variant.name}.txt"))
+    }
 }
