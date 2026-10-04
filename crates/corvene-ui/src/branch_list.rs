@@ -29,6 +29,9 @@
 //! Deviation (`854-branch-list-stash-icon`): a local branch with a Desktop
 //! stash shows the stash icon after its name (GHD `branch-list-item.tsx` does
 //! not).
+//! Deviation (`898-branch-list-folders`): Other Branches sharing a prefix
+//! before the first `/` sit under collapsible folder rows (flat while
+//! filtering).
 //! Deviation (`897-pinned-branches`): Pin / Unpin in the context menu and a
 //! Pinned group below the default branch (hidden while filtering).
 //! Deviation (`896-branch-upstream-gone-group`): local branches whose
@@ -39,7 +42,7 @@
 //! deletes them together.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -106,6 +109,8 @@ pub struct BranchFoldout {
     /// click order, and the row a ⇧-click extends from.
     multi_selected: Vec<String>,
     multi_anchor: Option<String>,
+    /// `898-branch-list-folders`: the folders opened, per repository.
+    expanded_folders: HashMap<u64, HashSet<String>>,
     /// GHD `FilterList` keyboard selection: the branch row ↓ / ↑ moved to
     /// from the filter box (an index into the rows as shown, groups
     /// flattened); while set it is the list's selection.
@@ -363,6 +368,123 @@ pub fn group_branches(
     groups
 }
 
+/// A folder row of [`fold_branches`]: drawn in group `group` before its
+/// visible branch `before` (or after the last), holding `count` branches,
+/// listed right after it while `expanded`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchFolder {
+    pub group: usize,
+    pub before: usize,
+    pub name: String,
+    pub count: usize,
+    pub expanded: bool,
+}
+
+/// Flag `898-branch-list-folders`: in the Other Branches group, branches
+/// sharing a prefix before the first `/` (two or more of them) move under a
+/// folder placed where the first of them was; a folder not in `expanded`
+/// hides them. Returns the groups as shown and the folder rows.
+pub fn fold_branches(
+    mut groups: Vec<BranchGroup>,
+    expanded: &HashSet<String>,
+) -> (Vec<BranchGroup>, Vec<BranchFolder>) {
+    let other = mac_or("Other Branches", "Other branches");
+    let mut folders = Vec::new();
+    for (g, group) in groups.iter_mut().enumerate() {
+        if group.title != other {
+            continue;
+        }
+        let prefix = |b: &Branch| {
+            b.name
+                .split_once('/')
+                .map(|(p, _)| p.to_string())
+                .filter(|p| !p.is_empty())
+        };
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for b in &group.branches {
+            if let Some(p) = prefix(b) {
+                *counts.entry(p).or_default() += 1;
+            }
+        }
+        let branches = std::mem::take(&mut group.branches);
+        let mut emitted: HashSet<String> = HashSet::new();
+        for b in &branches {
+            match prefix(b).filter(|p| counts.get(p).is_some_and(|n| *n > 1)) {
+                Some(p) => {
+                    if !emitted.insert(p.clone()) {
+                        continue;
+                    }
+                    let open = expanded.contains(&p);
+                    let members: Vec<Branch> = branches
+                        .iter()
+                        .filter(|m| prefix(m).as_deref() == Some(p.as_str()))
+                        .cloned()
+                        .collect();
+                    folders.push(BranchFolder {
+                        group: g,
+                        before: group.branches.len(),
+                        count: members.len(),
+                        name: p,
+                        expanded: open,
+                    });
+                    if open {
+                        group.branches.extend(members);
+                    }
+                }
+                None => group.branches.push(b.clone()),
+            }
+        }
+    }
+    (groups, folders)
+}
+
+/// One row of the branch list: a group header, a folder (an index into the
+/// folders) or a branch (its group and index there, its keyboard row and
+/// whether it is inside an open folder).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListItem {
+    Header(usize),
+    Folder(usize),
+    Branch {
+        group: usize,
+        ix: usize,
+        row: usize,
+        nested: bool,
+    },
+}
+
+fn list_items(groups: &[BranchGroup], folders: &[BranchFolder]) -> Vec<ListItem> {
+    let mut items = Vec::new();
+    let mut row = 0;
+    for (g, group) in groups.iter().enumerate() {
+        items.push(ListItem::Header(g));
+        let here: Vec<(usize, &BranchFolder)> = folders
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.group == g)
+            .collect();
+        for ix in 0..=group.branches.len() {
+            for (f, _) in here.iter().filter(|(_, f)| f.before == ix) {
+                items.push(ListItem::Folder(*f));
+            }
+            if ix == group.branches.len() {
+                break;
+            }
+            let nested = here
+                .iter()
+                .any(|(_, f)| f.expanded && f.before <= ix && ix < f.before + f.count);
+            items.push(ListItem::Branch {
+                group: g,
+                ix,
+                row,
+                nested,
+            });
+            row += 1;
+        }
+    }
+    items
+}
+
 /// Flag `897-pinned-branches`: moves the branches named in `pinned` (in
 /// that order) out of Recent and Other into a Pinned group after the
 /// Default Branch group. The default branch stays in its own group.
@@ -523,6 +645,7 @@ impl BranchFoldout {
             remote_only: false,
             multi_selected: Vec::new(),
             multi_anchor: None,
+            expanded_folders: HashMap::new(),
             highlighted: None,
             scroll: UniformListScrollHandle::new(),
             pr_highlighted: None,
@@ -532,6 +655,42 @@ impl BranchFoldout {
 
     /// The Branches tab's groups as the list shows them.
     fn branch_groups(&self, cx: &App) -> Vec<BranchGroup> {
+        self.folded_groups(cx).0
+    }
+
+    /// [`Self::branch_groups`] and the folder rows (`898-branch-list-folders`,
+    /// not while filtering).
+    fn folded_groups(&self, cx: &App) -> (Vec<BranchGroup>, Vec<BranchFolder>) {
+        let groups = self.unfolded_groups(cx);
+        let s = self.state.read(cx);
+        let folders = s.flags.bool(corvene_core::flags::ids::BRANCH_LIST_FOLDERS)
+            && !(self.remote_only
+                && s.flags
+                    .bool(corvene_core::flags::ids::BRANCH_LIST_REMOTE_ONLY))
+            && self.filter_text(cx).is_empty();
+        match s.selected.filter(|_| folders) {
+            Some(id) => {
+                let none = HashSet::new();
+                fold_branches(groups, self.expanded_folders.get(&id).unwrap_or(&none))
+            }
+            None => (groups, Vec::new()),
+        }
+    }
+
+    /// `898-branch-list-folders`: open or close a folder row.
+    fn toggle_folder(&mut self, name: String, cx: &mut Context<Self>) {
+        let Some(id) = self.state.read(cx).selected else {
+            return;
+        };
+        let open = self.expanded_folders.entry(id).or_default();
+        if !open.remove(&name) {
+            open.insert(name);
+        }
+        self.highlighted = None;
+        cx.notify();
+    }
+
+    fn unfolded_groups(&self, cx: &App) -> Vec<BranchGroup> {
         let query = self.filter_text(cx);
         let s = self.state.read(cx);
         let remote_only = self.remote_only
@@ -599,28 +758,19 @@ impl BranchFoldout {
     /// Branches filter box move through the branch rows (↑ from the filter
     /// starts at the last), clamped, skipping the group headers.
     fn move_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let sizes: Vec<usize> = self
-            .branch_groups(cx)
-            .iter()
-            .map(|g| g.branches.len())
-            .collect();
-        let Some(ix) = crate::filter_list::step(self.highlighted, delta, sizes.iter().sum()) else {
+        let (groups, folders) = self.folded_groups(cx);
+        let total = groups.iter().map(|g| g.branches.len()).sum();
+        let Some(ix) = crate::filter_list::step(self.highlighted, delta, total) else {
             return;
         };
         self.highlighted = Some(ix);
-        // the list is uniform (headers and `.branches-list-item` rows are
-        // both 30 px): its item index counts the headers above the row
-        let mut before = 0;
-        let headers = sizes
+        // the list is uniform (headers, folders and `.branches-list-item`
+        // rows are all 30 px): its item index counts the rows above
+        let item = list_items(&groups, &folders)
             .iter()
-            .take_while(|size| {
-                before += **size;
-                before <= ix
-            })
-            .count()
-            + 1;
-        self.scroll
-            .scroll_to_item(ix + headers, ScrollStrategy::Top);
+            .position(|item| matches!(item, ListItem::Branch { row, .. } if *row == ix))
+            .unwrap_or(ix);
+        self.scroll.scroll_to_item(item, ScrollStrategy::Top);
         cx.notify();
     }
 
@@ -1032,6 +1182,7 @@ impl BranchFoldout {
         &self,
         id: u64,
         branch: &Branch,
+        nested: bool,
         current: bool,
         highlighted: bool,
         stashed: bool,
@@ -1104,6 +1255,8 @@ impl BranchFoldout {
             .flex_row()
             .items_center()
             .px(SPACING())
+            // `898-branch-list-folders`: under the folder's icon
+            .when(nested, |d| d.pl(SPACING() + zpx(20.)))
             .cursor_pointer()
             // GHD `List.onRowMouseDown`: pressing (or right-clicking) a row
             // selects it and focuses the list; the click then checks it out
@@ -1589,7 +1742,7 @@ impl Render for BranchFoldout {
             .flags
             .bool(corvene_core::flags::ids::BRANCH_LIST_REMOTE_ONLY);
         let remote_only = remote_toggle && self.remote_only;
-        let groups = self.branch_groups(cx);
+        let (groups, folders) = self.folded_groups(cx);
         let (id, current, tip_valid, stashed, tracking) = {
             let s = self.state.read(cx);
             let id = s.selected;
@@ -1753,19 +1906,14 @@ impl Render for BranchFoldout {
                 // one uniform list of group headers and rows (both 30 px), so
                 // only the rows on screen are built: the whole list was built
                 // every frame (and every keystroke in the filter) before
-                // (group, branch in group, branch row counting only branches:
-                // the keyboard highlight's index)
-                let mut row = 0;
-                let mut items: Vec<(usize, Option<usize>, usize)> = Vec::new();
-                for (g, group) in groups.iter().enumerate() {
-                    items.push((g, None, row));
-                    for b in 0..group.branches.len() {
-                        items.push((g, Some(b), row));
-                        row += 1;
-                    }
-                }
+                // (a branch row counts only branches: the keyboard
+                // highlight's index)
+                let items = list_items(&groups, &folders);
                 let count = items.len();
                 let groups = std::rc::Rc::new(groups);
+                let list_hover = t.list_item_hover_background;
+                let secondary = t.text_secondary;
+                let icon_colour = t.text;
                 let current = current.clone();
                 div()
                     .id("branches-list")
@@ -1784,7 +1932,7 @@ impl Render for BranchFoldout {
                                 range
                                     .map(|ix| match items[ix] {
                                         // `.filter-list-group-header`
-                                        (g, None, _) => div()
+                                        ListItem::Header(g) => div()
                                             .h(zpx(30.))
                                             .px(SPACING())
                                             .flex()
@@ -1793,11 +1941,69 @@ impl Render for BranchFoldout {
                                             .text_size(FONT_SIZE())
                                             .child(groups[g].title)
                                             .into_any_element(),
-                                        (g, Some(b), row) => {
+                                        // `898-branch-list-folders`
+                                        ListItem::Folder(f) => {
+                                            let folder = &folders[f];
+                                            let name = folder.name.clone();
+                                            div()
+                                                .id(SharedString::from(format!(
+                                                    "branch-folder-{}",
+                                                    folder.name
+                                                )))
+                                                .a11y_row(
+                                                    format!(
+                                                        "{} folder, {} branches",
+                                                        folder.name, folder.count
+                                                    ),
+                                                    false,
+                                                )
+                                                .h(zpx(30.))
+                                                .w_full()
+                                                .px(SPACING())
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .gap(SPACING_HALF())
+                                                .cursor_pointer()
+                                                .hover(move |s| s.bg(list_hover))
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.toggle_folder(name.clone(), cx)
+                                                }))
+                                                .child(octicon(
+                                                    if folder.expanded {
+                                                        Octicon::ChevronDown
+                                                    } else {
+                                                        Octicon::ChevronRight
+                                                    },
+                                                    secondary,
+                                                ))
+                                                .child(octicon(Octicon::FileDirectory, icon_colour))
+                                                .child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .truncate()
+                                                        .text_size(FONT_SIZE())
+                                                        .child(folder.name.clone()),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_size(FONT_SIZE_SM())
+                                                        .text_color(secondary)
+                                                        .child(folder.count.to_string()),
+                                                )
+                                                .into_any_element()
+                                        }
+                                        ListItem::Branch {
+                                            group: g,
+                                            ix: b,
+                                            row,
+                                            nested,
+                                        } => {
                                             let b = &groups[g].branches[b];
                                             this.row(
                                                 id,
                                                 b,
+                                                nested,
                                                 current.as_deref() == Some(b.name.as_str()),
                                                 highlighted == Some(row),
                                                 b.kind == BranchKind::Local
@@ -1936,6 +2142,73 @@ mod tests {
             tip_time: None,
             remote_name: Some("origin".into()),
         }
+    }
+
+    #[::core::prelude::v1::test]
+    fn folders_group_shared_prefixes_where_the_first_member_was() {
+        let all = vec![
+            local("main", None),
+            local("alpha", None),
+            local("feature/a", None),
+            local("feature/b", None),
+            local("solo/x", None),
+            local("zeta", None),
+        ];
+        let groups = group_branches(&all, Some("main"), &[], "", false);
+        let names = |g: &BranchGroup| {
+            g.branches
+                .iter()
+                .map(|b| b.name.clone())
+                .collect::<Vec<_>>()
+        };
+
+        let (closed, folders) = fold_branches(groups, &HashSet::new());
+        assert_eq!(names(&closed[1]), ["alpha", "solo/x", "zeta"]);
+        assert_eq!(
+            folders,
+            [BranchFolder {
+                group: 1,
+                before: 1,
+                name: "feature".into(),
+                count: 2,
+                expanded: false,
+            }]
+        );
+        let items = list_items(&closed, &folders);
+        assert_eq!(items[2], ListItem::Header(1));
+        assert_eq!(items[4], ListItem::Folder(0));
+        assert!(matches!(
+            items[5],
+            ListItem::Branch {
+                row: 2,
+                nested: false,
+                ..
+            }
+        ));
+
+        let groups = group_branches(&all, Some("main"), &[], "", false);
+        let (open, folders) = fold_branches(groups, &HashSet::from(["feature".to_string()]));
+        assert_eq!(
+            names(&open[1]),
+            ["alpha", "feature/a", "feature/b", "solo/x", "zeta"]
+        );
+        let items = list_items(&open, &folders);
+        assert!(matches!(
+            items[5],
+            ListItem::Branch {
+                ix: 1,
+                nested: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            items[7],
+            ListItem::Branch {
+                ix: 3,
+                nested: false,
+                ..
+            }
+        ));
     }
 
     #[::core::prelude::v1::test]

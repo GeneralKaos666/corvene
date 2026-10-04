@@ -5790,6 +5790,23 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-models/src/lib.rs"],
     },
 
+    /// Other Branches grouped into folders by their prefix.
+    BRANCH_LIST_FOLDERS = 898 "branch-list-folders" {
+        title: "Branch folders",
+        summary: "In the branch list's Other Branches, branches sharing the part of their name \
+                  before the first / (feature/a, feature/b; origin/… for remote-only branches) \
+                  are grouped under a collapsible folder row showing how many branches it holds. \
+                  Folders start collapsed and remember being opened per repository until \
+                  Corvene quits; the list is flat while filtered.",
+        ghd_behaviour: "One flat list.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18194)],
+        code: &["crates/corvene-ui/src/branch_list.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.
