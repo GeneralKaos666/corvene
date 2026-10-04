@@ -4603,6 +4603,23 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Commits keep executable bits staged with `update-index --chmod`.
+    KEEP_STAGED_MODE_CHANGES = 781 "keep-staged-mode-changes" {
+        title: "Keep staged executable bits when committing",
+        summary: "While core.fileMode is false (the default on Windows, where files have no \
+                  executable bit), an executable bit set with git update-index --chmod=+x (or \
+                  removed with -x) is put back into the index after Corvene restages the files, \
+                  so the commit keeps it.",
+        ghd_behaviour: "Committing unstages and restages every file from the working tree, \
+                        which drops such a mode change.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3870)],
+        code: &["crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

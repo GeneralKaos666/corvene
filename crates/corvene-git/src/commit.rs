@@ -3,7 +3,9 @@
 //! `GitStore.discardChanges` / `undoCommit` (`lib/stores/git-store.ts`).
 //!
 //! Deviation: [`discard_changes`] resets paths without naming `HEAD`, so it
-//! also works on an unborn branch.
+//! also works on an unborn branch. Corvene can put executable bits staged
+//! with `update-index --chmod` back after the restage
+//! ([`staged_mode_changes`], `781-keep-staged-mode-changes`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -106,6 +108,97 @@ fn update_index(
         .current_dir(workdir)
         .stdin(nul_separated(paths))
         .run()?;
+    Ok(())
+}
+
+/// Corvene `781-keep-staged-mode-changes`: the executable bits the index
+/// gives files differently from `HEAD` (the empty tree on an unborn
+/// branch), as `git update-index --chmod=+x` leaves them, as `(path,
+/// executable)` pairs. Only while `core.fileMode` is false: the working
+/// tree cannot carry the bit then, so [`unstage_all`] and the restage of
+/// [`stage_files`] would drop it (with file modes trusted, the restage takes
+/// the working file's mode, as GHD's commit does). Empty otherwise.
+pub fn staged_mode_changes(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<(String, bool)>> {
+    let trusted = crate::handle::open(workdir)
+        .ok()
+        .map(|repo| repo.config_snapshot().boolean("core.fileMode"))
+        .unwrap_or_else(|| {
+            crate::config::boolean_config_value(git.clone(), workdir, "core.fileMode", false)
+        })
+        .unwrap_or(true);
+    if trusted {
+        return Ok(Vec::new());
+    }
+    let run = |base: &str| {
+        GitCommand::new(git.clone())
+            .args([
+                "diff-index",
+                "--cached",
+                "--raw",
+                "--no-renames",
+                "-z",
+                base,
+                "--",
+            ])
+            .current_dir(workdir)
+            .allow_exit_code(128)
+            .run()
+    };
+    let mut out = run("HEAD")?;
+    if out.status.code() == Some(128) {
+        out = run(crate::log::NULL_TREE_SHA)?;
+    }
+    Ok(parse_mode_changes(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// The regular files of `diff-index --raw -z --no-renames` output whose
+/// mode the index changes (or sets, for an added file), with whether the
+/// index makes them executable.
+fn parse_mode_changes(raw: &str) -> Vec<(String, bool)> {
+    let pieces: Vec<&str> = raw.split('\0').collect();
+    let (pairs, _) = pieces.as_chunks::<2>();
+    pairs
+        .iter()
+        .filter_map(|[meta, path]| {
+            let mut fields = meta.trim_start_matches(':').split(' ');
+            let (old, new) = (fields.next()?, fields.next()?);
+            (old != new && matches!(new, "100644" | "100755"))
+                .then(|| (path.to_string(), new == "100755"))
+        })
+        .collect()
+}
+
+/// Puts the [`staged_mode_changes`] of the files the commit stages back
+/// into the index (`update-index --chmod=±x`).
+pub fn restore_mode_changes(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    changes: &[(String, bool)],
+) -> Result<()> {
+    for executable in [true, false] {
+        let paths: Vec<&str> = changes
+            .iter()
+            .filter(|(_, x)| *x == executable)
+            .map(|(p, _)| p.as_str())
+            .collect();
+        if paths.is_empty() {
+            continue;
+        }
+        GitCommand::new(git.clone())
+            .args([
+                "update-index",
+                if executable {
+                    "--chmod=+x"
+                } else {
+                    "--chmod=-x"
+                },
+                "-z",
+                "--stdin",
+            ])
+            .current_dir(workdir)
+            .stdin(nul_separated(&paths))
+            .run()?;
+    }
     Ok(())
 }
 
@@ -625,6 +718,75 @@ mod tests {
         let info = crate::open_repository(path).unwrap();
         assert!(matches!(info.tip, corvene_models::Tip::Unborn { .. }));
         assert!(path.join("a.txt").exists());
+    }
+
+    #[test]
+    fn mode_changes_survive_the_restage_without_trusted_modes() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        run(&["config", "core.fileMode", "false"]);
+        std::fs::write(path.join("a.sh"), "a\n").unwrap();
+        std::fs::write(path.join("b.txt"), "b\n").unwrap();
+        run(&["add", "a.sh", "b.txt"]);
+        run(&["commit", "-q", "-m", "init"]);
+        std::fs::write(path.join("new.sh"), "n\n").unwrap();
+        run(&["add", "new.sh"]);
+        run(&["update-index", "--chmod=+x", "a.sh", "new.sh"]);
+        let modes = staged_mode_changes(git.clone(), path).unwrap();
+        assert_eq!(
+            modes,
+            vec![("a.sh".to_string(), true), ("new.sh".to_string(), true)]
+        );
+        let status = crate::get_status(git.clone(), path).unwrap();
+        unstage_all(git.clone(), path).unwrap();
+        stage_files(git.clone(), path, &status.files).unwrap();
+        restore_mode_changes(git.clone(), path, &modes).unwrap();
+        commit(git.clone(), path, "chmod\n", &CommitOptions::default()).unwrap();
+        let tree = Command::new("git")
+            .args(["ls-tree", "HEAD"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        let tree = String::from_utf8_lossy(&tree.stdout);
+        assert!(
+            tree.lines()
+                .any(|l| l.starts_with("100755") && l.ends_with("a.sh"))
+        );
+        assert!(
+            tree.lines()
+                .any(|l| l.starts_with("100755") && l.ends_with("new.sh"))
+        );
+        assert!(
+            tree.lines()
+                .any(|l| l.starts_with("100644") && l.ends_with("b.txt"))
+        );
+        // trusted modes: nothing to keep
+        run(&["config", "core.fileMode", "true"]);
+        assert!(staged_mode_changes(git, path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn parses_mode_changes() {
+        let raw = ":100644 100755 aaa aaa M\0x.sh\0:100644 100644 aaa bbb M\0y.txt\0\
+                   :000000 100644 000 ccc A\0z.txt\0:120000 100644 ddd ddd T\0l\0";
+        assert_eq!(
+            parse_mode_changes(raw),
+            vec![
+                ("x.sh".to_string(), true),
+                ("z.txt".to_string(), false),
+                ("l".to_string(), false)
+            ]
+        );
     }
 
     #[test]

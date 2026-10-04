@@ -60,7 +60,8 @@ pub use branch_ops::{
 pub use commit::{
     CommitOptions, add_paths, assume_unchanged_paths, commit, delete_worktree_paths,
     discard_changes, format_message, head_sha, merge_trailers, parse_commit_sha,
-    set_assume_unchanged, stage_files, undo_last_commit, unstage_all,
+    restore_mode_changes, set_assume_unchanged, stage_files, staged_mode_changes, undo_last_commit,
+    unstage_all,
 };
 pub use config::{
     add_safe_directory, boolean_config_value, branch_merge_base, global_boolean_config_value,

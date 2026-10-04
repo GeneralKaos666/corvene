@@ -5041,6 +5041,13 @@ impl Dispatcher {
             })
         };
         let summary_for_bar = summary.trim().to_string();
+        // Corvene (`781-keep-staged-mode-changes`): executable bits staged
+        // with `update-index --chmod` while `core.fileMode` is false
+        let keep_modes = !restages_everything
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::KEEP_STAGED_MODE_CHANGES);
         let task = cx.background_executor().spawn(async move {
             corvene_git::hook_env::reload_if_uncached();
             // GHD recommends a force push after every amend; the flag only
@@ -5056,11 +5063,32 @@ impl Dispatcher {
                 }
             };
             let message = corvene_git::merge_trailers(git.clone(), &workdir, &message, &trailers)?;
+            let modes = if keep_modes {
+                corvene_git::staged_mode_changes(git.clone(), &workdir).unwrap_or_else(|err| {
+                    warn!(%err, "could not read the staged mode changes");
+                    Vec::new()
+                })
+            } else {
+                Vec::new()
+            };
             if !restages_everything {
                 corvene_git::unstage_all(git.clone(), &workdir)?;
             }
             corvene_git::stage_files(git.clone(), &workdir, &files)?;
             corvene_git::stage_partial_files(git.clone(), &workdir, &files)?;
+            if !modes.is_empty() {
+                // the files going into the commit (a deleted one has no mode)
+                let staged: std::collections::HashSet<&str> = files
+                    .iter()
+                    .filter(|f| f.status.kind != corvene_models::FileStatusKind::Deleted)
+                    .map(|f| f.path.as_str())
+                    .collect();
+                let modes: Vec<(String, bool)> = modes
+                    .into_iter()
+                    .filter(|(path, _)| staged.contains(path.as_str()))
+                    .collect();
+                corvene_git::restore_mode_changes(git.clone(), &workdir, &modes)?;
+            }
             corvene_git::commit(
                 git.clone(),
                 &workdir,
