@@ -809,6 +809,23 @@ pub fn toolbar_button(
                             },
                         )
                     })
+                    // Corvene (`336-request-reviewers`): the badge's menu
+                    .when(badge.number.is_some(), |d| {
+                        d.on_mouse_down(MouseButton::Right, |ev: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            let s = corvene_core::AppState::global(cx).read(cx);
+                            let Some(id) = s.selected.filter(|_| {
+                                s.flags.bool(corvene_core::flags::ids::REQUEST_REVIEWERS)
+                            }) else {
+                                return;
+                            };
+                            let items = vec![crate::context_menu::MenuItem::new(
+                                mac_or("Request Reviewers…", "Request reviewers…"),
+                                move |_, cx| Dispatcher::show_request_reviewers(id, cx),
+                            )];
+                            crate::native_menu::show_context_menu(items, ev.position, window, cx);
+                        })
+                    })
                     .child(
                         canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})
                             .absolute()

@@ -29,7 +29,8 @@
 //! Corvene additions ([`MenuExtras`], all off in the github-desktop preset):
 //! "Flags…" (no GHD equivalent, always there), File › Import Repositories
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
-//! Fetch All Tags (flag `899-tags-in-branch-list`), Repository ›
+//! Fetch All Tags (flag `899-tags-in-branch-list`), Branch › Request
+//! Reviewers… (flag `336-request-reviewers`), Repository ›
 //! View Upstream on GitHub, Repository › Add License… ("A&dd license…" off
 //! macOS: `Pu&ll` has the `l`), View › Show Pull Requests List and Toggle
 //! History Review Mode, File › Remove Repositories… (flag
@@ -110,6 +111,9 @@ pub struct MenuExtras {
     pub fetch_all: bool,
     /// Flag `899-tags-in-branch-list`: Repository › Fetch All Tags.
     pub fetch_tags: bool,
+    /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
+    /// branch has a pull request).
+    pub request_reviewers: bool,
     /// Flag `414-linux-install-cli` (the item is always there on macOS).
     pub install_cli: bool,
     /// Flag `269-bulk-remove-repositories`.
@@ -135,6 +139,7 @@ impl MenuExtras {
             show_add_license: flags.bool(ids::ADD_LICENSE),
             fetch_all: flags.bool(ids::FETCH_ALL_REPOSITORIES),
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
+            request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             // Windows: the installer puts the command line tool on the PATH
             // (GHD has no menu item for it there either)
             install_cli: !cfg!(any(target_os = "android", windows))
@@ -645,6 +650,12 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         ),
         item(pull_request_label, CreatePullRequest),
     ]);
+    if extras.request_reviewers && labels.has_current_pull_request {
+        branch.push(item(
+            l("Request Reviewers…", "Request re&viewers…"),
+            RequestReviewers,
+        ));
+    }
     template.push(submenu(l("Branch", "&Branch"), branch));
 
     if cfg!(target_os = "macos") {
@@ -818,6 +829,7 @@ mod tests {
                     show_add_license: true,
                     fetch_all: true,
                     fetch_tags: true,
+                    request_reviewers: true,
                     install_cli: true,
                     show_remove_repositories: true,
                     undo_last_commit: Some(true),

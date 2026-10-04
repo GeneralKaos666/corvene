@@ -1215,6 +1215,55 @@ impl Client {
         self.get_json(&format!("repos/{owner}/{name}/pulls/{number}"))
     }
 
+    /// Corvene (`336-request-reviewers`): `GET /repos/{owner}/{name}/collaborators`,
+    /// the logins of the users who can be asked for a review (at most 10
+    /// pages of 100).
+    pub fn collaborators(&self, owner: &str, name: &str) -> Result<Vec<String>> {
+        let users: Vec<ApiOwner> = self.fetch_all(
+            &format!("repos/{owner}/{name}/collaborators?per_page=100"),
+            10,
+            get_next_page_path_from_link,
+            |_| true,
+        )?;
+        Ok(users.into_iter().map(|u| u.login).collect())
+    }
+
+    /// Corvene (`336-request-reviewers`): ask `add` for a review of pull
+    /// request `number` (`POST …/pulls/{number}/requested_reviewers`) and
+    /// withdraw the request from `remove` (`DELETE`, same path). A refusal
+    /// (403, 422: not a collaborator, the author…) is an `Err` with
+    /// GitHub's message.
+    pub fn set_requested_reviewers(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<()> {
+        let path = format!("repos/{owner}/{name}/pulls/{number}/requested_reviewers");
+        if !add.is_empty() {
+            let _: serde_json::Value =
+                self.post_json(&path, &serde_json::json!({ "reviewers": add }))?;
+        }
+        if !remove.is_empty() {
+            let url = self.endpoint.api(&path);
+            debug!(%url, "DELETE");
+            let response = self
+                .agent
+                .delete(&url)
+                .header("Accept", "application/vnd.github+json")
+                .header("Authorization", &format!("Bearer {}", self.token))
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .force_send_body()
+                .send_json(serde_json::json!({ "reviewers": remove }))?;
+            if !response.status().is_success() {
+                return Err(self.api_error(&url, response));
+            }
+        }
+        Ok(())
+    }
+
     /// `fetchAllOpenPullRequests`: every open pull request (at most 50
     /// pages), newest page first.
     pub fn open_pull_requests(&self, owner: &str, name: &str) -> Result<Vec<ApiPullRequest>> {

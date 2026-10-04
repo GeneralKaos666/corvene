@@ -421,6 +421,12 @@ pub enum Popup {
         repo: u64,
         name: String,
     },
+    /// Corvene (`336-request-reviewers`): ask collaborators for a review of
+    /// the current branch's pull request `number`.
+    RequestReviewers {
+        repo: u64,
+        number: u64,
+    },
     /// Corvene (`895-bulk-delete-branches`): delete the branch list's
     /// multi-selection of local branches.
     DeleteBranches {
@@ -604,6 +610,7 @@ impl Popup {
             | Self::DeleteWorktreeFailed { repo, .. }
             | Self::DeleteBranch { repo, .. }
             | Self::DeleteBranches { repo, .. }
+            | Self::RequestReviewers { repo, .. }
             | Self::StashAndSwitchBranch { repo, .. }
             | Self::ConfirmOverwriteStash { repo, .. }
             | Self::MergeBranch { repo, .. }
@@ -1096,6 +1103,10 @@ pub struct RepositoryState {
     pub merge_preview: Option<crate::mco::MergePreview>,
     /// Delete Branch dialog warnings (`860-delete-branch-warnings`).
     pub delete_branch_preview: Option<DeleteBranchPreview>,
+    /// `336-request-reviewers`: the repository's collaborators (logins,
+    /// sorted), fetched once per session, and whether that fetch runs.
+    pub collaborators: Option<Arc<Vec<String>>>,
+    pub collaborators_loading: bool,
     /// `1202-update-from-parent-branch`: the branch the current branch was
     /// created from (`branch.<name>.vscode-merge-base`), when it exists.
     pub update_parent: Option<String>,

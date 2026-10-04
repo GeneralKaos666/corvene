@@ -102,6 +102,8 @@ gpui_kit::actions!(
         FetchAllRepositories,
         // Repository › Fetch All Tags (`899-tags-in-branch-list`)
         FetchAllTags,
+        // Branch › Request Reviewers… (`336-request-reviewers`)
+        RequestReviewers,
         RemoveRepository,
         // Android only (no GHD equivalent): Repository › Move to shared storage…
         MoveToSharedStorage,

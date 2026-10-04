@@ -23,6 +23,10 @@
 //! replaces the cache, so pull requests that were deleted or whose
 //! repository was renamed or removed drop out. GHD only ever asks for what
 //! changed since the newest cached `updated_at`, which never reports them.
+//!
+//! Corvene addition (`336-request-reviewers`): the collaborators of a
+//! repository and asking them for a review of the current branch's pull
+//! request (GHD has no review requests).
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -863,6 +867,119 @@ impl Dispatcher {
         warn!(login = %account.login, endpoint = %api_base, "account token invalidated");
         Self::sign_out(api_base.to_string(), cx);
         Self::show_popup(crate::state::Popup::InvalidatedToken { account }, cx);
+    }
+}
+
+impl Dispatcher {
+    /// `336-request-reviewers`: Request Reviewers… for the current branch's
+    /// pull request.
+    pub fn show_request_reviewers(id: u64, cx: &mut App) {
+        let number = {
+            let s = Self::state(cx).read(cx);
+            if !s.flags.bool(crate::flags::ids::REQUEST_REVIEWERS) {
+                return;
+            }
+            s.current_pull_request(id).map(|pr| pr.number)
+        };
+        if let Some(number) = number {
+            Self::close_foldout(cx);
+            Self::show_popup(
+                crate::state::Popup::RequestReviewers { repo: id, number },
+                cx,
+            );
+        }
+    }
+
+    /// `336-request-reviewers`: the logins of the repository's
+    /// collaborators, fetched once per session into
+    /// `RepositoryState::collaborators`.
+    pub fn load_collaborators(id: u64, cx: &mut App) {
+        let target = {
+            let s = Self::state(cx).read(cx);
+            let loaded = s
+                .repo_states
+                .get(&id)
+                .is_some_and(|rs| rs.collaborators.is_some() || rs.collaborators_loading);
+            if loaded {
+                return;
+            }
+            s.repository(id).and_then(|r| r.non_fork_github().cloned())
+        };
+        let Some(target) = target else { return };
+        let Some((endpoint, token, _)) = Self::api_for(&target, cx) else {
+            return;
+        };
+        Self::state(cx).update(cx, |s, cx| {
+            s.repo_state_mut(id).collaborators_loading = true;
+            cx.notify();
+        });
+        spawn_bg(
+            cx,
+            move || Client::new(endpoint, token).collaborators(&target.owner, &target.name),
+            move |result, cx| {
+                let error = Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    rs.collaborators_loading = false;
+                    let error = match result {
+                        Ok(mut logins) => {
+                            logins.sort_by_key(|l| l.to_lowercase());
+                            rs.collaborators = Some(std::sync::Arc::new(logins));
+                            None
+                        }
+                        Err(err) => {
+                            rs.collaborators = Some(std::sync::Arc::new(Vec::new()));
+                            Some(err.to_string())
+                        }
+                    };
+                    cx.notify();
+                    error
+                });
+                if let Some(error) = error {
+                    Self::show_error("Could not list the collaborators", error, cx);
+                }
+            },
+        );
+    }
+
+    /// `336-request-reviewers`: ask `add` for a review of pull request
+    /// `number` and withdraw the request from `remove`, then reload the
+    /// pull request list.
+    pub fn request_reviewers(
+        id: u64,
+        number: u64,
+        add: Vec<String>,
+        remove: Vec<String>,
+        cx: &mut App,
+    ) {
+        if add.is_empty() && remove.is_empty() {
+            return;
+        }
+        let target = Self::state(cx)
+            .read(cx)
+            .repository(id)
+            .and_then(|r| r.non_fork_github().cloned());
+        let Some(target) = target else { return };
+        let Some((endpoint, token, _)) = Self::api_for(&target, cx) else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || {
+                Client::new(endpoint, token).set_requested_reviewers(
+                    &target.owner,
+                    &target.name,
+                    number,
+                    &add,
+                    &remove,
+                )
+            },
+            move |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not request reviewers", err.to_string(), cx);
+                }
+                Self::refresh_pull_requests(id, true, cx);
+            },
+        );
     }
 }
 

@@ -646,6 +646,11 @@ pub(crate) fn main() {
                 Dispatcher::start_pull_request(id, cx);
             }
         });
+        on_menu_action(cx, move |_: &RequestReviewers, cx| {
+            if let Some((id, _)) = selected_path(cx) {
+                Dispatcher::show_request_reviewers(id, cx);
+            }
+        });
         // Help
         cx.on_action(|_: &ReportIssue, cx| {
             Dispatcher::open_url("https://github.com/wasi-master/corvene/issues/new", cx)
@@ -1612,6 +1617,26 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         ),
         ("test-notifications", Some(id)) => {
             Dispatcher::show_popup(Popup::TestNotifications { repo: id }, cx)
+        }
+        // `336-request-reviewers`: the sample pull requests, sample
+        // collaborators (nothing fetched) and the dialog for #42
+        ("request-reviewers", Some(id)) => {
+            dev_samples::install_pull_requests(id, cx);
+            corvene_core::AppState::global(cx).update(cx, |s, cx| {
+                s.repo_state_mut(id).collaborators = Some(std::sync::Arc::new(
+                    ["hubot", "monalisa", "octocat", "wasi-master"]
+                        .map(String::from)
+                        .to_vec(),
+                ));
+                cx.notify();
+            });
+            Dispatcher::show_popup(
+                Popup::RequestReviewers {
+                    repo: id,
+                    number: 42,
+                },
+                cx,
+            );
         }
         ("pr-list", Some(id)) => {
             dev_samples::install_pull_requests(id, cx);

@@ -2307,6 +2307,23 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-ui/src/pull_request_list.rs", "crates/corvene-core/src/pull_requests.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// Ask collaborators for a review of the current branch's pull request.
+    REQUEST_REVIEWERS = 336 "request-reviewers" {
+        title: "Request reviewers",
+        summary: "Branch › Request Reviewers… (and the pull request badge's context menu) opens a \
+                  filterable list of the repository's collaborators, the pull request's author \
+                  left out and those already asked ticked; applying asks the newly ticked ones \
+                  for a review and withdraws the request from the unticked ones. GitHub's refusal \
+                  is shown as it comes.",
+        ghd_behaviour: "Reviewers can only be requested on GitHub.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10146)],
+        code: &["crates/corvene-ui/src/dialogs/request_reviewers.rs", "crates/corvene-core/src/pull_requests.rs", "crates/corvene-github/src/api.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/toolbar.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

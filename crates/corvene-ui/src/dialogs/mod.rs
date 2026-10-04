@@ -40,6 +40,7 @@ mod release_notes;
 mod remote_dialogs;
 mod remove_repositories;
 mod repository_settings;
+mod request_reviewers;
 mod sign_in;
 mod simple;
 mod ssh_key_passphrase;
@@ -101,6 +102,7 @@ pub use remote_dialogs::{
 pub use repository_settings::{
     NoRemoteAction, NoRemoteContent, RepositorySettingsDialog, no_remote,
 };
+pub use request_reviewers::RequestReviewersDialog;
 pub use sign_in::{
     ExistingAccountWarning, SignInAction, SignInContent, SignInDialog, sign_in_content,
 };
@@ -446,6 +448,9 @@ impl DialogHost {
                 .into(),
             Popup::DeleteBranches { repo, names } => cx
                 .new(|cx| DeleteBranchesDialog::new(state, *repo, names.clone(), cx))
+                .into(),
+            Popup::RequestReviewers { repo, number } => cx
+                .new(|cx| RequestReviewersDialog::new(state, *repo, *number, window, cx))
                 .into(),
             Popup::StashAndSwitchBranch { repo, branch } => cx
                 .new(|_| StashAndSwitchBranchDialog::new(state, *repo, branch.clone()))
