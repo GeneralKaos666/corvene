@@ -25,7 +25,8 @@
 //! `825`); pushed tags can be deleted after a confirmation (flag `826`);
 //! Cherry-pick Without Committing (flag `820`); Create Patch File(s) (flag
 //! `821`); a filter box under the compare box searches the history (flag
-//! `886`, `corvene_core::history_filter`).
+//! `886`, `corvene_core::history_filter`); a file's history shows as a
+//! removable chip there (flag `887`).
 
 use std::rc::Rc;
 
@@ -355,9 +356,16 @@ impl HistorySidebar {
 
     /// `886-history-search`: the filter box under the compare box, in the
     /// compare form's look.
-    fn filter_row(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn filter_row(
+        &self,
+        search: bool,
+        file: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let t = cx.ghd().clone();
         let focused = self.filter.read(cx).focus_handle(cx).is_focused(window);
+        let id = self.state.read(cx).selected;
         div()
             .id("history-filter-form")
             .key_context("HistoryFilter")
@@ -372,11 +380,68 @@ impl HistorySidebar {
                 window.focus(&this.list_focus, cx);
             }))
             .flex_none()
+            .flex()
+            .flex_col()
+            .gap(SPACING_HALF())
             .px(SPACING_HALF())
             .pb(SPACING_HALF())
             .bg(t.box_alt_background)
             .border_b_1()
             .border_color(t.box_border)
+            .when_some(file, |d, file| {
+                // `887`: "History of <file>", × goes back to the whole history
+                let name = file.rsplit('/').next().unwrap_or(&file).to_string();
+                d.child(
+                    div()
+                        .id("file-history-chip")
+                        .ghd_tooltip(file.clone())
+                        .h(zpx(22.))
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(SPACING_HALF())
+                        .pl(SPACING_HALF())
+                        .rounded(BORDER_RADIUS())
+                        .border_1()
+                        .border_color(t.box_border)
+                        .bg(t.background)
+                        .text_size(FONT_SIZE())
+                        .child(octicon(Octicon::History, t.text_secondary))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .child(format!("History of {name}")),
+                        )
+                        .child(
+                            div()
+                                .id("file-history-clear")
+                                .icon_button_label("Show the whole history")
+                                .size(zpx(20.))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .child(octicon(Octicon::X, t.text))
+                                .on_click(move |_, _, cx| {
+                                    if let Some(id) = id {
+                                        Dispatcher::clear_file_history(id, cx);
+                                    }
+                                }),
+                        ),
+                )
+            })
+            .when(search, |d| d.child(self.filter_box(focused, window, cx)))
+            .into_any_element()
+    }
+
+    /// `886`: the filter text box itself.
+    fn filter_box(&self, focused: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let t = cx.ghd().clone();
+        div()
+            .id("history-filter-box")
             .ghd_tooltip(
                 "Words match the message, author or SHA. Narrow with author:name, \
                  before:date or after:date.",
@@ -2420,7 +2485,7 @@ impl Render for HistorySidebar {
         };
         let t = cx.ghd().clone();
         // `807`: the first-parent toggle before the compare box
-        let (first_parent_toggle, comparing, search, filter_active) = {
+        let (first_parent_toggle, comparing, search, filter_active, file_history, file) = {
             let s = self.state.read(cx);
             let rs = s.selected.and_then(|id| s.repo_states.get(&id));
             (
@@ -2430,17 +2495,22 @@ impl Render for HistorySidebar {
                 rs.is_some_and(|rs| rs.compare.is_comparing()),
                 s.flags.bool(corvene_core::flags::ids::HISTORY_SEARCH),
                 rs.is_some_and(|rs| !rs.history_filter.text.is_empty()),
+                s.flags.bool(corvene_core::flags::ids::FILE_HISTORY),
+                rs.and_then(|rs| rs.history_filter.path.clone()),
             )
         };
-        // `886`: switched off while filtering, History goes back to normal
-        if !search
-            && filter_active
-            && let Some(id) = id
-        {
-            Dispatcher::set_history_filter_text(id, String::new(), cx);
+        // `886` / `887`: switched off while filtering, History goes back to normal
+        if let Some(id) = id {
+            if !search && filter_active {
+                Dispatcher::set_history_filter_text(id, String::new(), cx);
+            }
+            if !file_history && file.is_some() {
+                Dispatcher::clear_file_history(id, cx);
+            }
         }
-        let filter_row = (search && !comparing && !show_list && id.is_some())
-            .then(|| self.filter_row(window, cx));
+        let file = file.filter(|_| file_history);
+        let filter_row = ((search || file.is_some()) && !comparing && !show_list && id.is_some())
+            .then(|| self.filter_row(search, file, window, cx));
         div()
             .size_full()
             .flex()

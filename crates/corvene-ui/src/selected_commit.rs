@@ -1179,6 +1179,16 @@ fn open_commit_file_menu(
     if let Some(item) = revert_file {
         items.extend([MenuItem::separator(), item]);
     }
+    // `887-file-history`: History narrowed to this file
+    if state.flags.bool(corvene_core::flags::ids::FILE_HISTORY) {
+        let path = path.to_string();
+        items.extend([
+            MenuItem::separator(),
+            MenuItem::new(mac_or("Show History", "Show history"), move |_, cx| {
+                Dispatcher::show_file_history(id, path.clone(), cx)
+            }),
+        ]);
+    }
     if let Some(files) = open_all {
         items.push(MenuItem::separator());
         items.push(crate::changes::open_all_in_editor_item(

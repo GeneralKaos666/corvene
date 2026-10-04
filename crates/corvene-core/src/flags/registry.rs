@@ -5588,6 +5588,22 @@ registry! {
         code: &["crates/corvene-core/src/history_filter.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs"],
     },
 
+    /// "Show History" on a file narrows History to that file.
+    FILE_HISTORY = 887 "file-history" {
+        title: "File history",
+        summary: "\"Show History\" in the context menu of a changed file and of a file in a commit \
+                  switches to History listing only the commits that touched it, following renames \
+                  (git log --follow), under a removable \"History of <file>\" chip. Selecting one \
+                  of them selects the file under the name it had in that commit.",
+        ghd_behaviour: "A single file's history can only be seen on GitHub or with git.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11990), Upstream::issue(21234)],
+        code: &["crates/corvene-core/src/history_filter.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

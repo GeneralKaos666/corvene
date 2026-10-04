@@ -2641,6 +2641,26 @@ impl ChangesSidebar {
             items.extend(copy_diff_item);
             items.push(MenuItem::separator());
             items.extend(open_items(full, deleted));
+            // `887-file-history`: History narrowed to the file (as HEAD names it)
+            if self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::FILE_HISTORY)
+            {
+                let in_head = file
+                    .old_path
+                    .clone()
+                    .filter(|_| file.status.kind == FileStatusKind::Renamed)
+                    .unwrap_or(path.clone());
+                items.push(MenuItem::separator());
+                items.push(
+                    MenuItem::new(mac_or("Show History", "Show history"), move |_, cx| {
+                        Dispatcher::show_file_history(id, in_head.clone(), cx)
+                    })
+                    .enabled(!file.status.kind.is_new_or_untracked()),
+                );
+            }
         }
         self.open_menu(items, position, window, cx);
     }

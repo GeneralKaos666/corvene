@@ -9,6 +9,11 @@
 //! filter is active its results replace the History list
 //! ([`crate::state::RepositoryState::visible_commits`]); clearing it brings
 //! the plain list and selection back.
+//!
+//! `887-file-history`: "Show History" on a changed or committed file narrows
+//! the same search to that file (`git log --follow -- <path>`, shown as a
+//! removable chip), and selecting one of its commits selects the file under
+//! the name it had there.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,6 +36,8 @@ const SHA_PREFIX_MATCHES: usize = 10;
 pub struct HistoryFilter {
     /// The filter box's text.
     pub text: String,
+    /// `887-file-history`: History of this file only.
+    pub path: Option<String>,
     /// What `text` asks for; empty when History is not filtered.
     pub query: HistoryQuery,
     /// The matching commits loaded so far, newest first (SHA matches first).
@@ -60,6 +67,24 @@ pub struct HistoryFilter {
 impl HistoryFilter {
     pub fn is_active(&self) -> bool {
         !self.query.is_empty()
+    }
+
+    /// `887-file-history`: the file's path in commit `sha` of a file history.
+    pub fn file_path_at(&self, sha: &str) -> Option<&str> {
+        self.path.as_ref()?;
+        self.logged
+            .as_ref()?
+            .iter()
+            .find(|c| c.sha == sha)
+            .and_then(|c| c.path.as_deref())
+            .or(self.path.as_deref())
+    }
+
+    /// What the text and the file ask for.
+    fn wanted(&self) -> HistoryQuery {
+        let mut query = parse_history_query(&self.text);
+        query.path = self.path.clone();
+        query
     }
 }
 
@@ -120,8 +145,7 @@ impl Dispatcher {
     /// The History filter box was edited: search after a pause, or go back
     /// to the plain History once nothing is left to filter by.
     pub fn set_history_filter_text(id: u64, text: String, cx: &mut App) {
-        let query = parse_history_query(&text);
-        let debounce = Self::state(cx).update(cx, |s, cx| {
+        let request = Self::state(cx).update(cx, |s, cx| {
             let filter = &mut s.repo_state_mut(id).history_filter;
             if filter.text == text {
                 return None;
@@ -129,10 +153,11 @@ impl Dispatcher {
             filter.text = text;
             filter.debounce += 1;
             cx.notify();
+            let query = filter.wanted();
             // back to what was searched for: nothing new to search
-            (filter.query != query).then_some(filter.debounce)
+            (filter.query != query).then_some((filter.debounce, query))
         });
-        let Some(debounce) = debounce else {
+        let Some((debounce, query)) = request else {
             return;
         };
         if query.is_empty() {
@@ -156,6 +181,37 @@ impl Dispatcher {
             });
         })
         .detach();
+    }
+
+    /// `887-file-history`: History of `path` only (with the filter box's
+    /// terms), shown at once.
+    pub fn show_file_history(id: u64, path: String, cx: &mut App) {
+        Self::exit_compare(id, cx);
+        Self::show_section(id, corvene_models::Section::History, cx);
+        let query = Self::state(cx).update(cx, |s, cx| {
+            let filter = &mut s.repo_state_mut(id).history_filter;
+            filter.path = Some(path);
+            filter.debounce += 1;
+            cx.notify();
+            filter.wanted()
+        });
+        Self::run_history_filter(id, query, cx);
+    }
+
+    /// `887-file-history`: the chip's ×; the filter box's terms stay.
+    pub fn clear_file_history(id: u64, cx: &mut App) {
+        let query = Self::state(cx).update(cx, |s, cx| {
+            let filter = &mut s.repo_state_mut(id).history_filter;
+            filter.path = None;
+            filter.debounce += 1;
+            cx.notify();
+            filter.wanted()
+        });
+        if query.is_empty() {
+            Self::clear_history_filter(id, cx);
+        } else {
+            Self::run_history_filter(id, query, cx);
+        }
     }
 
     /// Drop the filter: the plain History list and its selection come back.

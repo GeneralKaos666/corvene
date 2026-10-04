@@ -2377,13 +2377,22 @@ impl Dispatcher {
             }
             match result {
                 Ok(data) => {
+                    // `887-file-history`: the file under its name in the commit
+                    let history_file = key
+                        .iter()
+                        .rev()
+                        .find_map(|sha| rs.history_filter.file_path_at(sha))
+                        .filter(|p| data.files.iter().any(|f| f.path == *p))
+                        .map(str::to_string);
                     // keep the file selection when the same path is still there
                     let keep = rs
                         .commit_selected_file
                         .as_ref()
                         .filter(|p| data.files.iter().any(|f| &f.path == *p))
                         .cloned();
-                    let file = keep.or_else(|| data.files.first().map(|f| f.path.clone()));
+                    let file = history_file
+                        .or(keep)
+                        .or_else(|| data.files.first().map(|f| f.path.clone()));
                     let mut changed = set(&mut rs.commit_selected_file, file);
                     if rs.changeset.as_ref() != Some(&*data) {
                         rs.changeset = Some(Arc::unwrap_or_clone(data));

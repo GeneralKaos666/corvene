@@ -263,6 +263,9 @@ pub struct HistoryQuery {
     /// `2.weeks.ago`).
     pub before: Option<String>,
     pub after: Option<String>,
+    /// `887-file-history`: the commits that touched this file, following
+    /// renames (`--follow -- <path>`).
+    pub path: Option<String>,
 }
 
 impl HistoryQuery {
@@ -271,6 +274,7 @@ impl HistoryQuery {
             && self.author.is_none()
             && self.before.is_none()
             && self.after.is_none()
+            && self.path.is_none()
     }
 
     /// A free word that looks like an abbreviated SHA (4 to 40 hex digits),
@@ -292,12 +296,15 @@ impl HistoryQuery {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoggedCommit {
     pub sha: String,
+    /// For a file history, the file's path in this commit (renames give
+    /// the new name).
+    pub path: Option<String>,
 }
 
 /// Corvene `886-history-search`: the commits reachable from `tip` that
 /// match the query's `git log` limits, newest first (`git log -i -F
-/// --format=%H [--author] [--before] [--after] <tip>`). Free words are left
-/// to [`filtered_history_page`].
+/// --format=%H [--author] [--before] [--after] <tip> [--follow --name-only
+/// -- <path>]`). Free words are left to [`filtered_history_page`].
 pub fn filtered_history(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -326,8 +333,15 @@ pub fn filtered_history(
     if let Some(after) = &query.after {
         args.push(format!("--after={after}"));
     }
+    if query.path.is_some() {
+        args.push("--follow".into());
+        args.push("--name-only".into());
+    }
     args.push(tip.to_string());
     args.push("--".into());
+    if let Some(path) = &query.path {
+        args.push(path.clone());
+    }
     let mut command = GitCommand::new(git).args(&args).current_dir(workdir);
     if let Some(cancel) = cancel {
         command = command.cancel_token(cancel);
@@ -342,9 +356,11 @@ pub fn parse_filtered_history(stdout: &[u8]) -> Vec<LoggedCommit> {
     String::from_utf8_lossy(stdout)
         .split('\0')
         .filter_map(|entry| {
-            let sha = entry.lines().next()?.trim();
+            let mut lines = entry.lines();
+            let sha = lines.next()?.trim();
             (sha.len() >= 40 && sha.bytes().all(|b| b.is_ascii_hexdigit())).then(|| LoggedCommit {
                 sha: sha.to_string(),
+                path: lines.find(|l| !l.trim().is_empty()).map(str::to_string),
             })
         })
         .collect()
@@ -998,7 +1014,13 @@ mod tests {
         let logged = parse_filtered_history(out.as_bytes());
         assert_eq!(
             logged,
-            vec![LoggedCommit { sha: a }, LoggedCommit { sha: b }]
+            vec![
+                LoggedCommit { sha: a, path: None },
+                LoggedCommit {
+                    sha: b,
+                    path: Some("src/x.rs".into())
+                }
+            ]
         );
     }
 
