@@ -2,7 +2,7 @@
 //!
 //! Corvene equivalents of GitHub Desktop's `lib/git/status.ts`:
 //!
-//! - `getStatus(repository)` is `corvene_git::get_status(git(), path, None)`
+//! - `getStatus(repository)` is `corvene_git::get_status(git(), path)`
 //!   (`getStatusOrThrow` is `get_status_or_throw`). GitHub Desktop's `null`
 //!   (git exited with 128, "likely missing its .git directory") is
 //!   `Err(GitError::Failed { code: Some(128), .. })`.
@@ -299,7 +299,7 @@ fn reflects_copies() {
 #[test]
 fn returns_null_for_directory_without_a_git_directory() {
     let repository = setup_empty_directory();
-    let status = corvene_git::get_status(git(), repository.path(), None);
+    let status = corvene_git::get_status(git(), repository.path());
     assert!(
         matches!(
             status,

@@ -274,7 +274,7 @@ pub fn undo_last_commit(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
             .current_dir(workdir)
             .run()?;
     } else {
-        let status = crate::status::get_status(git.clone(), workdir, None)?;
+        let status = crate::status::get_status(git.clone(), workdir)?;
         let deleted: Vec<&str> = status
             .files
             .iter()
@@ -529,7 +529,7 @@ mod tests {
         let path = dir.path();
         std::fs::write(path.join("a.txt"), "one\n").unwrap();
         std::fs::write(path.join("b.txt"), "two\n").unwrap();
-        let mut status = crate::get_status(git.clone(), path, None).unwrap();
+        let mut status = crate::get_status(git.clone(), path).unwrap();
         // exclude b.txt
         for f in &mut status.files {
             if f.path == "b.txt" {
@@ -548,7 +548,7 @@ mod tests {
         // GHD `parseCommitSHA` of a branch's first commit
         assert_eq!(parsed, "(root-commit)");
         let sha = head_sha(git.clone(), path).unwrap();
-        let after = crate::get_status(git.clone(), path, None).unwrap();
+        let after = crate::get_status(git.clone(), path).unwrap();
         let paths: Vec<_> = after.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, vec!["b.txt"]);
         let log = Command::new("git")
@@ -563,14 +563,14 @@ mod tests {
 
         // second commit then undo keeps changes
         std::fs::write(path.join("a.txt"), "changed\n").unwrap();
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         unstage_all(git.clone(), path).unwrap();
         stage_files(git.clone(), path, &status.files).unwrap();
         commit(git.clone(), path, "second\n", &CommitOptions::default()).unwrap();
         undo_last_commit(git.clone(), path).unwrap();
         let head = head_sha(git.clone(), path).unwrap();
         assert_eq!(head, sha);
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         assert!(status.files.iter().any(|f| f.path == "a.txt"));
 
         // undo the root commit: files stay, HEAD unborn
@@ -599,7 +599,7 @@ mod tests {
         let path = dir.path();
         std::fs::write(path.join("a.txt"), "one\n").unwrap();
         std::fs::write(path.join("b c.txt"), "two\n").unwrap();
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         stage_files(git.clone(), path, &status.files).unwrap();
         commit(git.clone(), path, "init\n", &CommitOptions::default()).unwrap();
         std::fs::write(path.join("a.txt"), "dirty\n").unwrap();
@@ -607,7 +607,7 @@ mod tests {
         let both = vec!["a.txt".to_string(), "b c.txt".to_string()];
         set_assume_unchanged(git.clone(), path, &both, true).unwrap();
         assert_eq!(assume_unchanged_paths(git.clone(), path).unwrap(), both);
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         assert!(status.files.is_empty());
         set_assume_unchanged(git.clone(), path, &both, false).unwrap();
         assert!(
@@ -615,7 +615,7 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        let status = crate::get_status(git, path, None).unwrap();
+        let status = crate::get_status(git, path).unwrap();
         assert_eq!(status.files.len(), 2);
     }
 
@@ -624,19 +624,19 @@ mod tests {
         let (dir, git) = repo();
         let path = dir.path();
         std::fs::write(path.join("a.txt"), "one\n").unwrap();
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         stage_files(git.clone(), path, &status.files).unwrap();
         commit(git.clone(), path, "init\n", &CommitOptions::default()).unwrap();
         std::fs::write(path.join("a.txt"), "dirty\n").unwrap();
         std::fs::write(path.join("new.txt"), "x\n").unwrap();
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         discard_changes(git.clone(), path, &status.files, false, false).unwrap();
         assert_eq!(
             std::fs::read_to_string(path.join("a.txt")).unwrap(),
             "one\n"
         );
         assert!(!path.join("new.txt").exists());
-        let status = crate::get_status(git, path, None).unwrap();
+        let status = crate::get_status(git, path).unwrap();
         assert!(status.files.is_empty());
     }
 
@@ -667,12 +667,11 @@ mod tests {
         std::fs::write(sub.join("junk.txt"), "x\n").unwrap();
         std::fs::create_dir(sub.join("junkdir")).unwrap();
         std::fs::write(sub.join("junkdir/more.txt"), "y\n").unwrap();
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         assert_eq!(status.files.len(), 1);
         let hidden = crate::get_status_with(
             git.clone(),
             path,
-            None,
             crate::StatusOptions {
                 ignore_submodules: crate::IgnoreSubmodules::Dirty,
                 ..Default::default()
@@ -701,7 +700,7 @@ mod tests {
         );
         assert!(!sub.join("junk.txt").exists());
         assert!(!sub.join("junkdir").exists());
-        let status = crate::get_status(git, path, None).unwrap();
+        let status = crate::get_status(git, path).unwrap();
         assert!(status.files.is_empty());
     }
 }

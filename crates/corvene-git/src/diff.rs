@@ -541,7 +541,7 @@ mod tests {
         std::fs::write(path.join("skip.txt"), "changed\n").unwrap();
         std::fs::write(path.join("new.txt"), "fresh\n").unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         let files: Vec<_> = status
             .files
             .into_iter()
@@ -626,7 +626,7 @@ mod tests {
         std::fs::write(path.join("a.txt"), "one\nTWO\n").unwrap();
         std::fs::write(path.join("b.txt"), "new\n").unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         for file in &status.files {
             let diff =
                 working_directory_diff(git.clone(), path, file, false, false, false).unwrap();
@@ -711,7 +711,7 @@ mod tests {
         run(&["commit", "-q", "-m", "init"]);
         std::fs::write(path.join("data.bin"), b"one\0\nTWO\n").unwrap();
         let git = Arc::new(crate::find_git().unwrap());
-        let status = crate::get_status(git.clone(), path, None).unwrap();
+        let status = crate::get_status(git.clone(), path).unwrap();
         let file = &status.files[0];
         let binary = working_directory_diff(git.clone(), path, file, false, false, false).unwrap();
         assert_eq!(binary, Diff::Binary);

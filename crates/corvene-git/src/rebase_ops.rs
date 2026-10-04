@@ -739,7 +739,7 @@ pub fn continue_rebase(
         return Ok(RebaseResult::Aborted);
     }
     let keep_messages = keep_messages && rebase_keeps_messages(workdir);
-    let status = crate::status::get_status(git.clone(), workdir, None)?;
+    let status = crate::status::get_status(git.clone(), workdir)?;
     let tracked_after = status
         .files
         .iter()
@@ -1250,7 +1250,7 @@ pub fn continue_cherry_pick(
     if !cherry_pick_head_found(workdir) {
         return Ok(CherryPickResult::UnableToStart);
     }
-    let status = crate::status::get_status(git.clone(), workdir, None)?;
+    let status = crate::status::get_status(git.clone(), workdir)?;
     let (commits, mut count) = match cherry_pick_snapshot(git.clone(), workdir) {
         Some(s) => (s.commits, s.cherry_picked_count),
         None => return Ok(CherryPickResult::UnableToStart),
@@ -1496,7 +1496,7 @@ mod tests {
             ),
             Some("main".to_string())
         );
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let conflicted = status
             .files
             .iter()
@@ -1559,7 +1559,7 @@ mod tests {
             rebase(git.clone(), path, "main", "feature", &[], true, |_| {}),
             RebaseResult::ConflictsEncountered
         );
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let mut resolutions = BTreeMap::new();
         resolutions.insert("a.txt".to_string(), ManualConflictResolution::Theirs);
         let result = continue_rebase(
@@ -1712,7 +1712,7 @@ mod tests {
                 .unwrap()
         };
         let resolve = |side: ManualConflictResolution| {
-            let status = crate::status::get_status(git.clone(), path, None).unwrap();
+            let status = crate::status::get_status(git.clone(), path).unwrap();
             let mut resolutions = BTreeMap::new();
             resolutions.insert("a.txt".to_string(), side);
             continue_cherry_pick(git.clone(), path, &status.files, &resolutions, true, |_| {})
@@ -1830,7 +1830,7 @@ mod tests {
                 .unwrap(),
             crate::MergeOutcome::Conflicts
         );
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let conflicted: Vec<_> = status
             .files
             .iter()
@@ -1856,7 +1856,7 @@ mod tests {
             crate::MergeOutcome::Conflicts
         );
         assert!(merge_head_set(path));
-        let status = crate::status::get_status(git.clone(), path, None).unwrap();
+        let status = crate::status::get_status(git.clone(), path).unwrap();
         let conflicted: Vec<_> = status
             .files
             .iter()

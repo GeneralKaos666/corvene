@@ -14,6 +14,6 @@ use crate::repositories::TestRepo;
 ///
 /// When `git status` fails.
 pub fn get_status_or_throw(repository: &TestRepo) -> WorkingDirectoryStatus {
-    corvene_git::get_status(git(), repository.path(), None)
+    corvene_git::get_status(git(), repository.path())
         .unwrap_or_else(|err| panic!("git status returned null which was not expected: {err}"))
 }

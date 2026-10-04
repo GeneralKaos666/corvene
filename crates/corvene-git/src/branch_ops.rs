@@ -892,7 +892,7 @@ eeee commit: something\n";
         crate::stage_files(
             git.clone(),
             path,
-            &crate::get_status(git.clone(), path, None).unwrap().files,
+            &crate::get_status(git.clone(), path).unwrap().files,
         )
         .unwrap();
         crate::commit(git.clone(), path, "feat\n", &Default::default()).unwrap();
@@ -954,7 +954,7 @@ eeee commit: something\n";
         std::fs::write(path.join("new.txt"), "n\n").unwrap();
         assert!(create_desktop_stash(git.clone(), path, "main").unwrap());
         assert!(
-            crate::get_status(git.clone(), path, None)
+            crate::get_status(git.clone(), path)
                 .unwrap()
                 .files
                 .is_empty()
@@ -963,7 +963,7 @@ eeee commit: something\n";
         assert_eq!(total, 1);
         assert_eq!(entries[0].branch.as_deref(), Some("main"));
         pop_stash_entry(git.clone(), path, &entries[0].sha).unwrap();
-        let files = crate::get_status(git.clone(), path, None).unwrap().files;
+        let files = crate::get_status(git.clone(), path).unwrap().files;
         assert_eq!(files.len(), 2);
         assert!(create_desktop_stash(git.clone(), path, "main").unwrap());
         let (entries, _) = get_stashes(git.clone(), path).unwrap();

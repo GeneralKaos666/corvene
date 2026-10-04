@@ -441,7 +441,7 @@ fn empty_directory_is_not_a_repository() {
     let dir = setup_empty_directory();
     assert!(dir.path().is_dir());
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-    assert!(corvene_git::get_status(git(), dir.path(), None).is_err());
+    assert!(corvene_git::get_status(git(), dir.path()).is_err());
 }
 
 #[test]

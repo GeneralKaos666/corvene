@@ -488,7 +488,7 @@ mod tests {
 
     fn assert_same(dir: &Path, options: StatusOptions) {
         let git = Arc::new(crate::find_git().unwrap());
-        let cli = get_status_with(git.clone(), dir, None, options).unwrap();
+        let cli = get_status_with(git.clone(), dir, options).unwrap();
         let gix = status(dir, options, false).expect("in-process status");
         assert_eq!(summary(&gix), summary(&cli), "in {}", dir.display());
         // identical content renames carry git's score
@@ -689,7 +689,7 @@ mod tests {
     /// it left the status to git.
     fn compare(dir: &Path, options: StatusOptions) -> bool {
         let git = Arc::new(crate::find_git().unwrap());
-        let cli = get_status_with(git.clone(), dir, None, options).unwrap();
+        let cli = get_status_with(git.clone(), dir, options).unwrap();
         let Some(gix) = status(dir, options, false) else {
             return false;
         };
@@ -938,7 +938,7 @@ mod tests {
                         in_process,
                         ..Default::default()
                     };
-                    let status = get_status_with(git.clone(), &repo, None, options).unwrap();
+                    let status = get_status_with(git.clone(), &repo, options).unwrap();
                     assert!(!status.files.is_empty() || status.branch.is_some());
                     started.elapsed().as_micros()
                 })

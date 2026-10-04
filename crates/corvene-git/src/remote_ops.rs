@@ -1031,7 +1031,7 @@ pub fn fast_forward_tracking_branches(
 /// `Ok(false)` when any of that does not hold. Corvene addition
 /// (desktop#16586: pull after a background fetch).
 pub fn fast_forward_if_only_behind(git: Arc<GitBinary>, workdir: &Path) -> Result<bool> {
-    let status = crate::get_status(git.clone(), workdir, None)?;
+    let status = crate::get_status(git.clone(), workdir)?;
     let only_behind = status
         .ahead_behind
         .is_some_and(|ab| ab.ahead == 0 && ab.behind > 0);

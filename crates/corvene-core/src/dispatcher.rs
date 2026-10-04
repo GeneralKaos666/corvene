@@ -1031,7 +1031,7 @@ impl Dispatcher {
                     let status = spawn_git(scope, &git, move |git| {
                         let started = Instant::now();
                         let status =
-                            corvene_git::get_status_with(git.clone(), path, None, status_options)
+                            corvene_git::get_status_with(git.clone(), path, status_options)
                                 // GHD `updateChangedFiles`' merge, here: it
                                 // copies and sorts every file
                                 .map(|status| {

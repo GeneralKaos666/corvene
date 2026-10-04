@@ -770,7 +770,7 @@ impl Dispatcher {
             cx,
             move || {
                 corvene_git::create_desktop_stash(git.clone(), &workdir, &branch)
-                    .and_then(|_| corvene_git::get_status(git, &workdir, None))
+                    .and_then(|_| corvene_git::get_status(git, &workdir))
             },
             move |result, cx| match result {
                 Ok(status) => {
@@ -1231,7 +1231,7 @@ impl Dispatcher {
                     keep_messages,
                     on_progress,
                 );
-                let status = corvene_git::get_status(git, &workdir, None).ok();
+                let status = corvene_git::get_status(git, &workdir).ok();
                 (result, status)
             },
             move |(result, status), cx| {
@@ -1584,7 +1584,7 @@ impl Dispatcher {
                             on_progress,
                         )
                         .unwrap_or_else(|e| RebaseResult::Error(e.to_string()));
-                        let status = corvene_git::get_status(git, &workdir, None).ok();
+                        let status = corvene_git::get_status(git, &workdir).ok();
                         (result, status)
                     },
                     move |(result, status), cx| {
@@ -1621,7 +1621,7 @@ impl Dispatcher {
                             on_progress,
                         )
                         .unwrap_or_else(|e| RebaseResult::Error(e.to_string()));
-                        let status = corvene_git::get_status(git, &workdir, None).ok();
+                        let status = corvene_git::get_status(git, &workdir).ok();
                         (result, status)
                     },
                     move |(result, status), cx| {
@@ -1648,7 +1648,7 @@ impl Dispatcher {
                             on_progress,
                         )
                         .unwrap_or_else(|e| CherryPickResult::Error(e.to_string()));
-                        let status = corvene_git::get_status(git, &workdir, None).ok();
+                        let status = corvene_git::get_status(git, &workdir).ok();
                         (result, status)
                     },
                     move |(result, status), cx| {
@@ -1724,7 +1724,7 @@ impl Dispatcher {
                     }
                     _ => None,
                 };
-                let status = corvene_git::get_status(git, &workdir, None).ok();
+                let status = corvene_git::get_status(git, &workdir).ok();
                 (result, status, submodule_error)
             },
             move |(result, status, submodule_error), cx| {
@@ -1934,7 +1934,7 @@ impl Dispatcher {
                     keep_messages,
                     on_progress,
                 );
-                let status = corvene_git::get_status(git, &workdir, None).ok();
+                let status = corvene_git::get_status(git, &workdir).ok();
                 (result, status, undo_sha, true)
             },
             move |(result, status, undo_sha, checked_out), cx| {
@@ -2239,7 +2239,7 @@ impl Dispatcher {
                         && stash_before.is_some_and(|before| {
                             corvene_git::stash_tip(git.clone(), &workdir) != before
                         });
-                    let status = corvene_git::get_status(git, &workdir, None).ok();
+                    let status = corvene_git::get_status(git, &workdir).ok();
                     (result, status, stash_kept)
                 },
                 move |(result, status, stash_kept), cx| {
@@ -2411,7 +2411,7 @@ impl Dispatcher {
                         },
                         on_progress,
                     );
-                    let status = corvene_git::get_status(git, &workdir, None).ok();
+                    let status = corvene_git::get_status(git, &workdir).ok();
                     (result, status)
                 },
                 move |(result, status), cx| {

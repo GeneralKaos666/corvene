@@ -51,20 +51,18 @@ pub enum IgnoreSubmodules {
     All,
 }
 
-/// Run status and build the model. `previous` carries over per-file selections.
-pub fn get_status(
-    git: Arc<GitBinary>,
-    workdir: &Path,
-    previous: Option<&WorkingDirectoryStatus>,
-) -> Result<WorkingDirectoryStatus> {
-    get_status_with(git, workdir, previous, StatusOptions::default())
+/// Run status and build the model (GHD `getStatus`). The files come with
+/// default selections; the caller carries over the previous ones
+/// (`corvene_core::changes_state::merge_changed_files`, GHD
+/// `updateChangedFiles`).
+pub fn get_status(git: Arc<GitBinary>, workdir: &Path) -> Result<WorkingDirectoryStatus> {
+    get_status_with(git, workdir, StatusOptions::default())
 }
 
 /// [`get_status`] with Corvene's [`StatusOptions`].
 pub fn get_status_with(
     git: Arc<GitBinary>,
     workdir: &Path,
-    previous: Option<&WorkingDirectoryStatus>,
     options: StatusOptions,
 ) -> Result<WorkingDirectoryStatus> {
     let hide_untracked = options.respect_show_untracked_files
@@ -110,20 +108,6 @@ pub fn get_status_with(
     status.rebase_internal_state = crate::rebase_ops::rebase_internal_state(workdir);
     if status.has_conflicts() {
         apply_conflict_details(git, workdir, &mut status);
-    }
-    if let Some(prev) = previous {
-        // by path: a linear search per file is quadratic, minutes on a tree
-        // with 100,000 untracked files
-        let old: std::collections::HashMap<&str, &corvene_models::DiffSelection> = prev
-            .files
-            .iter()
-            .map(|f| (f.path.as_str(), &f.selection))
-            .collect();
-        for file in &mut status.files {
-            if let Some(selection) = old.get(file.path.as_str()) {
-                file.selection = (*selection).clone();
-            }
-        }
     }
     // git's order (tracked before untracked, bytewise), as GHD `getStatus`
     // returns it; the changes list sorts them
@@ -665,7 +649,7 @@ mod tests {
         std::fs::write(path.join("b.txt"), "new\n").unwrap();
 
         let git = Arc::new(crate::find_git().unwrap());
-        let s = get_status(git.clone(), path, None).unwrap();
+        let s = get_status(git.clone(), path).unwrap();
         assert_eq!(s.branch.as_deref(), Some("main"));
         let mut paths: Vec<_> = s
             .files
@@ -684,7 +668,6 @@ mod tests {
         let hidden = get_status_with(
             git.clone(),
             path,
-            None,
             StatusOptions {
                 respect_show_untracked_files: true,
                 ..Default::default()
@@ -694,7 +677,7 @@ mod tests {
         assert_eq!(hidden.files.len(), 1);
         assert_eq!(hidden.files[0].path, "a.txt");
         // GHD ignores the setting
-        assert_eq!(get_status(git.clone(), path, None).unwrap().files.len(), 2);
+        assert_eq!(get_status(git.clone(), path).unwrap().files.len(), 2);
         let stats = working_directory_line_stats(git, path, &s).unwrap();
         assert_eq!(
             stats.get("a.txt"),

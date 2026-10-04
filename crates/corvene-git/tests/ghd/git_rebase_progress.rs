@@ -107,7 +107,7 @@ fn resolve_and_continue(
     strategy: ManualConflictResolution,
     progress_callback: &mut dyn FnMut(McoProgress),
 ) -> RebaseResult {
-    let status = corvene_git::get_status(git(), repository.path(), None).ok();
+    let status = corvene_git::get_status(git(), repository.path()).ok();
     let files = status.map(|s| s.files).unwrap_or_default();
     let mut resolutions = BTreeMap::<String, ManualConflictResolution>::new();
 

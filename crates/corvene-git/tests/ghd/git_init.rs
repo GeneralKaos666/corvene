@@ -57,7 +57,7 @@ fn creates_a_repository_with_a_default_branch() {
     let repo = TestRepo::from_temp_dir(temp_dir);
     // GitHub Desktop's `getStatus` returns null for a missing repository and
     // `exists: true` otherwise; Corvene's returns an error or the status
-    let status = corvene_git::get_status(git(), repo.path(), None);
+    let status = corvene_git::get_status(git(), repo.path());
     assert!(status.is_ok(), "{status:?}");
 
     let head = exec(["symbolic-ref", "--short", "HEAD"], repo.path());

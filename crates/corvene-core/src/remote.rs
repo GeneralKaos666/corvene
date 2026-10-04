@@ -882,7 +882,7 @@ impl Dispatcher {
                     });
                     let _ = corvene_git::fast_forward_branches(git.clone(), &workdir);
                 }
-                let status = corvene_git::get_status(git, &workdir, None).ok();
+                let status = corvene_git::get_status(git, &workdir).ok();
                 (result, status)
             },
             move |(result, status), cx| {
@@ -1684,7 +1684,7 @@ impl Dispatcher {
                     let Ok(info) = corvene_git::open_repository(&path) else {
                         continue;
                     };
-                    let changed = corvene_git::get_status(git.clone(), &info.workdir, None)
+                    let changed = corvene_git::get_status(git.clone(), &info.workdir)
                         .map(|st| st.files.len())
                         .unwrap_or(0);
                     let ahead_behind = info.current_branch().and_then(|b| {
