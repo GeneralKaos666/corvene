@@ -66,6 +66,8 @@
 //!   (`779-undoable-commit-message-replace`).
 //! - the commit options gear has "Amend Last Commit"
 //!   (`780-amend-from-commit-options`).
+//! - a submodule's menu has "Open Submodule in Corvene", which a double-click
+//!   does too (`284-open-submodule-from-changes`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -2790,7 +2792,28 @@ impl ChangesSidebar {
             items.extend(copy_items(targets));
             items.extend(copy_diff_item);
             items.push(MenuItem::separator());
-            items.extend(open_items(full, deleted));
+            items.extend(open_items(full.clone(), deleted));
+            // `284-open-submodule-from-changes`: the submodule as a repository
+            if file.status.submodule
+                && self
+                    .state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::OPEN_SUBMODULE_FROM_CHANGES)
+            {
+                let name = self.state.read(cx).product_name().to_string();
+                let label = if IS_MAC {
+                    format!("Open Submodule in {name}")
+                } else {
+                    format!("Open submodule in {name}")
+                };
+                items.push(
+                    MenuItem::new(label, move |_, cx| {
+                        Dispatcher::open_submodule(full.clone(), cx)
+                    })
+                    .enabled(!deleted),
+                );
+            }
             // `887-file-history`: History narrowed to the file (as HEAD names it)
             if self
                 .state
@@ -2816,9 +2839,10 @@ impl ChangesSidebar {
     }
 
     /// A double-clicked row: GHD `onOpenItemInExternalEditor` (nothing for a
-    /// deleted file, which GHD fails to open).
+    /// deleted file, which GHD fails to open). A submodule opens as a
+    /// repository with `284-open-submodule-from-changes`.
     fn open_row(&mut self, path: &str, cx: &mut Context<Self>) {
-        let target = {
+        let (target, submodule) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
             let Some(repo) = s.repository(id) else { return };
@@ -2829,11 +2853,19 @@ impl ChangesSidebar {
             else {
                 return;
             };
-            (file.status.kind != FileStatusKind::Deleted)
-                .then(|| repo.path.join(path.trim_end_matches('/')))
+            let submodule = file.status.submodule
+                && s.flags
+                    .bool(corvene_core::flags::ids::OPEN_SUBMODULE_FROM_CHANGES);
+            (
+                (file.status.kind != FileStatusKind::Deleted)
+                    .then(|| repo.path.join(path.trim_end_matches('/'))),
+                submodule,
+            )
         };
-        if let Some(full) = target {
-            Dispatcher::open_in_editor(full, cx);
+        match target {
+            Some(full) if submodule => Dispatcher::open_submodule(full, cx),
+            Some(full) => Dispatcher::open_in_editor(full, cx),
+            None => {}
         }
     }
 

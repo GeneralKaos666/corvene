@@ -1818,6 +1818,22 @@ registry! {
         code: &["crates/corvene-core/src/stash_flows.rs", "crates/corvene-ui/src/dialogs/worktree_dialogs.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Changes list › Open Submodule in Corvene.
+    OPEN_SUBMODULE_FROM_CHANGES = 284 "open-submodule-from-changes" {
+        title: "Open a submodule from the changes list",
+        summary: "A changed submodule's menu in the changes list has \"Open Submodule in \
+                  Corvene\", which adds it as a repository (if needed) and switches to it; \
+                  double-clicking its row does the same.",
+        ghd_behaviour: "Only the submodule's diff offers \"Open Repository\" (when its URL is \
+                        known); double-clicking the row opens the folder in the editor.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20921)],
+        code: &["crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.
