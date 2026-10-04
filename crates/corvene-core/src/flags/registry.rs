@@ -5638,6 +5638,22 @@ registry! {
         code: &["crates/corvene-core/src/compare.rs", "crates/corvene-git/src/rebase_ops.rs", "crates/corvene-ui/src/history.rs"],
     },
 
+    /// History rows label branch tips.
+    HISTORY_BRANCH_LABELS = 890 "history-branch-labels" {
+        title: "Branch labels in History",
+        summary: "Commit rows show a small outlined label (git branch icon and name, \"+N\" when \
+                  several) where another local branch or the default branch's remote-tracking \
+                  branch points, like git log --decorate, so History shows where the current \
+                  branch started and which branches share its commits. Hovering lists them all.",
+        ghd_behaviour: "Rows show tags only; nothing tells where other branches are.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(13547)],
+        code: &["crates/corvene-ui/src/history.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

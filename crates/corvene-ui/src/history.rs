@@ -27,7 +27,8 @@
 //! `821`); a filter box under the compare box searches the history (flag
 //! `886`, `corvene_core::history_filter`); a file's history shows as a
 //! removable chip there (flag `887`); the compare view lists the files a
-//! merge of the compared branch would leave conflicted (flag `889`).
+//! merge of the compared branch would leave conflicted (flag `889`); rows
+//! label local branch tips and the default branch's remote tip (flag `890`).
 
 use std::rc::Rc;
 
@@ -1838,6 +1839,15 @@ impl HistorySidebar {
         let draggable = rs.is_some_and(|r| r.mco.is_none()) && self.reorder.is_none() && !comparing;
         // filtered rows can be dragged onto a branch, not squashed or reordered
         let droppable = draggable && !filtering;
+        // `890`: branch tips label their rows
+        let labels: Rc<std::collections::HashMap<String, Vec<String>>> = Rc::new(
+            rs.filter(|_| {
+                s.flags
+                    .bool(corvene_core::flags::ids::HISTORY_BRANCH_LABELS)
+            })
+            .map(branch_labels)
+            .unwrap_or_default(),
+        );
         if commits.is_empty() {
             let compare_loading = rs.is_some_and(|r| r.compare.loading);
             let filter_message = filter.map(|filter| {
@@ -1986,6 +1996,10 @@ impl HistorySidebar {
                                 focused && !in_reorder,
                                 draggable,
                                 droppable,
+                                labels
+                                    .get(&commit.sha)
+                                    .map(Vec::as_slice)
+                                    .unwrap_or_default(),
                                 selected.clone(),
                                 row_hint,
                                 dimmed,
@@ -2144,6 +2158,48 @@ pub(crate) fn commit_row_contents(
     badge: Option<(Hsla, Hsla)>,
     cx: &App,
 ) -> Div {
+    commit_row_contents_with(commit, text, secondary, badge, &[], cx)
+}
+
+/// `890-history-branch-labels`: the branches whose tips label commit rows,
+/// by tip sha: local branches but the current one (which is the top row),
+/// and the default branch's remote-tracking branch, which shows where the
+/// current branch left it (`git log --decorate`).
+fn branch_labels(
+    rs: &corvene_core::RepositoryState,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut labels: std::collections::HashMap<String, Vec<String>> = Default::default();
+    let Some(info) = rs.info.as_ref() else {
+        return labels;
+    };
+    let current = info.current_branch().map(|b| b.full_name.clone());
+    let default_upstream = rs.default_branch.as_deref().and_then(|name| {
+        info.branches
+            .iter()
+            .find(|b| b.name == name && b.kind == corvene_core::BranchKind::Local)
+            .and_then(|b| b.upstream.clone())
+    });
+    for b in &info.branches {
+        let wanted = match b.kind {
+            corvene_core::BranchKind::Local => Some(&b.full_name) != current.as_ref(),
+            _ => Some(&b.full_name) == default_upstream.as_ref(),
+        };
+        if wanted && let Some(tip) = &b.tip {
+            labels.entry(tip.clone()).or_default().push(b.name.clone());
+        }
+    }
+    labels
+}
+
+/// [`commit_row_contents`] with `890-history-branch-labels`' branch names.
+fn commit_row_contents_with(
+    commit: &Commit,
+    text: Hsla,
+    secondary: Hsla,
+    badge: Option<(Hsla, Hsla)>,
+    branches: &[String],
+    cx: &App,
+) -> Div {
     let t = cx.ghd();
     let (badge_bg, badge_text) =
         badge.unwrap_or((t.list_item_badge_background, t.list_item_badge_text));
@@ -2236,6 +2292,38 @@ pub(crate) fn commit_row_contents(
                     )
                 }),
         )
+        // `890`: the first branch as an outlined pill, "+N" for more
+        .when(!branches.is_empty(), |d| {
+            let more = branches.len() - 1;
+            d.child(
+                div()
+                    .id(SharedString::from(format!("branches-{}", commit.sha)))
+                    .ghd_tooltip(branches.join("\n"))
+                    .ml(SPACING())
+                    .h(zpx(16.))
+                    .max_w(gpui_kit::relative(0.5))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(zpx(2.))
+                    .px(SPACING_HALF())
+                    .rounded(BORDER_RADIUS())
+                    .border_1()
+                    .border_color(badge_bg)
+                    .text_color(secondary)
+                    .text_size(FONT_SIZE_SM())
+                    .line_height(zpx(14.))
+                    .child(
+                        octicon(Octicon::GitBranch, secondary)
+                            .size(zpx(10.))
+                            .flex_none(),
+                    )
+                    .child(div().min_w_0().truncate().child(branches[0].clone()))
+                    .when(more > 0, |d| {
+                        d.child(div().flex_none().child(format!("+{more}")))
+                    }),
+            )
+        })
         // `.commit-indicators .tag-indicator`: the first tag as a 16 px pill
         // (5 px padding, 6 px radius, no icon); more tags peek out behind it
         // as a 10 px tab (`.tag-indicator-more`)
@@ -2354,6 +2442,7 @@ fn commit_row(
     list_focused: bool,
     draggable: bool,
     droppable: bool,
+    branches: &[String],
     selection: Rc<Vec<String>>,
     hint: RowHint,
     dimmed: bool,
@@ -2535,7 +2624,9 @@ fn commit_row(
                     .ok();
             })
         })
-        .child(commit_row_contents(commit, text, secondary, badge, cx))
+        .child(commit_row_contents_with(
+            commit, text, secondary, badge, branches, cx,
+        ))
         .when(hint.line_above, |d| {
             d.child(
                 div()
