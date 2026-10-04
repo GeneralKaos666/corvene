@@ -13,13 +13,14 @@
 //! GitHub Desktop runs with dugite's bundled git, which always has Git LFS.
 //! Every case that runs `git lfs` (through `exec(['lfs', 'track', …])` or
 //! through `isUsingLFS` itself) needs `git-lfs` on the git found by
-//! `corvene_test_support::git()`, and first calls [`require_git_lfs`], which
-//! fails the case when `git lfs` cannot run. Without that check the two
+//! `corvene_test_support::git()` (the GitHub Actions macOS, Ubuntu and
+//! Windows runners have it; elsewhere install it, no `git lfs install`
+//! needed), and first calls [`require_git_lfs`], which fails the case with
+//! a clear message when `git lfs` cannot run. Without that check the two
 //! "returns false" cases of `isUsingLFS` would pass without exercising LFS
 //! (`is_using_lfs` treats a failing `git lfs` as "not using LFS"), and
 //! "returns files not listed in Git LFS" would test a repository with no
-//! LFS rule at all. Those cases are ignored as `env` while the test git
-//! has no `git-lfs`; with `git-lfs` on `PATH` they pass.
+//! LFS rule at all.
 
 use std::path::Path;
 
@@ -53,7 +54,6 @@ fn files_not_tracked_by_lfs(repository: &Path, file_paths: &[&str]) -> Result<Ve
 
 // GHD: unit/git/lfs-test.ts › git-lfs › isUsingLFS › returns false for repository not using LFS
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn is_using_lfs_returns_false_for_repository_not_using_lfs() {
     let repository = setup_fixture_repository("test-repo");
     require_git_lfs(repository.path());
@@ -64,7 +64,6 @@ fn is_using_lfs_returns_false_for_repository_not_using_lfs() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › isUsingLFS › returns true if LFS is tracking a path
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn returns_true_if_lfs_is_tracking_a_path() {
     let repository = setup_fixture_repository("test-repo");
 
@@ -77,7 +76,6 @@ fn returns_true_if_lfs_is_tracking_a_path() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › isUsingLFS › returns false if a non-LFS Git filter is configured
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn returns_false_if_a_non_lfs_git_filter_is_configured() {
     let repository = setup_empty_repository();
     let attributes_path = repository.join(".git").join("info").join("attributes");
@@ -91,7 +89,6 @@ fn returns_false_if_a_non_lfs_git_filter_is_configured() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › isUsingLFS › returns true if LFS tracks a path alongside a non-LFS Git filter
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn returns_true_if_lfs_tracks_a_path_alongside_a_non_lfs_git_filter() {
     let repository = setup_empty_repository();
     let attributes_path = repository.join(".git").join("info").join("attributes");
@@ -119,7 +116,6 @@ fn is_tracked_by_lfs_returns_false_for_repository_not_using_lfs() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › isTrackedByLFS › returns true after tracking file in Git LFS
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn returns_true_after_tracking_file_in_git_lfs() {
     let repository = setup_empty_repository();
 
@@ -136,7 +132,6 @@ fn returns_true_after_tracking_file_in_git_lfs() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › isTrackedByLFS › returns true after tracking file with character issues in Git LFS
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn returns_true_after_tracking_file_with_character_issues_in_git_lfs() {
     let repository = setup_empty_repository();
 
@@ -153,7 +148,6 @@ fn returns_true_after_tracking_file_with_character_issues_in_git_lfs() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › filesNotTrackedByLFS › returns files not listed in Git LFS
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn returns_files_not_listed_in_git_lfs() {
     let repository = setup_empty_repository();
     require_git_lfs(repository.path());
@@ -169,7 +163,6 @@ fn returns_files_not_listed_in_git_lfs() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › filesNotTrackedByLFS › skips files that are tracked by Git LFS
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn skips_files_that_are_tracked_by_git_lfs() {
     let repository = setup_empty_repository();
     require_git_lfs(repository.path());
@@ -184,7 +177,6 @@ fn skips_files_that_are_tracked_by_git_lfs() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › filesNotTrackedByLFS › skips files in a subfolder that are tracked
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn skips_files_in_a_subfolder_that_are_tracked() {
     let repository = setup_empty_repository();
     require_git_lfs(repository.path());
@@ -199,7 +191,6 @@ fn skips_files_in_a_subfolder_that_are_tracked() {
 
 // GHD: unit/git/lfs-test.ts › git-lfs › filesNotTrackedByLFS › skips files in a subfolder where the rule only covers the subdirectory
 #[test]
-#[ignore = "ghd: env: needs git-lfs, which the test git lacks (GHD's dugite git bundles it); passes with git-lfs on PATH"]
 fn skips_files_in_a_subfolder_where_the_rule_only_covers_the_subdirectory() {
     let repository = setup_empty_repository();
     require_git_lfs(repository.path());

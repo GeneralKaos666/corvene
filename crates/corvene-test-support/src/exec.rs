@@ -130,8 +130,9 @@ where
 
 /// Whether the test git runs `git lfs` (GitHub Desktop's tests take it for
 /// granted: dugite's git bundles Git LFS; a system git may lack it). Probed
-/// once per process with `git lfs version`. Cases that need it stay ignored
-/// as `ghd: env:` on machines without it.
+/// once per process with `git lfs version`. The cases that need it run
+/// unconditionally (the CI runners have `git-lfs`) and fail with a clear
+/// message without it.
 pub fn has_git_lfs() -> bool {
     static HAS_GIT_LFS: OnceLock<bool> = OnceLock::new();
     *HAS_GIT_LFS.get_or_init(|| exec(["lfs", "version"], home_dir()).exit_code == 0)
