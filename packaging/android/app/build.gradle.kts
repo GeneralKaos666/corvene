@@ -1,5 +1,10 @@
 // The native library is compiled outside Gradle (packaging/android/build.sh
 // runs cargo-ndk) and picked up from src/main/jniLibs.
+//
+// This is the legacy Android app: the desktop GPUI application itself in a
+// NativeActivity, GitHub Desktop 1:1 on a phone or tablet. It stays
+// available next to the Compose app (android/, com.wasimaster.corvene) under
+// its own application id, so both install side by side.
 
 plugins {
     id("com.android.application")
@@ -20,7 +25,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.wasimaster.corvene"
+        applicationId = "com.wasimaster.corvene.legacy"
         // Android 8: Vulkan 1.0 and the APIs the platform layer uses
         minSdk = 26
         targetSdk = 35

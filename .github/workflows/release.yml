@@ -489,7 +489,8 @@ jobs:
             target/windows/*-portable.zip
           compression-level: 0
 
-  # The Android packages (foss and play: one per ABI and one with all four) on a Linux
+  # The legacy Android packages (the desktop app in a NativeActivity,
+  # com.wasimaster.corvene.legacy; foss and play: one per ABI and one with all four) on a Linux
   # runner; also the play flavour's bundle (.aab, with the grammars as an
   # on-demand module), which stays a workflow artifact: it is uploaded to
   # Google Play by hand. The APKs are signed with the keystore in the
@@ -567,7 +568,7 @@ jobs:
             FULL=1 PER_ABI=1 packaging/android/build.sh release foss
             rm -f "$RUNNER_TEMP/corvene.jks"
             for abi in $abis; do
-              cp "$outputs/per-abi/foss-${abi%%:*}.apk" "target/android/Corvene-Full-$VERSION-android-foss-${abi##*:}$suffix.apk"
+              cp "$outputs/per-abi/foss-${abi%%:*}.apk" "target/android/Corvene-Legacy-Full-$VERSION-android-foss-${abi##*:}$suffix.apk"
             done
             ls -l target/android
             exit 0
@@ -576,12 +577,12 @@ jobs:
           # PER_ABI=1: a package per ABI next to the one with all four
           BUNDLE=1 PER_ABI=1 packaging/android/build.sh release
           rm -f "$RUNNER_TEMP/corvene.jks"
-          cp $outputs/bundle/playRelease/*.aab "target/android/Corvene-$VERSION-android-play$suffix.aab"
+          cp $outputs/bundle/playRelease/*.aab "target/android/Corvene-Legacy-$VERSION-android-play$suffix.aab"
           for flavour in foss play; do
             apk="$(ls $outputs/apk/$flavour/release/*.apk | head -1)"
-            cp "$apk" "target/android/Corvene-$VERSION-android-$flavour-universal$suffix.apk"
+            cp "$apk" "target/android/Corvene-Legacy-$VERSION-android-$flavour-universal$suffix.apk"
             for abi in $abis; do
-              cp "$outputs/per-abi/$flavour-${abi%%:*}.apk" "target/android/Corvene-$VERSION-android-$flavour-${abi##*:}$suffix.apk"
+              cp "$outputs/per-abi/$flavour-${abi%%:*}.apk" "target/android/Corvene-Legacy-$VERSION-android-$flavour-${abi##*:}$suffix.apk"
             done
           done
           ls -l target/android

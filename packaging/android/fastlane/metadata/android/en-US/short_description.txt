@@ -1,1 +1,1 @@
-A native Git client in the style of GitHub Desktop
+GitHub Desktop 1:1 on Android, the desktop app itself
