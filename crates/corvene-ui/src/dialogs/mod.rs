@@ -5,6 +5,7 @@
 //! view is recreated only when its popup's value changes.
 
 mod acknowledgements;
+mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
 mod app_dialogs;
@@ -54,6 +55,7 @@ use corvene_core::{AppState, Popup};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+pub use add_embedded_repositories::AddEmbeddedRepositoriesDialog;
 pub use add_existing::AddExistingRepositoryDialog;
 pub use app_dialogs::{AboutDialog, ConfirmRemoveRepositoryDialog, IntegrationErrorDialog};
 #[doc(hidden)]
@@ -325,6 +327,15 @@ impl DialogHost {
                         description.clone(),
                         lfs_patterns.clone(),
                     )
+                })
+                .into(),
+            Popup::AddEmbeddedRepositories {
+                repo,
+                repositories,
+                commit,
+            } => cx
+                .new(|_| {
+                    AddEmbeddedRepositoriesDialog::new(*repo, repositories.clone(), commit.clone())
                 })
                 .into(),
             Popup::ConfirmCommitToDefaultBranch {

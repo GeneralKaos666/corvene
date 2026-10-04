@@ -168,7 +168,8 @@ pub use status::{
     map_status, parse_porcelain_v2, refresh_stale_index, working_directory_line_stats,
 };
 pub use submodule::{
-    SubmoduleEntry, list_submodules, reset_submodule_paths, update_submodules_after_operation,
+    EmbeddedRepository, SubmoduleEntry, add_embedded_repositories, embedded_repositories,
+    list_submodules, reset_submodule_paths, update_submodules_after_operation,
 };
 pub use terminal::{
     TailStream, TerminalOutput, TerminalOutputCallback, TerminalOutputListener,

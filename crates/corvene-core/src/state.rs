@@ -317,6 +317,15 @@ pub enum Popup {
         description: String,
         lfs_patterns: Vec<String>,
     },
+    /// Corvene `785-embedded-repo-commit`: untracked folders that are git
+    /// repositories: add them as submodules (with an `origin`) or pointers?
+    /// `commit`: the summary and description of the commit that goes on
+    /// afterwards (`None` from the changes list's menu).
+    AddEmbeddedRepositories {
+        repo: u64,
+        repositories: Vec<corvene_git::EmbeddedRepository>,
+        commit: Option<(String, String)>,
+    },
     /// Corvene `732-confirm-commit-to-default-branch`: committing on the
     /// default branch; "Commit" goes on to `UnknownAuthors` when
     /// `unknown_co_authors` is not empty.
@@ -619,6 +628,7 @@ impl Popup {
             | Self::PullRequestChecksFailed { repo, .. }
             | Self::UnknownAuthors { repo, .. }
             | Self::OversizedFiles { repo, .. }
+            | Self::AddEmbeddedRepositories { repo, .. }
             | Self::ConfirmDiscardSelection { repo, .. }
             | Self::ResetToCommit { repo, .. }
             | Self::CheckoutCommit { repo, .. }

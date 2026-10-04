@@ -4685,6 +4685,24 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/oversized_files.rs", "crates/corvene-core/src/commit_checks.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// Commit nested git repositories as submodules.
+    EMBEDDED_REPO_COMMIT = 785 "embedded-repo-commit" {
+        title: "Commit nested repositories as submodules",
+        summary: "When a commit includes an untracked folder that is a git repository of its \
+                  own, Corvene asks first: one with an origin remote is added as a submodule \
+                  (git submodule add with that URL, .gitmodules included), one without as a \
+                  pointer to its current commit (with a note that can be hidden); then the \
+                  commit goes on. Such a folder's menu also has \"Add as Submodule…\".",
+        ghd_behaviour: "The folder is left out of the commit; when it is the only change, \
+                        committing fails with nothing added.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16819)],
+        code: &["crates/corvene-core/src/commit_checks.rs", "crates/corvene-git/src/submodule.rs", "crates/corvene-ui/src/dialogs/add_embedded_repositories.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

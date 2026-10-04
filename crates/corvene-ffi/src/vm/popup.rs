@@ -313,6 +313,16 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
                 .list("files", files)
                 .list("lfs_patterns", lfs_patterns);
         }
+        Popup::AddEmbeddedRepositories {
+            repo: r,
+            repositories,
+            commit,
+        } => {
+            repo = Some(*r);
+            f.opt("summary", commit.as_ref().map(|c| &c.0))
+                .opt("description", commit.as_ref().map(|c| &c.1))
+                .list("paths", repositories.iter().map(|r| &r.path));
+        }
         Popup::ConfirmCommitToDefaultBranch {
             repo: r,
             branch,

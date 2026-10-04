@@ -135,6 +135,7 @@ impl Render for OversizedFilesDialog {
                     Dispatcher::close_popup(cx);
                     let checks = CommitChecks {
                         allow_oversized: true,
+                        ..CommitChecks::default()
                     };
                     Dispatcher::commit_with(repo, summary.clone(), description.clone(), checks, cx);
                 }),

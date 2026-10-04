@@ -132,9 +132,147 @@ pub fn reset_submodule_paths(git: Arc<GitBinary>, workdir: &Path, paths: &[&str]
     Ok(())
 }
 
+/// Corvene `785-embedded-repo-commit`: an untracked folder that is a git
+/// repository of its own, and its `origin` URL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedRepository {
+    /// The folder, repository-relative, without the trailing slash status
+    /// lists it with.
+    pub path: String,
+    pub url: Option<String>,
+}
+
+/// Corvene `785-embedded-repo-commit`: which of the untracked `paths`
+/// (status lists a nested repository as one entry, `Sub/`) are git
+/// repositories, with their `origin` URL.
+pub fn embedded_repositories<S: AsRef<str>>(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    paths: &[S],
+) -> Vec<EmbeddedRepository> {
+    paths
+        .iter()
+        .map(AsRef::as_ref)
+        .filter(|p| p.ends_with('/'))
+        .map(|p| p.trim_end_matches('/'))
+        .filter(|p| !p.is_empty() && workdir.join(p).join(".git").exists())
+        .map(|path| EmbeddedRepository {
+            path: path.to_string(),
+            url: crate::remote_ops::config_value(
+                git.clone(),
+                &workdir.join(path),
+                "remote.origin.url",
+            ),
+        })
+        .collect()
+}
+
+/// Corvene `785-embedded-repo-commit`: stage nested repositories: one with
+/// an `origin` as a submodule (`git submodule add <url> <path>`, which adds
+/// the existing checkout and its `.gitmodules` entry), one without as a bare
+/// pointer to its current commit (`update-index --add`, a gitlink with no
+/// `.gitmodules` entry, as `git add` does).
+pub fn add_embedded_repositories(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    repositories: &[EmbeddedRepository],
+) -> Result<()> {
+    for repository in repositories {
+        match &repository.url {
+            Some(url) => {
+                GitCommand::new(git.clone())
+                    .args(["submodule", "add", "--"])
+                    .arg(url)
+                    .arg(&repository.path)
+                    .current_dir(workdir)
+                    .run()?;
+            }
+            None => {
+                GitCommand::new(git.clone())
+                    .args(["update-index", "--add", "--"])
+                    .arg(&repository.path)
+                    .current_dir(workdir)
+                    .run()?;
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_repositories_become_submodules_or_pointers() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        let run = |cwd: &Path, args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(cwd)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        let init = |cwd: &Path| {
+            run(cwd, &["init", "-q", "-b", "main"]);
+            run(cwd, &["config", "commit.gpgsign", "false"]);
+            run(cwd, &["config", "user.name", "T"]);
+            run(cwd, &["config", "user.email", "t@example.com"]);
+            std::fs::write(cwd.join("f"), "f\n").unwrap();
+            run(cwd, &["add", "f"]);
+            run(cwd, &["commit", "-q", "-m", "f"]);
+        };
+        let root = dir.path();
+        init(root);
+        for name in ["Sub", "Bare"] {
+            std::fs::create_dir(root.join(name)).unwrap();
+            init(&root.join(name));
+        }
+        run(
+            &root.join("Sub"),
+            &["remote", "add", "origin", "https://example.com/sub.git"],
+        );
+        std::fs::create_dir(root.join("plain")).unwrap();
+        let git = Arc::new(crate::find_git().unwrap());
+        let found = embedded_repositories(git.clone(), root, &["Sub/", "Bare/", "plain/", "f"]);
+        assert_eq!(
+            found,
+            vec![
+                EmbeddedRepository {
+                    path: "Sub".into(),
+                    url: Some("https://example.com/sub.git".into())
+                },
+                EmbeddedRepository {
+                    path: "Bare".into(),
+                    url: None
+                },
+            ]
+        );
+        add_embedded_repositories(git, root, &found).unwrap();
+        let out = Command::new("git")
+            .args(["ls-files", "-s"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        let index = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            index
+                .lines()
+                .any(|l| l.starts_with("160000") && l.ends_with("\tSub"))
+        );
+        assert!(
+            index
+                .lines()
+                .any(|l| l.starts_with("160000") && l.ends_with("\tBare"))
+        );
+        assert!(index.lines().any(|l| l.ends_with("\t.gitmodules")));
+        let modules = std::fs::read_to_string(root.join(".gitmodules")).unwrap();
+        assert!(modules.contains("path = Sub") && !modules.contains("Bare"));
+    }
 
     #[test]
     fn parses_submodule_status() {

@@ -61,6 +61,9 @@ pub struct Settings {
     pub welcome_completed: bool,
     /// GHD `askForConfirmationOnDiscardChanges`.
     pub confirm_discard_changes: bool,
+    /// Corvene `785-embedded-repo-commit`: "Do not show this message again"
+    /// on the note about nested repositories without an `origin`.
+    pub hide_embedded_repository_note: bool,
     /// GHD `askForConfirmationOnCheckoutCommit`.
     pub confirm_checkout_commit: bool,
     /// GHD `askForConfirmationOnUndoCommit`.
@@ -309,6 +312,7 @@ impl Default for Settings {
             clone_dir: None,
             welcome_completed: false,
             confirm_discard_changes: true,
+            hide_embedded_repository_note: false,
             confirm_checkout_commit: true,
             confirm_undo_commit: true,
             history_first_parent: false,

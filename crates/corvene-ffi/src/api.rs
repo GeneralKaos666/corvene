@@ -251,9 +251,11 @@ impl Corvene {
     }
 
     pub fn commit(&self, repo: u64, summary: String, description: String) {
-        // the Compose app has no `OversizedFiles` dialog yet: commit as before
+        // the Compose app has no `OversizedFiles` / `AddEmbeddedRepositories`
+        // dialog yet: commit as before
         let checks = corvene_core::commit_checks::CommitChecks {
             allow_oversized: true,
+            embedded: Some(Vec::new()),
         };
         self.loop_
             .post(move |host| Dispatcher::commit_with(repo, summary, description, checks, host));

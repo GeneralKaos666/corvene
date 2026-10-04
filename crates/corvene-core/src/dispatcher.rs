@@ -4983,7 +4983,13 @@ impl Dispatcher {
 
     /// GHD `commitIncludedChanges`: commit the included changes, once
     /// [`Self::commit_with`]'s checks passed.
-    pub(crate) fn create_commit(id: u64, summary: String, description: String, cx: &mut dyn Host) {
+    pub(crate) fn create_commit(
+        id: u64,
+        summary: String,
+        description: String,
+        embedded: Vec<corvene_git::EmbeddedRepository>,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -5111,6 +5117,9 @@ impl Dispatcher {
             if !restages_everything {
                 corvene_git::unstage_all(git.clone(), &workdir)?;
             }
+            // Corvene (`785-embedded-repo-commit`): the nested repositories
+            // as submodules or pointers (`update-index` skips their `Sub/`)
+            corvene_git::add_embedded_repositories(git.clone(), &workdir, &embedded)?;
             corvene_git::stage_files(git.clone(), &workdir, &files)?;
             corvene_git::stage_partial_files(git.clone(), &workdir, &files)?;
             if !modes.is_empty() {

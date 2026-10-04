@@ -75,6 +75,8 @@
 //!   "Reset to my identity" (`783-amend-author`).
 //! - the commit form's top edge drags the description box taller
 //!   (`114-resizable-commit-message`).
+//! - an untracked folder that is a repository has "Add as Submodule…"
+//!   (`785-embedded-repo-commit`, `corvene_core::commit_checks`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -2611,6 +2613,23 @@ impl ChangesSidebar {
                 })
                 .enabled(can_stash && !has_stash),
             );
+        }
+        // `785-embedded-repo-commit`: status lists an untracked folder as
+        // one entry only when it is a repository of its own
+        if paths.len() == 1
+            && file.status.kind == FileStatusKind::Untracked
+            && path.ends_with('/')
+            && self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::EMBEDDED_REPO_COMMIT)
+        {
+            let folder = path.clone();
+            items.push(MenuItem::new(
+                mac_or("Add as Submodule…", "Add as submodule…"),
+                move |_, cx| Dispatcher::request_add_embedded_repository(id, folder.clone(), cx),
+            ));
         }
         items.push(MenuItem::separator());
         if paths.len() == 1 {
