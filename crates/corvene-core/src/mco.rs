@@ -2528,7 +2528,7 @@ impl Dispatcher {
         merge_head_branches: Option<Vec<String>>,
         cx: &mut App,
     ) {
-        let (conflict, mco, current, popup_open, mco_popup_open, banner_is_conflicts) = {
+        let (conflict, mco, current, selected, mco_popup_open, banner_is_conflicts) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
             (
@@ -2537,7 +2537,7 @@ impl Dispatcher {
                 rs.and_then(|r| r.info.as_ref())
                     .and_then(|i| i.current_branch())
                     .map(|b| (b.name.clone(), b.tip.clone())),
-                s.popups.is_a_popup_open(),
+                s.selected == Some(id),
                 Self::is_mco_popup(&s.popups, id),
                 matches!(s.banner, Some(Banner::ConflictsFound { .. })),
             )
@@ -2641,7 +2641,10 @@ impl Dispatcher {
                     their_branch: their,
                 };
             });
-            if !popup_open {
+            // GHD `_triggerConflictsFlow` (selected repository only, not
+            // while the conflicts banner shows): the conflicts dialog goes
+            // on the popup stack, above any dialog already open
+            if selected && !mco_popup_open && !banner_is_conflicts {
                 Self::show_mco_popup(id, cx);
             }
             return;
@@ -2650,6 +2653,7 @@ impl Dispatcher {
         // (`_triggerConflictsFlow`), leaving the operation's own progress
         // dialog alone (see the module doc)
         if let Some(mco) = mco
+            && selected
             && !banner_is_conflicts
             && !is_conflicts_flow(mco_popup_open, Some(&mco))
             && !(mco_popup_open && mco.step == McoStep::ShowProgress)
