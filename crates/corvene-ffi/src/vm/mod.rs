@@ -11,6 +11,7 @@ pub mod mco;
 pub mod popup;
 pub mod pull_requests;
 pub mod repo_list;
+pub mod repo_settings;
 pub mod session;
 pub mod settings;
 
@@ -23,5 +24,6 @@ pub use mco::*;
 pub use popup::*;
 pub use pull_requests::*;
 pub use repo_list::*;
+pub use repo_settings::*;
 pub use session::*;
 pub use settings::*;

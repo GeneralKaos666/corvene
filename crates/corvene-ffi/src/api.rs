@@ -11,10 +11,10 @@ use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 use crate::runtime::Services;
 use crate::vm::{
     BannerVm, BranchesVm, ChangesVm, CommitDetailVm, ConflictsVm, DesignStyleVm, DiffHeaderVm,
-    DiffRowVm, FlagsVm, HistoryVm, McoVm, PopupVm, PullRequestsVm, RepoListVm, ResolutionVm,
-    SessionVm, SettingsVm, ThemeVm, banner, branches, changes, commit_detail, commit_diff_rows,
-    conflicts, diff_header, diff_rows, flags, history, mco, popup, pull_requests, repo_list,
-    session, settings,
+    DiffRowVm, FlagsVm, GlobalGitConfigVm, HistoryVm, McoVm, PopupVm, PullRequestsVm, RepoListVm,
+    RepositorySettingsVm, ResolutionVm, SessionVm, SettingsVm, ThemeVm, banner, branches, changes,
+    commit_detail, commit_diff_rows, conflicts, diff_header, diff_rows, flags, global_git_config,
+    history, mco, popup, pull_requests, repo_list, repository_settings, session, settings,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -1082,5 +1082,74 @@ impl Corvene {
     /// Flags that need a restart: relaunch the process (the host quits).
     pub fn relaunch(&self) {
         self.loop_.post(|host| Dispatcher::relaunch(host));
+    }
+
+    // ---- repository settings and the global git config ----
+
+    /// Loads the repository's settings (`tab`: "remote", "ignored", "git").
+    pub fn open_repository_settings(&self, repo: u64, tab: String) {
+        use corvene_core::state::RepositorySettingsTab;
+        let tab = match tab.as_str() {
+            "ignored" => RepositorySettingsTab::IgnoredFiles,
+            "git" => RepositorySettingsTab::GitConfig,
+            _ => RepositorySettingsTab::Remote,
+        };
+        self.loop_
+            .post(move |host| Dispatcher::open_repository_settings(repo, tab, host));
+    }
+
+    pub async fn repository_settings(&self) -> Option<RepositorySettingsVm> {
+        self.loop_
+            .query(|host| repository_settings(host.state_ref()))
+            .await
+    }
+
+    /// Saves what changed: the remote URL (with its name), the `.gitignore`
+    /// text, the identity (`git_config_location` "global"/"local"), and
+    /// `core.autocrlf` ("true"/"false"/"input"/"" for unset).
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_repository_settings(
+        &self,
+        repo: u64,
+        remote_name: Option<String>,
+        remote_url: Option<String>,
+        gitignore: Option<String>,
+        git_config_location: Option<String>,
+        name: Option<String>,
+        email: Option<String>,
+        autocrlf: Option<String>,
+    ) {
+        use corvene_core::integrations::RepositorySettingsSave;
+        use corvene_core::state::GitConfigLocation;
+        let save = RepositorySettingsSave {
+            remote_url: remote_name.zip(remote_url),
+            gitignore,
+            git_config: git_config_location.map(|loc| {
+                (
+                    if loc == "local" {
+                        GitConfigLocation::Local
+                    } else {
+                        GitConfigLocation::Global
+                    },
+                    name.unwrap_or_default(),
+                    email.unwrap_or_default(),
+                )
+            }),
+            autocrlf: autocrlf.map(|v| (!v.is_empty()).then_some(v)),
+        };
+        self.loop_
+            .post(move |host| Dispatcher::save_repository_settings(repo, save, host));
+    }
+
+    /// Loads the global git config for Settings › Git.
+    pub fn open_global_git_config(&self) {
+        self.loop_
+            .post(|host| Dispatcher::edit_global_git_config(host));
+    }
+
+    pub async fn global_git_config(&self) -> Option<GlobalGitConfigVm> {
+        self.loop_
+            .query(|host| global_git_config(host.state_ref()))
+            .await
     }
 }
