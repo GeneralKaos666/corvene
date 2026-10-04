@@ -1098,6 +1098,7 @@ impl Dispatcher {
             refresh_stale_index,
             shared_fetch_head,
             read_parent,
+            read_message_hooks,
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -1135,6 +1136,8 @@ impl Dispatcher {
                 s.flags
                     .bool(crate::flags::ids::WORKTREE_SHARED_LAST_FETCHED),
                 s.flags.bool(crate::flags::ids::UPDATE_FROM_PARENT_BRANCH),
+                s.flags
+                    .bool(crate::flags::ids::MESSAGE_RULES_DEFER_TO_HOOKS),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -1241,6 +1244,16 @@ impl Dispatcher {
                     });
                     let pull_with_rebase = spawn_git(scope, &git, move |git| {
                         corvene_git::pull_with_rebase(git, path)
+                    });
+                    // `340-message-rules-defer-to-hooks`
+                    let message_hook = read_message_hooks.then(|| {
+                        spawn_git(scope, &git, move |git| {
+                            corvene_git::hook_exists(
+                                git,
+                                path,
+                                &["prepare-commit-msg", "commit-msg"],
+                            )
+                        })
                     });
                     let worktrees = spawn_git(scope, &git, move |git| {
                         corvene_git::list_worktrees(git, path).unwrap_or_default()
@@ -1394,6 +1407,7 @@ impl Dispatcher {
                                     .flatten()
                             }),
                         pull_with_rebase: join(pull_with_rebase),
+                        commit_message_hook: message_hook.is_some_and(join),
                         worktrees,
                         upstream_rewritten,
                         update_parent,
@@ -1517,6 +1531,10 @@ impl Dispatcher {
                                 changed |= set(&mut repo_state.last_fetched, extras.last_fetched);
                                 changed |=
                                     set(&mut repo_state.pull_with_rebase, extras.pull_with_rebase);
+                                changed |= set(
+                                    &mut repo_state.commit_message_hook,
+                                    extras.commit_message_hook,
+                                );
                                 changed |= set(&mut repo_state.worktrees, extras.worktrees);
                                 changed |= set(
                                     &mut repo_state.upstream_rewritten,
@@ -6992,6 +7010,9 @@ struct RefreshExtras {
     merge_head_branches: Option<Vec<String>>,
     last_fetched: Option<std::time::SystemTime>,
     pull_with_rebase: bool,
+    /// `340-message-rules-defer-to-hooks`: git runs a `prepare-commit-msg`
+    /// or `commit-msg` hook on a commit.
+    commit_message_hook: bool,
     worktrees: Vec<corvene_models::WorktreeEntry>,
     upstream_rewritten: bool,
     /// `1202-update-from-parent-branch`: the branch the current one was

@@ -61,8 +61,8 @@ pub use branch_ops::{
 };
 pub use commit::{
     CommitAuthor, CommitOptions, RECEIVE_LIMIT, add_paths, assume_unchanged_paths, commit,
-    delete_worktree_paths, discard_changes, format_message, head_sha, large_file_paths,
-    merge_trailers, parse_commit_author, parse_commit_sha, restore_mode_changes,
+    delete_worktree_paths, discard_changes, format_message, head_sha, hook_exists,
+    large_file_paths, merge_trailers, parse_commit_author, parse_commit_sha, restore_mode_changes,
     set_assume_unchanged, stage_files, staged_mode_changes, undo_last_commit, unstage_all,
 };
 pub use config::{

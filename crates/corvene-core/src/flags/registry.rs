@@ -2641,6 +2641,24 @@ registry! {
         code: &["crates/corvene-core/src/repo_rules.rs", "crates/corvene-github/src/api.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Commit message rules leave it to a commit message hook.
+    MESSAGE_RULES_DEFER_TO_HOOKS = 340 "message-rules-defer-to-hooks" {
+        title: "Commit message rules defer to hooks",
+        summary: "When the repository has a prepare-commit-msg or commit-msg hook (core.hooksPath \
+                  counts) and Bypass Commit Hooks is off, a summary that fails a commit message \
+                  rule only warns: the hook may add the ticket number or prefix the rule asks \
+                  for, so the Commit button stays enabled. GitHub still checks the pushed \
+                  commits.",
+        ghd_behaviour: "A failing commit message rule disables the Commit button, even when a \
+                        hook would rewrite the message to pass it.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21328)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

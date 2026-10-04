@@ -1267,6 +1267,10 @@ pub struct RepositoryState {
     /// fetch succeeds.
     pub remote_not_found: bool,
     pub pull_with_rebase: bool,
+    /// Corvene `340-message-rules-defer-to-hooks`: git runs a
+    /// `prepare-commit-msg` or `commit-msg` hook on a commit (read while the
+    /// flag is on).
+    pub commit_message_hook: bool,
     pub publishing: bool,
     /// The LFS initialisation prompt was already considered for this repository.
     pub lfs_checked: bool,

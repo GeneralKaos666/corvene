@@ -369,6 +369,50 @@ pub fn head_sha(git: Arc<GitBinary>, workdir: &Path) -> Result<String> {
     Ok(out.stdout_string()?.trim().to_string())
 }
 
+/// Corvene (`340-message-rules-defer-to-hooks`): whether git would run one
+/// of the hooks `names` (`commit-msg`, …) on a commit: the file
+/// `git rev-parse --git-path hooks/<name>` names (`core.hooksPath` and
+/// linked worktrees included) exists and, outside Windows, is executable.
+pub fn hook_exists(git: Arc<GitBinary>, workdir: &Path, names: &[&str]) -> bool {
+    if names.is_empty() {
+        return false;
+    }
+    let mut cmd = GitCommand::new(git).arg("rev-parse").current_dir(workdir);
+    for name in names {
+        cmd = cmd.arg("--git-path").arg(format!("hooks/{name}"));
+    }
+    let Ok(out) = cmd.run() else {
+        return false;
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .any(|line| {
+            let path = Path::new(line);
+            is_runnable_hook(&if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workdir.join(path)
+            })
+        })
+}
+
+fn is_runnable_hook(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.is_file() && meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        meta.is_file()
+    }
+}
+
 /// GHD `mergeTrailers`: `git interpret-trailers --no-divider --trailer k=v …`
 /// appends the trailers to a commit message (folding into an existing
 /// trailer block when there is one).
@@ -774,6 +818,36 @@ mod tests {
         run(&["config", "user.name", "T"]);
         run(&["config", "user.email", "t@example.com"]);
         (dir, Arc::new(crate::find_git().unwrap()))
+    }
+
+    #[test]
+    fn finds_runnable_commit_message_hooks() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        let names = ["prepare-commit-msg", "commit-msg"];
+        assert!(!hook_exists(git.clone(), path, &names));
+        let hook = path.join(".git/hooks/commit-msg");
+        std::fs::write(&hook, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // not executable: git skips it
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(!hook_exists(git.clone(), path, &names));
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert!(hook_exists(git.clone(), path, &names));
+        // core.hooksPath moves them
+        std::fs::create_dir_all(path.join("hooks")).unwrap();
+        assert!(
+            Command::new("git")
+                .args(["config", "core.hooksPath", "hooks"])
+                .current_dir(path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(!hook_exists(git, path, &names));
     }
 
     #[test]

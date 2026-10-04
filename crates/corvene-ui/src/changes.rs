@@ -81,6 +81,10 @@
 //!   (`785-embedded-repo-commit`, `corvene_core::commit_checks`).
 //! - the commit options gear has "Commit to New Branch…"
 //!   (`787-commit-to-new-branch`, `corvene_core::new_branch_flows`).
+//! - with a `prepare-commit-msg` / `commit-msg` hook, a commit message that
+//!   fails the repository rules warns instead of blocking the commit
+//!   (`340-message-rules-defer-to-hooks`; GHD `commit-message.tsx`
+//!   `hasRepoRuleFailure` blocks it).
 //! - a protected branch that takes the user's pushes gets a note above the
 //!   commit button (`339-protected-branch-bypass-note`; GHD `commit-warning`
 //!   shows the protected warning only for unpushable branches).
@@ -510,6 +514,9 @@ struct RulesSnapshot {
     protection_bypassed: bool,
     info: corvene_core::RepoRulesInfo,
     message_failures: RepoRulesMetadataFailures,
+    /// `340-message-rules-defer-to-hooks`: a commit message hook runs on the
+    /// commit and may make the message pass, so a failure does not block.
+    message_hook: bool,
     author_failures: RepoRulesMetadataFailures,
     branch_failures: RepoRulesMetadataFailures,
 }
@@ -3603,6 +3610,12 @@ impl ChangesSidebar {
                     .bool(corvene_core::flags::ids::PROTECTED_BRANCH_BYPASS_NOTE),
             info,
             message_failures,
+            message_hook: rs.commit_message_hook
+                && s.flags
+                    .bool(corvene_core::flags::ids::MESSAGE_RULES_DEFER_TO_HOOKS)
+                && !s
+                    .repository(id)
+                    .is_some_and(|r| r.commit_options.skip_commit_hooks),
             author_failures,
             branch_failures,
         })
@@ -3616,7 +3629,8 @@ impl ChangesSidebar {
         rules.info.basic_commit_warning == RepoRuleEnforced::Yes
             || rules.info.signed_commits_required == RepoRuleEnforced::Yes
             || rules.info.pull_request_required == RepoRuleEnforced::Yes
-            || rules.message_failures.status() == RepoRulesMetadataStatus::Fail
+            || (rules.message_failures.status() == RepoRulesMetadataStatus::Fail
+                && !rules.message_hook)
             || rules.author_failures.status() == RepoRulesMetadataStatus::Fail
             || (rules.unpublished
                 && (rules.info.creation_restricted == RepoRuleEnforced::Yes
@@ -4141,6 +4155,8 @@ impl ChangesSidebar {
             return None;
         }
         let can_bypass = status == RepoRulesMetadataStatus::Bypass;
+        // `340-message-rules-defer-to-hooks`: a warning, not a stop
+        let hook_may_fix = !can_bypass && rules.message_hook;
         let bounds = self.rule_hint_bounds.clone();
         Some(
             div()
@@ -4151,6 +4167,8 @@ impl ChangesSidebar {
                 .cursor_pointer()
                 .ghd_tooltip(if can_bypass {
                     "Warning: Commit message fails repository rules, but you can bypass them. View details."
+                } else if hook_may_fix {
+                    "Warning: Commit message fails repository rules, but a commit message hook may fix this. View details."
                 } else {
                     "Error: Commit message fails repository rules. View details."
                 })
@@ -4163,7 +4181,7 @@ impl ChangesSidebar {
                         .absolute()
                         .inset_0(),
                 )
-                .child(if can_bypass {
+                .child(if can_bypass || hook_may_fix {
                     octicon(Octicon::Alert, t.dialog_warning)
                 } else {
                     octicon(Octicon::Stop, t.dialog_error)
@@ -4193,6 +4211,10 @@ impl ChangesSidebar {
                 ", but you can bypass {}. Proceed with caution!",
                 if total == 1 { "it" } else { "them" }
             )
+        } else if rules.message_hook {
+            // `340-message-rules-defer-to-hooks`
+            ". The repository's commit message hook runs on the commit and may fix this."
+                .to_string()
         } else {
             ".".to_string()
         };
