@@ -33,6 +33,9 @@ pub struct Settings {
     pub sidebar_width: f32,
     /// History file-list width (`commitSummaryWidth`, default 250).
     pub commit_summary_width: f32,
+    /// Corvene `114-resizable-commit-message`: the commit description box's
+    /// height in CSS px; `None` is GHD's 80.
+    pub commit_description_height: Option<f32>,
     /// Resized toolbar buttons (`branch-dropdown-width`,
     /// `worktree-dropdown-width`); `None` is the 230 px default.
     pub branch_dropdown_width: Option<f32>,
@@ -302,6 +305,7 @@ impl Default for Settings {
             tutorial_pull_request_step_complete: false,
             tutorial_paused: false,
             commit_summary_width: 250.0,
+            commit_description_height: None,
             clone_dir: None,
             welcome_completed: false,
             confirm_discard_changes: true,

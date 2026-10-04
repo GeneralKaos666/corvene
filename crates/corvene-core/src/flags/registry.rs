@@ -556,6 +556,21 @@ registry! {
         code: &["crates/corvene-ffi/src/vm/settings.rs", "android/core/design"],
     },
 
+    /// Draggable height of the commit description box.
+    RESIZABLE_COMMIT_MESSAGE = 114 "resizable-commit-message" {
+        title: "Resizable commit description",
+        summary: "Dragging the top edge of the commit form up or down makes the description \
+                  box taller or shorter (the file list above gives up the room); the height is \
+                  kept for every repository.",
+        ghd_behaviour: "The description box is 80 px tall and scrolls.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1646)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/persistence.rs"],
+    },
+
     // ---- 200 Repository ----
 
     /// `commit.template` prefills the commit description.

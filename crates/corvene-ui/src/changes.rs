@@ -73,6 +73,8 @@
 //!   `continue-rebase.tsx` replaces the form during any rebase).
 //! - while amending, the commit's author is an editable `Name <email>` with
 //!   "Reset to my identity" (`783-amend-author`).
+//! - the commit form's top edge drags the description box taller
+//!   (`114-resizable-commit-message`).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -125,6 +127,12 @@ const CO_AUTHOR_HINT_DURATION: std::time::Duration = std::time::Duration::from_s
 
 /// GHD `MaxTagNameLength` (`737-commit-tag-field`).
 const MAX_TAG_NAME_LENGTH: usize = 245;
+
+/// `114-resizable-commit-message`: the description box keeps two lines.
+#[allow(non_snake_case)]
+fn DESCRIPTION_MIN_HEIGHT() -> Pixels {
+    zpx(40.)
+}
 
 /// Which commit-form field an autocompletion / spellcheck result belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -233,6 +241,11 @@ pub struct ChangesSidebar {
     summary_placeholder: SharedString,
     /// `766-persist-commit-drafts`: the repository the form's text belongs to.
     draft_repo: Option<u64>,
+    /// `114-resizable-commit-message`: the drag of the handle over the
+    /// commit form (pointer y and description height when it started) and
+    /// the height it set, until it is saved on release.
+    description_drag: Option<(Pixels, Pixels)>,
+    dragged_description_height: Option<Pixels>,
     /// `783-amend-author`: the amended commit's author as `Name <email>`, and
     /// that text as loaded (an unchanged field keeps the commit's author).
     amend_author: Entity<InputState>,
@@ -744,6 +757,8 @@ impl ChangesSidebar {
             programmatic_text: None,
             amend_author,
             amend_author_original: String::new(),
+            description_drag: None,
+            dragged_description_height: None,
             visible_cache: RefCell::new(None),
             selected_cache: RefCell::new(None),
             windows_names_cache: RefCell::new(None),
@@ -4576,6 +4591,99 @@ impl ChangesSidebar {
         )
     }
 
+    /// The description box's height: GHD's 80 px, or with
+    /// `114-resizable-commit-message` the dragged / saved one.
+    fn description_height(&self, cx: &App) -> Pixels {
+        let s = self.state.read(cx);
+        if !s
+            .flags
+            .bool(corvene_core::flags::ids::RESIZABLE_COMMIT_MESSAGE)
+        {
+            return zpx(80.);
+        }
+        self.dragged_description_height
+            .unwrap_or_else(|| zpx(s.settings.commit_description_height.unwrap_or(80.)))
+    }
+
+    /// `114-resizable-commit-message`: a strip over the commit form's top
+    /// edge that drags the description box taller or shorter (the file
+    /// list above gives up or takes back the height); saved on release.
+    fn description_resize_handle(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        if crate::theme::short()
+            || !self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::RESIZABLE_COMMIT_MESSAGE)
+        {
+            return None;
+        }
+        let weak = cx.weak_entity();
+        Some(
+            div()
+                .id("commit-message-resize-handle")
+                .absolute()
+                .top(zpx(-3.))
+                .left_0()
+                .right_0()
+                .h(zpx(6.))
+                .cursor(CursorStyle::ResizeUpDown)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                        this.description_drag =
+                            Some((event.position.y, this.description_height(cx)));
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                // the pointer is followed anywhere in the window until the
+                // button is released (as `workspace.rs`'s compact split)
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| {
+                            let moved = weak.clone();
+                            window.on_mouse_event(move |event: &MouseMoveEvent, _, window, cx| {
+                                let max = (window.viewport_size().height * 0.6)
+                                    .max(DESCRIPTION_MIN_HEIGHT());
+                                moved
+                                    .update(cx, |this, cx| {
+                                        if let Some((from, height)) = this.description_drag {
+                                            this.dragged_description_height = Some(
+                                                (height + from - event.position.y)
+                                                    .clamp(DESCRIPTION_MIN_HEIGHT(), max),
+                                            );
+                                            cx.notify();
+                                        }
+                                    })
+                                    .ok();
+                            });
+                            let released = weak.clone();
+                            window.on_mouse_event(move |_: &MouseUpEvent, _, _, cx| {
+                                released
+                                    .update(cx, |this, cx| {
+                                        if this.description_drag.take().is_some() {
+                                            if let Some(height) = this.dragged_description_height {
+                                                Dispatcher::update_settings(cx, |s| {
+                                                    s.commit_description_height =
+                                                        Some(unzoom(height))
+                                                });
+                                            }
+                                            cx.notify();
+                                        }
+                                    })
+                                    .ok();
+                            });
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn commit_form(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let t = cx.ghd();
         let description_box_focused = self.description_focus.is_focused(window)
@@ -4691,6 +4799,8 @@ impl ChangesSidebar {
                 this.toggle_co_authors(window, cx)
             }))
             .children(popup)
+            .relative()
+            .children(self.description_resize_handle(cx))
             .flex_none()
             .flex()
             .flex_col()
@@ -4772,7 +4882,11 @@ impl ChangesSidebar {
                                     .text_size(FONT_SIZE())
                                     // a short window (a phone on its
                                     // side) keeps one line of it
-                                    .h(zpx(if crate::theme::short() { 22. } else { 80. }))
+                                    .h(if crate::theme::short() {
+                                        zpx(22.)
+                                    } else {
+                                        self.description_height(cx)
+                                    })
                                     .context_menu(move |m, window, cx| menu(m, window, cx)),
                             )
                             .children(self.spell_overlay(CommitField::Description, cx))
