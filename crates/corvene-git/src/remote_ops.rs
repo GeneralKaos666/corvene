@@ -11,10 +11,13 @@
 //! simpler and keeps tokens out of the environment. SSH remotes are left to
 //! the user's ssh-agent, as in GHD.
 //!
-//! Deviation, off by default (GHD's behaviour): [`ProgressParser::with_alias`]
+//! Deviations, off by default (GHD's behaviour): [`ProgressParser::with_alias`]
 //! lets the clone parser count git's `Updating files` lines as GHD's
 //! `Checking out files` step (`lib/progress/clone.ts`,
-//! `281-clone-updating-files-step`).
+//! `281-clone-updating-files-step`), and [`fast_forward_branches_with`]
+//! leaves out the branches checked out in other worktrees, which make GHD's
+//! `fastForwardBranches` (`lib/git/fetch.ts`) fail as a whole
+//! (`282-fast-forward-skips-worktree-branches`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -1050,9 +1053,51 @@ pub fn get_branches_differing_from_upstream(
 /// were offered to git (the ones it could not fast-forward stay as they
 /// are).
 pub fn fast_forward_branches(git: Arc<GitBinary>, workdir: &Path) -> Result<usize> {
-    let branches = get_branches_differing_from_upstream(git.clone(), workdir)?;
-    fast_forward_tracking_branches(git, workdir, &branches)?;
-    Ok(branches.len())
+    fast_forward_branches_with(git, workdir, false)
+}
+
+/// [`fast_forward_branches`]; with `skip_worktree_branches`
+/// (`282-fast-forward-skips-worktree-branches`) the branches checked out in
+/// another worktree are left out, and so is any branch `git fetch` still
+/// refuses as checked out (being rebased or bisected) elsewhere. GHD offers
+/// them, and git then refuses the whole update with exit code 128, so no
+/// branch moves.
+pub fn fast_forward_branches_with(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    skip_worktree_branches: bool,
+) -> Result<usize> {
+    let mut branches = get_branches_differing_from_upstream(git.clone(), workdir)?;
+    if !skip_worktree_branches {
+        fast_forward_tracking_branches(git, workdir, &branches)?;
+        return Ok(branches.len());
+    }
+    if !branches.is_empty() {
+        let checked_out: std::collections::HashSet<String> =
+            crate::list_worktrees(git.clone(), workdir)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|worktree| worktree.branch)
+                .collect();
+        branches.retain(|branch| !checked_out.contains(&branch.reference));
+    }
+    loop {
+        match fast_forward_tracking_branches(git.clone(), workdir, &branches) {
+            Ok(()) => return Ok(branches.len()),
+            Err(err) => {
+                // `refusing to fetch into branch 'refs/heads/x' checked out at '<path>'`
+                let refused = err.branch_in_other_worktree().and_then(|(reference, _)| {
+                    branches.iter().position(|b| b.reference == reference)
+                });
+                match refused {
+                    Some(index) => {
+                        branches.remove(index);
+                    }
+                    None => return Err(err),
+                }
+            }
+        }
+    }
 }
 
 /// GHD `fastForwardBranches` (`lib/git/fetch.ts`): `fetch .
@@ -1561,6 +1606,68 @@ mod tests {
             "http://other.example/x.git"
         );
         assert_eq!(url("/some/path"), "/some/path");
+    }
+
+    #[test]
+    fn fast_forward_skips_branches_checked_out_in_other_worktrees() {
+        let git = Arc::new(crate::find_git().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let path = |name: &str| dir.path().join(name);
+        let (bare, work, other) = (path("remote.git"), path("work"), path("other"));
+        let (linked, rebasing) = (path("linked"), path("rebasing"));
+        let s = |p: &Path| p.to_str().unwrap().to_string();
+        run(
+            dir.path(),
+            &["init", "-q", "--bare", "-b", "main", &s(&bare)],
+        );
+        run(dir.path(), &["init", "-q", "-b", "main", &s(&work)]);
+        run(&work, &["config", "commit.gpgsign", "false"]);
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "first"]);
+        run(&work, &["remote", "add", "origin", &s(&bare)]);
+        run(&work, &["push", "-q", "-u", "origin", "main"]);
+        for branch in ["a", "b", "c"] {
+            run(&work, &["branch", "-q", "--track", branch, "origin/main"]);
+        }
+        // `b` is checked out in a linked worktree, `c` is being rebased in one
+        run(&work, &["worktree", "add", "-q", &s(&linked), "b"]);
+        run(&work, &["worktree", "add", "-q", &s(&rebasing), "c"]);
+        run(&rebasing, &["commit", "-q", "--allow-empty", "-m", "local"]);
+        let rebase = std::process::Command::new("git")
+            .args(["rebase", "-q", "-x", "false", "HEAD~1"])
+            .current_dir(&rebasing)
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .unwrap();
+        assert!(
+            !rebase.status.success(),
+            "the rebase stops at the failing exec"
+        );
+        run(dir.path(), &["clone", "-q", &s(&bare), &s(&other)]);
+        run(&other, &["config", "commit.gpgsign", "false"]);
+        run(&other, &["commit", "-q", "--allow-empty", "-m", "second"]);
+        run(&other, &["push", "-q", "origin", "main"]);
+        run(&work, &["fetch", "-q", "origin"]);
+        let rev = |r: &str| {
+            let out = std::process::Command::new("git")
+                .args(["rev-parse", r])
+                .current_dir(&work)
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let (b_before, c_before) = (rev("b"), rev("c"));
+        // GHD: git refuses the whole update, so `a` stays behind too
+        assert!(fast_forward_branches(git.clone(), &work).is_err());
+        assert_ne!(rev("a"), rev("origin/main"));
+        // `282-fast-forward-skips-worktree-branches`
+        assert_eq!(
+            fast_forward_branches_with(git.clone(), &work, true).unwrap(),
+            1
+        );
+        assert_eq!(rev("a"), rev("origin/main"));
+        assert_eq!(rev("b"), b_before);
+        assert_eq!(rev("c"), c_before);
     }
 
     #[test]

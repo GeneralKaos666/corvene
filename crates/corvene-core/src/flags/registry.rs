@@ -1449,6 +1449,23 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// Fast-forwarding after a fetch leaves out other worktrees' branches.
+    FAST_FORWARD_SKIPS_WORKTREE_BRANCHES = 282 "fast-forward-skips-worktree-branches" {
+        title: "Fast-forward branches checked out in other worktrees",
+        summary: "After a fetch, pull or push the branches that are behind their upstream are \
+                  fast-forwarded without the ones checked out in another worktree, which git \
+                  refuses to move.",
+        ghd_behaviour: "Hands git every branch that differs from its upstream; when one is \
+                        checked out in another worktree git refuses the whole update, so no \
+                        branch is fast-forwarded.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: false, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

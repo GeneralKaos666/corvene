@@ -570,6 +570,11 @@ impl Dispatcher {
                 .bool(crate::flags::ids::PUSH_DURING_BACKGROUND_FETCH);
         Self::arm_credential_helper(&remote.url, cx);
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         let title = format!("Fetching {}", remote.name);
         if quiet {
             Self::state(cx).update(cx, |s, _| {
@@ -643,7 +648,11 @@ impl Dispatcher {
                         description: Some("Fast-forwarding branches".into()),
                         value: 0.9,
                     });
-                    let _ = corvene_git::fast_forward_branches(git.clone(), &workdir);
+                    let _ = corvene_git::fast_forward_branches_with(
+                        git.clone(),
+                        &workdir,
+                        skip_worktree_branches,
+                    );
                     // `246-background-fetch-fast-forwards`: a clean branch
                     // that is only behind catches up (GHD leaves it for Pull)
                     if fast_forward_current {
@@ -708,6 +717,11 @@ impl Dispatcher {
             return;
         }
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         spawn_bg(
             cx,
             move || {
@@ -738,7 +752,11 @@ impl Dispatcher {
                         &mut |_, _| {},
                     ) {
                         Ok(()) => {
-                            let _ = corvene_git::fast_forward_branches(git.clone(), &info.workdir);
+                            let _ = corvene_git::fast_forward_branches_with(
+                                git.clone(),
+                                &info.workdir,
+                                skip_worktree_branches,
+                            );
                         }
                         Err(err) => failures.push(format!("{name}: {err}")),
                     }
@@ -802,6 +820,11 @@ impl Dispatcher {
         }
         Self::arm_credential_helper(&remote.url, cx);
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         let title = format!("Pulling {}", remote.name);
         let keep_remote_head = Self::state(cx)
             .read(cx)
@@ -880,7 +903,11 @@ impl Dispatcher {
                         description: Some("Fast-forwarding branches".into()),
                         value: 0.9,
                     });
-                    let _ = corvene_git::fast_forward_branches(git.clone(), &workdir);
+                    let _ = corvene_git::fast_forward_branches_with(
+                        git.clone(),
+                        &workdir,
+                        skip_worktree_branches,
+                    );
                 }
                 let status = corvene_git::get_status(git, &workdir).ok();
                 (result, status)
@@ -1138,6 +1165,11 @@ impl Dispatcher {
         }
         Self::arm_credential_helper(&remote.url, cx);
         let askpass = Self::askpass_env(cx);
+        // `282-fast-forward-skips-worktree-branches`
+        let skip_worktree_branches = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         let remote_name = branch
             .upstream_remote_name()
             .map(str::to_string)
@@ -1231,7 +1263,11 @@ impl Dispatcher {
                         description: Some("Fast-forwarding branches".into()),
                         value: 0.9,
                     });
-                    let _ = corvene_git::fast_forward_branches(git, &workdir);
+                    let _ = corvene_git::fast_forward_branches_with(
+                        git,
+                        &workdir,
+                        skip_worktree_branches,
+                    );
                 }
                 result
             },
