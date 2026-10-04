@@ -1883,6 +1883,25 @@ registry! {
         code: &["crates/corvene-core/src/dispatcher.rs", "crates/corvene-git/src/ops.rs"],
     },
 
+    /// Unreadable repository list entries are set aside, not lost.
+    REPOSITORY_LIST_BACKUP = 287 "repository-list-backup" {
+        title: "Keep the repository list safe",
+        summary: "When entries of the stored repository list cannot be read (after going back to \
+                  an older version, say), Corvene sets them aside and brings them back once a \
+                  version that reads them starts, instead of loading an empty list and saving \
+                  over it; a banner says so. A list that cannot be read at all is copied before \
+                  a new one starts. On every update the data file is copied to \
+                  corvene-<previous version>.redb.bak, and a banner says when the data could not \
+                  be opened and nothing is being saved.",
+        ghd_behaviour: "A repository list that cannot be read is lost; there is no backup.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: true, visible: true, availability: available,
+        upstream: &[Upstream::issue(9954)],
+        code: &["crates/corvene-core/src/persistence.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene/src/main.rs", "crates/corvene-ui/src/banner.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

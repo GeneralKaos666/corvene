@@ -459,6 +459,18 @@ pub enum Banner {
         host: String,
         missing: bool,
     },
+    /// Corvene (`287-repository-list-backup`): `count` entries of the stored
+    /// repository list could not be read and were set aside, or (`raw`) the
+    /// whole list was not readable and was backed up.
+    RepositoriesUnreadable {
+        count: usize,
+        raw: bool,
+    },
+    /// Corvene (`287-repository-list-backup`): the store at `path` could not
+    /// be opened, so this session uses a temporary one.
+    TemporaryStore {
+        path: std::path::PathBuf,
+    },
 }
 
 impl Banner {
@@ -478,7 +490,10 @@ impl Banner {
             | Banner::SuccessfulReorder { .. }
             | Banner::BranchDeleted { .. }
             | Banner::BranchesDeleted { .. } => Some(Duration::from_secs(15)),
-            Banner::ConflictsFound { .. } | Banner::GitEmailMismatch { .. } => None,
+            Banner::ConflictsFound { .. }
+            | Banner::GitEmailMismatch { .. }
+            | Banner::RepositoriesUnreadable { .. }
+            | Banner::TemporaryStore { .. } => None,
         }
     }
 

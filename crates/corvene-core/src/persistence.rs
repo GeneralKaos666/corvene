@@ -13,6 +13,14 @@
 //! repository list get the same move when they load (GHD matches them to
 //! the accounts again on selection, which Corvene does not do yet), so they
 //! keep matching their account.
+//!
+//! Deviation ([`StoreExt::repositories_keeping_unreadable`], flag
+//! `287-repository-list-backup`): an entry of the repository list this
+//! version cannot read is moved aside (`repositories.unreadable`) instead of
+//! the whole list loading empty and the next save overwriting it, and comes
+//! back once a version reads it; [`backup_on_version_change`] copies the
+//! store file when the app version changes. GHD's repository list lives in
+//! IndexedDB (`lib/databases/repositories-database.ts`) with no backup.
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -486,6 +494,66 @@ pub struct ExtensionSwitches {
     pub languages: HashMap<String, bool>,
 }
 
+/// Where `287-repository-list-backup` keeps the repository list's entries
+/// this version cannot read, as they were stored.
+pub const UNREADABLE_REPOSITORIES_KEY: &str = "repositories.unreadable";
+
+/// [`StoreExt::repositories_keeping_unreadable`]'s result.
+#[derive(Clone, Debug, Default)]
+pub struct LoadedRepositories {
+    pub repositories: Vec<Repository>,
+    /// Entries of the stored list that were just moved aside.
+    pub newly_unreadable: usize,
+    /// Entries moved aside earlier that this version reads again.
+    pub restored: usize,
+    /// The key the stored list was copied to because it was not JSON.
+    pub raw_backup: Option<String>,
+}
+
+fn unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Corvene (`287-repository-list-backup`): when the app version differs from
+/// the one that last opened `store`, copy its file to
+/// `corvene-<previous version>.redb.bak` next to it (replacing older
+/// backups), so an update that loses data can be rolled back. Returns the
+/// backup's path when one was made.
+pub fn backup_on_version_change(store: &Store, version: &str) -> Option<PathBuf> {
+    const KEY: &str = "meta.app_version";
+    let previous: Option<String> = store.get(KEY).ok().flatten();
+    if previous.as_deref() == Some(version) {
+        return None;
+    }
+    let backup = previous.and_then(|previous| {
+        let dir = store.path().parent()?;
+        let name = format!("corvene-{previous}.redb.bak");
+        // the newest backup only
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let file = entry.file_name().to_string_lossy().into_owned();
+                if file.starts_with("corvene-") && file.ends_with(".redb.bak") && file != name {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        let backup = dir.join(name);
+        match std::fs::copy(store.path(), &backup) {
+            Ok(_) => Some(backup),
+            Err(err) => {
+                warn!(%err, "could not back up the store");
+                None
+            }
+        }
+    });
+    if let Err(err) = store.set(KEY, version) {
+        warn!(%err, "could not record the app version");
+    }
+    backup
+}
+
 /// Keys are namespaced strings; values JSON. Add a key here, never ad hoc.
 pub trait StoreExt {
     fn settings(&self) -> Result<Settings>;
@@ -501,6 +569,11 @@ pub trait StoreExt {
     fn save_flags(&self, flags: &crate::flags::FlagOverrides) -> Result<()>;
 
     fn repositories(&self) -> Result<Vec<Repository>>;
+    /// `287-repository-list-backup`: [`StoreExt::repositories`], with the
+    /// entries that do not decode moved to `repositories.unreadable` (and a
+    /// list that is not JSON copied to `repositories.unreadable.raw.<secs>`)
+    /// rather than failing; earlier moved entries that decode now come back.
+    fn repositories_keeping_unreadable(&self) -> Result<LoadedRepositories>;
     fn save_repositories(&self, repos: &[Repository]) -> Result<()>;
     fn next_repository_id(&self) -> Result<u64>;
 
@@ -585,6 +658,81 @@ impl StoreExt for Store {
             warn!(%err, "could not save the migrated GitHub Enterprise repositories");
         }
         Ok(migrated)
+    }
+
+    fn repositories_keeping_unreadable(&self) -> Result<LoadedRepositories> {
+        let mut raw_backup = None;
+        let stored: Option<serde_json::Value> = match self.get("repositories") {
+            Ok(value) => value,
+            Err(corvene_store::StoreError::Json(err)) => {
+                warn!(%err, "the repository list is not JSON; backing it up");
+                if let Some(bytes) = self.get_raw("repositories")? {
+                    let key = format!("repositories.unreadable.raw.{}", unix_seconds());
+                    self.set_raw(&key, &bytes)?;
+                    raw_backup = Some(key);
+                }
+                None
+            }
+            Err(err) => return Err(err),
+        };
+        let mut repositories = Vec::new();
+        let mut unreadable = Vec::new();
+        match stored {
+            Some(serde_json::Value::Array(entries)) => {
+                for entry in entries {
+                    match serde_json::from_value::<Repository>(entry.clone()) {
+                        Ok(repo) => repositories.push(repo),
+                        Err(err) => {
+                            warn!(%err, "a repository list entry could not be read");
+                            unreadable.push(entry);
+                        }
+                    }
+                }
+            }
+            Some(other) => unreadable.push(other),
+            None => {}
+        }
+        let newly_unreadable = unreadable.len();
+        let mut kept: Vec<serde_json::Value> = self
+            .get(UNREADABLE_REPOSITORIES_KEY)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let kept_before = kept.len();
+        let mut restored = 0;
+        kept.retain(
+            |entry| match serde_json::from_value::<Repository>(entry.clone()) {
+                Ok(repo) => {
+                    if !repositories
+                        .iter()
+                        .any(|r| r.id == repo.id || r.path == repo.path)
+                    {
+                        repositories.push(repo);
+                        restored += 1;
+                    }
+                    false
+                }
+                Err(_) => true,
+            },
+        );
+        let changed = newly_unreadable > 0 || raw_backup.is_some() || kept.len() != kept_before;
+        kept.extend(unreadable);
+        if changed {
+            self.set(UNREADABLE_REPOSITORIES_KEY, &kept)?;
+            self.save_repositories(&repositories)?;
+        }
+        if let Some(migrated) = migrated_ghe_repositories(&repositories) {
+            if let Err(err) = self.save_repositories(&migrated) {
+                warn!(%err, "could not save the migrated GitHub Enterprise repositories");
+            }
+            repositories = migrated;
+        }
+        Ok(LoadedRepositories {
+            repositories,
+            newly_unreadable,
+            restored,
+            raw_backup,
+        })
     }
 
     fn save_repositories(&self, repos: &[Repository]) -> Result<()> {
@@ -806,6 +954,63 @@ mod tests {
         old.as_object_mut().unwrap().remove("syntax_highlighter");
         let back: Settings = serde_json::from_value(old).unwrap();
         assert_eq!(back.syntax_highlighter, SyntaxHighlighter::GitHubDesktop);
+    }
+
+    #[test]
+    fn unreadable_repositories_are_kept_aside_and_come_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_in(dir.path()).unwrap();
+        let good = Repository::new(1, "/tmp/a");
+        let mut bad = serde_json::to_value(Repository::new(2, "/tmp/b")).unwrap();
+        bad["pinned"] = serde_json::json!("not a bool");
+        store
+            .set(
+                "repositories",
+                &serde_json::json!([serde_json::to_value(&good).unwrap(), bad]),
+            )
+            .unwrap();
+        assert!(store.repositories().is_err());
+        let loaded = store.repositories_keeping_unreadable().unwrap();
+        assert_eq!(loaded.repositories, vec![good.clone()]);
+        assert_eq!(loaded.newly_unreadable, 1);
+        // the readable list was saved; the entry waits under its own key
+        assert_eq!(store.repositories().unwrap(), vec![good.clone()]);
+        let kept: Vec<serde_json::Value> = store.get(UNREADABLE_REPOSITORIES_KEY).unwrap().unwrap();
+        assert_eq!(kept.len(), 1);
+        // a second launch moves nothing new
+        let again = store.repositories_keeping_unreadable().unwrap();
+        assert_eq!((again.newly_unreadable, again.restored), (0, 0));
+        // a version that reads it gets it back
+        let mut readable = kept[0].clone();
+        readable["pinned"] = serde_json::json!(true);
+        store
+            .set(UNREADABLE_REPOSITORIES_KEY, &vec![readable])
+            .unwrap();
+        let back = store.repositories_keeping_unreadable().unwrap();
+        assert_eq!(back.restored, 1);
+        assert_eq!(back.repositories.len(), 2);
+        let kept: Vec<serde_json::Value> = store.get(UNREADABLE_REPOSITORIES_KEY).unwrap().unwrap();
+        assert!(kept.is_empty());
+        // a list that is not JSON is copied as it was
+        store.set_raw("repositories", b"{oops").unwrap();
+        let loaded = store.repositories_keeping_unreadable().unwrap();
+        assert!(loaded.repositories.is_empty());
+        let key = loaded.raw_backup.unwrap();
+        assert_eq!(store.get_raw(&key).unwrap().unwrap(), b"{oops");
+        assert_eq!(store.repositories().unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn the_store_is_backed_up_when_the_version_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_in(dir.path()).unwrap();
+        assert_eq!(backup_on_version_change(&store, "1.0.0"), None);
+        assert_eq!(backup_on_version_change(&store, "1.0.0"), None);
+        let backup = backup_on_version_change(&store, "1.1.0").unwrap();
+        assert_eq!(backup, dir.path().join("corvene-1.0.0.redb.bak"));
+        assert!(backup.exists());
+        let newer = backup_on_version_change(&store, "1.2.0").unwrap();
+        assert!(newer.exists() && !backup.exists());
     }
 
     #[test]

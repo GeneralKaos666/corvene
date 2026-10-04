@@ -80,11 +80,26 @@ impl Store {
     }
 
     pub fn set<T: Serialize + ?Sized>(&self, key: &str, value: &T) -> Result<()> {
-        let bytes = serde_json::to_vec(value)?;
+        self.set_raw(key, &serde_json::to_vec(value)?)
+    }
+
+    /// The stored bytes of `key`, whatever they hold.
+    pub fn get_raw(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        let txn = self.db.begin_read()?;
+        let table = match txn.open_table(KV) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(err) => return Err(err.into()),
+        };
+        Ok(table.get(key)?.map(|guard| guard.value().to_vec()))
+    }
+
+    /// Store `bytes` under `key` as they are.
+    pub fn set_raw(&self, key: &str, bytes: &[u8]) -> Result<()> {
         let txn = self.db.begin_write()?;
         {
             let mut table = txn.open_table(KV)?;
-            table.insert(key, bytes.as_slice())?;
+            table.insert(key, bytes)?;
         }
         txn.commit()?;
         Ok(())

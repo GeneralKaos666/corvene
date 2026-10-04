@@ -648,6 +648,12 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
         Banner::GitEmailMismatch { host, missing } => {
             f.put("host", host).put("missing", missing);
         }
+        Banner::RepositoriesUnreadable { count, raw } => {
+            f.put("count", count).put("raw", raw);
+        }
+        Banner::TemporaryStore { path } => {
+            f.put("path", path.display());
+        }
         Banner::CherryPickUndone {
             target_branch,
             count,

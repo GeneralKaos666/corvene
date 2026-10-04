@@ -81,6 +81,7 @@ pub(crate) fn main() {
     corvene_platform::crash_reports::install_panic_hook(env!("CARGO_PKG_VERSION"));
     phase(started, "logging initialised");
 
+    let mut store_fallback = None;
     let store = match corvene_store::Store::open_in(corvene_platform::paths::app_support_dir()) {
         Ok(store) => Arc::new(store),
         Err(err) => {
@@ -88,6 +89,7 @@ pub(crate) fn main() {
                 ?err,
                 "could not open settings store; falling back to a temporary one"
             );
+            store_fallback = Some(corvene_platform::paths::app_support_dir().join("corvene.redb"));
             // per process, so several instances can fall back at once
             let tmp = std::env::temp_dir().join(format!("corvene-fallback-{}", std::process::id()));
             Arc::new(corvene_store::Store::open_in(tmp).expect("temporary store"))
@@ -104,6 +106,17 @@ pub(crate) fn main() {
     }
     let launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
     sync_renderer_flags(&launch_flags);
+    // Corvene (`287-repository-list-backup`): a copy of the store from
+    // before an update, and a banner when this session cannot save
+    let list_backup = launch_flags.bool(corvene_core::flags::ids::REPOSITORY_LIST_BACKUP);
+    if list_backup
+        && store_fallback.is_none()
+        && let Some(backup) =
+            corvene_core::persistence::backup_on_version_change(&store, env!("CARGO_PKG_VERSION"))
+    {
+        info!(path = %backup.display(), "backed up the store from the previous version");
+    }
+    let store_fallback = store_fallback.filter(|_| list_backup);
     phase(started, "store opened");
 
     #[cfg(not(target_os = "android"))]
@@ -201,6 +214,9 @@ pub(crate) fn main() {
         );
         let sidebar_width = corvene_ui::theme::sizes::zpx(settings.sidebar_width);
         Dispatcher::init(store, settings, flag_overrides, flags_env, cx);
+        if let Some(path) = store_fallback {
+            Dispatcher::set_banner(corvene_core::Banner::TemporaryStore { path }, cx);
+        }
         let state = corvene_core::AppState::global(cx);
         Dispatcher::load_custom_emoji(cx);
         Dispatcher::check_crash_reports(cx);

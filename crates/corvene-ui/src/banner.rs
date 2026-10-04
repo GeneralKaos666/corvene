@@ -19,6 +19,10 @@
 //! warns only in Settings › Git and the commit form,
 //! `ui/lib/git-email-not-found-warning.tsx`).
 //!
+//! Deviation (`287-repository-list-backup`): banners say when entries of
+//! the stored repository list could not be read (and were set aside) or the
+//! store could not be opened (GHD has neither case's message).
+//!
 //! Deviation (`422-banner-as-toast`): [`banner_toast_frame`] floats the
 //! banner over the bottom-right corner instead of pushing the views down
 //! (GHD `ui/app.tsx` `renderBanner` puts it in the layout flow).
@@ -173,6 +177,23 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
                 )
             },
             false,
+        )],
+        Banner::RepositoriesUnreadable { raw: true, .. } => vec![t(
+            "The repository list could not be read. Corvene kept a copy of it and started a new list.",
+        )],
+        Banner::RepositoriesUnreadable { count, .. } => vec![(
+            if *count == 1 {
+                "1 repository in the list could not be read and is set aside for a newer Corvene."
+                    .to_string()
+            } else {
+                format!(
+                    "{count} repositories in the list could not be read and are set aside for a newer Corvene."
+                )
+            },
+            false,
+        )],
+        Banner::TemporaryStore { .. } => vec![t(
+            "Corvene could not open its data, so nothing you change now is saved.",
         )],
     }
 }
@@ -341,7 +362,10 @@ pub fn banner_bar(
     let (container, first) = focus.map_or((None, None), |(c, f)| (Some(c), Some(f)));
     let is_conflicts = matches!(
         banner,
-        Banner::ConflictsFound { .. } | Banner::GitEmailMismatch { .. }
+        Banner::ConflictsFound { .. }
+            | Banner::GitEmailMismatch { .. }
+            | Banner::RepositoriesUnreadable { .. }
+            | Banner::TemporaryStore { .. }
     );
     let icon = if is_conflicts {
         octicon(Octicon::Alert, t.text).mr(SPACING())
@@ -423,6 +447,20 @@ pub fn banner_bar(
             })
             .into_any_element(),
         ),
+        Banner::TemporaryStore { path } => {
+            let path = path.clone();
+            Some(
+                link_button(
+                    "banner-reveal-store",
+                    crate::context_menu::labels::REVEAL_IN_FILE_MANAGER,
+                    cx,
+                )
+                .when_some(first, |d, first| d.track_focus(first))
+                .ml(SPACING_HALF())
+                .on_click(move |_, _, cx| Dispatcher::show_in_finder(&path, cx))
+                .into_any_element(),
+            )
+        }
         _ => None,
     };
     let has_link = action.is_some();

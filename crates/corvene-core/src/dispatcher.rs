@@ -35,10 +35,32 @@ impl Dispatcher {
         cx: &mut dyn Host,
     ) -> StateHandle {
         let flags = crate::flags::Flags::resolve(&flag_overrides, &flags_env);
-        let mut repositories = store.repositories().unwrap_or_else(|err| {
-            error!(?err, "could not load repositories");
-            Vec::new()
-        });
+        // Corvene (`287-repository-list-backup`): entries that do not decode
+        // are set aside instead of the whole list loading empty (and the
+        // next save overwriting it)
+        let mut unreadable_banner = None;
+        let mut repositories = if flags.bool(crate::flags::ids::REPOSITORY_LIST_BACKUP) {
+            match store.repositories_keeping_unreadable() {
+                Ok(loaded) => {
+                    if loaded.raw_backup.is_some() || loaded.newly_unreadable > 0 {
+                        unreadable_banner = Some(crate::mco::Banner::RepositoriesUnreadable {
+                            count: loaded.newly_unreadable,
+                            raw: loaded.raw_backup.is_some(),
+                        });
+                    }
+                    loaded.repositories
+                }
+                Err(err) => {
+                    error!(?err, "could not load repositories");
+                    Vec::new()
+                }
+            }
+        } else {
+            store.repositories().unwrap_or_else(|err| {
+                error!(?err, "could not load repositories");
+                Vec::new()
+            })
+        };
         if flags.bool(crate::flags::ids::WIKI_NOT_GITHUB) {
             for repo in &mut repositories {
                 if repo.github.as_ref().is_some_and(|gh| gh.is_wiki()) {
@@ -187,6 +209,9 @@ impl Dispatcher {
             Self::refresh_repository(id, cx);
             Self::start_background_pruner(id, cx);
             Self::start_watching(id, cx);
+        }
+        if let Some(banner) = unreadable_banner {
+            Self::set_banner(banner, cx);
         }
         state
     }
