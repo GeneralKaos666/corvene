@@ -1768,6 +1768,10 @@ pub struct DiffWarnings {
     /// sections. Holds the old and new modes (`100644`, `120000`, ...).
     #[serde(default)]
     pub type_change: Option<(String, String)>,
+    /// Corvene `795-lfs-image-previews`: an image stored in Git LFS whose
+    /// contents are not downloaded, so its pointer files are diffed.
+    #[serde(default)]
+    pub lfs_not_downloaded: bool,
 }
 
 /// GHD `IDiff` (`DiffType`).

@@ -205,7 +205,11 @@ impl Dispatcher {
         }
         Self::sync_crash_reports_setting(cx);
         corvene_git::set_explain_missing_workdir(now.bool(ids::GIT_SPAWN_ERROR_DETAILS));
-        if now.bool(ids::NON_UTF8_DIFFS) != previous.bool(ids::NON_UTF8_DIFFS) {
+        // flags that change how diffs are read: the cached ones are stale
+        let reads_diffs = |flags: &Flags| {
+            [ids::NON_UTF8_DIFFS, ids::LFS_IMAGE_PREVIEWS].map(|id| flags.bool(id))
+        };
+        if reads_diffs(&now) != reads_diffs(previous) {
             corvene_git::text_encoding::set_decode_legacy_text(now.bool(ids::NON_UTF8_DIFFS));
             crate::diff_cache::clear_diffs();
             if let Some(id) = Self::state(cx).read(cx).selected {

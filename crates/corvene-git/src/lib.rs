@@ -17,6 +17,7 @@ pub mod history_ops;
 pub mod hook_env;
 pub mod ignore;
 pub mod index_lock;
+pub mod lfs;
 pub mod lfs_progress;
 pub mod log;
 mod log_gix;

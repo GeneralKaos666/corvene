@@ -58,6 +58,9 @@
 //! from one file; with Hide Whitespace the other's can differ in
 //! indentation), GHD always the old file's unless the diff only adds lines.
 //!
+//! Deviation (`795-lfs-image-previews`): an LFS image whose contents are
+//! not downloaded gets a note above its pointer diff.
+//!
 //! Deviation (`794-svg-image-diff`): an SVG file's header has a Text /
 //! Image switch; Image shows its image diff (GHD: text only).
 //!
@@ -2864,6 +2867,17 @@ impl DiffView {
                         file_type_name(new)
                     )
                     .into(),
+                ])
+                .into_any_element(),
+            );
+        }
+        // `795-lfs-image-previews`
+        if warnings.lfs_not_downloaded {
+            items.push(
+                paragraph(vec![
+                    "This image is stored in Git LFS and its contents are not downloaded, so \
+                     the LFS pointer files are compared instead."
+                        .into(),
                 ])
                 .into_any_element(),
             );

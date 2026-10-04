@@ -4866,6 +4866,23 @@ registry! {
         code: &["crates/corvene-ui/src/image_diff.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Images stored in Git LFS show as images.
+    LFS_IMAGE_PREVIEWS = 795 "lfs-image-previews" {
+        title: "Image previews for files in Git LFS",
+        summary: "An image stored in Git LFS shows as an image diff in Changes and History \
+                  when its contents are downloaded (git-lfs keeps them in the repository's \
+                  lfs folder), read without running git-lfs. When they are not downloaded, \
+                  the pointer diff stays, with a note saying so.",
+        ghd_behaviour: "The diff shows the LFS pointer files' text (version, oid and size \
+                        lines) instead of the image.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2981)],
+        code: &["crates/corvene-git/src/lfs.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

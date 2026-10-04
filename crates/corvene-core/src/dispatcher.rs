@@ -2716,8 +2716,9 @@ impl Dispatcher {
             return;
         }
         let key = (ordered.clone(), file.path.clone());
+        let diff_options = CommitDiffOptions::of(Self::state(cx).read(cx));
         let task = cx.background_executor().spawn(async move {
-            let loaded = compute_commit_diff(git, &workdir, &ordered, &file, hide_whitespace);
+            let loaded = compute_commit_diff(git, &workdir, &ordered, &file, diff_options);
             crate::diff_cache::store_commit_diff(
                 &workdir,
                 &ordered,
@@ -2779,6 +2780,7 @@ impl Dispatcher {
             return;
         }
         let hide_whitespace = s.settings.hide_whitespace_in_history_diff;
+        let diff_options = CommitDiffOptions::of(s);
         let in_process = s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
         let (Some(git), Some(rs)) = (s.git.clone(), s.repo_states.get(&id)) else {
             return;
@@ -2827,13 +2829,8 @@ impl Dispatcher {
                     if crate::diff_cache::commit_diff(&workdir, &shas, &file.path, hide_whitespace)
                         .is_none()
                     {
-                        let loaded = compute_commit_diff(
-                            git.clone(),
-                            &workdir,
-                            &shas,
-                            file,
-                            hide_whitespace,
-                        );
+                        let loaded =
+                            compute_commit_diff(git.clone(), &workdir, &shas, file, diff_options);
                         crate::diff_cache::store_commit_diff(
                             &workdir,
                             &shas,
@@ -6717,6 +6714,8 @@ struct WorkingDiffOptions {
     as_text: bool,
     /// `794-svg-image-diff`
     svg_as_image: bool,
+    /// `795-lfs-image-previews`
+    lfs_images: bool,
 }
 
 impl WorkingDiffOptions {
@@ -6728,16 +6727,18 @@ impl WorkingDiffOptions {
             as_text: rs.diff_as_text.as_deref() == Some(path)
                 && s.flags.bool(crate::flags::ids::BINARY_DIFF_AS_TEXT),
             svg_as_image: Dispatcher::svg_shown_as_image(s, rs, path),
+            lfs_images: s.flags.bool(crate::flags::ids::LFS_IMAGE_PREVIEWS),
         }
     }
 
-    fn key(self) -> [bool; 5] {
+    fn key(self) -> [bool; 6] {
         [
             self.hide_whitespace,
             self.renamed_against_head,
             self.symlinks_as_links,
             self.as_text,
             self.svg_as_image,
+            self.lfs_images,
         ]
     }
 }
@@ -6823,7 +6824,7 @@ fn compute_working_diff(
             return (Arc::new(diff), None, None);
         }
         let diff = corvene_git::working_directory_diff(
-            git,
+            git.clone(),
             workdir,
             file,
             options.hide_whitespace,
@@ -6837,6 +6838,21 @@ fn compute_working_diff(
             }
             corvene_models::Diff::Empty
         });
+        // `795-lfs-image-previews`: an LFS image's pointers become its images
+        let diff = if options.lfs_images {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            corvene_git::lfs::resolve_lfs_images(
+                git.clone(),
+                workdir,
+                &file.path,
+                file.status.kind,
+                diff,
+                || std::fs::read(workdir.join(&file.path)).ok(),
+                || corvene_git::blob_bytes(git.clone(), workdir, "HEAD", previous_path).ok(),
+            )
+        } else {
+            diff
+        };
         // GHD `fileContents.newContents`: the working copy, for hunk expansion.
         let contents = (file.status.kind != corvene_models::FileStatusKind::Deleted)
             .then(|| {
@@ -6897,6 +6913,23 @@ fn compute_changeset(
     .map(Arc::new)
 }
 
+/// What a committed file's diff depends on besides the commits.
+#[derive(Clone, Copy, Debug)]
+struct CommitDiffOptions {
+    hide_whitespace: bool,
+    /// `795-lfs-image-previews`
+    lfs_images: bool,
+}
+
+impl CommitDiffOptions {
+    fn of(s: &AppState) -> Self {
+        Self {
+            hide_whitespace: s.settings.hide_whitespace_in_history_diff,
+            lfs_images: s.flags.bool(crate::flags::ids::LFS_IMAGE_PREVIEWS),
+        }
+    }
+}
+
 /// `file`'s diff in `ordered` (one commit or a range, oldest first) with its
 /// new and old contents; the three parts are read in parallel. Blocking.
 fn compute_commit_diff(
@@ -6904,8 +6937,9 @@ fn compute_commit_diff(
     workdir: &Path,
     ordered: &[String],
     file: &corvene_models::CommittedFileChange,
-    hide_whitespace: bool,
+    options: CommitDiffOptions,
 ) -> LoadedDiff {
+    let hide_whitespace = options.hide_whitespace;
     let newest = match ordered {
         [_, .., newest] => newest.clone(),
         _ => file.commitish.clone(),
@@ -6934,19 +6968,42 @@ fn compute_commit_diff(
         });
         let diff = match ordered {
             [oldest, .., newest] => corvene_git::commit_range_file_diff(
-                git,
+                git.clone(),
                 workdir,
                 file,
                 oldest,
                 newest,
                 hide_whitespace,
             ),
-            _ => corvene_git::commit_file_diff(git, workdir, file, hide_whitespace),
+            _ => corvene_git::commit_file_diff(git.clone(), workdir, file, hide_whitespace),
         }
         .unwrap_or_else(|err| {
             warn!(%err, "commit diff failed");
             corvene_models::Diff::Empty
         });
+        // `795-lfs-image-previews`: an LFS image's pointers become its images
+        let diff = if options.lfs_images {
+            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
+            corvene_git::lfs::resolve_lfs_images(
+                git.clone(),
+                workdir,
+                &file.path,
+                file.status.kind,
+                diff,
+                || corvene_git::blob_bytes(git.clone(), workdir, &newest, &file.path).ok(),
+                || {
+                    corvene_git::blob_bytes(
+                        git.clone(),
+                        workdir,
+                        &format!("{oldest}^"),
+                        previous_path,
+                    )
+                    .ok()
+                },
+            )
+        } else {
+            diff
+        };
         (
             Arc::new(diff),
             contents.and_then(join).map(Arc::new),
