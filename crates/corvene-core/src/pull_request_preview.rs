@@ -76,6 +76,8 @@ impl Dispatcher {
             };
             (current, rs.default_branch.clone())
         };
+        // `333-pr-base-from-branch-origin`
+        let default_branch = Self::pull_request_base_from_origin(id, cx).or(default_branch);
         Self::close_foldout(cx);
         Self::initialize_pull_request_preview(id, default_branch, current, false, cx);
     }

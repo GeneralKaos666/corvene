@@ -273,6 +273,38 @@ pub fn encode_component(s: &str) -> String {
     out
 }
 
+/// `333-pr-base-from-branch-origin`: the remote branch (`<remote>/<name>`)
+/// to propose as a pull request's base for a branch created from `origin`
+/// (a local or remote-tracking branch name, `refs/...` allowed), when that
+/// is neither `HEAD`, the branch itself nor the default branch and
+/// `remote` has it.
+pub fn pull_request_base_candidate(
+    origin: &str,
+    current: &str,
+    default_branch: Option<&str>,
+    remote: &str,
+    branches: &[corvene_models::Branch],
+) -> Option<String> {
+    let origin = origin
+        .strip_prefix("refs/heads/")
+        .or_else(|| origin.strip_prefix("refs/remotes/"))
+        .unwrap_or(origin);
+    // a remote-tracking start point names its remote first
+    let name = branches
+        .iter()
+        .find(|b| b.kind == corvene_models::BranchKind::Remote && b.name == origin)
+        .map(|b| b.name_without_remote())
+        .unwrap_or(origin);
+    if name == "HEAD" || name == current || Some(name) == default_branch {
+        return None;
+    }
+    let remote_name = format!("{remote}/{name}");
+    branches
+        .iter()
+        .any(|b| b.kind == corvene_models::BranchKind::Remote && b.name == remote_name)
+        .then_some(remote_name)
+}
+
 /// GHD `_openCreatePullRequestInBrowser`: `${htmlURL}/pull/new/[base...]compare`;
 /// a fork contributing to its parent prefixes both refs with `owner:name:`.
 ///
@@ -997,7 +1029,38 @@ impl Dispatcher {
             Self::show_pull_request(id, cx);
             return;
         }
-        Self::create_pull_request_with_base(id, None, cx);
+        let base = Self::pull_request_base_from_origin(id, cx);
+        Self::create_pull_request_with_base(id, base, cx);
+    }
+
+    /// Deviation (`333-pr-base-from-branch-origin`; GHD `_createPullRequest`
+    /// / `_startPullRequest` always propose the default branch): the branch
+    /// the current branch was created from (`branch.<name>.vscode-merge-base`,
+    /// else its reflog's "Created from"), as the remote branch to propose as
+    /// the pull request's base, when it is another branch than the default
+    /// one and exists on the current branch's remote.
+    pub fn pull_request_base_from_origin(id: u64, cx: &App) -> Option<String> {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::PR_BASE_FROM_BRANCH_ORIGIN) {
+            return None;
+        }
+        let git = s.git.clone()?;
+        let rs = s.repo_states.get(&id)?;
+        let info = rs.info.as_ref()?;
+        let current = info.current_branch()?;
+        let remote = current
+            .upstream_remote_name()
+            .map(str::to_string)
+            .or_else(|| crate::git_store::default_remote_name(info).map(str::to_string))?;
+        let origin = corvene_git::branch_merge_base(git, &info.workdir, &current.name)
+            .or_else(|| corvene_git::branch_created_from(&info.workdir, &current.name))?;
+        pull_request_base_candidate(
+            &origin,
+            &current.name,
+            rs.default_branch.as_deref(),
+            &remote,
+            &info.branches,
+        )
     }
 
     /// `_createPullRequest(repository, baseBranch)`: an unpublished branch
@@ -1637,6 +1700,44 @@ mod tests {
     fn encodes_branch_names() {
         assert_eq!(encode_component("feature/x y"), "feature%2Fx%20y");
         assert_eq!(encode_component("main"), "main");
+    }
+
+    #[test]
+    fn pull_request_base_comes_from_where_the_branch_started() {
+        let branch = |name: &str, kind: corvene_models::BranchKind| corvene_models::Branch {
+            name: name.into(),
+            kind,
+            full_name: String::new(),
+            tip: None,
+            upstream: None,
+            tip_time: None,
+            tip_author: None,
+            remote_name: None,
+        };
+        use corvene_models::BranchKind::{Local, Remote};
+        let branches = vec![
+            branch("main", Local),
+            branch("feature", Local),
+            branch("stacked", Local),
+            branch("origin/main", Remote),
+            branch("origin/feature", Remote),
+        ];
+        let base = |origin: &str| {
+            pull_request_base_candidate(origin, "stacked", Some("main"), "origin", &branches)
+        };
+        assert_eq!(base("feature").as_deref(), Some("origin/feature"));
+        assert_eq!(base("origin/feature").as_deref(), Some("origin/feature"));
+        assert_eq!(
+            base("refs/remotes/origin/feature").as_deref(),
+            Some("origin/feature")
+        );
+        assert_eq!(base("main"), None);
+        assert_eq!(base("origin/main"), None);
+        assert_eq!(base("HEAD"), None);
+        assert_eq!(base("stacked"), None);
+        // not on the remote, or a commit
+        assert_eq!(base("unpublished"), None);
+        assert_eq!(base("1234abcd"), None);
     }
 
     #[test]

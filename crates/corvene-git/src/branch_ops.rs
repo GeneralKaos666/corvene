@@ -589,6 +589,30 @@ pub fn commits_not_in(
     Ok(out.stdout_string()?.trim().parse().unwrap_or(0))
 }
 
+/// The start point a local branch was created from, read from the first
+/// entry of its reflog (`branch: Created from <start>`): a branch name (a
+/// remote-tracking one as `origin/<name>` or `refs/remotes/...`), `HEAD`
+/// or a commit. `None` without a reflog or such an entry. Feeds the pull
+/// request base (Corvene, `333-pr-base-from-branch-origin`).
+pub fn branch_created_from(workdir: &Path, branch: &str) -> Option<String> {
+    use std::io::BufRead;
+    let path = crate::paths::common_dir(workdir)
+        .join("logs/refs/heads")
+        .join(branch);
+    let file = std::fs::File::open(path).ok()?;
+    let mut first = String::new();
+    std::io::BufReader::new(file).read_line(&mut first).ok()?;
+    parse_created_from(&first)
+}
+
+/// The `<start>` of a reflog line whose message is `branch: Created from
+/// <start>`.
+pub fn parse_created_from(line: &str) -> Option<String> {
+    let (_, message) = line.split_once('\t')?;
+    let start = message.trim().strip_prefix("branch: Created from ")?.trim();
+    (!start.is_empty()).then(|| start.to_string())
+}
+
 /// GHD `DesktopStashEntryMarker`
 pub const DESKTOP_STASH_MARKER: &str = "!!GitHub_Desktop";
 
@@ -924,6 +948,19 @@ mod tests {
         run(&["add", "."]);
         run(&["commit", "-q", "-m", "first"]);
         (dir, Arc::new(crate::find_git().unwrap()))
+    }
+
+    #[test]
+    fn created_from_is_read_from_the_first_reflog_message() {
+        let line = "0000000000000000000000000000000000000000 1111111111111111111111111111111111111111 A U Thor <a@example.com> 1700000000 +0000\tbranch: Created from origin/feature/x\n";
+        assert_eq!(
+            parse_created_from(line).as_deref(),
+            Some("origin/feature/x")
+        );
+        let checkout = "0 1 A <a@b> 1 +0000\tbranch: Created from HEAD\n";
+        assert_eq!(parse_created_from(checkout).as_deref(), Some("HEAD"));
+        assert_eq!(parse_created_from("0 1 A <a@b> 1 +0000\tcommit: x\n"), None);
+        assert_eq!(parse_created_from("no tab"), None);
     }
 
     #[test]

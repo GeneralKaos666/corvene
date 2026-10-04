@@ -2256,6 +2256,24 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs"],
     },
 
+    /// Pull requests propose the branch the current one was created from as base.
+    PR_BASE_FROM_BRANCH_ORIGIN = 333 "pr-base-from-branch-origin" {
+        title: "Pull request base from where the branch started",
+        summary: "Create Pull Request and Preview Pull Request propose as base the branch the \
+                  current branch was created from (the branch recorded by \
+                  update-from-parent-branch or VS Code, else the \"Created from\" entry of the \
+                  branch's reflog) when it is another branch than the default one and exists on \
+                  the remote; otherwise the default branch as before.",
+        ghd_behaviour: "The default branch is always proposed, so a pull request for a branch \
+                        stacked on another one targets the wrong branch unless changed by hand.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20580)],
+        code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-git/src/branch_ops.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
