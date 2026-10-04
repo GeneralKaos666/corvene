@@ -3,6 +3,10 @@
 //! The groups are GHD `groupRepositories` ([`group_repositories`]); the
 //! filter then keeps each group's matches, as GHD `FilterList` does.
 //!
+//! Deviation (`291-recent-worktrees`): a Recent repository used in several
+//! worktrees is listed once per worktree (named, dimmed); picking one
+//! switches to that worktree.
+//!
 //! Deviation (`290-custom-repository-groups`): "Move to Group…" puts a
 //! repository in a group of the user's naming, listed (by name) after
 //! Pinned and Recent and before GHD's owner groups.
@@ -459,14 +463,14 @@ impl RepositoryFoldout {
     /// Enter in the filter box: the highlighted row, else the first one.
     fn pick_highlighted(&mut self, cx: &mut Context<Self>) {
         let ix = self.highlighted.unwrap_or(0);
-        let id = self
+        let row = self
             .groups(cx)
             .into_iter()
             .flat_map(|g| g.repos)
             .nth(ix)
-            .map(|(r, _, _)| r.id);
-        if let Some(id) = id {
-            Dispatcher::select_repository(id, cx);
+            .map(|(r, _, _)| r);
+        if let Some(row) = row {
+            select_row(&row, cx);
         }
     }
 
@@ -603,6 +607,29 @@ impl RepositoryFoldout {
             if !query.is_empty() {
                 // stable: ties keep the list order
                 hits.sort_by(|a, b| b.0.total_cmp(&a.0));
+            }
+            // Corvene (`291-recent-worktrees`): a Recent repository used in
+            // several worktrees gets a row per worktree, most recent first
+            if group.identifier == RepositoryListGroup::Recent
+                && state.flags.bool(corvene_core::flags::ids::RECENT_WORKTREES)
+            {
+                hits = hits
+                    .into_iter()
+                    .flat_map(|(score, repo, positions, d)| {
+                        let paths = recent_worktree_paths(state, &repo);
+                        if paths.len() < 2 {
+                            return vec![(score, repo, positions, d)];
+                        }
+                        paths
+                            .into_iter()
+                            .map(|path| {
+                                let mut row = repo.clone();
+                                row.path = path;
+                                (score, row, positions.clone(), d)
+                            })
+                            .collect()
+                    })
+                    .collect();
             }
             if ungrouped && group.identifier != RepositoryListGroup::Recent {
                 all.extend(hits.into_iter().map(|(_, r, p, _)| (r, p, false)));
@@ -811,8 +838,23 @@ impl RepositoryFoldout {
             }),
             ..Default::default()
         };
+        // Corvene (`291-recent-worktrees`): a Recent row for another
+        // worktree of the repository than the one it is in now
+        let worktree_row = self
+            .state
+            .read(cx)
+            .repository(id)
+            .is_some_and(|r| r.path != repo.path);
+        let row_id: ElementId = if worktree_row {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            repo.path.hash(&mut hasher);
+            ("repo-worktree-row", hasher.finish()).into()
+        } else {
+            ("repo-row", id).into()
+        };
         div()
-            .id(("repo-row", id))
+            .id(row_id)
             .a11y_row(label, selected)
             .h(ROW_HEIGHT())
             .w_full()
@@ -859,7 +901,10 @@ impl RepositoryFoldout {
                 crate::widgets::rich_tooltip(text, bold)
             })
             .tooltip_show_delay(crate::widgets::TOOLTIP_DELAY)
-            .on_click(move |_, _, cx| Dispatcher::select_repository(id, cx))
+            .on_click({
+                let row = repo.clone();
+                move |_, _, cx| select_row(&row, cx)
+            })
             .on_mouse_down(MouseButton::Right, {
                 let repo = repo.clone();
                 move |ev: &MouseDownEvent, window, cx| {
@@ -1501,13 +1546,34 @@ impl Render for RepositoryFoldout {
                             })
                             .children(group.repos.iter().enumerate().map(
                                 |(ix, (repo, matched, needs_disambiguation))| {
+                                    // `291-recent-worktrees`: a repository
+                                    // listed once per worktree names it
+                                    let state = self.state.read(cx);
+                                    let current_path = state.repository(repo.id).map(|r| &r.path);
+                                    let worktree_rows = group.recent
+                                        && group
+                                            .repos
+                                            .iter()
+                                            .filter(|(r, _, _)| r.id == repo.id)
+                                            .count()
+                                            > 1;
+                                    // (the folder name, unless the row's name is that already)
+                                    let detail = if worktree_rows {
+                                        repo.path
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy().into_owned())
+                                            .filter(|folder| *folder != repo.name())
+                                    } else {
+                                        details.remove(&repo.id)
+                                    };
                                     self.row(
                                         repo,
                                         matched,
                                         *needs_disambiguation,
-                                        selected == Some(repo.id),
+                                        selected == Some(repo.id)
+                                            && current_path == Some(&repo.path),
                                         highlighted == Some(first + ix),
-                                        details.remove(&repo.id),
+                                        detail,
                                         cx,
                                     )
                                 },
@@ -1517,6 +1583,47 @@ impl Render for RepositoryFoldout {
             )
             .when(add_open, |d| d.child(self.add_menu(cx)))
     }
+}
+
+/// Select a list row's repository; a `291-recent-worktrees` row of another
+/// worktree also switches the repository to it.
+fn select_row(row: &Repository, cx: &mut App) {
+    let current = AppState::global(cx)
+        .read(cx)
+        .repository(row.id)
+        .map(|r| r.path.clone());
+    match current {
+        Some(current) if current != row.path => {
+            Dispatcher::select_recent_worktree(row.id, row.path.clone(), cx)
+        }
+        _ => Dispatcher::select_repository(row.id, cx),
+    }
+}
+
+/// `291-recent-worktrees`: the worktrees `repo` was last used in (its
+/// current one included), most recent first, at most three; worktrees the
+/// last refresh no longer lists are left out.
+fn recent_worktree_paths(state: &AppState, repo: &Repository) -> Vec<std::path::PathBuf> {
+    let known = state
+        .repo_states
+        .get(&repo.id)
+        .map(|rs| rs.worktrees.as_slice())
+        .unwrap_or_default();
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    for (id, path) in &state.recent_worktrees {
+        if *id != repo.id || paths.contains(path) {
+            continue;
+        }
+        if *path != repo.path && !known.is_empty() && !known.iter().any(|w| w.path == *path) {
+            continue;
+        }
+        paths.push(path.clone());
+    }
+    if !paths.contains(&repo.path) {
+        paths.insert(0, repo.path.clone());
+    }
+    paths.truncate(3);
+    paths
 }
 
 /// `HighlightText`'s bold ranges (bytes of `text`) for the matched char

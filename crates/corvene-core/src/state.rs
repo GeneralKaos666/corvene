@@ -2,7 +2,7 @@
 //! views observe; only the `Dispatcher` mutates it.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -1013,6 +1013,9 @@ pub const BUSY_INDICATOR_DELAY: std::time::Duration = std::time::Duration::from_
 
 pub const INCOMING_COMMITS_LIMIT: usize = 10;
 
+/// `291-recent-worktrees`: how many (repository, worktree) uses are kept.
+pub const RECENT_WORKTREES_LENGTH: usize = 30;
+
 /// Per-repository cache (`IRepositoryState`, trimmed).
 #[derive(Clone, Debug, Default)]
 pub struct RepositoryState {
@@ -1400,6 +1403,11 @@ pub struct AppState {
     pub repositories: Vec<Repository>,
     /// Most recent first, max 3 (GHD `RecentRepositoriesLength`).
     pub recent: Vec<u64>,
+    /// Corvene (`291-recent-worktrees`): the worktrees each repository was
+    /// last used in, most recent first (`(id, worktree path)`, at most
+    /// [`RECENT_WORKTREES_LENGTH`]); the Recent group lists a repository
+    /// once per worktree.
+    pub recent_worktrees: Vec<(u64, PathBuf)>,
     pub selected: Option<u64>,
     pub repo_states: HashMap<u64, RepositoryState>,
     pub accounts: Vec<Account>,
@@ -1673,6 +1681,39 @@ impl AppState {
     }
 
     /// GHD `RepositoriesStore`: the repository list and its persistence.
+    /// `291-recent-worktrees`: the repository is in use at its current path.
+    pub fn record_recent_worktree(&mut self, id: u64) {
+        let Some(path) = self.repository(id).map(|r| r.path.clone()) else {
+            return;
+        };
+        if self.recent_worktrees.first() == Some(&(id, path.clone())) {
+            return;
+        }
+        self.recent_worktrees
+            .retain(|(r, p)| !(*r == id && *p == path));
+        self.recent_worktrees.insert(0, (id, path));
+        self.recent_worktrees.truncate(RECENT_WORKTREES_LENGTH);
+        self.save_recent_worktrees();
+    }
+
+    /// `291-recent-worktrees`: forget the worktree `path` of `id` (`None`:
+    /// all of its worktrees).
+    pub fn forget_recent_worktrees(&mut self, id: u64, path: Option<&Path>) {
+        let before = self.recent_worktrees.len();
+        self.recent_worktrees
+            .retain(|(r, p)| !(*r == id && path.is_none_or(|path| p == path)));
+        if self.recent_worktrees.len() != before {
+            self.save_recent_worktrees();
+        }
+    }
+
+    fn save_recent_worktrees(&self) {
+        use crate::persistence::StoreExt;
+        if let Err(err) = self.store.save_recent_worktrees(&self.recent_worktrees) {
+            tracing::warn!(%err, "could not save the recent worktrees");
+        }
+    }
+
     pub fn repositories_store(&mut self) -> crate::repositories_store::RepositoriesStore<'_> {
         crate::repositories_store::RepositoriesStore::new(&self.store, &mut self.repositories)
     }

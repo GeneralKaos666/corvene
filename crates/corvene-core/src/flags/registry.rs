@@ -1952,6 +1952,23 @@ registry! {
         code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-ui/src/dialogs/move_repository_to_group.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// The Recent group lists the worktrees a repository was used in.
+    RECENT_WORKTREES = 291 "recent-worktrees" {
+        title: "Worktrees in the Recent group",
+        summary: "A recently used repository that was open in several of its worktrees gets a \
+                  row in the repository list's Recent group for each of them (up to three, most \
+                  recent first), with the worktree's folder name dimmed after the name; picking \
+                  one switches the repository to that worktree.",
+        ghd_behaviour: "The Recent group lists each repository once and opens it in whichever \
+                        worktree it was switched to last.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22376)],
+        code: &["crates/corvene-ui/src/repository_list.rs", "crates/corvene-core/src/worktrees.rs", "crates/corvene-core/src/state.rs"],
+    },
+
     // ---- 300 GitHub ----
 
     /// The quick view's "opened … by author" line.

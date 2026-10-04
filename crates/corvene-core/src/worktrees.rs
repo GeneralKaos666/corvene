@@ -5,6 +5,11 @@
 //! linked worktree it points at is deleted outside Corvene it falls back to
 //! the main worktree instead of showing a stale repository.
 //!
+//! Deviation (`291-recent-worktrees`): the worktrees each repository was
+//! used in are remembered ([`crate::AppState::recent_worktrees`]) so the
+//! repository list's Recent group can list them (GHD's recent repositories
+//! are ids only, `app-store.ts` `updateRecentRepositories`).
+//!
 //! Deviation: GHD records `mainWorktreePath` when it switches worktrees and
 //! otherwise asks the worktree's git dir; Corvene also records it on every
 //! refresh (from `git worktree list`), since `git worktree remove` deletes the
@@ -61,6 +66,11 @@ impl Dispatcher {
                 let info = match result {
                     Ok(info) => info,
                     Err(err) => {
+                        // `291-recent-worktrees`: not offered again
+                        Self::state(cx).update(cx, |s, cx| {
+                            s.forget_recent_worktrees(id, Some(&path));
+                            cx.notify();
+                        });
                         Self::show_error(
                             "Could not switch worktree",
                             format!(
@@ -140,6 +150,7 @@ impl Dispatcher {
         });
         match switched {
             Some(Ok(())) => {
+                Self::state(cx).update(cx, |s, _| s.record_recent_worktree(id));
                 Self::refresh_repository(id, cx);
                 Self::start_watching(id, cx);
             }
@@ -147,6 +158,20 @@ impl Dispatcher {
             // returned
             Some(Err(existing)) => Self::select_repository(existing, cx),
             None => {}
+        }
+    }
+
+    /// Corvene (`291-recent-worktrees`): a Recent row of the repository
+    /// list: select the repository and switch it to the worktree at `path`
+    /// unless it is there already.
+    pub fn select_recent_worktree(id: u64, path: PathBuf, cx: &mut dyn Host) {
+        Self::select_repository(id, cx);
+        let current = Self::state(cx)
+            .read(cx)
+            .repository(id)
+            .map(|r| r.path.clone());
+        if current.is_some_and(|current| current != path) {
+            Self::switch_worktree(id, path, cx);
         }
     }
 

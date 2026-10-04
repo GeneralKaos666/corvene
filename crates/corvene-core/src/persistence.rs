@@ -579,6 +579,10 @@ pub trait StoreExt {
 
     fn recent_repositories(&self) -> Result<Vec<u64>>;
     fn save_recent_repositories(&self, ids: &[u64]) -> Result<()>;
+    /// `291-recent-worktrees`: (repository id, worktree path), most recent
+    /// first.
+    fn recent_worktrees(&self) -> Result<Vec<(u64, PathBuf)>>;
+    fn save_recent_worktrees(&self, entries: &[(u64, PathBuf)]) -> Result<()>;
     /// The repository list's indicators by repository id (flag
     /// `271-persist-repository-indicators`).
     fn repository_indicators(
@@ -753,6 +757,16 @@ impl StoreExt for Store {
 
     fn save_recent_repositories(&self, ids: &[u64]) -> Result<()> {
         self.set("repositories.recent", ids)
+    }
+
+    fn recent_worktrees(&self) -> Result<Vec<(u64, PathBuf)>> {
+        Ok(self
+            .get("repositories.recent_worktrees")?
+            .unwrap_or_default())
+    }
+
+    fn save_recent_worktrees(&self, entries: &[(u64, PathBuf)]) -> Result<()> {
+        self.set("repositories.recent_worktrees", entries)
     }
 
     fn repository_indicators(

@@ -69,6 +69,8 @@ impl Dispatcher {
             }
         }
         let recent = store.recent_repositories().unwrap_or_default();
+        let mut recent_worktrees = store.recent_worktrees().unwrap_or_default();
+        recent_worktrees.retain(|(id, _)| repositories.iter().any(|r| r.id == *id));
         let selected = store
             .selected_repository()
             .ok()
@@ -150,6 +152,7 @@ impl Dispatcher {
             git_error,
             repositories,
             recent,
+            recent_worktrees,
             selected,
             repo_states: Default::default(),
             accounts,
@@ -905,6 +908,7 @@ impl Dispatcher {
                 usize::try_from(s.flags.number(crate::flags::ids::RECENT_REPOSITORIES_COUNT))
                     .unwrap_or(RECENT_REPOSITORIES_LENGTH);
             s.recent.truncate(shown.max(RECENT_REPOSITORIES_LENGTH));
+            s.record_recent_worktree(id);
             s.foldout = None;
             // flag `218-close-dialogs-on-repository-switch` (Corvene addition,
             // desktop/desktop#9847): a dialog bound to another repository
@@ -953,6 +957,7 @@ impl Dispatcher {
         let (next, moved) = state.update(cx, |s, cx| {
             s.repositories.retain(|r| r.id != id);
             s.recent.retain(|r| *r != id);
+            s.forget_recent_worktrees(id, None);
             s.remove_repo_state(id);
             let moved = s.selected == Some(id);
             let next = if moved {
