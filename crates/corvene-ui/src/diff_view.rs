@@ -53,6 +53,11 @@
 //! Deviation (`747-intra-line-max-length`): the line length beyond which no
 //! intra-line range is computed can be changed (GHD: 1024, fixed).
 //!
+//! Deviation (`791-word-intra-line-diff`): a modified line highlights each
+//! changed word (a word diff of the paired lines) instead of GHD's one range
+//! between the common prefix and suffix (`ui/diff/diff-helpers.tsx`
+//! `getModifiedRows` / `relativeChanges`).
+//!
 //! Deviation (`748-diff-show-whitespace`): spaces can be marked with dots
 //! and tabs with a line.
 //!
@@ -368,7 +373,7 @@ pub struct DiffView {
     split_rows: Rc<Vec<SplitRow>>,
     unified_to_split: Rc<Vec<usize>>,
     /// Intra-line change ranges of the unified rows.
-    unified_inner: Rc<Vec<Option<std::ops::Range<usize>>>>,
+    unified_inner: Rc<Vec<Vec<std::ops::Range<usize>>>>,
     /// Whether the list currently shows `split_rows`.
     split_mode: bool,
     /// New-side file lines for expansion (`fileContents.newContents`).
@@ -787,6 +792,7 @@ impl DiffView {
                 0 => None,
                 n => Some(n as usize),
             },
+            words: flags.bool(corvene_core::flags::ids::WORD_INTRA_LINE_DIFF),
         };
         let split = build_split_rows(&self.rows, options);
         self.unified_to_split = Rc::new(unified_to_split(&split, self.rows.len()));

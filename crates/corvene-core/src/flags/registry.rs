@@ -4801,6 +4801,22 @@ registry! {
         code: &["crates/corvene-core/src/line_selection.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Intra-line highlights mark the changed words.
+    WORD_INTRA_LINE_DIFF = 791 "word-intra-line-diff" {
+        title: "Highlight changed words",
+        summary: "In a modified line (a removed line paired with an added one), the darker \
+                  highlight marks each changed word, found by a word diff of the two lines, \
+                  so two small edits far apart in a line no longer highlight everything \
+                  between them.",
+        ghd_behaviour: "One highlight from the first to the last changed character of the line.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2485), Upstream::issue(2700)],
+        code: &["crates/corvene-ui/src/diff_view_rows.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

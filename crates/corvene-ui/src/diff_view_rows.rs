@@ -162,8 +162,8 @@ pub struct RowContext {
     pub view: WeakEntity<DiffView>,
     /// Syntax spans per row (same indexing as the rows), once highlighted.
     pub tokens: Option<Rc<Vec<Vec<Span>>>>,
-    /// Intra-line change range per unified row (`unified_inner`).
-    pub inner: Rc<Vec<Option<Range<usize>>>>,
+    /// Intra-line change ranges per unified row (`unified_inner`).
+    pub inner: Rc<Vec<Vec<Range<usize>>>>,
     pub search: Option<Rc<SearchIndex>>,
     /// Settings › Accessibility › Show check marks in the diff.
     pub show_check_marks: bool,
@@ -221,7 +221,8 @@ fn open_at_line_on_alt_click(
 
 /// The selectable text of a row: records its bounds for hit-testing, starts
 /// a text selection on mouse down (shift extends) and paints the selection.
-/// `inner` is the intra-line change background, drawn behind the text over
+/// `inner` is the intra-line change background (one range, or several with
+/// `791-word-intra-line-diff`), drawn behind the text over
 /// the font's content area like the inline `.cm-diff-add-inner` span in GHD
 /// (a `HighlightStyle` background would fill the whole 20 px line).
 fn selectable_text(
@@ -230,7 +231,7 @@ fn selectable_text(
     column: Column,
     row: &Row,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
-    inner: Option<(Range<usize>, Hsla)>,
+    inner: Vec<(Range<usize>, Hsla)>,
 ) -> Div {
     let text = &row.text;
     let bounds = ctx.text_bounds.clone();
@@ -256,7 +257,7 @@ fn selectable_text(
                     );
                 },
                 move |_, _, window, cx| {
-                    if let Some((range, color)) = &inner {
+                    for (range, color) in &inner {
                         paint_inline_background(&layout, range.clone(), *color, window);
                     }
                     if let Some(tabs) = &whitespace {
@@ -458,7 +459,7 @@ pub fn is_selected(sel: &DiffSelection, temp: Option<TempSelection>, line: u32) 
 fn merge_highlights(
     spans: &[Span],
     hits: &[(Range<usize>, bool)],
-    inner: Option<(Range<usize>, Hsla)>,
+    inner: &[(Range<usize>, Hsla)],
     selection: Option<Range<usize>>,
     len: usize,
     t: &GhdTheme,
@@ -472,7 +473,7 @@ fn merge_highlights(
         cuts.push(r.start.min(len));
         cuts.push(r.end.min(len));
     }
-    if let Some((r, _)) = &inner {
+    for (r, _) in inner {
         cuts.push(r.start.min(len));
         cuts.push(r.end.min(len));
     }
@@ -491,8 +492,8 @@ fn merge_highlights(
         // `_diff.scss`: "Intra line markings takes precedence over syntax
         // highlighting" (`color: var(--diff-add-text-color) !important`)
         let color = inner
-            .as_ref()
-            .filter(|(r, _)| r.start <= a && r.end >= b)
+            .iter()
+            .find(|(r, _)| r.start <= a && r.end >= b)
             .map(|(_, fg)| *fg)
             .or_else(|| {
                 spans
@@ -777,23 +778,26 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
                 .and_then(|s| s.by_row.get(&ix))
                 .map(|v| v.as_slice())
                 .unwrap_or(&[]);
-            let inner = ctx.inner.get(ix).cloned().flatten().map(|r| {
-                if row.kind == DiffLineKind::Delete {
-                    (r, t.diff_delete_inner_background, t.diff_delete_text)
-                } else {
-                    (r, t.diff_add_inner_background, t.diff_add_text)
-                }
-            });
-            let inner_fg = inner.as_ref().map(|(r, _, fg)| (r.clone(), *fg));
-            let inner_bg = inner.map(|(r, bg, _)| (r, bg));
+            let (inner_bg_color, inner_fg_color) = if row.kind == DiffLineKind::Delete {
+                (t.diff_delete_inner_background, t.diff_delete_text)
+            } else {
+                (t.diff_add_inner_background, t.diff_add_text)
+            };
+            let ranges = ctx.inner.get(ix).map(Vec::as_slice).unwrap_or(&[]);
+            let inner_fg: Vec<(Range<usize>, Hsla)> =
+                ranges.iter().map(|r| (r.clone(), inner_fg_color)).collect();
+            let inner_bg: Vec<(Range<usize>, Hsla)> =
+                ranges.iter().map(|r| (r.clone(), inner_bg_color)).collect();
             let selection = ctx.selection_range(ix, Column::Before, row.text.len());
-            let highlights =
-                if spans.is_empty() && hits.is_empty() && inner_fg.is_none() && selection.is_none()
-                {
-                    Vec::new()
-                } else {
-                    merge_highlights(spans, hits, inner_fg, selection, row.text.len(), t)
-                };
+            let highlights = if spans.is_empty()
+                && hits.is_empty()
+                && inner_fg.is_empty()
+                && selection.is_none()
+            {
+                Vec::new()
+            } else {
+                merge_highlights(spans, hits, &inner_fg, selection, row.text.len(), t)
+            };
             selectable_text(ctx, ix, Column::Before, row, highlights, inner_bg)
         })
         .when(row.no_newline, |d| {
@@ -1170,6 +1174,10 @@ pub struct IntraLineOptions {
     /// ([`MAX_INTRA_LINE_DIFF_LEN`]; `747-intra-line-max-length`, `None` for
     /// no limit).
     pub max_len: Option<usize>,
+    /// `791-word-intra-line-diff`: highlight the changed words
+    /// ([`word_changes`]) instead of GHD's one range between the common
+    /// prefix and suffix.
+    pub words: bool,
 }
 
 impl Default for IntraLineOptions {
@@ -1177,8 +1185,71 @@ impl Default for IntraLineOptions {
         Self {
             graphemes: false,
             max_len: Some(MAX_INTRA_LINE_DIFF_LEN),
+            words: false,
         }
     }
+}
+
+/// Word, run of whitespace or single other character: the tokens
+/// [`word_changes`] compares.
+fn word_tokens(text: &str) -> Vec<Range<usize>> {
+    #[derive(PartialEq)]
+    enum Class {
+        Word,
+        Space,
+        Other,
+    }
+    let class = |c: char| {
+        if c.is_alphanumeric() || c == '_' {
+            Class::Word
+        } else if c.is_whitespace() {
+            Class::Space
+        } else {
+            Class::Other
+        }
+    };
+    let mut out: Vec<Range<usize>> = Vec::new();
+    let mut last: Option<Class> = None;
+    for (ix, c) in text.char_indices() {
+        let current = class(c);
+        let extends = current != Class::Other && last.as_ref() == Some(&current);
+        match out.last_mut() {
+            Some(range) if extends => range.end = ix + c.len_utf8(),
+            _ => out.push(ix..ix + c.len_utf8()),
+        }
+        last = Some(current);
+    }
+    out
+}
+
+/// Corvene `791-word-intra-line-diff`: the byte ranges of `a` and `b` that
+/// a word diff of the two finds changed (removed from `a`, added in `b`),
+/// adjacent changes merged. GHD highlights a single range from the first to
+/// the last changed character ([`relative_changes`]), which covers
+/// unchanged words between two edits.
+pub fn word_changes(a: &str, b: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+    let (ta, tb) = (word_tokens(a), word_tokens(b));
+    let words_a: Vec<&str> = ta.iter().map(|r| &a[r.clone()]).collect();
+    let words_b: Vec<&str> = tb.iter().map(|r| &b[r.clone()]).collect();
+    let span = |tokens: &[Range<usize>], range: Range<usize>| {
+        (!range.is_empty()).then(|| tokens[range.start].start..tokens[range.end - 1].end)
+    };
+    let push = |out: &mut Vec<Range<usize>>, range: Option<Range<usize>>| {
+        let Some(range) = range else { return };
+        match out.last_mut() {
+            Some(last) if last.end == range.start => last.end = range.end,
+            _ => out.push(range),
+        }
+    };
+    let (mut ra, mut rb) = (Vec::new(), Vec::new());
+    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &words_a, &words_b) {
+        let (tag, old, new) = op.as_tag_tuple();
+        if tag != similar::DiffTag::Equal {
+            push(&mut ra, span(&ta, old));
+            push(&mut rb, span(&tb, new));
+        }
+    }
+    (ra, rb)
 }
 
 /// `range` of `text` widened to the grapheme clusters it touches.
@@ -1202,11 +1273,12 @@ pub fn snap_to_graphemes(text: &str, range: Range<usize>) -> Range<usize> {
 }
 
 /// One side of a split row: the unified row it shows and, for paired
-/// modified lines, the changed range highlighted with the inner colour.
+/// modified lines, the changed ranges highlighted with the inner colour
+/// (GHD: one; `791-word-intra-line-diff`: one per run of changed words).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SplitSide {
     pub unified: usize,
-    pub inner: Option<Range<usize>>,
+    pub inner: Vec<Range<usize>>,
 }
 
 /// GHD `DiffRow` in side-by-side mode (`getDiffRowsFromHunk` / `getModifiedRows`).
@@ -1268,27 +1340,42 @@ pub fn build_split_rows(rows: &[Row], options: IntraLineOptions) -> Vec<SplitRow
                     let (d, a) = (deleted[k], added[k]);
                     let short =
                         |ix: usize| options.max_len.is_none_or(|max| rows[ix].text.len() < max);
-                    let (before_inner, after_inner) = if with_tokens && short(d) && short(a) {
-                        let (mut b, mut af) = relative_changes(&rows[d].text, &rows[a].text);
-                        if options.graphemes {
-                            // widen both sides alike: the common prefix and
-                            // suffix stay the same length
-                            let (b2, af2) = (
-                                snap_to_graphemes(&rows[d].text, b.clone()),
-                                snap_to_graphemes(&rows[a].text, af.clone()),
-                            );
-                            let (lead, trail) = (
-                                (b.start - b2.start).max(af.start - af2.start),
-                                (b2.end - b.end).max(af2.end - af.end),
-                            );
-                            let (dl, al) = (rows[d].text.len(), rows[a].text.len());
-                            b = b.start.saturating_sub(lead)..(b.end + trail).min(dl);
-                            af = af.start.saturating_sub(lead)..(af.end + trail).min(al);
-                        }
-                        (Some(b), Some(af))
-                    } else {
-                        (None, None)
-                    };
+                    let (before_inner, after_inner) =
+                        if with_tokens && short(d) && short(a) && options.words {
+                            let (b, af) = word_changes(&rows[d].text, &rows[a].text);
+                            let snap =
+                                |text: &str, ranges: Vec<Range<usize>>| -> Vec<Range<usize>> {
+                                    if options.graphemes {
+                                        ranges
+                                            .into_iter()
+                                            .map(|r| snap_to_graphemes(text, r))
+                                            .collect()
+                                    } else {
+                                        ranges
+                                    }
+                                };
+                            (snap(&rows[d].text, b), snap(&rows[a].text, af))
+                        } else if with_tokens && short(d) && short(a) {
+                            let (mut b, mut af) = relative_changes(&rows[d].text, &rows[a].text);
+                            if options.graphemes {
+                                // widen both sides alike: the common prefix and
+                                // suffix stay the same length
+                                let (b2, af2) = (
+                                    snap_to_graphemes(&rows[d].text, b.clone()),
+                                    snap_to_graphemes(&rows[a].text, af.clone()),
+                                );
+                                let (lead, trail) = (
+                                    (b.start - b2.start).max(af.start - af2.start),
+                                    (b2.end - b.end).max(af2.end - af.end),
+                                );
+                                let (dl, al) = (rows[d].text.len(), rows[a].text.len());
+                                b = b.start.saturating_sub(lead)..(b.end + trail).min(dl);
+                                af = af.start.saturating_sub(lead)..(af.end + trail).min(al);
+                            }
+                            (vec![b], vec![af])
+                        } else {
+                            (Vec::new(), Vec::new())
+                        };
                     out.push(SplitRow::Modified {
                         before: SplitSide {
                             unified: d,
@@ -1304,7 +1391,7 @@ pub fn build_split_rows(rows: &[Row], options: IntraLineOptions) -> Vec<SplitRow
                     out.push(SplitRow::Deleted {
                         before: SplitSide {
                             unified: d,
-                            inner: None,
+                            inner: Vec::new(),
                         },
                     });
                 }
@@ -1312,7 +1399,7 @@ pub fn build_split_rows(rows: &[Row], options: IntraLineOptions) -> Vec<SplitRow
                     out.push(SplitRow::Added {
                         after: SplitSide {
                             unified: a,
-                            inner: None,
+                            inner: Vec::new(),
                         },
                     });
                 }
@@ -1339,8 +1426,8 @@ pub fn unified_to_split(split: &[SplitRow], unified_len: usize) -> Vec<usize> {
 /// GHD `getModifiedRows` without `showSideBySideDiff`: the unified view
 /// highlights the same intra-line ranges, the n-th deleted line of a block
 /// against its n-th added line.
-pub fn unified_inner(split: &[SplitRow], unified_len: usize) -> Vec<Option<Range<usize>>> {
-    let mut map = vec![None; unified_len];
+pub fn unified_inner(split: &[SplitRow], unified_len: usize) -> Vec<Vec<Range<usize>>> {
+    let mut map = vec![Vec::new(); unified_len];
     for row in split {
         if let SplitRow::Modified { before, after } = row {
             for side in [before, after] {
@@ -1540,7 +1627,7 @@ fn split_content(
     column: Column,
     row: &Row,
     prefix: &'static str,
-    inner: Option<(Range<usize>, Hsla, Hsla)>,
+    inner: Option<(&[Range<usize>], Hsla, Hsla)>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -1558,13 +1645,19 @@ fn split_content(
         .map(|v| v.as_slice())
         .unwrap_or(&[]);
     let selection = ctx.selection_range(list_ix, column, row.text.len());
-    let inner_fg = inner.as_ref().map(|(r, _, fg)| (r.clone(), *fg));
-    let inner_bg = inner.map(|(r, bg, _)| (r, bg));
+    let (inner_fg, inner_bg): (Vec<_>, Vec<_>) = inner
+        .map(|(ranges, bg, fg)| {
+            ranges
+                .iter()
+                .map(|r| ((r.clone(), fg), (r.clone(), bg)))
+                .unzip()
+        })
+        .unwrap_or_default();
     let highlights =
-        if spans.is_empty() && hits.is_empty() && inner_fg.is_none() && selection.is_none() {
+        if spans.is_empty() && hits.is_empty() && inner_fg.is_empty() && selection.is_none() {
             Vec::new()
         } else {
-            merge_highlights(spans, hits, inner_fg, selection, row.text.len(), t)
+            merge_highlights(spans, hits, &inner_fg, selection, row.text.len(), t)
         };
     let body = selectable_text(ctx, list_ix, column, row, highlights, inner_bg);
     let view_for_menu = ctx.view.clone();
@@ -1839,7 +1932,7 @@ pub fn render_split_row(
                         } else {
                             (t.diff_add_inner_background, t.diff_add_text)
                         };
-                        let inner = s.inner.clone().map(|r| (r, inner_bg, inner_fg));
+                        let inner = Some((s.inner.as_slice(), inner_bg, inner_fg));
                         let prefix = if column == Column::Before {
                             "  -  "
                         } else {
@@ -1900,7 +1993,7 @@ mod tests {
     use super::{
         IntraLineOptions, MAX_INTRA_LINE_DIFF_LEN, RangeType, SearchHit, SplitRow, build_rows,
         build_split_rows, expand_tabs, relative_changes, search_rows, snap_to_graphemes,
-        spans_for_row, tab_offsets, unified_inner, unified_to_split,
+        spans_for_row, tab_offsets, unified_inner, unified_to_split, word_changes,
     };
     use corvene_core::{DiffHunk, DiffLine, DiffLineKind};
 
@@ -2024,7 +2117,7 @@ mod tests {
             SplitRow::Modified { before, after } => {
                 assert_eq!((before.unified, after.unified), (2, 3));
                 // counts differ (1 deleted, 2 added) → no intra-line ranges
-                assert_eq!(before.inner, None);
+                assert!(before.inner.is_empty());
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -2045,7 +2138,7 @@ mod tests {
             &build_split_rows(&rows, IntraLineOptions::default()),
             rows.len(),
         );
-        assert_eq!(inner, vec![None, None, Some(0..1), Some(0..1), None]);
+        assert_eq!(inner, vec![vec![], vec![], vec![0..1], vec![0..1], vec![]]);
         // counts differ → nothing highlighted
         let x = crate::diff_expansion::from_hunks(&[hunk()], None);
         let rows = build_rows(&x);
@@ -2053,7 +2146,7 @@ mod tests {
             &build_split_rows(&rows, IntraLineOptions::default()),
             rows.len(),
         );
-        assert!(inner.iter().all(Option::is_none));
+        assert!(inner.iter().all(Vec::is_empty));
     }
 
     #[test]
@@ -2081,9 +2174,52 @@ mod tests {
         assert!(
             inner(Some(MAX_INTRA_LINE_DIFF_LEN))
                 .iter()
-                .all(Option::is_none)
+                .all(Vec::is_empty)
         );
-        assert_eq!(inner(None)[2], Some(2000..2001));
+        assert_eq!(inner(None)[2], one(2000..2001));
+    }
+
+    /// One intra-line range (a literal `[a..b]` reads like a mistake to clippy).
+    fn one(range: std::ops::Range<usize>) -> Vec<std::ops::Range<usize>> {
+        vec![range]
+    }
+
+    #[test]
+    fn word_changes_highlight_only_the_changed_words() {
+        // GHD: one range from the first to the last change
+        assert_eq!(
+            relative_changes("let total = price * count;", "let sum = price * amount;"),
+            (4..21, 4..20)
+        );
+        let (a, b) = word_changes("let total = price * count;", "let sum = price * amount;");
+        assert_eq!(a, [4..9, 20..25]);
+        assert_eq!(b, [4..7, 18..24]);
+        // adjacent changed tokens merge; an unchanged line has none
+        assert_eq!(
+            word_changes("a.b", "x.y"),
+            (vec![0..1, 2..3], vec![0..1, 2..3])
+        );
+        assert_eq!(word_changes("same words", "same words"), (vec![], vec![]));
+        let (removed, added) = word_changes("foo(1)", "foo(1, 2)");
+        assert!(removed.is_empty());
+        assert_eq!(added, one(5..8));
+    }
+
+    #[test]
+    fn word_option_feeds_split_rows() {
+        let mut h = hunk();
+        h.lines.remove(4);
+        h.lines[2].text = "one two three".into();
+        h.lines[3].text = "one 2 three".into();
+        let x = crate::diff_expansion::from_hunks(&[h], None);
+        let rows = build_rows(&x);
+        let options = IntraLineOptions {
+            words: true,
+            ..Default::default()
+        };
+        let inner = unified_inner(&build_split_rows(&rows, options), rows.len());
+        assert_eq!(inner[2], one(4..7));
+        assert_eq!(inner[3], one(4..5));
     }
 
     #[test]
