@@ -151,7 +151,8 @@ pub use remote_ops::{
     is_using_lfs_by_attributes, last_fetched, lfs_available, lfs_hooks_installed,
     parse_progress_line, prune_remote, pull, pull_with_rebase, push, push_with_progress,
     remote_failure, remote_head_resolves, remote_read_failure_cause, remove_remote, set_remote_url,
-    strip_vt_control_characters, update_remote_head, update_submodules, upstream_tip_in_reflog,
+    strip_vt_control_characters, track_in_lfs, update_remote_head, update_submodules,
+    upstream_tip_in_reflog,
 };
 pub use repo::{
     ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,

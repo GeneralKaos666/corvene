@@ -7,6 +7,10 @@
 //! GHD runs them in the view after the commit message's own checks
 //! (unknown co-authors); Corvene runs them in [`Dispatcher::commit_with`], which
 //! the commit form and those dialogs call, off the main thread.
+//!
+//! Deviation: with `784-suggest-lfs-tracking` (and Git LFS installed) the
+//! dialog can track the files' extensions in Git LFS instead
+//! ([`lfs_track_patterns`], [`Dispatcher::track_in_lfs`]).
 
 use crate::dispatcher::Dispatcher;
 use crate::host::Host;
@@ -57,6 +61,10 @@ impl Dispatcher {
         if paths.is_empty() {
             return Self::create_commit(id, summary, description, cx);
         }
+        let suggest_lfs = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::SUGGEST_LFS_TRACKING);
         Self::set_committing(id, true, cx);
         crate::remote::spawn_bg(
             cx,
@@ -64,11 +72,21 @@ impl Dispatcher {
                 let large =
                     corvene_git::large_file_paths(&workdir, &paths, corvene_git::RECEIVE_LIMIT);
                 if large.is_empty() {
-                    return large;
+                    return (large, Vec::new());
                 }
-                corvene_git::files_not_tracked_by_lfs(git, &workdir, &large).unwrap_or(large)
+                let oversized =
+                    corvene_git::files_not_tracked_by_lfs(git.clone(), &workdir, &large)
+                        .unwrap_or(large);
+                // `784-suggest-lfs-tracking`
+                let patterns =
+                    if suggest_lfs && !oversized.is_empty() && corvene_git::lfs_available(git) {
+                        lfs_track_patterns(&oversized)
+                    } else {
+                        Vec::new()
+                    };
+                (oversized, patterns)
             },
-            move |oversized, cx| {
+            move |(oversized, lfs_patterns), cx| {
                 Self::set_committing(id, false, cx);
                 if oversized.is_empty() {
                     let checks = CommitChecks {
@@ -82,10 +100,31 @@ impl Dispatcher {
                             files: oversized,
                             summary,
                             description,
+                            lfs_patterns,
                         },
                         cx,
                     );
                 }
+            },
+        );
+    }
+
+    /// `784-suggest-lfs-tracking`: `OversizedFiles` › Track … in Git LFS:
+    /// track `patterns` and turn `files` into pointers
+    /// ([`corvene_git::track_in_lfs`]), then back to the commit form, where
+    /// `.gitattributes` joins the changes.
+    pub fn track_in_lfs(id: u64, patterns: Vec<String>, files: Vec<String>, cx: &mut dyn Host) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::track_in_lfs(git, &workdir, &patterns, &files),
+            move |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not track the files in Git LFS", &err, cx);
+                }
+                Self::refresh_repository(id, cx);
             },
         );
     }
@@ -95,5 +134,44 @@ impl Dispatcher {
             s.repo_state_mut(id).committing = committing;
             cx.notify();
         });
+    }
+}
+
+/// `784-suggest-lfs-tracking`: what `git lfs track` gets for `files`: `*.ext`
+/// for each extension (in order, once), the path itself for a file without
+/// one.
+pub fn lfs_track_patterns(files: &[String]) -> Vec<String> {
+    let mut patterns: Vec<String> = Vec::new();
+    for file in files {
+        let name = file.rsplit('/').next().unwrap_or(file);
+        let pattern = match name.rsplit_once('.') {
+            Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => format!("*.{ext}"),
+            _ => file.clone(),
+        };
+        if !patterns.contains(&pattern) {
+            patterns.push(pattern);
+        }
+    }
+    patterns
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lfs_patterns_by_extension_or_path() {
+        let files = [
+            "videos/intro.mp4",
+            "outro.mp4",
+            "data/dump.tar.gz",
+            "bin/blob",
+            ".bigdotfile",
+        ]
+        .map(String::from);
+        assert_eq!(
+            lfs_track_patterns(&files),
+            vec!["*.mp4", "*.gz", "bin/blob", ".bigdotfile"]
+        );
     }
 }

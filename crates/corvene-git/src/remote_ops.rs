@@ -1392,6 +1392,43 @@ pub fn files_not_tracked_by_lfs<S: AsRef<str>>(
     Ok(untracked)
 }
 
+/// Corvene `784-suggest-lfs-tracking`: `git lfs track` the `patterns` (Git
+/// LFS set up for the repository first when git has no LFS filter, `git
+/// lfs install --local`), then `git add --renormalize` the tracked ones of
+/// `files`, so an index entry made before the patterns existed becomes a
+/// pointer too (untracked files become pointers when the commit stages
+/// them). `.gitattributes` is left for the commit.
+pub fn track_in_lfs(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    patterns: &[String],
+    files: &[String],
+) -> Result<()> {
+    if patterns.is_empty() {
+        return Ok(());
+    }
+    if config_value(git.clone(), workdir, "filter.lfs.clean").is_none() {
+        GitCommand::new(git.clone())
+            .args(["lfs", "install", "--local"])
+            .current_dir(workdir)
+            .run()?;
+    }
+    GitCommand::new(git.clone())
+        .args(["lfs", "track"])
+        .args(patterns)
+        .current_dir(workdir)
+        .run()?;
+    if !files.is_empty() {
+        GitCommand::new(git)
+            .args(["add", "--renormalize", "--"])
+            .args(files)
+            .env("GIT_LITERAL_PATHSPECS", "1")
+            .current_dir(workdir)
+            .run()?;
+    }
+    Ok(())
+}
+
 /// The repository's `pre-push` hook was written by Git LFS.
 pub fn lfs_hooks_installed(workdir: &Path) -> bool {
     std::fs::read_to_string(git_dir(workdir).join("hooks/pre-push"))

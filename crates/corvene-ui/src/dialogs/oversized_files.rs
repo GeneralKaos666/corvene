@@ -2,6 +2,10 @@
 //! `styles/ui/changes/_oversized-files-warning.scss`): included files over
 //! 100 MiB that Git LFS does not track; "Commit Anyway" commits them
 //! (`corvene_core::commit_checks`).
+//!
+//! Deviation: with `784-suggest-lfs-tracking` (Git LFS installed) a third
+//! button tracks the files' extensions in Git LFS and goes back to the
+//! commit form.
 
 use corvene_core::Dispatcher;
 use corvene_core::commit_checks::CommitChecks;
@@ -9,7 +13,9 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::context_menu::mac_or;
-use crate::dialog::{DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind};
+use crate::dialog::{
+    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog_with_kind,
+};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::mono_font;
@@ -23,15 +29,23 @@ pub struct OversizedFilesDialog {
     files: Vec<String>,
     summary: String,
     description: String,
+    lfs_patterns: Vec<String>,
 }
 
 impl OversizedFilesDialog {
-    pub fn new(repo: u64, files: Vec<String>, summary: String, description: String) -> Self {
+    pub fn new(
+        repo: u64,
+        files: Vec<String>,
+        summary: String,
+        description: String,
+        lfs_patterns: Vec<String>,
+    ) -> Self {
         Self {
             repo,
             files,
             summary,
             description,
+            lfs_patterns,
         }
     }
 }
@@ -95,7 +109,14 @@ impl Render for OversizedFilesDialog {
                     .into_any_element()
                     .into(),
                 " to store large files on GitHub.".into(),
-            ]));
+            ]))
+            // `784-suggest-lfs-tracking`
+            .when(!self.lfs_patterns.is_empty(), |d| {
+                d.child(div().mt(SPACING()).text_color(t.text_secondary).child(
+                    "Tracking them in Git LFS adds the patterns to .gitattributes, which \
+                             goes into the commit with the files.",
+                ))
+            });
         let (repo, summary, description) =
             (self.repo, self.summary.clone(), self.description.clone());
         let buttons = OkCancelButtonGroup {
@@ -120,6 +141,33 @@ impl Render for OversizedFilesDialog {
             },
         }
         .into_buttons();
+        // `784-suggest-lfs-tracking`: first in the macOS order (leftmost)
+        let mut buttons = buttons;
+        if !self.lfs_patterns.is_empty() {
+            let label: SharedString = if self.lfs_patterns.len() <= 2 {
+                format!("Track {} in Git LFS", self.lfs_patterns.join(", ")).into()
+            } else {
+                mac_or(
+                    "Track These Files in Git LFS",
+                    "Track these files in Git LFS",
+                )
+                .into()
+            };
+            let (patterns, files) = (self.lfs_patterns.clone(), self.files.clone());
+            buttons.insert(
+                0,
+                DialogButton {
+                    id: "oversized-files-track-lfs",
+                    label,
+                    primary: false,
+                    disabled: false,
+                    on_click: Box::new(move |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::track_in_lfs(repo, patterns.clone(), files.clone(), cx);
+                    }),
+                },
+            );
+        }
         dialog_with_kind(
             "oversized-files",
             DialogKind::Warning,

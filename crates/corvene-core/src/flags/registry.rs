@@ -4667,6 +4667,24 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Files Too Large › Track … in Git LFS.
+    SUGGEST_LFS_TRACKING = 784 "suggest-lfs-tracking" {
+        title: "Offer Git LFS for files that are too large",
+        summary: "The Files Too Large warning before a commit has a \"Track *.ext in Git LFS\" \
+                  button when Git LFS is installed: it tracks the files' extensions (the path \
+                  of a file without one) with git lfs track, setting Git LFS up for the \
+                  repository first if needed, and goes back to the commit form, where the files \
+                  are committed as LFS pointers along with the .gitattributes change.",
+        ghd_behaviour: "The warning links to an article about Git LFS; tracking the files is up \
+                        to the command line.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(6055)],
+        code: &["crates/corvene-ui/src/dialogs/oversized_files.rs", "crates/corvene-core/src/commit_checks.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

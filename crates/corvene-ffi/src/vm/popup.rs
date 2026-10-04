@@ -305,11 +305,13 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             files,
             summary,
             description,
+            lfs_patterns,
         } => {
             repo = Some(*r);
             f.put("summary", summary)
                 .put("description", description)
-                .list("files", files);
+                .list("files", files)
+                .list("lfs_patterns", lfs_patterns);
         }
         Popup::ConfirmCommitToDefaultBranch {
             repo: r,

@@ -307,12 +307,15 @@ pub enum Popup {
         description: String,
     },
     /// `OversizedFiles`: included files over 100 MiB that Git LFS does not
-    /// track; "Commit Anyway" commits them.
+    /// track; "Commit Anyway" commits them. `lfs_patterns`: what Corvene's
+    /// "Track … in Git LFS" button tracks (`784-suggest-lfs-tracking`, Git
+    /// LFS installed; empty otherwise).
     OversizedFiles {
         repo: u64,
         files: Vec<String>,
         summary: String,
         description: String,
+        lfs_patterns: Vec<String>,
     },
     /// Corvene `732-confirm-commit-to-default-branch`: committing on the
     /// default branch; "Commit" goes on to `UnknownAuthors` when

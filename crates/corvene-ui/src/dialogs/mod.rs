@@ -315,6 +315,7 @@ impl DialogHost {
                 files,
                 summary,
                 description,
+                lfs_patterns,
             } => cx
                 .new(|_| {
                     OversizedFilesDialog::new(
@@ -322,6 +323,7 @@ impl DialogHost {
                         files.clone(),
                         summary.clone(),
                         description.clone(),
+                        lfs_patterns.clone(),
                     )
                 })
                 .into(),
