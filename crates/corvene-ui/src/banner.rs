@@ -343,6 +343,10 @@ pub fn banner_bar(
         octicon(Octicon::CheckCircleFill, t.color_new).mr(SPACING())
     };
     let action: Option<AnyElement> = match banner {
+        // `894-cherry-pick-into-worktree-branch`: nothing to undo here
+        Banner::SuccessfulCherryPick {
+            undoable: false, ..
+        } => None,
         Banner::SuccessfulCherryPick { repo, .. }
         | Banner::SuccessfulSquash { repo, .. }
         | Banner::SuccessfulReorder { repo, .. } => {

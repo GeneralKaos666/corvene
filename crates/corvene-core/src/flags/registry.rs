@@ -5722,6 +5722,23 @@ registry! {
         code: &["crates/corvene-core/src/mco.rs", "crates/corvene-ui/src/dialogs/mco_dialogs.rs", "crates/corvene-ui/src/history.rs"],
     },
 
+    /// Cherry-pick onto a branch another worktree has checked out.
+    CHERRY_PICK_INTO_WORKTREE_BRANCH = 894 "cherry-pick-into-worktree-branch" {
+        title: "Cherry-pick into another worktree's branch",
+        summary: "Choosing a target branch that another worktree has checked out copies the \
+                  commits inside that worktree instead of failing on the checkout. It refuses \
+                  when that worktree has uncommitted changes, and on a conflict the cherry-pick \
+                  is undone there with a note to resolve it in that worktree.",
+        ghd_behaviour: "The cherry-pick fails because git cannot check out a branch that another \
+                        worktree uses.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22714)],
+        code: &["crates/corvene-core/src/mco.rs", "crates/corvene-ui/src/banner.rs"],
+    },
+
     // ---- 900 Performance ----
 
     /// Diffs of neighbouring files and commits computed ahead of time.

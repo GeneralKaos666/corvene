@@ -25,6 +25,7 @@
 //! on any status read that finds the conflict state).
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -376,6 +377,9 @@ pub enum Banner {
         repo: u64,
         target_branch: String,
         count: usize,
+        /// Offers Undo (not after `894-cherry-pick-into-worktree-branch`
+        /// copied them in another worktree).
+        undoable: bool,
     },
     CherryPickUndone {
         target_branch: String,
@@ -911,6 +915,7 @@ impl Dispatcher {
                 repo: id,
                 target_branch: mco.target_branch.clone().unwrap_or_default(),
                 count,
+                undoable: true,
             },
             McoDetail::Rebase { base_branch, .. } => Banner::SuccessfulRebase {
                 target_branch: mco.target_branch.clone().unwrap_or_default(),
@@ -1967,6 +1972,147 @@ impl Dispatcher {
         );
     }
 
+    /// `894-cherry-pick-into-worktree-branch`: the other worktree that has
+    /// `branch` checked out, when the flag is on.
+    fn worktree_with_branch(id: u64, branch: &str, cx: &App) -> Option<PathBuf> {
+        let s = Self::state(cx).read(cx);
+        if !s
+            .flags
+            .bool(crate::flags::ids::CHERRY_PICK_INTO_WORKTREE_BRANCH)
+        {
+            return None;
+        }
+        let rs = s.repo_states.get(&id)?;
+        // the current branch is this worktree's
+        if rs
+            .info
+            .as_ref()
+            .and_then(|i| i.current_branch())
+            .is_some_and(|b| b.name == branch)
+        {
+            return None;
+        }
+        let full = format!("refs/heads/{branch}");
+        rs.worktrees
+            .iter()
+            .find(|w| w.branch.as_deref() == Some(full.as_str()))
+            .map(|w| w.path.clone())
+    }
+
+    /// `894-cherry-pick-into-worktree-branch`: copy the commits onto
+    /// `target` inside the worktree at `path`, which has it checked out
+    /// (GHD's checkout of it fails). A worktree with changes is left alone;
+    /// conflicts are aborted there and explained.
+    fn cherry_pick_in_worktree(
+        id: u64,
+        target: String,
+        path: PathBuf,
+        commits: Vec<CommitOneLine>,
+        cx: &mut App,
+    ) {
+        enum Outcome {
+            Done,
+            Dirty,
+            Conflicts,
+            Failed(String),
+        }
+        let Some((git, _)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        Self::update_mco(id, cx, |m| {
+            m.target_branch = Some(target.clone());
+            m.step = McoStep::ShowProgress;
+        });
+        Self::show_mco_popup(id, cx);
+        let keep_messages = Self::cherry_pick_keeps_messages(cx);
+        let count = commits.len();
+        let worktree = path.clone();
+        spawn_bg(
+            cx,
+            move || {
+                match corvene_git::get_status(git.clone(), &worktree) {
+                    Ok(status) if !status.files.is_empty() => return Outcome::Dirty,
+                    Ok(_) => {}
+                    Err(err) => return Outcome::Failed(err.to_string()),
+                }
+                match corvene_git::cherry_pick(
+                    git.clone(),
+                    &worktree,
+                    &commits,
+                    keep_messages,
+                    |_| {},
+                ) {
+                    CherryPickResult::CompletedWithoutError => Outcome::Done,
+                    CherryPickResult::ConflictsEncountered
+                    | CherryPickResult::OutstandingFilesNotStaged => {
+                        let _ = corvene_git::abort_cherry_pick(git, &worktree);
+                        Outcome::Conflicts
+                    }
+                    CherryPickResult::UnableToStart => {
+                        Outcome::Failed("The cherry-pick could not be started.".into())
+                    }
+                    CherryPickResult::Error(message) => {
+                        if corvene_git::cherry_pick_head_found(&worktree) {
+                            let _ = corvene_git::abort_cherry_pick(git, &worktree);
+                        }
+                        Outcome::Failed(message)
+                    }
+                }
+            },
+            move |outcome, cx| {
+                Self::end_mco(id, cx);
+                let place = path.display().to_string();
+                match outcome {
+                    Outcome::Done => {
+                        Self::set_banner(
+                            Banner::SuccessfulCherryPick {
+                                repo: id,
+                                target_branch: target,
+                                count,
+                                undoable: false,
+                            },
+                            cx,
+                        );
+                        // the worktree's own repository, when it is listed
+                        let other = Self::state(cx)
+                            .read(cx)
+                            .repositories
+                            .iter()
+                            .find(|r| r.path == path)
+                            .map(|r| r.id);
+                        if let Some(other) = other {
+                            Self::refresh_repository(other, cx);
+                        }
+                    }
+                    Outcome::Dirty => Self::show_error(
+                        "Could not cherry-pick",
+                        format!(
+                            "\"{target}\" is checked out in the worktree at {place}, which has \
+                             uncommitted changes. Commit or stash them there, then cherry-pick \
+                             again."
+                        ),
+                        cx,
+                    ),
+                    Outcome::Conflicts => Self::show_error(
+                        "Could not cherry-pick",
+                        format!(
+                            "Copying the commits onto \"{target}\" in the worktree at {place} \
+                             ran into conflicts, so it was undone there. Open that worktree and \
+                             cherry-pick the commits there to resolve them."
+                        ),
+                        cx,
+                    ),
+                    Outcome::Failed(message) => Self::show_error(
+                        "Could not cherry-pick",
+                        format!("In the worktree at {place}: {message}"),
+                        cx,
+                    ),
+                }
+                Self::refresh_repository(id, cx);
+            },
+        );
+    }
+
     /// `cherryPick`: check out the target branch, then copy the commits.
     pub fn cherry_pick_to_branch(id: u64, target_name: String, cx: &mut App) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
@@ -1983,6 +2129,10 @@ impl Dispatcher {
         else {
             return;
         };
+        if let Some(path) = Self::worktree_with_branch(id, &target_name, cx) {
+            Self::cherry_pick_in_worktree(id, target_name, path, commits, cx);
+            return;
+        }
         Self::update_mco(id, cx, |m| {
             m.target_branch = Some(target_name.clone());
             m.step = McoStep::ShowProgress;
