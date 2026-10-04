@@ -11,9 +11,10 @@ use corvene_core::persistence::{StoreExt, UncommittedChangesStrategy};
 use crate::runtime::Services;
 use crate::vm::{
     BannerVm, BranchesVm, ChangesVm, CommitDetailVm, ConflictsVm, DesignStyleVm, DiffHeaderVm,
-    DiffRowVm, HistoryVm, McoVm, PopupVm, PullRequestsVm, RepoListVm, ResolutionVm, SessionVm,
-    SettingsVm, ThemeVm, banner, branches, changes, commit_detail, commit_diff_rows, conflicts,
-    diff_header, diff_rows, history, mco, popup, pull_requests, repo_list, session, settings,
+    DiffRowVm, FlagsVm, HistoryVm, McoVm, PopupVm, PullRequestsVm, RepoListVm, ResolutionVm,
+    SessionVm, SettingsVm, ThemeVm, banner, branches, changes, commit_detail, commit_diff_rows,
+    conflicts, diff_header, diff_rows, flags, history, mco, popup, pull_requests, repo_list,
+    session, settings,
 };
 
 /// What the engine asks of the Android side. Called on the engine's
@@ -985,5 +986,101 @@ impl Corvene {
             Dispatcher::close_popup(host);
             Dispatcher::rerequest_check_suites(github, checks, failed_only, |_, _| {}, host);
         });
+    }
+
+    // ---- settings by name, and the Flags screen ----
+
+    /// Sets one setting: a boolean one with "true"/"false", a text one with
+    /// its text (empty = none), `uncommitted_changes_strategy` with
+    /// "ask" / "stash" / "move". Unknown keys are ignored.
+    pub fn set_setting(&self, key: String, value: String) {
+        self.loop_.post(move |host| {
+            Dispatcher::update_settings(host, |s| {
+                let b = value == "true";
+                let text = (!value.is_empty()).then(|| value.clone());
+                match key.as_str() {
+                    "confirm_discard_changes" => s.confirm_discard_changes = b,
+                    "confirm_discard_changes_permanently" => {
+                        s.confirm_discard_changes_permanently = b
+                    }
+                    "confirm_checkout_commit" => s.confirm_checkout_commit = b,
+                    "confirm_undo_commit" => s.confirm_undo_commit = b,
+                    "confirm_discard_stash" => s.confirm_discard_stash = b,
+                    "confirm_force_push" => s.confirm_force_push = b,
+                    "confirm_repository_removal" => s.confirm_repository_removal = b,
+                    "confirm_commit_filtered_changes" => s.confirm_commit_filtered_changes = b,
+                    "notifications_enabled" => s.notifications_enabled = b,
+                    "repository_indicators_enabled" => s.repository_indicators_enabled = b,
+                    "hide_whitespace_in_changes_diff" => s.hide_whitespace_in_changes_diff = b,
+                    "hide_whitespace_in_history_diff" => s.hide_whitespace_in_history_diff = b,
+                    "show_diff_check_marks" => s.show_diff_check_marks = b,
+                    "underline_links" => s.underline_links = b,
+                    "show_commit_length_warning" => s.show_commit_length_warning = b,
+                    "commit_spellcheck_enabled" => s.commit_spellcheck_enabled = b,
+                    "history_first_parent" => s.history_first_parent = b,
+                    "use_external_credential_helper" => s.use_external_credential_helper = b,
+                    "uncommitted_changes_strategy" => {
+                        use corvene_core::persistence::UncommittedChangesStrategy as U;
+                        s.uncommitted_changes_strategy = match value.as_str() {
+                            "stash" => U::StashOnCurrentBranch,
+                            "move" => U::MoveToNewBranch,
+                            _ => U::AskForConfirmation,
+                        }
+                    }
+                    "external_editor" => s.external_editor = text,
+                    "shell" => s.shell = text,
+                    "clone_dir" => s.clone_dir = text.map(PathBuf::from),
+                    _ => {}
+                }
+            })
+        });
+    }
+
+    pub async fn flags(&self) -> FlagsVm {
+        self.loop_.query(|host| flags(host.state_ref())).await
+    }
+
+    /// Sets a flag by slug from its text form; the error names what was wrong.
+    pub fn set_flag_by_slug(&self, slug: String, value: String) -> Result<(), CoreError> {
+        let def = corvene_core::flags::by_slug(&slug).ok_or_else(|| CoreError::Failed {
+            reason: format!("no flag {slug}"),
+        })?;
+        let value = def
+            .kind
+            .parse(&value)
+            .map_err(|reason| CoreError::Failed { reason })?;
+        let id = def.id;
+        let result = self
+            .loop_
+            .query_blocking(move |host| Dispatcher::set_flag(id, value, host))
+            .unwrap_or_else(|| Err("the engine thread is gone".into()));
+        result.map_err(|reason| CoreError::Failed { reason })
+    }
+
+    pub fn reset_flag(&self, slug: String) {
+        let Some(def) = corvene_core::flags::by_slug(&slug) else {
+            return;
+        };
+        let id = def.id;
+        self.loop_
+            .post(move |host| Dispatcher::reset_flag(id, host));
+    }
+
+    /// "github-desktop", "familiar", "corvene" or "max".
+    pub fn apply_preset(&self, preset: String) {
+        let Some(preset) = corvene_core::flags::Preset::parse(&preset) else {
+            return;
+        };
+        self.loop_
+            .post(move |host| Dispatcher::apply_preset(preset, host));
+    }
+
+    pub fn reset_all_flags(&self) {
+        self.loop_.post(|host| Dispatcher::reset_all_flags(host));
+    }
+
+    /// Flags that need a restart: relaunch the process (the host quits).
+    pub fn relaunch(&self) {
+        self.loop_.post(|host| Dispatcher::relaunch(host));
     }
 }

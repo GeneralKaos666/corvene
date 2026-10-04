@@ -5,6 +5,7 @@
 pub mod branches;
 pub mod changes;
 pub mod diff;
+pub mod flags;
 pub mod history;
 pub mod mco;
 pub mod popup;
@@ -16,6 +17,7 @@ pub mod settings;
 pub use branches::*;
 pub use changes::*;
 pub use diff::*;
+pub use flags::*;
 pub use history::*;
 pub use mco::*;
 pub use popup::*;

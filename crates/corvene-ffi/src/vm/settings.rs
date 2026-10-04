@@ -58,6 +58,18 @@ pub struct SettingsVm {
     pub hide_whitespace_in_history_diff: bool,
     pub show_diff_check_marks: bool,
     pub underline_links: bool,
+    pub confirm_checkout_commit: bool,
+    pub confirm_undo_commit: bool,
+    pub confirm_discard_stash: bool,
+    pub confirm_commit_filtered_changes: bool,
+    pub show_commit_length_warning: bool,
+    pub commit_spellcheck_enabled: bool,
+    pub history_first_parent: bool,
+    /// "ask", "stash" or "move".
+    pub uncommitted_changes_strategy: String,
+    pub external_editor: Option<String>,
+    pub shell: Option<String>,
+    pub clone_dir: Option<String>,
 }
 
 pub fn settings(s: &AppState) -> SettingsVm {
@@ -83,5 +95,25 @@ pub fn settings(s: &AppState) -> SettingsVm {
         hide_whitespace_in_history_diff: s.settings.hide_whitespace_in_history_diff,
         show_diff_check_marks: s.settings.show_diff_check_marks,
         underline_links: s.settings.underline_links,
+        confirm_checkout_commit: s.settings.confirm_checkout_commit,
+        confirm_undo_commit: s.settings.confirm_undo_commit,
+        confirm_discard_stash: s.settings.confirm_discard_stash,
+        confirm_commit_filtered_changes: s.settings.confirm_commit_filtered_changes,
+        show_commit_length_warning: s.settings.show_commit_length_warning,
+        commit_spellcheck_enabled: s.settings.commit_spellcheck_enabled,
+        history_first_parent: s.settings.history_first_parent,
+        uncommitted_changes_strategy: match s.settings.uncommitted_changes_strategy {
+            corvene_core::persistence::UncommittedChangesStrategy::AskForConfirmation => "ask",
+            corvene_core::persistence::UncommittedChangesStrategy::StashOnCurrentBranch => "stash",
+            corvene_core::persistence::UncommittedChangesStrategy::MoveToNewBranch => "move",
+        }
+        .into(),
+        external_editor: s.settings.external_editor.clone(),
+        shell: s.settings.shell.clone(),
+        clone_dir: s
+            .settings
+            .clone_dir
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
     }
 }
