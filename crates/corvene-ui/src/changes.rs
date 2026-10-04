@@ -2815,6 +2815,28 @@ impl ChangesSidebar {
         self.open_menu(items, position, window, cx);
     }
 
+    /// A double-clicked row: GHD `onOpenItemInExternalEditor` (nothing for a
+    /// deleted file, which GHD fails to open).
+    fn open_row(&mut self, path: &str, cx: &mut Context<Self>) {
+        let target = {
+            let s = self.state.read(cx);
+            let Some(id) = s.selected else { return };
+            let Some(repo) = s.repository(id) else { return };
+            let Some(file) = s
+                .selected_state()
+                .and_then(|rs| rs.status.as_deref())
+                .and_then(|st| st.files.iter().find(|f| f.path == path))
+            else {
+                return;
+            };
+            (file.status.kind != FileStatusKind::Deleted)
+                .then(|| repo.path.join(path.trim_end_matches('/')))
+        };
+        if let Some(full) = target {
+            Dispatcher::open_in_editor(full, cx);
+        }
+    }
+
     /// GHD `onContextMenu` on the list itself: Discard All / Stash All.
     fn open_list_menu(
         &mut self,
@@ -4974,6 +4996,7 @@ fn file_row(
         DiffSelectionType::Partial => None,
     };
     let weak_for_order = weak.clone();
+    let weak_for_open = weak.clone();
     let file_for_menu = file.clone();
     let checkbox_focus = list_focus.clone();
     // `HighlightText`: the filter's fuzzy hits in bold (`<mark>`), split
@@ -5089,7 +5112,13 @@ fn file_row(
                         .unwrap_or_default();
                     Dispatcher::extend_file_selection(id, path_for_select.clone(), order, cx)
                 } else {
-                    Dispatcher::select_file(id, path_for_select.clone(), cx)
+                    Dispatcher::select_file(id, path_for_select.clone(), cx);
+                    // GHD `onChangedFileDoubleClick`
+                    if ev.click_count() == 2 {
+                        weak_for_open
+                            .update(cx, |this, cx| this.open_row(&path_for_select, cx))
+                            .ok();
+                    }
                 }
             })
         })
