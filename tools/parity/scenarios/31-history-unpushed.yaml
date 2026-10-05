@@ -1,0 +1,19 @@
+name: history-unpushed
+description: History rows the branch has not pushed (the arrow-up indicator)
+setup: repo-remote
+steps:
+  - click: [187, 97]
+    wait: 600
+  - dump: open
+  - snap: open
+  # the badge in the selected row's colours, focused and not
+  - click: [124, 225]
+    wait: 600
+  - snap: newest-selected
+  - click: [124, 275]
+    wait: 600
+  - snap: second-selected
+  # the list loses focus: the badge takes the dimmer selected tokens
+  - click: [124, 130]
+    wait: 400
+  - snap: list-unfocused

@@ -78,8 +78,13 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=writable)
 
 
-def build(parent: Path) -> Path:
-    """(Re)create `<parent>/parity-fixture` and return its path."""
+def build(parent: Path, remote: bool = False) -> Path:
+    """(Re)create `<parent>/parity-fixture` and return its path.
+
+    With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
+    and `main` is pushed up to its third commit, so the branch is two ahead
+    with the `v0.1.0` tag still to push (History's unpushed indicators, the
+    toolbar's Push origin)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -99,6 +104,15 @@ def build(parent: Path) -> Path:
             _git(repo, "branch", "feature/login")
             _git(repo, "branch", "bugfix/typo-in-guide")
     _git(repo, "tag", "v0.1.0", "HEAD~1")
+    if remote:
+        bare = parent / f"{NAME}.git"
+        if bare.exists():
+            remove_tree(bare)
+        _git(repo, "init", "-q", "--bare", str(bare))
+        _git(repo, "remote", "add", "origin", str(bare))
+        # the two newest commits and the tag stay behind
+        _git(repo, "push", "-q", "origin", "main~2:refs/heads/main")
+        _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main")
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)

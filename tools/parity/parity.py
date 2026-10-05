@@ -125,8 +125,12 @@ class Run:
         setup = sc.get("setup", "repo")
         # parents "n" / "u": one glyph apart and the same advance in SF (1079
         # units), so paths shown in either app lay out and wrap identically
-        repo_g = fixture.build(work / "n") if setup == "repo" else None
-        repo_c = fixture.build(work / "u") if setup == "repo" else None
+        # `repo-remote`: the same fixture behind a bare `origin`, two commits
+        # ahead of it
+        with_repo = setup in ("repo", "repo-remote")
+        remote = setup == "repo-remote"
+        repo_g = fixture.build(work / "n", remote) if with_repo else None
+        repo_c = fixture.build(work / "u", remote) if with_repo else None
 
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme)

@@ -2336,7 +2336,7 @@ impl Dispatcher {
             }
             return;
         }
-        let (workdir, revision, skip, first_parent) = {
+        let (workdir, revision, skip, first_parent, local) = {
             let s = state.read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
                 return;
@@ -2349,11 +2349,29 @@ impl Dispatcher {
                 Some(tip) if more && race_fix => tip.sha.clone(),
                 _ => "HEAD".to_string(),
             };
+            // GHD `loadLocalCommits`: the page reset reloads them, and a
+            // further page only when the list's last commit is local (there
+            // may be more local ones below it)
+            let branch = info.current_branch();
+            let local = branch.filter(|_| !info.remotes.is_empty()).and_then(|b| {
+                let more_local = rs
+                    .commits
+                    .last()
+                    .is_some_and(|c| rs.local_commits.contains(&c.sha));
+                (!more || more_local).then(|| {
+                    (
+                        b.name.clone(),
+                        b.upstream.clone(),
+                        if more { rs.local_commits.len() } else { 0 },
+                    )
+                })
+            });
             (
                 info.workdir.clone(),
                 revision,
                 if more { rs.commits.len() } else { 0 },
                 Self::history_first_parent(s),
+                local,
             )
         };
         // `883-unpublished-commit-links`: which of them no remote has
@@ -2372,6 +2390,16 @@ impl Dispatcher {
                     .filter(|shas| shas.len() < UNPUBLISHED_COMMITS_LIMIT)
                     .map(|shas| shas.into_iter().collect::<std::collections::HashSet<_>>())
             });
+            let local = local.map(|(branch, upstream, local_skip)| {
+                corvene_git::local_commit_shas(
+                    &workdir,
+                    &branch,
+                    upstream.as_deref(),
+                    local_skip,
+                    corvene_git::COMMIT_BATCH_SIZE,
+                )
+                .unwrap_or_default()
+            });
             let commits = corvene_git::get_commits_with(
                 &workdir,
                 &revision,
@@ -2379,10 +2407,10 @@ impl Dispatcher {
                 corvene_git::COMMIT_BATCH_SIZE,
                 first_parent,
             );
-            (commits, unpublished)
+            (commits, unpublished, local)
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
-            let (result, unpublished) = task.await;
+            let (result, unpublished, local) = task.await;
             cx.update(|cx| {
                 let mut rewritten = Vec::new();
                 let mut reload = false;
@@ -2394,6 +2422,31 @@ impl Dispatcher {
                     if rs.unpublished_commits != unpublished {
                         rs.unpublished_commits = unpublished;
                         cx.notify();
+                    }
+                    // GHD `localCommitSHAs`: replaced on a page reset,
+                    // extended when a further page brought more local commits
+                    match local {
+                        Some(shas) if more => {
+                            let before = rs.local_commits.len();
+                            rs.local_commits.extend(shas);
+                            if rs.local_commits.len() != before {
+                                cx.notify();
+                            }
+                        }
+                        Some(shas) => {
+                            let shas: std::collections::HashSet<String> =
+                                shas.into_iter().collect();
+                            if rs.local_commits != shas {
+                                rs.local_commits = shas;
+                                cx.notify();
+                            }
+                        }
+                        // no branch or no remote: nothing is unpushed
+                        None if !more && !rs.local_commits.is_empty() => {
+                            rs.local_commits.clear();
+                            cx.notify();
+                        }
+                        None => {}
                     }
                     match result {
                         Ok(batch) => {

@@ -1110,6 +1110,11 @@ pub struct RepositoryState {
     /// `883-unpublished-commit-links`: HEAD's commits no remote-tracking
     /// branch contains (`None`: not known, or the flag is off).
     pub unpublished_commits: Option<std::collections::HashSet<String>>,
+    /// GHD `localCommitSHAs`: the current branch's commits no remote has
+    /// (`upstream..branch`, else `HEAD --not --remotes`), for the history
+    /// rows' unpushed indicator. Paged alongside the commit list, so its
+    /// length is the next page's `skip`.
+    pub local_commits: std::collections::HashSet<String>,
     /// Incremented after every successful commit so the form can clear itself.
     pub commit_nonce: u64,
     /// `723-discard-confirm-snooze`: discarding (not all changes) skips the

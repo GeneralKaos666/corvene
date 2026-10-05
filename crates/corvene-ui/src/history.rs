@@ -8,9 +8,10 @@
 //! with ⌘/⇧-click, drag to squash onto another commit, to reorder (drop
 //! between rows) or to cherry-pick onto a branch in the branch foldout, and
 //! "Reorder Commit" starts the keyboard insertion mode (↑/↓, ⏎, Esc).
-//! Compare-to-branch and the unpushed indicator come with the remote
-//! milestone. Drop tooltips ("Copy to …", "Squash N commits") show under
-//! the drag element at once (GHD waits 1.5 s on macOS), in the darwin
+//! A row the current branch has not pushed, or one carrying a tag still to
+//! push, gets the arrow-up badge (`localCommitSHAs` / `tagsToPush`; nothing
+//! without a remote). Drop tooltips ("Copy to …", "Squash N commits") show
+//! under the drag element at once (GHD waits 1.5 s on macOS), in the darwin
 //! title-tooltip look on macOS and the bordered base look elsewhere.
 //!
 //! Deviations (`.docs/deviations.md` › History): the commit menus
@@ -1979,6 +1980,22 @@ impl HistorySidebar {
         let draggable = rs.is_some_and(|r| r.mco.is_none()) && self.reorder.is_none() && !comparing;
         // filtered rows can be dragged onto a branch, not squashed or reordered
         let droppable = draggable && !filtering;
+        // GHD `localCommitSHAs` / `tagsToPush`: the unpushed indicator, never
+        // without a remote (`isLocalRepository`)
+        let has_remote = rs
+            .and_then(|r| r.info.as_ref())
+            .is_some_and(|i| !i.remotes.is_empty());
+        let local: Rc<std::collections::HashSet<String>> = Rc::new(
+            rs.filter(|_| has_remote)
+                .map(|r| r.local_commits.clone())
+                .unwrap_or_default(),
+        );
+        let tags_to_push: Rc<std::collections::HashSet<String>> = Rc::new(
+            s.repository(id)
+                .filter(|_| has_remote)
+                .map(|r| r.tags_to_push.iter().cloned().collect())
+                .unwrap_or_default(),
+        );
         // `890`: branch tips label their rows
         let labels: Rc<std::collections::HashMap<String, Vec<String>>> = Rc::new(
             rs.filter(|_| {
@@ -2141,6 +2158,7 @@ impl HistorySidebar {
                                     .get(&commit.sha)
                                     .map(Vec::as_slice)
                                     .unwrap_or_default(),
+                                unpushed_indicator(commit, &local, &tags_to_push),
                                 selected.clone(),
                                 row_hint,
                                 dimmed,
@@ -2302,7 +2320,32 @@ pub(crate) fn commit_row_contents(
     badge: Option<(Hsla, Hsla)>,
     cx: &App,
 ) -> Div {
-    commit_row_contents_with(commit, text, secondary, badge, &[], cx)
+    commit_row_contents_with(commit, text, secondary, badge, &[], None, cx)
+}
+
+/// GHD `showUnpushedIndicator` / `getUnpushedIndicatorTitle`: the commit is
+/// one of the current branch's that no remote has (`localCommitSHAs`), or it
+/// carries a tag still to push (`tagsToPush`). The tooltip names which.
+/// Nothing shows without a remote (`isLocalRepository`).
+fn unpushed_indicator(
+    commit: &Commit,
+    local: &std::collections::HashSet<String>,
+    tags_to_push: &std::collections::HashSet<String>,
+) -> Option<SharedString> {
+    if local.contains(&commit.sha) {
+        return Some("This commit has not been pushed to the remote repository".into());
+    }
+    let tags = commit
+        .tags
+        .iter()
+        .filter(|t| tags_to_push.contains(*t))
+        .count();
+    (tags > 0).then(|| {
+        SharedString::from(format!(
+            "This commit has {tags} tag{} to push",
+            if tags > 1 { "s" } else { "" }
+        ))
+    })
 }
 
 /// `890-history-branch-labels`: the branches whose tips label commit rows,
@@ -2335,13 +2378,15 @@ fn branch_labels(
     labels
 }
 
-/// [`commit_row_contents`] with `890-history-branch-labels`' branch names.
+/// [`commit_row_contents`] with `890-history-branch-labels`' branch names
+/// and the unpushed indicator's tooltip.
 fn commit_row_contents_with(
     commit: &Commit,
     text: Hsla,
     secondary: Hsla,
     badge: Option<(Hsla, Hsla)>,
     branches: &[String],
+    unpushed: Option<SharedString>,
     cx: &App,
 ) -> Div {
     let t = cx.ghd();
@@ -2512,6 +2557,29 @@ fn commit_row_contents_with(
                 d.child(pill)
             }
         })
+        // `.commit-indicators .unpushed-indicator`: a 16 px arrow-up badge
+        // (5 px padding, 8 px radius) after the tag pill, 5 px from it and
+        // 15 px from the summary when there is none
+        .when_some(unpushed, |d, tooltip| {
+            d.child(
+                div()
+                    .id(SharedString::from(format!("unpushed-{}", commit.sha)))
+                    .ghd_tooltip(tooltip)
+                    .flex_none()
+                    .ml(if commit.tags.is_empty() {
+                        SPACING() + SPACING_HALF()
+                    } else {
+                        SPACING_HALF()
+                    })
+                    .h(zpx(16.))
+                    .px(SPACING_HALF())
+                    .rounded(zpx(8.))
+                    .bg(badge_bg)
+                    .flex()
+                    .items_center()
+                    .child(octicon(Octicon::ArrowUp, badge_text)),
+            )
+        })
 }
 
 /// `806`: the commit's tags as a tooltip on the tag pill and the details' tag list.
@@ -2586,6 +2654,7 @@ fn commit_row(
     draggable: bool,
     droppable: bool,
     branches: &[String],
+    unpushed: Option<SharedString>,
     selection: Rc<Vec<String>>,
     hint: RowHint,
     dimmed: bool,
@@ -2769,7 +2838,9 @@ fn commit_row(
             })
         })
         .map(|d| {
-            let contents = commit_row_contents_with(commit, text, secondary, badge, branches, cx);
+            let contents = commit_row_contents_with(
+                commit, text, secondary, badge, branches, unpushed, cx,
+            );
             // `621-context-menu-buttons`: after the contents
             if crate::context_menu::row_menu_buttons(cx) {
                 d.group("commit-row")

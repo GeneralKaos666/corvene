@@ -488,6 +488,63 @@ pub fn most_recent_local_commit(
     Ok(Some(commit_from_walk(info, &HashMap::new())?))
 }
 
+/// The current branch's commits no remote has, newest first (GHD
+/// `GitStore.loadLocalCommits` / `localCommitSHAs`): `upstream..branch` when
+/// the branch tracks one, else `HEAD --not --remotes`. `skip` pages them
+/// alongside the history list; at most `limit` come back. Feeds the history
+/// rows' unpushed indicator.
+pub fn local_commit_shas(
+    workdir: &Path,
+    branch: &str,
+    upstream: Option<&str>,
+    skip: usize,
+    limit: usize,
+) -> Result<Vec<String>> {
+    let repo = crate::handle::open(workdir)?;
+    let tip = match upstream {
+        Some(_) => branch,
+        None => "HEAD",
+    };
+    let Ok(tip) = repo.rev_parse_single(tip) else {
+        return Ok(Vec::new());
+    };
+    let mut hidden = Vec::new();
+    match upstream {
+        // `revRange(branch.upstream, branch.name)`
+        Some(upstream) => match repo.rev_parse_single(upstream) {
+            Ok(id) => hidden.push(id.detach()),
+            // the upstream is gone: nothing to hide behind
+            Err(_) => return Ok(Vec::new()),
+        },
+        // `HEAD --not --remotes`
+        None => {
+            if let Ok(refs) = repo.references()
+                && let Ok(iter) = refs.remote_branches()
+            {
+                for r in iter.flatten() {
+                    if let Ok(id) = r.into_fully_peeled_id() {
+                        hidden.push(id.detach());
+                    }
+                }
+            }
+        }
+    }
+    let walk = repo
+        .rev_walk([tip.detach()])
+        .with_hidden(hidden)
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .all()
+        .map_err(|e| GitError::Gix(e.to_string()))?;
+    let mut out = Vec::new();
+    for info in walk.skip(skip).take(limit) {
+        let info = info.map_err(|e| GitError::Gix(e.to_string()))?;
+        out.push(info.id.to_hex().to_string());
+    }
+    Ok(out)
+}
+
 /// Corvene `883-unpublished-commit-links`: the commits reachable from `tip`
 /// but from no remote-tracking branch (`rev-list <tip> --not --remotes`),
 /// newest first, at most `limit`. They are not on any remote, so links to
@@ -1156,6 +1213,39 @@ mod tests {
         assert!(status.success());
         let local = local_only_commits(git, dir.path(), "HEAD", 100).unwrap();
         assert_eq!(local, all[..1]);
+    }
+
+    #[test]
+    fn local_commit_shas_follow_the_upstream_then_every_remote() {
+        let (dir, _) = repo();
+        let all = get_commits(dir.path(), "HEAD", 0, 10).unwrap();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(dir.path())
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        // no upstream: `HEAD --not --remotes`
+        let local = local_commit_shas(dir.path(), "main", None, 0, 10).unwrap();
+        assert_eq!(local, [all[0].sha.clone(), all[1].sha.clone()]);
+        run(&["update-ref", "refs/remotes/origin/main", "HEAD~1"]);
+        let local = local_commit_shas(dir.path(), "main", None, 0, 10).unwrap();
+        assert_eq!(local, [all[0].sha.clone()]);
+        // with one: `upstream..branch`, whatever other remotes hold
+        run(&["update-ref", "refs/remotes/other/main", "HEAD"]);
+        let local =
+            local_commit_shas(dir.path(), "main", Some("refs/remotes/origin/main"), 0, 10).unwrap();
+        assert_eq!(local, [all[0].sha.clone()]);
+        // paged like the history list
+        let local = local_commit_shas(dir.path(), "main", None, 1, 10).unwrap();
+        assert!(local.is_empty());
+        // an upstream that is gone leaves nothing marked
+        let local = local_commit_shas(dir.path(), "main", Some("refs/remotes/gone/main"), 0, 10);
+        assert_eq!(local.unwrap(), Vec::<String>::new());
     }
 
     fn repo() -> (tempfile::TempDir, Arc<GitBinary>) {
