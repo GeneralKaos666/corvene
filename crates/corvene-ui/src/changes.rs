@@ -2318,13 +2318,10 @@ impl ChangesSidebar {
     /// GHD `renderSummaryLengthHint`: a light bulb at the end of the summary
     /// past [`IDEAL_SUMMARY_LENGTH`](corvene_core::commit_message::IDEAL_SUMMARY_LENGTH)
     /// characters, with Settings › Prompts › "Show commit length warning"
-    /// on and no repository rule hint there.
+    /// on (the repository rule hint takes its place when there is one).
     fn summary_length_hint(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let t = cx.ghd();
-        let rule_hint = self
-            .rules_snapshot(cx)
-            .is_some_and(|r| r.message_failures.status() != RepoRulesMetadataStatus::Pass);
-        if !self.state.read(cx).settings.show_commit_length_warning || rule_hint {
+        if !self.state.read(cx).settings.show_commit_length_warning {
             return None;
         }
         let summary = self.summary.read(cx).value().to_string();
@@ -2333,24 +2330,28 @@ impl ChangesSidebar {
         }
         let hint = div()
             .id("length-hint")
-            .absolute()
-            .top(zpx(2.))
-            .right(zpx(2.))
-            .w(zpx(16.))
-            .h(TEXT_FIELD_HEIGHT() - zpx(4.))
+            .size_full()
             .flex()
             .items_center()
             .justify_center()
             .a11y_button("Open Summary Length Info")
             .child(octicon(Octicon::LightBulb, t.text).size(zpx(12.)));
+        // the tooltip wrapper positions its element relatively: place a box
         Some(
-            crate::widgets::with_directed_tooltip_delay(
-                hint,
-                "Great commit summaries contain fewer than 50 characters\nPlace extra information in the description field.",
-                crate::widgets::TooltipDirection::North,
-                std::time::Duration::ZERO,
-            )
-            .into_any_element(),
+            div()
+                .absolute()
+                .top(zpx(2.))
+                .right(zpx(2.))
+                .w(zpx(16.))
+                .h(TEXT_FIELD_HEIGHT() - zpx(4.))
+                .child(crate::widgets::with_titled_tooltip(
+                    hint,
+                    "Great commit summaries contain fewer than 50 characters",
+                    "Place extra information in the description field.",
+                    crate::widgets::TooltipDirection::North,
+                    std::time::Duration::ZERO,
+                ))
+                .into_any_element(),
         )
     }
 
@@ -5115,6 +5116,10 @@ impl ChangesSidebar {
 
     fn commit_form(&self, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let t = cx.ghd();
+        // GHD: the repository rule hint, else the summary length hint
+        let trailing_icon = self
+            .rule_failure_hint(cx)
+            .or_else(|| self.summary_length_hint(cx));
         let description_box_focused = self.description_focus.is_focused(window)
             || self.commit_options_focus.is_focused(window);
         let avatar = self
@@ -5255,18 +5260,28 @@ impl ChangesSidebar {
                     .child(avatar_image(avatar, AVATAR_SIZE(), cx))
                     .children(self.conventional_type_button(cx))
                     .child(
-                        text_box_with_menu(
-                            "commit-summary",
-                            &self.summary,
-                            None,
-                            Some(self.input_menu(CommitField::Summary, cx)),
-                            window,
-                            cx,
-                        )
-                        .relative()
-                        .children(self.spell_overlay(CommitField::Summary, cx))
-                        .children(self.rule_failure_hint(cx))
-                        .children(self.summary_length_hint(cx)),
+                        // the icon sits over the field's border box, outside
+                        // its padding
+                        div()
+                            .relative()
+                            .w_full()
+                            .min_w_0()
+                            .child(
+                                text_box_with_menu(
+                                    "commit-summary",
+                                    &self.summary,
+                                    None,
+                                    Some(self.input_menu(CommitField::Summary, cx)),
+                                    window,
+                                    cx,
+                                )
+                                .relative()
+                                // `.with-trailing-icon input { padding-right:
+                                // 20px }` (the kit's input pads 4 px itself)
+                                .when(trailing_icon.is_some(), |d| d.pr(zpx(16.)))
+                                .children(self.spell_overlay(CommitField::Summary, cx)),
+                            )
+                            .children(trailing_icon),
                     ),
             )
             .child(

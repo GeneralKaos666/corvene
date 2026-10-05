@@ -1,0 +1,26 @@
+name: commit-helpers
+description: Corvene's commit helpers. The Conventional Commits type button and menu (1301-conventional-commit-types), Fixup Into an unpushed commit with its banner and Squash Now (799-fixup-commits)
+setup: repo-remote
+corvene_flags: 799-fixup-commits=on,1301-conventional-commit-types=on,1302-wrap-commit-body=on
+steps:
+  - snap: {name: type-button, corvene_only: true}
+  # the type button between the avatar and the summary
+  - click: [66, 583]
+    wait: 500
+  - corvene_menu: type-menu
+  - corvene_menu_pick: "feat: A new feature"
+    wait: 500
+  - type: "Explain the shout flag"
+    wait: 400
+  - snap: {name: type-picked, corvene_only: true}
+  # the commit options gear › Fixup Into › the newest unpushed commit
+  - click: [29, 705]
+    wait: 500
+  - corvene_menu: commit-options
+  - corvene_menu_pick: "f9cfc61 Explain flags in the README"
+    wait: 2500
+  - snap: {name: fixup-banner, corvene_only: true}
+  # the banner's Squash Now
+  - click: [396, 96]
+    wait: 3000
+  - snap: {name: autosquashed, corvene_only: true}

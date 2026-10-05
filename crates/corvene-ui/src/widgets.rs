@@ -1552,6 +1552,10 @@ struct TextTooltip {
     anchor: Option<(Bounds<Pixels>, TooltipDirection)>,
     /// Always the 300 px maximum wide, so changing text does not resize it.
     fixed_width: bool,
+    /// GHD `.length-hint-tooltip`: no maximum width (`max-width: none`, the
+    /// title `white-space: pre`) and the lines after the first at 0.7
+    /// opacity (`.description`).
+    titled: bool,
 }
 
 /// GHD `DefaultTooltipDelay` (`ui/lib/tooltip.tsx`).
@@ -1651,7 +1655,11 @@ impl Render for TextTooltip {
         let font_size = FONT_SIZE_SM();
         let line_height = font_size * 1.5;
         let (pad_x, pad_y) = (SPACING(), SPACING_HALF());
-        let max_text = zpx(300.) - pad_x * 2.;
+        let max_text = if self.titled {
+            viewport.size.width - pad_x * 2.
+        } else {
+            zpx(300.) - pad_x * 2.
+        };
         let mut style = window.text_style();
         style.font_size = font_size.into();
         // Chromium's line breaking (`word-break: break-word`), not GPUI's
@@ -1676,6 +1684,10 @@ impl Render for TextTooltip {
         // the bold range moves right by the line breaks inserted before it
         let shift = |i: usize| i + breaks.iter().filter(|b| **b < i).count();
         let bold = self.bold.clone().map(|r| shift(r.start)..shift(r.end));
+        let dim = self
+            .titled
+            .then(|| display.find('\n').map(|i| i + 1..display.len()))
+            .flatten();
         let display: SharedString = display.into();
         let text_width = if self.fixed_width {
             max_text
@@ -1688,15 +1700,27 @@ impl Render for TextTooltip {
         tooltip_frame(
             direction,
             rect,
-            StyledText::new(display).with_highlights(bold.map(|range| {
-                (
-                    range,
-                    HighlightStyle {
-                        font_weight: Some(FontWeight::BOLD),
-                        ..Default::default()
-                    },
-                )
-            })),
+            StyledText::new(display).with_highlights(
+                bold.map(|range| {
+                    (
+                        range,
+                        HighlightStyle {
+                            font_weight: Some(FontWeight::BOLD),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .into_iter()
+                .chain(dim.map(|range| {
+                    (
+                        range,
+                        HighlightStyle {
+                            fade_out: Some(0.3),
+                            ..Default::default()
+                        },
+                    )
+                })),
+            ),
             t,
         )
     }
@@ -2028,6 +2052,7 @@ pub fn tooltip(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) 
             bold: None,
             anchor: None,
             fixed_width: false,
+            titled: false,
         })
         .into()
     }
@@ -2045,6 +2070,7 @@ pub fn rich_tooltip(
             bold: Some(bold.clone()),
             anchor: None,
             fixed_width: false,
+            titled: false,
         })
         .into()
     }
@@ -2068,7 +2094,26 @@ pub fn with_directed_tooltip_delay(
     direction: TooltipDirection,
     delay: std::time::Duration,
 ) -> Stateful<Div> {
-    directed_tooltip(el, text.into(), direction, delay, false)
+    directed_tooltip(el, text.into(), direction, delay, false, false)
+}
+
+/// GHD's `length-hint-tooltip` (`ui/changes/commit-message.tsx`): a title
+/// line and a dimmed description below it, as wide as the title.
+pub fn with_titled_tooltip(
+    el: Stateful<Div>,
+    title: &str,
+    description: &str,
+    direction: TooltipDirection,
+    delay: std::time::Duration,
+) -> Stateful<Div> {
+    directed_tooltip(
+        el,
+        format!("{title}\n{description}").into(),
+        direction,
+        delay,
+        false,
+        true,
+    )
 }
 
 /// [`with_directed_tooltip`] at the 300 px maximum width whatever the text,
@@ -2078,7 +2123,7 @@ pub fn with_fixed_width_tooltip(
     text: impl Into<SharedString>,
     direction: TooltipDirection,
 ) -> Stateful<Div> {
-    directed_tooltip(el, text.into(), direction, TOOLTIP_DELAY, true)
+    directed_tooltip(el, text.into(), direction, TOOLTIP_DELAY, true, false)
 }
 
 /// [`with_directed_tooltip`] whose text follows the app state while it is
@@ -2119,6 +2164,7 @@ pub fn with_live_directed_tooltip(
                     bold: None,
                     anchor,
                     fixed_width: false,
+                    titled: false,
                 }
             })
             .into()
@@ -2132,6 +2178,7 @@ fn directed_tooltip(
     direction: TooltipDirection,
     delay: std::time::Duration,
     fixed_width: bool,
+    titled: bool,
 ) -> Stateful<Div> {
     let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
     let probe = bounds.clone();
@@ -2147,6 +2194,7 @@ fn directed_tooltip(
                 bold: None,
                 anchor: Some((bounds.get(), direction)),
                 fixed_width,
+                titled,
             })
             .into()
         })

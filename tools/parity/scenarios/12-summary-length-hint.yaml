@@ -1,0 +1,12 @@
+name: summary-length-hint
+description: The commit summary's light bulb past 50 characters (Show commit length warning, on for new users) and its tooltip
+setup: repo
+steps:
+  - click: [139, 583]
+  - type: "Explain how the shout flag changes the greeting output"
+    wait: 500
+  - dump: {name: summary, root: ".commit-message-component .summary"}
+  - snap: hint
+  - hover: {css: ".length-hint"}
+    wait: 700
+  - snap: hint-tooltip
