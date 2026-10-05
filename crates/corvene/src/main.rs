@@ -319,6 +319,7 @@ pub(crate) fn main() {
                         .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
                 );
                 sync_renderer_flags(&s.flags);
+                sync_store_flags(&s.store, &s.flags);
                 (
                     s.settings.theme,
                     s.settings.welcome_completed,
@@ -2017,6 +2018,8 @@ fn open_store(started: Instant) -> LaunchStore {
         info!(path = %backup.display(), "backed up the store from the previous version");
     }
     let store_fallback = store_fallback.filter(|_| list_backup);
+    // `910-background-store-writes`: after the backup, which copies the file
+    sync_store_flags(&store, &launch_flags);
     phase(started, "store opened");
     LaunchStore {
         store,
@@ -2027,6 +2030,12 @@ fn open_store(started: Instant) -> LaunchStore {
         settings_file,
         store_fallback,
     }
+}
+
+/// Flag `910-background-store-writes`: commit store writes off the main
+/// thread (a durable commit is an fsync).
+fn sync_store_flags(store: &corvene_store::Store, flags: &corvene_core::Flags) {
+    store.set_background_writes(flags.bool(corvene_core::flags::ids::BACKGROUND_STORE_WRITES));
 }
 
 /// Flags `908-opaque-depth-pass` and `909-damage-scissor`: the wgpu

@@ -7263,6 +7263,24 @@ registry! {
         code: &["vendor/gpui-pre-wgpu/src/wgpu_renderer.rs", "crates/corvene/src/main.rs"],
     },
 
+    /// Store writes committed on a background thread.
+    BACKGROUND_STORE_WRITES = 910 "background-store-writes" {
+        title: "Save settings in the background",
+        summary: "Changed settings, the selected repository and the other things Corvene \
+                  remembers are saved to disk by a background thread, so the click or drag that \
+                  changed them does not wait 5-35 ms for the disk to confirm the save. They are \
+                  read back at once, saved in the order they were made, and the rest is saved \
+                  before Corvene quits; a crash loses at most the last few milliseconds.",
+        ghd_behaviour: "Settings live in Chromium's localStorage, which writes to disk in the \
+                        background.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-store/src/lib.rs", "crates/corvene/src/main.rs"],
+    },
+
     // ---- 1000 Experimental ----
 
     /// Compile tree-sitter grammars an extension names but Corvene lacks.
