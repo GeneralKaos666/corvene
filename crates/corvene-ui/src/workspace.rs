@@ -167,11 +167,14 @@ impl Workspace {
             let foldout = s.foldout;
             let popup_closed = this.popup_was_open && s.popup().is_none();
             this.popup_was_open = s.popup().is_some();
-            // A closing dialog's focused field is still in the last frame, so
-            // `contains_focused` says yes; once it is gone nothing would have
-            // focus and no shortcut would match (`keymap::MENU` needs the
-            // `Workspace` context).
-            if !overlay_open && (popup_closed || !this.focus_handle.contains_focused(window, cx)) {
+            // A closing dialog's focused field is still in the last frame;
+            // once it is gone nothing would have focus and no shortcut would
+            // match (`keymap::MENU` needs the `Workspace` context). A
+            // foldout's filter box is caught by the focus-lost listener
+            // below. Not `!contains_focused`: that is also true of a field
+            // focused but not drawn yet (History's compare box after ⇧⌘B
+            // from Changes), and the focus would be taken from it.
+            if !overlay_open && (popup_closed || window.focused(cx).is_none()) {
                 window.focus(&this.focus_handle, cx);
             }
             // GHD foldouts put the caret in their filter box when they open,
@@ -191,6 +194,16 @@ impl Workspace {
                     _ => {}
                 }
             }
+        })
+        .detach();
+
+        // Focus whose element went away (a foldout's filter box after
+        // Escape, History's compare box blurring itself) leaves no key
+        // context, and the menu shortcuts (`keymap::MENU`) need `Workspace`:
+        // in GHD they are the window's accelerators and work whatever has
+        // focus.
+        cx.on_focus_lost(window, |this, window, cx| {
+            window.focus(&this.focus_handle, cx);
         })
         .detach();
 
