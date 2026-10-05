@@ -2598,7 +2598,7 @@ impl Dispatcher {
             });
             return;
         }
-        let (git, repos, stash_icon) = {
+        let (git, repos, stash_icon, other_stash) = {
             let s = Self::state(cx).read(cx);
             let Some(git) = s.git.clone() else { return };
             (
@@ -2609,6 +2609,7 @@ impl Dispatcher {
                     .map(|r| (r.id, r.path.clone()))
                     .collect::<Vec<_>>(),
                 s.flags.bool(crate::flags::ids::REPOSITORY_LIST_STASH_ICON),
+                s.flags.bool(crate::flags::ids::SHOW_LATEST_OTHER_STASH),
             )
         };
         spawn_bg(
@@ -2628,7 +2629,8 @@ impl Dispatcher {
                             .flatten()
                     });
                     let branch = info.current_branch().map(|b| b.name.clone());
-                    let has_stash = stash_icon && corvene_git::has_stash(&info.workdir);
+                    let has_stash =
+                        stash_icon && corvene_git::has_stash(&info.workdir, other_stash);
                     out.insert(
                         id,
                         RepoIndicator {

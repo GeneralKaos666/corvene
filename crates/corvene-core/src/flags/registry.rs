@@ -1664,7 +1664,8 @@ registry! {
         title: "Repository list shows stashes",
         summary: "Repositories with stashed changes show a stash icon in the repository list (from \
                   the opened repository's stashes, or the background indicator refresh for the \
-                  others), like the branch list's stash icon (854).",
+                  others), like the branch list's stash icon (854). Only stashes Corvene can show \
+                  count: its own on any branch, and command-line ones while 728 is on.",
         ghd_behaviour: "Nothing in the repository list tells which repositories hold stashed changes.",
         nature: Nature::Feature,
         kind: Kind::Bool,

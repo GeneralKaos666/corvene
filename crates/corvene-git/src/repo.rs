@@ -185,14 +185,28 @@ fn tip_author_name(commit: &gix::Commit<'_>) -> Option<String> {
         .filter(|n| !n.trim().is_empty())
 }
 
-/// Whether the repository has stash entries (`refs/stash` exists), for the
-/// repository list's stash icon (Corvene, `270-repository-list-stash-icon`).
-pub fn has_stash(path: &Path) -> bool {
-    crate::handle::open(path).is_ok_and(|repo| {
-        repo.try_find_reference("refs/stash")
-            .ok()
-            .flatten()
-            .is_some()
+/// Whether the repository has stash entries the app can show, for the
+/// repository list's stash icon (Corvene, `270-repository-list-stash-icon`):
+/// any entry of `refs/stash` when `any` (`728-show-latest-other-stash`),
+/// else only a `!!GitHub_Desktop<branch>` one.
+pub fn has_stash(path: &Path, any: bool) -> bool {
+    let Ok(repo) = crate::handle::open(path) else {
+        return false;
+    };
+    let Ok(Some(stash)) = repo.try_find_reference("refs/stash") else {
+        return false;
+    };
+    if any {
+        return true;
+    }
+    let mut log = stash.log_iter();
+    let Ok(Some(lines)) = log.all() else {
+        return false;
+    };
+    lines.flatten().any(|line| {
+        line.message
+            .to_str_lossy()
+            .contains(crate::DESKTOP_STASH_MARKER)
     })
 }
 
@@ -358,12 +372,20 @@ mod tests {
         std::fs::write(path.join("a.txt"), "1").unwrap();
         git(path, &["add", "."]);
         git(path, &["commit", "-q", "-m", "one"]);
-        assert!(!has_stash(path));
+        assert!(!has_stash(path, true));
         std::fs::write(path.join("a.txt"), "2").unwrap();
         git(path, &["stash", "-q"]);
-        assert!(has_stash(path));
-        git(path, &["stash", "drop", "-q"]);
-        assert!(!has_stash(path));
+        assert!(has_stash(path, true));
+        // a command-line stash is not a Desktop one
+        assert!(!has_stash(path, false));
+        std::fs::write(path.join("a.txt"), "3").unwrap();
+        git(
+            path,
+            &["stash", "push", "-q", "-m", "!!GitHub_Desktop<main>"],
+        );
+        assert!(has_stash(path, false));
+        git(path, &["stash", "clear"]);
+        assert!(!has_stash(path, true));
     }
 
     #[test]

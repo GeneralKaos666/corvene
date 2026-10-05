@@ -777,8 +777,10 @@ impl RepositoryFoldout {
         let repo_indicators = render_repo_indicators_with(ahead_behind, changed_files, &|n| {
             crate::toolbar::ahead_behind_count(n, self.state.read(cx))
         });
-        // Corvene (`270-repository-list-stash-icon`): the loaded state's
-        // stash count for an opened repository, else the indicator refresh
+        // Corvene (`270-repository-list-stash-icon`): a stash the app shows
+        // (the branch's own or, with `728-show-latest-other-stash`, a
+        // command-line one, or another branch's) for an opened repository,
+        // else the indicator refresh
         let has_stash = {
             let s = self.state.read(cx);
             s.flags
@@ -786,7 +788,7 @@ impl RepositoryFoldout {
                 && s.repo_states
                     .get(&id)
                     .filter(|rs| rs.info.is_some())
-                    .map(|rs| rs.stash_count > 0)
+                    .map(|rs| rs.stash.is_some() || !rs.stashed_branches.is_empty())
                     .or_else(|| s.indicators.get(&id).map(|i| i.has_stash))
                     .unwrap_or(false)
         };
@@ -963,35 +965,35 @@ impl RepositoryFoldout {
                         StyledText::new(text).with_highlights(highlights)
                     }),
             )
-            .when(has_stash, |d| {
-                d.child(
-                    div()
-                        .id(("repo-stash", id))
-                        .flex_none()
-                        .ml(SPACING_HALF())
-                        .child(octicon(
-                            Octicon::Stash,
-                            if selected || highlighted {
-                                t.box_selected_text
-                            } else {
-                                t.text_secondary
-                            },
-                        ))
-                        .ghd_tooltip("Stashed changes"),
-                )
-            })
-            // `.repo-indicators`: ahead / behind arrows, then the changes dot
+            // `.repo-indicators`: (Corvene's stash icon,) ahead / behind
+            // arrows, then the changes dot
             .when(
-                repo_indicators.changes || repo_indicators.ahead_behind.is_some(),
+                has_stash || repo_indicators.changes || repo_indicators.ahead_behind.is_some(),
                 |d| {
                     d.child(
                         div()
                             .flex_none()
-                            .ml_auto()
                             .mr(SPACING_HALF())
                             .flex()
                             .flex_row()
                             .items_center()
+                            .when(has_stash, |d| {
+                                d.child(
+                                    div()
+                                        .id(("repo-stash", id))
+                                        .flex_none()
+                                        .ml(SPACING_HALF())
+                                        .child(octicon(
+                                            Octicon::Stash,
+                                            if selected || highlighted {
+                                                t.box_selected_text
+                                            } else {
+                                                t.text_secondary
+                                            },
+                                        ))
+                                        .ghd_tooltip("Stashed changes"),
+                                )
+                            })
                             .when_some(
                                 repo_indicators
                                     .ahead_behind
@@ -1003,6 +1005,9 @@ impl RepositoryFoldout {
                                         div()
                                             .id(("repo-ahead-behind", id))
                                             .ghd_tooltip(tooltip)
+                                            // as far from the stash glyph (1 px inset)
+                                            // as the changes dot (5 px + its 4 px inset)
+                                            .when(has_stash, |d| d.ml(zpx(8.)))
                                             .flex()
                                             .flex_row()
                                             .items_center()
