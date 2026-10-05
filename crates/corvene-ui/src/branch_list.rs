@@ -126,6 +126,8 @@ pub struct BranchFoldout {
     /// flattened); while set it is the list's selection.
     highlighted: Option<usize>,
     scroll: UniformListScrollHandle,
+    /// Shift+F10 / Menu: the selected (or highlighted) branch row.
+    menu_anchor: crate::context_menu::RowMenuAnchor,
     /// The same for the Pull Requests tab.
     pr_highlighted: Option<usize>,
     /// `335-pull-request-list-filters`, kept while Corvene runs.
@@ -685,6 +687,7 @@ impl BranchFoldout {
             cx.notify()
         })
         .detach();
+        let scroll = UniformListScrollHandle::new();
         Self {
             state,
             filter,
@@ -704,7 +707,8 @@ impl BranchFoldout {
             multi_anchor: None,
             expanded_folders: HashMap::new(),
             highlighted: None,
-            scroll: UniformListScrollHandle::new(),
+            menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&scroll),
+            scroll,
             pr_highlighted: None,
             pr_list_filter: Default::default(),
             pr_scroll: ScrollHandle::new(),
@@ -1807,6 +1811,8 @@ impl BranchFoldout {
                         .child(format!("by {author}")),
                 )
             })
+            // Shift+F10 / Menu
+            .when(selected, |d| d.child(self.menu_anchor.track()))
     }
 
     /// `895-bulk-delete-branches`: ⌘-click toggles `name` in the
@@ -2044,6 +2050,7 @@ impl Render for BranchFoldout {
                     .gap(SPACING())
                     .p(SPACING())
                     .key_context("BranchFilter")
+                    .on_action(self.menu_anchor.action_handler())
                     .on_action(
                         cx.listener(|this, _: &SelectNextFile, _, cx| this.move_highlight(1, cx)),
                     )
@@ -2119,6 +2126,8 @@ impl Render for BranchFoldout {
                 let current = current.clone();
                 div()
                     .id("branches-list")
+                    .key_context("BranchList")
+                    .on_action(self.menu_anchor.action_handler())
                     .track_focus(&self.list_focus)
                     .role(Role::List)
                     .aria_label("Branches")

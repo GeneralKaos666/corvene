@@ -74,6 +74,8 @@ pub struct SelectedCommitView {
     /// is its origin.
     multi_end: Option<String>,
     file_scroll: UniformListScrollHandle,
+    /// Shift+F10 / Menu: the selected file's row.
+    menu_anchor: crate::context_menu::RowMenuAnchor,
     /// Corvene (`801-history-review-mode`): the file list is hidden.
     file_list_hidden: bool,
     /// GHD `CopyButton` of the commit's SHA (its copied state).
@@ -104,6 +106,7 @@ impl SelectedCommitView {
             }
         })
         .detach();
+        let file_scroll = UniformListScrollHandle::new();
         Self {
             state,
             diff,
@@ -114,7 +117,8 @@ impl SelectedCommitView {
             copy_sha: None,
             multi_files: None,
             multi_end: None,
-            file_scroll: UniformListScrollHandle::new(),
+            menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&file_scroll),
+            file_scroll,
             file_list_hidden: false,
         }
     }
@@ -1047,6 +1051,7 @@ impl SelectedCommitView {
         let focus = self.file_list_focus.clone();
         let focused = self.file_list_focused;
         let scroll = self.file_scroll.clone();
+        let menu_anchor = self.menu_anchor.clone();
         div()
             .size_full()
             .flex()
@@ -1094,6 +1099,8 @@ impl SelectedCommitView {
                                         focused,
                                         &multi,
                                         &weak,
+                                        (selected.as_deref() == Some(file.path.as_str()))
+                                            .then_some(&menu_anchor),
                                         cx,
                                     )
                                 })
@@ -1358,6 +1365,7 @@ fn commit_file_row(
     list_focused: bool,
     multi: &std::rc::Rc<Vec<String>>,
     view: &WeakEntity<SelectedCommitView>,
+    menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -1487,6 +1495,7 @@ fn commit_file_row(
             .text_size(FONT_SIZE())
         })
         .child(octicon(icon, color))
+        .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
         .into_any_element()
 }
 
@@ -1635,6 +1644,7 @@ impl Render for SelectedCommitView {
                                 self.file_list(id, cx),
                             )
                             .key_context("CommitFileList")
+                            .on_action(self.menu_anchor.action_handler())
                             .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| {
                                 this.select_relative(1, cx)
                             }))

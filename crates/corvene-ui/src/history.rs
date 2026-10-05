@@ -282,6 +282,8 @@ pub struct HistorySidebar {
     /// `889-compare-shows-conflicts`: the conflicted file list is open.
     conflicts_expanded: bool,
     list_scroll: UniformListScrollHandle,
+    /// Shift+F10 / Menu: the selected commit's row.
+    menu_anchor: crate::context_menu::RowMenuAnchor,
     /// Repository and tip (branch name or detached sha) the list last showed;
     /// a change scrolls it back to the top (flag `808`).
     shown_tip: Option<(u64, String)>,
@@ -346,6 +348,7 @@ impl HistorySidebar {
             }
         })
         .detach();
+        let list_scroll = UniformListScrollHandle::new();
         Self {
             state,
             compare,
@@ -358,7 +361,8 @@ impl HistorySidebar {
             focused_branch: None,
             merge_option: MultiCommitOperationKind::Merge,
             conflicts_expanded: false,
-            list_scroll: UniformListScrollHandle::new(),
+            menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&list_scroll),
+            list_scroll,
             shown_tip: None,
         }
     }
@@ -1956,6 +1960,9 @@ impl HistorySidebar {
             Rc::new(rs.map(|r| r.visible_commits().clone()).unwrap_or_default());
         let selected: Rc<Vec<String>> =
             Rc::new(rs.map(|r| r.selected_commits.clone()).unwrap_or_default());
+        // Shift+F10 / Menu
+        let anchor_sha = rs.and_then(|r| r.selected_commit.clone());
+        let menu_anchor = self.menu_anchor.clone();
         let highlighted: Rc<Vec<String>> =
             Rc::new(rs.map(|r| r.highlighted_shas.clone()).unwrap_or_default());
         // `886`: the filter's matches page in from its own search
@@ -2051,6 +2058,7 @@ impl HistorySidebar {
             .role(Role::List)
             .aria_label("Commits")
             .key_context("HistoryList")
+            .on_action(self.menu_anchor.action_handler())
             .track_focus(&self.list_focus)
             .on_action(cx.listener(|this, _: &ReorderMoveUp, _, cx| this.move_insertion(-1, cx)))
             .on_action(cx.listener(|this, _: &ReorderMoveDown, _, cx| this.move_insertion(1, cx)))
@@ -2138,6 +2146,7 @@ impl HistorySidebar {
                                 dimmed,
                                 weak.clone(),
                                 list_focus.clone(),
+                                (anchor_sha.as_ref() == Some(&commit.sha)).then_some(&menu_anchor),
                                 cx,
                             )
                         })
@@ -2582,6 +2591,7 @@ fn commit_row(
     dimmed: bool,
     weak: WeakEntity<HistorySidebar>,
     list_focus: FocusHandle,
+    menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -2783,6 +2793,7 @@ fn commit_row(
                     .bg(line),
             )
         })
+        .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
         .into_any_element()
 }
 

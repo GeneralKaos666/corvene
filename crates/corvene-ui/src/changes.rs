@@ -221,6 +221,8 @@ pub struct ChangesSidebar {
     check_all_focus: FocusHandle,
     /// Keeps the row an arrow key moved to in view (`scrollRowToVisible`).
     list_scroll: UniformListScrollHandle,
+    /// Shift+F10 / Menu: the selected file's row.
+    menu_anchor: crate::context_menu::RowMenuAnchor,
     /// View › Hide Changes Filter (`isChangesFilterVisible`).
     filter_visible: bool,
     /// GHD `AutocompletingTextInput` state for whichever field has the popup.
@@ -760,6 +762,7 @@ impl ChangesSidebar {
             Dispatcher::set_amend_author(id, author, cx);
         })
         .detach();
+        let list_scroll = UniformListScrollHandle::new();
         Self {
             filter,
             summary,
@@ -778,7 +781,8 @@ impl ChangesSidebar {
             filter_button_bounds: Rc::new(Cell::new(Bounds::default())),
             list_focus: cx.focus_handle(),
             check_all_focus: cx.focus_handle(),
-            list_scroll: UniformListScrollHandle::new(),
+            menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&list_scroll),
+            list_scroll,
             filter_visible: true,
             autocomplete: None,
             summary_misspelled: Vec::new(),
@@ -3454,6 +3458,9 @@ impl ChangesSidebar {
             None
         };
         let selected = self.selected_paths(cx);
+        // Shift+F10 / Menu: the row the arrows move from
+        let anchor_path = selected.list.last().cloned();
+        let menu_anchor = self.menu_anchor.clone();
         let query: SharedString = self.filter.read(cx).value().trim().to_string().into();
         let weak = cx.weak_entity();
         let list_focus = self.list_focus.clone();
@@ -3495,6 +3502,7 @@ impl ChangesSidebar {
                                 repo_id,
                                 weak.clone(),
                                 list_focus.clone(),
+                                (anchor_path.as_ref() == Some(&file.path)).then_some(&menu_anchor),
                                 cx,
                             ))
                         })
@@ -5282,6 +5290,7 @@ impl Render for ChangesSidebar {
                     .id("changes-list-container")
                     .track_focus(&self.list_focus)
                     .key_context("ChangesList")
+                    .on_action(self.menu_anchor.action_handler())
                     .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                         if this.type_into_summary(ev, window, cx) {
                             cx.stop_propagation();
@@ -5454,6 +5463,7 @@ fn file_row(
     repo_id: Option<u64>,
     weak: WeakEntity<ChangesSidebar>,
     list_focus: FocusHandle,
+    menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -5653,6 +5663,7 @@ fn file_row(
             d.child(line_stats_label(stats, colours, t))
         })
         .child(octicon(icon, color))
+        .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
         .into_any_element()
 }
 

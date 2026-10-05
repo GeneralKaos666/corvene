@@ -34,6 +34,8 @@ gpui_kit::actions!(
         SelectPreviousFileFromDiff,
         // View › Toggle History Review Mode (`801-history-review-mode`)
         ToggleHistoryReviewMode,
+        // Shift+F10 / the Menu key: the selected row's context menu
+        OpenRowContextMenu,
         // ← / → between the lists and the diff (`619-arrow-keys-between-panes`)
         FocusPaneLeft,
         FocusPaneRight,

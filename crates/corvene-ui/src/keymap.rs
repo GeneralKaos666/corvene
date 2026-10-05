@@ -350,6 +350,14 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("alt-secondary-b", ViewBranchOnGitHub, MENU),
         KeyBinding::new("alt-secondary-p", PreviewPullRequest, MENU),
         KeyBinding::new("secondary-r", CreatePullRequest, MENU),
+        // GHD `onMacOSWindowKeyDown` / Chromium: Shift+F10 (and the Menu key
+        // off macOS) open the selected row's context menu
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("ChangesList")),
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("HistoryList")),
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("CommitFileList")),
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("RepositoryFilter")),
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("BranchFilter")),
+        KeyBinding::new("shift-f10", OpenRowContextMenu, Some("BranchList")),
         // In-app
         KeyBinding::new("secondary-enter", Commit, Some("CommitMessage")),
         KeyBinding::new("escape", CloseFoldout, None),
@@ -456,6 +464,17 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
                 ),
             ]);
         }
+    }
+    #[cfg(not(target_os = "macos"))]
+    for context in [
+        "ChangesList",
+        "HistoryList",
+        "CommitFileList",
+        "RepositoryFilter",
+        "BranchFilter",
+        "BranchList",
+    ] {
+        bindings.push(KeyBinding::new("menu", OpenRowContextMenu, Some(context)));
     }
     // GHD `Dialog.onKeyDown`: CmdOrCtrl+W dismisses the dialog (on macOS
     // ⌘W is the Window menu's Close Window below)

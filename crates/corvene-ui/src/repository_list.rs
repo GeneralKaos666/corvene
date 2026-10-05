@@ -48,6 +48,8 @@ pub struct RepositoryFoldout {
     /// the filter box (an index into the rows as shown, groups flattened).
     highlighted: Option<usize>,
     scroll: ScrollHandle,
+    /// Shift+F10 / Menu: the highlighted (else the selected) row.
+    menu_anchor: crate::context_menu::RowMenuAnchor,
 }
 
 struct Group {
@@ -376,6 +378,7 @@ impl RepositoryFoldout {
             cx.notify()
         })
         .detach();
+        let scroll = ScrollHandle::new();
         Self {
             state,
             filter,
@@ -385,7 +388,8 @@ impl RepositoryFoldout {
             only_forks: false,
             only_sources: false,
             highlighted: None,
-            scroll: ScrollHandle::new(),
+            menu_anchor: crate::context_menu::RowMenuAnchor::new(&scroll),
+            scroll,
         }
     }
 
@@ -1039,6 +1043,11 @@ impl RepositoryFoldout {
                     )
                 },
             )
+            // Shift+F10 / Menu
+            .when(
+                highlighted || (selected && self.highlighted.is_none()),
+                |d| d.child(self.menu_anchor.track()),
+            )
     }
 
     /// Corvene (`207-repository-status-filter`): the filter options menu.
@@ -1418,6 +1427,7 @@ impl Render for RepositoryFoldout {
                     .on_action(
                         cx.listener(|this, _: &FilterListPick, _, cx| this.pick_highlighted(cx)),
                     )
+                    .on_action(self.menu_anchor.action_handler())
                     .child(crate::widgets::filter_text_box(
                         "repo-filter",
                         &self.filter,

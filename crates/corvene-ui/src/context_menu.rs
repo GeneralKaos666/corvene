@@ -1,13 +1,17 @@
 //! Right-click menus. GHD shows native NSMenus on macOS (`showContextualMenu`);
 //! GPUI has no native context-menu API, so this reproduces the system look:
 //! 5 px inset, 22 px items, 13 px text, accent highlight, 8 px radius.
+//!
+//! Shift+F10 (and the Menu key off macOS) open the selected row's menu in
+//! the repository, branch, changes, history and commit file lists
+//! ([`RowMenuAnchor`]), as in GHD.
 
 use std::rc::Rc;
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::actions::CloseFoldout;
+use crate::actions::{CloseFoldout, OpenRowContextMenu};
 use crate::icons::{Octicon, octicon};
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::zpx;
@@ -395,4 +399,96 @@ impl Render for ContextMenu {
         )
         .with_priority(30)
     }
+}
+
+// ---- Shift+F10 / the Menu key, and the rows' "…" button ----
+
+/// A list's selected row for the keyboard's context-menu keys (GHD
+/// `app.tsx` `onMacOSWindowKeyDown`: Shift+F10 sends `contextmenu` to the
+/// focused row; Chromium does the same for Shift+F10 and the Menu key on
+/// Windows and Linux): where the row was last painted and the list's scroll
+/// offset then, so a row scrolled since is found where it is now.
+/// Where a row was painted and the list's scroll offset then.
+type PaintedRow = Option<(Bounds<Pixels>, Point<Pixels>)>;
+
+#[derive(Clone)]
+pub struct RowMenuAnchor {
+    painted: Rc<std::cell::Cell<PaintedRow>>,
+    scroll: ScrollHandle,
+}
+
+impl RowMenuAnchor {
+    pub fn new(scroll: &ScrollHandle) -> Self {
+        Self {
+            painted: Rc::default(),
+            scroll: scroll.clone(),
+        }
+    }
+
+    pub fn for_uniform_list(scroll: &UniformListScrollHandle) -> Self {
+        Self::new(&scroll.0.borrow().base_handle)
+    }
+
+    /// The invisible child the selected row carries.
+    pub fn track(&self) -> impl IntoElement + use<> {
+        let painted = self.painted.clone();
+        let scroll = self.scroll.clone();
+        canvas(
+            move |bounds, _, _| painted.set(Some((bounds, scroll.offset()))),
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
+    /// Shift+F10 / Menu: the selected row is right-clicked where it is now,
+    /// so its own menu opens there (nothing while it is scrolled out of
+    /// view).
+    pub fn open(&self, window: &mut Window, cx: &mut App) {
+        let Some((bounds, offset)) = self.painted.get() else {
+            return;
+        };
+        let moved = self.scroll.offset() - offset;
+        let at = point(
+            bounds.origin.x + moved.x + (bounds.size.width / 2.).min(zpx(40.)),
+            bounds.origin.y + moved.y + bounds.size.height / 2.,
+        );
+        if self.scroll.bounds().contains(&at) {
+            right_click_at(at, window, cx);
+        }
+    }
+
+    /// The list element's handler for [`OpenRowContextMenu`].
+    pub fn action_handler(&self) -> impl Fn(&OpenRowContextMenu, &mut Window, &mut App) + use<> {
+        let anchor = self.clone();
+        move |_, window, cx| anchor.open(window, cx)
+    }
+}
+
+/// A right-click at `position`, after the event being handled: the row
+/// under it opens its menu as for the mouse.
+fn right_click_at(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    window.defer(cx, move |window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Right,
+                position,
+                modifiers: Modifiers::default(),
+                click_count: 1,
+            }),
+            cx,
+        );
+    });
 }
