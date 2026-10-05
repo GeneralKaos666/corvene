@@ -172,7 +172,15 @@ impl PreferencesDialog {
                         .default_value(value)
                 })
             };
-        let editor = draft.custom_editor.clone().unwrap_or_default();
+        // `523-custom-editor-list`: the form edits the chosen custom editor
+        let editor_list = state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CUSTOM_EDITOR_LIST);
+        let editor = draft
+            .chosen_custom_editor(editor_list)
+            .cloned()
+            .unwrap_or_default();
         let shell = draft.custom_shell.clone().unwrap_or_default();
         let custom_editor_path = custom_input("Path to executable", editor.path, cx);
         let custom_editor_args = custom_input("Command line arguments", editor.arguments, cx);
@@ -185,14 +193,21 @@ impl PreferencesDialog {
             &custom_editor_name,
         ] {
             cx.observe(input, |this, _, cx| {
+                let index = this.custom_editor_index(cx);
+                let mut editors = this.draft.custom_editors();
                 let path = this.custom_editor_path.read(cx).value().trim().to_string();
-                let bundle_id = bundle_id_for(&path, this.draft.custom_editor.as_ref());
-                this.draft.custom_editor = Some(corvene_core::CustomIntegration {
+                let bundle_id = bundle_id_for(&path, editors.get(index));
+                let editor = corvene_core::CustomIntegration {
                     path,
                     arguments: this.custom_editor_args.read(cx).value().trim().to_string(),
                     bundle_id,
                     name: this.custom_editor_name.read(cx).value().trim().to_string(),
-                });
+                };
+                match editors.get_mut(index) {
+                    Some(entry) => *entry = editor,
+                    None => editors.push(editor),
+                }
+                this.draft.set_custom_editors(editors);
                 cx.notify();
             })
             .detach();
@@ -352,6 +367,59 @@ impl PreferencesDialog {
             },
             cx,
         );
+    }
+
+    /// The custom editor the form edits: the chosen one with
+    /// `523-custom-editor-list`, else GHD's only one.
+    fn custom_editor_index(&self, cx: &App) -> usize {
+        let list = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CUSTOM_EDITOR_LIST);
+        if list {
+            self.draft.custom_editor_index
+        } else {
+            0
+        }
+    }
+
+    /// `523-custom-editor-list`: make custom editor `index` the one in use
+    /// and show it in the form.
+    fn choose_custom_editor(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.draft.use_custom_editor = true;
+        self.draft.custom_editor_index = index;
+        let editor = self
+            .draft
+            .custom_editors()
+            .get(index)
+            .cloned()
+            .unwrap_or_default();
+        self.custom_editor_path
+            .update(cx, |s, cx| s.set_value(editor.path, window, cx));
+        self.custom_editor_args
+            .update(cx, |s, cx| s.set_value(editor.arguments, window, cx));
+        self.custom_editor_name
+            .update(cx, |s, cx| s.set_value(editor.name, window, cx));
+        cx.notify();
+    }
+
+    /// `523-custom-editor-list`: drop the custom editor the form shows;
+    /// with none left the first installed editor is used again.
+    fn remove_custom_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let index = self.draft.custom_editor_index;
+        let mut editors = self.draft.custom_editors();
+        if index < editors.len() {
+            editors.remove(index);
+        }
+        let left = editors.len();
+        self.draft.set_custom_editors(editors);
+        if left == 0 {
+            self.draft.use_custom_editor = false;
+            cx.notify();
+        } else {
+            self.choose_custom_editor(index.min(left - 1), window, cx);
+        }
     }
 
     fn edit<F: Fn(&mut Settings, bool) + 'static>(
@@ -647,13 +715,35 @@ impl PreferencesDialog {
         // Android: applications are intents, not executables with arguments,
         // so there is no custom integration to configure
         let android = cfg!(target_os = "android");
+        // `523-custom-editor-list`: every custom editor by name, then "Add
+        // Custom Editor…"
+        let editor_list = s.flags.bool(corvene_core::flags::ids::CUSTOM_EDITOR_LIST) && !android;
+        let custom_names: Vec<SharedString> = if editor_list {
+            self.draft
+                .custom_editors()
+                .iter()
+                .enumerate()
+                .map(|(ix, e)| e.display_name(ix, true).into())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let custom_index = self.custom_editor_index(cx);
         let mut editor_options = editors.clone();
-        if !android {
+        editor_options.extend(custom_names.iter().cloned());
+        if editor_list {
+            editor_options.push(mac_or("Add Custom Editor…", "Add custom editor…").into());
+        } else if !android {
             editor_options
                 .push(mac_or("Configure Custom Editor…", "Configure custom editor…").into());
         }
         let editor_value = if use_custom_editor {
-            mac_or("Configure Custom Editor…", "Configure custom editor…").to_string()
+            custom_names
+                .get(custom_index)
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| {
+                    mac_or("Configure Custom Editor…", "Configure custom editor…").to_string()
+                })
         } else {
             self.draft
                 .external_editor
@@ -662,7 +752,7 @@ impl PreferencesDialog {
                 .unwrap_or_default()
         };
         let editor_ix = if use_custom_editor {
-            Some(editors.len())
+            Some(editors.len() + if editor_list { custom_index } else { 0 })
         } else {
             editors.iter().position(|e| e.as_ref() == editor_value)
         };
@@ -685,10 +775,22 @@ impl PreferencesDialog {
         };
         let weak = cx.weak_entity();
         let editor_names = editors.clone();
-        let on_editor: SelectHandler = Rc::new(move |ix, _, cx| {
+        let custom_count = custom_names.len();
+        let on_editor: SelectHandler = Rc::new(move |ix, window, cx| {
             let name = editor_names.get(ix).map(|n| n.to_string());
-            let custom = ix == editor_names.len();
+            let custom = ix >= editor_names.len();
             weak.update(cx, |this, cx| {
+                if editor_list && custom {
+                    // a listed custom editor, or a new one at the end
+                    let index = ix - editor_names.len();
+                    if index == custom_count {
+                        let mut editors = this.draft.custom_editors();
+                        editors.push(corvene_core::CustomIntegration::default());
+                        this.draft.set_custom_editors(editors);
+                    }
+                    this.choose_custom_editor(index, window, cx);
+                    return;
+                }
                 this.draft.use_custom_editor = custom;
                 if !custom {
                     this.draft.external_editor = name;
@@ -751,10 +853,9 @@ impl PreferencesDialog {
                 )
             })
             .when(use_custom_editor, |d| {
-                let name = s
-                    .flags
-                    .bool(corvene_core::flags::ids::CUSTOM_EDITOR_NAME)
-                    .then_some(&self.custom_editor_name);
+                let name = (editor_list
+                    || s.flags.bool(corvene_core::flags::ids::CUSTOM_EDITOR_NAME))
+                .then_some(&self.custom_editor_name);
                 d.child(self.custom_form(
                     "custom-editor",
                     &self.custom_editor_path,
@@ -763,6 +864,23 @@ impl PreferencesDialog {
                     window,
                     cx,
                 ))
+                // `523-custom-editor-list`
+                .when(editor_list, |d| {
+                    let weak = cx.weak_entity();
+                    d.child(
+                        div().flex().flex_row().child(
+                            button(
+                                "custom-editor-remove",
+                                mac_or("Remove Custom Editor", "Remove custom editor"),
+                                cx,
+                            )
+                            .on_click(move |_, window, cx| {
+                                weak.update(cx, |this, cx| this.remove_custom_editor(window, cx))
+                                    .ok();
+                            }),
+                        ),
+                    )
+                })
             })
             .child(labeled(
                 "Shell",

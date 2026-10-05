@@ -1609,6 +1609,30 @@ pub fn busy_for_quit(
 }
 
 impl AppState {
+    /// The custom editor "Open in …" uses (Settings › Integrations): GHD's
+    /// one, or with `523-custom-editor-list` the chosen one of the list.
+    pub fn custom_editor_in_use(&self) -> Option<&crate::persistence::CustomIntegration> {
+        if !self.settings.use_custom_editor {
+            return None;
+        }
+        self.settings
+            .chosen_custom_editor(self.flags.bool(crate::flags::ids::CUSTOM_EDITOR_LIST))
+    }
+
+    /// [`Self::custom_editor_in_use`]'s name in menus (its own with
+    /// `508-custom-editor-name` or `523-custom-editor-list`).
+    pub fn custom_editor_label(&self) -> Option<String> {
+        let list = self.flags.bool(crate::flags::ids::CUSTOM_EDITOR_LIST);
+        let custom = self.custom_editor_in_use()?;
+        let index = if list {
+            self.settings.custom_editor_index
+        } else {
+            0
+        };
+        let named = list || self.flags.bool(crate::flags::ids::CUSTOM_EDITOR_NAME);
+        Some(custom.display_name(index, named))
+    }
+
     /// The editor "Open in …" menu items name: the selected editor, else the
     /// first installed one, else GHD's generic "External Editor" (lower
     /// case off macOS, as GHD's non-darwin labels).
@@ -1621,14 +1645,8 @@ impl AppState {
         {
             return name;
         }
-        if self.settings.use_custom_editor
-            && let Some(custom) = &self.settings.custom_editor
-        {
-            let name = custom.name.trim();
-            if !name.is_empty() && self.flags.bool(crate::flags::ids::CUSTOM_EDITOR_NAME) {
-                return name.to_string();
-            }
-            return "Custom Editor".to_string();
+        if let Some(label) = self.custom_editor_label() {
+            return label;
         }
         self.settings
             .external_editor
@@ -1647,7 +1665,7 @@ impl AppState {
     /// The editor "Open in …" opens can jump to a line
     /// (`corvene_platform::editors::launch_at_line`; never a custom editor).
     pub fn editor_supports_line(&self) -> bool {
-        if self.settings.use_custom_editor && self.settings.custom_editor.is_some() {
+        if self.custom_editor_in_use().is_some() {
             return false;
         }
         corvene_platform::editors::find_editor_or_default(

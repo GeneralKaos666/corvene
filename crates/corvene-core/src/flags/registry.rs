@@ -3530,6 +3530,22 @@ registry! {
         code: &["crates/corvene-core/src/settings_file.rs", "crates/corvene/src/main.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
     },
 
+    /// Several custom editors.
+    CUSTOM_EDITOR_LIST = 523 "custom-editor-list" {
+        title: "Several custom editors",
+        summary: "Settings › Integrations keeps a list of custom editors (name, path and \
+                  arguments; Add Custom Editor… and Remove Custom Editor): the editor menu lists \
+                  each by name next to the installed editors, and so does the No Changes card's \
+                  editor picker.",
+        ghd_behaviour: "One custom editor (\"Configure Custom Editor…\").",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19163)],
+        code: &["crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/persistence.rs", "crates/corvene-core/src/state.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

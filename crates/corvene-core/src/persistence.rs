@@ -175,6 +175,12 @@ pub struct Settings {
     pub custom_editor: Option<CustomIntegration>,
     #[serde(default)]
     pub use_custom_editor: bool,
+    /// Corvene (`523-custom-editor-list`): the custom editors after
+    /// `custom_editor` (GHD's only one), and which of them all is used.
+    #[serde(default)]
+    pub more_custom_editors: Vec<CustomIntegration>,
+    #[serde(default)]
+    pub custom_editor_index: usize,
     #[serde(default)]
     pub custom_shell: Option<CustomIntegration>,
     #[serde(default)]
@@ -201,6 +207,56 @@ pub struct CustomIntegration {
     /// `custom-editor-name`; not in GHD). Empty: "Custom Editor".
     #[serde(default)]
     pub name: String,
+}
+
+impl CustomIntegration {
+    /// The custom editor's name in menus: its own (`508-custom-editor-name`,
+    /// `523-custom-editor-list`), else "Custom Editor" (numbered after the
+    /// first in a list).
+    pub fn display_name(&self, index: usize, named: bool) -> String {
+        let name = self.name.trim();
+        if named && !name.is_empty() {
+            name.to_string()
+        } else if index == 0 {
+            "Custom Editor".to_string()
+        } else {
+            format!("Custom Editor {}", index + 1)
+        }
+    }
+}
+
+impl Settings {
+    /// Corvene (`523-custom-editor-list`): every custom editor, GHD's
+    /// `custom_editor` first.
+    pub fn custom_editors(&self) -> Vec<CustomIntegration> {
+        self.custom_editor
+            .iter()
+            .chain(&self.more_custom_editors)
+            .cloned()
+            .collect()
+    }
+
+    /// Store `editors` as the custom editors (the first in
+    /// `custom_editor`), keeping the chosen one in range.
+    pub fn set_custom_editors(&mut self, mut editors: Vec<CustomIntegration>) {
+        self.custom_editor = (!editors.is_empty()).then(|| editors.remove(0));
+        self.more_custom_editors = editors;
+        let count = self.custom_editors().len();
+        self.custom_editor_index = self.custom_editor_index.min(count.saturating_sub(1));
+    }
+
+    /// The custom editor that "Open in …" uses while `use_custom_editor`
+    /// is set: GHD's one, or with `list` (`523-custom-editor-list`) the
+    /// chosen one of the list.
+    pub fn chosen_custom_editor(&self, list: bool) -> Option<&CustomIntegration> {
+        if list && self.custom_editor_index > 0 {
+            self.more_custom_editors
+                .get(self.custom_editor_index - 1)
+                .or(self.custom_editor.as_ref())
+        } else {
+            self.custom_editor.as_ref()
+        }
+    }
 }
 
 fn default_date_format() -> String {
@@ -361,6 +417,8 @@ impl Default for Settings {
             cache_git_hook_env: true,
             custom_editor: None,
             use_custom_editor: false,
+            more_custom_editors: Vec::new(),
+            custom_editor_index: 0,
             custom_shell: None,
             use_custom_shell: false,
             collapsed_repository_groups: Vec::new(),
@@ -876,6 +934,32 @@ impl StoreExt for Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_editor_list_keeps_ghds_entry_first() {
+        let editor = |name: &str| CustomIntegration {
+            path: format!("/bin/{name}"),
+            name: name.to_string(),
+            ..CustomIntegration::default()
+        };
+        // an old store: one custom editor, no list fields
+        let mut settings: Settings = serde_json::from_value(serde_json::json!({
+            "custom_editor": {"path": "/bin/a", "arguments": "", "name": "a"},
+            "use_custom_editor": true,
+        }))
+        .unwrap();
+        assert_eq!(settings.custom_editors(), vec![editor("a")]);
+        settings.set_custom_editors(vec![editor("a"), editor("b"), editor("c")]);
+        settings.custom_editor_index = 2;
+        assert_eq!(settings.chosen_custom_editor(true), Some(&editor("c")));
+        assert_eq!(settings.chosen_custom_editor(false), Some(&editor("a")));
+        settings.set_custom_editors(vec![editor("b")]);
+        assert_eq!(settings.custom_editor_index, 0);
+        assert_eq!(settings.chosen_custom_editor(true), Some(&editor("b")));
+        assert_eq!(editor("").display_name(1, true), "Custom Editor 2");
+        assert_eq!(editor("vi").display_name(1, false), "Custom Editor 2");
+        assert_eq!(editor("vi").display_name(0, true), "vi");
+    }
 
     #[test]
     fn flags_round_trip() {

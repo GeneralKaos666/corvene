@@ -142,7 +142,7 @@ pub const TUTORIAL_REPOSITORY_NAME: &str = "desktop-tutorial";
 impl AppState {
     /// The editor the tutorial and "Open in …" use (`resolvedExternalEditor`).
     pub fn resolved_editor_name(&self) -> Option<String> {
-        if self.settings.use_custom_editor && self.settings.custom_editor.is_some() {
+        if self.custom_editor_in_use().is_some() {
             return Some("Custom Editor".to_string());
         }
         self.settings

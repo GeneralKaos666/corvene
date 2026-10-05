@@ -476,10 +476,8 @@ impl Dispatcher {
                 repo_editor
                     .clone()
                     .or_else(|| s.settings.external_editor.clone()),
-                s.settings
-                    .use_custom_editor
-                    .then(|| s.settings.custom_editor.clone())
-                    .flatten()
+                s.custom_editor_in_use()
+                    .cloned()
                     .filter(|_| repo_editor.is_none()),
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
                 folder,

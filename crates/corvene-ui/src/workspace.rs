@@ -653,7 +653,7 @@ impl Workspace {
                         s.editor_label(),
                         // `isExternalEditorAvailable`: `useCustomEditor ||
                         // selectedExternalEditor !== null`
-                        (s.settings.use_custom_editor && s.settings.custom_editor.is_some())
+                        s.custom_editor_in_use().is_some()
                             || s.settings.external_editor.is_some()
                             || !s.editors.is_empty(),
                         // flag `724-no-changes-open-in-shell` (Corvene
@@ -678,9 +678,28 @@ impl Workspace {
                             .as_deref()
                             .is_some_and(|p| s.repository_editor(p).is_some())
                     });
+                    // `523-custom-editor-list`: the custom editors too (here
+                    // only while the repository has no editor of its own)
+                    let customs: Vec<(usize, String)> =
+                        if s.flags.bool(corvene_core::flags::ids::CUSTOM_EDITOR_LIST)
+                            && per_repo.is_none()
+                        {
+                            s.settings
+                                .custom_editors()
+                                .iter()
+                                .enumerate()
+                                .map(|(ix, e)| (ix, e.display_name(ix, true)))
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                    let custom_in_use = s
+                        .settings
+                        .use_custom_editor
+                        .then_some(s.settings.custom_editor_index);
                     (s.flags
                         .bool(corvene_core::flags::ids::EDITOR_PICKER_DROPDOWN)
-                        && s.editors.len() > 1)
+                        && s.editors.len() + customs.len() > 1)
                         .then(|| {
                             s.editors
                                 .iter()
@@ -714,6 +733,20 @@ impl Workspace {
                                         }),
                                     )
                                 })
+                                .chain(customs.iter().map(|(ix, label)| {
+                                    let (ix, path) = (*ix, path.clone());
+                                    crate::context_menu::MenuItem::checkbox(
+                                        label.clone(),
+                                        custom_in_use == Some(ix),
+                                        move |_, cx| {
+                                            Dispatcher::update_settings(cx, move |s| {
+                                                s.use_custom_editor = true;
+                                                s.custom_editor_index = ix;
+                                            });
+                                            Dispatcher::open_in_editor(path.clone(), cx);
+                                        },
+                                    )
+                                }))
                                 .collect::<Vec<_>>()
                         })
                 };
