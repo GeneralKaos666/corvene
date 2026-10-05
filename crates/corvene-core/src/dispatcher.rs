@@ -2365,7 +2365,8 @@ impl Dispatcher {
             let Some(info) = rs.info.as_ref() else { return };
             let revision = match rs.commits.first() {
                 Some(tip) if more && race_fix => tip.sha.clone(),
-                _ => "HEAD".to_string(),
+                // `1212-bisect`: from the bad commit, so the range stays in view
+                _ => crate::bisect::history_tip(s, rs).unwrap_or_else(|| "HEAD".to_string()),
             };
             // GHD `loadLocalCommits`: the page reset reloads them, and a
             // further page only when the list's last commit is local (there
@@ -2530,6 +2531,9 @@ impl Dispatcher {
                         Ok(true) => Self::load_changeset(id, cx),
                         _ => {}
                     }
+                }
+                if !more {
+                    Self::reveal_first_bad_commit(id, cx);
                 }
                 if reload {
                     Self::load_commits(id, false, cx);

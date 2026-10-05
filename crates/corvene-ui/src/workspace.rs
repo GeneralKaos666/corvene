@@ -1425,6 +1425,11 @@ impl Render for Workspace {
             .when(!bare, |d| {
                 d.child(toolbar(buttons, &self.toolbar_resize, cx))
             })
+            // `1212-bisect`: under the toolbar while the repository bisects
+            .when(
+                !bare && cloning.is_none() && missing_repository.is_none(),
+                |d| d.children(crate::bisect_bar::bisect_bar(self.state.read(cx), cx)),
+            )
             .when(self.welcome.is_none() && !banner_toast, |d| {
                 d.when(banner.is_some(), |d| d.child(self.banner_view.clone()))
             })

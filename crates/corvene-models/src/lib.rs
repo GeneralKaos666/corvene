@@ -1338,6 +1338,83 @@ pub struct WorkingDirectoryStatus {
     /// or that file would be committed.
     #[serde(default)]
     pub hidden_index_entries: bool,
+    /// A `git bisect` is in progress (Corvene `1212-bisect`).
+    #[serde(default)]
+    pub bisect: Option<BisectState>,
+}
+
+/// A `git bisect` in progress (Corvene `1212-bisect`; GitHub Desktop has no
+/// bisect): what the git directory holds, however the bisect was started.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct BisectState {
+    /// `BISECT_START`: the branch (or commit) `git bisect reset` goes back to.
+    pub start: String,
+    /// `BISECT_TERMS`: the words for a bad and a good commit (`bad` and
+    /// `good` unless the bisect was started with `--term-new` / `--term-old`).
+    pub term_bad: String,
+    pub term_good: String,
+    /// `refs/bisect/<bad>`
+    pub bad: Option<String>,
+    /// `refs/bisect/<good>-*`
+    pub good: Vec<String>,
+    /// `refs/bisect/skip-*`
+    pub skipped: Vec<String>,
+    /// Once a bad and a good commit are known, every commit that may still
+    /// be the first bad one, newest first, the bad commit included
+    /// (`git rev-list <bad> --not <good>…` with the bisect's paths).
+    pub candidates: Vec<String>,
+}
+
+/// Where a bisect stands ([`BisectState::phase`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BisectPhase {
+    /// A bad or a good commit (or both) is still to be marked.
+    Waiting { has_bad: bool, has_good: bool },
+    /// git checked out a commit to test; `left` candidates remain.
+    Testing { left: usize },
+    /// The first bad commit.
+    Found { sha: String },
+    /// Every commit left was skipped: the first bad one is among `count`.
+    OnlySkipped { count: usize },
+    /// Nothing lies between the marks (the good commit is not an ancestor
+    /// of the bad one).
+    Empty,
+}
+
+impl BisectState {
+    pub fn phase(&self) -> BisectPhase {
+        let Some(bad) = self.bad.as_deref() else {
+            return BisectPhase::Waiting {
+                has_bad: false,
+                has_good: !self.good.is_empty(),
+            };
+        };
+        if self.good.is_empty() {
+            return BisectPhase::Waiting {
+                has_bad: true,
+                has_good: false,
+            };
+        }
+        match self.candidates.as_slice() {
+            [] => BisectPhase::Empty,
+            [only] => BisectPhase::Found { sha: only.clone() },
+            all if all
+                .iter()
+                .all(|sha| sha == bad || self.skipped.contains(sha)) =>
+            {
+                BisectPhase::OnlySkipped { count: all.len() }
+            }
+            all => BisectPhase::Testing { left: all.len() },
+        }
+    }
+
+    /// The start is a branch name, not a commit (a bisect started on a
+    /// detached HEAD writes the sha).
+    pub fn start_branch(&self) -> Option<&str> {
+        let looks_like_sha =
+            self.start.len() >= 40 && self.start.chars().all(|c| c.is_ascii_hexdigit());
+        (!self.start.is_empty() && !looks_like_sha).then_some(self.start.as_str())
+    }
 }
 
 impl WorkingDirectoryStatus {

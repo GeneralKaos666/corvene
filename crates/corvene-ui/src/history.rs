@@ -1415,7 +1415,10 @@ impl HistorySidebar {
                 .filter(|_| !unpublished)
                 .map(|g| g.html_url.clone());
             let comparing = rs.is_some_and(|r| r.compare.is_comparing());
+            // `1212-bisect`: History lists from the bad commit, not HEAD
+            let bisecting = rs.is_some_and(|r| corvene_core::bisect::history_tip(s, r).is_some());
             let is_head = !comparing
+                && !bisecting
                 && rs
                     .and_then(|rs| rs.commits.first())
                     .map(|c| c.sha == commit.sha)
@@ -1600,6 +1603,10 @@ impl HistorySidebar {
                     }
                 },
             ));
+        }
+        // `1212-bisect`
+        if let Some(bisect) = crate::bisect_bar::bisect_menu(id, &sha, self.state.read(cx)) {
+            items.push(bisect);
         }
         items.extend([
             MenuItem::separator(),
@@ -2005,6 +2012,8 @@ impl HistorySidebar {
             .map(branch_labels)
             .unwrap_or_default(),
         );
+        // `1212-bisect`: marked commits and the range still in question
+        let bisect = rs.and_then(|r| crate::bisect_bar::BisectRows::of(s, r));
         if commits.is_empty() {
             let compare_loading = rs.is_some_and(|r| r.compare.loading);
             let filter_message = filter.map(|filter| {
@@ -2145,6 +2154,11 @@ impl HistorySidebar {
                                 line_above: insertion_here == Some(ix),
                                 line_below: insertion_here == Some(ix + 1) && ix + 1 == count,
                                 keyboard_selected: in_reorder && is_selected,
+                                bisect: bisect.as_ref().map(|b| BisectHint {
+                                    mark: b.mark(&commit.sha),
+                                    in_range: b.in_range(&commit.sha),
+                                    rows: b.clone(),
+                                }),
                             };
                             commit_row(
                                 id,
@@ -2315,12 +2329,22 @@ pub(crate) fn request_commit_avatars(commit: &Commit, cx: &mut App) {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct RowHint {
     squash_target: bool,
     line_above: bool,
     line_below: bool,
     keyboard_selected: bool,
+    /// `1212-bisect`
+    bisect: Option<BisectHint>,
+}
+
+/// `1212-bisect`: a row's mark and whether it is still in question.
+#[derive(Clone)]
+struct BisectHint {
+    mark: Option<corvene_core::bisect::BisectMark>,
+    in_range: bool,
+    rows: Rc<crate::bisect_bar::BisectRows>,
 }
 
 /// `.commit .info` + tag indicators, shared with the drag element. `badge`
@@ -2843,7 +2867,12 @@ fn commit_row(
         })
         .map(|d| {
             let contents =
-                commit_row_contents_with(commit, text, secondary, badge, branches, unpushed, cx);
+                commit_row_contents_with(commit, text, secondary, badge, branches, unpushed, cx)
+                    // `1212-bisect`: the mark after the tags
+                    .children(hint.bisect.as_ref().and_then(|b| {
+                        let selected = (is_selected || hint.keyboard_selected).then_some(text);
+                        Some(b.rows.pill(b.mark?, selected, cx))
+                    }));
             // `621-context-menu-buttons`: after the contents
             if crate::context_menu::row_menu_buttons(cx) {
                 d.group("commit-row")
@@ -2863,6 +2892,18 @@ fn commit_row(
             } else {
                 d.child(contents)
             }
+        })
+        // `1212-bisect`: a bar down the left of the commits still in question
+        .when(hint.bisect.as_ref().is_some_and(|b| b.in_range), |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .w(zpx(3.))
+                    .bg(t.color_modified),
+            )
         })
         .when(hint.line_above, |d| {
             d.child(

@@ -367,6 +367,18 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.put("sha", sha);
         }
+        Popup::StartBisect {
+            repo: r,
+            mark,
+            branch,
+        } => {
+            repo = Some(*r);
+            f.put("branch", branch).opt(
+                "mark",
+                mark.as_ref()
+                    .map(|(verdict, sha)| format!("{verdict:?} {sha}")),
+            );
+        }
         Popup::ResetToRemote {
             repo: r,
             branch,

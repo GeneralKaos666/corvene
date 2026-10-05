@@ -245,6 +245,8 @@ pub fn is_relevant(root: &Path, path: &Path) -> bool {
         "objects" | "modules" | "lfs" | "hooks" | "info" | "worktrees" => false,
         "HEAD" | "index" | "packed-refs" | "MERGE_HEAD" | "REBASE_HEAD" | "CHERRY_PICK_HEAD"
         | "ORIG_HEAD" | "FETCH_HEAD" | "config" => true,
+        // `1212-bisect`: `git bisect start` touches nothing else
+        "BISECT_START" | "BISECT_TERMS" | "BISECT_LOG" => true,
         "refs" | "logs" | "rebase-merge" | "rebase-apply" => true,
         _ => false,
     }

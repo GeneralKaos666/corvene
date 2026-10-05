@@ -389,6 +389,13 @@ pub enum Popup {
         repo: u64,
         sha: String,
     },
+    /// Corvene `1212-bisect`: stash the uncommitted changes on `branch`
+    /// before bisecting (`mark` as for `Dispatcher::start_bisect`).
+    StartBisect {
+        repo: u64,
+        mark: Option<(corvene_git::BisectVerdict, String)>,
+        branch: String,
+    },
     /// `WarnLocalChangesBeforeUndo`
     WarnLocalChangesBeforeUndo {
         repo: u64,
@@ -669,6 +676,7 @@ impl Popup {
             | Self::ResetToCommit { repo, .. }
             | Self::CheckoutCommit { repo, .. }
             | Self::CreateTag { repo, .. }
+            | Self::StartBisect { repo, .. }
             | Self::WarnLocalChangesBeforeUndo { repo, .. }
             | Self::CreateBranch { repo, .. }
             | Self::RenameBranch { repo, .. }
@@ -1291,6 +1299,9 @@ pub struct RepositoryState {
     pub rewritten_selection: Vec<(String, Option<i64>)>,
     /// `changesState.conflictState`
     pub conflict_state: Option<crate::mco::ConflictState>,
+    /// `1212-bisect`: a mark was just made; the next History load selects
+    /// the first bad commit if git named it (`Dispatcher::bisect_mark`).
+    pub bisect_reveal: bool,
     /// `770-co-authors-from-history`: the distinct authors (name, email) of
     /// the newest commits, read once per session; whether that read runs.
     pub recent_authors: Option<std::sync::Arc<Vec<(String, String)>>>,

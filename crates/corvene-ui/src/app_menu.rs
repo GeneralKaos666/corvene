@@ -27,7 +27,8 @@
 //! "Flags…" (no GHD equivalent, always there), File › Import Repositories
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
 //! Pull All Repositories (flag `299-pull-all-repositories`), Repository ›
-//! Fetch All Tags (flag `899-tags-in-branch-list`), Branch › Push To ▸ and
+//! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Start
+//! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
 //! Fetch From ▸ with a repository's remotes when it has several (flag
 //! `1210-push-to-other-remote`), Branch › Request
 //! Reviewers… (flag `336-request-reviewers`), Repository ›
@@ -127,6 +128,10 @@ pub struct MenuExtras {
     pub pull_all: bool,
     /// Flag `899-tags-in-branch-list`: Repository › Fetch All Tags.
     pub fetch_tags: bool,
+    /// Flag `1212-bisect`: Repository › Start Bisect / Stop Bisecting,
+    /// `Some(true)` while the repository bisects (set by
+    /// [`MenuLabelsEvent::of`]).
+    pub bisect: Option<bool>,
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
     /// branch has a pull request).
     pub request_reviewers: bool,
@@ -163,6 +168,7 @@ impl MenuExtras {
             fetch_all: flags.bool(ids::FETCH_ALL_REPOSITORIES),
             pull_all: flags.bool(ids::PULL_ALL_REPOSITORIES),
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
+            bisect: flags.bool(ids::BISECT).then_some(false),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
             stash_with_message: flags.bool(ids::STASH_LIST).then_some(false),
@@ -197,6 +203,10 @@ impl MenuLabelsEvent {
                     && rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
                     && rs.conflict_state.is_none()
             }));
+        }
+        // `1212-bisect`: whether the selected repository bisects
+        if extras.bisect.is_some() {
+            extras.bisect = Some(corvene_core::bisect::selected_bisect(s).is_some());
         }
         // `283-move-changes-to-worktree`: with changes and another worktree
         if extras.move_changes_to_worktree.is_some() {
@@ -658,6 +668,20 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         item(l("New Worktree…", "New work&tree…"), NewWorktree),
         separator(),
     ]);
+    // Corvene (`1212-bisect`)
+    if let Some(bisecting) = extras.bisect {
+        repository.extend([
+            MenuItemConstructorOptions {
+                enabled: Some(!bisecting),
+                ..item(l("Start Bisect", "Start &bisect"), StartBisect)
+            },
+            MenuItemConstructorOptions {
+                enabled: Some(bisecting),
+                ..item(l("Stop Bisecting", "Stop bise&cting"), StopBisect)
+            },
+            separator(),
+        ]);
+    }
     if extras.show_add_license {
         repository.push(item(l("Add License…", "A&dd license…"), AddLicense));
     }
@@ -1009,6 +1033,7 @@ mod tests {
                     fetch_all: true,
                     pull_all: true,
                     fetch_tags: true,
+                    bisect: Some(bits & 1 != 0),
                     request_reviewers: true,
                     move_changes_to_worktree: Some(true),
                     stash_with_message: Some(true),

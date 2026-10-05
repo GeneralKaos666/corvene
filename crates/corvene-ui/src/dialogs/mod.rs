@@ -47,6 +47,7 @@ mod request_reviewers;
 mod sign_in;
 mod simple;
 mod ssh_key_passphrase;
+mod start_bisect;
 mod stash_list_dialogs;
 mod test_notifications;
 mod tutorial_dialogs;
@@ -113,6 +114,7 @@ pub use sign_in::{
     ExistingAccountWarning, SignInAction, SignInContent, SignInDialog, sign_in_content,
 };
 pub use simple::{CliInstalledAction, CliInstalledContent, SimpleDialog, cli_installed};
+pub use start_bisect::StartBisectDialog;
 pub use unknown_authors::UnknownAuthorsDialog;
 pub use worktree_dialogs::{
     AddWorktreeDialog, DeleteWorktreeDialog, DeleteWorktreeFailedDialog, RenameWorktreeDialog,
@@ -415,6 +417,9 @@ impl DialogHost {
                 .into(),
             Popup::CreateTag { repo, sha } => cx
                 .new(|cx| CreateTagDialog::new(*repo, sha.clone(), window, cx))
+                .into(),
+            Popup::StartBisect { repo, mark, branch } => cx
+                .new(|_| StartBisectDialog::new(*repo, mark.clone(), branch.clone()))
                 .into(),
             Popup::WarnLocalChangesBeforeUndo { repo } => cx
                 .new(|_| WarnLocalChangesBeforeUndoDialog::new(*repo))

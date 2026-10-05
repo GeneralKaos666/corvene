@@ -1200,6 +1200,17 @@ pub(crate) fn main() {
                 Dispatcher::fetch_all_tags(id, cx);
             }
         });
+        // `1212-bisect`
+        on_menu_action(cx, move |_: &StartBisect, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::request_start_bisect(id, None, cx);
+            }
+        });
+        on_menu_action(cx, move |_: &StopBisect, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::stop_bisect(id, cx);
+            }
+        });
         Dispatcher::start_background_tasks(cx);
         // `296-cancel-fetch-on-wake`: a background fetch that hangs on a
         // connection the sleep broke is stopped

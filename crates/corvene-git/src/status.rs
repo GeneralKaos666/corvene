@@ -5,7 +5,8 @@
 //!
 //! Deviations behind flags: [`StatusOptions`] (`respect-show-untracked-files`,
 //! `ignore-submodules`, `1205-lfs-conflicts-pick-a-side`) and
-//! [`working_directory_line_stats`] (`changes-line-counts`).
+//! [`working_directory_line_stats`] (`changes-line-counts`). A bisect in
+//! progress is read whatever the flags say (`1212-bisect` gates its UI).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -149,6 +150,19 @@ fn finish_status(
     status.rebase_internal_state = crate::rebase_ops::rebase_internal_state(workdir);
     // git writes `amend` only at an `edit` stop that applied cleanly
     status.rebase_edit_stop = git_dir.join("rebase-merge/amend").exists();
+    // Corvene `1212-bisect` (the flag gates what is shown, not this read)
+    if git_dir.join("BISECT_START").is_file() {
+        status.bisect = crate::bisect::bisect_state(git.clone(), workdir)
+            .ok()
+            .flatten()
+            .map(|mut bisect| {
+                if let Ok(Some(range)) = crate::bisect::bisect_range(git.clone(), workdir, &bisect)
+                {
+                    bisect.candidates = range.candidates;
+                }
+                bisect
+            });
+    }
     if status.has_conflicts() {
         apply_conflict_details(git, workdir, &mut status, options.lfs_conflicts_manual);
     }

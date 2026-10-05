@@ -1,0 +1,22 @@
+# Corvene's bisect (flag 1212-bisect, off in the GitHub Desktop preset the
+# harness runs with). Run with
+#   PARITY_CORVENE_FLAGS=preset=github-desktop,1212-bisect=on
+# GHD has no bisect, so the snaps are recorded, not compared
+# (`corvene_only`; deviations.md › History & branches). The fixture has
+# uncommitted changes, so Start Bisect asks to stash them first.
+name: bisect
+description: Start Bisect stash prompt, bisect bar and locked commit form (Corvene only)
+setup: repo
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::StartBisect"}
+    wait: 1000
+  - snap: {name: stash-prompt, corvene_only: true, note: "GHD has no bisect (deviations.md, 1212-bisect)"}
+  # Stash Changes and Start
+  - ghd: {skip: true}
+    corvene: {click: [839, 476]}
+    wait: 2500
+  - snap: {name: waiting-for-good, corvene_only: true}
+  - menu: show-changes
+    wait: 800
+  - snap: {name: commit-locked, corvene_only: true}

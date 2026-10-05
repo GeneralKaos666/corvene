@@ -1,6 +1,7 @@
 //! Git engine. Reads via `gix`, writes and network via the
 //! `git` CLI so behaviour matches GitHub Desktop exactly.
 
+pub mod bisect;
 pub mod branch_ops;
 pub mod commit;
 pub mod commit_template;
@@ -46,6 +47,10 @@ pub mod terminal;
 pub mod text_encoding;
 pub mod worktree;
 
+pub use bisect::{
+    BisectRange, BisectVerdict, bisect_in_progress, bisect_mark, bisect_range, bisect_reset,
+    bisect_start, bisect_state, estimate_steps,
+};
 pub use branch_ops::{
     BranchTracking, CheckoutOptions, DESKTOP_STASH_MARKER, MergeOutcome, SubmoduleUpdate,
     abort_merge, branch_created_from, branch_tracking, checkout_branch, checkout_branch_with,

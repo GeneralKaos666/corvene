@@ -7444,6 +7444,27 @@ registry! {
         code: &["crates/corvene-git/src/config.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-core/src/text_tokens.rs"],
     },
 
+    /// A guided `git bisect`: History marks, a bar with Good / Bad / Skip.
+    BISECT = 1212 "bisect" {
+        title: "Bisect",
+        summary: "Find the commit that introduced a bug: mark a bad and a good commit from \
+                  History's context menu (or Repository › Start Bisect with the current commit \
+                  as bad), then answer Good, Bad or Skip for each commit Corvene checks out from \
+                  a bar under the toolbar, which counts the steps left. History lists the range \
+                  still in question with the marked commits labelled, and selects the first bad \
+                  commit at the end; Stop Bisect returns to the branch. Uncommitted changes are \
+                  stashed first, committing is off while bisecting, and a bisect started on the \
+                  command line shows the same way.",
+        ghd_behaviour: "No bisect: it has to be run on the command line, and History follows \
+                        the detached HEAD it leaves.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/bisect.rs", "crates/corvene-core/src/bisect.rs", "crates/corvene-ui/src/bisect_bar.rs", "crates/corvene-ui/src/history.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

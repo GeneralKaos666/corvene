@@ -112,6 +112,9 @@ gpui_kit::actions!(
         PullAllRepositories,
         // Repository › Fetch All Tags (`899-tags-in-branch-list`)
         FetchAllTags,
+        // Repository › Start Bisect / Stop Bisecting (`1212-bisect`)
+        StartBisect,
+        StopBisect,
         // Branch › Request Reviewers… (`336-request-reviewers`)
         RequestReviewers,
         // Branch › Push To ▸ / Fetch From ▸ the remote at that index of

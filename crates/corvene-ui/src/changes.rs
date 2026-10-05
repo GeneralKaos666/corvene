@@ -3,6 +3,8 @@
 //!
 //! Deviations (GHD `app/src/ui/changes/commit-message.tsx`):
 //! - a detached HEAD gets a commit warning (`730-detached-head-commit-warning`).
+//! - committing is off while the repository bisects, with a warning that
+//!   offers to stop (`1212-bisect`).
 //! - Open in editor / default program act on every selected file, and the
 //!   list menu has "Open All in <editor>" (`712-open-multiple-files`).
 //! - files matching the `706-changes-hide-globs` patterns are left out of the
@@ -3794,6 +3796,38 @@ impl ChangesSidebar {
         )
     }
 
+    /// Corvene `1212-bisect`: committing is off while the repository
+    /// bisects (HEAD is a detached commit under test).
+    fn bisecting(&self, cx: &App) -> bool {
+        corvene_core::bisect::selected_bisect(self.state.read(cx)).is_some()
+    }
+
+    /// `1212-bisect`: the `CommitWarning` saying why committing is off.
+    fn bisect_warning(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        if !self.bisecting(cx) {
+            return None;
+        }
+        let t = cx.ghd();
+        let id = self.state.read(cx).selected?;
+        Some(
+            self.commit_warning(
+                Octicon::Info,
+                t.dialog_information,
+                crate::widgets::paragraph(vec![
+                    "You're bisecting, so committing is off until you ".into(),
+                    crate::widgets::link_button("commit-warning-stop-bisect", "stop bisecting", cx)
+                        .on_click(move |_, _, cx| Dispatcher::stop_bisect(id, cx))
+                        .into_any_element()
+                        .into(),
+                    ".".into(),
+                ])
+                .justify_center()
+                .into_any_element(),
+                cx,
+            ),
+        )
+    }
+
     /// Corvene addition (`730-detached-head-commit-warning`): a `CommitWarning`
     /// while HEAD is detached, since the commit lands on no branch.
     fn detached_head_warning(&self, cx: &Context<Self>) -> Option<AnyElement> {
@@ -4517,6 +4551,7 @@ impl ChangesSidebar {
             || committing
             || self.has_repo_rule_failure(cx)
             || self.amend_author_invalid(cx)
+            || self.bisecting(cx)
     }
 
     /// GHD `getButtonTooltip` for a disabled commit button.
@@ -4530,7 +4565,9 @@ impl ChangesSidebar {
             .selected
             .and_then(|id| s.repository(id))
             .is_some_and(|r| r.commit_options.allow_empty_commit);
-        if self.summary_or_placeholder(cx).trim().is_empty() {
+        if self.bisecting(cx) {
+            Some("Stop bisecting to commit")
+        } else if self.summary_or_placeholder(cx).trim().is_empty() {
             Some("A commit summary is required to commit")
         } else if !any_included && any_available && !allow_empty {
             Some("Select one or more files to commit")
@@ -5189,6 +5226,7 @@ impl ChangesSidebar {
             .children(self.amend_notice(cx))
             .children(
                 self.no_write_access_warning(cx)
+                    .or_else(|| self.bisect_warning(cx))
                     .or_else(|| self.detached_head_warning(cx))
                     .or_else(|| self.branch_protection_warning(cx)),
             )
