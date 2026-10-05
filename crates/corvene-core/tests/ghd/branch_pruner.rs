@@ -72,6 +72,7 @@ fn setup_repository(
             // pull: true, push: true, admin: false
             permissions: Some(RepositoryPermission::Write),
             allow_forking: None,
+            node_id: None,
         });
     }
     // `primeCaches`: `loadRemotes`, `loadBranches`, `loadStatus`

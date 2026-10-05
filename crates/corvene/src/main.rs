@@ -554,6 +554,9 @@ pub(crate) fn main() {
         //   failure GHD describes, a push a protected branch rejected, or an error
         //   git did not produce)
         //   recent-activity (Repository › Recent Activity…, flag 1216),
+        //   issues | new-issue (Repository › Issues… with sample issues, New
+        //   Issue…; flag 345), releases | create-release[:<tag>] (Repository ›
+        //   Releases… with sample releases, Create Release…; flag 346)
         //   blame:<path>[@<rev>] (the Blame view of a file, in the working tree
         //   or at a revision; flag 798)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
@@ -1237,6 +1240,28 @@ pub(crate) fn main() {
                 Dispatcher::show_recent_activity(id, cx);
             }
         });
+        // `345-issues`
+        on_menu_action(cx, move |_: &ShowIssues, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_issues(id, cx);
+            }
+        });
+        on_menu_action(cx, move |_: &NewIssue, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_popup(Popup::NewIssue { repo: id }, cx);
+            }
+        });
+        // `346-releases`
+        on_menu_action(cx, move |_: &ShowReleases, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_releases(id, cx);
+            }
+        });
+        on_menu_action(cx, move |_: &CreateRelease, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_create_release(id, None, None, cx);
+            }
+        });
         // `1212-bisect`
         on_menu_action(cx, move |_: &StartBisect, cx| {
             if let Some(id) = selected(cx) {
@@ -1661,6 +1686,7 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 archived: false,
                 permissions: None,
                 allow_forking: None,
+                node_id: None,
             };
             corvene_core::AppState::global(cx).update(cx, |s, _| {
                 if let Some(r) = s.repositories.iter_mut().find(|r| r.id == id) {
@@ -1844,6 +1870,27 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         // `1216-recent-activity`
         ("recent-activity", Some(id)) => Dispatcher::show_recent_activity(id, cx),
+        // `345-issues`: the view with sample issues, the New Issue… dialog
+        ("issues", Some(id)) => {
+            corvene_core::issues::install_samples(id, cx);
+            Dispatcher::show_issues(id, cx);
+        }
+        ("new-issue", Some(id)) => {
+            corvene_core::issues::install_samples(id, cx);
+            Dispatcher::show_popup(Popup::NewIssue { repo: id }, cx);
+        }
+        // `346-releases`: the view with sample releases, Create Release…
+        ("releases", Some(id)) => {
+            corvene_core::releases::install_samples(id, cx);
+            Dispatcher::show_releases(id, cx);
+        }
+        (other, Some(id)) if other.starts_with("create-release") => {
+            let tag = other
+                .strip_prefix("create-release:")
+                .map(str::to_string)
+                .filter(|t| !t.is_empty());
+            Dispatcher::show_create_release(id, tag, None, cx);
+        }
         // `798-blame`: `blame:<path>` (working tree) or `blame:<path>@<rev>`
         (other, Some(id)) if other.starts_with("blame:") => {
             let arg = &other["blame:".len()..];

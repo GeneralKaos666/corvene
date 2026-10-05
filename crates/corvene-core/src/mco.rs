@@ -443,6 +443,18 @@ pub enum Banner {
     ReorderUndone {
         count: usize,
     },
+    /// Corvene (`345-issues`): "Created issue **#N**" + View on GitHub.
+    IssueCreated {
+        number: u64,
+        html_url: String,
+    },
+    /// Corvene (`346-releases`): "Created release **{name}**" (or "Saved
+    /// draft release") + View on GitHub.
+    ReleaseCreated {
+        name: String,
+        html_url: String,
+        draft: bool,
+    },
     /// Corvene (`861-undo-delete-branch`): "Deleted branch **{branch}**" +
     /// Undo, which recreates it at `sha`.
     BranchDeleted {
@@ -532,6 +544,8 @@ impl Banner {
             | Banner::FixupCommitted { .. }
             | Banner::BranchDeleted { .. }
             | Banner::BranchesDeleted { .. }
+            | Banner::IssueCreated { .. }
+            | Banner::ReleaseCreated { .. }
             | Banner::StashDropped { .. } => Some(Duration::from_secs(15)),
             Banner::ConflictsFound { .. }
             | Banner::GitEmailMismatch { .. }

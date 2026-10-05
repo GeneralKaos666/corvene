@@ -400,6 +400,13 @@ impl Dispatcher {
     /// [`show_popup_in`]).
     pub fn show_popup(popup: Popup, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
+            // `345-issues`: a Create Branch dialog is for an issue only when
+            // `create_branch_from_issue` says so right after this
+            if let Popup::CreateBranch { repo, .. } = &popup
+                && let Some(rs) = s.repo_states.get_mut(repo)
+            {
+                rs.pending_issue_link = None;
+            }
             show_popup_in(s, popup);
             cx.notify();
         });
@@ -4047,6 +4054,7 @@ impl Dispatcher {
             return;
         };
         let branch_name = name.clone();
+        let branch_done = name.clone();
         let checkout_options = Self::checkout_options(id, cx);
         // `1202-update-from-parent-branch`: a branch started from another
         // branch than the default one remembers it (VS Code's key)
@@ -4108,8 +4116,13 @@ impl Dispatcher {
             let result = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
-                if let Err(err) = result {
-                    Self::show_error("Could not create branch", &err, cx);
+                match result {
+                    // `345-issues`: a branch made from an issue remembers it
+                    Ok(()) => Self::record_issue_branch(id, &branch_done, cx),
+                    Err(err) => {
+                        Self::clear_pending_issue_link(id, cx);
+                        Self::show_error("Could not create branch", &err, cx);
+                    }
                 }
                 Self::show_section(id, Section::Changes, cx);
                 Self::refresh_repository(id, cx);

@@ -67,6 +67,7 @@ pub fn git_hub_repo_fixture(options: GitHubRepoFixtureOptions<'_>) -> GitHubRepo
         archived: false,
         permissions: None,
         allow_forking: None,
+        node_id: None,
     }
 }
 

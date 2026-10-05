@@ -1878,6 +1878,7 @@ mod tests {
             archived: false,
             permissions: None,
             allow_forking: None,
+            node_id: None,
         };
         let group = |endpoint: &str| {
             let mut r = repo(1, "/w/n");

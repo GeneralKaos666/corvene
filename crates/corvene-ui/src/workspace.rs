@@ -90,6 +90,10 @@ pub struct Workspace {
     stash_view: Entity<StashDiffViewer>,
     /// `798-blame`: shown in place of the diff while a blame is open.
     blame_view: Entity<crate::blame_view::BlameView>,
+    /// `345-issues` / `346-releases`: shown in place of the commit view
+    /// while those lists are open.
+    issue_view: Entity<crate::issue_view::IssueView>,
+    release_view: Entity<crate::release_view::ReleaseView>,
     /// The onboarding tutorial's right-hand panel.
     tutorial_panel: Entity<crate::tutorial_panel::TutorialPanel>,
     repository_foldout: Entity<RepositoryFoldout>,
@@ -235,6 +239,8 @@ impl Workspace {
         let selected_commit = cx.new(|cx| SelectedCommitView::new(state.clone(), cx));
         let stash_view = cx.new(|cx| StashDiffViewer::new(state.clone(), cx));
         let blame_view = cx.new(|cx| crate::blame_view::BlameView::new(state.clone(), cx));
+        let issue_view = cx.new(|cx| crate::issue_view::IssueView::new(state.clone(), cx));
+        let release_view = cx.new(|cx| crate::release_view::ReleaseView::new(state.clone(), cx));
         let tutorial_panel =
             cx.new(|cx| crate::tutorial_panel::TutorialPanel::new(state.clone(), cx));
         let repository_foldout = cx.new(|cx| RepositoryFoldout::new(state.clone(), window, cx));
@@ -273,6 +279,8 @@ impl Workspace {
             selected_commit,
             stash_view,
             blame_view,
+            issue_view,
+            release_view,
             tutorial_panel,
             repository_foldout,
             branch_foldout,
@@ -609,6 +617,18 @@ impl Workspace {
             .is_some_and(|b| b.section == self.section)
         {
             return self.blame_view.clone().into_any_element();
+        }
+        // `345-issues` / `346-releases`: the selected issue / release
+        // replaces History's commit view
+        if self.section == Section::History {
+            if rs.is_some_and(|r| {
+                corvene_core::issues::issues_of(state, r).is_some_and(|i| i.loaded || i.loading)
+            }) {
+                return self.issue_view.clone().into_any_element();
+            }
+            if rs.is_some_and(|r| corvene_core::releases::releases_of(state, r).is_some()) {
+                return self.release_view.clone().into_any_element();
+            }
         }
         match self.section {
             Section::Changes if showing_stash => self.stash_view.clone().into_any_element(),

@@ -42,6 +42,7 @@ fn github_repository(
         archived: false,
         permissions: None,
         allow_forking: None,
+        node_id: None,
     }
 }
 

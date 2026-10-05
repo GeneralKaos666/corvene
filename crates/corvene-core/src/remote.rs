@@ -1656,6 +1656,7 @@ impl Dispatcher {
             true => format!("refs/heads/{}", branch.name),
             false => branch.name.clone(),
         });
+        let pushed_branch = up_to.is_none().then(|| branch.name.clone());
         let remote_branch = branch
             .upstream_short()
             .and_then(|u| u.split_once('/').map(|(_, b)| b.to_string()))
@@ -1756,6 +1757,17 @@ impl Dispatcher {
                 // `clearTagsToPush` once the push went through
                 if pushed && pushed_tags {
                     Self::update_tags_to_push(id, cx, Vec::clear);
+                }
+                // `345-issues`: a branch made from an issue is linked to it
+                // on GitHub once it is there
+                if pushed
+                    && let Some(branch) = pushed_branch.clone()
+                    && Self::state(cx)
+                        .read(cx)
+                        .flags
+                        .bool(crate::flags::ids::ISSUES)
+                {
+                    Self::link_pushed_branch_to_issue(id, branch, cx);
                 }
                 if let Err(err) = result {
                     Self::handle_remote_error(

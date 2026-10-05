@@ -114,6 +114,12 @@ gpui_kit::actions!(
         FetchAllTags,
         // Repository › Recent Activity… (`1216-recent-activity`)
         ShowRecentActivity,
+        // Repository › Issues… / New Issue… (`345-issues`)
+        ShowIssues,
+        NewIssue,
+        // Repository › Releases… / Create Release… (`346-releases`)
+        ShowReleases,
+        CreateRelease,
         // Repository › Start Bisect / Stop Bisecting (`1212-bisect`)
         StartBisect,
         StopBisect,

@@ -261,6 +261,7 @@ fn repository_without_clone_url() -> GitHubRepository {
         archived: false,
         permissions: None,
         allow_forking: None,
+        node_id: None,
     }
 }
 

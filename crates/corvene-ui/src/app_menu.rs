@@ -135,6 +135,13 @@ pub struct MenuExtras {
     pub bisect: Option<bool>,
     /// Flag `1216-recent-activity`: Repository › Recent Activity….
     pub recent_activity: bool,
+    /// Flag `345-issues`: Repository › Issues… and New Issue…, enabled
+    /// for a GitHub repository that is not archived (set by
+    /// [`MenuLabelsEvent::of`]).
+    pub issues: Option<bool>,
+    /// Flag `346-releases`: Repository › Releases… and Create Release…,
+    /// enabled for a GitHub repository (set by [`MenuLabelsEvent::of`]).
+    pub releases: Option<bool>,
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
     /// branch has a pull request).
     pub request_reviewers: bool,
@@ -173,6 +180,8 @@ impl MenuExtras {
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             bisect: flags.bool(ids::BISECT).then_some(false),
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
+            issues: flags.bool(ids::ISSUES).then_some(false),
+            releases: flags.bool(ids::RELEASES).then_some(false),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
             stash_with_message: flags.bool(ids::STASH_LIST).then_some(false),
@@ -207,6 +216,15 @@ impl MenuLabelsEvent {
                     && rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
                     && rs.conflict_state.is_none()
             }));
+        }
+        // `345-issues` / `346-releases`: a GitHub repository (issues: not
+        // an archived one, as Create Issue on GitHub)
+        let github = s.selected_repository().and_then(|r| r.non_fork_github());
+        if extras.issues.is_some() {
+            extras.issues = Some(github.is_some_and(|gh| !gh.archived));
+        }
+        if extras.releases.is_some() {
+            extras.releases = Some(github.is_some());
         }
         // `1212-bisect`: whether the selected repository bisects
         if extras.bisect.is_some() {
@@ -672,6 +690,34 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         item(l("New Worktree…", "New work&tree…"), NewWorktree),
         separator(),
     ]);
+    // Corvene (`345-issues`)
+    if let Some(enabled) = extras.issues {
+        repository.extend([
+            MenuItemConstructorOptions {
+                enabled: Some(enabled),
+                ..item(l("New Issue…", "New iss&ue…"), NewIssue)
+            },
+            MenuItemConstructorOptions {
+                enabled: Some(enabled),
+                ..item(l("Issues…", "Iss&ues…"), ShowIssues)
+            },
+            separator(),
+        ]);
+    }
+    // Corvene (`346-releases`)
+    if let Some(enabled) = extras.releases {
+        repository.extend([
+            MenuItemConstructorOptions {
+                enabled: Some(enabled),
+                ..item(l("Create Release…", "Create re&lease…"), CreateRelease)
+            },
+            MenuItemConstructorOptions {
+                enabled: Some(enabled),
+                ..item(l("Releases…", "Re&leases…"), ShowReleases)
+            },
+            separator(),
+        ]);
+    }
     // Corvene (`1216-recent-activity`)
     if extras.recent_activity {
         repository.extend([
@@ -1049,6 +1095,8 @@ mod tests {
                     fetch_tags: true,
                     bisect: Some(bits & 1 != 0),
                     recent_activity: true,
+                    issues: Some(true),
+                    releases: Some(true),
                     request_reviewers: true,
                     move_changes_to_worktree: Some(true),
                     stash_with_message: Some(true),

@@ -78,6 +78,7 @@ fn api_repository(name: &str, owner: &str, private: bool, fork: bool) -> GitHubR
         archived: false,
         permissions: Some(RepositoryPermission::Write),
         allow_forking: None,
+        node_id: None,
     }
 }
 

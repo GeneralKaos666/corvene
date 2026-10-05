@@ -1206,6 +1206,69 @@ pub fn delete_remote_tag(
     Ok(())
 }
 
+/// Corvene (`346-releases`): `git push <remote> refs/tags/<tag>`, one
+/// tag on its own (a release needs its tag on GitHub first).
+pub fn push_tag(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+    tag: &str,
+    askpass: Option<&AskpassEnv>,
+) -> Result<()> {
+    remote_operation(git, workdir, remote, askpass)
+        .args(["push", remote, &format!("refs/tags/{tag}")])
+        .run()?;
+    Ok(())
+}
+
+/// Corvene (`346-releases`): the newest tag reachable from `target`'s
+/// first parent (`git describe --tags --abbrev=0 <target>^`), the one a
+/// release at `target` follows; `None` when no tag comes before it or
+/// `target` has no parent.
+pub fn previous_tag(git: Arc<GitBinary>, workdir: &Path, target: &str) -> Result<Option<String>> {
+    let out = GitCommand::new(git)
+        .args(["describe", "--tags", "--abbrev=0", &format!("{target}^")])
+        .current_dir(workdir)
+        .allow_exit_code(128)
+        .run()?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    let name = out.stdout_string()?.trim().to_string();
+    Ok((!name.is_empty()).then_some(name))
+}
+
+/// Corvene (`346-releases`): the remote-tracking branches that contain
+/// `sha` (`git branch -r --contains <sha>`), as `<remote>/<branch>`; empty
+/// when no remote has the commit yet.
+pub fn remote_branches_containing(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    sha: &str,
+) -> Result<Vec<String>> {
+    let out = GitCommand::new(git)
+        .args([
+            "branch",
+            "-r",
+            "--contains",
+            sha,
+            "--format=%(refname:short)",
+        ])
+        .current_dir(workdir)
+        .allow_exit_code(129)
+        .run()?;
+    if !out.status.success() {
+        return Ok(Vec::new());
+    }
+    Ok(out
+        .stdout_string()?
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.contains("HEAD"))
+        .map(str::to_string)
+        .collect())
+}
+
 /// GHD `ITrackingBranch` (`models/branch.ts`): a local branch and its
 /// upstream, by full ref name.
 #[derive(Clone, Debug, PartialEq, Eq)]

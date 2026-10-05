@@ -313,6 +313,66 @@ fn checkout_branch_row(id: u64, name: String, current: bool, cx: &mut App) {
     Dispatcher::checkout_branch(id, name, None, cx)
 }
 
+/// Flag `899-tags-in-branch-list` (+ `346-releases`): a tag row's menu:
+/// Create Release… for the tag, Copy Tag Name, and Delete Tag… as the
+/// History commit menu offers it (unpushed tags at once, the others after
+/// the `826` confirmation).
+fn tag_row_menu(
+    id: u64,
+    tag: String,
+    sha: String,
+    position: Point<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::context_menu::MenuItem;
+    let (releases, unpushed, delete_pushed) = {
+        let s = AppState::global(cx).read(cx);
+        (
+            s.flags.bool(corvene_core::flags::ids::RELEASES)
+                && s.repository(id).and_then(|r| r.non_fork_github()).is_some(),
+            s.repository(id)
+                .is_some_and(|r| r.tags_to_push.contains(&tag)),
+            s.flags.bool(corvene_core::flags::ids::DELETE_PUSHED_TAGS),
+        )
+    };
+    let mut items = Vec::new();
+    if releases {
+        let (tag, sha) = (tag.clone(), sha.clone());
+        items.push(MenuItem::new(
+            mac_or("Create Release…", "Create release…"),
+            move |_, cx| {
+                Dispatcher::show_create_release(id, Some(tag.clone()), Some(sha.clone()), cx)
+            },
+        ));
+        items.push(MenuItem::separator());
+    }
+    let copied = tag.clone();
+    items.push(MenuItem::new(
+        mac_or("Copy Tag Name", "Copy tag name"),
+        move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(copied.clone())),
+    ));
+    items.push(MenuItem::separator());
+    let deleted = tag.clone();
+    items.push(
+        MenuItem::new(mac_or("Delete Tag…", "Delete tag…"), move |_, cx| {
+            if unpushed {
+                Dispatcher::delete_tag(id, deleted.clone(), cx)
+            } else {
+                Dispatcher::show_popup(
+                    Popup::ConfirmDeletePushedTag {
+                        repo: id,
+                        tag: deleted.clone(),
+                    },
+                    cx,
+                )
+            }
+        })
+        .enabled(unpushed || delete_pushed),
+    );
+    crate::native_menu::show_context_menu(items, position, window, cx);
+}
+
 /// Flag `899-tags-in-branch-list`: a Tags group row is a tag dressed as a
 /// branch (`refs/tags/<name>`, its commit as the tip); its commit.
 fn tag_commit(branch: &Branch) -> Option<&str> {
@@ -1481,8 +1541,16 @@ impl BranchFoldout {
                 let this = cx.entity().downgrade();
                 move |ev: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    // `899-tags-in-branch-list`: a tag row has no menu
-                    if tag_commit(&branch).is_some() {
+                    // `899-tags-in-branch-list`: a tag row's menu (`346`)
+                    if let Some(sha) = tag_commit(&branch) {
+                        tag_row_menu(
+                            id,
+                            branch.name.clone(),
+                            sha.to_string(),
+                            ev.position,
+                            window,
+                            cx,
+                        );
                         return;
                     }
                     use crate::context_menu::{IS_MAC, MenuItem, mac_or};

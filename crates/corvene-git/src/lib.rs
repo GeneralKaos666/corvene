@@ -172,10 +172,11 @@ pub use remote_ops::{
     find_default_remote, get_branches_differing_from_upstream, get_remotes, implicit_push_remote,
     install_lfs_hooks, is_stale_remote_ref_failure, is_tracked_by_lfs, is_using_lfs,
     is_using_lfs_by_attributes, last_fetched, lfs_available, lfs_hooks_installed,
-    parse_progress_line, prune_remote, pull, pull_merge_started, pull_with_rebase, push, push_size,
-    push_with_progress, remote_failure, remote_head_resolves, remote_read_failure_cause,
-    remote_repository_missing, remove_remote, set_remote_url, strip_vt_control_characters,
-    track_in_lfs, update_remote_head, update_submodules, upstream_tip_in_reflog,
+    parse_progress_line, previous_tag, prune_remote, pull, pull_merge_started, pull_with_rebase,
+    push, push_size, push_tag, push_with_progress, remote_branches_containing, remote_failure,
+    remote_head_resolves, remote_read_failure_cause, remote_repository_missing, remove_remote,
+    set_remote_url, strip_vt_control_characters, track_in_lfs, update_remote_head,
+    update_submodules, upstream_tip_in_reflog,
 };
 pub use repo::{
     ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,

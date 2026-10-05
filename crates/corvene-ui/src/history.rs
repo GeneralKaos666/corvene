@@ -298,6 +298,9 @@ pub struct HistorySidebar {
     graph: Rc<std::cell::RefCell<corvene_core::commit_graph::CommitGraph>>,
     /// `1216-recent-activity`: shown instead while Recent Activity is open.
     reflog: Entity<crate::reflog_list::ReflogList>,
+    /// `345-issues` / `346-releases`: shown instead while those are open.
+    issues: Entity<crate::issues_list::IssuesList>,
+    releases: Entity<crate::releases_list::ReleasesList>,
 }
 
 impl HistorySidebar {
@@ -378,6 +381,12 @@ impl HistorySidebar {
             shown_tip: None,
             revealed: None,
             graph: Default::default(),
+            issues: cx.new(|cx| {
+                crate::issues_list::IssuesList::new(state_for_reflog.clone(), window, cx)
+            }),
+            releases: cx.new(|cx| {
+                crate::releases_list::ReleasesList::new(state_for_reflog.clone(), window, cx)
+            }),
             reflog: cx.new(|cx| crate::reflog_list::ReflogList::new(state_for_reflog, cx)),
         }
     }
@@ -1698,6 +1707,42 @@ impl HistorySidebar {
                     })
                     .collect();
                 items.push(MenuItem::submenu("Delete tag…", entries));
+            }
+        }
+        // `346-releases`: a release for one of the commit's tags, or a new
+        // tag at the commit
+        let releases = {
+            let s = self.state.read(cx);
+            s.flags.bool(corvene_core::flags::ids::RELEASES)
+                && s.repository(id).and_then(|r| r.non_fork_github()).is_some()
+        };
+        if releases {
+            let sha = sha.clone();
+            let create = move |tag: Option<String>| {
+                let sha = sha.clone();
+                move |_: &mut Window, cx: &mut App| {
+                    Dispatcher::show_create_release(id, tag.clone(), Some(sha.clone()), cx)
+                }
+            };
+            items.push(MenuItem::separator());
+            match commit.tags.as_slice() {
+                [] => items.push(MenuItem::new(
+                    mac_or("Create Release…", "Create release…"),
+                    create(None),
+                )),
+                [tag] => items.push(MenuItem::new(
+                    format!(
+                        "{} {tag}…",
+                        mac_or("Create Release for", "Create release for")
+                    ),
+                    create(Some(tag.clone())),
+                )),
+                tags => items.push(MenuItem::submenu(
+                    mac_or("Create Release…", "Create release…"),
+                    tags.iter()
+                        .map(|tag| MenuItem::new(tag.clone(), create(Some(tag.clone()))))
+                        .collect(),
+                )),
             }
         }
         // `893`: a commit the current branch is behind can come over
@@ -3084,6 +3129,23 @@ impl Render for HistorySidebar {
         };
         if reflog_open {
             return self.reflog.clone().into_any_element();
+        }
+        // `345-issues` / `346-releases`: so do the issues and the releases
+        let (issues_open, releases_open) = {
+            let s = self.state.read(cx);
+            let rs = s.selected_state();
+            (
+                rs.is_some_and(|rs| {
+                    corvene_core::issues::issues_of(s, rs).is_some_and(|i| i.loaded || i.loading)
+                }),
+                rs.is_some_and(|rs| corvene_core::releases::releases_of(s, rs).is_some()),
+            )
+        };
+        if issues_open {
+            return self.issues.clone().into_any_element();
+        }
+        if releases_open {
+            return self.releases.clone().into_any_element();
         }
         let (id, show_list, form, merge_status) = {
             let s = self.state.read(cx);

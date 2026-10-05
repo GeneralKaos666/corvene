@@ -590,6 +590,14 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.put("number", number);
         }
+        Popup::NewIssue { repo: r } => {
+            repo = Some(*r);
+        }
+        Popup::CreateRelease { repo: r, tag, sha } => {
+            repo = Some(*r);
+            f.opt("tag", tag.as_deref());
+            f.opt("sha", sha.as_deref());
+        }
         Popup::DeleteBranches { repo: r, names } => {
             repo = Some(*r);
             f.list("names", names);

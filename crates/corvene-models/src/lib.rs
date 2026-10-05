@@ -184,6 +184,10 @@ pub struct GitHubRepository {
     /// The API's `allow_forking`; `None` when unknown (not in GHD's model).
     #[serde(default)]
     pub allow_forking: Option<bool>,
+    /// The API's GraphQL `node_id`, for linking a branch to an issue
+    /// (flag `345-issues`); `None` for records stored before it was read.
+    #[serde(default)]
+    pub node_id: Option<String>,
 }
 
 /// GHD `GitHubRepositoryPermission`
@@ -554,6 +558,7 @@ pub fn github_from_remote(url: &str, hosts: &[String]) -> Option<GitHubRepositor
         archived: false,
         permissions: None,
         allow_forking: None,
+        node_id: None,
     })
 }
 

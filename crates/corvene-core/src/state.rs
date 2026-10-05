@@ -398,6 +398,17 @@ pub enum Popup {
         repo: u64,
         sha: String,
     },
+    /// Corvene `345-issues`: New Issue….
+    NewIssue {
+        repo: u64,
+    },
+    /// Corvene `346-releases`: Create Release… for `tag` (none: a new tag)
+    /// at `sha` (none: the current branch's tip).
+    CreateRelease {
+        repo: u64,
+        tag: Option<String>,
+        sha: Option<String>,
+    },
     /// Corvene `1212-bisect`: stash the uncommitted changes on `branch`
     /// before bisecting (`mark` as for `Dispatcher::start_bisect`).
     StartBisect {
@@ -686,6 +697,8 @@ impl Popup {
             | Self::ResetToReflogEntry { repo, .. }
             | Self::CheckoutCommit { repo, .. }
             | Self::CreateTag { repo, .. }
+            | Self::NewIssue { repo, .. }
+            | Self::CreateRelease { repo, .. }
             | Self::StartBisect { repo, .. }
             | Self::WarnLocalChangesBeforeUndo { repo, .. }
             | Self::CreateBranch { repo, .. }
@@ -1400,6 +1413,20 @@ pub struct RepositoryState {
     // ---- `1216-recent-activity` ----
     /// Repository › Recent Activity…: History lists the reflog instead.
     pub reflog: Option<crate::reflog::ReflogState>,
+
+    // ---- `345-issues` ----
+    /// Repository › Issues…: History lists the issues instead (also holds
+    /// the New Issue… labels and assignees while the list is closed).
+    pub issues: Option<crate::issues::IssuesViewState>,
+    /// The issue the Create Branch dialog was opened for.
+    pub pending_issue_link: Option<crate::issues::PendingIssueLink>,
+
+    // ---- `346-releases` ----
+    /// Repository › Releases…: History lists the releases instead.
+    pub releases: Option<crate::releases::ReleasesViewState>,
+    /// Create Release › Generate release notes, in flight / its result.
+    pub generating_release_notes: bool,
+    pub generated_release_notes: Option<Result<crate::releases::GeneratedReleaseNotes, String>>,
 }
 
 /// GHD `IFileListFilterState` option flags; the text lives in the text box.

@@ -17,6 +17,7 @@ mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
 mod confirm_quit;
 mod crash_report_found;
+mod create_release;
 mod create_repository;
 mod delete_branches;
 mod discard_changes;
@@ -32,6 +33,7 @@ mod mco_dialogs;
 mod move_repository_to_group;
 mod move_to_applications_folder;
 mod move_to_shared_storage;
+mod new_issue;
 mod open_pull_request;
 mod oversized_files;
 mod preferences;
@@ -75,6 +77,7 @@ pub use branch_dialogs::{
 pub use ci_check_run_rerun::CiCheckRunRerunDialog;
 pub use clone_repository::CloneRepositoryDialog;
 pub use confirm_commit_to_default_branch::ConfirmCommitToDefaultBranchDialog;
+pub use create_release::CreateReleaseDialog;
 pub use create_repository::CreateRepositoryDialog;
 pub use delete_branches::DeleteBranchesDialog;
 pub use discard_changes::DiscardChangesDialog;
@@ -90,6 +93,7 @@ pub use history_dialogs::{
     WarnLocalChangesBeforeUndoDialog, WarnTaggedCommitBeforeUndoDialog,
 };
 pub use mco_dialogs::{LocalChangesOverwrittenDialog, McoDialog, SquashCommitMessageDialog};
+pub use new_issue::NewIssueDialog;
 pub use open_pull_request::OpenPullRequestDialog;
 pub use oversized_files::OversizedFilesDialog;
 pub use preferences::PreferencesDialog;
@@ -534,6 +538,14 @@ impl DialogHost {
                 .into(),
             Popup::RequestReviewers { repo, number } => cx
                 .new(|cx| RequestReviewersDialog::new(state, *repo, *number, window, cx))
+                .into(),
+            Popup::NewIssue { repo } => cx
+                .new(|cx| NewIssueDialog::new(state, *repo, window, cx))
+                .into(),
+            Popup::CreateRelease { repo, tag, sha } => cx
+                .new(|cx| {
+                    CreateReleaseDialog::new(state, *repo, tag.clone(), sha.clone(), window, cx)
+                })
                 .into(),
             Popup::StashAndSwitchBranch { repo, branch } => cx
                 .new(|_| StashAndSwitchBranchDialog::new(state, *repo, branch.clone()))

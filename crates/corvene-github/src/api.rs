@@ -104,6 +104,9 @@ pub struct ApiRepository {
     /// `false` when the owner disabled forking.
     #[serde(default)]
     pub allow_forking: Option<bool>,
+    /// GraphQL id, for `createLinkedBranch` (flag `345-issues`).
+    #[serde(default)]
+    pub node_id: Option<String>,
 }
 
 /// `IAPIRepositoryPermissions`
@@ -134,7 +137,9 @@ impl ApiRepositoryPermissions {
     }
 }
 
-/// A GitHub release (`GET /repos/{owner}/{repo}/releases/tags/{tag}`).
+/// A GitHub release (`GET /repos/{owner}/{repo}/releases/tags/{tag}`,
+/// `GET /repos/{owner}/{repo}/releases`). Everything past `html_url`
+/// defaults, so the app's own release-notes lookup keeps decoding.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiRelease {
     pub tag_name: String,
@@ -146,6 +151,86 @@ pub struct ApiRelease {
     #[serde(default)]
     pub published_at: Option<String>,
     pub html_url: String,
+    #[serde(default)]
+    pub id: u64,
+    #[serde(default)]
+    pub draft: bool,
+    #[serde(default)]
+    pub prerelease: bool,
+    #[serde(default)]
+    pub author: Option<ApiIssueUser>,
+    /// ISO-8601.
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub target_commitish: Option<String>,
+    #[serde(default)]
+    pub tarball_url: Option<String>,
+    #[serde(default)]
+    pub assets: Vec<ApiReleaseAsset>,
+}
+
+/// An uploaded release asset.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ApiReleaseAsset {
+    pub name: String,
+    #[serde(default)]
+    pub size: u64,
+    pub browser_download_url: String,
+    #[serde(default)]
+    pub download_count: u64,
+}
+
+/// `POST /repos/{owner}/{repo}/releases` body (flag `346-releases`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NewRelease {
+    pub tag_name: String,
+    /// The commit a tag that does not exist yet is created at; ignored
+    /// for an existing tag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_commitish: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub body: String,
+    pub draft: bool,
+    pub prerelease: bool,
+}
+
+/// `POST /repos/{owner}/{repo}/releases/generate-notes` answer.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct GeneratedNotes {
+    pub name: String,
+    pub body: String,
+}
+
+/// `POST /repos/{owner}/{repo}/issues` body (flag `345-issues`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NewIssue {
+    pub title: String,
+    pub body: String,
+    pub labels: Vec<String>,
+    pub assignees: Vec<String>,
+}
+
+/// A repository label (`GET /repos/{owner}/{repo}/labels`, `issue.labels`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ApiLabel {
+    pub name: String,
+    /// Six hex digits without the `#`.
+    #[serde(default)]
+    pub color: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// The short user record on issues, releases and the assignees list.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ApiIssueUser {
+    pub login: String,
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub html_url: Option<String>,
 }
 
 /// GHD `IAPIRepositoryCloneInfo`.
@@ -173,7 +258,9 @@ impl IssueState {
     }
 }
 
-/// `IAPIIssue` (+ the `pull_request` marker used to filter PRs out).
+/// `IAPIIssue` (+ the `pull_request` marker used to filter PRs out). The
+/// fields past `pull_request` feed the Issues view (flag `345-issues`) and
+/// default, since the autocomplete cache only persists the first four.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiIssue {
     pub number: u64,
@@ -183,6 +270,31 @@ pub struct ApiIssue {
     pub updated_at: String,
     #[serde(default)]
     pub pull_request: Option<serde_json::Value>,
+    #[serde(default)]
+    pub id: u64,
+    /// GraphQL id, for `createLinkedBranch`.
+    #[serde(default)]
+    pub node_id: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub closed_at: Option<String>,
+    #[serde(default)]
+    pub user: Option<ApiIssueUser>,
+    #[serde(default)]
+    pub labels: Vec<ApiLabel>,
+    #[serde(default)]
+    pub assignees: Vec<ApiIssueUser>,
+    #[serde(default)]
+    pub comments: u64,
+    /// `completed` | `not_planned` | `reopened`; absent on older GitHub
+    /// Enterprise Server.
+    #[serde(default)]
+    pub state_reason: Option<String>,
 }
 
 /// `IAPIFullIdentity` (`GET /users/{login}`), also the `IAPIIdentity` on
@@ -1238,6 +1350,160 @@ impl Client {
             .collect())
     }
 
+    /// Flag `345-issues`: the newest-updated closed issues, at most
+    /// `max_pages` pages of 100 (`GET /repos/{owner}/{name}/issues?state=closed`),
+    /// without the pull requests.
+    pub fn closed_issues(
+        &self,
+        owner: &str,
+        name: &str,
+        max_pages: usize,
+    ) -> Result<Vec<ApiIssue>> {
+        let path = format!(
+            "repos/{}/{}/issues?state=closed&sort=updated&direction=desc&per_page=100",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        let issues: Vec<ApiIssue> =
+            self.fetch_all(&path, max_pages, get_next_page_path_from_link, |_| true)?;
+        Ok(issues
+            .into_iter()
+            .filter(|i| i.pull_request.is_none())
+            .collect())
+    }
+
+    /// Flag `345-issues`: `GET /repos/{owner}/{name}/labels` (at most 500).
+    pub fn labels(&self, owner: &str, name: &str) -> Result<Vec<ApiLabel>> {
+        let path = format!(
+            "repos/{}/{}/labels?per_page=100",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        self.fetch_all(&path, 5, get_next_page_path_from_link, |_| true)
+    }
+
+    /// Flag `345-issues`: `GET /repos/{owner}/{name}/assignees` (at most
+    /// 500), the users an issue can be assigned to.
+    pub fn assignees(&self, owner: &str, name: &str) -> Result<Vec<ApiIssueUser>> {
+        let path = format!(
+            "repos/{}/{}/assignees?per_page=100",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        self.fetch_all(&path, 5, get_next_page_path_from_link, |_| true)
+    }
+
+    /// Flag `345-issues`: `POST /repos/{owner}/{name}/issues`.
+    pub fn create_issue(&self, owner: &str, name: &str, new: &NewIssue) -> Result<ApiIssue> {
+        let path = format!(
+            "repos/{}/{}/issues",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        self.post_json(&path, &serde_json::to_value(new)?)
+    }
+
+    /// Flag `345-issues`: GitHub's own "create a branch for this issue"
+    /// (GraphQL `createLinkedBranch`): the branch `name` is created at
+    /// `oid` on GitHub and listed under the issue's Development section.
+    /// `Ok(true)` when linked. Needs push access and GitHub Enterprise
+    /// Server 3.7 or later; `oid` must already be on GitHub.
+    pub fn create_linked_branch(
+        &self,
+        issue_node_id: &str,
+        repository_node_id: &str,
+        oid: &str,
+        name: &str,
+    ) -> Result<bool> {
+        #[derive(Deserialize)]
+        struct LinkedBranch {
+            id: String,
+        }
+        #[derive(Deserialize)]
+        struct Payload {
+            #[serde(rename = "linkedBranch")]
+            linked_branch: Option<LinkedBranch>,
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            #[serde(rename = "createLinkedBranch")]
+            create_linked_branch: Option<Payload>,
+        }
+        let data: Data = self.post_graphql(
+            "mutation($issue: ID!, $repo: ID, $oid: GitObjectID!, $name: String) { \
+             createLinkedBranch(input: {issueId: $issue, repositoryId: $repo, oid: $oid, name: $name}) \
+             { linkedBranch { id } } }",
+            &serde_json::json!({
+                "issue": issue_node_id,
+                "repo": repository_node_id,
+                "oid": oid,
+                "name": name,
+            }),
+        )?;
+        Ok(data
+            .create_linked_branch
+            .and_then(|p| p.linked_branch)
+            .is_some_and(|b| !b.id.is_empty()))
+    }
+
+    /// Flag `346-releases`: `GET /repos/{owner}/{name}/releases`, newest
+    /// first, at most `max_pages` pages of 50. Drafts are included when the
+    /// token can push.
+    pub fn releases(&self, owner: &str, name: &str, max_pages: usize) -> Result<Vec<ApiRelease>> {
+        let path = format!(
+            "repos/{}/{}/releases?per_page=50",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        self.fetch_all(&path, max_pages, get_next_page_path_from_link, |_| true)
+    }
+
+    /// Flag `346-releases`: `POST /repos/{owner}/{name}/releases`.
+    pub fn create_release(&self, owner: &str, name: &str, new: &NewRelease) -> Result<ApiRelease> {
+        let path = format!(
+            "repos/{}/{}/releases",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        self.post_json(&path, &serde_json::to_value(new)?)
+    }
+
+    /// Flag `346-releases`: `POST /repos/{owner}/{name}/releases/generate-notes`,
+    /// GitHub's generated release notes for `tag_name` (created at
+    /// `target_commitish` when it does not exist yet) since
+    /// `previous_tag_name` (GitHub picks one without it). `Ok(None)` when
+    /// the host cannot generate notes (GitHub Enterprise Server before 3.5
+    /// answers 404; a tag GitHub cannot resolve, 422), so the caller can
+    /// fall back to the local history.
+    pub fn generate_release_notes(
+        &self,
+        owner: &str,
+        name: &str,
+        tag_name: &str,
+        target_commitish: Option<&str>,
+        previous_tag_name: Option<&str>,
+    ) -> Result<Option<GeneratedNotes>> {
+        let path = format!(
+            "repos/{}/{}/releases/generate-notes",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        let mut body = serde_json::json!({ "tag_name": tag_name });
+        if let Some(target) = target_commitish {
+            body["target_commitish"] = serde_json::Value::String(target.to_string());
+        }
+        if let Some(previous) = previous_tag_name {
+            body["previous_tag_name"] = serde_json::Value::String(previous.to_string());
+        }
+        match self.post_json::<GeneratedNotes>(&path, &body) {
+            Ok(notes) => Ok(Some(notes)),
+            Err(GitHubError::Api {
+                status: 404 | 422, ..
+            }) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
     /// `fetchUser`: `GET /users/{login}`; `None` when there is no such user.
     pub fn user(&self, login: &str) -> Result<Option<ApiIdentity>> {
         match self.get_json::<ApiIdentity>(&format!("users/{login}")) {
@@ -1621,6 +1887,7 @@ impl Client {
             archived: repo.archived,
             permissions: repo.permissions.and_then(|p| p.permission()),
             allow_forking: repo.allow_forking,
+            node_id: repo.node_id,
         }
     }
 }

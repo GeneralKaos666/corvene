@@ -9,11 +9,12 @@ pub mod error;
 pub mod signatures;
 
 pub use api::{
-    ApiBranch, ApiCheckSuite, ApiIdentity, ApiIssue, ApiIssueComment, ApiMentionableUser,
-    ApiPullRequest, ApiPullRequestReview, ApiPullRequestReviewState, ApiPushControl,
-    ApiRefCheckRun, ApiRefStatus, ApiRelease, ApiRepoRule, ApiRepoRuleset, ApiWorkflowJob,
-    ApiWorkflowRun, Client, IssueState, RepositoryCloneInfo, encode_path_component,
-    get_next_page_path_from_link, get_next_page_path_with_increasing_page_size,
+    ApiBranch, ApiCheckSuite, ApiIdentity, ApiIssue, ApiIssueComment, ApiIssueUser, ApiLabel,
+    ApiMentionableUser, ApiPullRequest, ApiPullRequestReview, ApiPullRequestReviewState,
+    ApiPushControl, ApiRefCheckRun, ApiRefStatus, ApiRelease, ApiReleaseAsset, ApiRepoRule,
+    ApiRepoRuleset, ApiWorkflowJob, ApiWorkflowRun, Client, GeneratedNotes, IssueState, NewIssue,
+    NewRelease, RepositoryCloneInfo, encode_path_component, get_next_page_path_from_link,
+    get_next_page_path_with_increasing_page_size,
 };
 pub use endpoint::{Endpoint, EnterpriseAddressError};
 pub use error::{ApiErrorBody, ApiErrorItem, GitHubError, Result};

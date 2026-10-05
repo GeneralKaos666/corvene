@@ -146,6 +146,17 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
             format!("Reorder of {count} {} undone.", plural(*count)),
             false,
         )],
+        Banner::IssueCreated { number, .. } => {
+            vec![t("Created issue\u{a0}"), b(&format!("#{number}"))]
+        }
+        Banner::ReleaseCreated { name, draft, .. } => vec![
+            t(if *draft {
+                "Saved draft release\u{a0}"
+            } else {
+                "Created release\u{a0}"
+            }),
+            b(name),
+        ],
         Banner::BranchDeleted { branch, .. } => vec![t("Deleted branch\u{a0}"), b(branch)],
         Banner::BranchRestored { branch } => vec![t("Restored branch\u{a0}"), b(branch)],
         Banner::BranchesDeleted { branches, .. } => {
@@ -438,6 +449,20 @@ pub fn banner_bar(
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
                         Dispatcher::autosquash(repo, false, cx);
+                    })
+                    .into_any_element(),
+            )
+        }
+        // Corvene (`345-issues`, `346-releases`)
+        Banner::IssueCreated { html_url, .. } | Banner::ReleaseCreated { html_url, .. } => {
+            let url = html_url.clone();
+            Some(
+                link_button("banner-view-on-github", "View on GitHub", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
+                    .ml(SPACING_HALF())
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::clear_banner(cx);
+                        Dispatcher::open_url(&url, cx);
                     })
                     .into_any_element(),
             )

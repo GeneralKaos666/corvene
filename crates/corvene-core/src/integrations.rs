@@ -1296,17 +1296,19 @@ impl Dispatcher {
                 .map(|(_, name)| name.to_string())
                 .unwrap_or(b)
         });
-        Self::open_url(
-            &pull_request_url(
-                &gh,
-                &branch,
-                base.as_deref(),
-                contributing_to_parent,
-                own_fork_targets_itself,
-                owner_refs,
-            ),
-            cx,
+        let mut url = pull_request_url(
+            &gh,
+            &branch,
+            base.as_deref(),
+            contributing_to_parent,
+            own_fork_targets_itself,
+            owner_refs,
         );
+        // `345-issues`: a branch made from an issue closes it
+        if let Some(number) = Self::current_branch_issue(id, cx) {
+            url = crate::issues::with_closes_issue(&url, number);
+        }
+        Self::open_url(&url, cx);
     }
 
     /// Settings › Git › Hooks: (re)load the login-shell environment for git
@@ -1820,6 +1822,7 @@ mod tests {
             archived: false,
             permissions: None,
             allow_forking: None,
+            node_id: None,
         };
         if parent {
             GitHubRepository {

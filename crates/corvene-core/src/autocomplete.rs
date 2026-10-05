@@ -782,6 +782,7 @@ mod tests {
             archived: false,
             permissions: None,
             allow_forking: None,
+            node_id: None,
         };
         let mut mentionables = MentionableCaches::new();
         mentionables.insert(

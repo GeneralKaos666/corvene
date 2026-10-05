@@ -45,6 +45,7 @@ fn create_repository(alias: Option<&str>) -> Repository {
         archived: false,
         permissions: None,
         allow_forking: None,
+        node_id: None,
     });
     repository.alias = alias.map(str::to_string);
     repository
