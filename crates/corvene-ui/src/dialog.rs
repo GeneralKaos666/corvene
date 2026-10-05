@@ -317,8 +317,9 @@ fn ghd_dialog_width(id: &str) -> Option<f32> {
         // `#app-error.raw-git-error`: room for 80-column git output
         "dialog-git-error" => 750.,
         "dialog-conflicts" | "create-fork" | "clone-repository" => 500.,
+        // (`dialog#push-needs-pull-warning` is 450 px too, but
+        // `PushNeedsPullWarning` never sets that id, so it sizes to its text)
         "dialog-confirm-abort"
-        | "dialog-push-needs-pull"
         | "dialog-stash-and-switch"
         | "create-tutorial-repository-dialog"
         | "dialog-merge-branch"

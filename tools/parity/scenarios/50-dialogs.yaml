@@ -176,3 +176,28 @@ steps:
     wait: 700
   - dump: {name: open, root: dialog}
   - snap: open
+---
+# `PushNeedsPull` and `InitializeLFS` (GHD has no test hooks for them: the
+# popups are shown through the AppStore found on the root React fiber, as
+# 55-generic-git-auth.yaml does)
+name: push-needs-pull
+description: Newer Commits on Remote dialog (a push the remote rejected)
+setup: repo
+steps:
+  - ghd: {eval: "(() => { const root = document.getElementById('desktop-app-container'); const key = Object.keys(root).find(k => k.startsWith('__reactContainer') || k === '_reactRootContainer'); const stack = [key === '_reactRootContainer' ? root._reactRootContainer._internalRoot.current : root[key]]; let store = null; while (stack.length && !store) { const f = stack.pop(); if (!f) continue; if (f.stateNode && f.stateNode.props && f.stateNode.props.appStore) store = f.stateNode.props.appStore; if (f.sibling) stack.push(f.sibling); if (f.child) stack.push(f.child); } store._showPopup({type: 'PushNeedsPull', repository: store.selectedRepository}); })()"}
+    corvene: {popup: push-needs-pull}
+    wait: 700
+  - dump: {name: open, root: dialog}
+  - snap: open
+  - hover: {text: "Fetch", within: "dialog"}
+  - snap: fetch-hover
+---
+name: initialize-lfs
+description: Initialize Git LFS dialog for one repository
+setup: repo
+steps:
+  - ghd: {eval: "(() => { const root = document.getElementById('desktop-app-container'); const key = Object.keys(root).find(k => k.startsWith('__reactContainer') || k === '_reactRootContainer'); const stack = [key === '_reactRootContainer' ? root._reactRootContainer._internalRoot.current : root[key]]; let store = null; while (stack.length && !store) { const f = stack.pop(); if (!f) continue; if (f.stateNode && f.stateNode.props && f.stateNode.props.appStore) store = f.stateNode.props.appStore; if (f.sibling) stack.push(f.sibling); if (f.child) stack.push(f.child); } store._showPopup({type: 'InitializeLFS', repositories: [store.selectedRepository]}); })()"}
+    corvene: {popup: initialize-lfs}
+    wait: 700
+  - dump: {name: open, root: dialog}
+  - snap: open

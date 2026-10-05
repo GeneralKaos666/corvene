@@ -533,6 +533,7 @@ pub(crate) fn main() {
         //   prompts, advanced, accessibility) | repository-settings | about | create
         //   clone | clone:<url>
         //   release-notes | move-to-applications | upstream-already-exists
+        //   push-needs-pull | initialize-lfs (for the selected repository)
         //   pr-review[:approved|:commented] (changes requested by default)
         //   pr-comment | pr-checks-failed
         //   pr-list (sample pull requests in the branch foldout's Pull Requests tab)
@@ -1594,6 +1595,12 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         ),
         ("create", _) => Dispatcher::show_popup(Popup::CreateRepository { path: None }, cx),
         ("clone", _) => Dispatcher::show_popup(Popup::CloneRepository { url: None }, cx),
+        ("push-needs-pull", Some(id)) => {
+            Dispatcher::show_popup(Popup::PushNeedsPull { repo: id }, cx)
+        }
+        ("initialize-lfs", Some(id)) => {
+            Dispatcher::show_popup(Popup::InitializeLFS { repos: vec![id] }, cx)
+        }
         // GHD `showFakeUpstreamAlreadyExists` (test UI components):
         // an in-memory fork of desktop/desktop whose `upstream`
         // points elsewhere

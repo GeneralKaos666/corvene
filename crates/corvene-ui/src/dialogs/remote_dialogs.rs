@@ -607,7 +607,7 @@ impl Render for PushNeedsPullDialog {
             "dialog-push-needs-pull",
             DialogKind::Warning,
             mac_or("Newer Commits on Remote", "Newer commits on remote"),
-            div().w(crate::theme::fit_width(450.)).child(
+            div().child(
                 "Corvene is unable to push commits to this branch because there are commits on the remote that are not present on your local branch. Fetch these new commits before pushing in order to reconcile them with your local commits.",
             ),
             buttons,
@@ -877,7 +877,6 @@ impl Render for InitializeLfsDialog {
         };
         let plural = repos.len() != 1;
         let content = div()
-            .w(crate::theme::fit_width(450.))
             .flex()
             .flex_col()
             .gap(SPACING())
