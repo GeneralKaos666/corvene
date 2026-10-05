@@ -17,6 +17,7 @@ pub mod ci_check_popover;
 pub mod ci_status;
 pub mod cloneable_repositories;
 pub mod cloning_view;
+pub mod commit_graph;
 pub mod context_menu;
 pub mod copy_button;
 pub mod dialog;

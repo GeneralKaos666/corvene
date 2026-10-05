@@ -95,14 +95,15 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=writable)
 
 
-def build(parent: Path, remote: bool = False, coauthors: bool = False) -> Path:
+def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
     and `main` is pushed up to its third commit, so the branch is two ahead
     with the `v0.1.0` tag still to push (History's unpushed indicators, the
     toolbar's Push origin). With `coauthors`, `_CO_AUTHORED` commits go on
-    top."""
+    top. With `graph`, a merged branch and an octopus merge of two more go on
+    top (History's commit graph)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -128,6 +129,30 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False) -> Path:
             _git(repo, "add", "-A")
             trailers = "".join(f"\nCo-authored-by: {n} <{e}>" for n, e in _PEOPLE[:count])
             _git(repo, "commit", "-q", "-m", f"{summary}\n{trailers}", date=date, committer=committer or AUTHOR)
+    if graph:
+        def commit(rel: str, summary: str, date: str):
+            p = repo / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(f"{summary}\n")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-q", "-m", summary, date=date)
+
+        _git(repo, "checkout", "-q", "-b", "topic/lanes", "HEAD~1")
+        commit("graph/lanes.md", "Draw the lanes", "2026-09-24T09:00:00+00:00")
+        _git(repo, "checkout", "-q", "main")
+        commit("graph/plan.md", "Plan the graph", "2026-09-24T10:00:00+00:00")
+        _git(repo, "merge", "-q", "--no-ff", "-m", "Merge branch 'topic/lanes'", "topic/lanes",
+             date="2026-09-24T11:00:00+00:00")
+        for name, hour in (("one", 12), ("two", 13)):
+            _git(repo, "checkout", "-q", "-b", f"topic/{name}", "main")
+            commit(f"graph/{name}.md", f"Add part {name}", f"2026-09-24T{hour}:00:00+00:00")
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--no-ff", "-m", "Merge parts one and two", "topic/one", "topic/two",
+             date="2026-09-24T14:00:00+00:00")
+        # a branch that is not merged (All branches)
+        _git(repo, "checkout", "-q", "-b", "topic/later", "main")
+        commit("graph/later.md", "Start the next part", "2026-09-24T15:00:00+00:00")
+        _git(repo, "checkout", "-q", "main")
     if remote:
         bare = parent / f"{NAME}.git"
         if bare.exists():

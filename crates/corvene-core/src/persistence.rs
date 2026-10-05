@@ -78,6 +78,8 @@ pub struct Settings {
     pub confirm_undo_commit: bool,
     /// Flag `807`: History lists first parents only (`git log --first-parent`).
     pub history_first_parent: bool,
+    /// Flag `1213`: History lists every branch's commits ("All branches").
+    pub history_all_branches: bool,
     /// GHD `uncommittedChangesStrategy` ("If I have changes and I switch branches…").
     pub uncommitted_changes_strategy: UncommittedChangesStrategy,
     /// GHD `askForConfirmationOnDiscardStash`.
@@ -388,6 +390,7 @@ impl Default for Settings {
             confirm_checkout_commit: true,
             confirm_undo_commit: true,
             history_first_parent: false,
+            history_all_branches: false,
             uncommitted_changes_strategy: UncommittedChangesStrategy::default(),
             confirm_discard_stash: true,
             confirm_worktree_removal: true,

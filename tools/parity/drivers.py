@@ -709,11 +709,13 @@ class Corvene:
 
     name = "corvene"
 
-    def __init__(self, binary: Path, data_dir: Path, log: Path, theme: str):
+    def __init__(self, binary: Path, data_dir: Path, log: Path, theme: str, flags: str | None = None):
         self.binary = binary
         self.data_dir = data_dir
         self.log = log
         self.theme = theme
+        # a scenario's `corvene_flags`, after the preset
+        self.flags = flags
         self.port = free_port()
         self.proc: subprocess.Popen | None = None
         self.sock = None
@@ -730,7 +732,9 @@ class Corvene:
             CORVENE_LOG=env.get("PARITY_CORVENE_LOG", "info"),
             # every flag at its GHD value, so the diff measures true parity
             # (.docs/flags.md); PARITY_CORVENE_FLAGS overrides
-            CORVENE_FLAGS=env.get("PARITY_CORVENE_FLAGS", "preset=github-desktop"),
+            CORVENE_FLAGS=",".join(
+                f for f in (env.get("PARITY_CORVENE_FLAGS", "preset=github-desktop"), self.flags) if f
+            ),
         )
         if not BACKGROUND:
             env["CORVENE_FOREGROUND"] = "1"

@@ -7484,6 +7484,25 @@ registry! {
         code: &["crates/corvene-git/src/bisect.rs", "crates/corvene-core/src/bisect.rs", "crates/corvene-ui/src/bisect_bar.rs", "crates/corvene-ui/src/history.rs"],
     },
 
+    /// Branch and merge lanes beside the History commits.
+    COMMIT_GRAPH = 1213 "commit-graph" {
+        title: "Commit graph",
+        summary: "History draws a graph column at the left of the commits: a lane per line of \
+                  development, a dot per commit, curves where branches fork and merge. The current \
+                  branch's first-parent line is the thicker accent lane; past seven lanes the rest \
+                  fold into a dotted column. A button before \"Select Branch to Compare…\" also \
+                  lists every local and remote-tracking branch's commits (All branches), where \
+                  commits cannot be squashed or reordered.",
+        ghd_behaviour: "History is a flat list of the current branch's commits, so merges and \
+                        parallel branches are not visible.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1634), Upstream::issue(9452)],
+        code: &["crates/corvene-core/src/commit_graph.rs", "crates/corvene-ui/src/commit_graph.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-git/src/log.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

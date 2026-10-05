@@ -1174,6 +1174,9 @@ pub struct RepositoryState {
     pub commits_reload_pending: bool,
     /// The last page was shorter than a batch: nothing more to load.
     pub commits_exhausted: bool,
+    /// `1213-commit-graph`: every branch's commits while History shows
+    /// All branches (`None` otherwise).
+    pub all_branches: Option<crate::commit_graph::AllBranchesHistory>,
     /// `commitSelection.shas[0]`: the anchor of the selection.
     pub selected_commit: Option<String>,
     /// `commitSelection.shas` in click order (⌘/⇧-click multi-select).
@@ -1474,9 +1477,23 @@ impl RepositoryState {
             &self.compare.commits
         } else if self.history_filter.is_active() {
             &self.history_filter.commits
+        } else if self.showing_all_branches() {
+            self.all_branches
+                .as_ref()
+                .map_or(&self.commits, |a| &a.commits)
         } else {
             &self.commits
         }
+    }
+
+    /// History lists every branch (`1213-commit-graph`), not only the
+    /// commits of HEAD: rows have no neighbours to squash or reorder with.
+    /// A bisect's range (`1212-bisect`) comes first.
+    pub fn showing_all_branches(&self) -> bool {
+        !self.compare.is_comparing()
+            && !self.history_filter.is_active()
+            && !self.status.as_ref().is_some_and(|s| s.bisect.is_some())
+            && self.all_branches.as_ref().is_some_and(|a| a.loaded)
     }
 
     pub fn changed_files(&self) -> usize {

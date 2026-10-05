@@ -1,0 +1,16 @@
+name: history-graph
+description: The commit graph (1213-commit-graph) beside merges, an octopus merge and, with All branches, an unmerged branch
+setup: repo-graph
+corvene_flags: 1213-commit-graph=on
+steps:
+  - click: [187, 97]
+    wait: 600
+  - snap: {name: open, corvene_only: true}
+  # a merged branch's commit
+  - click: [124, 275]
+    wait: 600
+  - snap: {name: second-commit-selected, corvene_only: true}
+  # All branches: the toggle before the compare box
+  - click: [18, 130]
+    wait: 900
+  - snap: {name: all-branches, corvene_only: true}

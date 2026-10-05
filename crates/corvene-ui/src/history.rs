@@ -33,7 +33,9 @@
 //! Edit Commit Message… rewords an unpushed commit (flag `892`); a commit of
 //! the compare view's Behind tab can be cherry-picked onto the current
 //! branch (flag `893`); the current branch's newest commits can go to a new
-//! branch (Create Branch from N Commits…, flag `787`).
+//! branch (Create Branch from N Commits…, flag `787`); a graph column draws
+//! the branch lanes and a toggle lists every branch's commits (flag `1213`,
+//! `crate::commit_graph`).
 
 use std::rc::Rc;
 
@@ -291,6 +293,9 @@ pub struct HistorySidebar {
     /// `798-blame`: the last commit picked from a Blame gutter that was
     /// scrolled to (repository, `reveal_commit` count).
     revealed: Option<(u64, u64)>,
+    /// `1213-commit-graph`: the lanes of the listed commits, extended as
+    /// pages load.
+    graph: Rc<std::cell::RefCell<corvene_core::commit_graph::CommitGraph>>,
 }
 
 impl HistorySidebar {
@@ -369,6 +374,7 @@ impl HistorySidebar {
             list_scroll,
             shown_tip: None,
             revealed: None,
+            graph: Default::default(),
         }
     }
 
@@ -1243,12 +1249,9 @@ impl HistorySidebar {
         let count = selection.len();
         let busy = self.mco_in_progress(id, cx);
         // `886`: squashing and reordering need the plain list's neighbours
-        let comparing = self
-            .state
-            .read(cx)
-            .repo_states
-            .get(&id)
-            .is_some_and(|r| r.compare.is_comparing() || r.history_filter.is_active());
+        let comparing = self.state.read(cx).repo_states.get(&id).is_some_and(|r| {
+            r.compare.is_comparing() || r.history_filter.is_active() || r.showing_all_branches()
+        });
         let (copy_items, revert_no_commit, pick_no_commit, patches) = {
             let flags = &self.state.read(cx).flags;
             (
@@ -1459,13 +1462,13 @@ impl HistorySidebar {
                         .is_some(),
             )
         };
-        // `886`: no reordering among filtered rows
+        // `886`: no reordering among filtered rows (nor all branches', `1213`)
         let filtering = self
             .state
             .read(cx)
             .repo_states
             .get(&id)
-            .is_some_and(|r| r.history_filter.is_active());
+            .is_some_and(|r| r.history_filter.is_active() || r.showing_all_branches());
         let reset_modes = self
             .state
             .read(cx)
@@ -1982,15 +1985,36 @@ impl HistorySidebar {
             .map(|r| &r.history_filter)
             .filter(|f| !comparing && f.is_active());
         let filtering = filter.is_some();
+        // `1213`: every branch's commits page in from their own walk
+        let all_branches = rs.and_then(|r| {
+            r.showing_all_branches()
+                .then_some(r.all_branches.as_ref())
+                .flatten()
+        });
         let exhausted = comparing
-            || match filter {
-                Some(filter) => filter.exhausted,
-                None => rs.map(|r| r.commits_exhausted).unwrap_or(true),
+            || match (filter, all_branches) {
+                (Some(filter), _) => filter.exhausted,
+                (None, Some(all)) => all.exhausted,
+                (None, None) => rs.map(|r| r.commits_exhausted).unwrap_or(true),
             };
         let loaded = rs.map(|r| r.info.is_some()).unwrap_or(false);
         let draggable = rs.is_some_and(|r| r.mco.is_none()) && self.reorder.is_none() && !comparing;
         // filtered rows can be dragged onto a branch, not squashed or reordered
-        let droppable = draggable && !filtering;
+        let droppable = draggable && !filtering && all_branches.is_none();
+        // `1213`: the graph of the plain list (or all branches)
+        let graph =
+            (s.flags.bool(corvene_core::flags::ids::COMMIT_GRAPH) && !comparing && !filtering)
+                .then(|| {
+                    let head = all_branches.and_then(|a| a.tips.first().map(String::as_str));
+                    let mut graph = self.graph.borrow_mut();
+                    graph.sync(&commits, head, Dispatcher::history_first_parent(s));
+                    (
+                        self.graph.clone(),
+                        crate::commit_graph::graph_columns(graph.width()),
+                        crate::commit_graph::palette(cx),
+                    )
+                });
+        let paging_all = all_branches.is_some();
         // GHD `localCommitSHAs` / `tagsToPush`: the unpushed indicator, never
         // without a remote (`isLocalRepository`)
         let has_remote = rs
@@ -2144,6 +2168,8 @@ impl HistorySidebar {
                     if !exhausted && range.end + 20 >= count {
                         if filtering {
                             Dispatcher::load_more_history_filter(id, cx);
+                        } else if paging_all {
+                            Dispatcher::load_all_branches(id, true, cx);
                         } else {
                             Dispatcher::load_commits(id, true, cx);
                         }
@@ -2191,6 +2217,7 @@ impl HistorySidebar {
                                 weak.clone(),
                                 list_focus.clone(),
                                 (anchor_sha.as_ref() == Some(&commit.sha)).then_some(&menu_anchor),
+                                graph.clone(),
                                 cx,
                             )
                         })
@@ -2635,7 +2662,6 @@ pub(crate) fn tags_tooltip(cx: &App) -> bool {
 /// parents only; accent-coloured with a dot while on (the Changes filter
 /// button's `.active` look), disabled while comparing.
 fn first_parent_button(on: bool, comparing: bool, cx: &App) -> AnyElement {
-    let t = cx.ghd();
     let label = if comparing {
         "First-parent history does not apply to a comparison"
     } else if on {
@@ -2643,8 +2669,51 @@ fn first_parent_button(on: bool, comparing: bool, cx: &App) -> AnyElement {
     } else {
         "Show first-parent commits only"
     };
+    history_toggle(
+        "history-first-parent",
+        Octicon::Filter,
+        label,
+        on,
+        comparing,
+        |on, cx| Dispatcher::set_history_first_parent(on, cx),
+        cx,
+    )
+}
+
+/// Flag `1213`: the All branches toggle after the first-parent one, in
+/// its look.
+fn all_branches_button(on: bool, comparing: bool, cx: &App) -> AnyElement {
+    let label = if comparing {
+        "All branches does not apply to a comparison"
+    } else if on {
+        "Showing the commits of all branches"
+    } else {
+        "Show the commits of all branches"
+    };
+    history_toggle(
+        "history-all-branches",
+        Octicon::GitMerge,
+        label,
+        on,
+        comparing,
+        |on, cx| Dispatcher::set_history_all_branches(on, cx),
+        cx,
+    )
+}
+
+/// A 27 px toggle of the compare form's row.
+fn history_toggle(
+    id: &'static str,
+    icon: Octicon,
+    label: &'static str,
+    on: bool,
+    comparing: bool,
+    toggle: fn(bool, &mut App),
+    cx: &App,
+) -> AnyElement {
+    let t = cx.ghd();
     div()
-        .id("history-first-parent")
+        .id(id)
         .icon_button_label(label)
         .relative()
         .size(zpx(27.))
@@ -2658,11 +2727,10 @@ fn first_parent_button(on: bool, comparing: bool, cx: &App) -> AnyElement {
         .bg(t.secondary_button_background)
         .when(comparing, |d| d.opacity(0.6))
         .when(!comparing, |d| {
-            d.cursor_pointer()
-                .on_click(move |_, _, cx| Dispatcher::set_history_first_parent(!on, cx))
+            d.cursor_pointer().on_click(move |_, _, cx| toggle(!on, cx))
         })
         .child(octicon(
-            Octicon::Filter,
+            icon,
             if on {
                 t.box_selected_active_background
             } else {
@@ -2683,6 +2751,13 @@ fn first_parent_button(on: bool, comparing: bool, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// `1213`: the graph, its column count and lane colours for a row.
+type GraphColumn = (
+    Rc<std::cell::RefCell<corvene_core::commit_graph::CommitGraph>>,
+    usize,
+    [Hsla; corvene_core::commit_graph::PALETTE_LEN as usize],
+);
+
 /// `CommitListItem`
 #[allow(clippy::too_many_arguments)]
 fn commit_row(
@@ -2701,6 +2776,7 @@ fn commit_row(
     weak: WeakEntity<HistorySidebar>,
     list_focus: FocusHandle,
     menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
+    graph: Option<GraphColumn>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -2885,6 +2961,28 @@ fn commit_row(
                         let selected = (is_selected || hint.keyboard_selected).then_some(text);
                         Some(b.rows.pill(b.mark?, selected, cx))
                     }));
+            // `1213`: the graph column before the contents (painted in
+            // the row, the contents moved over: no extra layout per row)
+            let (contents, graph) = match graph {
+                Some((graph, columns, palette)) => (
+                    contents.pl(crate::commit_graph::column_width(columns) + SPACING()),
+                    Some(crate::commit_graph::graph_cell(
+                        graph,
+                        ix,
+                        columns,
+                        crate::commit_graph::GraphStyle {
+                            palette,
+                            accent: (is_selected && list_focused && !hint.keyboard_selected)
+                                .then_some(text),
+                            background: bg,
+                            overflow: secondary,
+                            height: commit_row_height(cx),
+                        },
+                    )),
+                ),
+                None => (contents, None),
+            };
+            let d = d.children(graph);
             // `621-context-menu-buttons`: after the contents
             if crate::context_menu::row_menu_buttons(cx) {
                 d.group("commit-row")
@@ -3001,6 +3099,23 @@ impl Render for HistorySidebar {
         };
         let t = cx.ghd().clone();
         // `807`: the first-parent toggle before the compare box
+        // `1213`: the All branches toggle after it, its list loaded or dropped
+        let all_branches_toggle = {
+            let s = self.state.read(cx);
+            let rs = s.selected.and_then(|id| s.repo_states.get(&id));
+            let on = Dispatcher::history_all_branches(s);
+            let stale = !on && s.repo_states.values().any(|rs| rs.all_branches.is_some());
+            let missing = on && rs.is_some_and(|rs| rs.info.is_some() && rs.all_branches.is_none());
+            if stale {
+                Dispatcher::clear_all_branches(cx);
+            } else if missing && let Some(id) = id {
+                Dispatcher::load_all_branches(id, false, cx);
+            }
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::COMMIT_GRAPH)
+                .then_some(s.settings.history_all_branches)
+        };
         let (first_parent_toggle, comparing, search, filter_active, file_history, file) = {
             let s = self.state.read(cx);
             let rs = s.selected.and_then(|id| s.repo_states.get(&id));
@@ -3065,6 +3180,12 @@ impl Render for HistorySidebar {
                             .flex_row()
                             .gap(SPACING_HALF())
                             .child(first_parent_button(on, comparing, cx))
+                    })
+                    .when_some(all_branches_toggle, |d, on| {
+                        d.flex()
+                            .flex_row()
+                            .gap(SPACING_HALF())
+                            .child(all_branches_button(on, comparing, cx))
                     })
                     .child({
                         // `FancyTextBox`: 27 px, `--box-border-color` frame,

@@ -230,8 +230,74 @@ pub fn get_commits_with(
     let Some(tip) = repo.rev_parse_single(revision).ok() else {
         return Ok(Vec::new());
     };
-    let tags = tags_by_commit(&repo);
-    let mut walk = repo.rev_walk([tip.detach()]);
+    walk_commits(&repo, vec![tip.detach()], skip, limit, first_parent)
+}
+
+/// Corvene `1213-commit-graph`: where History's "All branches" list starts,
+/// HEAD's commit first, then the tips of the local and remote-tracking
+/// branches (`git log HEAD --branches --remotes`), each commit once. Empty
+/// on an unborn branch with no branches.
+pub fn all_branch_tips(workdir: &Path) -> Result<Vec<String>> {
+    let repo = crate::handle::open(workdir)?;
+    let mut tips: Vec<String> = Vec::new();
+    if let Ok(head) = repo.head_id() {
+        tips.push(head.to_string());
+    }
+    let refs = repo
+        .references()
+        .map_err(|e| GitError::Gix(e.to_string()))?;
+    let mut branches: Vec<(String, String)> = Vec::new();
+    for iter in [refs.local_branches(), refs.remote_branches()] {
+        let iter = iter.map_err(|e| GitError::Gix(e.to_string()))?;
+        for r in iter.flatten() {
+            // `refs/remotes/<remote>/HEAD` only repeats a branch
+            if matches!(r.target(), gix::refs::TargetRef::Symbolic(_)) {
+                continue;
+            }
+            let name = r.name().as_bstr().to_string();
+            if let Ok(id) = r.into_fully_peeled_id() {
+                branches.push((name, id.to_string()));
+            }
+        }
+    }
+    branches.sort();
+    for (_, id) in branches {
+        if !tips.contains(&id) {
+            tips.push(id);
+        }
+    }
+    Ok(tips)
+}
+
+/// [`get_commits_with`] walking from several `tips` (SHAs) at once, newest
+/// first by commit date, each commit once.
+pub fn get_commits_from(
+    workdir: &Path,
+    tips: &[String],
+    skip: usize,
+    limit: usize,
+    first_parent: bool,
+) -> Result<Vec<Commit>> {
+    let repo = crate::handle::open(workdir)?;
+    let tips: Vec<gix::ObjectId> = tips
+        .iter()
+        .filter_map(|t| gix::ObjectId::from_hex(t.as_bytes()).ok())
+        .collect();
+    if tips.is_empty() {
+        return Ok(Vec::new());
+    }
+    walk_commits(&repo, tips, skip, limit, first_parent)
+}
+
+fn walk_commits(
+    repo: &gix::Repository,
+    tips: Vec<gix::ObjectId>,
+    skip: usize,
+    limit: usize,
+    first_parent: bool,
+) -> Result<Vec<Commit>> {
+    let tags = tags_by_commit(repo);
+    let mut walk = repo.rev_walk(tips);
     if first_parent {
         walk = walk.first_parent_only();
     }
@@ -1391,6 +1457,43 @@ mod tests {
         let first = get_commits_with(dir.path(), "HEAD", 0, 10, true).unwrap();
         let summaries: Vec<_> = first.iter().map(|c| c.summary.as_str()).collect();
         assert_eq!(summaries, ["merge topic", "second", "first"]);
+    }
+
+    #[test]
+    fn all_branches_walk_from_every_tip() {
+        let (dir, _) = repo();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(dir.path())
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        run(&["checkout", "-q", "-b", "topic"]);
+        std::fs::write(dir.path().join("c.txt"), "c\n").unwrap();
+        run(&["add", "."]);
+        run(&["commit", "-q", "-m", "topic work"]);
+        run(&["checkout", "-q", "main"]);
+        run(&["update-ref", "refs/remotes/origin/main", "HEAD~1"]);
+        run(&[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ]);
+        let head = get_commits(dir.path(), "HEAD", 0, 1).unwrap().remove(0);
+        let tips = all_branch_tips(dir.path()).unwrap();
+        // HEAD first; main repeats it and origin/HEAD repeats origin/main
+        assert_eq!(tips.len(), 3);
+        assert_eq!(tips[0], head.sha);
+        let all = get_commits_from(dir.path(), &tips, 0, 10, false).unwrap();
+        let summaries: Vec<_> = all.iter().map(|c| c.summary.as_str()).collect();
+        assert!(summaries.contains(&"topic work"));
+        assert_eq!(summaries.len(), 3);
+        let page = get_commits_from(dir.path(), &tips, 1, 1, false).unwrap();
+        assert_eq!(page[0].sha, all[1].sha);
     }
 
     #[test]

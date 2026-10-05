@@ -127,14 +127,17 @@ class Run:
         # units), so paths shown in either app lay out and wrap identically
         # `repo-remote`: the same fixture behind a bare `origin`, two commits
         # ahead of it; `repo-coauthors`: with commits by several people on top
-        with_repo = setup in ("repo", "repo-remote", "repo-coauthors")
+        # `repo-graph`: with merges on top (the commit graph)
+        with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph")
         remote = setup == "repo-remote"
         coauthors = setup == "repo-coauthors"
-        repo_g = fixture.build(work / "n", remote, coauthors) if with_repo else None
-        repo_c = fixture.build(work / "u", remote, coauthors) if with_repo else None
+        graph = setup == "repo-graph"
+        repo_g = fixture.build(work / "n", remote, coauthors, graph) if with_repo else None
+        repo_c = fixture.build(work / "u", remote, coauthors, graph) if with_repo else None
 
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
-        cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme)
+        cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,
+                                                         sc.get("corvene_flags"))
         result = {"name": sc["name"], "theme": theme, "file": sc["_file"], "description": sc.get("description", ""), "snaps": [], "error": None, "notes": []}
         started = time.time()
         try:

@@ -21,6 +21,7 @@ pub mod changes_state;
 pub mod clone_info;
 pub mod cloning_repositories_store;
 pub mod commit_checks;
+pub mod commit_graph;
 pub mod commit_status;
 pub mod compare;
 pub mod crash_reports;

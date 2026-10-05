@@ -73,6 +73,7 @@ pub const ORANGE_800: u32 = 0xc24e00;
 pub const ORANGE_900: u32 = 0xa04100;
 
 pub const PURPLE_300: u32 = 0xb392f0;
+pub const PURPLE_500: u32 = 0x6f42c1;
 
 pub const BLUE: u32 = BLUE_500;
 pub const GREEN: u32 = GREEN_500;

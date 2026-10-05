@@ -2333,8 +2333,146 @@ impl Dispatcher {
         }
     }
 
+    /// Flag `1213`: History lists every branch's commits.
+    pub fn history_all_branches(s: &AppState) -> bool {
+        s.settings.history_all_branches && s.flags.bool(crate::flags::ids::COMMIT_GRAPH)
+    }
+
+    /// Flag `1213`: switch History to All branches (or back) and load the
+    /// selected repository's list.
+    pub fn set_history_all_branches(on: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.history_all_branches = on);
+        let selected = Self::state(cx).read(cx).selected;
+        if on {
+            if let Some(id) = selected {
+                Self::load_all_branches(id, false, cx);
+            }
+        } else {
+            Self::clear_all_branches(cx);
+        }
+    }
+
+    /// Drops every repository's All branches list (History shows HEAD's).
+    pub fn clear_all_branches(cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            let mut cleared = false;
+            for rs in s.repo_states.values_mut() {
+                cleared |= rs.all_branches.take().is_some();
+            }
+            if cleared {
+                cx.notify();
+            }
+        });
+    }
+
+    /// Flag `1213`: the first page of the All branches list (tips read
+    /// again), or the next one when `more`.
+    pub fn load_all_branches(id: u64, more: bool, cx: &mut dyn Host) {
+        let state = Self::state(cx);
+        let job = {
+            let s = state.read(cx);
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            let Some(info) = rs.info.as_ref() else { return };
+            let all = rs.all_branches.as_ref();
+            if all.is_some_and(|a| a.loading) {
+                None
+            } else if more && !all.is_some_and(|a| a.loaded && !a.exhausted) {
+                return;
+            } else {
+                Some((
+                    info.workdir.clone(),
+                    more.then(|| all.map(|a| a.tips.clone()).unwrap_or_default()),
+                    if more {
+                        all.map_or(0, |a| a.commits.len())
+                    } else {
+                        0
+                    },
+                    Self::history_first_parent(s),
+                ))
+            }
+        };
+        let Some((workdir, tips, skip, first_parent)) = job else {
+            // a reload asked for while a page loads runs after it
+            if !more {
+                state.update(cx, |s, _| {
+                    if let Some(a) = s.repo_state_mut(id).all_branches.as_mut() {
+                        a.reload_pending = true;
+                    }
+                });
+            }
+            return;
+        };
+        state.update(cx, |s, _| {
+            s.repo_state_mut(id)
+                .all_branches
+                .get_or_insert_with(Default::default)
+                .loading = true;
+        });
+        let task = cx.background_executor().spawn(async move {
+            let tips = match tips {
+                Some(tips) => tips,
+                None => corvene_git::all_branch_tips(&workdir).unwrap_or_default(),
+            };
+            let commits = corvene_git::get_commits_from(
+                &workdir,
+                &tips,
+                skip,
+                corvene_git::COMMIT_BATCH_SIZE,
+                first_parent,
+            );
+            (tips, commits)
+        });
+        cx.spawn(async move |cx: &mut AsyncCtx| {
+            let (tips, result) = task.await;
+            cx.update(|cx| {
+                let reload = Self::state(cx).update(cx, |s, cx| {
+                    // switched off meanwhile
+                    let Some(all) = s.repo_state_mut(id).all_branches.as_mut() else {
+                        return false;
+                    };
+                    all.loading = false;
+                    match result {
+                        Ok(batch) => {
+                            let full = batch.len() == corvene_git::COMMIT_BATCH_SIZE;
+                            if more {
+                                all.exhausted = !full;
+                                all.commits.extend(batch);
+                            } else if all.loaded
+                                && all.tips == tips
+                                && all.commits.len() >= batch.len()
+                                && all.commits[..batch.len()] == batch[..]
+                                && (full || all.commits.len() == batch.len())
+                            {
+                                // a refresh changed nothing: the pages
+                                // scrolled in stay
+                            } else {
+                                all.exhausted = !full;
+                                all.commits = batch;
+                                all.tips = tips;
+                            }
+                            all.loaded = true;
+                            cx.notify();
+                        }
+                        Err(err) => warn!(id, %err, "all branches history failed"),
+                    }
+                    std::mem::take(&mut all.reload_pending)
+                });
+                if reload {
+                    Self::load_all_branches(id, false, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Load the first page of HEAD's history, or the next one when `more`.
     pub fn load_commits(id: u64, more: bool, cx: &mut dyn Host) {
+        // `1213`: a reload of History reloads All branches too
+        if !more && Self::history_all_branches(Self::state(cx).read(cx)) {
+            Self::load_all_branches(id, false, cx);
+        }
         let state = Self::state(cx);
         // `885-history-load-race`: a reload asked for while a page loads
         // runs once that page is in (GHD drops it), and the next page
@@ -2489,6 +2627,7 @@ impl Dispatcher {
                             // the filter's selection is not in the plain list
                             let missing = !rs.compare.is_comparing()
                                 && !rs.history_filter.is_active()
+                                && !rs.showing_all_branches()
                                 && rs
                                     .selected_commits
                                     .iter()
