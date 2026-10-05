@@ -601,6 +601,24 @@ impl KnownGitError {
     }
 }
 
+/// Corvene (`526-commit-signing`): git could not sign a commit, with GPG
+/// (dugite's `GPGFailedToSignData`) or an SSH key (`gpg-interface.c`'s
+/// `sign_buffer_ssh` and `ssh-keygen -Y sign` errors).
+pub fn is_signing_failure(output: &str) -> bool {
+    const SIGNS: &[&str] = &[
+        "gpg failed to sign the data",
+        "ssh-keygen -Y sign is needed for ssh signing",
+        "Couldn't load public key",
+        "failed to get the ssh fingerprint for key",
+        "either user.signingkey or gpg.ssh.defaultKeyCommand needs to be configured",
+        "incorrect passphrase supplied to decrypt private key",
+        "agent refused operation",
+    ];
+    known_git_error(output) == Some(KnownGitError::GPGFailedToSignData)
+        || SIGNS.iter().any(|sign| output.contains(sign))
+        || (output.contains("Signing file ") && output.contains(" failed"))
+}
+
 /// Corvene (`1104-lfs-server-authentication`): git-lfs could not sign in to
 /// its server ("batch response: too many authentication attempts" when the
 /// credential prompt was answered with nothing, "Git credentials for … not
@@ -960,6 +978,23 @@ impl GitError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recognises_signing_failures() {
+        use super::is_signing_failure;
+        assert!(is_signing_failure(
+            "error: gpg failed to sign the data\nfatal: failed to write commit object\n"
+        ));
+        assert!(is_signing_failure(
+            "error: Couldn't load public key /tmp/x.pub: No such file or directory?\n\
+             fatal: failed to write commit object\n"
+        ));
+        assert!(is_signing_failure(
+            "error: Signing file /tmp/.git_signing_buffer_tmpAb failed: agent refused operation?\n"
+        ));
+        assert!(!is_signing_failure(
+            "fatal: unable to auto-detect email address"
+        ));
+    }
 
     #[test]
     fn lfs_sign_in_failures_name_the_lfs_server() {

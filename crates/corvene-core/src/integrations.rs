@@ -182,6 +182,9 @@ pub struct PreferencesSave {
     /// to write; `None` leaves them alone.
     pub quotepath: Option<bool>,
     pub longpaths: Option<bool>,
+    /// `526-commit-signing`: the global signing settings to write; `None`
+    /// leaves them alone.
+    pub signing: Option<crate::state::SigningConfig>,
 }
 
 /// What Repository Settings › Save applies (`repository-settings.tsx#onSubmit`).
@@ -196,6 +199,51 @@ pub struct RepositorySettingsSave {
     /// `239-line-endings-setting`: the `--local` `core.autocrlf` to store
     /// (`None`: remove it, so the global value applies).
     pub autocrlf: Option<Option<String>>,
+    /// `526-commit-signing`: the repository's signing settings; what
+    /// differs from the ones in effect is stored `--local` (`None`: leave
+    /// them).
+    pub signing: Option<crate::state::SigningConfig>,
+}
+
+/// Corvene (`526-commit-signing`): write what differs between `before` and
+/// `after` to the repository at `workdir`'s own config, or the global one.
+fn write_signing(
+    git: Arc<corvene_git::GitBinary>,
+    workdir: Option<&Path>,
+    before: &crate::state::SigningConfig,
+    after: &crate::state::SigningConfig,
+) -> Result<(), corvene_git::GitError> {
+    let set = |key: &str, value: Option<&str>| match (workdir, value) {
+        (Some(dir), Some(value)) => {
+            corvene_git::set_local_config_value(git.clone(), dir, key, value)
+        }
+        (Some(dir), None) => corvene_git::remove_local_config_value(git.clone(), dir, key),
+        (None, Some(value)) => corvene_git::set_global_config_value(git.clone(), key, value),
+        (None, None) => corvene_git::remove_global_config_value(git.clone(), key),
+    };
+    if after.sign != before.sign {
+        set(
+            "commit.gpgsign",
+            Some(if after.sign { "true" } else { "false" }),
+        )?;
+    }
+    let key = after.key.trim();
+    if key != before.key.trim() {
+        set("user.signingkey", (!key.is_empty()).then_some(key))?;
+    }
+    if after.ssh != before.ssh {
+        set("gpg.format", after.ssh.then_some("ssh"))?;
+    }
+    Ok(())
+}
+
+/// Corvene (`526-commit-signing`): the signing settings `value` reads.
+fn read_signing(value: impl Fn(&str) -> Option<String>) -> crate::state::SigningConfig {
+    crate::state::SigningConfig {
+        sign: value("commit.gpgsign").is_some_and(|v| config_bool(&v, false)),
+        key: value("user.signingkey").unwrap_or_default(),
+        ssh: value("gpg.format").is_some_and(|v| v.trim().eq_ignore_ascii_case("ssh")),
+    }
 }
 
 /// Corvene (`524-open-repository-with-editor`): an editor to open a
@@ -1335,6 +1383,7 @@ impl Dispatcher {
                     email: identity.email,
                     quotepath: flag("core.quotepath", true),
                     longpaths: flag("core.longpaths", false),
+                    signing: read_signing(|key| corvene_git::global_config_value(git.clone(), key)),
                     default_branch: corvene_git::configured_default_branch(git),
                 }
             },
@@ -1379,6 +1428,7 @@ impl Dispatcher {
             default_branch,
             quotepath,
             longpaths,
+            signing,
         } = save;
         let (git, previous) = {
             let s = Self::state(cx).read(cx);
@@ -1395,9 +1445,12 @@ impl Dispatcher {
             !default_branch.trim().is_empty() && default_branch.trim() != previous.default_branch;
         let quotepath = quotepath.filter(|v| *v != previous.quotepath);
         let longpaths = longpaths.filter(|v| *v != previous.longpaths);
+        let signing = signing.filter(|s| *s != previous.signing);
+        let previous_signing = previous.signing.clone();
         if !(name_changed || email_changed || branch_changed)
             && quotepath.is_none()
             && longpaths.is_none()
+            && signing.is_none()
         {
             return;
         }
@@ -1424,6 +1477,9 @@ impl Dispatcher {
                         "core.longpaths",
                         if on { "true" } else { "false" },
                     )?;
+                }
+                if let Some(signing) = &signing {
+                    write_signing(git.clone(), None, &previous_signing, signing)?;
                 }
                 if branch_changed {
                     corvene_git::set_default_branch(git, default_branch.trim())?;
@@ -1485,7 +1541,14 @@ impl Dispatcher {
                     ),
                     global,
                     autocrlf,
-                    local_autocrlf: corvene_git::local_config_value(git, &workdir, "core.autocrlf"),
+                    local_autocrlf: corvene_git::local_config_value(
+                        git.clone(),
+                        &workdir,
+                        "core.autocrlf",
+                    ),
+                    local_signing: read_signing(|key| {
+                        corvene_git::config_value(git.clone(), &workdir, key)
+                    }),
                 }
             },
             |data, cx| {
@@ -1555,6 +1618,15 @@ impl Dispatcher {
                     };
                     if let Err(err) = result {
                         errors.push(format!("Failed saving the Git config: {err}"));
+                    }
+                }
+                if let Some(signing) = save.signing {
+                    // what applies here now; a change is stored locally
+                    let before =
+                        read_signing(|key| corvene_git::config_value(git.clone(), &workdir, key));
+                    if let Err(err) = write_signing(git.clone(), Some(&workdir), &before, &signing)
+                    {
+                        errors.push(format!("Failed saving the signing settings: {err}"));
                     }
                 }
                 if let Some(value) = save.autocrlf {

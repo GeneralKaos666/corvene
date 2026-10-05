@@ -2256,3 +2256,46 @@ pub fn resizable_text_area(
         )
         .into_any_element()
 }
+
+/// Corvene (`526-commit-signing`): "Sign commits", "Signing key" and the
+/// SSH key choice (`commit.gpgsign`, `user.signingkey`, `gpg.format`) of
+/// one Git config scope. `ids`: the two checkboxes' and the key box's.
+#[allow(clippy::too_many_arguments)]
+pub fn signing_fields(
+    ids: (&'static str, &'static str, &'static str),
+    sign: bool,
+    ssh: bool,
+    key: &Entity<InputState>,
+    on_sign: impl Fn(bool, &mut Window, &mut App) + 'static,
+    on_ssh: impl Fn(bool, &mut Window, &mut App) + 'static,
+    window: &Window,
+    cx: &App,
+) -> Div {
+    let t = cx.ghd();
+    div()
+        .flex()
+        .flex_col()
+        .gap(SPACING_HALF())
+        .child(checkbox_row(ids.0, sign, "Sign commits", on_sign, cx))
+        .child(labeled(
+            "Signing key",
+            text_box(ids.2, key, None, window, cx),
+            cx,
+        ))
+        .child(checkbox_row(
+            ids.1,
+            ssh,
+            "The key is an SSH key (gpg.format = ssh)",
+            on_ssh,
+            cx,
+        ))
+        .child(
+            div()
+                .text_size(FONT_SIZE_SM())
+                .text_color(t.text_secondary)
+                .child(
+                    "A GPG key ID, or an SSH public key file or key. Git signs each commit \
+                     with it while Sign commits is on.",
+                ),
+        )
+}

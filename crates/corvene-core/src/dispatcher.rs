@@ -1142,6 +1142,7 @@ impl Dispatcher {
             read_parent,
             read_message_hooks,
             read_implicit_upstream,
+            read_signing,
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -1183,6 +1184,7 @@ impl Dispatcher {
                     .bool(crate::flags::ids::MESSAGE_RULES_DEFER_TO_HOOKS),
                 s.flags
                     .bool(crate::flags::ids::IMPLICIT_UPSTREAM_PUSH_DEFAULT),
+                s.flags.bool(crate::flags::ids::COMMIT_SIGNING),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -1289,6 +1291,13 @@ impl Dispatcher {
                     });
                     let pull_with_rebase = spawn_git(scope, &git, move |git| {
                         corvene_git::pull_with_rebase(git, path)
+                    });
+                    // `526-commit-signing`: git signs the commits made here
+                    let signs_commits = read_signing.then(|| {
+                        spawn_git(scope, &git, move |git| {
+                            corvene_git::boolean_config_value(git, path, "commit.gpgsign", false)
+                                .unwrap_or(false)
+                        })
                     });
                     // `340-message-rules-defer-to-hooks`
                     let message_hook = read_message_hooks.then(|| {
@@ -1482,6 +1491,7 @@ impl Dispatcher {
                             }),
                         pull_with_rebase: join(pull_with_rebase),
                         commit_message_hook: message_hook.is_some_and(join),
+                        signs_commits: signs_commits.is_some_and(join),
                         implicit_upstream,
                         worktrees,
                         upstream_rewritten,
@@ -1610,6 +1620,7 @@ impl Dispatcher {
                                     &mut repo_state.commit_message_hook,
                                     extras.commit_message_hook,
                                 );
+                                changed |= set(&mut repo_state.signs_commits, extras.signs_commits);
                                 changed |= set(
                                     &mut repo_state.implicit_upstream,
                                     extras.implicit_upstream,
@@ -5798,7 +5809,28 @@ impl Dispatcher {
                 });
                 let committed = result.is_ok();
                 if let Err(err) = result {
-                    Self::show_error("Could not commit", &err, cx);
+                    // Corvene (`526-commit-signing`): a signing failure says
+                    // so, git's words below
+                    let signing = Self::state(cx)
+                        .read(cx)
+                        .flags
+                        .bool(crate::flags::ids::COMMIT_SIGNING)
+                        && err
+                            .failure()
+                            .is_some_and(|f| corvene_git::is_signing_failure(&f.output));
+                    let message = if signing {
+                        ErrorMessage::explained(
+                            &err,
+                            Some(
+                                "Git could not sign the commit. Check your signing key or turn \
+                                 off commit signing."
+                                    .to_string(),
+                            ),
+                        )
+                    } else {
+                        ErrorMessage::from(&err)
+                    };
+                    Self::show_error("Could not commit", message, cx);
                 }
                 Self::refresh_repository(id, cx);
                 let branch = Self::state(cx)
@@ -7277,6 +7309,8 @@ struct RefreshExtras {
     /// `340-message-rules-defer-to-hooks`: git runs a `prepare-commit-msg`
     /// or `commit-msg` hook on a commit.
     commit_message_hook: bool,
+    /// `526-commit-signing`: the effective `commit.gpgsign`.
+    signs_commits: bool,
     /// `1103-implicit-upstream-push-default`
     implicit_upstream: Option<(String, corvene_models::AheadBehind)>,
     worktrees: Vec<corvene_models::WorktreeEntry>,

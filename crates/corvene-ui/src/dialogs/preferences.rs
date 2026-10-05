@@ -126,6 +126,10 @@ pub struct PreferencesDialog {
     /// `517-path-git-settings`: global `core.quotepath` / `core.longpaths`.
     quotepath: bool,
     longpaths: bool,
+    /// `526-commit-signing`: the global signing settings as edited (the key
+    /// in `signing_key`).
+    signing: corvene_core::SigningConfig,
+    signing_key: Entity<InputState>,
     /// GHD `Notifications` state: `getNotificationsPermission()` result.
     notification_permission: Option<NotificationPermission>,
     /// `CustomIntegrationForm` inputs (Integrations tab).
@@ -164,6 +168,7 @@ impl PreferencesDialog {
         let name = cx.new(|cx| InputState::new(window, cx));
         let email = cx.new(|cx| InputState::new(window, cx));
         let default_branch = cx.new(|cx| InputState::new(window, cx));
+        let signing_key = cx.new(|cx| InputState::new(window, cx).placeholder("Key ID or file"));
         for input in [&name, &email, &default_branch] {
             cx.observe(input, |_, _, cx| cx.notify()).detach();
         }
@@ -281,6 +286,8 @@ impl PreferencesDialog {
             git_loaded: false,
             quotepath: true,
             longpaths: false,
+            signing: corvene_core::SigningConfig::default(),
+            signing_key,
             notification_permission: None,
             custom_editor_path,
             custom_editor_args,
@@ -355,6 +362,10 @@ impl PreferencesDialog {
         self.git_loaded = true;
         self.quotepath = config.quotepath;
         self.longpaths = config.longpaths;
+        self.signing = config.signing.clone();
+        self.signing_key.update(cx, |s, cx| {
+            s.set_value(config.signing.key.clone(), window, cx)
+        });
         let name = config.name.unwrap_or_default();
         let email = config.email.unwrap_or_default();
         self.name.update(cx, |s, cx| s.set_value(name, window, cx));
@@ -402,6 +413,17 @@ impl PreferencesDialog {
                 quotepath: (self.git_loaded && path_settings).then_some(self.quotepath),
                 longpaths: (self.git_loaded && path_settings && cfg!(windows))
                     .then_some(self.longpaths),
+                // `526-commit-signing`
+                signing: (self.git_loaded
+                    && self
+                        .state
+                        .read(cx)
+                        .flags
+                        .bool(corvene_core::flags::ids::COMMIT_SIGNING))
+                .then(|| corvene_core::SigningConfig {
+                    key: self.signing_key.read(cx).value().trim().to_string(),
+                    ..self.signing.clone()
+                }),
             },
             cx,
         );
@@ -1159,6 +1181,43 @@ impl PreferencesDialog {
                             .text_color(t.text_secondary),
                         )
                     })
+                    // `526-commit-signing`
+                    .when(
+                        self.state
+                            .read(cx)
+                            .flags
+                            .bool(corvene_core::flags::ids::COMMIT_SIGNING),
+                        |d| {
+                            let sign = cx.weak_entity();
+                            let ssh = cx.weak_entity();
+                            d.child(div().mt(SPACING()).child(crate::widgets::signing_fields(
+                                (
+                                    "prefs-sign-commits",
+                                    "prefs-signing-ssh",
+                                    "prefs-signing-key",
+                                ),
+                                self.signing.sign,
+                                self.signing.ssh,
+                                &self.signing_key,
+                                move |on, _, cx| {
+                                    sign.update(cx, |this, cx| {
+                                        this.signing.sign = on;
+                                        cx.notify();
+                                    })
+                                    .ok();
+                                },
+                                move |on, _, cx| {
+                                    ssh.update(cx, |this, cx| {
+                                        this.signing.ssh = on;
+                                        cx.notify();
+                                    })
+                                    .ok();
+                                },
+                                window,
+                                cx,
+                            )))
+                        },
+                    )
                     .child(edit_config(cx))
                     .into_any_element()
             }

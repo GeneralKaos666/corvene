@@ -3597,6 +3597,25 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// Commit signing: a hint, a plain error and the settings.
+    COMMIT_SIGNING = 526 "commit-signing" {
+        title: "Commit signing",
+        summary: "When Git signs commits (commit.gpgsign), a lock under the commit button says \
+                  \"Commits will be signed\"; a commit that fails because Git could not sign it \
+                  says so above Git's output; and Settings › Git and Repository Settings › Git \
+                  Config (local config) have Sign commits, Signing key and an SSH key choice \
+                  (commit.gpgsign, user.signingkey, gpg.format).",
+        ghd_behaviour: "Signing works through the Git configuration only: nothing shows that \
+                        commits are signed, a signing failure shows Git's output alone and \
+                        signing is set up outside the app.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(78), Upstream::issue(12147)],
+        code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/git_errors.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

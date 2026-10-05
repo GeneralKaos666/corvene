@@ -117,6 +117,6 @@ pub use state::{
     CommitMessage, DropTarget, FileListFilter, FilterOption, Foldout, GitConfigLocation,
     GlobalGitConfig, LastCommit, Popup, PreferencesTab, RepositorySettingsData,
     RepositorySettingsTab, RepositoryState, RetryAction, SharedStorageMove, SharedStorageMoveStage,
-    SharedStorageMoveState, UnreachableCommitsTab,
+    SharedStorageMoveState, SigningConfig, UnreachableCommitsTab,
 };
 pub use updater::{AvailableUpdate, PackageManager, UpdateState, UpdateStatus};

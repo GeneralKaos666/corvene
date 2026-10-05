@@ -68,8 +68,9 @@ pub use commit::{
 pub use config::{
     IssueTracker, add_safe_directory, boolean_config_value, branch_merge_base,
     global_boolean_config_value, global_config_path, global_config_value, global_config_values,
-    issue_trackers, local_config_value, remove_local_config_value, set_branch_merge_base,
-    set_default_branch, set_global_config_value, set_local_config_value, still_unsafe,
+    issue_trackers, local_config_value, remove_global_config_value, remove_local_config_value,
+    set_branch_merge_base, set_default_branch, set_global_config_value, set_local_config_value,
+    still_unsafe,
 };
 pub use config_lock::delete_config_lock_file;
 pub use credential::{CredentialError, format_credential, parse_credential};
@@ -88,8 +89,8 @@ pub use diff::{
 pub use error::{GitError, bad_config_line, dubious_ownership_path, explain_bad_config};
 pub use git_errors::{
     GitErrorDetails, GitFailure, KnownGitError, display_command, files_that_would_be_overwritten,
-    git_error_details, is_lfs_auth_failure, known_git_error, lfs_auth_failure_url,
-    merge_abort_blocked_paths, parse_config_lock_file_path_from_error,
+    git_error_details, is_lfs_auth_failure, is_signing_failure, known_git_error,
+    lfs_auth_failure_url, merge_abort_blocked_paths, parse_config_lock_file_path_from_error,
 };
 pub use history_ops::{
     ResetMode, checkout_commit, cherry_pick_no_commit, create_tag, delete_tag, format_patch_range,

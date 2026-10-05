@@ -106,6 +106,10 @@ pub struct RepositorySettingsDialog {
     autolink_prefix: Entity<InputState>,
     autolink_url: Entity<InputState>,
     autolink_alphanumeric: bool,
+    /// `526-commit-signing`: the signing settings in effect, as edited (the
+    /// key in `signing_key`).
+    signing: corvene_core::SigningConfig,
+    signing_key: Entity<InputState>,
     /// `focusFirstSuitableChild`: with nothing to type into on the first tab
     /// (no remote), Save holds focus until a mouse press moves it.
     default_focus: bool,
@@ -170,6 +174,7 @@ impl RepositorySettingsDialog {
         for input in [&autolink_prefix, &autolink_url] {
             cx.observe(input, |_, _, cx| cx.notify()).detach();
         }
+        let signing_key = cx.new(|cx| InputState::new(window, cx).placeholder("Key ID or file"));
         // `518-per-repo-editor`: a stored custom editor that is not one of
         // Settings' shows as "Custom…" with its path and arguments
         let stored_custom = state
@@ -259,6 +264,8 @@ impl RepositorySettingsDialog {
             autolink_prefix,
             autolink_url,
             autolink_alphanumeric: false,
+            signing: corvene_core::SigningConfig::default(),
+            signing_key,
             default_focus: true,
         };
         this.fill(&state, window, cx);
@@ -307,6 +314,10 @@ impl RepositorySettingsDialog {
         let emails = self.account_emails(cx);
         self.email_choice = emails.iter().find(|e| **e == email).cloned();
         self.autocrlf = autocrlf_choice(&data);
+        self.signing = data.local_signing.clone();
+        self.signing_key.update(cx, |s, cx| {
+            s.set_value(data.local_signing.key.clone(), window, cx)
+        });
         self.loaded = true;
         self.gitignore_edited = false;
     }
@@ -451,6 +462,20 @@ impl RepositorySettingsDialog {
             .is_some_and(|d| autocrlf_choice(d) != self.autocrlf)
         {
             save.autocrlf = Some(self.autocrlf.map(str::to_string));
+        }
+        // `526-commit-signing`: what differs from the settings in effect
+        let signing = corvene_core::SigningConfig {
+            key: self.signing_key.read(cx).value().trim().to_string(),
+            ..self.signing.clone()
+        };
+        if self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::COMMIT_SIGNING)
+            && data.as_ref().is_some_and(|d| d.local_signing != signing)
+        {
+            save.signing = Some(signing);
         }
         Dispatcher::save_repository_settings(self.repo, save, cx);
     }
@@ -824,6 +849,44 @@ impl RepositorySettingsDialog {
                     } else {
                         email_field
                     }),
+            )
+            // `526-commit-signing`: the settings in effect here; a change is
+            // stored in the repository's own config
+            .when(
+                AppState::global(cx)
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::COMMIT_SIGNING),
+                |d| {
+                    let sign = cx.weak_entity();
+                    let ssh = cx.weak_entity();
+                    d.child(div().mt(SPACING()).child(crate::widgets::signing_fields(
+                        (
+                            "repo-settings-sign-commits",
+                            "repo-settings-signing-ssh",
+                            "repo-settings-signing-key",
+                        ),
+                        self.signing.sign,
+                        self.signing.ssh,
+                        &self.signing_key,
+                        move |on, _, cx| {
+                            sign.update(cx, |this, cx| {
+                                this.signing.sign = on;
+                                cx.notify();
+                            })
+                            .ok();
+                        },
+                        move |on, _, cx| {
+                            ssh.update(cx, |this, cx| {
+                                this.signing.ssh = on;
+                                cx.notify();
+                            })
+                            .ok();
+                        },
+                        window,
+                        cx,
+                    )))
+                },
             )
             .when(
                 AppState::global(cx)

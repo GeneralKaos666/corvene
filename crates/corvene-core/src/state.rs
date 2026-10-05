@@ -772,6 +772,19 @@ pub struct GlobalGitConfig {
     pub quotepath: bool,
     /// `517-path-git-settings`: `core.longpaths` (Git for Windows; off).
     pub longpaths: bool,
+    /// `526-commit-signing`: the global signing settings.
+    pub signing: SigningConfig,
+}
+
+/// Corvene (`526-commit-signing`): commit signing in one Git config scope.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct SigningConfig {
+    /// `commit.gpgsign`
+    pub sign: bool,
+    /// `user.signingkey` (empty: unset)
+    pub key: String,
+    /// `gpg.format` is `ssh` (else OpenPGP, git's default)
+    pub ssh: bool,
 }
 
 /// Everything the Repository Settings dialog needs, loaded when it opens.
@@ -790,6 +803,9 @@ pub struct RepositorySettingsData {
     pub autocrlf: bool,
     /// `--local` `core.autocrlf` (`239-line-endings-setting`).
     pub local_autocrlf: Option<String>,
+    /// `526-commit-signing`: the signing settings in effect in the
+    /// repository (its own config over the global one).
+    pub local_signing: SigningConfig,
 }
 
 /// GHD `RetryAction` (the subset behind `LocalChangesOverwritten`).
@@ -1283,6 +1299,9 @@ pub struct RepositoryState {
     /// Corvene `341-custom-autolinks`: the GitHub repository's autolinks
     /// as its API gave them (only admins may read them).
     pub api_autolinks: Vec<corvene_models::Autolink>,
+    /// Corvene `526-commit-signing`: the effective `commit.gpgsign` (git
+    /// signs the commits made here).
+    pub signs_commits: bool,
     /// Corvene `1211-issuetracker-links`: the repository's `.issuetracker`
     /// trackers, compiled when it is selected.
     pub issue_trackers: Vec<crate::text_tokens::LinkRule>,

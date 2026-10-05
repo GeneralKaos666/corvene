@@ -86,7 +86,8 @@
 //!   (`340-message-rules-defer-to-hooks`; GHD `commit-message.tsx`
 //!   `hasRepoRuleFailure` blocks it).
 //! - a note under the commit button says when the branch's upstream was
-//!   deleted on the remote (`1209-current-branch-deleted-hint`).
+//!   deleted on the remote (`1209-current-branch-deleted-hint`), and a lock
+//!   that git signs the commit (`commit.gpgsign`, `526-commit-signing`).
 //! - a protected branch that takes the user's pushes gets a note above the
 //!   commit button (`339-protected-branch-bypass-note`; GHD `commit-warning`
 //!   shows the protected warning only for unpushable branches).
@@ -5220,7 +5221,31 @@ impl ChangesSidebar {
                 }
             })
             .children(self.upstream_gone_note(cx))
+            .children(self.signing_note(cx))
             .when_some(self.undo_bar(cx), |d, bar| d.child(bar))
+    }
+
+    /// Corvene (`526-commit-signing`): under the commit button, git signs
+    /// the commit (`commit.gpgsign` is on here).
+    fn signing_note(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let t = cx.ghd();
+        let s = self.state.read(cx);
+        let signs = s.flags.bool(corvene_core::flags::ids::COMMIT_SIGNING)
+            && s.selected_state().is_some_and(|rs| rs.signs_commits);
+        signs.then(|| {
+            div()
+                .id("commit-signing-note")
+                .mt(SPACING_HALF())
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(SPACING_HALF())
+                .text_size(FONT_SIZE_SM())
+                .text_color(t.text_secondary)
+                .child(octicon(Octicon::Lock, t.text_secondary).flex_none())
+                .child("Commits will be signed")
+                .into_any_element()
+        })
     }
 
     /// Corvene (`1209-current-branch-deleted-hint`): under the commit

@@ -286,6 +286,15 @@ fn suggested_safe_directory(stderr: &str) -> Option<String> {
 
 /// GHD `removeConfigValue`: `git config --local --unset-all <key>`; a
 /// missing key (exit 5) is not an error (GHD's is).
+/// `git config --global --unset-all <key>` (nothing to remove is fine).
+pub fn remove_global_config_value(git: Arc<GitBinary>, key: &str) -> Result<()> {
+    GitCommand::new(git)
+        .args(["config", "--global", "--unset-all", key])
+        .allow_exit_code(5)
+        .run()?;
+    Ok(())
+}
+
 pub fn remove_local_config_value(git: Arc<GitBinary>, workdir: &Path, key: &str) -> Result<()> {
     GitCommand::new(git)
         .args(["config", "--local", "--unset-all", key])
