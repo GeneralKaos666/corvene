@@ -742,6 +742,19 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
             repo = Some(*r);
             f.put("target", target);
         }
+        // `345-issues` / `346-releases`
+        Banner::IssueCreated { number, html_url } => {
+            f.put("number", number).put("html_url", html_url);
+        }
+        Banner::ReleaseCreated {
+            name,
+            html_url,
+            draft,
+        } => {
+            f.put("name", name)
+                .put("html_url", html_url)
+                .put("draft", draft);
+        }
         Banner::BranchDeleted {
             repo: r,
             branch,
