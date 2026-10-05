@@ -382,44 +382,110 @@ pub fn commit_matches_words(commit: &Commit, words: &[String]) -> bool {
     if words.is_empty() {
         return true;
     }
-    let haystack = format!(
-        "{}\n{}\n{}\n{}",
-        commit.summary, commit.body, commit.author.name, commit.author.email
-    )
-    .to_lowercase();
+    let haystack = haystack(
+        &commit.summary,
+        &commit.body,
+        &commit.author.name,
+        &commit.author.email,
+    );
     words.iter().all(|w| haystack.contains(w.as_str()))
+}
+
+/// What [`commit_matches_words`] searches: the message, author name and
+/// e-mail in lower case.
+fn haystack(summary: &str, body: &str, name: &str, email: &str) -> String {
+    format!("{summary}\n{body}\n{name}\n{email}").to_lowercase()
+}
+
+/// [`commit_matches_words`]'s text of commit `id`, without building the
+/// whole [`Commit`].
+fn commit_haystack(repo: &gix::Repository, id: gix::ObjectId) -> Result<Box<str>> {
+    let commit = repo
+        .find_commit(id)
+        .map_err(|e| GitError::Gix(e.to_string()))?;
+    let decoded = commit.decode().map_err(|e| GitError::Gix(e.to_string()))?;
+    let (summary, body) = subject_and_body(decoded.message);
+    let author = commit.author().map_err(|e| GitError::Gix(e.to_string()))?;
+    Ok(haystack(
+        &summary,
+        &body,
+        &author.name.to_string(),
+        &author.email.to_string(),
+    )
+    .into_boxed_str())
+}
+
+/// Corvene `886-history-search`: a filtered History's `git log`
+/// ([`filtered_history`]) with each commit's searchable text, read the
+/// first time a page looks at the commit and kept, so searching the same
+/// commits for other words reads no objects.
+#[derive(Debug, Default)]
+pub struct LoggedHistory {
+    pub commits: Vec<LoggedCommit>,
+    haystacks: std::sync::Mutex<Vec<Option<Box<str>>>>,
+}
+
+impl LoggedHistory {
+    pub fn new(commits: Vec<LoggedCommit>) -> Self {
+        let haystacks = std::sync::Mutex::new(vec![None; commits.len()]);
+        Self { commits, haystacks }
+    }
+
+    pub fn len(&self) -> usize {
+        self.commits.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.commits.is_empty()
+    }
 }
 
 /// One page of a filtered History: from `logged[start..]`, the commits that
 /// match `words` ([`commit_matches_words`]) and are not in `skip`, until
 /// `limit` of them are found. Returns them and where the next page starts.
+/// Stops with [`GitError::Cancelled`] once `cancel` is cancelled.
 pub fn filtered_history_page(
     workdir: &Path,
-    logged: &[LoggedCommit],
+    logged: &LoggedHistory,
     start: usize,
     words: &[String],
     skip: &[String],
     limit: usize,
+    cancel: Option<&crate::process::CancelToken>,
 ) -> Result<(Vec<Commit>, usize)> {
     let repo = crate::handle::open(workdir)?;
-    let tags = tags_by_commit(&repo);
+    let mut tags = None;
+    let mut haystacks = logged
+        .haystacks
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut out = Vec::new();
     let mut next = start;
-    for entry in logged.iter().skip(start) {
+    for (ix, entry) in logged.commits.iter().enumerate().skip(start) {
         if out.len() >= limit {
             break;
         }
-        next += 1;
+        if ix % 256 == 0 && cancel.is_some_and(|c| c.is_cancelled()) {
+            return Err(GitError::Cancelled("history filter".into()));
+        }
+        next = ix + 1;
         if skip.contains(&entry.sha) {
             continue;
         }
         let Ok(id) = gix::ObjectId::from_hex(entry.sha.as_bytes()) else {
             continue;
         };
-        let commit = commit_from_id(&repo, id, &tags)?;
-        if commit_matches_words(&commit, words) {
-            out.push(commit);
+        if !words.is_empty() {
+            let text = match &mut haystacks[ix] {
+                Some(text) => text,
+                slot => slot.insert(commit_haystack(&repo, id)?),
+            };
+            if !words.iter().all(|w| text.contains(w.as_str())) {
+                continue;
+            }
         }
+        let tags = tags.get_or_insert_with(|| tags_by_commit(&repo));
+        out.push(commit_from_id(&repo, id, tags)?);
     }
     Ok((out, next))
 }

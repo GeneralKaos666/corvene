@@ -5,10 +5,13 @@
 //! `after:` terms ([`parse_history_query`]). A background `git log` lists
 //! the commits of HEAD that pass the git-side terms; the words are matched
 //! against the message, author name and e-mail as pages are built, and a
-//! lone hex word also matches abbreviated SHAs, listed first. While the
-//! filter is active its results replace the History list
-//! ([`crate::state::RepositoryState::visible_commits`]); clearing it brings
-//! the plain list and selection back.
+//! lone hex word also matches abbreviated SHAs, listed first. The log and
+//! the text read for matching are kept while only the words change, so
+//! typing does not run git again. While the filter is active its results
+//! replace the History list
+//! ([`crate::state::RepositoryState::visible_commits`]) without moving the
+//! selection, so the diff does not reload on every keystroke; clearing it
+//! brings the plain list and selection back.
 //!
 //! `887-file-history`: "Show History" on a changed or committed file narrows
 //! the same search to that file (`git log --follow -- <path>`, shown as a
@@ -19,7 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::host::{AsyncCtx, Host};
-use corvene_git::{CancelToken, HistoryQuery, LoggedCommit};
+use corvene_git::{CancelToken, HistoryQuery, LoggedHistory};
 use corvene_models::Commit;
 use tracing::warn;
 
@@ -48,7 +51,10 @@ pub struct HistoryFilter {
     /// A search for `query` finished (its results, possibly none, are in).
     pub searched: bool,
     /// `git log`'s commits for the query, which pages are built from.
-    logged: Option<Arc<Vec<LoggedCommit>>>,
+    logged: Option<Arc<LoggedHistory>>,
+    /// What `logged` was listed for; a search that only changes the words
+    /// reuses it.
+    logged_for: Option<LogKey>,
     /// Where in `logged` the next page starts.
     next: usize,
     /// Commits matched by SHA prefix (already in `commits`).
@@ -64,6 +70,29 @@ pub struct HistoryFilter {
     cancel: Option<CancelToken>,
 }
 
+/// The `git log` behind a filtered History: its tip, first-parent mode and
+/// the query without its free words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LogKey {
+    tip: String,
+    first_parent: bool,
+    query: HistoryQuery,
+}
+
+impl LogKey {
+    fn new(tip: String, first_parent: bool, query: &HistoryQuery) -> Self {
+        let query = HistoryQuery {
+            words: Vec::new(),
+            ..query.clone()
+        };
+        Self {
+            tip,
+            first_parent,
+            query,
+        }
+    }
+}
+
 impl HistoryFilter {
     pub fn is_active(&self) -> bool {
         !self.query.is_empty()
@@ -74,6 +103,7 @@ impl HistoryFilter {
         self.path.as_ref()?;
         self.logged
             .as_ref()?
+            .commits
             .iter()
             .find(|c| c.sha == sha)
             .and_then(|c| c.path.as_deref())
@@ -145,14 +175,15 @@ impl Dispatcher {
     /// The History filter box was edited: search after a pause, or go back
     /// to the plain History once nothing is left to filter by.
     pub fn set_history_filter_text(id: u64, text: String, cx: &mut dyn Host) {
-        let request = Self::state(cx).update(cx, |s, cx| {
+        let request = Self::state(cx).update(cx, |s, _| {
             let filter = &mut s.repo_state_mut(id).history_filter;
             if filter.text == text {
                 return None;
             }
+            // the box shows the text itself: nothing to render until the
+            // search runs
             filter.text = text;
             filter.debounce += 1;
-            cx.notify();
             let query = filter.wanted();
             // back to what was searched for: nothing new to search
             (filter.query != query).then_some((filter.debounce, query))
@@ -176,7 +207,7 @@ impl Dispatcher {
                     .get(&id)
                     .map(|rs| rs.history_filter.debounce);
                 if current == Some(debounce) {
-                    Self::run_history_filter(id, query, cx);
+                    Self::run_history_filter(id, query, false, cx);
                 }
             });
         })
@@ -195,7 +226,7 @@ impl Dispatcher {
             cx.notify();
             filter.wanted()
         });
-        Self::run_history_filter(id, query, cx);
+        Self::run_history_filter(id, query, true, cx);
     }
 
     /// `887-file-history`: the chip's ×; the filter box's terms stay.
@@ -210,7 +241,7 @@ impl Dispatcher {
         if query.is_empty() {
             Self::clear_history_filter(id, cx);
         } else {
-            Self::run_history_filter(id, query, cx);
+            Self::run_history_filter(id, query, true, cx);
         }
     }
 
@@ -224,9 +255,12 @@ impl Dispatcher {
                 cancel.cancel();
             }
             let text = std::mem::take(&mut filter.text);
+            // the log stays for the next search over the same commits
             *filter = HistoryFilter {
                 generation: filter.generation + 1,
                 debounce: filter.debounce + 1,
+                logged: filter.logged.take(),
+                logged_for: filter.logged_for.take(),
                 ..HistoryFilter::default()
             };
             // keep text typed after a term was removed (only spaces left)
@@ -256,39 +290,50 @@ impl Dispatcher {
     }
 
     /// Run the search for `query` (the box's current text) in the background.
-    fn run_history_filter(id: u64, query: HistoryQuery, cx: &mut dyn Host) {
+    /// `reselect`: select the first match when the selection is not among
+    /// them (a file history being opened); typing keeps the selection.
+    fn run_history_filter(id: u64, query: HistoryQuery, reselect: bool, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
         let first_parent = Self::history_first_parent(Self::state(cx).read(cx));
         let cancel = CancelToken::new();
-        let generation = Self::state(cx).update(cx, |s, cx| {
+        let (generation, cached) = Self::state(cx).update(cx, |s, cx| {
             let filter = &mut s.repo_state_mut(id).history_filter;
             if let Some(previous) = filter.cancel.replace(cancel.clone()) {
                 previous.cancel();
             }
+            let was_loading = filter.loading;
             filter.query = query.clone();
             filter.loading = true;
             filter.generation += 1;
-            cx.notify();
-            filter.generation
+            // only the empty list's message shows the search running
+            if !was_loading && filter.commits.is_empty() {
+                cx.notify();
+            }
+            let cached = filter.logged.clone().zip(filter.logged_for.clone());
+            (filter.generation, cached)
         });
         let task = cx.background_executor().spawn(async move {
             let Some(tip) = corvene_git::resolve_commit(&workdir, "HEAD")? else {
-                return Ok((None, Arc::new(Vec::new()), Vec::new(), Vec::new(), 0));
+                return Ok(None);
             };
-            let logged = Arc::new(corvene_git::filtered_history(
-                git,
-                &workdir,
-                &tip,
-                &query,
-                first_parent,
-                Some(cancel),
-            )?);
+            let key = LogKey::new(tip, first_parent, &query);
+            let logged = match cached {
+                Some((logged, for_key)) if for_key == key => logged,
+                _ => Arc::new(LoggedHistory::new(corvene_git::filtered_history(
+                    git,
+                    &workdir,
+                    &key.tip,
+                    &query,
+                    first_parent,
+                    Some(cancel.clone()),
+                )?)),
+            };
             let mut commits = match query.sha_prefix() {
                 Some(prefix) => corvene_git::commits_with_sha_prefix(
                     &workdir,
-                    &logged,
+                    &logged.commits,
                     prefix,
                     SHA_PREFIX_MATCHES,
                 )?,
@@ -302,9 +347,10 @@ impl Dispatcher {
                 &query.words,
                 &sha_matches,
                 corvene_git::COMMIT_BATCH_SIZE,
+                Some(&cancel),
             )?;
             commits.extend(page);
-            Ok::<_, corvene_git::GitError>((Some(tip), logged, sha_matches, commits, next))
+            Ok::<_, corvene_git::GitError>(Some((key, logged, sha_matches, commits, next)))
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
@@ -319,18 +365,27 @@ impl Dispatcher {
                     filter.cancel = None;
                     filter.searched = true;
                     match result {
-                        Ok((tip, logged, sha_matches, commits, next)) => {
+                        Ok(Some((key, logged, sha_matches, commits, next))) => {
                             filter.exhausted = next >= logged.len();
-                            filter.tip = tip;
+                            filter.tip = Some(key.tip.clone());
                             filter.logged = Some(logged);
+                            filter.logged_for = Some(key);
                             filter.next = next;
                             filter.sha_matches = sha_matches;
                             filter.commits = commits;
+                        }
+                        Ok(None) => {
+                            filter.exhausted = true;
+                            filter.tip = None;
+                            filter.logged = None;
+                            filter.logged_for = None;
+                            filter.commits.clear();
                         }
                         Err(err) => {
                             warn!(id, %err, "history filter failed");
                             filter.exhausted = true;
                             filter.logged = None;
+                            filter.logged_for = None;
                             filter.commits.clear();
                         }
                     }
@@ -339,6 +394,9 @@ impl Dispatcher {
                         return None;
                     }
                     let commits = &rs.history_filter.commits;
+                    if !reselect && !rs.selected_commits.is_empty() {
+                        return None;
+                    }
                     let kept = !rs.selected_commits.is_empty()
                         && rs
                             .selected_commits
@@ -369,6 +427,8 @@ impl Dispatcher {
                 return None;
             }
             let logged = filter.logged.clone()?;
+            let cancel = CancelToken::new();
+            filter.cancel = Some(cancel.clone());
             filter.loading = true;
             Some((
                 logged,
@@ -376,9 +436,10 @@ impl Dispatcher {
                 filter.query.words.clone(),
                 filter.sha_matches.clone(),
                 filter.generation,
+                cancel,
             ))
         });
-        let Some((logged, start, words, skip, generation)) = request else {
+        let Some((logged, start, words, skip, generation, cancel)) = request else {
             return;
         };
         let task = cx.background_executor().spawn(async move {
@@ -389,6 +450,7 @@ impl Dispatcher {
                 &words,
                 &skip,
                 corvene_git::COMMIT_BATCH_SIZE,
+                Some(&cancel),
             );
             (page, logged.len())
         });
@@ -401,6 +463,7 @@ impl Dispatcher {
                         return;
                     }
                     filter.loading = false;
+                    filter.cancel = None;
                     match result {
                         Ok((page, next)) => {
                             filter.next = next;
@@ -434,7 +497,7 @@ impl Dispatcher {
             }
             filter.query.clone()
         };
-        Self::run_history_filter(id, query, cx);
+        Self::run_history_filter(id, query, false, cx);
     }
 }
 

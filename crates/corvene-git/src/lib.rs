@@ -106,7 +106,7 @@ pub use lfs_progress::GitLfsProgressParser;
 pub use log::{
     COMMIT_BATCH_SIZE, HistoryQuery, LoggedCommit, NULL_TREE_SHA, REMERGE_DIFF_MIN_VERSION,
     commit_file_diff, commit_matches_words, commit_range_file_diff, commits_with_sha_prefix,
-    filtered_history, filtered_history_page, get_all_tags, get_changed_files,
+    LoggedHistory, filtered_history, filtered_history_page, get_all_tags, get_changed_files,
     get_changed_files_in_process, get_commit_range_changed_files, get_commits,
     get_commits_in_range, get_commits_with, local_commit_shas, local_only_commits, merge_base,
     merge_base_changed_files, merge_base_file_diff, most_recent_local_commit,

@@ -614,7 +614,8 @@ pub struct GhdTheme {
     pub dialog_banner_success_background: Hsla,
     pub dialog_banner_success_border: Hsla,
     pub dialog_banner_success_text: Hsla,
-    /// Selected diff text (the browser's `::selection` in GHD; macOS's
+    /// Selected text in the diff and in text boxes (GHD sets no
+    /// `::selection`, so Chromium paints macOS's
     /// selectedTextBackgroundColor with the blue accent).
     pub text_selection_background: Hsla,
     /// `--banner-warning-*`: the update banner (`#update-available`).
@@ -930,7 +931,7 @@ pub fn apply(theme: GhdTheme, cx: &mut App) {
         c.accent_foreground = theme.box_hover_text;
         c.ring = theme.focus;
         c.caret = theme.text;
-        c.selection = theme.text_field_focus_shadow;
+        c.selection = theme.text_selection_background;
         c.link = theme.link;
         c.link_hover = theme.link_hover;
         c.link_active = theme.link_hover;

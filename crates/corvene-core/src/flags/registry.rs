@@ -6768,7 +6768,7 @@ registry! {
     /// A filter box above History searches the branch's commits.
     HISTORY_SEARCH = 886 "history-search" {
         title: "Search History",
-        summary: "A \"Filter commits\" box under \"Select Branch to Compare…\" searches the \
+        summary: "A \"Search commits\" box under \"Select Branch to Compare…\" searches the \
                   current branch's history in the background: words match the message, the \
                   author's name or e-mail (any case) and a lone hex word also an abbreviated SHA; \
                   author:<name>, before:<date> and after:<date> narrow it (dates like 2024-05-01 or \

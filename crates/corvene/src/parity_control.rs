@@ -595,6 +595,12 @@ fn state_summary(cx: &mut App) -> Value {
         "repository": state.selected_repository().map(|r| r.name()),
         "section": format!("{:?}", rs.section),
         "foldout": state.foldout.map(|f| format!("{f:?}")),
+        // `886-history-search`
+        "history_filter": {
+            "loading": rs.history_filter.loading,
+            "searched": rs.history_filter.searched,
+            "commits": rs.history_filter.commits.len(),
+        },
     })
 }
 

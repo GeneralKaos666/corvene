@@ -326,7 +326,7 @@ impl HistorySidebar {
         // `886`: the box edits the repository's history filter and follows
         // it when it changes elsewhere (another repository, cleared)
         let filter = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(mac_or("Filter Commits", "Filter commits"))
+            InputState::new(window, cx).placeholder(mac_or("Search Commits", "Search commits"))
         });
         cx.subscribe(&filter, |this: &mut Self, input, ev: &InputEvent, cx| {
             if matches!(ev, InputEvent::Change)
