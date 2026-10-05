@@ -1620,7 +1620,11 @@ impl Render for SquashCommitMessageDialog {
                     .rounded(BORDER_RADIUS())
                     .bg(t.box_background)
                     .overflow_hidden()
-                    .child(Textarea::new(&self.description)),
+                    .child(crate::widgets::resizable_text_area(
+                        "squash-description",
+                        Textarea::new(&self.description),
+                        cx,
+                    )),
             )
             .when_some(self.target_message.clone(), |d, (summary, body)| {
                 d.child(

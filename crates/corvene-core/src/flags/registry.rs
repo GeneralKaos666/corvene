@@ -605,6 +605,22 @@ registry! {
         code: &["crates/corvene-ui/src/workspace.rs", "crates/corvene-ui/src/active_resizable.rs"],
     },
 
+    /// The dialogs' multi-line boxes can be dragged taller.
+    RESIZABLE_DIALOG_TEXT_AREAS = 116 "resizable-dialog-text-areas" {
+        title: "Resizable text boxes in dialogs",
+        summary: "The multi-line boxes of the squash commit message, the squash and merge \
+                  description, the tag message and Repository Settings' .gitignore have a grip \
+                  along their bottom edge that drags them taller or shorter (up to 70% of the \
+                  window); the dialog grows with them and the height is kept while Corvene runs.",
+        ghd_behaviour: "Those boxes have a fixed number of rows and scroll.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17317)],
+        code: &["crates/corvene-ui/src/widgets.rs"],
+    },
+
     // ---- 200 Repository ----
 
     /// `commit.template` prefills the commit description.

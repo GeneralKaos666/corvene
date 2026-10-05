@@ -2011,7 +2011,11 @@ impl Render for MergeBranchDialog {
                         .rounded(BORDER_RADIUS())
                         .bg(t.box_background)
                         .overflow_hidden()
-                        .child(Textarea::new(&self.description)),
+                        .child(crate::widgets::resizable_text_area(
+                            "merge-description",
+                            Textarea::new(&self.description),
+                            cx,
+                        )),
                 )
         });
         let content = div().flex().flex_col().child(list);

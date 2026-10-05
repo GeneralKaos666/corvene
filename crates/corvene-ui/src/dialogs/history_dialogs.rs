@@ -432,7 +432,11 @@ impl Render for CreateTagDialog {
                             .rounded(BORDER_RADIUS())
                             .bg(t.box_background)
                             .overflow_hidden()
-                            .child(Textarea::new(&self.message)),
+                            .child(crate::widgets::resizable_text_area(
+                                "tag-message",
+                                Textarea::new(&self.message),
+                                cx,
+                            )),
                     )
             })
             .when_some(read_only_repo, |d, repo| {

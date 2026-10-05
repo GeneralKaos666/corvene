@@ -2127,3 +2127,132 @@ pub fn touch_drag_handle() -> impl IntoElement {
     .absolute()
     .size_full()
 }
+
+/// Corvene (`116-resizable-dialog-text-areas`): heights of the dialogs'
+/// multi-line boxes the user dragged (kept while Corvene runs), keyed by box,
+/// and the drag in progress (box, pointer and height where it started).
+struct TextAreaResize {
+    heights: std::collections::HashMap<&'static str, Pixels>,
+    laid_out: std::collections::HashMap<&'static str, Pixels>,
+    drag: Option<(&'static str, Pixels, Pixels)>,
+}
+
+thread_local! {
+    static TEXT_AREA_RESIZE: std::cell::RefCell<TextAreaResize> =
+        std::cell::RefCell::new(TextAreaResize {
+            heights: std::collections::HashMap::new(),
+            laid_out: std::collections::HashMap::new(),
+            drag: None,
+        });
+}
+
+/// Corvene (`116-resizable-dialog-text-areas`): a dialog's multi-line text
+/// box with a grip along its bottom edge that drags it taller or shorter
+/// (at least 40 px, at most 70% of the window; the dialog grows with it).
+/// GHD's text areas have a fixed number of rows (`rows` in
+/// `app/src/ui/lib/text-area.tsx`); without the flag the box is unchanged.
+pub fn resizable_text_area(
+    key: &'static str,
+    area: gpui_kit::component::input::Textarea,
+    cx: &App,
+) -> AnyElement {
+    let on = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+        s.read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::RESIZABLE_DIALOG_TEXT_AREAS)
+    });
+    if !on {
+        return area.into_any_element();
+    }
+    let t = cx.ghd();
+    let height = TEXT_AREA_RESIZE.with(|r| r.borrow().heights.get(key).copied());
+    let area = match height {
+        Some(height) => area.h(height),
+        None => area,
+    };
+    div()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .relative()
+                .child(area)
+                // the height the box has now: where a drag starts from
+                .child(
+                    canvas(
+                        move |bounds, _, _| {
+                            TEXT_AREA_RESIZE
+                                .with(|r| r.borrow_mut().laid_out.insert(key, bounds.size.height));
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full(),
+                ),
+        )
+        .child(
+            div()
+                .id(SharedString::from(format!("{key}-resize-grip")))
+                .h(zpx(8.))
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor(CursorStyle::ResizeUpDown)
+                .child(
+                    div()
+                        .w(zpx(24.))
+                        .h(zpx(3.))
+                        .rounded(zpx(2.))
+                        .bg(t.text_secondary.opacity(0.5)),
+                )
+                .on_mouse_down(MouseButton::Left, move |ev: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    TEXT_AREA_RESIZE.with(|r| {
+                        let mut r = r.borrow_mut();
+                        let from = r.laid_out.get(key).copied().unwrap_or(zpx(80.));
+                        r.drag = Some((key, ev.position.y, from));
+                    });
+                })
+                // the pointer is followed anywhere in the window until the
+                // button is released (as the commit form's handle)
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| {
+                            window.on_mouse_event(move |ev: &MouseMoveEvent, _, window, _| {
+                                let max = (window.viewport_size().height * 0.7).max(zpx(40.));
+                                let moved = TEXT_AREA_RESIZE.with(|r| {
+                                    let mut r = r.borrow_mut();
+                                    match r.drag {
+                                        Some((dragged, from, height)) if dragged == key => {
+                                            let height = (height + ev.position.y - from)
+                                                .clamp(zpx(40.), max);
+                                            r.heights.insert(key, height);
+                                            true
+                                        }
+                                        _ => false,
+                                    }
+                                });
+                                if moved {
+                                    window.refresh();
+                                }
+                            });
+                            window.on_mouse_event(move |_: &MouseUpEvent, _, _, _| {
+                                TEXT_AREA_RESIZE.with(|r| {
+                                    let mut r = r.borrow_mut();
+                                    if r.drag.is_some_and(|(dragged, _, _)| dragged == key) {
+                                        r.drag = None;
+                                    }
+                                });
+                            });
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                ),
+        )
+        .into_any_element()
+}

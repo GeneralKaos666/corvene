@@ -521,6 +521,10 @@ impl RepositorySettingsDialog {
         } else {
             130.
         };
+        let resizable = AppState::global(cx)
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::RESIZABLE_DIALOG_TEXT_AREAS);
         div()
             .flex()
             .flex_col()
@@ -541,9 +545,9 @@ impl RepositorySettingsDialog {
             .when(templates, |d| d.child(self.gitignore_template_select(cx)))
             .child(
                 // `textarea.gitignore { height: 130px }`; flag
-                // `107-taller-text-areas` doubles it
+                // `107-taller-text-areas` doubles it, `116` lets it be dragged
                 div()
-                    .h(zpx(height))
+                    .when(!resizable, |d| d.h(zpx(height)))
                     .border_1()
                     .border_color(t.box_border_contrast)
                     .rounded(BORDER_RADIUS())
@@ -555,11 +559,13 @@ impl RepositorySettingsDialog {
                     .py(zpx(2.))
                     .text_size(FONT_SIZE())
                     .line_height(zpx(14.))
-                    .child(
+                    .child(crate::widgets::resizable_text_area(
+                        "gitignore",
                         Textarea::new(&self.gitignore)
                             .appearance(false)
                             .h(zpx(height - 6.)),
-                    ),
+                        cx,
+                    )),
             )
             .when(
                 self.state
