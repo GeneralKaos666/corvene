@@ -192,6 +192,11 @@ pub struct Settings {
     /// Corvene `292-clone-owner-picker`: the owner the clone lists show per
     /// account (`<endpoint>|<login>` → owner login); missing = all owners.
     pub clone_owner_filter: HashMap<String, String>,
+    /// Corvene `525-account-commit-email`: the email a repository of an
+    /// account (`<endpoint>|<login>`) gets as its local `user.email` when it
+    /// is cloned or added without one.
+    #[serde(default)]
+    pub account_commit_emails: HashMap<String, String>,
 }
 
 /// GHD `ICustomIntegration`: an executable (or macOS app bundle) plus its
@@ -423,6 +428,7 @@ impl Default for Settings {
             use_custom_shell: false,
             collapsed_repository_groups: Vec::new(),
             clone_owner_filter: HashMap::new(),
+            account_commit_emails: HashMap::new(),
         }
     }
 }

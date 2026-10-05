@@ -865,12 +865,12 @@ impl Dispatcher {
             cx.update(|cx| match result {
                 Ok((path, info)) => {
                     let state = Self::state(cx);
-                    let id = state.update(cx, |s, cx| {
+                    let (id, added) = state.update(cx, |s, cx| {
                         // GHD `addRepository` hands back the entry already at
                         // that path (a subdirectory of a listed repository
                         // was picked)
                         if let Some(existing) = s.repositories_store().find_by_path(&info.workdir) {
-                            return existing.id;
+                            return (existing.id, false);
                         }
                         let wiki_not_github = s.flags.bool(crate::flags::ids::WIKI_NOT_GITHUB);
                         // GHD `matchGitHubRepository`: the signed-in accounts'
@@ -893,9 +893,12 @@ impl Dispatcher {
                         repo_state.last_refresh = Some(Instant::now());
                         info!(id, path = %path.display(), "added repository");
                         cx.notify();
-                        id
+                        (id, true)
                     });
                     Self::select_repository(id, cx);
+                    if added {
+                        Self::apply_account_commit_email(id, cx);
+                    }
                     then(id, cx);
                 }
                 Err(GitError::NotARepository(path)) => Self::show_error(
@@ -3486,6 +3489,48 @@ impl Dispatcher {
                 cx.notify();
             }
         });
+    }
+
+    /// Corvene (`525-account-commit-email`): a repository just cloned or
+    /// added that belongs to an account with a commit email in Settings ›
+    /// Accounts gets it as its local `user.email`, unless it has one.
+    fn apply_account_commit_email(id: u64, cx: &mut dyn Host) {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::ACCOUNT_COMMIT_EMAIL) {
+            return;
+        }
+        let Some(repo) = s.repository(id) else {
+            return;
+        };
+        let email = repo
+            .github
+            .as_ref()
+            .and_then(|gh| s.account_for(&gh.endpoint))
+            .and_then(|account| {
+                s.settings
+                    .account_commit_emails
+                    .get(&account_commit_email_key(account))
+            })
+            .map(|email| email.trim().to_string())
+            .filter(|email| !email.is_empty());
+        let (Some(email), Some(git)) = (email, s.git.clone()) else {
+            return;
+        };
+        let path = repo.path.clone();
+        crate::remote::spawn_bg(
+            cx,
+            move || {
+                if corvene_git::local_config_value(git.clone(), &path, "user.email").is_some() {
+                    return Ok(false);
+                }
+                corvene_git::set_local_config_value(git, &path, "user.email", &email).map(|_| true)
+            },
+            move |result, _| match result {
+                Ok(true) => info!(id, "set the account's commit email"),
+                Ok(false) => {}
+                Err(err) => warn!(id, %err, "could not set the account's commit email"),
+            },
+        );
     }
 
     /// Corvene (`341-custom-autolinks`): Repository Settings › Autolinks.
@@ -7131,6 +7176,12 @@ fn close_sign_in_popups(s: &mut AppState) {
         s.popups.remove_popup_by_id(popup_id);
     }
     sign_in_store(s).reset();
+}
+
+/// Corvene (`525-account-commit-email`): the key of `account`'s commit
+/// email in `Settings::account_commit_emails`.
+pub fn account_commit_email_key(account: &corvene_models::Account) -> String {
+    format!("{}|{}", account.endpoint, account.login)
 }
 
 pub(crate) fn persist_repositories(s: &mut AppState) {

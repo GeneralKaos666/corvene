@@ -3580,6 +3580,23 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// An account's commit email for the repositories cloned from it.
+    ACCOUNT_COMMIT_EMAIL = 525 "account-commit-email" {
+        title: "Commit email per account",
+        summary: "Settings › Accounts has a Commit email box under each account: a repository of \
+                  that account (an Enterprise one, say) that is cloned or added without its own \
+                  user.email gets it in its local Git config, so work commits do not carry the \
+                  personal global email.",
+        ghd_behaviour: "Commits use the global Git email unless a repository sets its own in \
+                        Repository Settings.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2829)],
+        code: &["crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

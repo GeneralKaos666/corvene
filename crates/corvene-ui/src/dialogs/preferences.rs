@@ -135,6 +135,9 @@ pub struct PreferencesDialog {
     custom_editor_name: Entity<InputState>,
     custom_shell_path: Entity<InputState>,
     custom_shell_args: Entity<InputState>,
+    /// `525-account-commit-email`: each account's commit email box, by
+    /// `account_commit_email_key`.
+    commit_email_inputs: Vec<(String, Entity<InputState>)>,
 }
 
 impl PreferencesDialog {
@@ -226,6 +229,40 @@ impl PreferencesDialog {
             })
             .detach();
         }
+        // `525-account-commit-email`
+        let commit_email_inputs: Vec<(String, Entity<InputState>)> = state
+            .read(cx)
+            .accounts
+            .clone()
+            .iter()
+            .map(|account| {
+                let key = corvene_core::dispatcher::account_commit_email_key(account);
+                let value = draft
+                    .account_commit_emails
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                let input = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .placeholder("Leave the repository's email alone")
+                        .default_value(value)
+                });
+                let observed = key.clone();
+                cx.observe(&input, move |this, input, cx| {
+                    let email = input.read(cx).value().trim().to_string();
+                    if email.is_empty() {
+                        this.draft.account_commit_emails.remove(&observed);
+                    } else {
+                        this.draft
+                            .account_commit_emails
+                            .insert(observed.clone(), email);
+                    }
+                    cx.notify();
+                })
+                .detach();
+                (key, input)
+            })
+            .collect();
         cx.observe_in(&state, window, |this, state, window, cx| {
             this.fill_from_git_config(&state, window, cx);
             cx.notify();
@@ -250,6 +287,7 @@ impl PreferencesDialog {
             custom_editor_name,
             custom_shell_path,
             custom_shell_args,
+            commit_email_inputs,
         };
         this.fill_from_git_config(&state, window, cx);
         this.poll_notification_permission(cx);
@@ -439,7 +477,50 @@ impl PreferencesDialog {
 
     // ---- tabs ----
 
-    fn accounts_tab(&self, cx: &Context<Self>) -> AnyElement {
+    /// `525-account-commit-email`: `account`'s commit email box.
+    fn commit_email_field(
+        &self,
+        account: &corvene_core::Account,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::ACCOUNT_COMMIT_EMAIL)
+        {
+            return None;
+        }
+        let key = corvene_core::dispatcher::account_commit_email_key(account);
+        let (_, input) = self.commit_email_inputs.iter().find(|(k, _)| *k == key)?;
+        Some(
+            div()
+                .mb(SPACING())
+                .flex()
+                .flex_col()
+                .gap(SPACING_HALF())
+                .child(labeled(
+                    "Commit email",
+                    text_box(
+                        SharedString::from(format!("prefs-commit-email-{key}")),
+                        input,
+                        None,
+                        window,
+                        cx,
+                    ),
+                    cx,
+                ))
+                .child(settings_description(cx).child(format!(
+                    "Repositories of {} you clone or add get this email for their commits \
+                     unless they have one.",
+                    account.friendly_endpoint()
+                )))
+                .into_any_element(),
+        )
+    }
+
+    fn accounts_tab(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
         let s = self.state.read(cx);
         let dotcom = s.dotcom_account().cloned();
@@ -511,7 +592,10 @@ impl PreferencesDialog {
             .flex_col()
             .child(section_heading("GitHub.com", cx))
             .child(match &dotcom {
-                Some(account) => account_row(account, "prefs-signout-dotcom").into_any_element(),
+                Some(account) => div()
+                    .child(account_row(account, "prefs-signout-dotcom"))
+                    .children(self.commit_email_field(account, window, cx))
+                    .into_any_element(),
                 None => accounts_call_to_action(
                     "prefs-signin-dotcom",
                     "Sign in to your GitHub.com account to access your repositories.",
@@ -531,7 +615,11 @@ impl PreferencesDialog {
             .children(
                 enterprise
                     .iter()
-                    .map(|account| account_row(account, "prefs-signout-enterprise")),
+                    .map(|account| {
+                        div()
+                            .child(account_row(account, "prefs-signout-enterprise"))
+                            .children(self.commit_email_field(account, window, cx))
+                    }),
             )
             .child(if enterprise.is_empty() {
                 accounts_call_to_action(
@@ -2432,7 +2520,7 @@ impl Render for PreferencesDialog {
             cx,
         );
         let body = match self.tab {
-            PreferencesTab::Accounts => self.accounts_tab(cx),
+            PreferencesTab::Accounts => self.accounts_tab(window, cx),
             PreferencesTab::Integrations => self.integrations_tab(window, cx),
             PreferencesTab::Git => self.git_tab(window, cx),
             PreferencesTab::Appearance => self.appearance_tab(cx),
