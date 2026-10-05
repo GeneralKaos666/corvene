@@ -1248,8 +1248,16 @@ pub(crate) fn main() {
             }
         });
         cx.on_action(|_: &CloseFoldout, cx| {
+            let state = corvene_core::AppState::global(cx).read(cx);
+            let open = state.foldout;
+            if open.is_none() && state.popup().is_none() {
+                // nothing to close: Escape goes on to the focused element's
+                // binding (History's compare box, a commit reorder), which
+                // this context-free one outranks
+                cx.propagate();
+                return;
+            }
             // the foldout's toolbar button keeps keyboard focus
-            let open = corvene_core::AppState::global(cx).read(cx).foldout;
             Dispatcher::close_foldout(cx);
             Dispatcher::close_popup(cx);
             if open.is_some() {
