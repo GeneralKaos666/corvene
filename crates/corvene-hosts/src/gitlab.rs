@@ -17,6 +17,8 @@ use crate::{CheckTarget, HostProvider, NewPullRequest, Result, blank_repository,
 
 /// Pages read of a list (100 items each).
 const MAX_PAGES: usize = 10;
+/// Fork projects read for one merge request list.
+const MAX_FORK_LOOKUPS: usize = 30;
 
 pub struct GitLab {
     http: Http,
@@ -407,18 +409,34 @@ impl HostProvider for GitLab {
             .unwrap_or_default();
         let mut sources: HashMap<u64, Option<GitHubRepository>> = HashMap::new();
         sources.insert(target_id, Some(repo.clone()));
-        for mr in &requests {
-            if sources.contains_key(&mr.source_project_id) || sources.len() > 20 {
-                continue;
-            }
-            let project = self
-                .http
-                .get_optional::<ApiProject>(&format!("projects/{}", mr.source_project_id))
-                .ok()
-                .flatten()
-                .map(|p| self.convert(p));
-            sources.insert(mr.source_project_id, project);
-        }
+        // the fork projects requests come from, read side by side (one
+        // request each would take seconds in a row)
+        let mut forks: Vec<u64> = requests
+            .iter()
+            .map(|mr| mr.source_project_id)
+            .filter(|id| *id != target_id)
+            .collect();
+        forks.sort_unstable();
+        forks.dedup();
+        forks.truncate(MAX_FORK_LOOKUPS);
+        let found: Vec<(u64, Option<GitHubRepository>)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = forks
+                .iter()
+                .map(|&id| {
+                    scope.spawn(move || {
+                        let project = self
+                            .http
+                            .get_optional::<ApiProject>(&format!("projects/{id}"))
+                            .ok()
+                            .flatten()
+                            .map(|p| self.convert(p));
+                        (id, project)
+                    })
+                })
+                .collect();
+            handles.into_iter().filter_map(|h| h.join().ok()).collect()
+        });
+        sources.extend(found);
         let mut prs: Vec<PullRequest> = requests
             .into_iter()
             .map(|mr| {
