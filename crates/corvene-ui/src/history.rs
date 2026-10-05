@@ -2,7 +2,7 @@
 //! `commit-list-item.tsx` (`styles/ui/history/_history.scss`,
 //! `_commit-list.scss`, `drag-elements/_commit-drag-element.scss`):
 //! "Select Branch to Compare…" box, then 50 px commit rows (bold summary;
-//! avatar + "authors • time" byline, `CommitAttribution`; tag badges). The
+//! `AvatarStack` + "authors • time" byline, `CommitAttribution`; tag badges). The
 //! list is virtualized and pages in `COMMIT_BATCH_SIZE` commits as it
 //! scrolls. Commits multi-select
 //! with ⌘/⇧-click, drag to squash onto another commit, to reorder (drop
@@ -58,7 +58,7 @@ use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{GhdTooltip, IconButtonA11y, ListRowA11y};
-use crate::widgets::{author_avatar, kbd, primary_button};
+use crate::widgets::{avatar_stack, kbd, primary_button};
 
 /// `RowHeight` in `commit-list.tsx`
 #[allow(non_snake_case)]
@@ -2134,7 +2134,7 @@ impl HistorySidebar {
                             let is_selected = selected.contains(&commit.sha);
                             let dimmed =
                                 !highlighted.is_empty() && !highlighted.contains(&commit.sha);
-                            Dispatcher::request_avatar_for_email(&commit.author.email, cx);
+                            request_commit_avatars(commit, cx);
                             let insertion_here = match (&reorder, drop_hint) {
                                 (Some((_, at)), _) => Some(*at),
                                 (None, Some(DropHint::InsertAt(at))) => Some(at),
@@ -2295,12 +2295,24 @@ pub fn commit_attribution(avatar_users: &[&corvene_core::AvatarUser]) -> CommitA
 /// `CommitAttribution` of `commit` in the selected repository
 /// (`getAvatarUsersForCommit` with its GitHub repository).
 pub(crate) fn commit_attribution_for(commit: &Commit, cx: &App) -> CommitAttribution {
+    commit_attribution(&avatar_users_for(commit, cx).iter().collect::<Vec<_>>())
+}
+
+/// `getAvatarUsersForCommit` of `commit` with the selected repository's
+/// GitHub repository: the author, co-authors and a differing committer.
+pub(crate) fn avatar_users_for(commit: &Commit, cx: &App) -> Vec<corvene_core::AvatarUser> {
     let github = AppState::try_global(cx).and_then(|s| {
         let s = s.read(cx);
         s.selected_repository().and_then(|r| r.github.clone())
     });
-    let users = corvene_core::get_avatar_users_for_commit(github.as_ref(), commit);
-    commit_attribution(&users.iter().collect::<Vec<_>>())
+    corvene_core::get_avatar_users_for_commit(github.as_ref(), commit)
+}
+
+/// Fetches the avatars of everyone in `commit`'s `AvatarStack`.
+pub(crate) fn request_commit_avatars(commit: &Commit, cx: &mut App) {
+    for user in avatar_users_for(commit, cx) {
+        Dispatcher::request_avatar_for_email(&user.email, cx);
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -2408,9 +2420,10 @@ fn commit_row_contents_with(
         });
     let compact = compact_rows(cx);
     // `.byline`: `CommitAttribution`, then the relative time
+    let users = avatar_users_for(commit, cx);
     let byline = format!(
         "{} • {}",
-        commit_attribution_for(commit, cx).text,
+        commit_attribution(&users.iter().collect::<Vec<_>>()).text,
         relative(commit.author.date())
     );
     div()
@@ -2456,28 +2469,19 @@ fn commit_row_contents_with(
                 )
                 .when(!compact, |d| {
                     d.child(
-                        div()
-                            .mt(zpx(3.))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(zpx(4.))
-                            .child(author_avatar(
-                                &commit.author.name,
-                                &commit.author.email,
-                                zpx(16.),
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_size(FONT_SIZE_SM())
-                                    .line_height(zpx(16.5))
-                                    .text_color(secondary)
-                                    .child(byline),
-                            ),
+                        // `.description`: `AvatarStack`, then the byline
+                        avatar_stack(
+                            "avatar-stack",
+                            &users,
+                            div()
+                                .truncate()
+                                .text_size(FONT_SIZE_SM())
+                                .line_height(zpx(16.5))
+                                .text_color(secondary)
+                                .child(byline),
+                            cx,
+                        )
+                        .mt(zpx(3.)),
                     )
                 }),
         )
@@ -2838,9 +2842,8 @@ fn commit_row(
             })
         })
         .map(|d| {
-            let contents = commit_row_contents_with(
-                commit, text, secondary, badge, branches, unpushed, cx,
-            );
+            let contents =
+                commit_row_contents_with(commit, text, secondary, badge, branches, unpushed, cx);
             // `621-context-menu-buttons`: after the contents
             if crate::context_menu::row_menu_buttons(cx) {
                 d.group("commit-row")

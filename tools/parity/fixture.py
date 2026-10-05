@@ -48,12 +48,29 @@ _WORKING_CHANGES = {
 }
 _DELETED = ["docs/old.md"]
 
+# `repo-coauthors`: commits by several people (`AvatarStack`), the newest
+# first in History: six people (the stack's "more" sliver), four, three
+# (a different committer), two
+_PEOPLE = [
+    ("Mona Lisa", "mona@example.com"),
+    ("Hubot", "hubot@example.com"),
+    ("Octo Cat", "octocat@example.com"),
+    ("Jane Doe", "jane@example.com"),
+    ("John Roe", "john@example.com"),
+]
+_CO_AUTHORED = [
+    ("2026-09-20T09:00:00+00:00", "Pair on the greeting", 1, None),
+    ("2026-09-21T09:00:00+00:00", "Apply the review", 1, _PEOPLE[2]),
+    ("2026-09-22T09:00:00+00:00", "Mob on the parser", 3, None),
+    ("2026-09-23T09:00:00+00:00", "Team cleanup", 5, None),
+]
 
-def _git(repo: Path, *args: str, date: str | None = None):
+
+def _git(repo: Path, *args: str, date: str | None = None, committer: tuple[str, str] = AUTHOR):
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(
         GIT_AUTHOR_NAME=AUTHOR[0], GIT_AUTHOR_EMAIL=AUTHOR[1],
-        GIT_COMMITTER_NAME=AUTHOR[0], GIT_COMMITTER_EMAIL=AUTHOR[1],
+        GIT_COMMITTER_NAME=committer[0], GIT_COMMITTER_EMAIL=committer[1],
         GIT_CONFIG_NOSYSTEM="1",
     )
     if date:
@@ -78,13 +95,14 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=writable)
 
 
-def build(parent: Path, remote: bool = False) -> Path:
+def build(parent: Path, remote: bool = False, coauthors: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
     and `main` is pushed up to its third commit, so the branch is two ahead
     with the `v0.1.0` tag still to push (History's unpushed indicators, the
-    toolbar's Push origin)."""
+    toolbar's Push origin). With `coauthors`, `_CO_AUTHORED` commits go on
+    top."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -104,6 +122,12 @@ def build(parent: Path, remote: bool = False) -> Path:
             _git(repo, "branch", "feature/login")
             _git(repo, "branch", "bugfix/typo-in-guide")
     _git(repo, "tag", "v0.1.0", "HEAD~1")
+    if coauthors:
+        for i, (date, summary, count, committer) in enumerate(_CO_AUTHORED):
+            (repo / "TEAM.md").write_text("".join(f"- {n}\n" for n, _ in _PEOPLE[: i + 1]))
+            _git(repo, "add", "-A")
+            trailers = "".join(f"\nCo-authored-by: {n} <{e}>" for n, e in _PEOPLE[:count])
+            _git(repo, "commit", "-q", "-m", f"{summary}\n{trailers}", date=date, committer=committer or AUTHOR)
     if remote:
         bare = parent / f"{NAME}.git"
         if bare.exists():

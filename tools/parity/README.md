@@ -84,7 +84,7 @@ same data for scripts.
 ```yaml
 name: branch-foldout
 description: What this covers
-setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | empty (no repositories) | welcome (first launch)
+setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | empty (no repositories) | welcome (first launch)
 ghd_env: {GITHUB_DESKTOP_PREVIEW_FEATURES: 1}   # optional: extra env for GHD (test-* popups need this; it also turns on beta features)
 threshold: 1.0         # optional per-scenario defaults: threshold, tolerance, radius, settle, width, height
 steps:

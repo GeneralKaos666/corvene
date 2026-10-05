@@ -1315,6 +1315,144 @@ pub fn author_avatar(name: &str, email: &str, size: Pixels, cx: &App) -> AnyElem
         .into_any_element()
 }
 
+/// GHD `MaxDisplayedAvatars`: stacked before the rest hide behind
+/// `.avatar-more` until hover.
+const MAX_DISPLAYED_AVATARS: usize = 3;
+
+/// GHD `AvatarStack` (`--small`, `_avatar-stack.scss`) in front of `label`:
+/// 16 px avatars overlapping by 11 px, the first on top, each with a 1 px
+/// `--background-color` edge on its right. Hovering spreads them 1 px apart
+/// and, past four users, swaps `.avatar-more` for the hidden ones. The stack
+/// body is absolute over `label`, which keeps the stack's `min-width` as
+/// left padding, so spread avatars paint over the text as in GHD.
+pub fn avatar_stack(
+    id: impl Into<ElementId>,
+    users: &[corvene_core::AvatarUser],
+    label: impl IntoElement,
+    cx: &App,
+) -> Stateful<Div> {
+    let t = cx.ghd();
+    // the innermost group of a name wins, so every stack can share it
+    let group = SharedString::from("avatar-stack");
+    let more = users.len() > MAX_DISPLAYED_AVATARS + 1;
+    let min_width = match users.len() {
+        0 | 1 => 20.,
+        2 => 25.,
+        3 => 30.,
+        _ => 40.,
+    };
+    // Each avatar advances by its 16 px width plus `margin-right` (-11 px,
+    // 1 px on hover) and overflows its slot; the row runs right to left in
+    // reverse so earlier avatars paint over later ones (GHD's z-indexes)
+    let shadow = t.background;
+    // each `.avatar-container` carries its own north tooltip (GHD `Avatar`
+    // `TooltippedContent`), anchored to the 16 px avatar, not the advance
+    let slot = |key: usize, user: &corvene_core::AvatarUser| {
+        div()
+            .id(("avatar", key))
+            .flex_none()
+            .h(zpx(16.))
+            .w(zpx(5.))
+            .group_hover(group.clone(), |s| s.w(zpx(17.)))
+            .child(with_user_info_tooltip(
+                // `.avatar-container { display: flex }`, which also puts the
+                // tooltip's bounds probe at the avatar's top left
+                div()
+                    .id(("avatar-tooltip", key))
+                    .flex()
+                    .size(zpx(16.))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(zpx(1.))
+                            .size(zpx(16.))
+                            .rounded_full()
+                            .bg(shadow),
+                    )
+                    .child(author_avatar(&user.name, &user.email, zpx(16.), cx)),
+                user.name.clone(),
+                user.email.clone(),
+            ))
+    };
+    let mut slots: Vec<AnyElement> = Vec::new();
+    for (i, user) in users.iter().enumerate() {
+        if more && i == MAX_DISPLAYED_AVATARS - 1 {
+            // `.avatar-more`: a 10 px sliver of stacked grey ellipses
+            let ellipse = |w: f32, color: u32| {
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w(zpx(w))
+                    .h(zpx(16.))
+                    .rounded_full()
+                    .bg(crate::theme::c(color))
+            };
+            slots.push(
+                div()
+                    .id("avatar-more")
+                    .flex_none()
+                    .relative()
+                    .w(zpx(10.))
+                    .h(zpx(16.))
+                    .group_hover(group.clone(), |s| s.hidden())
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(zpx(1.))
+                            .w(zpx(10.))
+                            .h(zpx(16.))
+                            .rounded_full()
+                            .bg(shadow),
+                    )
+                    .child(ellipse(10., crate::theme::primer::GRAY_100))
+                    .child(ellipse(13., crate::theme::primer::GRAY_200))
+                    .child(ellipse(14., crate::theme::primer::GRAY_300))
+                    .into_any_element(),
+            );
+        }
+        // `.avatar-container:nth-child(n + 5)` hides until hover
+        let child_ix = i + 1 + usize::from(more && i >= MAX_DISPLAYED_AVATARS - 1);
+        let hidden = child_ix >= 5;
+        slots.push(
+            slot(i, user)
+                .when(hidden, |d| {
+                    d.hidden()
+                        .group_hover(group.clone(), |s| s.flex().w(zpx(17.)))
+                })
+                .into_any_element(),
+        );
+    }
+    slots.reverse();
+    div()
+        .id(id)
+        .relative()
+        .flex()
+        .flex_row()
+        .items_center()
+        .min_w_0()
+        .child(div().flex_1().min_w_0().pl(zpx(min_width)).child(label))
+        .child(
+            div()
+                .group(group.clone())
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                // hovering anywhere over the stack spreads it, not just
+                // over the 5 px advances
+                .min_w(zpx(min_width))
+                .flex()
+                .flex_row_reverse()
+                // physical left: `justify_end` is CSS `end`, not `flex-end`
+                .justify_start()
+                .items_center()
+                .children(slots),
+        )
+}
+
 /// Cached avatar for a commit e-mail (request it with
 /// `Dispatcher::request_avatar_for_email` from a render with `&mut App`).
 pub fn avatar_lookup(email: &str, cx: &App) -> Option<std::path::PathBuf> {
@@ -1500,7 +1638,6 @@ impl Render for TextTooltip {
     // pointer (`mouseRect`), 300 px at most, 5 / 10 px padding, 11 px text,
     // a 6 px arrow pointing back at the pointer.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        use TooltipDirection::*;
         let t = cx.ghd();
         let mouse = window.mouse_position();
         let (target, desired) = match self.anchor {
@@ -1548,72 +1685,208 @@ impl Render for TextTooltip {
         let box_size = size(text_width + pad_x * 2., text_size.height + pad_y * 2.);
         let direction = tooltip_direction(desired, target, viewport, box_size);
         let rect = tooltip_rect(target, direction, box_size);
-        let bg = t.tooltip_background;
-        // `::before`: a 12 × 6 triangle outside the box
-        let arrow = |path: &'static str, w: f32, h: f32| {
-            svg()
-                .path(path)
-                .w(zpx(w))
-                .h(zpx(h))
-                .text_color(bg)
-                .absolute()
-        };
-        let arrow = match direction {
-            SouthEast => arrow("ui/tooltip-arrow-up.svg", 12., 6.)
-                .top(zpx(-6.))
-                .left(zpx(10.)),
-            South => arrow("ui/tooltip-arrow-up.svg", 12., 6.)
-                .top(zpx(-6.))
-                .left(box_size.width / 2. - zpx(6.)),
-            SouthWest => arrow("ui/tooltip-arrow-up.svg", 12., 6.)
-                .top(zpx(-6.))
-                .right(zpx(10.)),
-            NorthEast => arrow("ui/tooltip-arrow-down.svg", 12., 6.)
-                .bottom(zpx(-6.))
-                .left(zpx(10.)),
-            North => arrow("ui/tooltip-arrow-down.svg", 12., 6.)
-                .bottom(zpx(-6.))
-                .left(box_size.width / 2. - zpx(6.)),
-            NorthWest => arrow("ui/tooltip-arrow-down.svg", 12., 6.)
-                .bottom(zpx(-6.))
-                .right(zpx(10.)),
-            East => arrow("ui/tooltip-arrow-left.svg", 6., 12.)
-                .left(zpx(-6.))
-                .top(box_size.height / 2. - zpx(6.)),
-            West => arrow("ui/tooltip-arrow-right.svg", 6., 12.)
-                .right(zpx(-6.))
-                .top(box_size.height / 2. - zpx(6.)),
-        };
-        anchored().position(rect.origin.map(|v| v.round())).child(
-            div()
-                .relative()
-                .w(box_size.width)
-                .px(pad_x)
-                .py(pad_y)
-                .rounded(BORDER_RADIUS())
-                .bg(bg)
-                .text_color(t.tooltip_text)
-                .text_size(font_size)
-                .line_height(line_height)
-                .shadow(vec![BoxShadow {
-                    color: t.tooltip_shadow,
-                    offset: point(zpx(0.), zpx(8.)),
-                    blur_radius: css_blur(24.),
-                    spread_radius: zpx(0.),
-                    inset: false,
-                }])
-                .child(arrow)
-                .child(StyledText::new(display).with_highlights(bold.map(|range| {
-                    (
-                        range,
-                        HighlightStyle {
-                            font_weight: Some(FontWeight::BOLD),
-                            ..Default::default()
-                        },
-                    )
-                }))),
+        tooltip_frame(
+            direction,
+            rect,
+            StyledText::new(display).with_highlights(bold.map(|range| {
+                (
+                    range,
+                    HighlightStyle {
+                        font_weight: Some(FontWeight::BOLD),
+                        ..Default::default()
+                    },
+                )
+            })),
+            t,
         )
     }
+}
+
+/// GHD `.tooltip` chrome for a box at `rect`: 5 / 10 px padding, 11 px
+/// text, the shadow and the 6 px arrow on the side facing the target.
+fn tooltip_frame(
+    direction: TooltipDirection,
+    rect: Bounds<Pixels>,
+    content: impl IntoElement,
+    t: &GhdTheme,
+) -> impl IntoElement {
+    use TooltipDirection::*;
+    let box_size = rect.size;
+    let font_size = FONT_SIZE_SM();
+    let bg = t.tooltip_background;
+    // `::before`: a 12 × 6 triangle outside the box
+    let arrow = |path: &'static str, w: f32, h: f32| {
+        svg()
+            .path(path)
+            .w(zpx(w))
+            .h(zpx(h))
+            .text_color(bg)
+            .absolute()
+    };
+    let arrow = match direction {
+        SouthEast => arrow("ui/tooltip-arrow-up.svg", 12., 6.)
+            .top(zpx(-6.))
+            .left(zpx(10.)),
+        South => arrow("ui/tooltip-arrow-up.svg", 12., 6.)
+            .top(zpx(-6.))
+            .left(box_size.width / 2. - zpx(6.)),
+        SouthWest => arrow("ui/tooltip-arrow-up.svg", 12., 6.)
+            .top(zpx(-6.))
+            .right(zpx(10.)),
+        NorthEast => arrow("ui/tooltip-arrow-down.svg", 12., 6.)
+            .bottom(zpx(-6.))
+            .left(zpx(10.)),
+        North => arrow("ui/tooltip-arrow-down.svg", 12., 6.)
+            .bottom(zpx(-6.))
+            .left(box_size.width / 2. - zpx(6.)),
+        NorthWest => arrow("ui/tooltip-arrow-down.svg", 12., 6.)
+            .bottom(zpx(-6.))
+            .right(zpx(10.)),
+        East => arrow("ui/tooltip-arrow-left.svg", 6., 12.)
+            .left(zpx(-6.))
+            .top(box_size.height / 2. - zpx(6.)),
+        West => arrow("ui/tooltip-arrow-right.svg", 6., 12.)
+            .right(zpx(-6.))
+            .top(box_size.height / 2. - zpx(6.)),
+    };
+    anchored().position(rect.origin.map(|v| v.round())).child(
+        div()
+            .relative()
+            .w(box_size.width)
+            .px(SPACING())
+            .py(SPACING_HALF())
+            .rounded(BORDER_RADIUS())
+            .bg(bg)
+            .text_color(t.tooltip_text)
+            .text_size(font_size)
+            .line_height(font_size * 1.5)
+            .shadow(vec![BoxShadow {
+                color: t.tooltip_shadow,
+                offset: point(zpx(0.), zpx(8.)),
+                blur_radius: css_blur(24.),
+                spread_radius: zpx(0.),
+                inset: false,
+            }])
+            .child(arrow)
+            .child(content),
+    )
+}
+
+/// GHD `Avatar`'s own tooltip (`.tooltip.user-info`, `avatar.tsx`
+/// `getTitle`): a 32 px avatar, 10 px, then the bold name over the e-mail,
+/// with 5 px more padding above and below.
+struct UserInfoTooltip {
+    name: SharedString,
+    email: SharedString,
+    anchor: (Bounds<Pixels>, TooltipDirection),
+}
+
+impl Render for UserInfoTooltip {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.ghd();
+        let (target, desired) = self.anchor;
+        let viewport = crate::theme::page_bounds(window);
+        let font_size = FONT_SIZE_SM();
+        let line_height = font_size * 1.5;
+        let avatar = zpx(32.);
+        let max_text = zpx(300.) - SPACING() * 3. - avatar;
+        let style = window.text_style();
+        let window = &*window;
+        let measure_with = |weight: FontWeight| {
+            let mut run = style.clone();
+            run.font_weight = weight;
+            move |s: &str| -> Pixels {
+                window
+                    .text_system()
+                    .shape_line(
+                        SharedString::from(s.to_string()),
+                        font_size,
+                        &[run.to_run(s.len())],
+                        None,
+                    )
+                    .width
+            }
+        };
+        let lines = |text: &str, weight: FontWeight| {
+            let measure = measure_with(weight);
+            let (display, _) = break_word_lines(text, max_text, &measure);
+            let widest = display
+                .split('\n')
+                .map(&measure)
+                .fold(px(0.), |a, b| a.max(b));
+            let count = display.split('\n').count();
+            (display, widest, count)
+        };
+        let (name, name_w, name_lines) = lines(&self.name, FontWeight::BOLD);
+        let (email, email_w, email_lines) = lines(&self.email, style.font_weight);
+        let text_width = name_w.max(email_w).min(max_text).ceil();
+        let text_height = line_height * (name_lines + email_lines) as f32;
+        let content_height = text_height.max(avatar);
+        let box_size = size(
+            SPACING() * 3. + avatar + text_width,
+            content_height + SPACING_HALF() * 4.,
+        );
+        let direction = tooltip_direction(Some(desired), target, viewport, box_size);
+        let rect = tooltip_rect(target, direction, box_size);
+        tooltip_frame(
+            direction,
+            rect,
+            div()
+                .flex()
+                .flex_row()
+                .py(SPACING_HALF())
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .mr(SPACING())
+                        .child(author_avatar(&self.name, &self.email, avatar, cx)),
+                )
+                .child(
+                    div()
+                        .w(text_width)
+                        .child(div().font_weight(FontWeight::BOLD).child(name))
+                        .child(div().child(email)),
+                ),
+            t,
+        )
+    }
+}
+
+/// GHD `Avatar` with a tooltip: north of `el` after [`TOOLTIP_DELAY`], the
+/// user-info card for a named user, else the e-mail as a caption.
+pub fn with_user_info_tooltip(
+    el: Stateful<Div>,
+    name: impl Into<SharedString>,
+    email: impl Into<SharedString>,
+) -> Stateful<Div> {
+    let (name, email): (SharedString, SharedString) = (name.into(), email.into());
+    if name.is_empty() {
+        let text = if email.is_empty() {
+            SharedString::from("Unknown user")
+        } else {
+            email
+        };
+        return with_directed_tooltip(el, text, TooltipDirection::North);
+    }
+    let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
+    let probe = bounds.clone();
+    el.relative()
+        .child(
+            canvas(move |b, _, _| probe.set(b), |_, _, _, _| {})
+                .absolute()
+                .size_full(),
+        )
+        .tooltip(move |_, cx| {
+            cx.new(|_| UserInfoTooltip {
+                name: name.clone(),
+                email: email.clone(),
+                anchor: (bounds.get(), TooltipDirection::North),
+            })
+            .into()
+        })
+        .tooltip_show_delay(TOOLTIP_DELAY)
 }
 
 /// Chromium's line breaking for tooltip text (`word-break: break-word` over

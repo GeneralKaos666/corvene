@@ -944,6 +944,7 @@ impl Render for UnreachableCommitsDialog {
                     .flex_col()
                     .children(commits.iter().map(|commit| {
                         div()
+                            .id(SharedString::from(commit.sha.clone()))
                             .h(zpx(50.))
                             .flex_none()
                             .border_b_1()

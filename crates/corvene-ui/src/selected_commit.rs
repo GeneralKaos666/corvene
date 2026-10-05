@@ -46,7 +46,7 @@ use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, mono_font};
-use crate::widgets::{author_avatar, link_button};
+use crate::widgets::{avatar_stack, link_button};
 
 /// `commitSummaryWidth` constraints (GHD `constrain(250, 100, 600)`).
 #[allow(non_snake_case)]
@@ -737,17 +737,13 @@ impl SelectedCommitView {
                                 .items_center()
                                 .line_height(zpx(16.5))
                                 .child(
-                                    meta_item(div())
-                                        .gap(zpx(4.))
-                                        .child(author_avatar(
-                                            &commit.author.name,
-                                            &commit.author.email,
-                                            zpx(16.),
-                                            cx,
-                                        ))
-                                        // `CommitAttribution`; `882-commit-author-links`
-                                        // links the author's name to their profile
-                                        .child({
+                                    // `renderAuthorStack`: `AvatarStack`, then
+                                    // `CommitAttribution`; `882-commit-author-links`
+                                    // links the author's name to their profile
+                                    meta_item(div()).child(avatar_stack(
+                                        "avatar-stack",
+                                        &crate::history::avatar_users_for(&commit, cx),
+                                        {
                                             let attribution =
                                                 crate::history::commit_attribution_for(&commit, cx);
                                             let rest = attribution
@@ -775,7 +771,9 @@ impl SelectedCommitView {
                                                     .into_any_element(),
                                                 _ => attribution.text.into_any_element(),
                                             }
-                                        }),
+                                        },
+                                        cx,
+                                    )),
                                 )
                                 .when(extras, |d| {
                                     let date = commit.author.date();
@@ -1522,15 +1520,12 @@ impl Render for SelectedCommitView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let compact = crate::theme::compact(window);
         self.file_list_focused = self.file_list_focus.is_focused(window);
-        let author_email = self.state.read(cx).selected_state().and_then(|rs| {
+        let commit = self.state.read(cx).selected_state().and_then(|rs| {
             let sha = rs.selected_commit.as_ref()?;
-            rs.commits
-                .iter()
-                .find(|c| &c.sha == sha)
-                .map(|c| c.author.email.clone())
+            rs.commits.iter().find(|c| &c.sha == sha).cloned()
         });
-        if let Some(email) = author_email {
-            Dispatcher::request_avatar_for_email(&email, cx);
+        if let Some(commit) = commit {
+            crate::history::request_commit_avatars(&commit, cx);
         }
         let t = cx.ghd();
         let (id, has_commit, selected_file, non_contiguous) = {
