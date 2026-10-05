@@ -72,66 +72,28 @@ pub(crate) fn main() {
         corvene_platform::single_instance::Claim::First(listener) => listener,
     };
     let started = Instant::now();
+    let pre_main_ms = since_process_start_ms();
     // the `git --version` probes run while the store, GPUI and the window
     // come up (`Dispatcher::init` collects the result)
     Dispatcher::prefetch_git();
     let _log_guard = logging::init();
-    info!(version = env!("CARGO_PKG_VERSION"), "starting corvene");
+    // `pre_main_ms`: from the process's start to here (dyld, the binary's
+    // pages read from disk, static initialisers), what a cold launch adds
+    // before any phase below
+    info!(
+        version = env!("CARGO_PKG_VERSION"),
+        pre_main_ms, "starting corvene"
+    );
     // writes a local report only while "Save crash reports locally" is on
     corvene_platform::crash_reports::install_panic_hook(env!("CARGO_PKG_VERSION"));
     phase(started, "logging initialised");
 
-    let mut store_fallback = None;
-    let store = match corvene_store::Store::open_in(corvene_platform::paths::app_support_dir()) {
-        Ok(store) => Arc::new(store),
-        Err(err) => {
-            error!(
-                ?err,
-                "could not open settings store; falling back to a temporary one"
-            );
-            store_fallback = Some(corvene_platform::paths::app_support_dir().join("corvene.redb"));
-            // per process, so several instances can fall back at once
-            let tmp = std::env::temp_dir().join(format!("corvene-fallback-{}", std::process::id()));
-            Arc::new(corvene_store::Store::open_in(tmp).expect("temporary store"))
-        }
-    };
-    let mut settings = store.settings().unwrap_or_default();
-    // Feature flags: the stored preset + overrides, then CORVENE_FLAGS for
-    // this session (bad entries are logged and skipped). Resolved here too
-    // because the theme is applied before `AppState` exists.
-    let flag_overrides = store.flags().unwrap_or_default();
-    let (mut flags_env, flag_errors) = corvene_core::flags::env::from_env();
-    for err in &flag_errors {
-        warn!("{err}");
-    }
-    let mut launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
-    // Corvene (`522-settings-file`): the settings file over the stored
-    // settings, its flags under CORVENE_FLAGS
-    let settings_file = launch_flags
-        .bool(corvene_core::flags::ids::SETTINGS_FILE)
-        .then(|| {
-            corvene_core::settings_file::apply_at_launch(
-                &corvene_platform::paths::settings_file(),
-                &mut settings,
-                &mut flags_env,
-            )
-        });
-    if settings_file.is_some() {
-        launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
-    }
-    sync_renderer_flags(&launch_flags);
-    // Corvene (`287-repository-list-backup`): a copy of the store from
-    // before an update, and a banner when this session cannot save
-    let list_backup = launch_flags.bool(corvene_core::flags::ids::REPOSITORY_LIST_BACKUP);
-    if list_backup
-        && store_fallback.is_none()
-        && let Some(backup) =
-            corvene_core::persistence::backup_on_version_change(&store, env!("CARGO_PKG_VERSION"))
-    {
-        info!(path = %backup.display(), "backed up the store from the previous version");
-    }
-    let store_fallback = store_fallback.filter(|_| list_backup);
-    phase(started, "store opened");
+    // the store opens on a thread while GPUI creates the application (Metal
+    // device, shaders, menus): neither needs the other
+    let store_thread = std::thread::Builder::new()
+        .name("store-open".into())
+        .spawn(move || open_store(started))
+        .expect("spawn the store thread");
 
     #[cfg(not(target_os = "android"))]
     let app = gpui_kit::application().with_assets(assets::Assets);
@@ -189,6 +151,19 @@ pub(crate) fn main() {
 
     app.run(move |cx| {
         phase(started, "platform ready");
+        let LaunchStore {
+            store,
+            settings,
+            flag_overrides,
+            flags_env,
+            launch_flags,
+            settings_file,
+            store_fallback,
+        } = store_thread
+            .join()
+            .expect("the store thread does not panic");
+        sync_renderer_flags(&launch_flags);
+        phase(started, "store ready");
         // the kit theme below takes the monospace family off macOS
         corvene_ui::theme::set_mono_font(corvene_platform::fonts::ghd_monospace_family().leak());
         corvene_ui::theme::preseed_kit_theme(cx);
@@ -227,7 +202,16 @@ pub(crate) fn main() {
             resolve_theme_with(shown_theme, high_contrast, theme_variants, cx),
         );
         let sidebar_width = corvene_ui::theme::sizes::zpx(settings.sidebar_width);
+        // GPUI quits through `exit`, which never drops the store: close it
+        // once the windows are gone so the next launch needs no repair
+        let quit_store = store.clone();
+        cx.on_app_quit(move |_| {
+            let store = quit_store.clone();
+            async move { store.close() }
+        })
+        .detach();
         Dispatcher::init(store, settings, flag_overrides, flags_env, cx);
+        phase(started, "state initialised");
         if let Some((overlay, file_flags, errors)) = settings_file {
             Dispatcher::set_settings_file(overlay, file_flags, errors, cx);
         }
@@ -236,7 +220,6 @@ pub(crate) fn main() {
         }
         let state = corvene_core::AppState::global(cx);
         Dispatcher::load_custom_emoji(cx);
-        Dispatcher::check_crash_reports(cx);
         // a notification click brings the (possibly hidden) window forward
         // and opens its dialog; installed before the first frame so a click
         // that launched Corvene is delivered too
@@ -256,11 +239,14 @@ pub(crate) fn main() {
         {
             Dispatcher::report_config_file_errors(corvene_core::keymap_file::path(), errors, cx);
         }
+        phase(started, "theme, keymap and state installed");
+        // the menu bar Linux and Windows draw in the window is there from
+        // its first frame; macOS builds the system one after it (below)
+        #[cfg(not(target_os = "macos"))]
         {
             let options = menus::MenuOptions::of(state.read(cx));
             menus::install(cx, &options);
         }
-        phase(started, "theme, keymap, menus and state installed");
 
         // Settings › Appearance and Integrations feed back into the theme and
         // the "Open in …" menu labels; system appearance flips the System theme.
@@ -880,6 +866,48 @@ pub(crate) fn main() {
                 return;
             }
         };
+
+        // Once the window is on screen: AppKit takes 30-60 ms to build the
+        // macOS menu bar (the Edit menu's text input items load the Writing
+        // Tools library), and the crash report check records this launch
+        // with a durable settings write. The window reaches the screen when
+        // the run loop next sleeps, which the first frame callback can still
+        // run before, so the second one does it. A window that draws no
+        // frames (shown later, occluded) gets them from the timer.
+        let after_first_frame =
+            std::rc::Rc::new(std::cell::Cell::new(Some(move |cx: &mut App| {
+                #[cfg(target_os = "macos")]
+                {
+                    let options =
+                        menus::MenuOptions::of(corvene_core::AppState::global(cx).read(cx));
+                    menus::install(cx, &options);
+                }
+                Dispatcher::check_crash_reports(cx);
+                phase(started, "menus installed, crash reports checked");
+            })));
+        if let Some(window) = cx.windows().first().copied() {
+            let run = after_first_frame.clone();
+            window
+                .update(cx, |_, window, _| {
+                    window.on_next_frame(move |window, _| {
+                        window.on_next_frame(move |_, cx| {
+                            if let Some(f) = run.take() {
+                                f(cx)
+                            }
+                        })
+                    })
+                })
+                .ok();
+        }
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(500))
+                .await;
+            if let Some(f) = after_first_frame.take() {
+                cx.update(f);
+            }
+        })
+        .detach();
 
         // System theme follows macOS light/dark switches (`supportsSystemThemeChanges`)
         // and, back in Corvene, the "Increase contrast" display option.
@@ -1874,6 +1902,86 @@ fn apply_theme(setting: ThemeSetting, cx: &mut App) {
     }
 }
 
+/// What `main` reads from the store before the first window.
+struct LaunchStore {
+    store: Arc<corvene_store::Store>,
+    settings: corvene_core::Settings,
+    flag_overrides: corvene_core::flags::FlagOverrides,
+    flags_env: corvene_core::flags::EnvFlags,
+    launch_flags: corvene_core::Flags,
+    settings_file: Option<(
+        corvene_core::settings_file::SettingsOverlay,
+        corvene_core::flags::EnvFlags,
+        Vec<String>,
+    )>,
+    store_fallback: Option<std::path::PathBuf>,
+}
+
+/// Open the store (a temporary one when it cannot be opened) and resolve
+/// the settings and flags the launch needs. Runs on its own thread.
+fn open_store(started: Instant) -> LaunchStore {
+    let mut store_fallback = None;
+    let store = match corvene_store::Store::open_in(corvene_platform::paths::app_support_dir()) {
+        Ok(store) => Arc::new(store),
+        Err(err) => {
+            error!(
+                ?err,
+                "could not open settings store; falling back to a temporary one"
+            );
+            store_fallback = Some(corvene_platform::paths::app_support_dir().join("corvene.redb"));
+            // per process, so several instances can fall back at once
+            let tmp = std::env::temp_dir().join(format!("corvene-fallback-{}", std::process::id()));
+            Arc::new(corvene_store::Store::open_in(tmp).expect("temporary store"))
+        }
+    };
+    phase(started, "store file opened");
+    let mut settings = store.settings().unwrap_or_default();
+    // Feature flags: the stored preset + overrides, then CORVENE_FLAGS for
+    // this session (bad entries are logged and skipped). Resolved here too
+    // because the theme is applied before `AppState` exists.
+    let flag_overrides = store.flags().unwrap_or_default();
+    let (mut flags_env, flag_errors) = corvene_core::flags::env::from_env();
+    for err in &flag_errors {
+        warn!("{err}");
+    }
+    let mut launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
+    // Corvene (`522-settings-file`): the settings file over the stored
+    // settings, its flags under CORVENE_FLAGS
+    let settings_file = launch_flags
+        .bool(corvene_core::flags::ids::SETTINGS_FILE)
+        .then(|| {
+            corvene_core::settings_file::apply_at_launch(
+                &corvene_platform::paths::settings_file(),
+                &mut settings,
+                &mut flags_env,
+            )
+        });
+    if settings_file.is_some() {
+        launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
+    }
+    // Corvene (`287-repository-list-backup`): a copy of the store from
+    // before an update, and a banner when this session cannot save
+    let list_backup = launch_flags.bool(corvene_core::flags::ids::REPOSITORY_LIST_BACKUP);
+    if list_backup
+        && store_fallback.is_none()
+        && let Some(backup) =
+            corvene_core::persistence::backup_on_version_change(&store, env!("CARGO_PKG_VERSION"))
+    {
+        info!(path = %backup.display(), "backed up the store from the previous version");
+    }
+    let store_fallback = store_fallback.filter(|_| list_backup);
+    phase(started, "store opened");
+    LaunchStore {
+        store,
+        settings,
+        flag_overrides,
+        flags_env,
+        launch_flags,
+        settings_file,
+        store_fallback,
+    }
+}
+
 /// Flags `908-opaque-depth-pass` and `909-damage-scissor`: the wgpu
 /// renderer's (Linux, Android) overdraw switches, applied from the next frame.
 fn sync_renderer_flags(flags: &corvene_core::Flags) {
@@ -1885,6 +1993,37 @@ fn sync_renderer_flags(flags: &corvene_core::Flags) {
     }
     #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "android")))]
     let _ = flags;
+}
+
+/// Milliseconds since the kernel started this process (macOS; `None`
+/// elsewhere).
+fn since_process_start_ms() -> Option<u128> {
+    #[cfg(target_os = "macos")]
+    {
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        // SAFETY: `proc_pidinfo` writes at most `size` bytes into `info`,
+        // a plain C struct for which all zeroes is a valid value
+        let info = unsafe {
+            let mut info: libc::proc_bsdinfo = std::mem::zeroed();
+            let written = libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            );
+            (written == size).then_some(info)
+        }?;
+        let start = std::time::UNIX_EPOCH
+            + std::time::Duration::from_secs(info.pbi_start_tvsec)
+            + std::time::Duration::from_micros(info.pbi_start_tvusec);
+        std::time::SystemTime::now()
+            .duration_since(start)
+            .ok()
+            .map(|d| d.as_millis())
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
 }
 
 fn phase(started: Instant, what: &str) {

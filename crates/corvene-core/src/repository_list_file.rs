@@ -89,6 +89,10 @@ pub fn write(dir: &Path, repositories: &[Repository], selected: Option<u64>) {
         }
     };
     for (name, bytes) in [(JSON_FILE, json), (TEXT_FILE, text(&listed).into_bytes())] {
+        // every launch writes the list: leave a file that already says it
+        if std::fs::read(dir.join(name)).is_ok_and(|old| old == bytes) {
+            continue;
+        }
         let tmp = dir.join(format!("{name}.tmp"));
         if let Err(err) =
             std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, dir.join(name)))
