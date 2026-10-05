@@ -793,6 +793,9 @@ fn dialog_impl(
                                             .relative()
                                             .icon_button_label("Close")
                                             .size(zpx(16.))
+                                            // `close-button` mixin: `margin-right:
+                                            // -10px` pulls it into the header's padding
+                                            .mr(-SPACING())
                                             .cursor_pointer()
                                             .on_click(move |_, window, cx| on_close(window, cx))
                                             // Chromium's focus ring: 2 px out,

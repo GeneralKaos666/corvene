@@ -893,6 +893,8 @@ impl Render for OpenPullRequestDialog {
                                                     .id("open-pull-request-close")
                                                     .icon_button_label("Close")
                                                     .size(zpx(16.))
+                                                    // `close-button` mixin
+                                                    .mr(-SPACING())
                                                     .cursor_pointer()
                                                     .on_click(close)
                                                     .child(octicon(Octicon::X, t.text_secondary)),

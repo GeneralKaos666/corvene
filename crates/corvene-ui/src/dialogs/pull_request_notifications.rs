@@ -188,6 +188,8 @@ fn frame(
                                         .flex_none()
                                         .icon_button_label("Close")
                                         .size(zpx(16.))
+                                        // `close-button` mixin
+                                        .mr(-SPACING())
                                         .cursor_pointer()
                                         .on_click(move |_, window, cx| close(window, cx))
                                         .child(octicon(Octicon::X, t.text_secondary)),
