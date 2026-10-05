@@ -7727,7 +7727,8 @@ registry! {
                   checked files, only the checked lines. New, deleted and renamed files go into the stash whole. \
                   With the stash list the result is a stash of its own beside the branch's; \
                   without it, it is the branch's stash, and the items are disabled while the \
-                  branch has one.",
+                  branch has one. A stash restores over the changes left in the same files \
+                  when the two do not touch the same lines.",
         ghd_behaviour: "Only all changes can be stashed (Stash All Changes).",
         nature: Nature::Feature,
         kind: Kind::Bool,

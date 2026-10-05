@@ -46,7 +46,9 @@
 //! its own (a message, no Desktop marker), so it can sit next to the
 //! branch's Desktop stash and branch switches leave it alone; without the
 //! list it is the branch's Desktop stash and is refused while one exists.
-//! GHD stashes all changes or none.
+//! A restore git refuses over local changes to the same files merges into
+//! them instead ([`StashPopOptions::merge_over_local_changes`]). GHD
+//! stashes all changes or none.
 //!
 //! Deviation (`1207-switch-warns-target-behind`): the Switch Branch dialog
 //! warns when the branch is behind its upstream (read by
@@ -155,6 +157,7 @@ impl Dispatcher {
         StashPopOptions {
             keep_on_conflict: flags.bool(crate::flags::ids::STASH_CONFLICT_FLOW),
             unstage_new_files: flags.bool(crate::flags::ids::STASH_RESTORE_UNSTAGES_NEW_FILES),
+            merge_over_local_changes: flags.bool(crate::flags::ids::PARTIAL_STASH),
         }
     }
 

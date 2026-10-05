@@ -47,6 +47,11 @@ pub struct StashPopOptions {
     /// `775-stash-restore-unstages-new-files`: after a restore, the files
     /// the stash added are unstaged (GHD leaves them staged).
     pub unstage_new_files: bool,
+    /// `1303-partial-stash`: when git refuses because files the stash
+    /// changes have local changes (a line stash next to the lines left
+    /// behind), the stash is merged into them instead
+    /// ([`restore_over_local_changes`]). GHD reports git's refusal.
+    pub merge_over_local_changes: bool,
 }
 
 /// What [`pop_stash_entry_with`] did.
@@ -121,6 +126,15 @@ fn restore_stash_entry(
     if known == Some(KnownGitError::MergeConflicts) {
         return Ok(StashPop::Conflicted);
     }
+    if known == Some(KnownGitError::MergeWithLocalChanges)
+        && options.merge_over_local_changes
+        && restore_over_local_changes(git.clone(), workdir, &entry)?
+    {
+        if pop {
+            drop_desktop_stash_entry(git, workdir, stash_sha)?;
+        }
+        return Ok(StashPop::Restored);
+    }
     if out.status.code() == Some(1)
         && options.keep_on_conflict
         && !unmerged_before
@@ -140,6 +154,62 @@ fn restore_stash_entry(
         code: out.status.code(),
         stderr: out.stderr.trim().to_string(),
     })
+}
+
+/// `1303-partial-stash`: put stash `entry` back over local changes to the
+/// same files, which `git stash apply` refuses to touch. The working
+/// directory is snapshotted (untracked files included, nothing changes),
+/// `merge-tree` merges the stash into the snapshot over the stash's base,
+/// and the difference between the snapshot and the merge is applied to the
+/// working copy (the index stays as it is). False when there are no local
+/// changes or the stash keeps untracked files in a third commit; a merge
+/// that conflicts is an error naming the files, and nothing is changed.
+pub fn restore_over_local_changes(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    entry: &StashEntry,
+) -> Result<bool> {
+    let [base, _] = entry.parents.as_slice() else {
+        return Ok(false);
+    };
+    let Some(snapshot) = snapshot_working_directory(git.clone(), workdir)? else {
+        return Ok(false);
+    };
+    let tree = match merge_stash_trees(git.clone(), workdir, base, &snapshot, &entry.sha)? {
+        Ok(tree) => tree,
+        Err(files) => {
+            return Err(GitError::Gix(format!(
+                "The stash and your changes both change the same lines in {}, so the stash was \
+                 not restored. Nothing was changed.",
+                if files.is_empty() {
+                    "some files".to_string()
+                } else {
+                    files.join(", ")
+                }
+            )));
+        }
+    };
+    let patch = GitCommand::new(git.clone())
+        .args([
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-color",
+            &snapshot,
+            &tree,
+        ])
+        .current_dir(workdir)
+        .run()?
+        .stdout;
+    if !patch.is_empty() {
+        GitCommand::new(git)
+            .args(["apply", "--binary", "--whitespace=nowarn", "-"])
+            .current_dir(workdir)
+            .stdin(patch)
+            .run()?;
+    }
+    Ok(true)
 }
 
 /// The files stash `entry` added to the index: those its index commit
@@ -419,6 +489,7 @@ fn restore_made_entry(git: Arc<GitBinary>, workdir: &Path, sha: &str) -> Result<
     let options = StashPopOptions {
         keep_on_conflict: true,
         unstage_new_files: true,
+        merge_over_local_changes: false,
     };
     match pop_stash_entry_with(git, workdir, sha, options)? {
         StashPop::Restored | StashPop::Missing => Ok(()),

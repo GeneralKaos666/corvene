@@ -458,8 +458,18 @@ mod tests {
         assert_eq!(run(p, &["show", "stash@{0}:new.txt"]), "new\n");
         // index commit carries the new file (Desktop's way)
         assert_eq!(run(p, &["show", "stash@{0}^2:new.txt"]), "new\n");
-        // and it comes back on top of the remaining change
-        run(p, &["stash", "pop", "-q"]);
+        // git refuses to pop it over the change left in a.txt; merged in,
+        // it comes back on top of it
+        let entry = crate::get_stashes(git(), p).expect("stashes").0[0].clone();
+        let options = crate::StashPopOptions {
+            merge_over_local_changes: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::pop_stash_entry_with(git(), p, &entry.sha, options).expect("pop"),
+            crate::StashPop::Restored
+        );
+        assert_eq!(run(p, &["stash", "list"]).trim(), "");
         assert_eq!(
             std::fs::read_to_string(p.join("a.txt")).expect("read"),
             "ONE\n2\n3\n4\n5\n6\n7\n8\n9\nTEN\n"

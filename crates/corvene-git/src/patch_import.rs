@@ -158,10 +158,8 @@ pub fn parse_summary(stdout: &str) -> Vec<(PatchFileChange, String)> {
             let line = line.trim_start();
             let (change, rest) = if let Some(rest) = line.strip_prefix("create mode ") {
                 (PatchFileChange::Added, rest)
-            } else if let Some(rest) = line.strip_prefix("delete mode ") {
-                (PatchFileChange::Deleted, rest)
             } else {
-                return None;
+                (PatchFileChange::Deleted, line.strip_prefix("delete mode ")?)
             };
             let (_, path) = rest.split_once(' ')?;
             Some((change, unquote_c_path(path)))
