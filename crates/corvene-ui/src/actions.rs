@@ -116,6 +116,16 @@ gpui_kit::actions!(
         RequestReviewers,
         // Branch › Push To ▸ / Fetch From ▸ the remote at that index of
         // `MenuLabelsEvent::remotes` (`1210-push-to-other-remote`)
+        // Repository › Open in Editor ▸ (`524-open-repository-with-editor`),
+        // by index into `Dispatcher::menu_editors`
+        OpenInChosenEditor0,
+        OpenInChosenEditor1,
+        OpenInChosenEditor2,
+        OpenInChosenEditor3,
+        OpenInChosenEditor4,
+        OpenInChosenEditor5,
+        OpenInChosenEditor6,
+        OpenInChosenEditor7,
         PushToRemote0,
         PushToRemote1,
         PushToRemote2,

@@ -198,6 +198,15 @@ pub struct RepositorySettingsSave {
     pub autocrlf: Option<Option<String>>,
 }
 
+/// Corvene (`524-open-repository-with-editor`): an editor to open a
+/// repository in, picked from Open in Editor ▸.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditorChoice {
+    /// An installed editor, by its friendly name.
+    Installed(String),
+    Custom(crate::persistence::CustomIntegration),
+}
+
 /// `openIssueCreationPage`: GitHub's issue template chooser.
 pub fn issue_creation_url(html_url: &str) -> String {
     format!("{html_url}/issues/new/choose")
@@ -448,10 +457,62 @@ impl Dispatcher {
         Self::open_in_editor_at(path, None, cx);
     }
 
+    /// Corvene (`524-open-repository-with-editor`): the editors of the
+    /// repository's Open in Editor ▸ menus, as (label, editor): the
+    /// installed ones, then Settings' custom ones (`523-custom-editor-list`);
+    /// at most 8, and none unless there are two.
+    pub fn menu_editors(s: &crate::state::AppState) -> Vec<(String, EditorChoice)> {
+        if !s.flags.bool(crate::flags::ids::OPEN_REPOSITORY_WITH_EDITOR)
+            || cfg!(target_os = "android")
+        {
+            return Vec::new();
+        }
+        let mut editors: Vec<(String, EditorChoice)> = s
+            .editors
+            .iter()
+            .map(|e| (e.name.clone(), EditorChoice::Installed(e.name.clone())))
+            .collect();
+        if s.flags.bool(crate::flags::ids::CUSTOM_EDITOR_LIST) {
+            editors.extend(
+                s.settings
+                    .custom_editors()
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, c)| !c.path.trim().is_empty())
+                    .map(|(ix, c)| (c.display_name(ix, true), EditorChoice::Custom(c))),
+            );
+        } else if let Some(custom) = s.custom_editor_in_use() {
+            let label = s.custom_editor_label().unwrap_or_default();
+            editors.push((label, EditorChoice::Custom(custom.clone())));
+        }
+        if editors.len() < 2 {
+            return Vec::new();
+        }
+        editors.truncate(8);
+        editors
+    }
+
+    /// Corvene (`524-open-repository-with-editor`): open `path` in `editor`
+    /// this once, leaving Settings and the repository's editor as they are.
+    pub fn open_in_editor_with(path: PathBuf, editor: EditorChoice, cx: &mut dyn Host) {
+        Self::open_in_editor_choosing(path, None, Some(editor), cx);
+    }
+
     /// `open_in_editor` at a 1-based line where the editor supports it
     /// (the diff's "Open in <Editor> at Line N", flag
     /// `diff-open-in-editor-at-line`); a custom editor opens the file.
     pub fn open_in_editor_at(path: PathBuf, line: Option<u32>, cx: &mut dyn Host) {
+        Self::open_in_editor_choosing(path, line, None, cx);
+    }
+
+    /// [`Self::open_in_editor_at`] in `chosen` when given, else in the
+    /// editor the repository and Settings name.
+    fn open_in_editor_choosing(
+        path: PathBuf,
+        line: Option<u32>,
+        chosen: Option<EditorChoice>,
+        cx: &mut dyn Host,
+    ) {
         let (editors, selected, custom, workspace_file, folder, folder_as_workspace) = {
             let s = Self::state(cx).read(cx);
             // `518-per-repo-editor`: the repository's own editor wins over
@@ -471,17 +532,34 @@ impl Dispatcher {
                         .cloned()
                 })
                 .flatten();
+            let (repo_editor, repo_custom) = match &chosen {
+                Some(_) => (None, None),
+                None => (repo_editor, s.repository_custom_editor(&path)),
+            };
+            let (chosen_installed, chosen_custom) = match chosen {
+                Some(EditorChoice::Installed(name)) => (Some(name), None),
+                Some(EditorChoice::Custom(custom)) => (None, Some(custom)),
+                None => (None, None),
+            };
+            let chosen_installed_given = chosen_installed.is_some();
             (
                 s.editors.clone(),
-                repo_editor
-                    .clone()
-                    .or_else(|| s.settings.external_editor.clone()),
-                // a repository's own custom editor, else Settings' one
-                s.repository_custom_editor(&path).or_else(|| {
-                    s.custom_editor_in_use()
-                        .cloned()
-                        .filter(|_| repo_editor.is_none())
+                chosen_installed.or_else(|| {
+                    repo_editor
+                        .clone()
+                        .or_else(|| s.settings.external_editor.clone())
                 }),
+                // the one chosen, a repository's own custom editor, else
+                // Settings' one (not when another editor was chosen)
+                if chosen_installed_given {
+                    None
+                } else {
+                    chosen_custom.or(repo_custom).or_else(|| {
+                        s.custom_editor_in_use()
+                            .cloned()
+                            .filter(|_| repo_editor.is_none())
+                    })
+                },
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
                 folder,
                 s.flags.bool(crate::flags::ids::NOTEPADPP_FOLDER_WORKSPACE),

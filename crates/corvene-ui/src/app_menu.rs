@@ -75,6 +75,10 @@ pub struct MenuLabelsEvent {
     /// Corvene (`1210-push-to-other-remote`): the remotes of Branch › Push
     /// To ▸ and Fetch From ▸ (`Dispatcher::menu_remotes`; empty: no menus).
     pub remotes: Vec<String>,
+    /// Corvene (`524-open-repository-with-editor`): the editors of
+    /// Repository › Open in Editor ▸ (`Dispatcher::menu_editors`; empty: no
+    /// menu).
+    pub editors: Vec<String>,
     /// Corvene (`427-back-forward-navigation`): whether View › Back /
     /// Forward have a step.
     pub navigation: (bool, bool),
@@ -96,6 +100,7 @@ impl Default for MenuLabelsEvent {
             ask_for_confirmation_when_stashing_all_changes: true,
             is_changes_filter_visible: true,
             remotes: Vec::new(),
+            editors: Vec::new(),
             navigation: (false, false),
             extras: MenuExtras::default(),
         }
@@ -240,6 +245,10 @@ impl MenuLabelsEvent {
             // `changesState.stashEntry !== null`
             ask_for_confirmation_when_stashing_all_changes: rs.desktop_stash().is_some(),
             remotes: corvene_core::Dispatcher::menu_remotes(s, repository.id),
+            editors: corvene_core::Dispatcher::menu_editors(s)
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect(),
             ..labels
         }
     }
@@ -617,6 +626,15 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             ),
             OpenInEditor,
         ),
+    ]);
+    // Corvene (`524-open-repository-with-editor`)
+    if !labels.editors.is_empty() {
+        repository.push(submenu(
+            l("Open in Editor", "Open i&n editor"),
+            remote_items(&labels.editors, &OPEN_IN_CHOSEN_EDITOR),
+        ));
+    }
+    repository.extend([
         item(l("Open With…", "Open &with…"), OpenWith),
         separator(),
         item(
@@ -756,6 +774,19 @@ const PUSH_TO_REMOTE: [fn() -> Box<dyn Action>; 8] = [
     || Box::new(PushToRemote7),
 ];
 
+/// Open in Editor ▸'s, as [`PUSH_TO_REMOTE`]
+/// (`524-open-repository-with-editor`).
+const OPEN_IN_CHOSEN_EDITOR: [fn() -> Box<dyn Action>; 8] = [
+    || Box::new(OpenInChosenEditor0),
+    || Box::new(OpenInChosenEditor1),
+    || Box::new(OpenInChosenEditor2),
+    || Box::new(OpenInChosenEditor3),
+    || Box::new(OpenInChosenEditor4),
+    || Box::new(OpenInChosenEditor5),
+    || Box::new(OpenInChosenEditor6),
+    || Box::new(OpenInChosenEditor7),
+];
+
 /// Fetch From ▸'s, as [`PUSH_TO_REMOTE`].
 const FETCH_FROM_REMOTE: [fn() -> Box<dyn Action>; 8] = [
     || Box::new(FetchFromRemote0),
@@ -768,8 +799,8 @@ const FETCH_FROM_REMOTE: [fn() -> Box<dyn Action>; 8] = [
     || Box::new(FetchFromRemote7),
 ];
 
-/// One item per remote name (a `&` in a name is doubled for the Windows
-/// and Linux access keys).
+/// One item per remote (or editor) name (a `&` in a name is doubled for
+/// the Windows and Linux access keys).
 fn remote_items(
     remotes: &[String],
     actions: &[fn() -> Box<dyn Action>; 8],
@@ -943,6 +974,7 @@ mod tests {
                 ask_for_confirmation_on_repository_removal: bits & 8 != 0,
                 is_changes_filter_visible: bits & 16 != 0,
                 remotes: vec!["fork".into(), "origin".into()],
+                editors: vec!["Zed".into(), "Vim".into()],
                 extras: MenuExtras {
                     show_release_notes: true,
                     show_import: true,

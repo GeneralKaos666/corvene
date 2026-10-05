@@ -92,7 +92,7 @@ pub use emoji::CustomEmoji;
 pub use flags::{FlagId, FlagOverrides, Flags};
 pub use forks::UPSTREAM_REMOTE_NAME;
 pub use host::{AsyncCtx, Ctx, Host, HostServices, StateCx, StateHandle};
-pub use integrations::{PreferencesSave, RepositorySettingsSave};
+pub use integrations::{EditorChoice, PreferencesSave, RepositorySettingsSave};
 pub use mco::{
     Banner, ConflictKind, ConflictState, McoConflicts, McoDetail, McoStep, McoUndo, MergePreview,
     MultiCommitOperation, RebasePreview, conflicted_files, get_unique_coauthors_as_authors,

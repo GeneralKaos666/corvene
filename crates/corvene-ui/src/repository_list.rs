@@ -1297,6 +1297,26 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
             Dispatcher::open_in_editor(editor_path.clone(), cx)
         })
         .enabled(!missing),
+    ]);
+    // Corvene (`524-open-repository-with-editor`)
+    let editors = Dispatcher::menu_editors(state);
+    if !editors.is_empty() {
+        let items_for = |(label, editor): (String, corvene_core::EditorChoice)| {
+            let path = repo.path.clone();
+            MenuItem::new(label, move |_, cx| {
+                Dispatcher::close_foldout(cx);
+                Dispatcher::open_in_editor_with(path.clone(), editor.clone(), cx)
+            })
+        };
+        items.push(
+            MenuItem::submenu(
+                mac_or("Open in Editor", "Open in editor"),
+                editors.into_iter().map(items_for).collect(),
+            )
+            .enabled(!missing),
+        );
+    }
+    items.extend([
         MenuItem::separator(),
         MenuItem::new(
             if confirm { "Remove…" } else { "Remove" },

@@ -3546,6 +3546,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/persistence.rs", "crates/corvene-core/src/state.rs"],
     },
 
+    /// Open a repository once in another editor.
+    OPEN_REPOSITORY_WITH_EDITOR = 524 "open-repository-with-editor" {
+        title: "Open in another editor",
+        summary: "The repository list's context menu and the Repository menu get an \"Open in \
+                  Editor\" submenu listing the installed editors (and the custom ones) that opens \
+                  the repository in the one picked this once, without changing Settings. Shown \
+                  when there are at least two editors.",
+        ghd_behaviour: "Repositories open in the editor chosen in Settings; another one means \
+                        changing that setting first.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18737)],
+        code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

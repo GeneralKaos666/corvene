@@ -1218,6 +1218,35 @@ pub(crate) fn main() {
             6 => PushToRemote6, FetchFromRemote6;
             7 => PushToRemote7, FetchFromRemote7;
         }
+        // `524-open-repository-with-editor`: the editor at the item's index
+        // of the menu's list (`Dispatcher::menu_editors`)
+        fn open_in_chosen_editor(cx: &mut App, index: usize) {
+            let target = {
+                let s = corvene_core::AppState::global(cx).read(cx);
+                s.selected_repository()
+                    .filter(|r| !r.missing)
+                    .map(|r| r.path.clone())
+                    .zip(Dispatcher::menu_editors(s).into_iter().nth(index))
+            };
+            if let Some((path, (_, editor))) = target {
+                Dispatcher::open_in_editor_with(path, editor, cx);
+            }
+        }
+        macro_rules! editor_menu_actions {
+            ($($index:literal => $action:ident;)*) => {$(
+                on_menu_action(cx, move |_: &$action, cx| open_in_chosen_editor(cx, $index));
+            )*};
+        }
+        editor_menu_actions! {
+            0 => OpenInChosenEditor0;
+            1 => OpenInChosenEditor1;
+            2 => OpenInChosenEditor2;
+            3 => OpenInChosenEditor3;
+            4 => OpenInChosenEditor4;
+            5 => OpenInChosenEditor5;
+            6 => OpenInChosenEditor6;
+            7 => OpenInChosenEditor7;
+        }
         on_menu_action(cx, move |_: &FetchAllTags, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::fetch_all_tags(id, cx);
