@@ -41,11 +41,24 @@ thread_local! {
 pub struct ResizableDescription {
     pub description: &'static str,
     pub range: Range<Pixels>,
+    /// The pane is the group's last panel (`115-sidebar-on-right`), not its
+    /// first.
+    pub last_panel: bool,
 }
 
 impl ResizableDescription {
     pub fn new(description: &'static str, range: Range<Pixels>) -> Self {
-        Self { description, range }
+        Self {
+            description,
+            range,
+            last_panel: false,
+        }
+    }
+
+    /// The pane is the group's last panel.
+    pub fn last_panel(mut self, last: bool) -> Self {
+        self.last_panel = last;
+        self
     }
 
     /// `getResizePercentage` for `width`.
@@ -68,8 +81,9 @@ impl ResizableDescription {
     }
 }
 
-/// Resize the first panel of `resizable` by `delta` (clamped by the panel's
-/// `size_range`; subscribers persist it like a drag), then announce it.
+/// Resize the first (or [`ResizableDescription::last_panel`]) panel of
+/// `resizable` by `delta` (clamped by the panel's `size_range`; subscribers
+/// persist it like a drag), then announce it.
 fn nudge(
     resizable: &Entity<ResizableState>,
     delta: Pixels,
@@ -78,9 +92,14 @@ fn nudge(
     cx: &mut App,
 ) {
     let widths = resizable.update(cx, |state, cx| {
-        let before = state.sizes().first().copied()?;
-        state.resize_panel(0, before + delta, window, cx);
-        state.sizes().first().copied().map(|after| (before, after))
+        let ix = if about.last_panel {
+            state.sizes().len().checked_sub(1)?
+        } else {
+            0
+        };
+        let before = state.sizes().get(ix).copied()?;
+        state.resize_panel(ix, before + delta, window, cx);
+        state.sizes().get(ix).copied().map(|after| (before, after))
     });
     if let Some((before, after)) = widths {
         // `601-resizable-announces-new-width`: GHD reads the width before

@@ -590,6 +590,21 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-core/src/persistence.rs"],
     },
 
+    /// The repository sidebar on the right of the diff.
+    SIDEBAR_ON_RIGHT = 115 "sidebar-on-right" {
+        title: "Sidebar on the right",
+        summary: "The Changes / History sidebar sits on the right of the diff instead of the \
+                  left; it keeps its width and is resized from its left edge. The toolbar stays \
+                  as it is.",
+        ghd_behaviour: "The sidebar is always on the left.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18645)],
+        code: &["crates/corvene-ui/src/workspace.rs", "crates/corvene-ui/src/active_resizable.rs"],
+    },
+
     // ---- 200 Repository ----
 
     /// `commit.template` prefills the commit description.

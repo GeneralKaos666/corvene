@@ -8,6 +8,9 @@
 //! the tab, so its focus is lost).
 //! `419-extra-zoom-inputs`: ⌘ / Ctrl + mouse wheel zooms; GHD only zooms
 //! from the View menu's shortcuts (`main-process/menu/build-default-menu.ts`).
+//! `115-sidebar-on-right`: the sidebar is the resizable group's second
+//! panel, right of the diff (GHD `ui/repository.tsx` always renders it
+//! first).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -117,6 +120,9 @@ pub struct Workspace {
     /// focus when Changes was left (`617-section-switch-restores-commit-focus`).
     rendered_section: Section,
     left_commit_field: Option<FocusHandle>,
+    /// The side the sidebar was laid out on (`115-sidebar-on-right`): the
+    /// panel group's sizes are dropped when it changes.
+    sidebar_on_right: bool,
 }
 
 /// GHD `sidebarWidth` minimum (220 px), or 120 px with
@@ -189,7 +195,13 @@ impl Workspace {
 
         let resizable = cx.new(|_| ResizableState::default());
         cx.subscribe(&resizable, |this, state, _: &ResizablePanelEvent, cx| {
-            if let Some(width) = state.read(cx).sizes().first().copied()
+            let sizes = state.read(cx).sizes();
+            let sidebar = if this.sidebar_on_right {
+                sizes.last()
+            } else {
+                sizes.first()
+            };
+            if let Some(width) = sidebar.copied()
                 && width != this.sidebar_width
             {
                 this.sidebar_width = width;
@@ -219,6 +231,10 @@ impl Workspace {
         let banner_view = cx.new(|cx| BannerView::new(state.clone(), window, cx));
         window.focus(&focus_handle, cx);
         let sidebar_min = sidebar_min_width(state.read(cx));
+        let sidebar_on_right = state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::SIDEBAR_ON_RIGHT);
 
         Self {
             focus_handle,
@@ -250,6 +266,7 @@ impl Workspace {
             review_mode: false,
             rendered_section: Section::Changes,
             left_commit_field: None,
+            sidebar_on_right,
             dialogs,
             diff_view,
             welcome,
@@ -440,7 +457,14 @@ impl Workspace {
             .flex()
             .flex_col()
             .min_h_0()
-            .border_r_1()
+            .map(|d| {
+                // the seam is on the diff's side
+                if self.sidebar_on_right && !self.compact {
+                    d.border_l_1()
+                } else {
+                    d.border_r_1()
+                }
+            })
             .border_color(t.box_border)
             .bg(t.background)
             .child(tab_bar(
@@ -900,43 +924,47 @@ impl Workspace {
                 })
                 .into_any_element();
         }
+        let sidebar = resizable_panel()
+            .size(self.sidebar_width)
+            .size_range(sidebar_min..zpx(900.))
+            .child(crate::active_resizable::active_resizable(
+                "repository-sidebar-resizable",
+                &self.resizable,
+                None,
+                crate::active_resizable::ResizableDescription::new(
+                    "Repository sidebar",
+                    sidebar_min..zpx(900.),
+                )
+                .last_panel(self.sidebar_on_right),
+                self.sidebar(cx),
+            ));
+        let content = resizable_panel().child(self.content(cx));
+        let group = h_resizable("repository")
+            .with_state(&self.resizable)
+            // GHD's 6 px handle is invisible; the sidebar's own border is the seam.
+            .with_handle_appearance(std::rc::Rc::new(|_, _, _| {
+                // (Android: a finger can drag it too)
+                Some(
+                    div()
+                        .relative()
+                        .size_full()
+                        .child(crate::widgets::touch_drag_handle())
+                        .into_any_element(),
+                )
+            }));
+        // `115-sidebar-on-right`
+        let group = if self.sidebar_on_right {
+            group.child(content).child(sidebar)
+        } else {
+            group.child(sidebar).child(content)
+        };
         div()
             .flex_1()
             .min_h_0()
             .w_full()
             .border_t_1()
             .border_color(t.box_border)
-            .child(
-                h_resizable("repository")
-                    .with_state(&self.resizable)
-                    // GHD's 6 px handle is invisible; the sidebar's own border is the seam.
-                    .with_handle_appearance(std::rc::Rc::new(|_, _, _| {
-                        // (Android: a finger can drag it too)
-                        Some(
-                            div()
-                                .relative()
-                                .size_full()
-                                .child(crate::widgets::touch_drag_handle())
-                                .into_any_element(),
-                        )
-                    }))
-                    .child(
-                        resizable_panel()
-                            .size(self.sidebar_width)
-                            .size_range(sidebar_min..zpx(900.))
-                            .child(crate::active_resizable::active_resizable(
-                                "repository-sidebar-resizable",
-                                &self.resizable,
-                                None,
-                                crate::active_resizable::ResizableDescription::new(
-                                    "Repository sidebar",
-                                    sidebar_min..zpx(900.),
-                                ),
-                                self.sidebar(cx),
-                            )),
-                    )
-                    .child(resizable_panel().child(self.content(cx))),
-            )
+            .child(group)
             .into_any_element()
     }
 
@@ -1091,6 +1119,17 @@ impl Render for Workspace {
             self.section = section;
         }
         self.place_launch_focus(window, cx);
+        // `115-sidebar-on-right` changed: the group's sizes belong to the
+        // old panel order
+        let sidebar_on_right = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::SIDEBAR_ON_RIGHT);
+        if sidebar_on_right != self.sidebar_on_right {
+            self.sidebar_on_right = sidebar_on_right;
+            self.resizable.update(cx, |state, _| state.clear());
+        }
         self.compact = crate::theme::compact(window);
         let page = crate::theme::page_size(window);
         crate::theme::set_compact_page_width(self.compact.then_some(page.width));
