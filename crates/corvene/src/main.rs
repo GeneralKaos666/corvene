@@ -49,6 +49,16 @@ pub(crate) fn main() {
             }
         }
     }
+    // a stand-in git hook runs this same binary (`corvene_git::hooks`):
+    // proxy the hook and exit before touching GPUI
+    {
+        let mut args = std::env::args_os().skip(1);
+        if args.next().as_deref() == Some(std::ffi::OsStr::new(corvene_git::hooks::PROXY_ARG)) {
+            let hook = args.next().unwrap_or_default();
+            let rest: Vec<std::ffi::OsString> = args.collect();
+            std::process::exit(corvene_git::hooks::run_proxy(&hook, &rest));
+        }
+    }
     // `GIT_ASKPASS` runs this same binary; answer git and exit before touching GPUI.
     if std::env::var_os("CORVENE_ASKPASS").is_some() {
         askpass::run();
@@ -319,6 +329,7 @@ pub(crate) fn main() {
                         .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
                 );
                 sync_renderer_flags(&s.flags);
+                sync_store_flags(&s.store, &s.flags);
                 (
                     s.settings.theme,
                     s.settings.welcome_completed,
@@ -559,6 +570,9 @@ pub(crate) fn main() {
         //   Releases… with sample releases, Create Release…; flag 346)
         //   blame:<path>[@<rev>] (the Blame view of a file, in the working tree
         //   or at a revision; flag 798)
+        //   clean-untracked[:ignored] (Repository › Clean Untracked Files…, flag 1105)
+        //   apply-patch:<path> (Apply Patch's preview of a patch file, the path
+        //   relative to the repository; flag 1106)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1240,6 +1254,27 @@ pub(crate) fn main() {
                 Dispatcher::show_recent_activity(id, cx);
             }
         });
+        // `1105-clean-untracked-files`
+        on_menu_action(cx, move |_: &CleanUntrackedFiles, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_clean_untracked_files(id, cx);
+            }
+        });
+        // `1106-apply-patch`
+        on_menu_action(cx, move |_: &ApplyPatchFromFile, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::prompt_apply_patch_file(id, cx);
+            }
+        });
+        on_menu_action(cx, move |_: &ApplyPatchFromClipboard, cx| {
+            if let Some(id) = selected(cx) {
+                let text = cx
+                    .read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .unwrap_or_default();
+                Dispatcher::preview_patch_text(id, text, cx);
+            }
+        });
         // `345-issues`
         on_menu_action(cx, move |_: &ShowIssues, cx| {
             if let Some(id) = selected(cx) {
@@ -1282,6 +1317,8 @@ pub(crate) fn main() {
         Dispatcher::start_alive(cx);
         Dispatcher::start_pull_request_updater(cx);
         Dispatcher::start_commit_status_refresh(cx);
+        // flags 342-344: OAuth tokens of GitLab and Gitea accounts expire
+        Dispatcher::start_host_token_refresh(cx);
         // GHD `componentDidMount`: offer the move to /Applications
         Dispatcher::check_move_to_applications_folder(cx);
         // `checkForUpdates(true)` at launch and every four hours (release builds)
@@ -1824,6 +1861,12 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         // the sign-in dialog (device flow by default, browser flow link)
         ("sign-in", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx),
         ("sign-in-enterprise", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx),
+        // flags 342-344: the GitLab / Gitea / Bitbucket sign-in dialog
+        ("sign-in-gitlab", _) => Dispatcher::show_host_sign_in(corvene_core::HostKind::GitLab, cx),
+        ("sign-in-gitea", _) => Dispatcher::show_host_sign_in(corvene_core::HostKind::Gitea, cx),
+        ("sign-in-bitbucket", _) => {
+            Dispatcher::show_host_sign_in(corvene_core::HostKind::Bitbucket, cx)
+        }
         // `GenericGitAuthentication` after a failed fetch (`:user` with the
         // login known, so only the password is asked for)
         (name @ ("generic-git-auth" | "generic-git-auth:user"), Some(id)) => {
@@ -1870,6 +1913,21 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         // `1216-recent-activity`
         ("recent-activity", Some(id)) => Dispatcher::show_recent_activity(id, cx),
+        // `1105-clean-untracked-files`: `clean-untracked[:ignored]`
+        ("clean-untracked", Some(id)) => Dispatcher::show_clean_untracked_files(id, cx),
+        ("clean-untracked:ignored", Some(id)) => {
+            Dispatcher::show_clean_untracked_files(id, cx);
+            Dispatcher::load_clean_preview(id, true, cx);
+        }
+        // `1106-apply-patch`: `apply-patch:<path>`, relative to the repository
+        (other, Some(id)) if other.starts_with("apply-patch:") => {
+            let path = std::path::PathBuf::from(&other["apply-patch:".len()..]);
+            let path = match corvene_core::AppState::global(cx).read(cx).repository(id) {
+                Some(repo) if path.is_relative() => repo.path.join(path),
+                _ => path,
+            };
+            Dispatcher::preview_patch_file(id, path, cx);
+        }
         // `345-issues`: the view with sample issues, the New Issue… dialog
         ("issues", Some(id)) => {
             corvene_core::issues::install_samples(id, cx);
@@ -2017,6 +2075,8 @@ fn open_store(started: Instant) -> LaunchStore {
         info!(path = %backup.display(), "backed up the store from the previous version");
     }
     let store_fallback = store_fallback.filter(|_| list_backup);
+    // `910-background-store-writes`: after the backup, which copies the file
+    sync_store_flags(&store, &launch_flags);
     phase(started, "store opened");
     LaunchStore {
         store,
@@ -2027,6 +2087,12 @@ fn open_store(started: Instant) -> LaunchStore {
         settings_file,
         store_fallback,
     }
+}
+
+/// Flag `910-background-store-writes`: commit store writes off the main
+/// thread (a durable commit is an fsync).
+fn sync_store_flags(store: &corvene_store::Store, flags: &corvene_core::Flags) {
+    store.set_background_writes(flags.bool(corvene_core::flags::ids::BACKGROUND_STORE_WRITES));
 }
 
 /// Flags `908-opaque-depth-pass` and `909-damage-scissor`: the wgpu

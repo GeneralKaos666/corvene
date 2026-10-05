@@ -23,7 +23,8 @@
 //! - `action {name}` (a registered action, e.g. `corvene::OpenSettings`)
 //! - `hook {name, arg}`: `complete-welcome`, `add-repo <path>`,
 //!   `theme light|dark|high-contrast|system`, `popup <name>` (a
-//!   `CORVENE_POPUP` name, opened now), `fake-accounts <json>` (signed-in
+//!   `CORVENE_POPUP` name, opened now), `fake-host-accounts <json>` (GitLab,
+//!   Gitea and Bitbucket accounts), `fake-accounts <json>` (signed-in
 //!   accounts + their repository lists, `tools/parity/accounts.py`)
 //! - `snap {path, cached}` → draws a fresh frame and saves it as PNG
 //!   (`cached`: re-render only invalidated views, like a real frame)
@@ -238,6 +239,10 @@ fn window_command(
             // (the macOS `NSMenu` holds this loop until it closes instead)
             #[cfg(not(target_os = "macos"))]
             corvene_ui::views_menu::close_all(cx);
+            // hit testing uses the last drawn frame, and an unfocused window
+            // gets none: without this a click right after a popup opened or
+            // a list changed lands on what was there before
+            window.draw(cx).clear(cx);
             window.dispatch_event(moved(position, None), cx);
             window.dispatch_event(down(position), cx);
             window.dispatch_event(up(position), cx);
@@ -626,6 +631,22 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
             }
         }
         "fake-accounts" => fake_accounts(arg, cx)?,
+        // flags 342-344: GitLab / Gitea / Bitbucket accounts, no tokens
+        "fake-host-accounts" => {
+            let accounts: Vec<corvene_core::HostAccount> =
+                serde_json::from_str(arg).map_err(|e| e.to_string())?;
+            corvene_core::AppState::global(cx).update(cx, |s, cx| {
+                s.hosts.accounts = accounts;
+                cx.notify();
+            });
+        }
+        // Settings › Git › Hooks › Load Git hook environment variables from
+        // shell (GHD's `git-hooks-env-enabled`): hooks interception
+        "hooks-env" => {
+            let enabled = arg != "off";
+            Dispatcher::update_settings(cx, |s| s.enable_git_hook_env = enabled);
+            Dispatcher::refresh_hook_env(cx);
+        }
         "fake-github" => fake_github(arg, cx)?,
         other => return Err(format!("unknown hook {other:?}")),
     }

@@ -11,6 +11,7 @@ corvene-extensions.workspace = true
 corvene-highlight.workspace = true
 corvene-packs.workspace = true
 corvene-github.workspace = true
+corvene-hosts.workspace = true
 corvene-models.workspace = true
 corvene-platform.workspace = true
 corvene-store.workspace = true

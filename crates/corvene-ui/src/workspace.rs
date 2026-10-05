@@ -599,6 +599,10 @@ impl Workspace {
         let state = self.state.read(cx);
         let repo = state.selected_repository();
         let has_github = repo.and_then(|r| r.github.as_ref()).is_some();
+        // flags 342-344: GitLab, Gitea or Bitbucket
+        let hosted_kind = repo
+            .and_then(|r| state.hosted_repository(r.id))
+            .map(|h| h.kind.site_name(&h.repo.endpoint));
         let rs = state.selected_state();
         let selected_change = rs.and_then(|r| {
             let path = r.selected_file.as_ref()?;
@@ -876,6 +880,13 @@ impl Workspace {
                     })
                     .and_then(|id| state.current_pull_request(id).map(|pr| (id, pr.clone())));
                 if let Some((id, pr)) = open_pr {
+                    // flags 342-344: "Merge request !12" on GitLab
+                    let kind = pr.host_kind();
+                    let noun = if kind.is_merge_request() {
+                        "Merge request"
+                    } else {
+                        "Pull request"
+                    };
                     actions.insert(
                         0,
                         SuggestedAction {
@@ -884,17 +895,24 @@ impl Workspace {
                                 Dispatcher::show_pull_request(id, cx)
                             }),
                             title: format!(
-                                "Pull request #{} is open for the current branch",
-                                pr.number
+                                "{noun} {} is open for the current branch",
+                                pr.number_label()
                             )
                             .into(),
                             description: Some(pr.title.into()),
                             hint: "Branch menu or".into(),
                             keys: &["⌘", "R"],
-                            button_label: crate::context_menu::mac_or(
-                                "View Pull Request",
-                                "View pull request",
-                            )
+                            button_label: if kind.is_merge_request() {
+                                crate::context_menu::mac_or(
+                                    "View Merge Request",
+                                    "View merge request",
+                                )
+                            } else {
+                                crate::context_menu::mac_or(
+                                    "View Pull Request",
+                                    "View pull request",
+                                )
+                            }
                             .into(),
                             primary: true,
                             menu: None,
@@ -910,6 +928,20 @@ impl Workspace {
                         hint: "Repository menu or".into(),
                         keys: &["⌘", "⇧", "G"],
                         button_label: "View on GitHub".into(),
+                        primary: false,
+                        menu: None,
+                    });
+                }
+                if let (Some(kind), Some(id)) = (hosted_kind, repo_id) {
+                    actions.push(SuggestedAction {
+                        id: "suggested-host",
+                        on_click: std::rc::Rc::new(move |_, cx| Dispatcher::view_on_github(id, cx)),
+                        title: format!("Open the repository page on {} in your browser", kind)
+                            .into(),
+                        description: None,
+                        hint: "Repository menu or".into(),
+                        keys: &["⌘", "⇧", "G"],
+                        button_label: format!("View on {kind}").into(),
                         primary: false,
                         menu: None,
                     });

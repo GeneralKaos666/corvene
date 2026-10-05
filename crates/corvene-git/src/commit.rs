@@ -327,6 +327,20 @@ pub fn commit(
     message: &str,
     opts: &CommitOptions,
 ) -> Result<String> {
+    commit_with_terminal_output(git, workdir, message, opts, None)
+}
+
+/// [`commit`] with GHD's `onTerminalOutputAvailable` (the Committing changes
+/// dialog's live output). The commit hooks (`interceptHooks`) run through
+/// the hooks proxy while it is on, with the callbacks of
+/// [`crate::hooks::with_hook_callbacks`].
+pub fn commit_with_terminal_output(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    message: &str,
+    opts: &CommitOptions,
+    on_terminal_output_available: Option<&crate::TerminalOutputCallback>,
+) -> Result<String> {
     let mut args = vec!["commit".to_string()];
     match &opts.fixup {
         Some(sha) => args.push(format!("--fixup={sha}")),
@@ -351,11 +365,22 @@ pub fn commit(
         Some(CommitAuthor::ResetToCommitter) => args.push("--reset-author".into()),
         None => {}
     }
-    let mut cmd = GitCommand::new(git).args(args).current_dir(workdir);
+    // https://git-scm.com/docs/githooks/2.46.1
+    let mut hooks = crate::hooks::COMMIT_HOOKS.to_vec();
+    if opts.amend {
+        hooks.insert(4, "post-rewrite");
+    }
+    let mut cmd = GitCommand::new(git)
+        .args(args)
+        .current_dir(workdir)
+        .intercept_hooks(&hooks);
     if opts.fixup.is_none() {
         cmd = cmd.stdin(message.as_bytes().to_vec());
     }
-    let out = cmd.run()?;
+    let out = match on_terminal_output_available {
+        Some(callback) => cmd.run_with_terminal_output(callback)?,
+        None => cmd.run()?,
+    };
     let sha = parse_commit_sha(&String::from_utf8_lossy(&out.stdout));
     info!(%sha, "created commit");
     Ok(sha)

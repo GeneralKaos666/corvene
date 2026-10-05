@@ -1098,6 +1098,8 @@ impl Dispatcher {
     pub fn view_on_github(id: u64, cx: &mut dyn Host) {
         if let Some((gh, _)) = Self::github_and_branch(id, cx) {
             Self::open_url(&gh.html_url, cx);
+        } else if Self::view_hosted_repository(id, cx) {
+            // flags 342-344: View on GitLab / Gitea / Bitbucket
         } else if let Some(url) = Self::non_github_remote_web_url(id, cx) {
             Self::open_url(&url, cx);
         }
@@ -1131,6 +1133,10 @@ impl Dispatcher {
     /// with the plain new-issue form when the repository has no templates,
     /// so, as in GHD, nothing is checked locally.
     pub fn create_issue(id: u64, cx: &mut dyn Host) {
+        // flags 342-344: the host's new issue page
+        if Self::create_issue_on_host(id, cx) {
+            return;
+        }
         let url = Self::state(cx)
             .read(cx)
             .repository(id)
@@ -1143,6 +1149,9 @@ impl Dispatcher {
 
     /// Branch › Compare on GitHub.
     pub fn compare_on_github(id: u64, cx: &mut dyn Host) {
+        if Self::compare_on_host(id, cx) {
+            return;
+        }
         if let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) {
             Self::open_url(
                 &format!("{}/compare/{}", gh.html_url, encode_component(&branch)),
@@ -1153,6 +1162,9 @@ impl Dispatcher {
 
     /// Branch › View Branch on GitHub.
     pub fn view_branch_on_github(id: u64, cx: &mut dyn Host) {
+        if Self::view_branch_on_host(id, cx) {
+            return;
+        }
         if let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) {
             Self::open_url(
                 &format!("{}/tree/{}", gh.html_url, encode_component(&branch)),
@@ -1206,7 +1218,9 @@ impl Dispatcher {
     /// `_createPullRequest(repository, baseBranch)`: an unpublished branch
     /// or unpushed commits ask `PushBranchCommits` first.
     pub fn create_pull_request_with_base(id: u64, base: Option<String>, cx: &mut dyn Host) {
-        let Some((_, Some(branch))) = Self::github_and_branch(id, cx) else {
+        let Some((_, Some(branch))) = Self::github_and_branch(id, cx)
+            .or_else(|| Self::hosted_and_branch(id, cx).map(|(h, b)| (h.repo, b)))
+        else {
             return;
         };
         let ahead_behind = Self::state(cx)
@@ -1278,6 +1292,10 @@ impl Dispatcher {
 
     /// `_openCreatePullRequestInBrowser`
     pub fn open_create_pull_request_in_browser(id: u64, base: Option<String>, cx: &mut dyn Host) {
+        // flags 342-344: the host's new pull (merge) request form
+        if Self::open_create_host_pull_request(id, base.clone(), cx) {
+            return;
+        }
         let Some((gh, Some(branch))) = Self::github_and_branch(id, cx) else {
             return;
         };
@@ -1318,6 +1336,8 @@ impl Dispatcher {
             let s = Self::state(cx).read(cx).settings.clone();
             (s.enable_git_hook_env, s.cache_git_hook_env)
         };
+        // GHD `getHooksEnvEnabled()` also turns hooks interception on
+        corvene_git::hooks::set_enabled(enabled);
         if !enabled {
             corvene_git::hook_env::clear_hook_env();
             return;

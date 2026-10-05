@@ -115,6 +115,18 @@ pub enum Popup {
         /// exited non-zero); `message` then holds its full text.
         git: Option<corvene_git::GitFailure>,
     },
+    /// GHD `PopupType.HookFailed` (`ui/hook-failed/hook-failed.tsx`): a
+    /// hook failed and waits for Abort or Ignore and Continue.
+    HookFailed {
+        hook_name: String,
+        terminal_output: String,
+        reply: crate::hooks::HookFailureReply,
+    },
+    /// GHD `PopupType.CommitProgress` (`ui/commit-progress`): the commit's
+    /// live output.
+    CommitProgress {
+        output: crate::hooks::CommitOutput,
+    },
     /// `265-remove-stale-index-lock`: an error caused by a left-over
     /// `index.lock`, with a button to remove it.
     IndexLockExists {
@@ -140,6 +152,11 @@ pub enum Popup {
     },
     SignIn {
         enterprise: bool,
+    },
+    /// Corvene (flags 342-344): sign in to GitLab, Gitea / Forgejo or
+    /// Bitbucket (`dialogs::sign_in_host`).
+    SignInHost {
+        kind: corvene_models::HostKind,
     },
     /// `all` selects the "Discard All Changes" wording.
     DiscardChanges {
@@ -545,6 +562,20 @@ pub enum Popup {
     StashWithMessage {
         repo: u64,
     },
+    /// Corvene (`1105-clean-untracked-files`): the `git clean` dry run with
+    /// a checkbox per path (`RepositoryState::clean_preview`).
+    CleanUntrackedFiles {
+        repo: u64,
+    },
+    /// Corvene (`1106-apply-patch`): the files patch `name` touches, before
+    /// it is applied.
+    ApplyPatch {
+        repo: u64,
+        /// The file's name, or "Clipboard".
+        name: String,
+        patch: std::sync::Arc<Vec<u8>>,
+        preview: corvene_git::PatchPreview,
+    },
     /// Corvene (`797-stash-list`): name the branch `git stash branch` makes.
     CreateBranchFromStash {
         repo: u64,
@@ -719,6 +750,8 @@ impl Popup {
             | Self::DropKeptStash { repo, .. }
             | Self::ConfirmDropStashEntry { repo, .. }
             | Self::StashWithMessage { repo }
+            | Self::CleanUntrackedFiles { repo }
+            | Self::ApplyPatch { repo, .. }
             | Self::CreateBranchFromStash { repo, .. }
             | Self::MoveChangesToWorktree { repo, .. }
             | Self::MultiCommitOperation { repo, .. }
@@ -1174,6 +1207,11 @@ pub struct RepositoryState {
     pub show_co_authored_by: bool,
     pub co_authors: Vec<corvene_models::Author>,
     pub committing: bool,
+    /// GHD `hookProgress`: the commit's hook running or just done (hooks
+    /// interception, Settings › Git › Hooks).
+    pub hook_progress: Option<corvene_git::hooks::HookProgress>,
+    /// GHD `subscribeToCommitOutput`: the output of the commit in progress.
+    pub commit_output: Option<crate::hooks::CommitOutput>,
     /// Discard Changes is running (`708-changes-busy-indicator`).
     pub discarding: bool,
     /// A refresh was requested while one was running; run again when done.
@@ -1414,6 +1452,8 @@ pub struct RepositoryState {
     /// Repository › Recent Activity…: History lists the reflog instead.
     pub reflog: Option<crate::reflog::ReflogState>,
 
+    /// `1105-clean-untracked-files`: the dry run Clean Untracked Files shows.
+    pub clean_preview: Option<crate::clean_untracked::CleanPreview>,
     // ---- `345-issues` ----
     /// Repository › Issues…: History lists the issues instead (also holds
     /// the New Issue… labels and assignees while the list is closed).
@@ -1701,6 +1741,9 @@ pub struct AppState {
     /// saved, and the repositories whose first status already got them.
     pub excluded_files: HashMap<u64, Vec<String>>,
     pub excluded_files_restored: std::collections::HashSet<u64>,
+    /// Corvene (flags `342-gitlab`, `343-gitea`, `344-bitbucket`): GitLab,
+    /// Gitea / Forgejo and Bitbucket accounts and data (`hosts.rs`).
+    pub hosts: crate::hosts::HostsState,
 }
 
 impl AppState {

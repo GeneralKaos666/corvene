@@ -4,6 +4,7 @@
 pub mod bisect;
 pub mod blame;
 pub mod branch_ops;
+pub mod clean;
 pub mod commit;
 pub mod commit_template;
 pub mod config;
@@ -17,6 +18,7 @@ pub mod git_errors;
 pub mod handle;
 pub mod history_ops;
 pub mod hook_env;
+pub mod hooks;
 pub mod ignore;
 pub mod index_lock;
 pub mod lfs;
@@ -24,7 +26,9 @@ pub mod lfs_progress;
 pub mod log;
 mod log_gix;
 pub mod ops;
+pub mod partial_stash;
 pub mod patch;
+pub mod patch_import;
 pub mod paths;
 pub mod process;
 pub mod proxy;
@@ -70,11 +74,13 @@ pub use branch_ops::{
     pop_stash_entry, pop_stash_on_branch, recent_branches, remote_head, rename_branch,
     set_upstream, stashed_files, update_submodules_after_checkout,
 };
+pub use clean::{clean_dry_run, clean_paths, parse_clean_dry_run, unquote_c_path};
 pub use commit::{
     CommitAuthor, CommitOptions, RECEIVE_LIMIT, add_paths, assume_unchanged_paths, commit,
-    delete_worktree_paths, discard_changes, format_message, head_sha, hook_exists,
-    large_file_paths, merge_trailers, parse_commit_author, parse_commit_sha, restore_mode_changes,
-    set_assume_unchanged, stage_files, staged_mode_changes, undo_last_commit, unstage_all,
+    commit_with_terminal_output, delete_worktree_paths, discard_changes, format_message, head_sha,
+    hook_exists, large_file_paths, merge_trailers, parse_commit_author, parse_commit_sha,
+    restore_mode_changes, set_assume_unchanged, stage_files, staged_mode_changes, undo_last_commit,
+    unstage_all,
 };
 pub use config::{
     IssueTracker, add_safe_directory, boolean_config_value, branch_merge_base,
@@ -132,10 +138,15 @@ pub use ops::{
     normalize_clone_url, parse_clone_progress, path_status, readme_exists, refresh_index,
     repositories_inside, repository_name_from_url, root_path_status, set_global_identity,
 };
+pub use partial_stash::create_partial_stash;
 pub use patch::{
     PatchOptions, apply_patch_to_index, discard_changes_from_selection, format_patch,
     format_patch_to_discard_changes, format_patch_to_discard_changes_with, format_patch_with,
     stage_partial_files, stage_partial_files_with,
+};
+pub use patch_import::{
+    PatchApply, PatchFile, PatchFileChange, PatchPreview, apply_mailbox, apply_patch,
+    mailbox_subjects, preview_patch,
 };
 pub use paths::git_dir;
 pub use process::{

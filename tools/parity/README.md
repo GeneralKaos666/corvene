@@ -84,7 +84,7 @@ same data for scripts.
 ```yaml
 name: branch-foldout
 description: What this covers
-setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | repo-graph (plus a merged branch, an octopus merge and an unmerged branch) | empty (no repositories) | welcome (first launch)
+setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | repo-graph (plus a merged branch, an octopus merge and an unmerged branch) | repo-tools (plus ignored files, and `../parity-fixture.patch` / `.mbox` beside the repository) | empty (no repositories) | welcome (first launch)
 corvene_flags: 1213-commit-graph=on   # optional: flags for Corvene after the GHD preset (a surface GHD lacks)
 github_stub: true                     # optional: a stub GitHub API for Corvene (`github_stub.py`), reached by the `github: stub` step
 ghd_env: {GITHUB_DESKTOP_PREVIEW_FEATURES: 1}   # optional: extra env for GHD (test-* popups need this; it also turns on beta features)
@@ -109,6 +109,7 @@ steps:
   - ghd: {eval: "…"}                     # app-specific step (either side can be `{skip: true}`)
     corvene: {hook: {name: popup, arg: about}}   # hooks: complete-welcome, add-repo, theme, popup, refresh (GHD's `focus` IPC)
   - fixture: move                        # rename both fixture repositories away (missing repository)
+  - hooks: {pre-commit: "#!/bin/sh\nexit 1\n"}   # executable git hooks in both fixture repositories
   - context_menu: add                    # compare both apps' last native menu (items, separators, disabled/checked)
   - context_menu_pick: "Clone Repository…"   # choose an item in both (GHD: resolves its IPC; Corvene: menu-pick)
   - corvene_menu: options                  # record Corvene's last menu in the report (a menu GHD lacks, no comparison)

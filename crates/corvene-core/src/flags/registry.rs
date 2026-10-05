@@ -2805,6 +2805,60 @@ registry! {
         code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs"],
     },
 
+    /// GitLab accounts, merge requests and pipelines.
+    GITLAB = 342 "gitlab" {
+        title: "GitLab",
+        summary: "Sign in to GitLab.com or a self-managed GitLab (browser or personal access \
+                  token) in Settings › Accounts. A repository on GitLab gets the Merge Requests \
+                  tab, Create Merge Request, the current branch's merge request with its pipeline \
+                  in the toolbar and the checks popover, View on GitLab, and HTTPS credentials \
+                  for git from the account. Public gitlab.com projects work without signing in.",
+        ghd_behaviour: "Only GitHub.com and GitHub Enterprise; a GitLab repository is a plain \
+                        repository and git asks for its credentials.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7875), Upstream::issue(18588)],
+        code: &["crates/corvene-hosts/src/gitlab.rs", "crates/corvene-core/src/hosts.rs", "crates/corvene-ui/src/dialogs/sign_in_host.rs"],
+    },
+
+    /// Gitea, Forgejo and Codeberg accounts, pull requests and statuses.
+    GITEA = 343 "gitea" {
+        title: "Gitea, Forgejo and Codeberg",
+        summary: "Sign in to Codeberg or a self-hosted Gitea or Forgejo (browser or access \
+                  token) in Settings › Accounts. A repository there gets the Pull Requests tab, \
+                  Create Pull Request, the current branch's pull request with its commit \
+                  statuses (Actions too) in the toolbar and the checks popover, View on the \
+                  host, and HTTPS credentials for git. Public Codeberg repositories work without \
+                  signing in.",
+        ghd_behaviour: "Only GitHub.com and GitHub Enterprise.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-hosts/src/gitea.rs", "crates/corvene-core/src/hosts.rs", "crates/corvene-ui/src/dialogs/sign_in_host.rs"],
+    },
+
+    /// Bitbucket Cloud accounts, pull requests and build statuses.
+    BITBUCKET = 344 "bitbucket" {
+        title: "Bitbucket",
+        summary: "Sign in to Bitbucket Cloud with an Atlassian API token in Settings › \
+                  Accounts. A repository on bitbucket.org gets the Pull Requests tab, Create Pull \
+                  Request, the current branch's pull request with its build statuses \
+                  (Pipelines too) in the toolbar and the checks popover, View on Bitbucket, and \
+                  HTTPS credentials for git. Public repositories work without signing in.",
+        ghd_behaviour: "Only GitHub.com and GitHub Enterprise; git asks for Bitbucket's \
+                        credentials and app passwords no longer work.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14052)],
+        code: &["crates/corvene-hosts/src/bitbucket.rs", "crates/corvene-core/src/hosts.rs", "crates/corvene-ui/src/dialogs/sign_in_host.rs"],
+    },
+
     /// Repository › Issues…: the repository's issues in the app.
     ISSUES = 345 "issues" {
         title: "Issues",
@@ -7248,6 +7302,24 @@ registry! {
         code: &["vendor/gpui-pre-wgpu/src/wgpu_renderer.rs", "crates/corvene/src/main.rs"],
     },
 
+    /// Store writes committed on a background thread.
+    BACKGROUND_STORE_WRITES = 910 "background-store-writes" {
+        title: "Save settings in the background",
+        summary: "Changed settings, the selected repository and the other things Corvene \
+                  remembers are saved to disk by a background thread, so the click or drag that \
+                  changed them does not wait 5-35 ms for the disk to confirm the save. They are \
+                  read back at once, saved in the order they were made, and the rest is saved \
+                  before Corvene quits; a crash loses at most the last few milliseconds.",
+        ghd_behaviour: "Settings live in Chromium's localStorage, which writes to disk in the \
+                        background.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-store/src/lib.rs", "crates/corvene/src/main.rs"],
+    },
+
     // ---- 1000 Experimental ----
 
     /// Compile tree-sitter grammars an extension names but Corvene lacks.
@@ -7335,6 +7407,39 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(11575)],
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/git_errors.rs"],
+    },
+    /// Repository › Clean Untracked Files…: `git clean` with a preview.
+    CLEAN_UNTRACKED_FILES = 1105 "clean-untracked-files" {
+        title: "Clean untracked files",
+        summary: "Repository › Clean Untracked Files… (also in the changes list's menu) lists \
+                  what git clean would delete, the untracked files and folders, each with a \
+                  checkbox. Include ignored files adds what .gitignore hides, such as build \
+                  output. The ticked paths are deleted for good, not moved to the Trash.",
+        ghd_behaviour: "Untracked files are discarded one by one from the changes list (to the \
+                        Trash) and ignored files cannot be removed at all.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15485)],
+        code: &["crates/corvene-core/src/clean_untracked.rs", "crates/corvene-git/src/clean.rs", "crates/corvene-ui/src/dialogs/clean_untracked_files.rs"],
+    },
+    /// Repository › Apply Patch from File… / from Clipboard.
+    APPLY_PATCH = 1106 "apply-patch" {
+        title: "Apply patches",
+        summary: "Repository › Apply Patch › From File… and From Clipboard show the files a \
+                  patch touches and whether it applies as it is, then apply it as \
+                  uncommitted changes. A patch that does not apply cleanly goes in with a \
+                  three-way merge, and its conflicts show in the changes list. A series made \
+                  with git format-patch can instead become commits (git am); if one patch \
+                  fails, nothing is committed.",
+        ghd_behaviour: "Patches can be created (Create Patch File) but not applied.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8703)],
+        code: &["crates/corvene-core/src/apply_patch.rs", "crates/corvene-git/src/patch_import.rs", "crates/corvene-ui/src/dialogs/apply_patch.rs"],
     },
 
     // ---- 1200 History & branches (overflow) ----
@@ -7651,6 +7756,25 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(62), Upstream::issue(1646)],
         code: &["crates/corvene-core/src/commit_message.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+    /// Stash some lines: a hunk, a line or the checked changes.
+    PARTIAL_STASH = 1303 "partial-stash" {
+        title: "Stash lines",
+        summary: "The diff's gutter menu has Stash Added Line, Stash Modified Lines and so on \
+                  next to Discard, its text menu Stash N Selected Lines, and the changes list's \
+                  menu Stash Checked Changes, which stashes the checked files and, in partly \
+                  checked files, only the checked lines. New, deleted and renamed files go into the stash whole. \
+                  With the stash list the result is a stash of its own beside the branch's; \
+                  without it, it is the branch's stash, and the items are disabled while the \
+                  branch has one. A stash restores over the changes left in the same files \
+                  when the two do not touch the same lines.",
+        ghd_behaviour: "Only all changes can be stashed (Stash All Changes).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21882), Upstream::issue(21378)],
+        code: &["crates/corvene-core/src/stash_flows.rs", "crates/corvene-git/src/partial_stash.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
     },
 }
 

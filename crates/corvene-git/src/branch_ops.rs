@@ -561,6 +561,15 @@ pub fn merge_branch(
     merge_branch_with_message(git, workdir, branch, squash, None)
 }
 
+/// GHD `createSquashMergeCommit`'s `interceptHooks`.
+const SQUASH_MERGE_COMMIT_HOOKS: &[&str] = &[
+    "pre-merge-commit",
+    "prepare-commit-msg",
+    "commit-msg",
+    "post-commit",
+    "pre-auto-gc",
+];
+
 /// [`merge_branch`]; a squash merge given `message` commits with it instead
 /// of git's "Squashed commit of the following" list (on conflicts it becomes
 /// `SQUASH_MSG`, and `MERGE_MSG`'s conflict note goes, so the commit made
@@ -575,7 +584,8 @@ pub fn merge_branch_with_message(
     let message = message.filter(|m| squash && !m.trim().is_empty());
     let mut cmd = GitCommand::new(git.clone())
         .args(["merge"])
-        .current_dir(workdir);
+        .current_dir(workdir)
+        .intercept_hooks(&["pre-merge-commit", "post-merge", "commit-msg"]);
     if squash {
         cmd = cmd.arg("--squash");
     }
@@ -603,11 +613,13 @@ pub fn merge_branch_with_message(
             .args(["commit", "-F", "-"])
             .stdin(message.as_bytes().to_vec())
             .current_dir(workdir)
+            .intercept_hooks(SQUASH_MERGE_COMMIT_HOOKS)
             .run()?;
     } else if squash {
         GitCommand::new(git)
             .args(["commit", "--no-edit"])
             .current_dir(workdir)
+            .intercept_hooks(SQUASH_MERGE_COMMIT_HOOKS)
             .run()?;
     }
     let stdout = out.stdout_string()?;

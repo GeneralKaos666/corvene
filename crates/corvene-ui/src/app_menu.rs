@@ -28,7 +28,9 @@
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
 //! Pull All Repositories (flag `299-pull-all-repositories`), Repository ›
 //! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Recent
-//! Activity… (flag `1216-recent-activity`), Repository › Start
+//! Activity… (flag `1216-recent-activity`), Repository › Clean Untracked
+//! Files… (flag `1105-clean-untracked-files`), Repository › Apply Patch ▸
+//! (flag `1106-apply-patch`), Repository › Start
 //! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
 //! Fetch From ▸ with a repository's remotes when it has several (flag
 //! `1210-push-to-other-remote`), Branch › Request
@@ -86,6 +88,10 @@ pub struct MenuLabelsEvent {
     pub navigation: (bool, bool),
     /// Corvene's flag-dependent items.
     pub extras: MenuExtras,
+    /// Corvene (flags 342-344): the selected repository is on GitLab,
+    /// Gitea or Bitbucket, so its items say "View on GitLab", "Create
+    /// Merge Request"…
+    pub host: Option<(corvene_core::HostKind, &'static str)>,
 }
 
 impl Default for MenuLabelsEvent {
@@ -105,6 +111,7 @@ impl Default for MenuLabelsEvent {
             editors: Vec::new(),
             navigation: (false, false),
             extras: MenuExtras::default(),
+            host: None,
         }
     }
 }
@@ -135,6 +142,12 @@ pub struct MenuExtras {
     pub bisect: Option<bool>,
     /// Flag `1216-recent-activity`: Repository › Recent Activity….
     pub recent_activity: bool,
+    /// Flag `1105-clean-untracked-files`: Repository › Clean Untracked
+    /// Files….
+    pub clean_untracked: bool,
+    /// Flag `1106-apply-patch`: Repository › Apply Patch ▸ From File… /
+    /// From Clipboard.
+    pub apply_patch: bool,
     /// Flag `345-issues`: Repository › Issues… and New Issue…, enabled
     /// for a GitHub repository that is not archived (set by
     /// [`MenuLabelsEvent::of`]).
@@ -180,6 +193,8 @@ impl MenuExtras {
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             bisect: flags.bool(ids::BISECT).then_some(false),
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
+            clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
+            apply_patch: flags.bool(ids::APPLY_PATCH),
             issues: flags.bool(ids::ISSUES).then_some(false),
             releases: flags.bool(ids::RELEASES).then_some(false),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
@@ -287,6 +302,9 @@ impl MenuLabelsEvent {
             ) != corvene_core::ForcePushState::NotAvailable,
             is_stashed_changes_visible: rs.showing_stash,
             has_current_pull_request: s.current_pull_request(repository.id).is_some(),
+            host: s
+                .hosted_repository(repository.id)
+                .map(|h| (h.kind, h.kind.site_name(&h.repo.endpoint))),
             // `changesState.stashEntry !== null`
             ask_for_confirmation_when_stashing_all_changes: rs.desktop_stash().is_some(),
             remotes: corvene_core::Dispatcher::menu_remotes(s, repository.id),
@@ -408,13 +426,28 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     } else {
         l("Remove", "&Remove")
     };
+    // flags 342-344: the host's name and, on GitLab, "merge request"
+    let (host, site) = labels
+        .host
+        .unwrap_or((corvene_core::HostKind::GitHub, "GitHub"));
+    let hosted = |label: &'static str| -> String {
+        let label = label.replace("GitHub", site);
+        if host.is_merge_request() {
+            label
+                .replace("Pull Request", "Merge Request")
+                .replace("&pull request", "&merge request")
+                .replace("pull request", "merge request")
+        } else {
+            label
+        }
+    };
     let pull_request_label = if labels.has_current_pull_request {
-        l(
+        hosted(l(
             "View Pull Request on GitHub",
             "View &pull request on GitHub",
-        )
+        ))
     } else {
-        l("Create Pull Request", "Create &pull request")
+        hosted(l("Create Pull Request", "Create &pull request"))
     };
 
     let mut template = Vec::new();
@@ -638,7 +671,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     }
     repository.extend([
         separator(),
-        item(l("View on GitHub", "&View on GitHub"), ViewOnGitHub),
+        item(hosted(l("View on GitHub", "&View on GitHub")), ViewOnGitHub),
     ]);
     if extras.show_view_upstream {
         repository.push(item(
@@ -683,13 +716,35 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         item(l("Open With…", "Open &with…"), OpenWith),
         separator(),
         item(
-            l("Create Issue on GitHub", "Create &issue on GitHub"),
+            hosted(l("Create Issue on GitHub", "Create &issue on GitHub")),
             CreateIssue,
         ),
         separator(),
         item(l("New Worktree…", "New work&tree…"), NewWorktree),
         separator(),
     ]);
+    // Corvene (`1105-clean-untracked-files`, `1106-apply-patch`)
+    if extras.clean_untracked || extras.apply_patch {
+        if extras.clean_untracked {
+            repository.push(item(
+                l("Clean Untracked Files…", "Clean untrac&ked files…"),
+                CleanUntrackedFiles,
+            ));
+        }
+        if extras.apply_patch {
+            repository.push(submenu(
+                l("Apply Patch", "Apply patc&h"),
+                vec![
+                    item(l("From File…", "From &file…"), ApplyPatchFromFile),
+                    item(
+                        l("From Clipboard", "From &clipboard"),
+                        ApplyPatchFromClipboard,
+                    ),
+                ],
+            ));
+        }
+        repository.push(separator());
+    }
     // Corvene (`345-issues`)
     if let Some(enabled) = extras.issues {
         repository.extend([
@@ -833,11 +888,11 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     branch.extend([
         separator(),
         item(
-            l("Compare on GitHub", "Compare on &GitHub"),
+            hosted(l("Compare on GitHub", "Compare on &GitHub")),
             CompareOnGitHub,
         ),
         item(
-            l("View Branch on GitHub", "View branch on GitHub"),
+            hosted(l("View Branch on GitHub", "View branch on GitHub")),
             ViewBranchOnGitHub,
         ),
     ]);
@@ -847,7 +902,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     }
     branch.extend([
         item(
-            l("Preview Pull Request", "Preview pull request"),
+            hosted(l("Preview Pull Request", "Preview pull request")),
             PreviewPullRequest,
         ),
         item(pull_request_label, CreatePullRequest),
@@ -1095,6 +1150,8 @@ mod tests {
                     fetch_tags: true,
                     bisect: Some(bits & 1 != 0),
                     recent_activity: true,
+                    clean_untracked: true,
+                    apply_patch: true,
                     issues: Some(true),
                     releases: Some(true),
                     request_reviewers: true,

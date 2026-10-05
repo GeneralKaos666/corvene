@@ -9,9 +9,11 @@ mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
 mod app_dialogs;
+mod apply_patch;
 pub(crate) mod branch_dialogs;
 mod change_repository_alias;
 mod ci_check_run_rerun;
+mod clean_untracked_files;
 pub(crate) mod clone_repository;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
@@ -25,6 +27,7 @@ mod discard_selection;
 mod flags;
 mod fork_dialogs;
 mod history_dialogs;
+mod hook_dialogs;
 mod ignore_with_pattern;
 mod import_git_config;
 mod import_github_desktop;
@@ -48,6 +51,7 @@ mod repository_settings;
 mod request_reviewers;
 mod reset_to_reflog_entry;
 mod sign_in;
+pub mod sign_in_host;
 mod simple;
 mod ssh_key_passphrase;
 mod start_bisect;
@@ -92,6 +96,7 @@ pub use history_dialogs::{
     ResetToCommitDialog, ResetToRemoteDialog, UnreachableCommitsDialog,
     WarnLocalChangesBeforeUndoDialog, WarnTaggedCommitBeforeUndoDialog,
 };
+pub use hook_dialogs::{CommitProgressDialog, HookFailedDialog};
 pub use mco_dialogs::{LocalChangesOverwrittenDialog, McoDialog, SquashCommitMessageDialog};
 pub use new_issue::NewIssueDialog;
 pub use open_pull_request::OpenPullRequestDialog;
@@ -147,6 +152,18 @@ impl DialogHost {
             | Popup::IndexLockExists { .. }
             | Popup::InstallGit { .. }
             | Popup::CLIInstalled { .. } => cx.new(|_| SimpleDialog::new(popup.clone())).into(),
+            Popup::HookFailed {
+                hook_name,
+                terminal_output,
+                reply,
+            } => cx
+                .new(|cx| {
+                    HookFailedDialog::new(hook_name.clone(), terminal_output, reply.clone(), cx)
+                })
+                .into(),
+            Popup::CommitProgress { output } => cx
+                .new(|cx| CommitProgressDialog::new(state, output.clone(), cx))
+                .into(),
             Popup::AddExistingRepository { path } => cx
                 .new(|cx| AddExistingRepositoryDialog::new(state, path.clone(), window, cx))
                 .into(),
@@ -170,6 +187,9 @@ impl DialogHost {
                 .into(),
             Popup::SignIn { enterprise } => cx
                 .new(|cx| SignInDialog::new(state, *enterprise, window, cx))
+                .into(),
+            Popup::SignInHost { kind } => cx
+                .new(|cx| sign_in_host::SignInHostDialog::new(state, *kind, window, cx))
                 .into(),
             Popup::DiscardChanges { repo, paths, all } => cx
                 .new(|_| DiscardChangesDialog::new(*repo, paths.clone(), *all))
@@ -570,6 +590,24 @@ impl DialogHost {
                 .into(),
             Popup::StashWithMessage { repo } => cx
                 .new(|cx| stash_list_dialogs::StashWithMessageDialog::new(*repo, window, cx))
+                .into(),
+            Popup::CleanUntrackedFiles { repo } => cx
+                .new(|cx| clean_untracked_files::CleanUntrackedFilesDialog::new(state, *repo, cx))
+                .into(),
+            Popup::ApplyPatch {
+                repo,
+                name,
+                patch,
+                preview,
+            } => cx
+                .new(|_| {
+                    apply_patch::ApplyPatchDialog::new(
+                        *repo,
+                        name.clone(),
+                        patch.clone(),
+                        preview.clone(),
+                    )
+                })
                 .into(),
             Popup::CreateBranchFromStash { repo, stash } => cx
                 .new(|cx| {

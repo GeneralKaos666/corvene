@@ -2,6 +2,9 @@
 //! `styles/ui/changes/{_changes-list,_commit-message}.scss`.
 //!
 //! Deviations (GHD `app/src/ui/changes/commit-message.tsx`):
+//! - while committing, the summary and description get the read-only
+//!   background but keep their text colour and still take typing (GHD's
+//!   `readOnly={isCommitting}` dims the text and refuses it).
 //! - a detached HEAD gets a commit warning (`730-detached-head-commit-warning`).
 //! - committing is off while the repository bisects, with a warning that
 //!   offers to stop (`1212-bisect`).
@@ -3241,6 +3244,24 @@ impl ChangesSidebar {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::STASH_LIST);
+        // `1303-partial-stash` (with whether any change is checked) and
+        // `1105-clean-untracked-files`
+        let (partial_stash, clean_untracked) = {
+            let s = self.state.read(cx);
+            (
+                s.selected_state().and_then(|rs| {
+                    let stash = corvene_core::stash_flows::PartialStash::of(s, rs)?;
+                    let checked = rs.status.as_deref().is_some_and(|st| {
+                        st.files
+                            .iter()
+                            .any(|f| f.selection.kind() != DiffSelectionType::None)
+                    });
+                    Some((stash, checked))
+                }),
+                s.flags
+                    .bool(corvene_core::flags::ids::CLEAN_UNTRACKED_FILES),
+            )
+        };
         let (id, confirm, paths, openable, assume_unchanged, has_stash, can_stash, move_changes) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
@@ -3326,6 +3347,24 @@ impl ChangesSidebar {
                 .enabled(has_changes && can_stash),
             );
         }
+        if let Some((stash, checked)) = partial_stash {
+            let label = mac_or("Stash Checked Changes", "Stash checked changes");
+            let label = if stash == corvene_core::stash_flows::PartialStash::Blocked {
+                let why = mac_or(
+                    " (Restore or Discard the Stash First)",
+                    " (restore or discard the stash first)",
+                );
+                format!("{label}{why}")
+            } else {
+                label.to_string()
+            };
+            items.push(
+                MenuItem::new(label, move |_, cx| {
+                    Dispatcher::stash_checked_changes(id, cx)
+                })
+                .enabled(checked && stash != corvene_core::stash_flows::PartialStash::Blocked),
+            );
+        }
         if let Some(other_worktree) = move_changes {
             items.push(
                 MenuItem::new(
@@ -3334,6 +3373,13 @@ impl ChangesSidebar {
                 )
                 .enabled(has_changes && can_stash && other_worktree),
             );
+        }
+        if clean_untracked {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::new(
+                mac_or("Clean Untracked Files…", "Clean untracked files…"),
+                move |_, cx| Dispatcher::show_clean_untracked_files(id, cx),
+            ));
         }
         if let Some(files) = openable {
             items.push(MenuItem::separator());
@@ -5120,6 +5166,11 @@ impl ChangesSidebar {
         let trailing_icon = self
             .rule_failure_hint(cx)
             .or_else(|| self.summary_length_hint(cx));
+        let committing_now = self
+            .state
+            .read(cx)
+            .selected_state()
+            .is_some_and(|rs| rs.committing);
         let description_box_focused = self.description_focus.is_focused(window)
             || self.commit_options_focus.is_focused(window);
         let avatar = self
@@ -5276,6 +5327,8 @@ impl ChangesSidebar {
                                     cx,
                                 )
                                 .relative()
+                                // `readOnly={isCommitting}`: `textboxish-disabled-styles`
+                                .when(committing_now, |d| d.bg(t.box_alt_background))
                                 // `.with-trailing-icon input { padding-right:
                                 // 20px }` (the kit's input pads 4 px itself)
                                 .when(trailing_icon.is_some(), |d| d.pr(zpx(16.)))
@@ -5310,6 +5363,8 @@ impl ChangesSidebar {
                     .rounded_t(BORDER_RADIUS())
                     .when(!co_authors_visible, |d| d.rounded_b(BORDER_RADIUS()))
                     .bg(t.box_background)
+                    // the read-only textarea and `.action-bar.disabled`
+                    .when(committing_now, |d| d.bg(t.box_alt_background))
                     .overflow_hidden()
                     .child({
                         let menu = self.input_menu(CommitField::Description, cx);
@@ -5491,7 +5546,42 @@ impl ChangesSidebar {
                         )
                 };
                 let disabled = self.commit_disabled(cx);
+                // GHD `<Loading />` before the text while committing
+                let label = div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .when(committing, |d| {
+                        let color = if disabled {
+                            crate::widgets::faded(cx.ghd().button_text, cx.ghd().box_alt_background)
+                        } else {
+                            cx.ghd().button_text
+                        };
+                        d.child(
+                            div()
+                                .w(zpx(16.))
+                                .h(zpx(12.))
+                                .mr(zpx(5.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(crate::icons::spin(
+                                    octicon(Octicon::SyncClockwise, color).size(zpx(12.)),
+                                    "commit-spinner",
+                                )),
+                        )
+                    })
+                    .child(label);
                 let button = primary_button("commit", label, disabled, cx)
+                    // `opacity: 0.6` shows the commit form's box-alt
+                    // background through, not the page's
+                    .when(disabled, |d| {
+                        let t = cx.ghd();
+                        let bg = crate::widgets::faded(t.button_background, t.box_alt_background);
+                        d.bg(bg)
+                            .border_color(bg)
+                            .text_color(crate::widgets::faded(t.button_text, t.box_alt_background))
+                    })
                     .w_full()
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.commit_disabled(cx) {
@@ -5509,9 +5599,98 @@ impl ChangesSidebar {
                     None => button,
                 }
             })
+            .children(self.commit_progress(cx))
             .children(self.upstream_gone_note(cx))
             .children(self.signing_note(cx))
             .when_some(self.undo_bar(cx), |d, bar| d.child(bar))
+    }
+
+    /// GHD `renderCommitProgress`: under the commit button while a commit's
+    /// hook runs (hooks interception), with Show commit progress (the
+    /// Committing changes dialog) once git's output can be followed.
+    fn commit_progress(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        use corvene_git::hooks::HookStatus;
+        let t = cx.ghd();
+        let s = self.state.read(cx);
+        let rs = s.selected_state()?;
+        let progress = rs.hook_progress.as_ref().filter(|_| rs.committing)?;
+        let hook = &progress.hook_name;
+        let text = match progress.status {
+            HookStatus::Finished if hook == "pre-auto-gc" => "Optimizing repository…".to_string(),
+            HookStatus::Started => format!("{hook} hook running…"),
+            HookStatus::Finished => format!("{hook} hook finished"),
+            HookStatus::Failed => format!("{hook} hook failed"),
+        };
+        let output = rs.commit_output.clone();
+        let with_button = output.is_some();
+        let border = t.secondary_button_border;
+        let description = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .px(SPACING())
+            .border_1()
+            .border_color(border)
+            .when(with_button, |d| d.border_r_0())
+            .rounded_l(BORDER_RADIUS())
+            .when(!with_button, |d| d.rounded_r(BORDER_RADIUS()))
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .child(text),
+            );
+        let button = output.map(|output| {
+            let (bg, hover_bg, hover_border) = (
+                t.secondary_button_background,
+                t.secondary_button_hover_background,
+                t.secondary_button_hover_border,
+            );
+            let button = div()
+                .id("show-commit-progress")
+                .flex_none()
+                .w(zpx(30.))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(bg)
+                .border_1()
+                .border_color(border)
+                .rounded_r(BORDER_RADIUS())
+                .cursor_pointer()
+                .hover(move |s| s.bg(hover_bg).border_color(hover_border))
+                .child(octicon(Octicon::Terminal, t.secondary_button_text).size(zpx(12.)))
+                .on_click(move |_, _, cx| {
+                    Dispatcher::show_popup(
+                        corvene_core::Popup::CommitProgress {
+                            output: output.clone(),
+                        },
+                        cx,
+                    )
+                });
+            crate::widgets::with_directed_tooltip(
+                button,
+                "Show commit progress",
+                crate::widgets::TooltipDirection::North,
+            )
+        });
+        Some(
+            div()
+                .id("commit-progress")
+                .mt(SPACING_HALF())
+                .h(zpx(30.))
+                .flex()
+                .flex_row()
+                .items_center()
+                .child(description)
+                .children(button)
+                .into_any_element(),
+        )
     }
 
     /// Corvene (`526-commit-signing`): under the commit button, git signs

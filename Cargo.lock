@@ -1607,6 +1607,7 @@ dependencies = [
  "corvene-git",
  "corvene-github",
  "corvene-highlight",
+ "corvene-hosts",
  "corvene-models",
  "corvene-packs",
  "corvene-platform",
@@ -1830,11 +1831,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "corvene-hosts"
+version = "0.1.0"
+dependencies = [
+ "corvene-github",
+ "corvene-models",
+ "corvene-platform",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+ "ureq",
+]
+
+[[package]]
 name = "corvene-models"
 version = "0.1.0"
 dependencies = [
  "corvene-test-support",
  "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1915,6 +1932,7 @@ dependencies = [
  "corvene-git",
  "corvene-github",
  "corvene-highlight",
+ "corvene-hosts",
  "corvene-packs",
  "corvene-platform",
  "corvene-test-support",

@@ -1462,8 +1462,24 @@ impl DiffView {
         if discard_menu && let Some(item) = self.discard_selected_text_item(cx) {
             if !separated {
                 items.push(MenuItem::separator());
+                separated = true;
             }
             items.push(item);
+        }
+        // `1303-partial-stash`: the same lines into a stash
+        let mut stash_items: Vec<MenuItem> = Vec::new();
+        if let Some((original, (start, len), kind)) = discard {
+            stash_items.extend(self.stash_item(original, 1, kind, cx));
+            if len > 1 {
+                stash_items.extend(self.stash_item(start, len, kind, cx));
+            }
+        }
+        stash_items.extend(self.stash_selected_text_item(cx));
+        if !stash_items.is_empty() {
+            if !separated {
+                items.push(MenuItem::separator());
+            }
+            items.extend(stash_items);
         }
         if let Some(item) = self.expand_menu_item(cx) {
             items.push(MenuItem::separator());
@@ -1553,15 +1569,20 @@ impl DiffView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(item) = self.discard_item(start, len, kind, cx) {
-            self.open_menu(vec![item], position, window, cx);
+        // `1303-partial-stash`: Stash … Lines after the discard item
+        let items: Vec<MenuItem> = self
+            .discard_item(start, len, kind, cx)
+            .into_iter()
+            .chain(self.stash_item(start, len, kind, cx))
+            .collect();
+        if !items.is_empty() {
+            self.open_menu(items, position, window, cx);
         }
     }
 
-    /// `760-discard-from-text-menu`: "Discard N Selected Lines…" for the
-    /// added and removed lines the text selection spans, when there are
-    /// several (desktop/desktop#16415); same conditions as [`Self::discard_item`].
-    fn discard_selected_text_item(&self, cx: &Context<Self>) -> Option<MenuItem> {
+    /// The selection indices of the added and removed lines the text
+    /// selection spans, each once and in order.
+    fn selected_text_lines(&self) -> Option<Vec<u32>> {
         let sel = self.text_selection_snapshot()?;
         // a selection that ends at the start of a row takes nothing from it
         let last = if sel.end.col == 0 && sel.end.row > sel.start.row {
@@ -1569,22 +1590,100 @@ impl DiffView {
         } else {
             sel.end.row
         };
-        let lines: Vec<u32> = (sel.start.row..=last)
-            .filter_map(|ix| {
-                let unified = if self.split_mode {
-                    let (before, after) = self.split_rows.get(ix)?.unified_rows();
-                    match sel.column {
-                        Column::Before => before,
-                        Column::After => after,
-                    }?
-                } else {
-                    ix
-                };
-                Some(self.rows.get(unified)?.discard_target()?.0)
+        Some(
+            (sel.start.row..=last)
+                .filter_map(|ix| {
+                    let unified = if self.split_mode {
+                        let (before, after) = self.split_rows.get(ix)?.unified_rows();
+                        match sel.column {
+                            Column::Before => before,
+                            Column::After => after,
+                        }?
+                    } else {
+                        ix
+                    };
+                    Some(self.rows.get(unified)?.discard_target()?.0)
+                })
+                .collect::<std::collections::BTreeSet<u32>>()
+                .into_iter()
+                .collect(),
+        )
+    }
+
+    /// `1303-partial-stash`: "Stash N Selected Lines" for the changed lines
+    /// the text selection spans, when there are several.
+    fn stash_selected_text_item(&self, cx: &Context<Self>) -> Option<MenuItem> {
+        let lines = self.selected_text_lines()?;
+        if lines.len() < 2 {
+            return None;
+        }
+        let (repo, path, enabled) = self.stash_target(cx)?;
+        let count = lines.len();
+        let label = if IS_MAC {
+            format!("Stash {count} Selected Lines")
+        } else {
+            format!("Stash {count} selected lines")
+        };
+        Some(
+            MenuItem::new(label, move |_, cx| {
+                Dispatcher::stash_selected_lines(
+                    repo,
+                    path.clone(),
+                    selection_of_lines(&lines),
+                    cx,
+                );
             })
-            .collect::<std::collections::BTreeSet<u32>>()
-            .into_iter()
-            .collect();
+            .enabled(enabled),
+        )
+    }
+
+    /// `1303-partial-stash`: "Stash Added Line…" for `len` selection lines
+    /// from `start`, where lines can be stashed ([`Self::stash_target`]).
+    fn stash_item(
+        &self,
+        start: u32,
+        len: u32,
+        kind: RangeType,
+        cx: &Context<Self>,
+    ) -> Option<MenuItem> {
+        let (repo, path, enabled) = self.stash_target(cx)?;
+        Some(
+            MenuItem::new(kind.stash_label(len), move |_, cx| {
+                let selection = DiffSelection::none().with_range(start, len, true);
+                Dispatcher::stash_selected_lines(repo, path.clone(), selection, cx);
+            })
+            .enabled(enabled),
+        )
+    }
+
+    /// The repository and file whose lines the diff's menus can stash, and
+    /// whether that is possible now (not while the branch's only stash is
+    /// taken, `PartialStash::Blocked`). `None` outside the Changes tab, for
+    /// files other than modified ones and wherever Discard is not offered.
+    fn stash_target(&self, cx: &Context<Self>) -> Option<(u64, String, bool)> {
+        let snap = self.snapshot(cx)?;
+        if self.source != DiffSource::WorkingDirectory
+            || snap.kind != FileStatusKind::Modified
+            || snap.hide_whitespace
+            || snap.as_text
+            || self.locked_type_change(&snap.diff, cx)
+        {
+            return None;
+        }
+        let s = self.state.read(cx);
+        let stash = corvene_core::stash_flows::PartialStash::of(s, s.repo_states.get(&snap.repo)?)?;
+        Some((
+            snap.repo,
+            snap.path.clone(),
+            stash != corvene_core::stash_flows::PartialStash::Blocked,
+        ))
+    }
+
+    /// `760-discard-from-text-menu`: "Discard N Selected Lines…" for the
+    /// added and removed lines the text selection spans, when there are
+    /// several (desktop/desktop#16415); same conditions as [`Self::discard_item`].
+    fn discard_selected_text_item(&self, cx: &Context<Self>) -> Option<MenuItem> {
+        let lines = self.selected_text_lines()?;
         if lines.len() < 2 {
             return None;
         }
@@ -1606,23 +1705,12 @@ impl DiffView {
         };
         let (repo, path) = (snap.repo, snap.path.clone());
         Some(MenuItem::new(label, move |_, cx| {
-            // consecutive lines as one range each
-            let mut selection = DiffSelection::none();
-            let mut run: Option<(u32, u32)> = None;
-            for &line in &lines {
-                run = match run {
-                    Some((start, len)) if start + len == line => Some((start, len + 1)),
-                    Some((start, len)) => {
-                        selection = selection.with_range(start, len, true);
-                        Some((line, 1))
-                    }
-                    None => Some((line, 1)),
-                };
-            }
-            if let Some((start, len)) = run {
-                selection = selection.with_range(start, len, true);
-            }
-            Dispatcher::request_discard_selection(repo, path.clone(), selection, cx);
+            Dispatcher::request_discard_selection(
+                repo,
+                path.clone(),
+                selection_of_lines(&lines),
+                cx,
+            );
         }))
     }
 
@@ -3202,6 +3290,27 @@ fn floor_char_boundary(text: &str, index: usize) -> usize {
         i -= 1;
     }
     i
+}
+
+/// A selection of `lines` (ascending selection indices), consecutive lines
+/// as one range each.
+fn selection_of_lines(lines: &[u32]) -> DiffSelection {
+    let mut selection = DiffSelection::none();
+    let mut run: Option<(u32, u32)> = None;
+    for &line in lines {
+        run = match run {
+            Some((start, len)) if start + len == line => Some((start, len + 1)),
+            Some((start, len)) => {
+                selection = selection.with_range(start, len, true);
+                Some((line, 1))
+            }
+            None => Some((line, 1)),
+        };
+    }
+    if let Some((start, len)) = run {
+        selection = selection.with_range(start, len, true);
+    }
+    selection
 }
 
 #[cfg(test)]

@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+mod hosts;
 mod signature;
+pub use hosts::*;
 pub use signature::*;
 
 /// A repository known to Corvene (`models/repository.ts`).
@@ -2027,7 +2029,19 @@ pub fn parse_iso8601(value: &str) -> Option<std::time::SystemTime> {
     let year: i64 = d.next()?.parse().ok()?;
     let month: u32 = d.next()?.parse().ok()?;
     let day: u32 = d.next()?.parse().ok()?;
-    let time = time.split(['+', '-']).next()?;
+    // a `+02:00` / `-0500` offset (Forgejo, Bitbucket) is taken out; GitHub
+    // always sends UTC
+    let (time, offset_secs) = match time.find(['+', '-']) {
+        Some(ix) => {
+            let (clock, offset) = time.split_at(ix);
+            let sign = if offset.starts_with('-') { -1 } else { 1 };
+            let digits: String = offset[1..].chars().filter(char::is_ascii_digit).collect();
+            let hours: i64 = digits.get(..2).and_then(|h| h.parse().ok()).unwrap_or(0);
+            let minutes: i64 = digits.get(2..4).and_then(|m| m.parse().ok()).unwrap_or(0);
+            (clock, sign * (hours * 3600 + minutes * 60))
+        }
+        None => (time, 0),
+    };
     let mut t = time.split(':');
     let hour: u64 = t.next()?.parse().ok()?;
     let minute: u64 = t.next()?.parse().ok()?;
@@ -2048,7 +2062,7 @@ pub fn parse_iso8601(value: &str) -> Option<std::time::SystemTime> {
     let doy = (153 * mp + 2) / 5 + day as u64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe as i64 - 719_468;
-    let secs = days * 86_400 + (hour * 3600 + minute * 60 + second) as i64;
+    let secs = days * 86_400 + (hour * 3600 + minute * 60 + second) as i64 - offset_secs;
     if secs < 0 {
         return None;
     }

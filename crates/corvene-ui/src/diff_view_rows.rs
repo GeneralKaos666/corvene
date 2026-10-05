@@ -76,6 +76,23 @@ impl RangeType {
             format!("Discard {kind} line{plural}{suffix}")
         }
     }
+
+    /// `1303-partial-stash`: "Stash Added Line", "Stash Modified Lines"…,
+    /// worded like [`Self::discard_label`].
+    pub fn stash_label(self, lines: u32) -> String {
+        use crate::context_menu::{IS_MAC, mac_or};
+        let kind = match self {
+            RangeType::Additions => mac_or("Added", "added"),
+            RangeType::Deletions => mac_or("Removed", "removed"),
+            RangeType::Mixed => mac_or("Modified", "modified"),
+        };
+        let plural = if lines > 1 { "s" } else { "" };
+        if IS_MAC {
+            format!("Stash {kind} Line{plural}")
+        } else {
+            format!("Stash {kind} line{plural}")
+        }
+    }
 }
 
 /// One unified-diff row: its index in the expanded diff, its index in the

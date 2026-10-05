@@ -57,7 +57,37 @@ pub struct CommitStatusSubscription {
 pub struct CommitStatusStore {
     pub entries: HashMap<String, CommitStatusEntry>,
     pub subscriptions: HashMap<String, CommitStatusSubscription>,
-    in_flight: HashSet<String>,
+    pub(crate) in_flight: HashSet<String>,
+}
+
+impl CommitStatusStore {
+    /// Store a fresh result, evicting the oldest entry when full.
+    pub(crate) fn insert_entry(&mut self, key: String, check: Option<CombinedRefCheck>) {
+        if !self.entries.contains_key(&key)
+            && self.entries.len() >= MAX_ENTRIES
+            && let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, e)| e.fetched_at)
+                .map(|(k, _)| k.clone())
+        {
+            self.entries.remove(&oldest);
+        }
+        self.entries.insert(
+            key,
+            CommitStatusEntry {
+                check,
+                fetched_at: Instant::now(),
+            },
+        );
+    }
+
+    /// A failed refresh: try again only after the usual minute.
+    pub(crate) fn touch_entry(&mut self, key: &str) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.fetched_at = Instant::now();
+        }
+    }
 }
 
 /// `getCacheKey`
@@ -296,7 +326,15 @@ impl AppState {
         {
             return None;
         }
-        let gh = self.repository(id)?.github.as_ref()?;
+        // flags 342-344: a repository on GitLab, Gitea or Bitbucket too
+        let hosted;
+        let gh = match self.repository(id)?.github.as_ref() {
+            Some(gh) => gh,
+            None => {
+                hosted = self.hosted_repository(id)?.repo;
+                &hosted
+            }
+        };
         let info = self.repo_states.get(&id)?.info.as_ref()?;
         let branch = info.current_branch()?;
         let upstream = branch.upstream_short()?;
@@ -485,6 +523,14 @@ impl Dispatcher {
         }) else {
             return;
         };
+        // flags 342-344: a subscription on GitLab, Gitea or Bitbucket
+        if Self::state(cx)
+            .read(cx)
+            .host_kind_of(&sub.api_base)
+            .is_some()
+        {
+            return Self::refresh_host_commit_status(key, sub, cx);
+        }
         let gh = GitHubRepository {
             endpoint: sub.api_base.clone(),
             owner: sub.owner.clone(),

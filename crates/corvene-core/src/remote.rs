@@ -235,6 +235,12 @@ impl Dispatcher {
             .filter(|a| host.is_none_or(|host| a.host() != host))
             .map(|a| format!("{}={}", a.host(), a.login))
             .collect();
+        // flags 342-344: GitLab, Gitea and Bitbucket accounts
+        logins.extend(
+            s.host_askpass_logins()
+                .into_iter()
+                .filter(|pair| host.is_none_or(|host| !pair.starts_with(&format!("{host}=")))),
+        );
         logins.extend(
             s.generic_logins
                 .iter()
@@ -1295,6 +1301,9 @@ impl Dispatcher {
             branch.zip(Self::implicit_upstream_in(s, id).map(|(name, _)| name))
         };
         let cancel = Self::network_cancel_token(id, PushPullKind::Pull, false, cx);
+        // GHD `pullRepo(…, { onHookFailure })`
+        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let hook_callbacks = hooks.callbacks.clone();
         Self::run_network(
             id,
             cx,
@@ -1308,21 +1317,24 @@ impl Dispatcher {
                     }
                     let mut retry = prune_retry;
                     let result = loop {
-                        let result = corvene_git::pull(
-                            git.clone(),
-                            &workdir,
-                            &remote_name,
-                            skip_submodules,
-                            askpass.as_ref(),
-                            &mut |value, text| {
-                                report(PushPullProgress {
-                                    kind: PushPullKind::Pull,
-                                    title: title.clone(),
-                                    description: Some(text),
-                                    value: value * 0.6,
-                                })
-                            },
-                        );
+                        let result =
+                            corvene_git::hooks::with_hook_callbacks(&hook_callbacks, || {
+                                corvene_git::pull(
+                                    git.clone(),
+                                    &workdir,
+                                    &remote_name,
+                                    skip_submodules,
+                                    askpass.as_ref(),
+                                    &mut |value, text| {
+                                        report(PushPullProgress {
+                                            kind: PushPullKind::Pull,
+                                            title: title.clone(),
+                                            description: Some(text),
+                                            value: value * 0.6,
+                                        })
+                                    },
+                                )
+                            });
                         if !Self::prune_before_retry(
                             &mut retry,
                             &result,
@@ -1334,6 +1346,7 @@ impl Dispatcher {
                             break result;
                         }
                     };
+                    drop(hook_callbacks);
                     // `251-remote-head-once`: `set-head -a` asks the server for
                     // every ref, which takes minutes on huge repositories; skip
                     // it while the remote's HEAD already resolves
@@ -1389,7 +1402,8 @@ impl Dispatcher {
                         .repo_states
                         .get(&id)
                         .is_some_and(|r| r.conflict_state.is_some());
-                    if !conflicted {
+                    // aborted in the HookFailed dialog: no error
+                    if !conflicted && !hooks.aborted() {
                         Self::handle_remote_error(
                             id,
                             "Could not pull",
@@ -1685,29 +1699,35 @@ impl Dispatcher {
             up_to,
         };
         let cancel = Self::network_cancel_token(id, PushPullKind::Push, false, cx);
+        // GHD `onHookFailure: this.onHookFailure(() => (aborted = true))`
+        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let hook_callbacks = hooks.callbacks.clone();
         Self::run_network(
             id,
             cx,
             move |report| {
                 cancellable(cancel.as_ref(), || {
-                    let result = corvene_git::push(
-                        git.clone(),
-                        &workdir,
-                        &remote_name,
-                        &local,
-                        remote_branch.as_deref(),
-                        &tags,
-                        force_with_lease,
-                        askpass.as_ref(),
-                        &mut |value, text| {
-                            report(PushPullProgress {
-                                kind: PushPullKind::Push,
-                                title: title.clone(),
-                                description: Some(text),
-                                value: value * 0.65,
-                            })
-                        },
-                    );
+                    let result = corvene_git::hooks::with_hook_callbacks(&hook_callbacks, || {
+                        corvene_git::push(
+                            git.clone(),
+                            &workdir,
+                            &remote_name,
+                            &local,
+                            remote_branch.as_deref(),
+                            &tags,
+                            force_with_lease,
+                            askpass.as_ref(),
+                            &mut |value, text| {
+                                report(PushPullProgress {
+                                    kind: PushPullKind::Push,
+                                    title: title.clone(),
+                                    description: Some(text),
+                                    value: value * 0.65,
+                                })
+                            },
+                        )
+                    });
+                    drop(hook_callbacks);
                     if result.is_ok() {
                         report(PushPullProgress {
                             kind: PushPullKind::Fetch,
@@ -1769,7 +1789,10 @@ impl Dispatcher {
                 {
                     Self::link_pushed_branch_to_issue(id, branch, cx);
                 }
-                if let Err(err) = result {
+                // aborted in the HookFailed dialog: no error
+                if let Err(err) = result
+                    && !hooks.aborted()
+                {
                     Self::handle_remote_error(
                         id,
                         "Could not push",
@@ -1931,29 +1954,34 @@ impl Dispatcher {
         let retry = RetryAction::PushToRemote {
             remote: remote_name.clone(),
         };
+        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let hook_callbacks = hooks.callbacks.clone();
         Self::run_network(
             id,
             cx,
             move |report| {
                 cancellable(cancel.as_ref(), || {
-                    let result = corvene_git::push(
-                        git.clone(),
-                        &workdir,
-                        &remote_name,
-                        &refspec,
-                        Some(&refspec),
-                        &[],
-                        false,
-                        askpass.as_ref(),
-                        &mut |value, text| {
-                            report(PushPullProgress {
-                                kind: PushPullKind::Push,
-                                title: title.clone(),
-                                description: Some(text),
-                                value: value * 0.8,
-                            })
-                        },
-                    );
+                    let result = corvene_git::hooks::with_hook_callbacks(&hook_callbacks, || {
+                        corvene_git::push(
+                            git.clone(),
+                            &workdir,
+                            &remote_name,
+                            &refspec,
+                            Some(&refspec),
+                            &[],
+                            false,
+                            askpass.as_ref(),
+                            &mut |value, text| {
+                                report(PushPullProgress {
+                                    kind: PushPullKind::Push,
+                                    title: title.clone(),
+                                    description: Some(text),
+                                    value: value * 0.8,
+                                })
+                            },
+                        )
+                    });
+                    drop(hook_callbacks);
                     if result.is_ok() {
                         // the remote-tracking branch catches up
                         let _ = corvene_git::fetch_with(
@@ -1976,7 +2004,9 @@ impl Dispatcher {
                 })
             },
             move |result, cx| {
-                if let Err(err) = result {
+                if let Err(err) = result
+                    && !hooks.aborted()
+                {
                     Self::handle_remote_error(
                         id,
                         "Could not push",

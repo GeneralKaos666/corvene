@@ -1,0 +1,16 @@
+[package]
+name = "corvene-hosts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Corvene host providers: GitLab, Gitea/Forgejo and Bitbucket beside GitHub"
+
+[dependencies]
+corvene-github.workspace = true
+corvene-models.workspace = true
+corvene-platform.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ureq.workspace = true

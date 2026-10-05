@@ -104,17 +104,20 @@ impl CiCheckPopover {
                 (github, sha, None)
             }
         };
-        let read_only = s
-            .flags
-            .bool(corvene_core::flags::ids::RERUN_NEEDS_PUSH_ACCESS)
-            && s.repository(id)
-                .and_then(|r| r.github.as_ref())
-                .filter(|gh| {
-                    gh.endpoint == github.endpoint
-                        && gh.owner.eq_ignore_ascii_case(&github.owner)
-                        && gh.name.eq_ignore_ascii_case(&github.name)
-                })
-                .is_some_and(|gh| !gh.has_write_permission());
+        // flags 342-344: re-runs are GitHub's (check suites)
+        let hosted =
+            corvene_core::HostKind::of_api_base(&github.endpoint) != corvene_core::HostKind::GitHub;
+        let read_only = hosted
+            || s.flags
+                .bool(corvene_core::flags::ids::RERUN_NEEDS_PUSH_ACCESS)
+                && s.repository(id)
+                    .and_then(|r| r.github.as_ref())
+                    .filter(|gh| {
+                        gh.endpoint == github.endpoint
+                            && gh.owner.eq_ignore_ascii_case(&github.owner)
+                            && gh.name.eq_ignore_ascii_case(&github.name)
+                    })
+                    .is_some_and(|gh| !gh.has_write_permission());
         Some(Snapshot {
             repo: id,
             pr_number,
@@ -298,7 +301,17 @@ impl CiCheckPopover {
                                 d.child(
                                     crate::widgets::link_button(
                                         "ci-open-pull-request",
-                                        format!("Open #{number} on GitHub"),
+                                        {
+                                            // flags 342-344: `!12` on GitLab
+                                            let kind = corvene_core::HostKind::of_api_base(
+                                                &snap.github.endpoint,
+                                            );
+                                            format!(
+                                                "Open {}{number} on {}",
+                                                kind.number_prefix(),
+                                                kind.site_name(&snap.github.endpoint)
+                                            )
+                                        },
                                         cx,
                                     )
                                     .on_click(
@@ -329,13 +342,14 @@ impl CiCheckPopover {
         let t = cx.ghd();
         let expanded = self.expanded == Some(check.id);
         let id = check.id;
-        let external_url = check
-            .html_url
-            .clone()
-            .unwrap_or_else(|| match snap.pr_number {
-                Some(number) => format!("{}/pull/{number}", snap.github.html_url),
-                None => format!("{}/commit/{}", snap.github.html_url, snap.git_ref),
-            });
+        let external_url = check.html_url.clone().unwrap_or_else(|| {
+            // flags 342-344: the host's own page layout
+            let kind = corvene_core::HostKind::of_api_base(&snap.github.endpoint);
+            match snap.pr_number {
+                Some(number) => corvene_hosts::urls::pull_request_url(kind, &snap.github, number),
+                None => corvene_hosts::urls::commit_url(kind, &snap.github, &snap.git_ref),
+            }
+        });
         let entity = cx.entity().downgrade();
         let row = check_run_row(check, false, expanded, cx).on_click(move |_, _, cx| {
             entity.update(cx, |this, cx| this.toggle(id, cx)).ok();

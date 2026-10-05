@@ -132,16 +132,18 @@ class Run:
         # ahead of it; `repo-coauthors`: with commits by several people on top
         # `repo-graph`: with merges on top (the commit graph); `repo-signed`:
         # with good, unknown-key and bad signatures on top; `repo-reflog`: with
-        # a rebase, a deleted branch and a hard reset in HEAD's reflog
+        # a rebase, a deleted branch and a hard reset in HEAD's reflog;
+        # `repo-tools`: with ignored files and a patch and a mailbox beside it
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
-                             "repo-reflog")
+                             "repo-reflog", "repo-tools")
         remote = setup == "repo-remote"
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
         signed = setup == "repo-signed"
         reflog = setup == "repo-reflog"
-        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog) if with_repo else None
-        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog) if with_repo else None
+        tools = setup == "repo-tools"
+        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
+        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues and
         # Releases views (`github_stub.py`), reached by the `github: stub` step
@@ -267,6 +269,15 @@ class Run:
                 raise ValueError(f"unknown fixture action {step['fixture']!r}")
             for repo in self.fixtures:
                 repo.rename(repo.with_name(repo.name + "-moved"))
+            return
+        if "hooks" in step:
+            # `hooks: {pre-commit: script}`: executable hooks in both apps'
+            # fixture repositories; nothing is sent to either app
+            for repo in self.fixtures:
+                for hook, script in step["hooks"].items():
+                    path = repo / ".git" / "hooks" / hook
+                    path.write_text(script)
+                    path.chmod(0o755)
             return
         if not step and not any(per_app.values()) and wait is not None:
             time.sleep(wait / 1000)

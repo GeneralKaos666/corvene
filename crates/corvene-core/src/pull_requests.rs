@@ -66,9 +66,10 @@ const MAX_UPDATED_RESULTS: usize = 320;
 /// `ForkedRemotePrefix`: remotes Desktop adds to check out PRs from forks.
 pub const FORKED_REMOTE_PREFIX: &str = "github-desktop-";
 
-/// `forkPullRequestRemoteName`
+/// `forkPullRequestRemoteName`. A GitLab namespace's `/` (flag
+/// `342-gitlab`) becomes `-`; GitHub owners have none.
 pub fn fork_pull_request_remote_name(owner: &str) -> String {
-    format!("{FORKED_REMOTE_PREFIX}{owner}")
+    format!("{FORKED_REMOTE_PREFIX}{}", owner.replace('/', "-"))
 }
 
 /// `BranchesTab`: the tab shown in the branch foldout.
@@ -226,18 +227,16 @@ pub fn forked_remotes_to_prune(
 impl AppState {
     /// The cached open pull requests of a repository (its fork target).
     pub fn pull_requests_for(&self, id: u64) -> &[PullRequest] {
-        self.repository(id)
-            .and_then(|r| r.non_fork_github())
-            .and_then(|gh| self.pull_requests.get(&cache_key(gh)))
+        self.pull_request_repository(id)
+            .and_then(|gh| self.pull_requests.get(&cache_key(&gh)))
             .map(|c| c.pull_requests.as_slice())
             .unwrap_or(&[])
     }
 
     /// `isLoadingPullRequests`
     pub fn pull_requests_loading(&self, id: u64) -> bool {
-        self.repository(id)
-            .and_then(|r| r.non_fork_github())
-            .and_then(|gh| self.pull_requests.get(&cache_key(gh)))
+        self.pull_request_repository(id)
+            .and_then(|gh| self.pull_requests.get(&cache_key(&gh)))
             .is_some_and(|c| c.loading)
     }
 
@@ -281,13 +280,17 @@ impl Dispatcher {
     /// cached one and drop what closed. `force` skips the 2-minute throttle
     /// (the list's refresh button).
     pub fn refresh_pull_requests(id: u64, force: bool, cx: &mut dyn Host) {
-        let Some(target) = Self::state(cx)
-            .read(cx)
-            .repository(id)
-            .and_then(|r| r.non_fork_github().cloned())
-        else {
+        // the GitHub repository, or (flags 342-344) the hosted one
+        let Some(target) = Self::state(cx).read(cx).pull_request_repository(id) else {
             return;
         };
+        if Self::state(cx)
+            .read(cx)
+            .host_kind_of(&target.endpoint)
+            .is_some()
+        {
+            return Self::refresh_host_pull_requests(id, target, force, cx);
+        }
         let key = cache_key(&target);
         let (skip, since) = Self::state(cx).update(cx, |s, cx| {
             let store = s.store.clone();
@@ -501,7 +504,8 @@ impl Dispatcher {
 
     /// `_showPullRequestByPR`: the pull request page in the browser.
     pub fn open_pull_request(pr: &PullRequest, cx: &mut dyn Host) {
-        if let Some(url) = pr.html_url() {
+        // the host's page for a pull request on GitLab, Gitea or Bitbucket
+        if let Some(url) = Self::state(cx).read(cx).pull_request_web_url(pr) {
             Self::open_url(&url, cx);
         }
     }
@@ -600,10 +604,18 @@ impl Dispatcher {
             return;
         };
         let Some(head_repo) = pr.head.repository.clone() else {
-            let headless = Self::state(cx)
-                .read(cx)
-                .flags
-                .bool(crate::flags::ids::PULL_REQUESTS_FROM_DELETED_FORKS);
+            // flags 342-344: a host's pull requests always check out from
+            // their ref (Gitea's AGit pull requests have no head branch)
+            let headless = {
+                let s = Self::state(cx).read(cx);
+                s.flags
+                    .bool(crate::flags::ids::PULL_REQUESTS_FROM_DELETED_FORKS)
+                    || pr
+                        .base
+                        .repository
+                        .as_ref()
+                        .is_some_and(|r| s.host_kind_of(&r.endpoint).is_some())
+            };
             if headless {
                 Self::find_headless_pull_request_branch(id, pr, cx, on_found);
             } else {
@@ -780,6 +792,26 @@ impl Dispatcher {
         let askpass = Self::askpass_env(cx);
         let name = format!("pr/{}", pr.number);
         let number = pr.number;
+        // GitLab's is `refs/merge-requests/<n>/head`; Bitbucket has none
+        let kind = {
+            let s = Self::state(cx).read(cx);
+            pr.base
+                .repository
+                .as_ref()
+                .map_or(corvene_models::HostKind::GitHub, |r| {
+                    s.web_host_kind(&r.endpoint)
+                })
+        };
+        let Some(pull_ref) = kind.pull_request_ref(number) else {
+            on_found(
+                Err(format!(
+                    "{} has no git ref for pull request #{number}: its source branch or fork is gone.",
+                    kind.name()
+                )),
+                cx,
+            );
+            return;
+        };
         let find_local = move |branches: &[Branch], name: &str| {
             branches
                 .iter()
@@ -796,7 +828,7 @@ impl Dispatcher {
                     git,
                     &workdir,
                     &remote.name,
-                    &format!("refs/pull/{number}/head:refs/heads/{name}"),
+                    &format!("{pull_ref}:refs/heads/{name}"),
                     askpass.as_ref(),
                 )
                 .map_err(|err| err.to_string())?;
