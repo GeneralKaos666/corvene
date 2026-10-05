@@ -6,7 +6,7 @@ A native, fast, low-memory [GitHub Desktop](https://github.com/apps/desktop) clo
 
 The UI is a one-to-one recreation of [GitHub Desktop 3.6.6](https://github.com/desktop/desktop/releases/tag/release-3.6.6): same layout, buttons, menus, dialogs and workflow. The engine is different: [GPUI](https://gpui.rs/) ([Zed](https://zed.dev/)'s GPU-accelerated UI framework) for rendering, [gitoxide](https://github.com/gitoxidelabs/gitoxide) for in-process git reads, and the [git](https://git-scm.com/) CLI for writes so behaviour matches GitHub Desktop exactly.
 
-Status: beta. Feature-complete with GitHub Desktop. macOS, Linux ([X11](https://en.wikipedia.org/wiki/X_Window_System) and [Wayland](https://wayland.freedesktop.org/), x86_64 and arm64), Windows 10 and 11 (x64, ARM64 and 32-bit x86), Android (phones, tablets, [Chromebooks](https://www.google.com/chromebook/)) is experimental, with two variants Binaries for all are on [GitHub Releases](https://github.com/wasi-master/corvene/releases).
+Status: beta. Feature-complete with GitHub Desktop. Runs on macOS, Linux ([X11](https://en.wikipedia.org/wiki/X_Window_System) and [Wayland](https://wayland.freedesktop.org/), x86_64 and arm64), Windows 10 and 11 (x64, ARM64 and 32-bit x86) and Android (phones, tablets, [Chromebooks](https://www.google.com/chromebook/)). Android is experimental and comes as two apps (see below). Binaries for all of them are on [GitHub Releases](https://github.com/wasi-master/corvene/releases).
 
 ## Requirements
 
