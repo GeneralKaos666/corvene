@@ -748,6 +748,9 @@ pub enum RepositorySettingsTab {
     ForkSettings,
     /// Corvene (`518-per-repo-editor`): the repository's external editor.
     Editor,
+    /// Corvene (`341-custom-autolinks`): links for references like
+    /// `TICKET-123` in commit messages.
+    Autolinks,
 }
 
 /// GHD `GitConfigLocation`.
@@ -1277,6 +1280,9 @@ pub struct RepositoryState {
     /// repository list marks the row and background fetches skip it until a
     /// fetch succeeds.
     pub remote_not_found: bool,
+    /// Corvene `341-custom-autolinks`: the GitHub repository's autolinks
+    /// as its API gave them (only admins may read them).
+    pub api_autolinks: Vec<corvene_models::Autolink>,
     pub pull_with_rebase: bool,
     /// Corvene `340-message-rules-defer-to-hooks`: git runs a
     /// `prepare-commit-msg` or `commit-msg` hook on a commit (read while the
@@ -1753,6 +1759,32 @@ impl AppState {
 
     pub fn selected_state(&self) -> Option<&RepositoryState> {
         self.selected.and_then(|id| self.repo_states.get(&id))
+    }
+
+    /// Corvene (`341-custom-autolinks`): the links of repository `id`'s
+    /// own kinds of references in commit messages (`None`: GHD's only).
+    pub fn link_rules(&self, id: u64) -> Option<Arc<[crate::text_tokens::LinkRule]>> {
+        use crate::text_tokens::LinkRule;
+        let mut rules = Vec::new();
+        if self.flags.bool(crate::flags::ids::CUSTOM_AUTOLINKS) {
+            let own = self.repository(id).map(|r| r.autolinks.as_slice());
+            let api = self
+                .repo_states
+                .get(&id)
+                .map(|rs| rs.api_autolinks.as_slice());
+            rules.extend(
+                own.into_iter()
+                    .chain(api)
+                    .flatten()
+                    .filter(|a| !a.key_prefix.is_empty())
+                    .map(|a| LinkRule::Autolink {
+                        prefix: a.key_prefix.clone(),
+                        url_template: a.url_template.clone(),
+                        alphanumeric: a.is_alphanumeric,
+                    }),
+            );
+        }
+        (!rules.is_empty()).then(|| rules.into())
     }
 
     /// What locks flag `id` in the Flags dialog: the settings file

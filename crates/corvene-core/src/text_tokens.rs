@@ -20,6 +20,11 @@
 //! link to that repository's issue and `owner/repo@<sha>` one link to its
 //! commit (GHD links `#123` to the current repository and leaves the rest).
 //!
+//! Deviation (`341-custom-autolinks`, [`LinkRule`]): the repository's
+//! GitHub autolinks (`TICKET-123` → the tracker's URL) also become links,
+//! in GitHub and other repositories alike (GHD knows only GitHub's own
+//! references).
+//!
 //! [`wrap_rich_text_commit_message`] ports `lib/wrap-rich-text-commit-message.ts`:
 //! a commit summary longer than 72 characters (counted on the tokens' shown
 //! text, in UTF-16 units as JavaScript does) moves its overflow to the start
@@ -27,7 +32,7 @@
 //! such a character moves whole.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use corvene_models::Repository;
 
@@ -73,12 +78,140 @@ impl TokenRepository {
 }
 
 /// Corvene deviations from GHD's tokenizer; the default is GHD's behaviour.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct TokenOptions {
     /// `765-linkify-trailing-punctuation`
     pub trailing_punctuation: bool,
     /// `766-cross-repository-issue-links`
     pub cross_repository: bool,
+    /// The repository's own links ([`LinkRule`]), applied to the text
+    /// between GHD's tokens.
+    pub links: Option<Arc<[LinkRule]>>,
+}
+
+/// A repository's own kind of link in commit messages.
+#[derive(Clone, Debug)]
+pub enum LinkRule {
+    /// `341-custom-autolinks`: a GitHub autolink (`GET
+    /// repos/{owner}/{repo}/autolinks`, or one set in Repository Settings):
+    /// `prefix` (any case) and a reference (digits; with `alphanumeric` also
+    /// letters and `-`) at a word's start, linked to `url_template` with
+    /// `<num>` replaced by the reference.
+    Autolink {
+        prefix: String,
+        url_template: String,
+        alphanumeric: bool,
+    },
+    /// A regular expression over the text; `url`'s `$1`, `$2`… (`$0`: the
+    /// whole match) are the match's groups.
+    Pattern { regex: regex::Regex, url: String },
+}
+
+impl LinkRule {
+    /// The first match in `text` at or after byte `from`: its byte range
+    /// and URL.
+    fn find(&self, text: &str, from: usize) -> Option<(std::ops::Range<usize>, String)> {
+        match self {
+            LinkRule::Autolink {
+                prefix,
+                url_template,
+                alphanumeric,
+            } => {
+                if prefix.is_empty() {
+                    return None;
+                }
+                let lower = text.to_lowercase();
+                // `to_lowercase` keeps byte offsets only for ASCII text
+                if lower.len() != text.len() {
+                    return None;
+                }
+                let wanted = prefix.to_lowercase();
+                let reference = |b: u8| {
+                    b.is_ascii_digit() || (*alphanumeric && (b.is_ascii_alphabetic() || b == b'-'))
+                };
+                let mut at = from;
+                while let Some(found) = lower[at..].find(&wanted) {
+                    let start = at + found;
+                    let after = start + wanted.len();
+                    at = start + 1;
+                    let starts_word = text[..start]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+                    if !starts_word {
+                        continue;
+                    }
+                    let len = text.as_bytes()[after..]
+                        .iter()
+                        .take_while(|b| reference(**b))
+                        .count();
+                    // a reference ends a word, and does not end with `-`
+                    let len = text[after..after + len].trim_end_matches('-').len();
+                    let ends_word = text[after + len..]
+                        .chars()
+                        .next()
+                        .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+                    if len == 0 || !ends_word {
+                        continue;
+                    }
+                    let num = &text[after..after + len];
+                    return Some((start..after + len, url_template.replace("<num>", num)));
+                }
+                None
+            }
+            LinkRule::Pattern { regex, url } => {
+                let captures = regex.captures_at(text, from)?;
+                let whole = captures.get(0)?;
+                if whole.is_empty() {
+                    return None;
+                }
+                let mut link = url.clone();
+                // `$10` before `$1`
+                for ix in (0..captures.len()).rev() {
+                    let group = captures.get(ix).map_or("", |m| m.as_str());
+                    link = link.replace(&format!("${ix}"), group);
+                }
+                Some((whole.range(), link))
+            }
+        }
+    }
+}
+
+/// `341-custom-autolinks`: the text tokens of `tokens` with every match of
+/// `rules` turned into a link (the earliest match first, the first rule on
+/// a tie).
+fn apply_link_rules(tokens: Vec<Token>, rules: &[LinkRule]) -> Vec<Token> {
+    let mut out = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        let Token::Text(text) = token else {
+            out.push(token);
+            continue;
+        };
+        let mut at = 0;
+        let mut plain = 0;
+        while at < text.len() {
+            let next = rules
+                .iter()
+                .filter_map(|rule| rule.find(&text, at))
+                .min_by_key(|(range, _)| range.start);
+            let Some((range, url)) = next else {
+                break;
+            };
+            if range.start > plain {
+                out.push(Token::Text(text[plain..range.start].to_string()));
+            }
+            out.push(Token::Link {
+                text: text[range.clone()].to_string(),
+                url,
+            });
+            plain = range.end;
+            at = range.end;
+        }
+        if plain < text.len() {
+            out.push(Token::Text(text[plain..].to_string()));
+        }
+    }
+    out
 }
 
 static EMOJI: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
@@ -99,6 +232,7 @@ pub fn tokenize_with(
     repository: Option<&TokenRepository>,
     options: TokenOptions,
 ) -> Vec<Token> {
+    let links = options.links.clone();
     let mut t = Tokenizer {
         results: Vec::new(),
         current: String::new(),
@@ -125,7 +259,10 @@ pub fn tokenize_with(
         }
     }
     t.flush();
-    t.results
+    match links {
+        Some(rules) if !rules.is_empty() => apply_link_rules(t.results, &rules),
+        _ => t.results,
+    }
 }
 
 struct Tokenizer {
@@ -413,7 +550,7 @@ pub fn wrap_rich_text_commit_message_with(
     let mut summary = Vec::new();
     let mut overflow = Vec::new();
     let mut remainder = MAX_SUMMARY_LENGTH;
-    for token in tokenize_with(summary_text.trim_end(), repository, options) {
+    for token in tokenize_with(summary_text.trim_end(), repository, options.clone()) {
         // an emoji shows about as wide as two characters
         let char_count = match &token {
             Token::Emoji { .. } => 2,
@@ -521,6 +658,71 @@ mod tests {
         Token::Text(t.into())
     }
 
+    fn with_links(rules: Vec<LinkRule>) -> TokenOptions {
+        TokenOptions {
+            links: Some(rules.into()),
+            ..TokenOptions::default()
+        }
+    }
+
+    #[test]
+    fn autolinks_link_prefixed_references_at_word_starts() {
+        let options = with_links(vec![
+            LinkRule::Autolink {
+                prefix: "TICKET-".into(),
+                url_template: "https://t.example/?id=<num>".into(),
+                alphanumeric: false,
+            },
+            LinkRule::Autolink {
+                prefix: "JIRA-".into(),
+                url_template: "https://j.example/browse/JIRA-<num>".into(),
+                alphanumeric: true,
+            },
+        ]);
+        assert_eq!(
+            tokenize_with(
+                "Fix ticket-12 and (JIRA-ab-3), not xTICKET-1 or TICKET-1a or TICKET-",
+                None,
+                options.clone()
+            ),
+            vec![
+                text("Fix "),
+                link("ticket-12", "https://t.example/?id=12"),
+                text(" and ("),
+                link("JIRA-ab-3", "https://j.example/browse/JIRA-ab-3"),
+                text("), not xTICKET-1 or TICKET-1a or TICKET-"),
+            ]
+        );
+        // GHD's own tokens stay as they are
+        assert_eq!(
+            tokenize_with("see #4 TICKET-5", Some(&repo()), options),
+            vec![
+                text("see "),
+                link("#4", "https://github.com/o/r/issues/4"),
+                text(" "),
+                link("TICKET-5", "https://t.example/?id=5"),
+            ]
+        );
+    }
+
+    #[test]
+    fn patterns_fill_in_their_groups() {
+        let options = with_links(vec![LinkRule::Pattern {
+            regex: regex::Regex::new(r"\b([A-Z]+)-(\d+)\b").unwrap(),
+            url: "https://tracker.example/$1/issue/$2".into(),
+        }]);
+        assert_eq!(
+            tokenize_with("Closes ABC-7 and DEF-12.", None, options),
+            vec![
+                text("Closes "),
+                link("ABC-7", "https://tracker.example/ABC/issue/7"),
+                text(" and "),
+                link("DEF-12", "https://tracker.example/DEF/issue/12"),
+                text("."),
+            ]
+        );
+    }
+
     #[test]
     fn issues() {
         let r = repo();
@@ -600,7 +802,7 @@ mod tests {
             tokenize_with(
                 "via https://x.io/pull/39177. (https://w.org/a_(b)) ok",
                 None,
-                on
+                on.clone()
             ),
             [
                 text("via "),
@@ -611,7 +813,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            tokenize_with("[#12] #3: #4!?", Some(&r), on),
+            tokenize_with("[#12] #3: #4!?", Some(&r), on.clone()),
             [
                 text("["),
                 link("#12", "https://github.com/o/r/issues/12"),
@@ -638,7 +840,7 @@ mod tests {
             tokenize_with(
                 "See a-b/c.d#12, (x/y@a5c37851) and a/b/c#3 #4",
                 Some(&r),
-                on
+                on.clone()
             ),
             [
                 text("See "),

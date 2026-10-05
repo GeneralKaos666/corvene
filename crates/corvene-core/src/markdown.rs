@@ -247,14 +247,20 @@ pub fn commit_message_rich_text(
                 .then_some((open, open + 1 + close))
         });
         let Some((open, close)) = span else {
-            push_tokens(&mut out, rest, repository, options, Some(commit_base));
+            push_tokens(
+                &mut out,
+                rest,
+                repository,
+                options.clone(),
+                Some(commit_base),
+            );
             break;
         };
         push_tokens(
             &mut out,
             &rest[..open],
             repository,
-            options,
+            options.clone(),
             Some(commit_base),
         );
         out.push(&rest[open + 1..close], code, None);
@@ -278,12 +284,22 @@ pub fn commit_summary_rich_text(
     extras: bool,
     commit_base: Option<&str>,
 ) -> (RichText, RichText) {
-    let (title, description) =
-        crate::text_tokens::wrap_rich_text_commit_message_with(summary, body, repository, options);
-    if title == tokenize_with(summary.trim_end(), repository, options) {
+    let (title, description) = crate::text_tokens::wrap_rich_text_commit_message_with(
+        summary,
+        body,
+        repository,
+        options.clone(),
+    );
+    if title == tokenize_with(summary.trim_end(), repository, options.clone()) {
         // nothing moved
         return (
-            commit_message_rich_text(summary.trim_end(), repository, options, extras, commit_base),
+            commit_message_rich_text(
+                summary.trim_end(),
+                repository,
+                options.clone(),
+                extras,
+                commit_base,
+            ),
             commit_message_rich_text(body.trim_end(), repository, options, extras, commit_base),
         );
     }

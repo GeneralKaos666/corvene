@@ -579,6 +579,17 @@ pub fn encode_path_component(s: &str) -> String {
     out
 }
 
+/// Corvene `341-custom-autolinks`: an entry of `GET
+/// repos/{owner}/{name}/autolinks` (only repository admins may read them).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ApiAutolink {
+    pub key_prefix: String,
+    pub url_template: String,
+    /// GitHub's default is alphanumeric.
+    #[serde(default = "default_true")]
+    pub is_alphanumeric: bool,
+}
+
 /// GHD `IAPIBranch` (`GET repos/{owner}/{name}/branches`).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ApiBranch {
@@ -1493,6 +1504,16 @@ impl Client {
         let safe = encode_path_component(branch);
         self.get_json_opt(
             &format!("repos/{owner}/{name}/branches/{safe}"),
+            "application/vnd.github+json",
+        )
+    }
+
+    /// Corvene `341-custom-autolinks`: the repository's autolink references;
+    /// `None` when the account may not read them (not an admin) or GitHub
+    /// has none to give.
+    pub fn autolinks(&self, owner: &str, name: &str) -> Result<Option<Vec<ApiAutolink>>> {
+        self.get_json_opt(
+            &format!("repos/{owner}/{name}/autolinks"),
             "application/vnd.github+json",
         )
     }

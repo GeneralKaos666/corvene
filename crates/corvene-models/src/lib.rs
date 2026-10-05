@@ -63,6 +63,21 @@ pub struct Repository {
     /// sign in through git's credential helper instead of the account.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_credential_helper: bool,
+    /// Corvene (flag `341-custom-autolinks`): links for references like
+    /// `TICKET-123` in commit messages, set in Repository Settings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub autolinks: Vec<Autolink>,
+}
+
+/// Corvene (flag `341-custom-autolinks`): a GitHub autolink reference
+/// (`key_prefix` + a reference → `url_template` with `<num>` replaced).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Autolink {
+    pub key_prefix: String,
+    pub url_template: String,
+    /// Letters and `-` may follow the prefix too, not only digits.
+    #[serde(default)]
+    pub is_alphanumeric: bool,
 }
 
 /// Corvene (flag `518-per-repo-editor`): a repository's own custom editor,
@@ -107,6 +122,7 @@ impl Repository {
             pinned_branches: Vec::new(),
             group: None,
             use_credential_helper: false,
+            autolinks: Vec::new(),
         }
     }
 

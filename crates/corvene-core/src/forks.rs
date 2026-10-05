@@ -34,7 +34,7 @@ use corvene_github::Client;
 use corvene_models::{
     ForkContributionTarget, GitHubRepository, Remote, clone_url_like_remote, url_matches_remote,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
@@ -67,6 +67,65 @@ impl Dispatcher {
     /// `repositoryWithRefreshedGitHubRepository`: re-read the repository's
     /// API record (parent, default branch, `permissions`) with the account
     /// for its endpoint and persist it. A failed request keeps what is stored.
+    /// Corvene (`341-custom-autolinks`): the GitHub repository's autolinks
+    /// (`GET repos/{owner}/{name}/autolinks`, admins only: anything else
+    /// leaves none), read when it is selected.
+    pub fn refresh_autolinks(id: u64, cx: &mut dyn Host) {
+        if !Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CUSTOM_AUTOLINKS)
+        {
+            return;
+        }
+        let Some(github) = Self::state(cx)
+            .read(cx)
+            .repository(id)
+            .and_then(|r| r.github.clone())
+        else {
+            return;
+        };
+        // the API answers repository admins only
+        if github
+            .permissions
+            .is_some_and(|p| p != corvene_models::RepositoryPermission::Admin)
+        {
+            return;
+        }
+        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+            return;
+        };
+        let (owner, name) = (github.owner.clone(), github.name.clone());
+        spawn_bg(
+            cx,
+            move || Client::new(endpoint, token).autolinks(&owner, &name),
+            move |result, cx| {
+                let autolinks: Vec<corvene_models::Autolink> = match result {
+                    Ok(list) => list
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|a| corvene_models::Autolink {
+                            key_prefix: a.key_prefix,
+                            url_template: a.url_template,
+                            is_alphanumeric: a.is_alphanumeric,
+                        })
+                        .collect(),
+                    Err(err) => {
+                        debug!(id, %err, "could not read the repository's autolinks");
+                        return;
+                    }
+                };
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    if rs.api_autolinks != autolinks {
+                        rs.api_autolinks = autolinks;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
     pub fn refresh_github_repository(id: u64, cx: &mut dyn Host) {
         let Some(github) = Self::state(cx)
             .read(cx)

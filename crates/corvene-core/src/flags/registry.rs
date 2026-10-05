@@ -2787,6 +2787,23 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
 
+    /// GitHub autolinks and the repository's own ones link in commit messages.
+    CUSTOM_AUTOLINKS = 341 "custom-autolinks" {
+        title: "Autolinks in commit messages",
+        summary: "References like TICKET-123 in commit messages link to their tracker: the \
+                  GitHub repository's autolinks (read when the signed-in account is an admin of \
+                  it) and the ones added in Repository Settings › Autolinks (a prefix and a URL \
+                  with <num>), in GitHub and other repositories alike.",
+        ghd_behaviour: "Only #123, @mentions and URLs are links; a repository's autolink \
+                        references stay plain text.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11417)],
+        code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

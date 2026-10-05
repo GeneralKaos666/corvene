@@ -970,6 +970,7 @@ impl Dispatcher {
             Self::check_lfs(id, cx);
             Self::ensure_pull_requests(id, cx);
             Self::refresh_github_repository(id, cx);
+            Self::refresh_autolinks(id, cx);
             Self::resume_tutorial_on_other_repository(id, cx);
             Self::restart_pull_request_updater(cx);
         }
@@ -3480,6 +3481,23 @@ impl Dispatcher {
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
                 repo.editor = editor;
                 repo.custom_editor = None;
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
+    /// Corvene (`341-custom-autolinks`): Repository Settings › Autolinks.
+    pub fn set_repository_autolinks(
+        id: u64,
+        autolinks: Vec<corvene_models::Autolink>,
+        cx: &mut dyn Host,
+    ) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
+                && repo.autolinks != autolinks
+            {
+                repo.autolinks = autolinks;
                 persist_repositories(s);
                 cx.notify();
             }

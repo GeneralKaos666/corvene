@@ -12,6 +12,8 @@
 //! ("Custom…").
 //! Deviation (flag `1102-repository-credential-helper`): the Remote tab can
 //! make the repository sign in through git's credential helper.
+//! Deviation (flag `341-custom-autolinks`): an Autolinks tab lists the
+//! GitHub repository's autolinks and edits the repository's own.
 
 use std::rc::Rc;
 
@@ -98,6 +100,12 @@ pub struct RepositorySettingsDialog {
     custom_args: Entity<InputState>,
     /// `1102-repository-credential-helper`: the Remote tab's checkbox.
     credential_helper: bool,
+    /// `341-custom-autolinks`: the repository's own autolinks as edited,
+    /// and the Add form.
+    autolinks: Vec<corvene_core::Autolink>,
+    autolink_prefix: Entity<InputState>,
+    autolink_url: Entity<InputState>,
+    autolink_alphanumeric: bool,
     /// `focusFirstSuitableChild`: with nothing to type into on the first tab
     /// (no remote), Save holds focus until a mouse press moves it.
     default_focus: bool,
@@ -155,6 +163,13 @@ impl RepositorySettingsDialog {
         cx: &mut Context<Self>,
     ) -> Self {
         let remote_url = cx.new(|cx| InputState::new(window, cx).placeholder("Remote URL"));
+        let autolink_prefix = cx.new(|cx| InputState::new(window, cx).placeholder("TICKET-"));
+        let autolink_url = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("https://example.com/TICKET?query=<num>")
+        });
+        for input in [&autolink_prefix, &autolink_url] {
+            cx.observe(input, |_, _, cx| cx.notify()).detach();
+        }
         // `518-per-repo-editor`: a stored custom editor that is not one of
         // Settings' shows as "Custom…" with its path and arguments
         let stored_custom = state
@@ -236,6 +251,14 @@ impl RepositorySettingsDialog {
                 .read(cx)
                 .repository(repo)
                 .is_some_and(|r| r.use_credential_helper),
+            autolinks: state
+                .read(cx)
+                .repository(repo)
+                .map(|r| r.autolinks.clone())
+                .unwrap_or_default(),
+            autolink_prefix,
+            autolink_url,
+            autolink_alphanumeric: false,
             default_focus: true,
         };
         this.fill(&state, window, cx);
@@ -376,6 +399,15 @@ impl RepositorySettingsDialog {
                 }
                 None => Dispatcher::set_repository_editor(self.repo, editor, cx),
             }
+        }
+        // `341-custom-autolinks`
+        let stored_autolinks = self
+            .state
+            .read(cx)
+            .repository(self.repo)
+            .map(|r| r.autolinks.clone());
+        if stored_autolinks.is_some_and(|a| a != self.autolinks) {
+            Dispatcher::set_repository_autolinks(self.repo, self.autolinks.clone(), cx);
         }
         // `1102-repository-credential-helper`
         let stored_helper = self
@@ -906,6 +938,157 @@ impl RepositorySettingsDialog {
             .into_any_element()
     }
 
+    /// `341-custom-autolinks`: the GitHub repository's autolinks (read
+    /// only) and the repository's own, with a form to add one.
+    fn autolinks_tab(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
+        let t = cx.ghd();
+        let api = self
+            .state
+            .read(cx)
+            .repo_states
+            .get(&self.repo)
+            .map(|rs| rs.api_autolinks.clone())
+            .unwrap_or_default();
+        let describe = |a: &corvene_core::Autolink| {
+            format!(
+                "{}<num> → {}{}",
+                a.key_prefix,
+                a.url_template,
+                if a.is_alphanumeric {
+                    " (letters too)"
+                } else {
+                    ""
+                }
+            )
+        };
+        let row = |text: String| {
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(FONT_SIZE())
+                .child(text)
+        };
+        let prefix = self.autolink_prefix.read(cx).value().trim().to_string();
+        let url = self.autolink_url.read(cx).value().trim().to_string();
+        let can_add = !prefix.is_empty() && url.contains("<num>");
+        let weak = cx.weak_entity();
+        let add = move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+            weak.update(cx, |this, cx| {
+                let key_prefix = this.autolink_prefix.read(cx).value().trim().to_string();
+                let url_template = this.autolink_url.read(cx).value().trim().to_string();
+                if key_prefix.is_empty() || !url_template.contains("<num>") {
+                    return;
+                }
+                this.autolinks.push(corvene_core::Autolink {
+                    key_prefix,
+                    url_template,
+                    is_alphanumeric: this.autolink_alphanumeric,
+                });
+                this.autolink_prefix
+                    .update(cx, |s, cx| s.set_value("", window, cx));
+                this.autolink_url
+                    .update(cx, |s, cx| s.set_value("", window, cx));
+                this.autolink_alphanumeric = false;
+                cx.notify();
+            })
+            .ok();
+        };
+        let weak = cx.weak_entity();
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .child(
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .child(
+                        "References such as TICKET-123 in commit messages link to the URL, \
+                         with <num> replaced by what follows the prefix.",
+                    ),
+            )
+            .when(!api.is_empty(), |d| {
+                d.child(section_heading("From GitHub", cx))
+                    .children(api.iter().map(|a| row(describe(a))))
+            })
+            .child(section_heading("This repository", cx))
+            .children(self.autolinks.iter().enumerate().map(|(ix, a)| {
+                let weak = weak.clone();
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING())
+                    .child(row(describe(a)))
+                    .child(
+                        link_button(("repo-autolink-remove", ix), "Remove", cx).on_click(
+                            move |_, _, cx| {
+                                weak.update(cx, |this, cx| {
+                                    if ix < this.autolinks.len() {
+                                        this.autolinks.remove(ix);
+                                    }
+                                    cx.notify();
+                                })
+                                .ok();
+                            },
+                        ),
+                    )
+            }))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_end()
+                    .gap(SPACING())
+                    .child(div().w(zpx(110.)).child(labeled(
+                        "Prefix",
+                        text_box(
+                            "repo-autolink-prefix",
+                            &self.autolink_prefix,
+                            None,
+                            window,
+                            cx,
+                        ),
+                        cx,
+                    )))
+                    .child(div().flex_1().child(labeled(
+                        "URL",
+                        text_box("repo-autolink-url", &self.autolink_url, None, window, cx),
+                        cx,
+                    ))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .child(checkbox_row(
+                        "repo-autolink-alphanumeric",
+                        self.autolink_alphanumeric,
+                        "Letters may follow the prefix too",
+                        move |on, _, cx| {
+                            weak.update(cx, |this, cx| {
+                                this.autolink_alphanumeric = on;
+                                cx.notify();
+                            })
+                            .ok();
+                        },
+                        cx,
+                    ))
+                    .child(if can_add {
+                        crate::widgets::button("repo-autolink-add", "Add", cx)
+                            .on_click(add)
+                            .into_any_element()
+                    } else {
+                        crate::widgets::button_disabled("repo-autolink-add", "Add", cx)
+                            .into_any_element()
+                    }),
+            )
+            .into_any_element()
+    }
+
     /// `239-line-endings-setting`: the repository's `core.autocrlf`.
     fn line_endings_field(&self, cx: &Context<Self>) -> impl IntoElement {
         let selected = AUTOCRLF_CHOICES
@@ -988,6 +1171,12 @@ impl Render for RepositorySettingsDialog {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::PER_REPO_EDITOR);
+        // Corvene (`341-custom-autolinks`)
+        let autolinks_tab = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CUSTOM_AUTOLINKS);
         let tabs: Vec<RepositorySettingsTab> = [
             RepositorySettingsTab::Remote,
             RepositorySettingsTab::IgnoredFiles,
@@ -996,6 +1185,7 @@ impl Render for RepositorySettingsDialog {
         .into_iter()
         .chain(is_fork.then_some(RepositorySettingsTab::ForkSettings))
         .chain(editor_tab.then_some(RepositorySettingsTab::Editor))
+        .chain(autolinks_tab.then_some(RepositorySettingsTab::Autolinks))
         .collect();
         if !tabs.contains(&self.tab) {
             self.tab = RepositorySettingsTab::Remote;
@@ -1032,6 +1222,11 @@ impl Render for RepositorySettingsDialog {
                 label: "Editor".into(),
                 icon: Octicon::FileCode,
             }))
+            .chain(autolinks_tab.then_some(VerticalTab {
+                id: "repo-settings-tab-autolinks",
+                label: "Autolinks".into(),
+                icon: Octicon::LinkExternal,
+            }))
             .collect(),
             selected,
             compact,
@@ -1052,6 +1247,7 @@ impl Render for RepositorySettingsDialog {
             RepositorySettingsTab::GitConfig => self.git_config_tab(window, cx),
             RepositorySettingsTab::ForkSettings => self.fork_settings_tab(cx),
             RepositorySettingsTab::Editor => self.editor_tab(window, cx),
+            RepositorySettingsTab::Autolinks => self.autolinks_tab(window, cx),
         };
         // `#repository-settings { width: 600px; .dialog-content { min-height: 305px } }`
         let content = div()

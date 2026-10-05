@@ -574,6 +574,8 @@ impl SelectedCommitView {
             cross_repository: s
                 .flags
                 .bool(corvene_core::flags::ids::CROSS_REPOSITORY_ISSUE_LINKS),
+            // `341-custom-autolinks`
+            links: s.link_rules(id),
         };
         // `882-commit-author-links`: the author's GitHub profile, when known
         let author_url = s
