@@ -739,9 +739,11 @@ impl Render for ConfirmDeletePushedTagDialog {
     }
 }
 
-/// `ConfirmDiscardStash`
+/// `ConfirmDiscardStash`; with an entry, the stash list's Discard
+/// (`797-stash-list`).
 pub struct ConfirmDiscardStashDialog {
     repo: u64,
+    entry: Option<corvene_core::StashEntry>,
     dont_show_again: bool,
 }
 
@@ -749,6 +751,15 @@ impl ConfirmDiscardStashDialog {
     pub fn new(repo: u64) -> Self {
         Self {
             repo,
+            entry: None,
+            dont_show_again: false,
+        }
+    }
+
+    pub fn for_entry(repo: u64, entry: corvene_core::StashEntry) -> Self {
+        Self {
+            repo,
+            entry: Some(entry),
             dont_show_again: false,
         }
     }
@@ -758,6 +769,7 @@ impl Render for ConfirmDiscardStashDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let (repo, dont_show_again) = (self.repo, self.dont_show_again);
+        let entry = self.entry.clone();
         let content = div()
             .flex()
             .flex_col()
@@ -808,7 +820,10 @@ impl Render for ConfirmDiscardStashDialog {
                             Dispatcher::update_settings(cx, |s| s.confirm_discard_stash = false);
                         }
                         Dispatcher::close_popup(cx);
-                        Dispatcher::drop_stash(repo, cx);
+                        match &entry {
+                            Some(entry) => Dispatcher::discard_stash_entry(repo, entry.clone(), cx),
+                            None => Dispatcher::drop_stash(repo, cx),
+                        }
                     }),
                 },
             }

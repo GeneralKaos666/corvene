@@ -1,6 +1,10 @@
 //! Stash viewer - GHD `ui/stashing/{stash-diff-viewer,stash-diff-header}.tsx`
 //! (`styles/ui/_stash-diff-viewer.scss`): "Stashed changes" header with
 //! Restore / Discard, then a resizable file list beside the read-only diff.
+//!
+//! Deviation (`797-stash-list`): the viewer shows the entry picked in the
+//! Stashes section under its own title, with Apply (keep the stash) between
+//! Restore and Discard; GHD's always shows the branch's Desktop stash.
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher};
 use gpui_kit::component::resizable::{
@@ -244,6 +248,22 @@ impl Render for StashDiffViewer {
         let Some(id) = id else {
             return div().size_full().into_any_element();
         };
+        // `797-stash-list`: the entry's own title, and Apply
+        let (title, apply) = {
+            let s = self.state.read(cx);
+            let shown = s.selected_state().and_then(|rs| rs.shown_stash());
+            if s.flags.bool(corvene_core::flags::ids::STASH_LIST) {
+                (
+                    shown.map_or_else(
+                        || "Stashed changes".to_string(),
+                        corvene_core::stash_list::stash_title,
+                    ),
+                    shown.map(|e| e.sha.clone()),
+                )
+            } else {
+                ("Stashed changes".to_string(), None)
+            }
+        };
         div()
             .id("stash-diff-viewer")
             .size_full()
@@ -267,7 +287,8 @@ impl Render for StashDiffViewer {
                             .text_size(zpx(32.))
                             .line_height(zpx(32.))
                             .font_weight(FontWeight::LIGHT)
-                            .child("Stashed changes"),
+                            .truncate()
+                            .child(title),
                     )
                     .child(
                         div()
@@ -280,6 +301,13 @@ impl Render for StashDiffViewer {
                                     .mr(SPACING())
                                     .on_click(move |_, _, cx| Dispatcher::pop_stash(id, cx)),
                             )
+                            .when_some(apply, |d, sha| {
+                                d.child(button("stash-apply", "Apply", cx).mr(SPACING()).on_click(
+                                    move |_, _, cx| {
+                                        Dispatcher::apply_stash_entry(id, sha.clone(), cx)
+                                    },
+                                ))
+                            })
                             .child(
                                 button("stash-discard", "Discard", cx)
                                     .mr(SPACING())

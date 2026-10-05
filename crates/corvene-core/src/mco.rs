@@ -446,6 +446,15 @@ pub enum Banner {
     BranchesRestored {
         count: usize,
     },
+    /// Corvene (`797-stash-list`): "Discarded stash" + Undo, which stores
+    /// the entry's commit `sha` again with its `message`.
+    StashDropped {
+        repo: u64,
+        sha: String,
+        message: String,
+    },
+    /// Corvene (`797-stash-list`): after that Undo.
+    StashRestored,
     /// "Resolve conflicts to continue {description} **{branch}**."
     ConflictsFound {
         repo: u64,
@@ -496,13 +505,15 @@ impl Banner {
             | Banner::SquashUndone { .. }
             | Banner::ReorderUndone { .. }
             | Banner::BranchRestored { .. }
-            | Banner::BranchesRestored { .. } => Some(Duration::from_secs(5)),
+            | Banner::BranchesRestored { .. }
+            | Banner::StashRestored => Some(Duration::from_secs(5)),
             Banner::RepositoryMoved { .. } => Some(Duration::from_secs(15)),
             Banner::SuccessfulCherryPick { .. }
             | Banner::SuccessfulSquash { .. }
             | Banner::SuccessfulReorder { .. }
             | Banner::BranchDeleted { .. }
-            | Banner::BranchesDeleted { .. } => Some(Duration::from_secs(15)),
+            | Banner::BranchesDeleted { .. }
+            | Banner::StashDropped { .. } => Some(Duration::from_secs(15)),
             Banner::ConflictsFound { .. }
             | Banner::GitEmailMismatch { .. }
             | Banner::RepositoriesUnreadable { .. }

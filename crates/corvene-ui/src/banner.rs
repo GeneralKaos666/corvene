@@ -151,6 +151,12 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
         Banner::BranchesRestored { count } => {
             vec![(format!("Restored {count} branches"), false)]
         }
+        Banner::StashDropped { message, .. } => vec![
+            t("Discarded stash\u{a0}"),
+            b(&corvene_core::stash_list::message_title(message)
+                .unwrap_or_else(|| "stash".to_string())),
+        ],
+        Banner::StashRestored => vec![t("Restored stash")],
         Banner::ConflictsFound {
             description,
             branch,
@@ -428,6 +434,19 @@ pub fn banner_bar(
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
                         Dispatcher::restore_deleted_branch(repo, branch.clone(), sha.clone(), cx);
+                    })
+                    .into_any_element(),
+            )
+        }
+        Banner::StashDropped { repo, sha, message } => {
+            let (repo, sha, message) = (*repo, sha.clone(), message.clone());
+            Some(
+                link_button("banner-undo", "Undo", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
+                    .ml(SPACING_HALF())
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::clear_banner(cx);
+                        Dispatcher::restore_discarded_stash(repo, sha.clone(), message.clone(), cx);
                     })
                     .into_any_element(),
             )

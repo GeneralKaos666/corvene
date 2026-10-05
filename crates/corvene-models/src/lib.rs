@@ -328,6 +328,10 @@ pub struct StashEntry {
     pub message: String,
     pub tree: String,
     pub parents: Vec<String>,
+    /// Corvene (`797-stash-list`): when the entry was made, in seconds
+    /// since the Unix epoch (0 when unknown).
+    #[serde(default)]
+    pub date: i64,
 }
 
 /// `models/tip.ts`

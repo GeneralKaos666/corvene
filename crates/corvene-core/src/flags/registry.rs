@@ -5483,6 +5483,28 @@ registry! {
         code: &["crates/corvene-git/src/lfs.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// Every stash is listed and can be applied, restored, branched or discarded.
+    STASH_LIST = 797 "stash-list" {
+        title: "List every stash",
+        summary: "The bottom of the changes list shows every stash of the repository (Stashes \
+                  with a count, collapsible), including those made with git stash on the \
+                  command line, each with its message, branch and age; Desktop's own stashes \
+                  are marked. Clicking one shows it in the stash viewer. Its menu and the \
+                  viewer offer Restore (apply and drop), Apply (keep the stash), Create Branch \
+                  from Stash and Discard, which shows a Discarded stash banner with Undo for \
+                  15 seconds. Stash All Changes with Message asks for a message and whether \
+                  to include new files; such a stash is not the branch's own, so switching \
+                  branches leaves it alone.",
+        ghd_behaviour: "Only the current branch's Desktop stash is shown, as the Stashed Changes \
+                        row, and it can only be restored or discarded.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12699), Upstream::issue(21432)],
+        code: &["crates/corvene-core/src/stash_list.rs", "crates/corvene-git/src/stash_ops.rs", "crates/corvene-ui/src/stash_list.rs", "crates/corvene-ui/src/stash_view.rs", "crates/corvene-ui/src/dialogs/stash_list_dialogs.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.

@@ -509,6 +509,20 @@ pub enum Popup {
         repo: u64,
         stash: corvene_models::StashEntry,
     },
+    /// Corvene (`797-stash-list`): discard this entry of the stash list?
+    ConfirmDropStashEntry {
+        repo: u64,
+        stash: corvene_models::StashEntry,
+    },
+    /// Corvene (`797-stash-list`): Stash All Changes with Message.
+    StashWithMessage {
+        repo: u64,
+    },
+    /// Corvene (`797-stash-list`): name the branch `git stash branch` makes.
+    CreateBranchFromStash {
+        repo: u64,
+        stash: corvene_models::StashEntry,
+    },
     /// `MultiCommitOperation`: the dialog for the current `RepositoryState::mco` step.
     /// `flow` changes per operation so the dialog view is rebuilt (no stale
     /// branch selection from an earlier flow).
@@ -672,6 +686,9 @@ impl Popup {
             | Self::MergeBranch { repo, .. }
             | Self::ConfirmDiscardStash { repo, .. }
             | Self::DropKeptStash { repo, .. }
+            | Self::ConfirmDropStashEntry { repo, .. }
+            | Self::StashWithMessage { repo }
+            | Self::CreateBranchFromStash { repo, .. }
             | Self::MoveChangesToWorktree { repo, .. }
             | Self::MultiCommitOperation { repo, .. }
             | Self::LocalChangesOverwritten { repo, .. }
@@ -1216,6 +1233,9 @@ pub struct RepositoryState {
     /// Branches with a GitHub Desktop / Corvene stash (the branch list's
     /// stash icon, `854-branch-list-stash-icon`).
     pub stashed_branches: Vec<String>,
+    /// `797-stash-list`: every stash entry, newest first (empty while the
+    /// flag is off).
+    pub stashes: Vec<corvene_models::StashEntry>,
     /// Merge dialog preview.
     pub merge_preview: Option<crate::mco::MergePreview>,
     /// Delete Branch dialog warnings (`860-delete-branch-warnings`).
@@ -1325,6 +1345,9 @@ pub struct RepositoryState {
 
     // ---- stash viewer (`isShowingStashEntry`, `selectedStashedFile`) ----
     pub showing_stash: bool,
+    /// `797-stash-list`: the entry of [`Self::stashes`] the viewer shows
+    /// instead of [`Self::stash`] (see [`Self::shown_stash`]).
+    pub viewed_stash: Option<String>,
     pub stash_files: Option<Vec<corvene_models::CommittedFileChange>>,
     /// The stash whose files `stash_files` holds or is loading
     /// (`stashEntry.files` Loading / Loaded).
@@ -1445,6 +1468,15 @@ impl RepositoryState {
     /// is never dropped to make room).
     pub fn desktop_stash(&self) -> Option<&corvene_models::StashEntry> {
         self.stash.as_ref().filter(|s| s.branch.is_some())
+    }
+
+    /// The stash the stash viewer shows: the entry picked in the stash list
+    /// (`797-stash-list`), else [`Self::stash`].
+    pub fn shown_stash(&self) -> Option<&corvene_models::StashEntry> {
+        self.viewed_stash
+            .as_ref()
+            .and_then(|sha| self.stashes.iter().find(|s| &s.sha == sha))
+            .or(self.stash.as_ref())
     }
 }
 

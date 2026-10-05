@@ -1,0 +1,16 @@
+# The Stashes section and the viewer's Apply button (Corvene only, flag
+# 797-stash-list, off in the GitHub Desktop preset the harness runs with).
+# Run with
+#   PARITY_CORVENE_FLAGS=preset=github-desktop,797-stash-list=on
+# GHD shows a single Stashed Changes row instead, so the snaps are
+# recorded, not compared (`corvene_only`; deviations.md › Repository).
+name: stash-list
+description: Stashes section and stash viewer with Apply (Corvene only)
+setup: repo
+steps:
+  - menu: stash-all-changes
+    wait: 1500
+  - snap: {name: stashes, corvene_only: true, note: "GHD has one Stashed Changes row (deviations.md, 797-stash-list)"}
+  - menu: show-stashed-changes
+    wait: 800
+  - snap: {name: stash-view, corvene_only: true}

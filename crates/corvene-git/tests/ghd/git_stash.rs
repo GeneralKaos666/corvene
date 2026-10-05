@@ -254,6 +254,7 @@ fn does_not_exist(name: &str) -> StashEntry {
         message: String::new(),
         tree: "xyz".to_string(),
         parents: vec!["abc".to_string()],
+        date: 0,
     }
 }
 

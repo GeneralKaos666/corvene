@@ -51,6 +51,7 @@ pub mod repository_list;
 pub mod scrollbar;
 pub mod selected_commit;
 pub mod stash_conflicts;
+pub mod stash_list;
 pub mod stash_view;
 pub mod tab_bar;
 pub mod theme;

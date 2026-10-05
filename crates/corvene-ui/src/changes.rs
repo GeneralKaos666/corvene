@@ -58,6 +58,9 @@
 //! - a single file's menu has "Ignore with Pattern…", a dialog to edit the
 //!   pattern before it is added to `.gitignore` (`768-ignore-custom-pattern`).
 //! - a file menu can stash the selected files (`777-stash-selected-files`).
+//! - the Stashes section lists every stash in place of the Stashed Changes
+//!   row, and the list menu has Stash All Changes with Message
+//!   (`797-stash-list`, `crate::stash_list`).
 //! - the list menu can move the changes to another worktree
 //!   (`283-move-changes-to-worktree`).
 //! - conflicts left by restoring a stash replace the commit form with a list
@@ -280,6 +283,8 @@ pub struct ChangesSidebar {
     selected_cache: RefCell<Option<Rc<SelectedPaths>>>,
     /// `716-windows-invalid-names-warning` for the current status.
     windows_names_cache: RefCell<Option<(std::sync::Weak<Status>, WindowsNames)>>,
+    /// `797-stash-list`: the Stashes section is collapsed.
+    stash_list_collapsed: bool,
 }
 
 /// Included files Windows cannot check out: how many, and the first one
@@ -810,6 +815,7 @@ impl ChangesSidebar {
             visible_cache: RefCell::new(None),
             selected_cache: RefCell::new(None),
             windows_names_cache: RefCell::new(None),
+            stash_list_collapsed: false,
         }
     }
 
@@ -3038,6 +3044,11 @@ impl ChangesSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let stash_list = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::STASH_LIST);
         let (id, confirm, paths, openable, assume_unchanged, has_stash, can_stash, move_changes) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
@@ -3110,6 +3121,19 @@ impl ChangesSidebar {
             )
             .enabled(has_changes && can_stash),
         ];
+        // `797-stash-list`
+        if stash_list {
+            items.push(
+                MenuItem::new(
+                    mac_or(
+                        "Stash All Changes with Message…",
+                        "Stash all changes with message…",
+                    ),
+                    move |_, cx| Dispatcher::request_stash_with_message(id, cx),
+                )
+                .enabled(has_changes && can_stash),
+            );
+        }
         if let Some(other_worktree) = move_changes {
             items.push(
                 MenuItem::new(
@@ -3516,6 +3540,27 @@ impl ChangesSidebar {
             .when(whitespace_hidden > 0, |d| {
                 d.child(whitespace_hidden_note(whitespace_hidden, cx))
             })
+    }
+
+    /// `797-stash-list`: the Stashes section (every stash), else GHD's
+    /// Stashed Changes row.
+    fn stash_section(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let s = self.state.read(cx);
+        if !s.flags.bool(corvene_core::flags::ids::STASH_LIST) {
+            return self.stash_button(cx).map(IntoElement::into_any_element);
+        }
+        let id = s.selected?;
+        let rs = s.selected_state()?;
+        crate::stash_list::stash_list(
+            id,
+            rs,
+            self.stash_list_collapsed,
+            cx.listener(|this, _, _, cx| {
+                this.stash_list_collapsed = !this.stash_list_collapsed;
+                cx.notify();
+            }),
+            cx,
+        )
     }
 
     /// `.stashed-changes-button`: shown when the current branch has a stash.
@@ -5393,7 +5438,7 @@ impl Render for ChangesSidebar {
                     )
                     .child(self.header(window, cx))
                     .child(self.list(window, cx))
-                    .children(self.stash_button(cx)),
+                    .children(self.stash_section(cx)),
             )
             .children(self.hidden_changes_warning(cx))
             .child(

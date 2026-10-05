@@ -156,6 +156,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::ChangeRepositoryAlias { repo: r }
         | Popup::MoveRepositoryToGroup { repo: r }
         | Popup::ConfirmDiscardStash { repo: r }
+        | Popup::StashWithMessage { repo: r }
         | Popup::PublishRepository { repo: r }
         | Popup::PushNeedsPull { repo: r }
         | Popup::ConfirmRemoveRepository { repo: r } => {
@@ -556,7 +557,9 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         Popup::MoveChangesToWorktree { repo: r } => {
             repo = Some(*r);
         }
-        Popup::DropKeptStash { repo: r, stash } => {
+        Popup::DropKeptStash { repo: r, stash }
+        | Popup::ConfirmDropStashEntry { repo: r, stash }
+        | Popup::CreateBranchFromStash { repo: r, stash } => {
             repo = Some(*r);
             f.put("stash", &stash.sha);
         }
@@ -687,6 +690,15 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
         Banner::BranchRestored { branch } => {
             f.put("branch", branch);
         }
+        Banner::StashDropped {
+            repo: r,
+            sha,
+            message,
+        } => {
+            repo = Some(*r);
+            f.put("sha", sha).put("message", message);
+        }
+        Banner::StashRestored => {}
         Banner::ConflictsFound {
             repo: r,
             description,

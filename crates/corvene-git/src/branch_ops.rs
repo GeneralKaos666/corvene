@@ -797,14 +797,15 @@ pub fn create_desktop_stash(
 }
 
 /// `getStashes`: every entry of `refs/stash`; Corvene/GHD entries carry the
-/// branch they were made on in their message.
+/// branch they were made on in their message. Corvene also reads when each
+/// entry was made (`%ct`, for `797-stash-list`).
 pub fn get_stashes(git: Arc<GitBinary>, workdir: &Path) -> Result<(Vec<StashEntry>, usize)> {
     let out = GitCommand::new(git)
         .args([
             "log",
             "-g",
             "-z",
-            "--format=%gD%x00%H%x00%gs%x00%T%x00%P",
+            "--format=%gD%x00%H%x00%gs%x00%T%x00%P%x00%ct",
             "refs/stash",
             "--",
         ])
@@ -817,8 +818,8 @@ pub fn get_stashes(git: Arc<GitBinary>, workdir: &Path) -> Result<(Vec<StashEntr
     let text = String::from_utf8_lossy(&out.stdout);
     let mut entries = Vec::new();
     let mut total = 0usize;
-    for record in text.split('\0').collect::<Vec<_>>().chunks(5) {
-        if record.len() < 5 || record[0].trim().is_empty() {
+    for record in text.split('\0').collect::<Vec<_>>().chunks(6) {
+        if record.len() < 6 || record[0].trim().is_empty() {
             continue;
         }
         total += 1;
@@ -838,6 +839,7 @@ pub fn get_stashes(git: Arc<GitBinary>, workdir: &Path) -> Result<(Vec<StashEntr
                 .split_whitespace()
                 .map(|s| s.to_string())
                 .collect(),
+            date: record[5].trim().parse().unwrap_or(0),
         });
     }
     Ok((entries, total))

@@ -134,6 +134,9 @@ pub struct MenuExtras {
     /// Worktree…, enabled with changes and another worktree (set by
     /// [`MenuLabelsEvent::of`]).
     pub move_changes_to_worktree: Option<bool>,
+    /// Flag `797-stash-list`: Branch › Stash All Changes with Message…,
+    /// enabled like Stash All Changes (set by [`MenuLabelsEvent::of`]).
+    pub stash_with_message: Option<bool>,
     /// Flag `414-linux-install-cli` (the item is always there on macOS).
     pub install_cli: bool,
     /// Flag `269-bulk-remove-repositories`.
@@ -162,6 +165,7 @@ impl MenuExtras {
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
+            stash_with_message: flags.bool(ids::STASH_LIST).then_some(false),
             // Windows: the installer puts the command line tool on the PATH
             // (GHD has no menu item for it there either)
             install_cli: !cfg!(any(target_os = "android", windows))
@@ -184,6 +188,15 @@ impl MenuLabelsEvent {
                 s.selected_state()
                     .is_some_and(|rs| rs.last_commit.is_some()),
             );
+        }
+        // `797-stash-list`: like Stash All Changes (changes on a branch, no
+        // conflicts)
+        if extras.stash_with_message.is_some() {
+            extras.stash_with_message = Some(s.selected_state().is_some_and(|rs| {
+                rs.changed_files() > 0
+                    && rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
+                    && rs.conflict_state.is_none()
+            }));
         }
         // `283-move-changes-to-worktree`: with changes and another worktree
         if extras.move_changes_to_worktree.is_some() {
@@ -670,6 +683,18 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         ),
         item(stash_all_label, StashAllChanges),
     ];
+    if let Some(enabled) = extras.stash_with_message {
+        branch.push(MenuItemConstructorOptions {
+            enabled: Some(enabled),
+            ..item(
+                l(
+                    "Stash All Changes with Message…",
+                    "Stash all changes &with message…",
+                ),
+                StashAllChangesWithMessage,
+            )
+        });
+    }
     if let Some(enabled) = extras.move_changes_to_worktree {
         branch.push(MenuItemConstructorOptions {
             enabled: Some(enabled),
@@ -986,6 +1011,7 @@ mod tests {
                     fetch_tags: true,
                     request_reviewers: true,
                     move_changes_to_worktree: Some(true),
+                    stash_with_message: Some(true),
                     install_cli: true,
                     show_remove_repositories: true,
                     undo_last_commit: Some(true),

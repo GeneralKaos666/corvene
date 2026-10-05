@@ -1133,7 +1133,7 @@ impl Dispatcher {
             line_counts,
             status_options,
             recent_count,
-            other_stash,
+            (other_stash, stash_list),
             track_branches,
             clone_counts_as_fetch,
             detect_rewrite,
@@ -1170,7 +1170,10 @@ impl Dispatcher {
                 // GHD `RecentBranchesLimit` is 5
                 usize::try_from(s.flags.number(crate::flags::ids::RECENT_BRANCHES_COUNT))
                     .unwrap_or(5),
-                s.flags.bool(crate::flags::ids::SHOW_LATEST_OTHER_STASH),
+                (
+                    s.flags.bool(crate::flags::ids::SHOW_LATEST_OTHER_STASH),
+                    s.flags.bool(crate::flags::ids::STASH_LIST),
+                ),
                 s.flags.bool(crate::flags::ids::BRANCH_UPSTREAM_GONE)
                     || s.flags.bool(crate::flags::ids::BRANCH_LIST_AHEAD_BEHIND),
                 s.flags.bool(crate::flags::ids::CLONE_COUNTS_AS_FETCH),
@@ -1451,6 +1454,12 @@ impl Dispatcher {
                     let current = info.current_branch().map(|b| b.name.clone());
                     let stashed_branches =
                         stashes.iter().filter_map(|s| s.branch.clone()).collect();
+                    // Corvene (`797-stash-list`): every entry, for the list
+                    let all_stashes = if stash_list {
+                        stashes.clone()
+                    } else {
+                        Vec::new()
+                    };
                     // `getLastDesktopStashEntryForBranch`
                     let desktop_stash = current.as_deref().and_then(|current| {
                         corvene_git::last_desktop_stash_entry_index(&stashes, current)
@@ -1475,6 +1484,7 @@ impl Dispatcher {
                         stash,
                         stash_count,
                         stashed_branches,
+                        stashes: all_stashes,
                         rebase_snapshot,
                         cherry_pick_snapshot,
                         merge_head_branches,
@@ -1613,6 +1623,7 @@ impl Dispatcher {
                                 changed |= set(&mut repo_state.stash_count, extras.stash_count);
                                 changed |=
                                     set(&mut repo_state.stashed_branches, extras.stashed_branches);
+                                changed |= set(&mut repo_state.stashes, extras.stashes);
                                 changed |= set(&mut repo_state.last_fetched, extras.last_fetched);
                                 changed |=
                                     set(&mut repo_state.pull_with_rebase, extras.pull_with_rebase);
@@ -1644,12 +1655,19 @@ impl Dispatcher {
                                     .iter()
                                     .find(|w| w.kind == corvene_models::WorktreeType::Main)
                                     .map(|w| w.path.clone());
-                                let stash_sha = repo_state.stash.as_ref().map(|s| s.sha.clone());
+                                // `797-stash-list`: an entry that is gone is no
+                                // longer shown
+                                if repo_state.viewed_stash.as_ref().is_some_and(|sha| {
+                                    !repo_state.stashes.iter().any(|s| &s.sha == sha)
+                                }) {
+                                    changed |= set(&mut repo_state.viewed_stash, None);
+                                }
+                                let stash_sha = repo_state.shown_stash().map(|s| s.sha.clone());
                                 if repo_state.stash_files_sha != stash_sha {
                                     changed |= set(&mut repo_state.stash_files, None);
                                     changed |= set(&mut repo_state.stash_files_sha, None);
                                 }
-                                if repo_state.stash.is_none() {
+                                if repo_state.shown_stash().is_none() {
                                     changed |= set(&mut repo_state.showing_stash, false);
                                     changed |= set(&mut repo_state.stash_diff, None);
                                 }
@@ -4716,6 +4734,13 @@ impl Dispatcher {
     pub fn toggle_stash_view(id: u64, cx: &mut dyn Host) {
         let show = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
+            // `797-stash-list`: hiding forgets the entry picked in the list,
+            // showing shows the branch's own
+            if rs.viewed_stash.take().is_some() {
+                rs.stash_files = None;
+                rs.stash_files_sha = None;
+                rs.stash_diff = None;
+            }
             if rs.stash.is_none() {
                 rs.showing_stash = false;
                 cx.notify();
@@ -4750,7 +4775,7 @@ impl Dispatcher {
     /// GHD `GitStore.loadFilesForCurrentStashEntry`: the current stash's
     /// files, once per stash; the first is selected and, while the stash
     /// is showing, its diff loaded.
-    fn load_stash_files(id: u64, cx: &mut dyn Host) {
+    pub(crate) fn load_stash_files(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4758,7 +4783,7 @@ impl Dispatcher {
             .read(cx)
             .repo_states
             .get(&id)
-            .and_then(|r| r.stash.as_ref())
+            .and_then(|r| r.shown_stash())
             .map(|s| s.sha.clone())
         else {
             return;
@@ -4783,7 +4808,7 @@ impl Dispatcher {
             cx.update(|cx| {
                 let load = Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
-                    if rs.stash.as_ref().map(|s| &s.sha) != Some(&sha) {
+                    if rs.shown_stash().map(|s| &s.sha) != Some(&sha) {
                         return false;
                     }
                     match result {
@@ -4815,7 +4840,7 @@ impl Dispatcher {
         Self::load_stash_diff(id, cx);
     }
 
-    fn load_stash_diff(id: u64, cx: &mut dyn Host) {
+    pub(crate) fn load_stash_diff(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -4863,7 +4888,7 @@ impl Dispatcher {
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
-                    if rs.stash.as_ref().map(|s| s.sha.as_str()) != Some(key.0.as_str())
+                    if rs.shown_stash().map(|s| s.sha.as_str()) != Some(key.0.as_str())
                         || rs.stash_selected_file.as_deref() != Some(key.1.as_str())
                     {
                         return;
@@ -4892,18 +4917,19 @@ impl Dispatcher {
     /// Restore: `git stash pop`, then the files show up in Changes.
     pub fn pop_stash(id: u64, cx: &mut dyn Host) {
         let s = Self::state(cx).read(cx);
-        let Some(stash) = s
-            .repo_states
-            .get(&id)
-            .and_then(|r| r.stash.as_ref())
-            .cloned()
-        else {
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let Some(stash) = rs.shown_stash().cloned() else {
             return;
         };
         // Corvene (`868-stash-restore-checks-branch`): the stash is popped by
         // its commit and only while its branch is still checked out (GHD pops
-        // `stash@{n}` from the last refresh, which may be another branch's)
-        let check_branch = s.flags.bool(crate::flags::ids::STASH_RESTORE_CHECKS_BRANCH);
+        // `stash@{n}` from the last refresh, which may be another branch's);
+        // an entry picked in the stash list (`797-stash-list`) is restored
+        // onto whichever branch is checked out
+        let check_branch = s.flags.bool(crate::flags::ids::STASH_RESTORE_CHECKS_BRANCH)
+            && rs.viewed_stash.is_none();
         // `774-stash-conflict-flow` / `775-stash-restore-unstages-new-files`
         Self::pop_stash_with_options(id, stash, check_branch, cx);
     }
@@ -4918,15 +4944,21 @@ impl Dispatcher {
     }
 
     pub fn drop_stash(id: u64, cx: &mut dyn Host) {
-        let Some(sha) = Self::state(cx)
-            .read(cx)
+        let s = Self::state(cx).read(cx);
+        let Some(stash) = s
             .repo_states
             .get(&id)
-            .and_then(|r| r.stash.as_ref())
-            .map(|s| s.sha.clone())
+            .and_then(|r| r.shown_stash())
+            .cloned()
         else {
             return;
         };
+        // `797-stash-list`: with an Undo banner
+        if s.flags.bool(crate::flags::ids::STASH_LIST) {
+            Self::discard_stash_entry(id, stash, cx);
+            return;
+        }
+        let sha = stash.sha;
         Self::run_history_op(
             id,
             "Could not discard stash",
@@ -7353,6 +7385,7 @@ struct RefreshExtras {
     stash: Option<corvene_models::StashEntry>,
     stash_count: usize,
     stashed_branches: Vec<String>,
+    stashes: Vec<corvene_models::StashEntry>,
     rebase_snapshot: Option<corvene_git::RebaseSnapshot>,
     cherry_pick_snapshot: Option<corvene_git::CherryPickSnapshot>,
     /// The local branches at `MERGE_HEAD` (`getBranchesPointedAt`).

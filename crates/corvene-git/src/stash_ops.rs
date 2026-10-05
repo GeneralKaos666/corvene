@@ -20,6 +20,12 @@
 //!
 //! Deviation (`777-stash-selected-files`): [`create_desktop_stash_of_files`]
 //! stashes some of the changed files (GHD stashes all of them).
+//!
+//! Deviation (`797-stash-list`): every stash can be applied without dropping
+//! it ([`apply_stash_entry_with`]), turned into a branch
+//! ([`create_branch_from_stash`]) and put back after a discard
+//! ([`store_stash`]); [`create_stash_with_message`] makes a stash with the
+//! user's message. GHD only pops or drops the branch's Desktop stash.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -66,6 +72,30 @@ pub fn pop_stash_entry_with(
     stash_sha: &str,
     options: StashPopOptions,
 ) -> Result<StashPop> {
+    restore_stash_entry(git, workdir, stash_sha, options, true)
+}
+
+/// Corvene (`797-stash-list`): `git stash apply --quiet <name>` of the entry
+/// whose commit is `stash_sha`, which stays in the list. [`StashPop::Restored`]
+/// then means the changes are back (and the entry is still there).
+pub fn apply_stash_entry_with(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    stash_sha: &str,
+    options: StashPopOptions,
+) -> Result<StashPop> {
+    restore_stash_entry(git, workdir, stash_sha, options, false)
+}
+
+/// [`pop_stash_entry_with`] (`pop`) or [`apply_stash_entry_with`].
+fn restore_stash_entry(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    stash_sha: &str,
+    options: StashPopOptions,
+    pop: bool,
+) -> Result<StashPop> {
+    let verb = if pop { "pop" } else { "apply" };
     let Some(entry) = stash_entry_matching_sha(git.clone(), workdir, stash_sha)? else {
         return Ok(StashPop::Missing);
     };
@@ -78,7 +108,7 @@ pub fn pop_stash_entry_with(
     let unmerged_before =
         options.keep_on_conflict && !unmerged_paths(git.clone(), workdir)?.is_empty();
     let out = GitCommand::new(git.clone())
-        .args(["stash", "pop", "--quiet", &entry.name])
+        .args(["stash", verb, "--quiet", &entry.name])
         .current_dir(workdir)
         .allow_any_exit_code()
         .run()?;
@@ -99,12 +129,14 @@ pub fn pop_stash_entry_with(
         return Ok(StashPop::Conflicted);
     }
     if out.status.code() == Some(1) && out.stderr.is_empty() {
-        drop_desktop_stash_entry(git.clone(), workdir, stash_sha)?;
+        if pop {
+            drop_desktop_stash_entry(git.clone(), workdir, stash_sha)?;
+        }
         unstage_new_files(git, workdir, &new_files);
         return Ok(StashPop::Restored);
     }
     Err(GitError::Failed {
-        args: format!("stash pop --quiet {}", entry.name),
+        args: format!("stash {verb} --quiet {}", entry.name),
         code: out.status.code(),
         stderr: out.stderr.trim().to_string(),
     })
@@ -466,6 +498,90 @@ fn merge_stash_trees(
 }
 
 /// The paths with unmerged index entries (`ls-files -u`), each once.
+/// Corvene (`797-stash-list`): `git stash push [-u] [-m <message>]`, a stash
+/// that is not the branch's Desktop stash (no `!!GitHub_Desktop` marker), so
+/// branch switches leave it alone. Returns false when there was nothing to
+/// stash. `guard_assume_unchanged` is flag `869`'s check.
+pub fn create_stash_with_message(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    message: Option<&str>,
+    include_untracked: bool,
+    guard_assume_unchanged: bool,
+) -> Result<bool> {
+    if guard_assume_unchanged {
+        crate::branch_ops::ensure_no_modified_assume_unchanged(git.clone(), workdir)?;
+    }
+    let mut args = vec!["stash", "push"];
+    if include_untracked {
+        args.push("--include-untracked");
+    }
+    let message = message.map(str::trim).filter(|m| !m.is_empty());
+    if let Some(message) = message {
+        args.extend(["-m", message]);
+    }
+    let out = GitCommand::new(git)
+        .args(args)
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .run()?;
+    if out.stdout_string()?.trim() == "No local changes to save" {
+        return Ok(false);
+    }
+    if !out.status.success() {
+        return Err(GitError::Failed {
+            args: "stash push".into(),
+            code: out.status.code(),
+            stderr: out.stderr.trim().to_string(),
+        });
+    }
+    Ok(true)
+}
+
+/// Corvene (`797-stash-list`): `git stash branch <branch> <name>` of the
+/// entry whose commit is `stash_sha`: a new branch at the commit the stash
+/// was made on, checked out, with the stash applied and (when that worked)
+/// dropped. [`StashPop::Missing`] when the entry is gone.
+pub fn create_branch_from_stash(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    stash_sha: &str,
+    branch: &str,
+) -> Result<StashPop> {
+    let Some(entry) = stash_entry_matching_sha(git.clone(), workdir, stash_sha)? else {
+        return Ok(StashPop::Missing);
+    };
+    let out = GitCommand::new(git.clone())
+        .args(["stash", "branch", branch, &entry.name])
+        .current_dir(workdir)
+        .allow_any_exit_code()
+        .run()?;
+    if out.status.success() {
+        return Ok(StashPop::Restored);
+    }
+    // the branch is made and checked out before the apply; a conflicted
+    // apply keeps the entry
+    if !unmerged_paths(git, workdir)?.is_empty() {
+        return Ok(StashPop::Conflicted);
+    }
+    Err(GitError::Failed {
+        args: format!("stash branch {branch} {}", entry.name),
+        code: out.status.code(),
+        stderr: out.stderr.trim().to_string(),
+    })
+}
+
+/// Corvene (`797-stash-list`): put a dropped entry back (`git stash store
+/// -m <message> <sha>`), the "Discarded stash" banner's Undo. The stash
+/// commit stays in the object database until git's gc prunes it.
+pub fn store_stash(git: Arc<GitBinary>, workdir: &Path, sha: &str, message: &str) -> Result<()> {
+    GitCommand::new(git)
+        .args(["stash", "store", "-m", message, sha])
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
 pub fn unmerged_paths(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<String>> {
     let out = GitCommand::new(git)
         .args(["ls-files", "-u", "-z"])
@@ -771,5 +887,89 @@ mod tests {
             pop_stash_entry_with(git, dir.path(), "0000", StashPopOptions::default()).unwrap(),
             StashPop::Missing
         );
+    }
+
+    #[test]
+    fn applying_a_stash_keeps_the_entry() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        run(path, &["stash", "push", "-m", "wip"]);
+        let sha = crate::get_stashes(git.clone(), path).unwrap().0[0]
+            .sha
+            .clone();
+        assert_eq!(
+            apply_stash_entry_with(git.clone(), path, &sha, StashPopOptions::default()).unwrap(),
+            StashPop::Restored
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "two\n"
+        );
+        let (entries, _) = crate::get_stashes(git, path).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sha, sha);
+    }
+
+    #[test]
+    fn a_stash_with_a_message_is_not_a_desktop_stash() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        std::fs::write(path.join("new.txt"), "new\n").unwrap();
+        assert!(create_stash_with_message(git.clone(), path, Some(" wip "), true, false).unwrap());
+        assert_eq!(porcelain(path), "");
+        let (entries, _) = crate::get_stashes(git.clone(), path).unwrap();
+        assert_eq!(entries[0].message, "On main: wip");
+        assert_eq!(entries[0].branch, None);
+        assert!(entries[0].date > 0);
+        // without --include-untracked the new file stays
+        std::fs::write(path.join("a.txt"), "three\n").unwrap();
+        std::fs::write(path.join("other.txt"), "x\n").unwrap();
+        assert!(create_stash_with_message(git.clone(), path, None, false, false).unwrap());
+        assert_eq!(porcelain(path), "?? other.txt\n");
+        std::fs::remove_file(path.join("other.txt")).unwrap();
+        assert!(!create_stash_with_message(git, path, None, false, false).unwrap());
+    }
+
+    #[test]
+    fn a_branch_from_a_stash_starts_where_the_stash_was_made() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        run(path, &["stash", "push"]);
+        std::fs::write(path.join("a.txt"), "three\n").unwrap();
+        run(path, &["commit", "-q", "-am", "three"]);
+        let sha = crate::get_stashes(git.clone(), path).unwrap().0[0]
+            .sha
+            .clone();
+        assert_eq!(
+            create_branch_from_stash(git.clone(), path, &sha, "from-stash").unwrap(),
+            StashPop::Restored
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "two\n"
+        );
+        assert!(crate::get_stashes(git.clone(), path).unwrap().0.is_empty());
+        assert_eq!(
+            create_branch_from_stash(git, path, &sha, "again").unwrap(),
+            StashPop::Missing
+        );
+    }
+
+    #[test]
+    fn a_discarded_stash_can_be_stored_again() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "two\n").unwrap();
+        run(path, &["stash", "push", "-m", "keep me"]);
+        let entry = crate::get_stashes(git.clone(), path).unwrap().0.remove(0);
+        crate::drop_desktop_stash_entry(git.clone(), path, &entry.sha).unwrap();
+        assert!(crate::get_stashes(git.clone(), path).unwrap().0.is_empty());
+        store_stash(git.clone(), path, &entry.sha, &entry.message).unwrap();
+        let (entries, _) = crate::get_stashes(git, path).unwrap();
+        assert_eq!(entries[0].sha, entry.sha);
+        assert_eq!(entries[0].message, "On main: keep me");
     }
 }

@@ -67,6 +67,7 @@ pub mod settings_file;
 pub mod shared_storage;
 pub mod sign_in;
 pub mod stash_flows;
+pub mod stash_list;
 pub mod state;
 pub mod templates;
 pub mod text_tokens;

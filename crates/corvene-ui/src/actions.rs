@@ -144,6 +144,8 @@ gpui_kit::actions!(
         FetchFromRemote7,
         // Branch › Move Changes to Worktree… (`283-move-changes-to-worktree`)
         MoveChangesToWorktree,
+        // Branch › Stash All Changes with Message… (`797-stash-list`)
+        StashAllChangesWithMessage,
         RemoveRepository,
         // Android only (no GHD equivalent): Repository › Move to shared storage…
         MoveToSharedStorage,

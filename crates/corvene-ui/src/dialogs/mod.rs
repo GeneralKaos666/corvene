@@ -47,6 +47,7 @@ mod request_reviewers;
 mod sign_in;
 mod simple;
 mod ssh_key_passphrase;
+mod stash_list_dialogs;
 mod test_notifications;
 mod tutorial_dialogs;
 mod unknown_authors;
@@ -530,6 +531,22 @@ impl DialogHost {
                 .into(),
             Popup::DropKeptStash { repo, stash } => cx
                 .new(|_| DropKeptStashDialog::new(*repo, stash.clone()))
+                .into(),
+            Popup::ConfirmDropStashEntry { repo, stash } => cx
+                .new(|_| ConfirmDiscardStashDialog::for_entry(*repo, stash.clone()))
+                .into(),
+            Popup::StashWithMessage { repo } => cx
+                .new(|cx| stash_list_dialogs::StashWithMessageDialog::new(*repo, window, cx))
+                .into(),
+            Popup::CreateBranchFromStash { repo, stash } => cx
+                .new(|cx| {
+                    stash_list_dialogs::CreateBranchFromStashDialog::new(
+                        *repo,
+                        stash.clone(),
+                        window,
+                        cx,
+                    )
+                })
                 .into(),
             Popup::PublishRepository { repo } => cx
                 .new(|cx| PublishRepositoryDialog::new(state, *repo, window, cx))

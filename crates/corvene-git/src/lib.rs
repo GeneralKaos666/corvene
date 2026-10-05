@@ -104,10 +104,10 @@ pub use ignore::{
 pub use index_lock::{index_lock_path, remove_stale_index_lock};
 pub use lfs_progress::GitLfsProgressParser;
 pub use log::{
-    COMMIT_BATCH_SIZE, HistoryQuery, LoggedCommit, NULL_TREE_SHA, REMERGE_DIFF_MIN_VERSION,
-    commit_file_diff, commit_matches_words, commit_range_file_diff, commits_with_sha_prefix,
-    LoggedHistory, filtered_history, filtered_history_page, get_all_tags, get_changed_files,
-    get_changed_files_in_process, get_commit_range_changed_files, get_commits,
+    COMMIT_BATCH_SIZE, HistoryQuery, LoggedCommit, LoggedHistory, NULL_TREE_SHA,
+    REMERGE_DIFF_MIN_VERSION, commit_file_diff, commit_matches_words, commit_range_file_diff,
+    commits_with_sha_prefix, filtered_history, filtered_history_page, get_all_tags,
+    get_changed_files, get_changed_files_in_process, get_commit_range_changed_files, get_commits,
     get_commits_in_range, get_commits_with, local_commit_shas, local_only_commits, merge_base,
     merge_base_changed_files, merge_base_file_diff, most_recent_local_commit,
     parse_filtered_history, parse_raw_log_with_numstat, parse_recent_authors, recent_authors,
@@ -166,8 +166,9 @@ pub use repo::{
 };
 pub use ssh::{AddSshHostInfo, parse_add_ssh_host_prompt};
 pub use stash_ops::{
-    AddToStash, StashPop, StashPopOptions, add_to_desktop_stash, create_desktop_stash_of_files,
-    mark_conflicts_resolved, pop_stash_entry_with, stash_entry, unmerged_paths,
+    AddToStash, StashPop, StashPopOptions, add_to_desktop_stash, apply_stash_entry_with,
+    create_branch_from_stash, create_desktop_stash_of_files, create_stash_with_message,
+    mark_conflicts_resolved, pop_stash_entry_with, stash_entry, store_stash, unmerged_paths,
 };
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,
