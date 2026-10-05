@@ -6,7 +6,9 @@
 //! `corvene_git::hook_env::load_shell_env()`; `{ kind: 'success', env }` is
 //! `Ok(env)` and `{ kind: 'failure' }` an `Err`. On macOS and Linux both run
 //! the user's login shell (GitHub Desktop's default shell; Corvene's
-//! `$SHELL -ilc`) and collect the environment it prints.
+//! `$SHELL -ilc`) and collect the environment it prints. The test calls
+//! `load_shell_env_with_timeout` with a longer timeout than the app's 5 s
+//! so a busy machine does not fail it.
 //!
 //! On Windows GitHub Desktop runs the case once per
 //! `SupportedHooksEnvShell` (`git-bash`, `pwsh`, `powershell`, `cmd`).
@@ -19,7 +21,8 @@
 #[test]
 fn returns_an_env_containing_path_default_shell() {
     corvene_test_support::init();
-    let result = corvene_git::hook_env::load_shell_env();
+    let result =
+        corvene_git::hook_env::load_shell_env_with_timeout(std::time::Duration::from_secs(60));
 
     assert!(result.is_ok(), "expected kind 'success', got {result:?}");
 

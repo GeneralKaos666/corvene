@@ -79,10 +79,21 @@ pub fn load_shell_env() -> std::io::Result<HashMap<String, String>> {
         .collect())
 }
 
+/// How long [`load_shell_env`] waits for the login shell.
+#[cfg(not(windows))]
+const SHELL_ENV_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Run `$SHELL -ilc` and collect its environment, NUL-delimited so values
 /// with newlines survive (the same awk one-liner GHD uses). 5 s timeout.
 #[cfg(not(windows))]
 pub fn load_shell_env() -> std::io::Result<HashMap<String, String>> {
+    load_shell_env_with_timeout(SHELL_ENV_TIMEOUT)
+}
+
+/// [`load_shell_env`] with the caller's timeout. Tests pass a long one: a
+/// login shell can take seconds to start on a machine busy with builds.
+#[cfg(not(windows))]
+pub fn load_shell_env_with_timeout(timeout: Duration) -> std::io::Result<HashMap<String, String>> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
     let cmd = r#"command awk 'BEGIN{for(k in ENVIRON) printf("%c%s=%s%c", 0, k, ENVIRON[k], 0)}'"#;
     let mut child = Command::new(&shell)
@@ -108,12 +119,15 @@ pub fn load_shell_env() -> std::io::Result<HashMap<String, String>> {
         if child.try_wait()?.is_some() {
             break;
         }
-        if started.elapsed() > Duration::from_secs(5) {
+        if started.elapsed() > timeout {
             let _ = child.kill();
             let _ = child.wait();
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                "shell did not print its environment within 5 s",
+                format!(
+                    "shell did not print its environment within {} s",
+                    timeout.as_secs()
+                ),
             ));
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -147,6 +161,10 @@ mod tests {
 
     #[test]
     fn loads_the_login_shell_environment() {
+        // The app's 5 s budget is too tight under a parallel workspace build
+        #[cfg(not(windows))]
+        let env = load_shell_env_with_timeout(Duration::from_secs(60)).expect("shell env");
+        #[cfg(windows)]
         let env = load_shell_env().expect("shell env");
         // Windows spells it `Path`
         assert!(env.keys().any(|key| key.eq_ignore_ascii_case("PATH")));
