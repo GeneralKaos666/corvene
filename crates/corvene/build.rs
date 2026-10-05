@@ -1,9 +1,17 @@
 //! Windows: the executable's icon and version information
 //! (`packaging/windows/corvene.rc`). GPUI's own build script embeds the
-//! application manifest.
+//! application manifest. macOS: only the frameworks the binary uses.
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
+    // macOS: link only the frameworks whose symbols the binary uses. The
+    // objc2 crates that gpui-component, accesskit and GPUI pull in with
+    // default features name CloudKit, CoreData, CoreLocation, CoreImage
+    // and OpenGL, and dyld would load each at every launch (and for every
+    // askpass run).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo::rustc-link-arg-bins=-Wl,-dead_strip_dylibs");
+    }
     #[cfg(windows)]
     if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
         let dir = "../../packaging/windows";
