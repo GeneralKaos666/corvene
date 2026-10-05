@@ -27,7 +27,8 @@
 //! "Flags…" (no GHD equivalent, always there), File › Import Repositories
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
 //! Pull All Repositories (flag `299-pull-all-repositories`), Repository ›
-//! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Start
+//! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Recent
+//! Activity… (flag `1216-recent-activity`), Repository › Start
 //! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
 //! Fetch From ▸ with a repository's remotes when it has several (flag
 //! `1210-push-to-other-remote`), Branch › Request
@@ -132,6 +133,8 @@ pub struct MenuExtras {
     /// `Some(true)` while the repository bisects (set by
     /// [`MenuLabelsEvent::of`]).
     pub bisect: Option<bool>,
+    /// Flag `1216-recent-activity`: Repository › Recent Activity….
+    pub recent_activity: bool,
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
     /// branch has a pull request).
     pub request_reviewers: bool,
@@ -169,6 +172,7 @@ impl MenuExtras {
             pull_all: flags.bool(ids::PULL_ALL_REPOSITORIES),
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             bisect: flags.bool(ids::BISECT).then_some(false),
+            recent_activity: flags.bool(ids::RECENT_ACTIVITY),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
             stash_with_message: flags.bool(ids::STASH_LIST).then_some(false),
@@ -668,6 +672,16 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         item(l("New Worktree…", "New work&tree…"), NewWorktree),
         separator(),
     ]);
+    // Corvene (`1216-recent-activity`)
+    if extras.recent_activity {
+        repository.extend([
+            item(
+                l("Recent Activity…", "Recent activit&y…"),
+                ShowRecentActivity,
+            ),
+            separator(),
+        ]);
+    }
     // Corvene (`1212-bisect`)
     if let Some(bisecting) = extras.bisect {
         repository.extend([
@@ -1034,6 +1048,7 @@ mod tests {
                     pull_all: true,
                     fetch_tags: true,
                     bisect: Some(bits & 1 != 0),
+                    recent_activity: true,
                     request_reviewers: true,
                     move_changes_to_worktree: Some(true),
                     stash_with_message: Some(true),

@@ -60,6 +60,7 @@ pub mod portable_paths;
 pub mod pull_request_preview;
 pub mod pull_requests;
 pub mod push_errors;
+pub mod reflog;
 pub mod release_notes;
 pub mod remote;
 pub mod repo_rules;

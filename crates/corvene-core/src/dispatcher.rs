@@ -2473,6 +2473,16 @@ impl Dispatcher {
         if !more && Self::history_all_branches(Self::state(cx).read(cx)) {
             Self::load_all_branches(id, false, cx);
         }
+        // `1216-recent-activity`: and the reflog while it is listed
+        if !more
+            && Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .is_some_and(|rs| rs.reflog.is_some())
+        {
+            Self::load_reflog(id, cx);
+        }
         let state = Self::state(cx);
         // `885-history-load-race`: a reload asked for while a page loads
         // runs once that page is in (GHD drops it), and the next page

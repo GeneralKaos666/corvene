@@ -362,6 +362,15 @@ pub enum Popup {
         repo: u64,
         sha: String,
     },
+    /// Corvene `1216-recent-activity`: confirm `reset --hard` to a reflog
+    /// entry's commit; `dirty` changed files are stashed first.
+    ResetToReflogEntry {
+        repo: u64,
+        sha: String,
+        /// The branch being reset, `None` on a detached HEAD.
+        branch: Option<String>,
+        dirty: usize,
+    },
     /// Corvene addition (`261-reset-to-remote`): confirm resetting the
     /// current branch to its upstream (`reset --hard`), or to a commit
     /// (`888-reset-modes`' Hard reset).
@@ -674,6 +683,7 @@ impl Popup {
             | Self::CreateBranchFromCommits { repo, .. }
             | Self::ConfirmDiscardSelection { repo, .. }
             | Self::ResetToCommit { repo, .. }
+            | Self::ResetToReflogEntry { repo, .. }
             | Self::CheckoutCommit { repo, .. }
             | Self::CreateTag { repo, .. }
             | Self::StartBisect { repo, .. }
@@ -1386,6 +1396,10 @@ pub struct RepositoryState {
 
     /// `1214-commit-signatures`: verified signatures by commit.
     pub signatures: crate::signatures::SignatureStore,
+
+    // ---- `1216-recent-activity` ----
+    /// Repository › Recent Activity…: History lists the reflog instead.
+    pub reflog: Option<crate::reflog::ReflogState>,
 }
 
 /// GHD `IFileListFilterState` option flags; the text lives in the text box.
@@ -1478,7 +1492,10 @@ impl RepositoryState {
     /// to a branch, the filter's matches while History is filtered
     /// (`886-history-search`), else the branch's own history.
     pub fn visible_commits(&self) -> &Vec<corvene_models::Commit> {
-        if self.compare.is_comparing() {
+        if let Some(reflog) = &self.reflog {
+            // `1216-recent-activity`: the commits its entries point at
+            &reflog.commits
+        } else if self.compare.is_comparing() {
             &self.compare.commits
         } else if self.history_filter.is_active() {
             &self.history_filter.commits
@@ -1491,11 +1508,21 @@ impl RepositoryState {
         }
     }
 
+    /// The commit `sha` in the listed commits, else in HEAD's history
+    /// (`1216-recent-activity` lists commits no branch has).
+    pub fn find_commit(&self, sha: &str) -> Option<&corvene_models::Commit> {
+        self.visible_commits()
+            .iter()
+            .find(|c| c.sha == sha)
+            .or_else(|| self.commits.iter().find(|c| c.sha == sha))
+    }
+
     /// History lists every branch (`1213-commit-graph`), not only the
     /// commits of HEAD: rows have no neighbours to squash or reorder with.
     /// A bisect's range (`1212-bisect`) comes first.
     pub fn showing_all_branches(&self) -> bool {
-        !self.compare.is_comparing()
+        self.reflog.is_none()
+            && !self.compare.is_comparing()
             && !self.history_filter.is_active()
             && !self.status.as_ref().is_some_and(|s| s.bisect.is_some())
             && self.all_branches.as_ref().is_some_and(|a| a.loaded)

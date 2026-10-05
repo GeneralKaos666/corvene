@@ -296,6 +296,8 @@ pub struct HistorySidebar {
     /// `1213-commit-graph`: the lanes of the listed commits, extended as
     /// pages load.
     graph: Rc<std::cell::RefCell<corvene_core::commit_graph::CommitGraph>>,
+    /// `1216-recent-activity`: shown instead while Recent Activity is open.
+    reflog: Entity<crate::reflog_list::ReflogList>,
 }
 
 impl HistorySidebar {
@@ -358,6 +360,7 @@ impl HistorySidebar {
         })
         .detach();
         let list_scroll = UniformListScrollHandle::new();
+        let state_for_reflog = state.clone();
         Self {
             state,
             compare,
@@ -375,6 +378,7 @@ impl HistorySidebar {
             shown_tip: None,
             revealed: None,
             graph: Default::default(),
+            reflog: cx.new(|cx| crate::reflog_list::ReflogList::new(state_for_reflog, cx)),
         }
     }
 
@@ -3072,6 +3076,15 @@ impl Render for HistorySidebar {
                 Dispatcher::set_drag_target(None, cx);
             }
         }
+        // `1216-recent-activity`: the reflog replaces the whole sidebar
+        let reflog_open = {
+            let s = self.state.read(cx);
+            s.selected_state()
+                .is_some_and(|rs| corvene_core::reflog::recent_activity_of(s, rs).is_some())
+        };
+        if reflog_open {
+            return self.reflog.clone().into_any_element();
+        }
         let (id, show_list, form, merge_status) = {
             let s = self.state.read(cx);
             let id = s.selected;
@@ -3231,6 +3244,7 @@ impl Render for HistorySidebar {
             .children(filter_row)
             .child(body)
             .children(self.context_menu.clone())
+            .into_any_element()
     }
 }
 

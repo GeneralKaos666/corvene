@@ -44,6 +44,7 @@ mod remote_dialogs;
 mod remove_repositories;
 mod repository_settings;
 mod request_reviewers;
+mod reset_to_reflog_entry;
 mod sign_in;
 mod simple;
 mod ssh_key_passphrase;
@@ -391,6 +392,21 @@ impl DialogHost {
                 .into(),
             Popup::ResetToCommit { repo, sha } => cx
                 .new(|_| ResetToCommitDialog::new(*repo, sha.clone()))
+                .into(),
+            Popup::ResetToReflogEntry {
+                repo,
+                sha,
+                branch,
+                dirty,
+            } => cx
+                .new(|_| {
+                    reset_to_reflog_entry::ResetToReflogEntryDialog::new(
+                        *repo,
+                        sha.clone(),
+                        branch.clone(),
+                        *dirty,
+                    )
+                })
                 .into(),
             Popup::ResetToRemote {
                 repo,

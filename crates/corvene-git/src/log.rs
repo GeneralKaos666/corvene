@@ -294,6 +294,28 @@ pub fn get_commits_from(
     walk_commits(&repo, tips, skip, limit, first_parent)
 }
 
+/// Corvene `1216-recent-activity`: the commits `shas` name, in that order,
+/// each once. A SHA whose object is gone (garbage collected) or is not a
+/// commit is left out.
+pub fn commits_by_sha(workdir: &Path, shas: &[String]) -> Result<Vec<Commit>> {
+    let repo = crate::handle::open(workdir)?;
+    let tags = tags_by_commit(&repo);
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for sha in shas {
+        let Ok(id) = gix::ObjectId::from_hex(sha.as_bytes()) else {
+            continue;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        if let Ok(commit) = commit_from_id(&repo, id, &tags) {
+            out.push(commit);
+        }
+    }
+    Ok(out)
+}
+
 fn walk_commits(
     repo: &gix::Repository,
     tips: Vec<gix::ObjectId>,

@@ -112,6 +112,8 @@ gpui_kit::actions!(
         PullAllRepositories,
         // Repository › Fetch All Tags (`899-tags-in-branch-list`)
         FetchAllTags,
+        // Repository › Recent Activity… (`1216-recent-activity`)
+        ShowRecentActivity,
         // Repository › Start Bisect / Stop Bisecting (`1212-bisect`)
         StartBisect,
         StopBisect,

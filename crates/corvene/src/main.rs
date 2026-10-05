@@ -567,6 +567,7 @@ pub(crate) fn main() {
         //   a merge blocked by local changes, an output nobody has words for, a
         //   failure GHD describes, a push a protected branch rejected, or an error
         //   git did not produce)
+        //   recent-activity (Repository › Recent Activity…, flag 1216),
         //   blame:<path>[@<rev>] (the Blame view of a file, in the working tree
         //   or at a revision; flag 798)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
@@ -1202,6 +1203,12 @@ pub(crate) fn main() {
                 Dispatcher::fetch_all_tags(id, cx);
             }
         });
+        // `1216-recent-activity`
+        on_menu_action(cx, move |_: &ShowRecentActivity, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_recent_activity(id, cx);
+            }
+        });
         // `1212-bisect`
         on_menu_action(cx, move |_: &StartBisect, cx| {
             if let Some(id) = selected(cx) {
@@ -1807,6 +1814,8 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 cx,
             );
         }
+        // `1216-recent-activity`
+        ("recent-activity", Some(id)) => Dispatcher::show_recent_activity(id, cx),
         // `798-blame`: `blame:<path>` (working tree) or `blame:<path>@<rev>`
         (other, Some(id)) if other.starts_with("blame:") => {
             let arg = &other["blame:".len()..];

@@ -593,7 +593,7 @@ impl Render for CreateBranchDialog {
             // `updateBranchName`: any of `allBranches`, remote names included
             let existing: Vec<String> = all_branches.into_iter().map(|b| b.name).collect();
             let target = self.target_sha.as_ref().and_then(|sha| {
-                rs.and_then(|r| r.commits.iter().find(|c| &c.sha == sha))
+                rs.and_then(|r| r.find_commit(sha))
                     .map(|c| (c.summary.clone(), c.short_sha().to_string()))
             });
             let default_branch = rs.and_then(|r| r.default_branch.clone());

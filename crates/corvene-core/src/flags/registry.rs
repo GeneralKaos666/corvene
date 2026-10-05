@@ -7558,6 +7558,27 @@ registry! {
         code: &["crates/corvene-core/src/signatures.rs", "crates/corvene-ui/src/history.rs"],
     },
 
+    /// Repository › Recent Activity…: the reflog, to get lost commits back.
+    RECENT_ACTIVITY = 1216 "recent-activity" {
+        title: "Recent Activity",
+        summary: "Repository › Recent Activity… lists what happened to HEAD (or the current \
+                  branch) in plain words: commits, switches, resets, rebases (folded into one \
+                  row unless Show Every Step is on), merges and pulls, newest first. Selecting \
+                  a row shows the commit it left behind in the usual commit view; commits no \
+                  branch or tag reaches any more are marked Unreachable and can be listed alone. \
+                  Each row offers Create Branch Here, Reset Current Branch to Here (a hard \
+                  reset, uncommitted changes stashed first) and Copy SHA, and a row that left a \
+                  branch since deleted offers to restore it at the tip it had.",
+        ghd_behaviour: "No reflog view: a commit lost to a reset or a rebase, or a deleted \
+                        branch, can only be found with `git reflog` on the command line.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20750)],
+        code: &["crates/corvene-git/src/reflog.rs", "crates/corvene-core/src/reflog.rs", "crates/corvene-ui/src/reflog_list.rs", "crates/corvene-ui/src/dialogs/reset_to_reflog_entry.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.

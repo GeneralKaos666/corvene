@@ -534,7 +534,7 @@ impl SelectedCommitView {
         let s = self.state.read(cx);
         let rs = s.repo_states.get(&id)?;
         let sha = rs.selected_commit.as_ref()?;
-        let commit = rs.commits.iter().find(|c| &c.sha == sha)?.clone();
+        let commit = rs.find_commit(sha)?.clone();
         let expanded = rs.commit_summary_expanded;
         let (added, deleted) = rs
             .changeset
@@ -1539,7 +1539,7 @@ impl Render for SelectedCommitView {
         self.file_list_focused = self.file_list_focus.is_focused(window);
         let commit = self.state.read(cx).selected_state().and_then(|rs| {
             let sha = rs.selected_commit.as_ref()?;
-            rs.commits.iter().find(|c| &c.sha == sha).cloned()
+            rs.find_commit(sha).cloned()
         });
         if let Some(commit) = commit {
             crate::history::request_commit_avatars(&commit, cx);

@@ -48,6 +48,7 @@ pub mod path_label;
 pub mod path_text;
 pub mod popover;
 pub mod pull_request_list;
+pub mod reflog_list;
 pub mod relative_time;
 pub mod repository_drag;
 pub mod repository_list;

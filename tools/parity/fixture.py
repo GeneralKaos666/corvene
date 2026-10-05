@@ -152,7 +152,7 @@ def _signed(parent: Path, repo: Path) -> None:
 
 
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
-          signed: bool = False) -> Path:
+          signed: bool = False, reflog: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -160,7 +160,10 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     with the `v0.1.0` tag still to push (History's unpushed indicators, the
     toolbar's Push origin). With `coauthors`, `_CO_AUTHORED` commits go on
     top. With `graph`, a merged branch and an octopus merge of two more go on
-    top (History's commit graph). With `signed`, see `_signed`."""
+    top (History's commit graph). With `signed`, see `_signed`. With
+    `reflog`, HEAD's reflog gets a rebase, a branch deleted after use and
+    three commits a hard reset left behind (Recent Activity,
+    `1216-recent-activity`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -212,6 +215,30 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "checkout", "-q", "main")
     if signed:
         _signed(parent, repo)
+    if reflog:
+        def day(hour: int) -> str:
+            return f"2026-09-25T{hour:02}:00:00+00:00"
+
+        def commit_at(rel: str, summary: str, hour: int):
+            p = repo / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(f"{summary}\n")
+            _git(repo, "add", "-A", date=day(hour))
+            _git(repo, "commit", "-q", "-m", summary, date=day(hour))
+
+        _git(repo, "checkout", "-q", "-b", "topic/rebase", "HEAD~1", date=day(8))
+        commit_at("notes/one.md", "Write the first note", 8)
+        commit_at("notes/two.md", "Write the second note", 9)
+        _git(repo, "rebase", "-q", "main", date=day(10))
+        _git(repo, "checkout", "-q", "main", date=day(10))
+        _git(repo, "checkout", "-q", "-b", "experiment", date=day(11))
+        commit_at("experiment/idea.md", "Try an idea", 11)
+        commit_at("experiment/more.md", "Push the idea further", 12)
+        _git(repo, "checkout", "-q", "main", date=day(13))
+        _git(repo, "branch", "-q", "-D", "experiment", date=day(13))
+        for hour, name in ((14, "A"), (15, "B"), (16, "C")):
+            commit_at(f"drafts/{name}.md", f"Draft {name}", hour)
+        _git(repo, "reset", "-q", "--hard", "HEAD~3", date=day(17))
     if remote:
         bare = parent / f"{NAME}.git"
         if bare.exists():

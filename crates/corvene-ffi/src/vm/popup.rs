@@ -367,6 +367,17 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.put("sha", sha);
         }
+        Popup::ResetToReflogEntry {
+            repo: r,
+            sha,
+            branch,
+            dirty,
+        } => {
+            repo = Some(*r);
+            f.put("sha", sha)
+                .opt("branch", branch.clone())
+                .put("dirty", dirty);
+        }
         Popup::StartBisect {
             repo: r,
             mark,
