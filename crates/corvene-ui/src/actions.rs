@@ -34,6 +34,9 @@ gpui_kit::actions!(
         SelectPreviousFileFromDiff,
         // View › Toggle History Review Mode (`801-history-review-mode`)
         ToggleHistoryReviewMode,
+        // ← / → between the lists and the diff (`619-arrow-keys-between-panes`)
+        FocusPaneLeft,
+        FocusPaneRight,
         // View › Back / Forward (`427-back-forward-navigation`)
         NavigateBack,
         NavigateForward,

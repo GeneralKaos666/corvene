@@ -152,6 +152,17 @@ impl SelectedCommitView {
         self.diff.update(cx, |diff, cx| diff.focus(window, cx));
     }
 
+    /// Corvene (`619-arrow-keys-between-panes`): the panes left to right,
+    /// the file list only while it shows.
+    pub fn pane_focus_handles(&self, cx: &App) -> Vec<FocusHandle> {
+        let diff = self.diff.read(cx).focus_handle();
+        if self.file_list_hidden {
+            vec![diff]
+        } else {
+            vec![self.file_list_focus.clone(), diff]
+        }
+    }
+
     /// Corvene (`606-open-file-shortcuts`): the selected commit file, when
     /// it exists in the working directory (the context menu's condition).
     fn selected_file_on_disk(&self, cx: &App) -> Option<std::path::PathBuf> {

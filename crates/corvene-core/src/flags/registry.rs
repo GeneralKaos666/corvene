@@ -3801,6 +3801,21 @@ registry! {
         code: &["crates/corvene-core/src/keymap_file.rs", "crates/corvene-ui/src/keymap.rs"],
     },
 
+    /// ← / → move focus between the lists and the diff.
+    ARROW_KEYS_BETWEEN_PANES = 619 "arrow-keys-between-panes" {
+        title: "Arrow keys between panes",
+        summary: "← and → in the History commit list, the file lists and the diff move keyboard \
+                  focus to the pane on that side: commit list ⇄ files ⇄ diff in History, files ⇄ \
+                  diff in Changes.",
+        ghd_behaviour: "← and → do nothing there; Tab moves between the panes.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22222)],
+        code: &["crates/corvene-ui/src/keymap.rs", "crates/corvene-ui/src/workspace.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

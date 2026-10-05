@@ -23,6 +23,7 @@ use gpui_kit::component::resizable::{
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+use crate::actions::{FocusPaneLeft, FocusPaneRight};
 use crate::banner::{BannerView, banner_toast_frame, update_banner};
 use crate::branch_list::BranchFoldout;
 use crate::changes::ChangesSidebar;
@@ -362,6 +363,39 @@ impl Workspace {
             Section::History => self
                 .selected_commit
                 .update(cx, |v, cx| v.focus_diff(window, cx)),
+        }
+    }
+
+    /// Corvene (`619-arrow-keys-between-panes`): ← (`step` -1) / → move
+    /// keyboard focus from the focused list or diff to the pane on that
+    /// side: History's commit list, file list and diff, Changes' file list
+    /// and diff. Nothing happens at either end or from anywhere else.
+    pub fn focus_pane(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let showing_stash = self
+            .state
+            .read(cx)
+            .selected_state()
+            .is_some_and(|rs| rs.showing_stash);
+        let panes: Vec<FocusHandle> = match self.section {
+            Section::Changes if showing_stash => return,
+            Section::Changes => vec![
+                self.changes.read(cx).list_focus_handle(),
+                self.diff_view.read(cx).focus_handle(),
+            ],
+            Section::History => {
+                let mut panes = Vec::new();
+                if !self.review_mode_active(cx) {
+                    panes.push(self.history.read(cx).list_focus_handle());
+                }
+                panes.extend(self.selected_commit.read(cx).pane_focus_handles(cx));
+                panes
+            }
+        };
+        let Some(ix) = panes.iter().position(|h| h.contains_focused(window, cx)) else {
+            return;
+        };
+        if let Some(next) = ix.checked_add_signed(step).and_then(|ix| panes.get(ix)) {
+            window.focus(next, cx);
         }
     }
 
@@ -1306,6 +1340,13 @@ impl Render for Workspace {
             .id("workspace")
             .key_context(key_context)
             .track_focus(&self.focus_handle)
+            // `619-arrow-keys-between-panes` (bound in the lists and the diff)
+            .on_action(
+                cx.listener(|this, _: &FocusPaneLeft, window, cx| this.focus_pane(-1, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &FocusPaneRight, window, cx| this.focus_pane(1, window, cx)),
+            )
             .relative()
             .when(wheel_zoom, |d| {
                 d.child(wheel_zoom_listener(cx.entity().downgrade()))

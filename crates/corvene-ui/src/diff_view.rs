@@ -896,6 +896,11 @@ impl DiffView {
         window.focus(&self.focus_handle, cx);
     }
 
+    /// The diff's keyboard focus (`619-arrow-keys-between-panes`).
+    pub fn focus_handle(&self) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+
     /// Diff Settings › Diff display changed: swap the row set.
     fn set_split_mode(&mut self, split: bool) {
         if self.split_mode != split {

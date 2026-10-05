@@ -45,6 +45,9 @@ pub struct KeymapFlags {
     /// `427-back-forward-navigation`: ⌃- / ⌃⇧- (Alt+← / Alt+→ off macOS)
     /// go back / forward.
     pub back_forward: bool,
+    /// `619-arrow-keys-between-panes`: ← / → in the lists and the diff move
+    /// focus to the pane on that side.
+    pub arrow_keys_between_panes: bool,
 }
 
 impl KeymapFlags {
@@ -61,6 +64,7 @@ impl KeymapFlags {
             history_review_mode: flags.bool(ids::HISTORY_REVIEW_MODE),
             extra_zoom_inputs: flags.bool(ids::EXTRA_ZOOM_INPUTS),
             back_forward: flags.bool(ids::BACK_FORWARD_NAVIGATION),
+            arrow_keys_between_panes: flags.bool(ids::ARROW_KEYS_BETWEEN_PANES),
         }
     }
 }
@@ -405,6 +409,15 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
     }
     if flags.history_review_mode {
         bindings.push(KeyBinding::new(CTRL_CMD_S, ToggleHistoryReviewMode, MENU));
+    }
+    if flags.arrow_keys_between_panes {
+        // a text field inside one of them binds the arrows deeper
+        for context in ["ChangesList", "HistoryList", "CommitFileList", "Diff"] {
+            bindings.extend([
+                KeyBinding::new("left", FocusPaneLeft, Some(context)),
+                KeyBinding::new("right", FocusPaneRight, Some(context)),
+            ]);
+        }
     }
     if flags.back_forward {
         // Xcode's ⌃- / ⌃⇧-; off macOS Ctrl+- is Zoom Out, so the browsers'
