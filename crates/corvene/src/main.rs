@@ -567,6 +567,8 @@ pub(crate) fn main() {
         //   a merge blocked by local changes, an output nobody has words for, a
         //   failure GHD describes, a push a protected branch rejected, or an error
         //   git did not produce)
+        //   blame:<path>[@<rev>] (the Blame view of a file, in the working tree
+        //   or at a revision; flag 798)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1804,6 +1806,20 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 },
                 cx,
             );
+        }
+        // `798-blame`: `blame:<path>` (working tree) or `blame:<path>@<rev>`
+        (other, Some(id)) if other.starts_with("blame:") => {
+            let arg = &other["blame:".len()..];
+            let (path, rev) = match arg.rsplit_once('@') {
+                Some((path, rev)) => (path, Some(rev.to_string())),
+                None => (arg, None),
+            };
+            let target = corvene_core::blame::BlameTarget {
+                path: path.to_string(),
+                rev,
+                line: None,
+            };
+            Dispatcher::show_blame(id, target, Vec::new(), cx);
         }
         ("pr-list", Some(id)) => {
             dev_samples::install_pull_requests(id, cx);

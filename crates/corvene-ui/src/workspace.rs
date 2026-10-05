@@ -88,6 +88,8 @@ pub struct Workspace {
     history: Entity<HistorySidebar>,
     selected_commit: Entity<SelectedCommitView>,
     stash_view: Entity<StashDiffViewer>,
+    /// `798-blame`: shown in place of the diff while a blame is open.
+    blame_view: Entity<crate::blame_view::BlameView>,
     /// The onboarding tutorial's right-hand panel.
     tutorial_panel: Entity<crate::tutorial_panel::TutorialPanel>,
     repository_foldout: Entity<RepositoryFoldout>,
@@ -232,6 +234,7 @@ impl Workspace {
         let history = cx.new(|cx| HistorySidebar::new(state.clone(), window, cx));
         let selected_commit = cx.new(|cx| SelectedCommitView::new(state.clone(), cx));
         let stash_view = cx.new(|cx| StashDiffViewer::new(state.clone(), cx));
+        let blame_view = cx.new(|cx| crate::blame_view::BlameView::new(state.clone(), cx));
         let tutorial_panel =
             cx.new(|cx| crate::tutorial_panel::TutorialPanel::new(state.clone(), cx));
         let repository_foldout = cx.new(|cx| RepositoryFoldout::new(state.clone(), window, cx));
@@ -269,6 +272,7 @@ impl Workspace {
             history,
             selected_commit,
             stash_view,
+            blame_view,
             tutorial_panel,
             repository_foldout,
             branch_foldout,
@@ -599,6 +603,13 @@ impl Workspace {
         });
         let showing_stash = rs.is_some_and(|r| r.showing_stash);
         let multi_selected = rs.map(|r| r.selected_files.len()).unwrap_or(0);
+        // `798-blame`: the Blame view replaces the tab's diff
+        if rs
+            .and_then(|r| r.blame.as_ref())
+            .is_some_and(|b| b.section == self.section)
+        {
+            return self.blame_view.clone().into_any_element();
+        }
         match self.section {
             Section::Changes if showing_stash => self.stash_view.clone().into_any_element(),
             Section::Changes if multi_selected > 1 => {

@@ -3004,6 +3004,21 @@ impl ChangesSidebar {
                     .enabled(!file.status.kind.is_new_or_untracked()),
                 );
             }
+            // `798-blame`: who last changed each line (`HEAD`'s copy of a
+            // deleted file)
+            let flags = &self.state.read(cx).flags;
+            if flags.bool(corvene_core::flags::ids::BLAME) {
+                if !flags.bool(corvene_core::flags::ids::FILE_HISTORY) {
+                    items.push(MenuItem::separator());
+                }
+                let path = path.clone();
+                items.push(
+                    MenuItem::new("Blame", move |_, cx| {
+                        Dispatcher::show_blame_for_change(id, path.clone(), cx)
+                    })
+                    .enabled(!file.status.kind.is_new_or_untracked()),
+                );
+            }
         }
         self.open_menu(items, position, window, cx);
     }

@@ -5505,6 +5505,25 @@ registry! {
         upstream: &[Upstream::issue(12699), Upstream::issue(21432)],
         code: &["crates/corvene-core/src/stash_list.rs", "crates/corvene-git/src/stash_ops.rs", "crates/corvene-ui/src/stash_list.rs", "crates/corvene-ui/src/stash_view.rs", "crates/corvene-ui/src/dialogs/stash_list_dialogs.rs"],
     },
+    /// A Blame view: who last changed each line of a file.
+    BLAME = 798 "blame" {
+        title: "Blame",
+        summary: "Blame in the context menu of a changed file and of a file in a commit, and \
+                  a Blame button in the diff header, show the file with the commit that last \
+                  changed each line: short SHA, author and age beside each run of lines from \
+                  one commit, Not committed yet for local edits. The gutter fills in while git \
+                  works. Hovering a commit shows its summary, clicking it selects the commit \
+                  in History, and its menu can blame the revision before it to step back \
+                  through a line's history. Options ignore whitespace, follow moved or copied \
+                  lines and skip the revisions in .git-blame-ignore-revs.",
+        ghd_behaviour: "There is no blame; it can only be seen on GitHub or with git.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2310)],
+        code: &["crates/corvene-git/src/blame.rs", "crates/corvene-core/src/blame.rs", "crates/corvene-ui/src/blame_view.rs"],
+    },
 
     // ---- 800 History & branches ----
 

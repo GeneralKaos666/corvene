@@ -220,6 +220,8 @@ pub fn diff_header(
         }))
         // `794-svg-image-diff`
         .children(svg_switch(path, cx))
+        // `798-blame`
+        .children(blame_button(path, kind, view, cx))
         // `.path-label-component { margin-right: 5px }`,
         // `.diff-options-component { margin-right: 5px }`
         .child(
@@ -229,6 +231,56 @@ pub fn diff_header(
                 .child(diff_options_button(view, cx)),
         )
         .child(octicon(icon, color))
+}
+
+/// `798-blame`: the header's Blame button, for a working file HEAD has
+/// (or `HEAD`'s copy of a deleted one) and for a file of a commit.
+fn blame_button(
+    path: &str,
+    kind: FileStatusKind,
+    view: &Entity<DiffView>,
+    cx: &App,
+) -> Option<impl IntoElement + use<>> {
+    let s = AppState::try_global(cx)?.read(cx);
+    if !s.flags.bool(corvene_core::flags::ids::BLAME) {
+        return None;
+    }
+    let repo = s.selected?;
+    let source = view.read(cx).source;
+    let working = match source {
+        DiffSource::WorkingDirectory if !kind.is_new_or_untracked() => true,
+        DiffSource::Commit => false,
+        _ => return None,
+    };
+    let t = cx.ghd();
+    let path = path.to_string();
+    Some(
+        div()
+            .id("diff-blame-button")
+            .a11y_button("Blame")
+            .flex_none()
+            .ml(SPACING())
+            .h(zpx(19.))
+            .px(SPACING_HALF())
+            .flex()
+            .items_center()
+            .rounded(BORDER_RADIUS())
+            .border_1()
+            .border_color(t.box_border)
+            .text_size(FONT_SIZE_SM())
+            .text_color(t.text)
+            .cursor_pointer()
+            .hover(|d| d.bg(t.box_hover_background))
+            .ghd_tooltip("Show who last changed each line")
+            .child("Blame")
+            .on_click(move |_, _, cx| {
+                if working {
+                    Dispatcher::show_blame_for_change(repo, path.clone(), cx)
+                } else {
+                    Dispatcher::show_blame_for_commit_file(repo, path.clone(), cx)
+                }
+            }),
+    )
 }
 
 /// `794-svg-image-diff`: the Text / Image switch of an SVG file's header.
@@ -2674,7 +2726,7 @@ impl DiffView {
 /// The highlighter diffs use (Settings › Appearance › Syntax highlighting,
 /// offered by `105-tree-sitter-highlighting`) and, when it runs tree-sitter,
 /// the grammar set's generation.
-fn highlight_engine(s: &AppState) -> (corvene_highlight::Engine, u64) {
+pub(crate) fn highlight_engine(s: &AppState) -> (corvene_highlight::Engine, u64) {
     use corvene_core::SyntaxHighlighter;
     use corvene_highlight::Engine;
     let allowed = s

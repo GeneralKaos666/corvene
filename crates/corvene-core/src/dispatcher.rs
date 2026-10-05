@@ -1824,6 +1824,8 @@ impl Dispatcher {
             !same_anchor
         });
         if changed {
+            // `798-blame`: another file was picked
+            Self::close_blame(id, cx);
             Self::load_diff(id, cx);
         }
     }
@@ -2574,6 +2576,8 @@ impl Dispatcher {
             true
         });
         if changed {
+            // `798-blame`: another commit was picked
+            Self::close_blame(id, cx);
             Self::load_changeset(id, cx);
         }
     }
@@ -3849,6 +3853,8 @@ impl Dispatcher {
     }
 
     pub fn show_section(id: u64, section: Section, cx: &mut dyn Host) {
+        // `798-blame`: the view belongs to the tab it was opened in
+        Self::close_blame_unless(id, |b| b.section == section, cx);
         Self::state(cx).update(cx, |s, cx| {
             if s.selected == Some(id) && s.repo_state_mut(id).section != section {
                 s.record_navigation();

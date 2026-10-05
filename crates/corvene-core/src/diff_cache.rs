@@ -114,6 +114,48 @@ static COMMIT_DIFFS: LazyLock<Mutex<Lru<CommitDiffKey, LoadedDiff>>> =
 static WORKING_DIFFS: LazyLock<Mutex<Lru<WorkingKey, LoadedDiff>>> =
     LazyLock::new(|| Mutex::new(Lru::new(64, 32 * MB)));
 
+/// `798-blame`: (workdir, commit or working-tree key, path, options).
+type BlameKey = (PathBuf, String, String, corvene_git::BlameOptions);
+
+static BLAMES: LazyLock<Mutex<Lru<BlameKey, Arc<crate::blame::BlameResult>>>> =
+    LazyLock::new(|| Mutex::new(Lru::new(32, 16 * MB)));
+
+/// `798-blame`: a finished blame of `path` at `revision` (a commit SHA, or
+/// `HEAD` plus a hash of the working file).
+pub fn blame(
+    workdir: &Path,
+    revision: &str,
+    path: &str,
+    options: corvene_git::BlameOptions,
+) -> Option<Arc<crate::blame::BlameResult>> {
+    let key = (
+        workdir.to_path_buf(),
+        revision.to_string(),
+        path.to_string(),
+        options,
+    );
+    BLAMES.lock().ok()?.get(&key)
+}
+
+pub fn store_blame(
+    workdir: &Path,
+    revision: &str,
+    path: &str,
+    options: corvene_git::BlameOptions,
+    result: Arc<crate::blame::BlameResult>,
+    size: usize,
+) {
+    if let Ok(mut cache) = BLAMES.lock() {
+        let key = (
+            workdir.to_path_buf(),
+            revision.to_string(),
+            path.to_string(),
+            options,
+        );
+        cache.insert(key, result, size);
+    }
+}
+
 /// The changed files of `shas` (one commit or a range) in `workdir`.
 pub fn changeset(workdir: &Path, shas: &[String]) -> Option<Arc<ChangesetData>> {
     let key = (workdir.to_path_buf(), shas.to_vec());

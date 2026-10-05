@@ -2,6 +2,7 @@
 //! `git` CLI so behaviour matches GitHub Desktop exactly.
 
 pub mod bisect;
+pub mod blame;
 pub mod branch_ops;
 pub mod commit;
 pub mod commit_template;
@@ -50,6 +51,9 @@ pub mod worktree;
 pub use bisect::{
     BisectRange, BisectVerdict, bisect_in_progress, bisect_mark, bisect_range, bisect_reset,
     bisect_start, bisect_state, estimate_steps,
+};
+pub use blame::{
+    BlameCommit, BlameEvent, BlameOptions, BlameRange, IGNORE_REVS_FILE, UNCOMMITTED_SHA, blame,
 };
 pub use branch_ops::{
     BranchTracking, CheckoutOptions, DESKTOP_STASH_MARKER, MergeOutcome, SubmoduleUpdate,

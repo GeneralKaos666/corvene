@@ -288,6 +288,9 @@ pub struct HistorySidebar {
     /// Repository and tip (branch name or detached sha) the list last showed;
     /// a change scrolls it back to the top (flag `808`).
     shown_tip: Option<(u64, String)>,
+    /// `798-blame`: the last commit picked from a Blame gutter that was
+    /// scrolled to (repository, `reveal_commit` count).
+    revealed: Option<(u64, u64)>,
 }
 
 impl HistorySidebar {
@@ -365,6 +368,7 @@ impl HistorySidebar {
             menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&list_scroll),
             list_scroll,
             shown_tip: None,
+            revealed: None,
         }
     }
 
@@ -2069,6 +2073,14 @@ impl HistorySidebar {
                 }
                 self.shown_tip = key;
             }
+        }
+        // `798-blame`: a commit picked in the Blame gutter is scrolled to
+        if let Some((n, Some(sha))) = rs.map(|r| &r.reveal_commit)
+            && self.revealed != Some((id, *n))
+            && let Some(ix) = commits.iter().position(|c| &c.sha == sha)
+        {
+            self.revealed = Some((id, *n));
+            self.list_scroll.scroll_to_item(ix, ScrollStrategy::Center);
         }
         let weak = cx.weak_entity();
         let list_focus = self.list_focus.clone();

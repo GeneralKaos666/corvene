@@ -1,0 +1,17 @@
+# The Blame view (Corvene only, flag 798-blame, off in the GitHub Desktop
+# preset the harness runs with). Run with
+#   PARITY_CORVENE_FLAGS=preset=github-desktop,798-blame=on
+# GHD has no blame, so the snaps are recorded, not compared
+# (`corvene_only`; deviations.md › Diff viewer).
+name: blame
+description: Blame view of a working file with local edits and of a committed file (Corvene only)
+setup: repo
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "blame:src/main.rs"}}
+    wait: 1500
+  - snap: {name: working-tree, corvene_only: true, note: "GHD has no blame (deviations.md, 798-blame)"}
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "blame:README.md@HEAD~1"}}
+    wait: 1500
+  - snap: {name: at-revision, corvene_only: true}

@@ -13,6 +13,7 @@ pub mod avatar_users;
 pub mod avatars;
 pub mod banner_focus;
 pub mod bisect;
+pub mod blame;
 pub mod bookmarks;
 pub mod branch_pruner;
 pub mod branch_tags;

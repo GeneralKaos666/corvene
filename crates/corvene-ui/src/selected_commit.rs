@@ -1342,6 +1342,16 @@ fn open_commit_file_menu(
             }),
         ]);
     }
+    // `798-blame`: the file as this commit left it
+    if state.flags.bool(corvene_core::flags::ids::BLAME) {
+        if !state.flags.bool(corvene_core::flags::ids::FILE_HISTORY) {
+            items.push(MenuItem::separator());
+        }
+        let path = path.to_string();
+        items.push(MenuItem::new("Blame", move |_, cx| {
+            Dispatcher::show_blame_for_commit_file(id, path.clone(), cx)
+        }));
+    }
     if let Some(files) = open_all {
         items.push(MenuItem::separator());
         items.push(crate::changes::open_all_in_editor_item(

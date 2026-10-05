@@ -10,6 +10,7 @@ pub mod app_menu;
 pub mod autocompletion;
 pub mod banner;
 pub mod bisect_bar;
+pub mod blame_view;
 pub mod branch_list;
 pub mod changes;
 pub mod ci_check_popover;

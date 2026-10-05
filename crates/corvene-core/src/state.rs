@@ -1369,6 +1369,15 @@ pub struct RepositoryState {
     pub stash_diff_contents: Option<Arc<Vec<String>>>,
     /// `<stash>^:<old path>`, for highlighting.
     pub stash_diff_old_contents: Option<Arc<Vec<String>>>,
+
+    // ---- `798-blame` ----
+    /// The open Blame view, shown in place of the diff.
+    pub blame: Option<crate::blame::BlameState>,
+    /// The options the next blame runs with (kept per session).
+    pub blame_options: corvene_git::BlameOptions,
+    /// Bumped with the commit History should scroll to (a blamed commit
+    /// selected from the gutter).
+    pub reveal_commit: (u64, Option<String>),
 }
 
 /// GHD `IFileListFilterState` option flags; the text lives in the text box.
