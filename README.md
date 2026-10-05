@@ -6,7 +6,7 @@ A native, fast, low-memory [GitHub Desktop](https://github.com/apps/desktop) clo
 
 The UI is a one-to-one recreation of [GitHub Desktop 3.6.6](https://github.com/desktop/desktop/releases/tag/release-3.6.6): same layout, buttons, menus, dialogs and workflow. The engine is different: [GPUI](https://gpui.rs/) ([Zed](https://zed.dev/)'s GPU-accelerated UI framework) for rendering, [gitoxide](https://github.com/gitoxidelabs/gitoxide) for in-process git reads, and the [git](https://git-scm.com/) CLI for writes so behaviour matches GitHub Desktop exactly.
 
-Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus a few gaps. Linux ([X11](https://en.wikipedia.org/wiki/X_Window_System) and [Wayland](https://wayland.freedesktop.org/), x86_64 and arm64) runs the same app with GitHub Desktop's Linux menus and wording; it is newer and not yet pixel-identical to GitHub Desktop everywhere (expect <5% differences). Binaries for both are on [GitHub Releases](https://github.com/wasi-master/corvene/releases). [Android](https://www.android.com/) (phones, tablets, [Chromebooks](https://www.google.com/chromebook/)) is experimental, with packages on the same page. Windows is planned.
+Status: beta. Feature-complete with GitHub Desktop. macOS, Linux ([X11](https://en.wikipedia.org/wiki/X_Window_System) and [Wayland](https://wayland.freedesktop.org/), x86_64 and arm64), Windows 10 and 11 (x64, ARM64 and 32-bit x86), Android (phones, tablets, [Chromebooks](https://www.google.com/chromebook/)) is experimental, with two variants Binaries for all are on [GitHub Releases](https://github.com/wasi-master/corvene/releases).
 
 ## Requirements
 
@@ -15,12 +15,18 @@ Status: pre-release. Feature-complete with GitHub Desktop 3.6.6 on macOS, minus 
 - macOS 10.15.7 Catalina or newer on Intel, macOS 11 or newer on [Apple Silicon](https://support.apple.com/en-us/116943)
 - `git` 2.38+ on your `PATH`: the [Xcode Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) from Xcode 14.3 on ship 2.39, or use [Homebrew](https://brew.sh/)'s
 
+### Windows
+
+- Windows 10 1809 or newer, or Windows 11, on x64, ARM64 or 32-bit x86
+- `git` 2.38+: [Git for Windows](https://gitforwindows.org/) on your `PATH`, or let the installer download [MinGit](https://github.com/git-for-windows/git/releases) for Corvene when it finds no git
+- Signed-in accounts are stored in the [Windows Credential Manager](https://support.microsoft.com/en-us/windows/security/credential-manager-in-windows)
+
 ### Linux
 
 - A distribution with [glibc](https://sourceware.org/glibc/) 2.35 or newer ([Ubuntu 22.04](https://releases.ubuntu.com/jammy/), [Debian 12](https://www.debian.org/distrib/), [Fedora 36](https://fedoraproject.org/) or later), on x86_64 or arm64
 - An X11 or Wayland session, and a [Vulkan](https://www.vulkan.org/) driver (Mesa's drivers work)
 - A [Secret Service](https://specifications.freedesktop.org/secret-service-spec/latest/) keyring for signed-in accounts: [GNOME Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), [KWallet](https://apps.kde.org/kwalletmanager5/) or [KeePassXC](https://keepassxc.org/)
-- `git` 2.40+ on your `PATH`; Ubuntu 22.04 ships an older git, so use the [git-core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa) there
+- `git` 2.38+ on your `PATH`; Ubuntu 22.04 ships an older git, so use the [git-core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa) there
 
 ### Android
 
@@ -38,6 +44,20 @@ brew install --cask wasi-master/corvene/corvene
 ```
 
 Direct download from [GitHub Releases](https://github.com/wasi-master/corvene/releases): after the first launch is blocked, open System Settings → Privacy & Security and click "Open Anyway" (on macOS 14 and older, right-click the app and choose Open), or run `xattr -d com.apple.quarantine /Applications/Corvene.app`.
+
+### Windows
+
+Download from [GitHub Releases](https://github.com/wasi-master/corvene/releases) for your architecture (`x86_64`, `aarch64` for ARM64, `i686` for 32-bit):
+
+- Installer (recommended): `Corvene-<version>-x86_64-setup.exe` installs for your user only, without administrator rights, into `%LOCALAPPDATA%\Programs\Corvene`. It adds a Start menu shortcut, puts `corvene` on your `PATH`, registers the `x-corvene://` links and offers "Open in Corvene" in Explorer's folder menus. It updates itself. Uninstall it from Settings › Apps; your settings in `%APPDATA%\Corvene` stay.
+- Windows Installer: `Corvene-<version>-x86_64.msi` installs for every user into `Program Files\Corvene`, for deployment with Group Policy or Intune (`msiexec /i Corvene-<version>-x86_64.msi /qn`). Deploy a newer `.msi` to update; the app only says that a release is available.
+- Portable: unzip `Corvene-<version>-windows-x86_64-portable.zip` anywhere (a USB stick works) and run `Corvene\corvene.exe`. No installer, no `PATH` entry, no self-update.
+
+Every format also comes as `Corvene-Full`, with every tree-sitter grammar built in (see Linux below).
+
+The packages are not code-signed yet, so [SmartScreen](https://learn.microsoft.com/en-us/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/) warns on first launch: click "More info", then "Run anyway". A PC with [Smart App Control](https://support.microsoft.com/en-us/topic/what-is-smart-app-control-285ea03d-fa88-4d56-882e-6698afdb7003) turned on refuses to run them.
+
+The installer and the `.msi` put the command line tool (`bin\corvene.bat`) on the `PATH`, so `corvene` in a terminal opens the current folder, like GitHub Desktop's `github`.
 
 ### Linux
 
@@ -78,6 +98,8 @@ On Linux, install the build dependencies first (Debian and Ubuntu package names)
 sudo apt install clang mold pkg-config libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
   libwayland-dev libfontconfig-dev libfreetype-dev libvulkan-dev
 ```
+
+On Windows, install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the "Desktop development with C++" workload (the MSVC toolchain and the Windows SDK, whose `fxc.exe` compiles GPUI's shaders). `packaging/windows/package.ps1` builds the installer, the `.msi` and the portable zip from a release build; it needs [Inno Setup](https://jrsoftware.org/isinfo.php) 6.7 or 7 and, for the `.msi`, [WiX Toolset](https://wixtoolset.org/) 5 (`dotnet tool install --global wix --version 5.0.2`).
 
 On macOS, development builds compile [Metal](https://developer.apple.com/metal/) shaders at runtime so a full [Xcode](https://developer.apple.com/xcode/) install is not required. Release builds in CI use precompiled shaders (`--no-default-features`).
 
