@@ -39,6 +39,7 @@ pub mod headless;
 pub mod history_filter;
 pub mod host;
 pub mod integrations;
+pub mod keymap_file;
 pub mod line_selection;
 pub mod list_selection;
 pub mod markdown;

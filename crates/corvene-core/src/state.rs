@@ -1437,6 +1437,10 @@ pub struct AppState {
     pub recent_worktrees: Vec<(u64, PathBuf)>,
     /// Corvene (`427-back-forward-navigation`): View › Back / Forward.
     pub navigation: crate::navigation::NavigationHistory,
+    /// Corvene (`618-keymap-overrides`): `keymap.json` as last read, and
+    /// the problems reading it found (shown once in a banner).
+    pub keymap_overrides: crate::keymap_file::KeymapOverrides,
+    pub keymap_load_errors: Vec<String>,
     pub selected: Option<u64>,
     pub repo_states: HashMap<u64, RepositoryState>,
     pub accounts: Vec<Account>,

@@ -229,9 +229,16 @@ pub(crate) fn main() {
             service_urls.send(corvene_core::app_url::open_local_repo_url(&path));
         });
         Dispatcher::listen_for_app_urls(url_inbox, focus_main_window_host, cx);
-        // flag-dependent key bindings, before the menu bar reads its shortcuts
+        // flag-dependent key bindings and `keymap.json`, before the menu bar
+        // reads its shortcuts
+        Dispatcher::load_keymap_overrides(cx);
         let keymap_flags = corvene_ui::keymap::KeymapFlags::from_flags(&state.read(cx).flags);
-        corvene_ui::keymap::sync(keymap_flags, cx);
+        let keymap_overrides = state.read(cx).keymap_overrides.clone();
+        if let Some(errors) = corvene_ui::keymap::sync(keymap_flags, &keymap_overrides, cx)
+            && !errors.is_empty()
+        {
+            Dispatcher::report_config_file_errors(corvene_core::keymap_file::path(), errors, cx);
+        }
         {
             let options = menus::MenuOptions::of(state.read(cx));
             menus::install(cx, &options);
@@ -264,6 +271,11 @@ pub(crate) fn main() {
         );
         corvene_ui::widgets::sync_hover_while_typing(cx);
         let mut last_reduce_motion_flag = sync_reduce_motion(cx);
+        let mut last_preferences_open = false;
+        let mut last_keymap_file_flag = state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::KEYMAP_OVERRIDES);
         cx.observe(&state, move |state, cx| {
             corvene_ui::widgets::sync_hover_while_typing(cx);
             let reduce_motion_flag = state
@@ -276,6 +288,22 @@ pub(crate) fn main() {
             Dispatcher::sync_crash_reports_setting(cx);
             // accounts or Settings › Notifications changed: (un)subscribe
             Dispatcher::sync_alive_subscriptions(cx);
+            // `618-keymap-overrides`: `keymap.json` is read again when
+            // Settings closes or the flag changes
+            let (preferences_open, keymap_file_flag) = {
+                let s = state.read(cx);
+                (
+                    matches!(s.popup(), Some(Popup::Preferences { .. })),
+                    s.flags.bool(corvene_core::flags::ids::KEYMAP_OVERRIDES),
+                )
+            };
+            if (last_preferences_open && !preferences_open)
+                || keymap_file_flag != last_keymap_file_flag
+            {
+                Dispatcher::load_keymap_overrides(cx);
+            }
+            last_preferences_open = preferences_open;
+            last_keymap_file_flag = keymap_file_flag;
             let (theme, welcome_done, menu_key, high_contrast, variants, keymap_flags) = {
                 let s = state.read(cx);
                 corvene_ui::format::sync(&s.settings);
@@ -298,7 +326,16 @@ pub(crate) fn main() {
                 )
             };
             // a rebuilt keymap changes the menus' shortcuts
-            let keymap_changed = corvene_ui::keymap::sync(keymap_flags, cx);
+            let keymap_overrides = state.read(cx).keymap_overrides.clone();
+            let keymap_errors = corvene_ui::keymap::sync(keymap_flags, &keymap_overrides, cx);
+            let keymap_changed = keymap_errors.is_some();
+            if let Some(errors) = keymap_errors.filter(|e| !e.is_empty()) {
+                Dispatcher::report_config_file_errors(
+                    corvene_core::keymap_file::path(),
+                    errors,
+                    cx,
+                );
+            }
             if menu_key != last_menu_key || keymap_changed {
                 last_menu_key = menu_key;
                 menus::install(cx, &last_menu_key);

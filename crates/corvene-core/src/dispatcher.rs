@@ -154,6 +154,8 @@ impl Dispatcher {
             recent,
             recent_worktrees,
             navigation: Default::default(),
+            keymap_overrides: Default::default(),
+            keymap_load_errors: Vec::new(),
             selected,
             repo_states: Default::default(),
             accounts,
@@ -6897,6 +6899,43 @@ impl Dispatcher {
     }
 
     // ---- settings ----
+
+    /// Corvene (`618-keymap-overrides`): read `keymap.json` (nothing while
+    /// the flag is off); the main loop hands it to the keymap. Problems
+    /// reading it show a banner, once per distinct set.
+    pub fn load_keymap_overrides(cx: &mut dyn Host) {
+        let on = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::KEYMAP_OVERRIDES);
+        let path = crate::keymap_file::path();
+        let (overrides, errors) = if on {
+            crate::keymap_file::load(&path)
+        } else {
+            Default::default()
+        };
+        let report = Self::state(cx).update(cx, |s, cx| {
+            if s.keymap_overrides != overrides {
+                s.keymap_overrides = overrides;
+                cx.notify();
+            }
+            let new = s.keymap_load_errors != errors;
+            s.keymap_load_errors = errors.clone();
+            new && !errors.is_empty()
+        });
+        if report {
+            Self::report_config_file_errors(path, errors, cx);
+        }
+    }
+
+    /// Corvene (`618-keymap-overrides`, `522-settings-file`): a banner
+    /// naming the configuration file and what in it could not be used.
+    pub fn report_config_file_errors(path: PathBuf, errors: Vec<String>, cx: &mut dyn Host) {
+        for err in &errors {
+            warn!(path = %path.display(), "{err}");
+        }
+        Self::set_banner(crate::mco::Banner::ConfigFileErrors { path, errors }, cx);
+    }
 
     /// A failed save is logged; with `report-settings-save-errors` it is also
     /// shown (once while that error popup is up), where GitHub Desktop's

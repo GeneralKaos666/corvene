@@ -4,10 +4,15 @@
 //!
 //! Corvene: some bindings depend on flags ([`KeymapFlags`]); [`sync`]
 //! rebuilds the keymap when one changes, so the menu bar (which reads its
-//! shortcuts from the keymap) must be rebuilt after it.
+//! shortcuts from the keymap) must be rebuilt after it. `618-keymap-overrides`:
+//! `keymap.json` ([`corvene_core::keymap_file`]) is applied last, over the
+//! defaults, the flags' bindings and gpui-kit's.
+
+use std::rc::Rc;
 
 use corvene_core::flags::{Flags, ids};
-use gpui_kit::{App, Global, KeyBinding};
+use corvene_core::keymap_file::{KeymapOverrides, resolve_action_name};
+use gpui_kit::{App, DummyKeyboardMapper, Global, KeyBinding, KeyBindingContextPredicate};
 
 use crate::actions::*;
 
@@ -92,6 +97,7 @@ const MENU: Option<&str> = Some("!Popup");
 struct InstalledKeymap {
     base: Vec<KeyBinding>,
     flags: KeymapFlags,
+    overrides: KeymapOverrides,
 }
 
 impl Global for InstalledKeymap {}
@@ -100,24 +106,104 @@ pub fn install(cx: &mut App) {
     let base = cx.key_bindings().borrow().bindings().cloned().collect();
     let flags = KeymapFlags::default();
     cx.bind_keys(bindings(flags));
-    cx.set_global(InstalledKeymap { base, flags });
+    cx.set_global(InstalledKeymap {
+        base,
+        flags,
+        overrides: KeymapOverrides::default(),
+    });
 }
 
-/// Rebinds the keymap when `flags` differ from the installed ones; true when
-/// it did (rebuild the menu bar so its shortcuts follow).
-pub fn sync(flags: KeymapFlags, cx: &mut App) -> bool {
-    let Some(installed) = cx.try_global::<InstalledKeymap>() else {
-        return false;
-    };
-    if installed.flags == flags {
-        return false;
+/// Rebinds the keymap when `flags` or `overrides` differ from the installed
+/// ones. `Some` when it did (rebuild the menu bar so its shortcuts follow),
+/// with what of `overrides` could not be used.
+pub fn sync(flags: KeymapFlags, overrides: &KeymapOverrides, cx: &mut App) -> Option<Vec<String>> {
+    let installed = cx.try_global::<InstalledKeymap>()?;
+    if installed.flags == flags && installed.overrides == *overrides {
+        return None;
     }
-    let base = installed.base.clone();
+    let mut all = installed.base.clone();
+    all.extend(bindings(flags));
+    let errors = apply_overrides(&mut all, overrides, cx);
     cx.clear_key_bindings();
-    cx.bind_keys(base);
-    cx.bind_keys(bindings(flags));
-    cx.global_mut::<InstalledKeymap>().flags = flags;
-    true
+    cx.bind_keys(all);
+    let installed = cx.global_mut::<InstalledKeymap>();
+    installed.flags = flags;
+    installed.overrides = overrides.clone();
+    Some(errors)
+}
+
+/// `618-keymap-overrides`: each entry drops every binding of its action and,
+/// with a keystroke, binds that keystroke in the contexts the action had (an
+/// action without one is bound like a menu item's shortcut). Returns what
+/// could not be used.
+fn apply_overrides(
+    bindings: &mut Vec<KeyBinding>,
+    overrides: &KeymapOverrides,
+    cx: &App,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    let registered = cx.all_action_names().to_vec();
+    for (name, keystrokes) in &overrides.entries {
+        let Some(action_name) = resolve_action_name(name, &registered) else {
+            errors.push(format!("there is no action named `{name}`"));
+            continue;
+        };
+        let action = match cx.build_action(action_name, None) {
+            Ok(action) => action,
+            Err(err) => {
+                errors.push(format!("`{name}` cannot have a shortcut ({err})"));
+                continue;
+            }
+        };
+        // a keystroke that does not parse leaves the action's shortcuts alone
+        if let Some(keystrokes) = keystrokes
+            && let Err(err) = KeyBinding::load(
+                keystrokes,
+                action.boxed_clone(),
+                None,
+                false,
+                None,
+                &DummyKeyboardMapper,
+            )
+        {
+            errors.push(format!(
+                "`{keystrokes}` for `{name}` is not a keystroke ({err})"
+            ));
+            continue;
+        }
+        let mut contexts: Vec<Option<Rc<KeyBindingContextPredicate>>> = Vec::new();
+        bindings.retain(|binding| {
+            if binding.action().name() != action_name {
+                return true;
+            }
+            let predicate = binding.predicate();
+            if !contexts.contains(&predicate) {
+                contexts.push(predicate);
+            }
+            false
+        });
+        let Some(keystrokes) = keystrokes else {
+            continue;
+        };
+        if contexts.is_empty() {
+            contexts.push(
+                MENU.and_then(|m| KeyBindingContextPredicate::parse(m).ok())
+                    .map(Rc::new),
+            );
+        }
+        bindings.extend(contexts.into_iter().filter_map(|context| {
+            KeyBinding::load(
+                keystrokes,
+                action.boxed_clone(),
+                context,
+                false,
+                None,
+                &DummyKeyboardMapper,
+            )
+            .ok()
+        }));
+    }
+    errors
 }
 
 /// GHD `List.onKeyDown` `isHomeKey` / `isEndKey`: ⌘↑ / ⌘↓ go to the first

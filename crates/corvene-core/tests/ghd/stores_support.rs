@@ -59,6 +59,8 @@ pub fn app_state() -> TestAppState {
         recent: Vec::new(),
         recent_worktrees: Vec::new(),
         navigation: Default::default(),
+        keymap_overrides: Default::default(),
+        keymap_load_errors: Vec::new(),
         selected: None,
         repo_states: HashMap::new(),
         accounts: Vec::new(),

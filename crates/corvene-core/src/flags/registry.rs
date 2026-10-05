@@ -3765,6 +3765,23 @@ registry! {
         code: &["crates/corvene-ui/src/workspace.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// `keymap.json` changes or removes keyboard shortcuts.
+    KEYMAP_OVERRIDES = 618 "keymap-overrides" {
+        title: "Custom keyboard shortcuts",
+        summary: "A keymap.json file in Corvene's data folder maps action names to keystrokes \
+                  ({\"Push\": null, \"Pull\": \"cmd-shift-l\"}): null removes an action's \
+                  shortcut, a keystroke replaces it, and the menus show the result. Read at launch \
+                  and whenever Settings closes; names or keystrokes it cannot use are listed in a \
+                  banner.",
+        ghd_behaviour: "The keyboard shortcuts are fixed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19259)],
+        code: &["crates/corvene-core/src/keymap_file.rs", "crates/corvene-ui/src/keymap.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

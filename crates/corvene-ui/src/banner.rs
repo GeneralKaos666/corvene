@@ -198,6 +198,22 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
         Banner::TemporaryStore { .. } => vec![t(
             "Corvene could not open its data, so nothing you change now is saved.",
         )],
+        Banner::ConfigFileErrors { path, errors } => {
+            let file = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let first = errors.first().map(String::as_str).unwrap_or_default();
+            let more = match errors.len() {
+                0 | 1 => String::new(),
+                n => format!(" (and {} more)", n - 1),
+            };
+            vec![
+                t("Corvene could not use part of\u{a0}"),
+                b(&file),
+                (format!(": {first}{more}"), false),
+            ]
+        }
         Banner::RepositoryMoved { name, path } => vec![
             b(name),
             (
@@ -376,6 +392,7 @@ pub fn banner_bar(
             | Banner::GitEmailMismatch { .. }
             | Banner::RepositoriesUnreadable { .. }
             | Banner::TemporaryStore { .. }
+            | Banner::ConfigFileErrors { .. }
     );
     let icon = if is_conflicts {
         octicon(Octicon::Alert, t.text).mr(SPACING())
@@ -457,7 +474,7 @@ pub fn banner_bar(
             })
             .into_any_element(),
         ),
-        Banner::TemporaryStore { path } => {
+        Banner::TemporaryStore { path } | Banner::ConfigFileErrors { path, .. } => {
             let path = path.clone();
             Some(
                 link_button(

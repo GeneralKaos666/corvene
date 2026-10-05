@@ -477,6 +477,12 @@ pub enum Banner {
     TemporaryStore {
         path: std::path::PathBuf,
     },
+    /// Corvene (`618-keymap-overrides`, `522-settings-file`): parts of the
+    /// configuration file at `path` could not be used; `errors` say which.
+    ConfigFileErrors {
+        path: std::path::PathBuf,
+        errors: Vec<String>,
+    },
 }
 
 impl Banner {
@@ -500,7 +506,8 @@ impl Banner {
             Banner::ConflictsFound { .. }
             | Banner::GitEmailMismatch { .. }
             | Banner::RepositoriesUnreadable { .. }
-            | Banner::TemporaryStore { .. } => None,
+            | Banner::TemporaryStore { .. }
+            | Banner::ConfigFileErrors { .. } => None,
         }
     }
 
