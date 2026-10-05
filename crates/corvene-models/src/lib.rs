@@ -47,6 +47,10 @@ pub struct Repository {
     /// name) this repository opens in; `None` = the one in Settings.
     #[serde(default)]
     pub editor: Option<String>,
+    /// Corvene (flag `518-per-repo-editor`): a custom editor this repository
+    /// opens in instead (`editor` is then `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_editor: Option<RepoCustomEditor>,
     /// Corvene (flag `897-pinned-branches`): branch names listed in the
     /// branch list's Pinned group.
     #[serde(default)]
@@ -59,6 +63,17 @@ pub struct Repository {
     /// sign in through git's credential helper instead of the account.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_credential_helper: bool,
+}
+
+/// Corvene (flag `518-per-repo-editor`): a repository's own custom editor,
+/// an executable and its arguments (`%TARGET_PATH%` is the path opened).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoCustomEditor {
+    pub path: String,
+    pub arguments: String,
+    /// Its name in "Open in …" labels (empty: "Custom Editor").
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
 }
 
 /// GHD `ICommitOptions`: `skipCommitHooks`, `signOffCommits`, `allowEmptyCommit`.
@@ -88,6 +103,7 @@ impl Repository {
             tags_to_push: Vec::new(),
             pinned: false,
             editor: None,
+            custom_editor: None,
             pinned_branches: Vec::new(),
             group: None,
             use_credential_helper: false,

@@ -7,7 +7,9 @@
 //! Deviation (flag `239-line-endings-setting`): Git Config ends in a "Line
 //! endings (core.autocrlf)" select stored in the repository's own config.
 //! Deviation (flag `518-per-repo-editor`): an Editor tab picks the external
-//! editor this repository opens in.
+//! editor this repository opens in: an installed one, one of Settings'
+//! custom editors (`523-custom-editor-list`) or its own path and arguments
+//! ("Custom…").
 //! Deviation (flag `1102-repository-credential-helper`): the Remote tab can
 //! make the repository sign in through git's credential helper.
 
@@ -87,13 +89,45 @@ pub struct RepositorySettingsDialog {
     /// (`None`: the global config's).
     autocrlf: Option<&'static str>,
     /// `518-per-repo-editor`: the editor picked on the Editor tab (`None`:
-    /// the one in Settings).
+    /// the one in Settings), or a custom one: one of Settings' list, or
+    /// ("Custom…", `own_custom`) the path and arguments typed here.
     editor: Option<String>,
+    custom_editor: Option<corvene_core::RepoCustomEditor>,
+    own_custom: bool,
+    custom_path: Entity<InputState>,
+    custom_args: Entity<InputState>,
     /// `1102-repository-credential-helper`: the Remote tab's checkbox.
     credential_helper: bool,
     /// `focusFirstSuitableChild`: with nothing to type into on the first tab
     /// (no remote), Save holds focus until a mouse press moves it.
     default_focus: bool,
+}
+
+/// `518-per-repo-editor` with `523-custom-editor-list`: Settings' custom
+/// editors, as a repository keeps one.
+fn global_custom_editors(s: &AppState) -> Vec<corvene_core::RepoCustomEditor> {
+    if !s.flags.bool(corvene_core::flags::ids::CUSTOM_EDITOR_LIST) {
+        return Vec::new();
+    }
+    s.settings
+        .custom_editors()
+        .into_iter()
+        .enumerate()
+        .map(|(ix, c)| corvene_core::RepoCustomEditor {
+            name: c.display_name(ix, true),
+            path: c.path,
+            arguments: c.arguments,
+        })
+        .collect()
+}
+
+/// A repository custom editor's name in the menu.
+fn display_name(custom: &corvene_core::RepoCustomEditor) -> String {
+    if custom.name.trim().is_empty() {
+        "Custom Editor".to_string()
+    } else {
+        custom.name.clone()
+    }
 }
 
 /// The [`AUTOCRLF_CHOICES`] entry of the repository's own `core.autocrlf`.
@@ -121,6 +155,30 @@ impl RepositorySettingsDialog {
         cx: &mut Context<Self>,
     ) -> Self {
         let remote_url = cx.new(|cx| InputState::new(window, cx).placeholder("Remote URL"));
+        // `518-per-repo-editor`: a stored custom editor that is not one of
+        // Settings' shows as "Custom…" with its path and arguments
+        let stored_custom = state
+            .read(cx)
+            .repository(repo)
+            .and_then(|r| r.custom_editor.clone());
+        let own_custom = stored_custom
+            .as_ref()
+            .is_some_and(|c| !global_custom_editors(state.read(cx)).iter().any(|g| g == c));
+        let (path, args) = stored_custom
+            .as_ref()
+            .filter(|_| own_custom)
+            .map(|c| (c.path.clone(), c.arguments.clone()))
+            .unwrap_or_default();
+        let custom_path = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Path to executable")
+                .default_value(path)
+        });
+        let custom_args = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Command line arguments")
+                .default_value(args)
+        });
         let taller = AppState::global(cx)
             .read(cx)
             .flags
@@ -170,6 +228,10 @@ impl RepositorySettingsDialog {
                 .read(cx)
                 .repository(repo)
                 .and_then(|r| r.editor.clone()),
+            custom_editor: stored_custom.clone().filter(|_| !own_custom),
+            own_custom,
+            custom_path,
+            custom_args,
             credential_helper: state
                 .read(cx)
                 .repository(repo)
@@ -295,9 +357,25 @@ impl RepositorySettingsDialog {
             .state
             .read(cx)
             .repository(self.repo)
-            .map(|r| r.editor.clone());
-        if stored_editor.is_some_and(|e| e != self.editor) {
-            Dispatcher::set_repository_editor(self.repo, self.editor.clone(), cx);
+            .map(|r| (r.editor.clone(), r.custom_editor.clone()));
+        let custom = if self.own_custom {
+            let path = self.custom_path.read(cx).value().trim().to_string();
+            (!path.is_empty()).then(|| corvene_core::RepoCustomEditor {
+                path,
+                arguments: self.custom_args.read(cx).value().trim().to_string(),
+                name: String::new(),
+            })
+        } else {
+            self.custom_editor.clone()
+        };
+        let editor = self.editor.clone().filter(|_| custom.is_none());
+        if stored_editor.is_some_and(|stored| stored != (editor.clone(), custom.clone())) {
+            match custom {
+                Some(custom) => {
+                    Dispatcher::set_repository_custom_editor(self.repo, Some(custom), cx)
+                }
+                None => Dispatcher::set_repository_editor(self.repo, editor, cx),
+            }
         }
         // `1102-repository-credential-helper`
         let stored_helper = self
@@ -726,7 +804,7 @@ impl RepositorySettingsDialog {
     }
 
     /// `518-per-repo-editor`: which external editor opens this repository.
-    fn editor_tab(&self, cx: &Context<Self>) -> AnyElement {
+    fn editor_tab(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let names: Vec<String> = self
             .state
             .read(cx)
@@ -734,6 +812,9 @@ impl RepositorySettingsDialog {
             .iter()
             .map(|e| e.name.clone())
             .collect();
+        // Settings' custom editors (`523-custom-editor-list`), then
+        // "Custom…": this repository's own path and arguments
+        let customs = global_custom_editors(self.state.read(cx));
         let default = {
             let s = self.state.read(cx);
             s.settings
@@ -746,9 +827,17 @@ impl RepositorySettingsDialog {
             None => "Use my default editor".into(),
         }];
         options.extend(names.iter().cloned().map(SharedString::from));
-        let selected = match &self.editor {
-            None => Some(0),
-            Some(name) => names.iter().position(|n| n == name).map(|i| i + 1),
+        options.extend(customs.iter().map(|c| SharedString::from(display_name(c))));
+        let own_ix = options.len();
+        options.push(mac_or("Custom…", "Custom…").into());
+        let selected = match (&self.editor, &self.custom_editor) {
+            _ if self.own_custom => Some(own_ix),
+            (_, Some(custom)) => customs
+                .iter()
+                .position(|c| c == custom)
+                .map(|i| i + 1 + names.len()),
+            (None, None) => Some(0),
+            (Some(name), None) => names.iter().position(|n| n == name).map(|i| i + 1),
         };
         let value = match selected {
             Some(ix) => options[ix].clone(),
@@ -756,13 +845,35 @@ impl RepositorySettingsDialog {
             None => format!("{} (not found)", self.editor.clone().unwrap_or_default()).into(),
         };
         let weak = cx.weak_entity();
+        let installed = names.len();
         let on_select: SelectHandler = Rc::new(move |ix, _, cx| {
             let choice = ix.checked_sub(1).and_then(|i| names.get(i).cloned());
+            let custom = ix
+                .checked_sub(1 + installed)
+                .and_then(|i| customs.get(i).cloned());
             weak.update(cx, |this, cx| {
+                this.own_custom = ix == own_ix;
+                this.custom_editor = custom;
                 this.editor = choice;
                 cx.notify();
             })
             .ok();
+        });
+        let own_form = self.own_custom.then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(SPACING_HALF())
+                .child(labeled(
+                    "Path",
+                    text_box("repo-editor-path", &self.custom_path, None, window, cx),
+                    cx,
+                ))
+                .child(labeled(
+                    "Arguments",
+                    text_box("repo-editor-args", &self.custom_args, None, window, cx),
+                    cx,
+                ))
         });
         div()
             .child(labeled(
@@ -791,6 +902,7 @@ impl RepositorySettingsDialog {
                     ),
                 cx,
             ))
+            .when_some(own_form, |d, form| d.child(div().mt(SPACING()).child(form)))
             .into_any_element()
     }
 
@@ -939,7 +1051,7 @@ impl Render for RepositorySettingsDialog {
             RepositorySettingsTab::IgnoredFiles => self.ignored_files_tab(cx),
             RepositorySettingsTab::GitConfig => self.git_config_tab(window, cx),
             RepositorySettingsTab::ForkSettings => self.fork_settings_tab(cx),
-            RepositorySettingsTab::Editor => self.editor_tab(cx),
+            RepositorySettingsTab::Editor => self.editor_tab(window, cx),
         };
         // `#repository-settings { width: 600px; .dialog-content { min-height: 305px } }`
         let content = div()

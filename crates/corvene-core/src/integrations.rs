@@ -476,9 +476,12 @@ impl Dispatcher {
                 repo_editor
                     .clone()
                     .or_else(|| s.settings.external_editor.clone()),
-                s.custom_editor_in_use()
-                    .cloned()
-                    .filter(|_| repo_editor.is_none()),
+                // a repository's own custom editor, else Settings' one
+                s.repository_custom_editor(&path).or_else(|| {
+                    s.custom_editor_in_use()
+                        .cloned()
+                        .filter(|_| repo_editor.is_none())
+                }),
                 s.flags.bool(crate::flags::ids::VSCODE_WORKSPACE_FILE),
                 folder,
                 s.flags.bool(crate::flags::ids::NOTEPADPP_FOLDER_WORKSPACE),

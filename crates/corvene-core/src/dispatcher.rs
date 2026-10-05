@@ -3479,6 +3479,24 @@ impl Dispatcher {
         Self::state(cx).update(cx, |s, cx| {
             if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
                 repo.editor = editor;
+                repo.custom_editor = None;
+                persist_repositories(s);
+                cx.notify();
+            }
+        });
+    }
+
+    /// `518-per-repo-editor`: a custom editor for repository `id` (in place
+    /// of an installed one).
+    pub fn set_repository_custom_editor(
+        id: u64,
+        editor: Option<corvene_models::RepoCustomEditor>,
+        cx: &mut dyn Host,
+    ) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id) {
+                repo.custom_editor = editor;
+                repo.editor = None;
                 persist_repositories(s);
                 cx.notify();
             }

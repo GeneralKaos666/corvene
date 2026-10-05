@@ -1645,6 +1645,13 @@ impl AppState {
         {
             return name;
         }
+        if let Some(custom) = self
+            .selected
+            .and_then(|id| self.repository(id))
+            .and_then(|r| self.repository_custom_editor(&r.path))
+        {
+            return custom.display_name(0, true);
+        }
         if let Some(label) = self.custom_editor_label() {
             return label;
         }
@@ -1690,6 +1697,30 @@ impl AppState {
 
     /// `518-per-repo-editor`: the installed editor chosen for the repository
     /// holding `path` (the innermost one), if any.
+    /// `518-per-repo-editor`: the custom editor of the repository holding
+    /// `path`, as Settings' custom editors are kept.
+    pub fn repository_custom_editor(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<crate::persistence::CustomIntegration> {
+        if !self.flags.bool(crate::flags::ids::PER_REPO_EDITOR) {
+            return None;
+        }
+        let custom = self
+            .repositories
+            .iter()
+            .filter(|r| path.starts_with(&r.path))
+            .max_by_key(|r| r.path.components().count())?
+            .custom_editor
+            .clone()?;
+        Some(crate::persistence::CustomIntegration {
+            path: custom.path,
+            arguments: custom.arguments,
+            bundle_id: None,
+            name: custom.name,
+        })
+    }
+
     pub fn repository_editor(&self, path: &std::path::Path) -> Option<String> {
         if !self.flags.bool(crate::flags::ids::PER_REPO_EDITOR) {
             return None;

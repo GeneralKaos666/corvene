@@ -674,29 +674,22 @@ impl Workspace {
                 let editor_menu = {
                     let s = self.state.read(cx);
                     let per_repo = repo_id.filter(|_| {
-                        repo_path
-                            .as_deref()
-                            .is_some_and(|p| s.repository_editor(p).is_some())
+                        repo_path.as_deref().is_some_and(|p| {
+                            s.repository_editor(p).is_some()
+                                || s.repository_custom_editor(p).is_some()
+                        })
                     });
-                    // `523-custom-editor-list`: the custom editors too (here
-                    // only while the repository has no editor of its own)
-                    let customs: Vec<(usize, String)> =
-                        if s.flags.bool(corvene_core::flags::ids::CUSTOM_EDITOR_LIST)
-                            && per_repo.is_none()
-                        {
+                    // `523-custom-editor-list`: the custom editors too
+                    let customs: Vec<(usize, corvene_core::CustomIntegration)> =
+                        if s.flags.bool(corvene_core::flags::ids::CUSTOM_EDITOR_LIST) {
                             s.settings
                                 .custom_editors()
-                                .iter()
+                                .into_iter()
                                 .enumerate()
-                                .map(|(ix, e)| (ix, e.display_name(ix, true)))
                                 .collect()
                         } else {
                             Vec::new()
                         };
-                    let custom_in_use = s
-                        .settings
-                        .use_custom_editor
-                        .then_some(s.settings.custom_editor_index);
                     (s.flags
                         .bool(corvene_core::flags::ids::EDITOR_PICKER_DROPDOWN)
                         && s.editors.len() + customs.len() > 1)
@@ -733,16 +726,32 @@ impl Workspace {
                                         }),
                                     )
                                 })
-                                .chain(customs.iter().map(|(ix, label)| {
+                                .chain(customs.iter().map(|(ix, custom)| {
                                     let (ix, path) = (*ix, path.clone());
+                                    let label = custom.display_name(ix, true);
+                                    // a repository keeps a copy (`518`)
+                                    let own = corvene_core::RepoCustomEditor {
+                                        path: custom.path.clone(),
+                                        arguments: custom.arguments.clone(),
+                                        name: label.clone(),
+                                    };
                                     crate::context_menu::MenuItem::checkbox(
                                         label.clone(),
-                                        custom_in_use == Some(ix),
+                                        label == editor_label,
                                         move |_, cx| {
-                                            Dispatcher::update_settings(cx, move |s| {
-                                                s.use_custom_editor = true;
-                                                s.custom_editor_index = ix;
-                                            });
+                                            match per_repo {
+                                                Some(id) => {
+                                                    Dispatcher::set_repository_custom_editor(
+                                                        id,
+                                                        Some(own.clone()),
+                                                        cx,
+                                                    )
+                                                }
+                                                None => Dispatcher::update_settings(cx, move |s| {
+                                                    s.use_custom_editor = true;
+                                                    s.custom_editor_index = ix;
+                                                }),
+                                            }
                                             Dispatcher::open_in_editor(path.clone(), cx);
                                         },
                                     )
