@@ -28,7 +28,9 @@
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
 //! Pull All Repositories (flag `299-pull-all-repositories`), Repository ›
 //! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Recent
-//! Activity… (flag `1216-recent-activity`), Repository › Start
+//! Activity… (flag `1216-recent-activity`), Repository › Clean Untracked
+//! Files… (flag `1105-clean-untracked-files`), Repository › Apply Patch ▸
+//! (flag `1106-apply-patch`), Repository › Start
 //! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
 //! Fetch From ▸ with a repository's remotes when it has several (flag
 //! `1210-push-to-other-remote`), Branch › Request
@@ -135,6 +137,12 @@ pub struct MenuExtras {
     pub bisect: Option<bool>,
     /// Flag `1216-recent-activity`: Repository › Recent Activity….
     pub recent_activity: bool,
+    /// Flag `1105-clean-untracked-files`: Repository › Clean Untracked
+    /// Files….
+    pub clean_untracked: bool,
+    /// Flag `1106-apply-patch`: Repository › Apply Patch ▸ From File… /
+    /// From Clipboard.
+    pub apply_patch: bool,
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
     /// branch has a pull request).
     pub request_reviewers: bool,
@@ -173,6 +181,8 @@ impl MenuExtras {
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             bisect: flags.bool(ids::BISECT).then_some(false),
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
+            clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
+            apply_patch: flags.bool(ids::APPLY_PATCH),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
             stash_with_message: flags.bool(ids::STASH_LIST).then_some(false),
@@ -672,6 +682,28 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         item(l("New Worktree…", "New work&tree…"), NewWorktree),
         separator(),
     ]);
+    // Corvene (`1105-clean-untracked-files`, `1106-apply-patch`)
+    if extras.clean_untracked || extras.apply_patch {
+        if extras.clean_untracked {
+            repository.push(item(
+                l("Clean Untracked Files…", "Clean untrac&ked files…"),
+                CleanUntrackedFiles,
+            ));
+        }
+        if extras.apply_patch {
+            repository.push(submenu(
+                l("Apply Patch", "Apply patc&h"),
+                vec![
+                    item(l("From File…", "From &file…"), ApplyPatchFromFile),
+                    item(
+                        l("From Clipboard", "From &clipboard"),
+                        ApplyPatchFromClipboard,
+                    ),
+                ],
+            ));
+        }
+        repository.push(separator());
+    }
     // Corvene (`1216-recent-activity`)
     if extras.recent_activity {
         repository.extend([
@@ -1049,6 +1081,8 @@ mod tests {
                     fetch_tags: true,
                     bisect: Some(bits & 1 != 0),
                     recent_activity: true,
+                    clean_untracked: true,
+                    apply_patch: true,
                     request_reviewers: true,
                     move_changes_to_worktree: Some(true),
                     stash_with_message: Some(true),

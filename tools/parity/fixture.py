@@ -151,8 +151,50 @@ def _signed(parent: Path, repo: Path) -> None:
     _git(repo, "update-ref", "HEAD", oid)
 
 
+_PATCH = """diff --git a/docs/guide.md b/docs/guide.md
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -3,4 +3,5 @@
+ 1. Build with `cargo build`.
+ 2. Run `parity-fixture <name>`.
++3. Pass `--shout` to shout.
+ 
+ That is all.
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+new file mode 100644
+--- /dev/null
++++ b/CONTRIBUTING.md
+@@ -0,0 +1,3 @@
++# Contributing
++
++Open a pull request.
+"""
+
+
+def _tools(parent: Path, repo: Path) -> None:
+    """Ignored files in `repo`, and beside it `parity-fixture.patch` (a plain
+    diff) and `parity-fixture.mbox` (two `git format-patch` commits made on a
+    branch that is deleted again)."""
+    (repo / "build.log").write_text("build output\n")
+    (repo / "target" / "debug").mkdir(parents=True, exist_ok=True)
+    (repo / "target" / "debug" / "parity-fixture").write_text("binary\n")
+    (parent / f"{NAME}.patch").write_text(_PATCH)
+    date = "2026-09-30T10:00:00+00:00"
+    _git(repo, "checkout", "-q", "-b", "changelog", date=date)
+    (repo / "CHANGELOG.md").write_text("# Changelog\n")
+    _git(repo, "add", "CHANGELOG.md", date=date)
+    _git(repo, "commit", "-q", "-m", "Add a changelog", date=date)
+    (repo / "CHANGELOG.md").write_text("# Changelog\n\n- 0.1.0\n")
+    _git(repo, "commit", "-q", "-am", "Note 0.1.0 in the changelog", date=date)
+    mbox = subprocess.run(["git", "format-patch", "-2", "--stdout"], cwd=repo, check=True,
+                          capture_output=True, text=True).stdout
+    (parent / f"{NAME}.mbox").write_text(mbox)
+    _git(repo, "checkout", "-q", "main", date=date)
+    _git(repo, "branch", "-q", "-D", "changelog", date=date)
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
-          signed: bool = False, reflog: bool = False) -> Path:
+          signed: bool = False, reflog: bool = False, tools: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -163,7 +205,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     top (History's commit graph). With `signed`, see `_signed`. With
     `reflog`, HEAD's reflog gets a rebase, a branch deleted after use and
     three commits a hard reset left behind (Recent Activity,
-    `1216-recent-activity`)."""
+    `1216-recent-activity`). With `tools`, see `_tools` (Clean Untracked
+    Files and Apply Patch, flags 1105 and 1106)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -248,6 +291,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         # the two newest commits and the tag stay behind
         _git(repo, "push", "-q", "origin", "main~2:refs/heads/main")
         _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    if tools:
+        _tools(parent, repo)
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)

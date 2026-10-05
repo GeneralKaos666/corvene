@@ -556,6 +556,9 @@ pub(crate) fn main() {
         //   recent-activity (Repository › Recent Activity…, flag 1216),
         //   blame:<path>[@<rev>] (the Blame view of a file, in the working tree
         //   or at a revision; flag 798)
+        //   clean-untracked[:ignored] (Repository › Clean Untracked Files…, flag 1105)
+        //   apply-patch:<path> (Apply Patch's preview of a patch file, the path
+        //   relative to the repository; flag 1106)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1237,6 +1240,27 @@ pub(crate) fn main() {
                 Dispatcher::show_recent_activity(id, cx);
             }
         });
+        // `1105-clean-untracked-files`
+        on_menu_action(cx, move |_: &CleanUntrackedFiles, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_clean_untracked_files(id, cx);
+            }
+        });
+        // `1106-apply-patch`
+        on_menu_action(cx, move |_: &ApplyPatchFromFile, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::prompt_apply_patch_file(id, cx);
+            }
+        });
+        on_menu_action(cx, move |_: &ApplyPatchFromClipboard, cx| {
+            if let Some(id) = selected(cx) {
+                let text = cx
+                    .read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .unwrap_or_default();
+                Dispatcher::preview_patch_text(id, text, cx);
+            }
+        });
         // `1212-bisect`
         on_menu_action(cx, move |_: &StartBisect, cx| {
             if let Some(id) = selected(cx) {
@@ -1844,6 +1868,21 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         // `1216-recent-activity`
         ("recent-activity", Some(id)) => Dispatcher::show_recent_activity(id, cx),
+        // `1105-clean-untracked-files`: `clean-untracked[:ignored]`
+        ("clean-untracked", Some(id)) => Dispatcher::show_clean_untracked_files(id, cx),
+        ("clean-untracked:ignored", Some(id)) => {
+            Dispatcher::show_clean_untracked_files(id, cx);
+            Dispatcher::load_clean_preview(id, true, cx);
+        }
+        // `1106-apply-patch`: `apply-patch:<path>`, relative to the repository
+        (other, Some(id)) if other.starts_with("apply-patch:") => {
+            let path = std::path::PathBuf::from(&other["apply-patch:".len()..]);
+            let path = match corvene_core::AppState::global(cx).read(cx).repository(id) {
+                Some(repo) if path.is_relative() => repo.path.join(path),
+                _ => path,
+            };
+            Dispatcher::preview_patch_file(id, path, cx);
+        }
         // `798-blame`: `blame:<path>` (working tree) or `blame:<path>@<rev>`
         (other, Some(id)) if other.starts_with("blame:") => {
             let arg = &other["blame:".len()..];

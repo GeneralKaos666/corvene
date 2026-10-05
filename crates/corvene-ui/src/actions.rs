@@ -114,6 +114,11 @@ gpui_kit::actions!(
         FetchAllTags,
         // Repository › Recent Activity… (`1216-recent-activity`)
         ShowRecentActivity,
+        // Repository › Clean Untracked Files… (`1105-clean-untracked-files`)
+        CleanUntrackedFiles,
+        // Repository › Apply Patch from File… / from Clipboard (`1106-apply-patch`)
+        ApplyPatchFromFile,
+        ApplyPatchFromClipboard,
         // Repository › Start Bisect / Stop Bisecting (`1212-bisect`)
         StartBisect,
         StopBisect,

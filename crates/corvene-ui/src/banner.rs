@@ -160,6 +160,39 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
                 .unwrap_or_else(|| "stash".to_string())),
         ],
         Banner::StashRestored => vec![t("Restored stash")],
+        // `1106-apply-patch`
+        Banner::PatchApplied {
+            files,
+            commits,
+            conflicts,
+        } => {
+            let files_text = |n: usize| match n {
+                1 => "1 file".to_string(),
+                n => format!("{n} files"),
+            };
+            if *commits > 0 {
+                vec![(
+                    match commits {
+                        1 => "Committed 1 patch".to_string(),
+                        n => format!("Committed {n} patches"),
+                    },
+                    false,
+                )]
+            } else if *conflicts > 0 {
+                vec![(
+                    format!(
+                        "Applied the patch. Resolve the conflicts in {} to finish.",
+                        files_text(*conflicts)
+                    ),
+                    false,
+                )]
+            } else {
+                vec![(
+                    format!("Applied the patch to {}", files_text(*files)),
+                    false,
+                )]
+            }
+        }
         Banner::ConflictsFound {
             description,
             branch,
@@ -398,6 +431,7 @@ pub fn banner_bar(
     let is_conflicts = matches!(
         banner,
         Banner::ConflictsFound { .. }
+            | Banner::PatchApplied { conflicts: 1.., .. }
             | Banner::GitEmailMismatch { .. }
             | Banner::RepositoriesUnreadable { .. }
             | Banner::TemporaryStore { .. }

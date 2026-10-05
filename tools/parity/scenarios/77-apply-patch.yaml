@@ -1,0 +1,25 @@
+# Repository › Apply Patch ▸ (Corvene only, flag 1106-apply-patch, off in
+# the GitHub Desktop preset the harness runs with). GHD cannot apply
+# patches, so the snaps are recorded, not compared (`corvene_only`;
+# deviations.md › Repository). The `repo-tools` fixture puts a plain diff
+# and a two-commit mailbox beside the repository.
+name: apply-patch
+description: Apply Patch preview of a diff and of a mailbox, then the mailbox applied as commits (Corvene only)
+setup: repo-tools
+corvene_flags: 1106-apply-patch=on
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "apply-patch:../parity-fixture.patch"}}
+    wait: 1500
+  - snap: {name: diff-preview, corvene_only: true, note: "GHD cannot apply patches (deviations.md, 1106-apply-patch)"}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "apply-patch:../parity-fixture.mbox"}}
+    wait: 1500
+  - snap: {name: mailbox-preview, corvene_only: true}
+  # Apply as 2 Commits
+  - ghd: {skip: true}
+    corvene: {click: [875, 532]}
+    wait: 2500
+  - snap: {name: committed, corvene_only: true}

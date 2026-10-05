@@ -534,6 +534,20 @@ pub enum Popup {
     StashWithMessage {
         repo: u64,
     },
+    /// Corvene (`1105-clean-untracked-files`): the `git clean` dry run with
+    /// a checkbox per path (`RepositoryState::clean_preview`).
+    CleanUntrackedFiles {
+        repo: u64,
+    },
+    /// Corvene (`1106-apply-patch`): the files patch `name` touches, before
+    /// it is applied.
+    ApplyPatch {
+        repo: u64,
+        /// The file's name, or "Clipboard".
+        name: String,
+        patch: std::sync::Arc<Vec<u8>>,
+        preview: corvene_git::PatchPreview,
+    },
     /// Corvene (`797-stash-list`): name the branch `git stash branch` makes.
     CreateBranchFromStash {
         repo: u64,
@@ -706,6 +720,8 @@ impl Popup {
             | Self::DropKeptStash { repo, .. }
             | Self::ConfirmDropStashEntry { repo, .. }
             | Self::StashWithMessage { repo }
+            | Self::CleanUntrackedFiles { repo }
+            | Self::ApplyPatch { repo, .. }
             | Self::CreateBranchFromStash { repo, .. }
             | Self::MoveChangesToWorktree { repo, .. }
             | Self::MultiCommitOperation { repo, .. }
@@ -1400,6 +1416,9 @@ pub struct RepositoryState {
     // ---- `1216-recent-activity` ----
     /// Repository › Recent Activity…: History lists the reflog instead.
     pub reflog: Option<crate::reflog::ReflogState>,
+
+    /// `1105-clean-untracked-files`: the dry run Clean Untracked Files shows.
+    pub clean_preview: Option<crate::clean_untracked::CleanPreview>,
 }
 
 /// GHD `IFileListFilterState` option flags; the text lives in the text box.

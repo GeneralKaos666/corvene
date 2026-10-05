@@ -1,0 +1,25 @@
+# Stashing lines (Corvene only, flag 1303-partial-stash, off in the GitHub
+# Desktop preset the harness runs with; the stash list, 797, shows the
+# result). GHD stashes all changes or none, so the snaps are recorded, not
+# compared (`corvene_only`; deviations.md › Changes).
+name: partial-stash
+description: Diff gutter menu with Stash Modified Line, the line stashed, the changes list menu (Corvene only)
+setup: repo
+corvene_flags: 1303-partial-stash=on,797-stash-list=on
+steps:
+  # src/main.rs
+  - ghd: {skip: true}
+    corvene: {click: [62, 301]}
+    wait: 1200
+  - snap: {name: diff, corvene_only: true, note: "GHD cannot stash lines (deviations.md, 1303-partial-stash)"}
+  # the removed `--shout` line's gutter
+  - ghd: {skip: true}
+    corvene: {rclick: [311, 182]}
+  - corvene_menu: gutter
+  - corvene_menu_pick: "Stash Modified Line"
+    wait: 1500
+  - snap: {name: line-stashed, corvene_only: true}
+  # the list's empty space: Stash Checked Changes, Clean Untracked Files…
+  - ghd: {skip: true}
+    corvene: {rclick: [120, 450]}
+  - corvene_menu: list

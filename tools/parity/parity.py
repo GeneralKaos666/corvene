@@ -129,16 +129,18 @@ class Run:
         # ahead of it; `repo-coauthors`: with commits by several people on top
         # `repo-graph`: with merges on top (the commit graph); `repo-signed`:
         # with good, unknown-key and bad signatures on top; `repo-reflog`: with
-        # a rebase, a deleted branch and a hard reset in HEAD's reflog
+        # a rebase, a deleted branch and a hard reset in HEAD's reflog;
+        # `repo-tools`: with ignored files and a patch and a mailbox beside it
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
-                             "repo-reflog")
+                             "repo-reflog", "repo-tools")
         remote = setup == "repo-remote"
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
         signed = setup == "repo-signed"
         reflog = setup == "repo-reflog"
-        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog) if with_repo else None
-        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog) if with_repo else None
+        tools = setup == "repo-tools"
+        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
+        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
 
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,

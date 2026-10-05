@@ -7297,6 +7297,39 @@ registry! {
         upstream: &[Upstream::issue(11575)],
         code: &["crates/corvene-core/src/remote.rs", "crates/corvene-git/src/git_errors.rs"],
     },
+    /// Repository › Clean Untracked Files…: `git clean` with a preview.
+    CLEAN_UNTRACKED_FILES = 1105 "clean-untracked-files" {
+        title: "Clean untracked files",
+        summary: "Repository › Clean Untracked Files… (also in the changes list's menu) lists \
+                  what git clean would delete, the untracked files and folders, each with a \
+                  checkbox. Include ignored files adds what .gitignore hides, such as build \
+                  output. The ticked paths are deleted for good, not moved to the Trash.",
+        ghd_behaviour: "Untracked files are discarded one by one from the changes list (to the \
+                        Trash) and ignored files cannot be removed at all.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15485)],
+        code: &["crates/corvene-core/src/clean_untracked.rs", "crates/corvene-git/src/clean.rs", "crates/corvene-ui/src/dialogs/clean_untracked_files.rs"],
+    },
+    /// Repository › Apply Patch from File… / from Clipboard.
+    APPLY_PATCH = 1106 "apply-patch" {
+        title: "Apply patches",
+        summary: "Repository › Apply Patch › From File… and From Clipboard show the files a \
+                  patch touches and whether it applies as it is, then apply it as \
+                  uncommitted changes. A patch that does not apply cleanly goes in with a \
+                  three-way merge, and its conflicts show in the changes list. A series made \
+                  with git format-patch can instead become commits (git am); if one patch \
+                  fails, nothing is committed.",
+        ghd_behaviour: "Patches can be created (Create Patch File) but not applied.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8703)],
+        code: &["crates/corvene-core/src/apply_patch.rs", "crates/corvene-git/src/patch_import.rs", "crates/corvene-ui/src/dialogs/apply_patch.rs"],
+    },
 
     // ---- 1200 History & branches (overflow) ----
 
@@ -7612,6 +7645,24 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(62), Upstream::issue(1646)],
         code: &["crates/corvene-core/src/commit_message.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
+    /// Stash some lines: a hunk, a line or the checked changes.
+    PARTIAL_STASH = 1303 "partial-stash" {
+        title: "Stash lines",
+        summary: "The diff's gutter menu has Stash Added Line, Stash Modified Lines and so on \
+                  next to Discard, its text menu Stash N Selected Lines, and the changes list's \
+                  menu Stash Checked Changes, which stashes the checked files and, in partly \
+                  checked files, only the checked lines. New, deleted and renamed files go into the stash whole. \
+                  With the stash list the result is a stash of its own beside the branch's; \
+                  without it, it is the branch's stash, and the items are disabled while the \
+                  branch has one.",
+        ghd_behaviour: "Only all changes can be stashed (Stash All Changes).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21882), Upstream::issue(21378)],
+        code: &["crates/corvene-core/src/stash_flows.rs", "crates/corvene-git/src/partial_stash.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
     },
 }
 

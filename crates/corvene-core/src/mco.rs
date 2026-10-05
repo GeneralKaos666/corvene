@@ -473,6 +473,14 @@ pub enum Banner {
     },
     /// Corvene (`797-stash-list`): after that Undo.
     StashRestored,
+    /// Corvene (`1106-apply-patch`): "Committed N patches", "Applied the
+    /// patch to N files", or with `conflicts` "… Resolve the conflicts in N
+    /// files."
+    PatchApplied {
+        files: usize,
+        commits: usize,
+        conflicts: usize,
+    },
     /// "Resolve conflicts to continue {description} **{branch}**."
     ConflictsFound {
         repo: u64,
@@ -526,6 +534,9 @@ impl Banner {
             | Banner::BranchesRestored { .. }
             | Banner::StashRestored => Some(Duration::from_secs(5)),
             Banner::RepositoryMoved { .. } => Some(Duration::from_secs(15)),
+            Banner::PatchApplied { conflicts, .. } => {
+                (*conflicts == 0).then(|| Duration::from_secs(5))
+            }
             Banner::SuccessfulCherryPick { .. }
             | Banner::SuccessfulSquash { .. }
             | Banner::SuccessfulReorder { .. }

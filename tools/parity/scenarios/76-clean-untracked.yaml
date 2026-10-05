@@ -1,0 +1,18 @@
+# Repository › Clean Untracked Files… (Corvene only, flag
+# 1105-clean-untracked-files, off in the GitHub Desktop preset the harness
+# runs with). GHD has no git clean, so the snaps are recorded, not compared
+# (`corvene_only`; deviations.md › Repository). The `repo-tools` fixture has
+# ignored files (build.log, target/) next to the untracked ones.
+name: clean-untracked
+description: git clean dry run with checkboxes, then with ignored files included (Corvene only)
+setup: repo-tools
+corvene_flags: 1105-clean-untracked-files=on
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::CleanUntrackedFiles"}
+    wait: 1500
+  - snap: {name: untracked, corvene_only: true, note: "GHD has no git clean (deviations.md, 1105-clean-untracked-files)"}
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "clean-untracked:ignored"}}
+    wait: 1500
+  - snap: {name: with-ignored, corvene_only: true}

@@ -3241,6 +3241,24 @@ impl ChangesSidebar {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::STASH_LIST);
+        // `1303-partial-stash` (with whether any change is checked) and
+        // `1105-clean-untracked-files`
+        let (partial_stash, clean_untracked) = {
+            let s = self.state.read(cx);
+            (
+                s.selected_state().and_then(|rs| {
+                    let stash = corvene_core::stash_flows::PartialStash::of(s, rs)?;
+                    let checked = rs.status.as_deref().is_some_and(|st| {
+                        st.files
+                            .iter()
+                            .any(|f| f.selection.kind() != DiffSelectionType::None)
+                    });
+                    Some((stash, checked))
+                }),
+                s.flags
+                    .bool(corvene_core::flags::ids::CLEAN_UNTRACKED_FILES),
+            )
+        };
         let (id, confirm, paths, openable, assume_unchanged, has_stash, can_stash, move_changes) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
@@ -3326,6 +3344,24 @@ impl ChangesSidebar {
                 .enabled(has_changes && can_stash),
             );
         }
+        if let Some((stash, checked)) = partial_stash {
+            let label = mac_or("Stash Checked Changes", "Stash checked changes");
+            let label = if stash == corvene_core::stash_flows::PartialStash::Blocked {
+                let why = mac_or(
+                    " (Restore or Discard the Stash First)",
+                    " (restore or discard the stash first)",
+                );
+                format!("{label}{why}")
+            } else {
+                label.to_string()
+            };
+            items.push(
+                MenuItem::new(label, move |_, cx| {
+                    Dispatcher::stash_checked_changes(id, cx)
+                })
+                .enabled(checked && stash != corvene_core::stash_flows::PartialStash::Blocked),
+            );
+        }
         if let Some(other_worktree) = move_changes {
             items.push(
                 MenuItem::new(
@@ -3334,6 +3370,13 @@ impl ChangesSidebar {
                 )
                 .enabled(has_changes && can_stash && other_worktree),
             );
+        }
+        if clean_untracked {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::new(
+                mac_or("Clean Untracked Files…", "Clean untracked files…"),
+                move |_, cx| Dispatcher::show_clean_untracked_files(id, cx),
+            ));
         }
         if let Some(files) = openable {
             items.push(MenuItem::separator());

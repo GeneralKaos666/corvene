@@ -9,9 +9,11 @@ mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
 mod app_dialogs;
+mod apply_patch;
 pub(crate) mod branch_dialogs;
 mod change_repository_alias;
 mod ci_check_run_rerun;
+mod clean_untracked_files;
 pub(crate) mod clone_repository;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
@@ -558,6 +560,24 @@ impl DialogHost {
                 .into(),
             Popup::StashWithMessage { repo } => cx
                 .new(|cx| stash_list_dialogs::StashWithMessageDialog::new(*repo, window, cx))
+                .into(),
+            Popup::CleanUntrackedFiles { repo } => cx
+                .new(|cx| clean_untracked_files::CleanUntrackedFilesDialog::new(state, *repo, cx))
+                .into(),
+            Popup::ApplyPatch {
+                repo,
+                name,
+                patch,
+                preview,
+            } => cx
+                .new(|_| {
+                    apply_patch::ApplyPatchDialog::new(
+                        *repo,
+                        name.clone(),
+                        patch.clone(),
+                        preview.clone(),
+                    )
+                })
                 .into(),
             Popup::CreateBranchFromStash { repo, stash } => cx
                 .new(|cx| {

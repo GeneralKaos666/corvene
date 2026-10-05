@@ -157,6 +157,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::MoveRepositoryToGroup { repo: r }
         | Popup::ConfirmDiscardStash { repo: r }
         | Popup::StashWithMessage { repo: r }
+        | Popup::CleanUntrackedFiles { repo: r }
         | Popup::PublishRepository { repo: r }
         | Popup::PushNeedsPull { repo: r }
         | Popup::ConfirmRemoveRepository { repo: r } => {
@@ -366,6 +367,19 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::CreateTag { repo: r, sha } => {
             repo = Some(*r);
             f.put("sha", sha);
+        }
+        Popup::ApplyPatch {
+            repo: r,
+            name,
+            preview,
+            ..
+        } => {
+            repo = Some(*r);
+            f.put("name", name)
+                .put("mailbox", preview.is_mailbox())
+                .put("applies_cleanly", preview.applies_cleanly)
+                .list("files", preview.files.iter().map(|file| file.path.clone()))
+                .list("commits", preview.commits.clone());
         }
         Popup::ResetToReflogEntry {
             repo: r,
@@ -726,6 +740,15 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
             f.put("sha", sha).put("message", message);
         }
         Banner::StashRestored => {}
+        Banner::PatchApplied {
+            files,
+            commits,
+            conflicts,
+        } => {
+            f.put("files", files)
+                .put("commits", commits)
+                .put("conflicts", conflicts);
+        }
         Banner::ConflictsFound {
             repo: r,
             description,

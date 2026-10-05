@@ -6467,7 +6467,7 @@ impl Dispatcher {
         Self::patch_options_of(&Self::state(cx).read(cx).flags)
     }
 
-    fn patch_options_of(flags: &crate::flags::Flags) -> corvene_git::PatchOptions {
+    pub(crate) fn patch_options_of(flags: &crate::flags::Flags) -> corvene_git::PatchOptions {
         corvene_git::PatchOptions {
             exact_hunk_starts: flags.bool(crate::flags::ids::PARTIAL_COMMIT_HUNK_POSITIONS),
             raw_lines: flags.bool(crate::flags::ids::NON_UTF8_DIFFS),

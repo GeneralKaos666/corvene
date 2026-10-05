@@ -37,6 +37,17 @@
 //! ([`Dispatcher::move_changes_to_worktree`]); GHD 3.6's worktree switch
 //! leaves them where they are.
 //!
+//! Deviation (`1303-partial-stash`): lines can be stashed: the diff's
+//! gutter menu stashes a hunk or line, its text menu the selected lines
+//! ([`Dispatcher::stash_selected_lines`]), and the changes list's menu the
+//! checked changes, lines included ([`Dispatcher::stash_checked_changes`]).
+//! The stash is built from patches (`corvene_git::create_partial_stash`),
+//! never with `git stash push -p`. With `797-stash-list` it is a stash of
+//! its own (a message, no Desktop marker), so it can sit next to the
+//! branch's Desktop stash and branch switches leave it alone; without the
+//! list it is the branch's Desktop stash and is refused while one exists.
+//! GHD stashes all changes or none.
+//!
 //! Deviation (`1207-switch-warns-target-behind`): the Switch Branch dialog
 //! warns when the branch is behind its upstream (read by
 //! [`Dispatcher::load_switch_target_behind`]); GHD does not look.
@@ -50,6 +61,50 @@ use corvene_models::{StashEntry, WorkingDirectoryFileChange};
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
 use crate::state::{AppState, Popup, RepositoryState};
+
+/// `1303-partial-stash`: what a stash of some changes would be.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PartialStash {
+    /// A stash of its own, listed by `797-stash-list`.
+    Listed,
+    /// The branch's Desktop stash (no stash list to show another one).
+    Desktop,
+    /// The branch has a Desktop stash and there is no list: restore or
+    /// discard it first.
+    Blocked,
+}
+
+impl PartialStash {
+    /// `None`: the flag is off, or there is no branch to stash on or there
+    /// are conflicts (as Stash All Changes).
+    pub fn of(s: &AppState, rs: &RepositoryState) -> Option<Self> {
+        let usable = s.flags.bool(crate::flags::ids::PARTIAL_STASH)
+            && rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
+            && rs.conflict_state.is_none()
+            && !rs
+                .status
+                .as_deref()
+                .is_some_and(|st| st.files.iter().any(|f| f.status.is_conflicted()));
+        if !usable {
+            return None;
+        }
+        Some(if s.flags.bool(crate::flags::ids::STASH_LIST) {
+            Self::Listed
+        } else if rs.desktop_stash().is_some() {
+            Self::Blocked
+        } else {
+            Self::Desktop
+        })
+    }
+}
+
+/// The message of a [`PartialStash::Listed`] stash of `files`.
+pub fn partial_stash_message(files: &[WorkingDirectoryFileChange]) -> String {
+    match files {
+        [file] => format!("Some changes to {}", file.path),
+        files => format!("Some changes to {} files", files.len()),
+    }
+}
 
 /// `774-stash-conflict-flow`: a stash entry git kept because restoring it
 /// conflicted, where (the worktree) and with which files.
@@ -413,6 +468,99 @@ impl Dispatcher {
             move |git, workdir| {
                 corvene_git::create_desktop_stash_of_files(git, &workdir, &branch, &files, guard)
                     .map(|_| ())
+            },
+            cx,
+        );
+    }
+
+    /// `1303-partial-stash` › Stash Line / Stash Hunk / Stash N Selected
+    /// Lines (diff menus): the `selection` lines of `path`'s diff.
+    pub fn stash_selected_lines(
+        id: u64,
+        path: String,
+        selection: corvene_models::DiffSelection,
+        cx: &mut dyn Host,
+    ) {
+        let file = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|rs| {
+                rs.status
+                    .as_deref()
+                    .and_then(|st| st.files.iter().find(|f| f.path == path))
+                    .cloned()
+            });
+        if let Some(mut file) = file {
+            file.selection = selection;
+            Self::stash_partial(id, vec![file], cx);
+        }
+    }
+
+    /// `1303-partial-stash` › Stash Checked Changes (changes list menu):
+    /// every checked file, the checked lines of partly checked ones.
+    pub fn stash_checked_changes(id: u64, cx: &mut dyn Host) {
+        let files: Vec<WorkingDirectoryFileChange> = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|rs| rs.status.as_deref())
+            .map(|st| {
+                st.files
+                    .iter()
+                    .filter(|f| f.selection.kind() != corvene_models::DiffSelectionType::None)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self::stash_partial(id, files, cx);
+    }
+
+    /// The selected changes of `files` into a stash ([`PartialStash`]).
+    fn stash_partial(id: u64, files: Vec<WorkingDirectoryFileChange>, cx: &mut dyn Host) {
+        if files.is_empty() {
+            return;
+        }
+        let (target, branch, options, guard) = {
+            let s = Self::state(cx).read(cx);
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            (
+                PartialStash::of(s, rs),
+                rs.info
+                    .as_ref()
+                    .and_then(|i| i.current_branch())
+                    .map(|b| b.name.clone()),
+                Self::patch_options_of(&s.flags),
+                s.flags
+                    .bool(crate::flags::ids::STASH_PROTECTS_ASSUME_UNCHANGED),
+            )
+        };
+        let Some(branch) = branch else {
+            return;
+        };
+        let message = match target {
+            Some(PartialStash::Listed) => partial_stash_message(&files),
+            Some(PartialStash::Desktop) => corvene_git::desktop_stash_message(&branch),
+            Some(PartialStash::Blocked) => {
+                Self::show_error(
+                    "Could not stash changes",
+                    "This branch already has stashed changes. Restore or discard them first.",
+                    cx,
+                );
+                return;
+            }
+            None => return,
+        };
+        Self::run_history_op(
+            id,
+            "Could not stash changes",
+            move |git, workdir| {
+                corvene_git::create_partial_stash(
+                    git, &workdir, &branch, &message, &files, options, guard,
+                )
+                .map(|_| ())
             },
             cx,
         );
