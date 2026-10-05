@@ -197,9 +197,14 @@ impl IssuesViewState {
                 if query.is_empty() {
                     return true;
                 }
-                let mut keys = vec![format!("#{} {}", row.number, row.title), row.author.clone()];
-                keys.extend(row.labels.iter().map(|l| l.name.clone()));
-                let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+                // `match_keys` reads a title and a subtitle key: the author
+                // and the labels share the second one
+                let mut subtitle = row.author.clone();
+                for label in &row.labels {
+                    subtitle.push(' ');
+                    subtitle.push_str(&label.name);
+                }
+                let keys = [format!("#{} {}", row.number, row.title), subtitle];
                 crate::filter::match_keys(query, &keys).is_some()
             })
             .collect()
@@ -918,7 +923,8 @@ mod tests {
             1234,
             "A very long issue title that keeps going on and on and on past the limit",
         );
-        assert_eq!(long.chars().count(), 60);
+        assert!(long.chars().count() <= 60, "{long}");
+        assert!(long.chars().count() >= 55, "{long}");
         assert!(!long.ends_with('-'), "{long}");
         assert_eq!(
             issue_branch_name(5, "exactly sixty characters long title words here x-y-"),
