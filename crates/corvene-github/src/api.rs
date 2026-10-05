@@ -955,6 +955,41 @@ impl Client {
         Ok(response.body_mut().read_json()?)
     }
 
+    /// `POST /graphql`: the query's `data`. A 200 answer whose `errors`
+    /// left no `data` is an error with the first error's message.
+    pub(crate) fn post_graphql<T: serde::de::DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: &serde_json::Value,
+    ) -> Result<T> {
+        #[derive(Deserialize)]
+        struct Message {
+            message: String,
+        }
+        #[derive(Deserialize)]
+        struct Response<T> {
+            data: Option<T>,
+            #[serde(default)]
+            errors: Vec<Message>,
+        }
+        let url = self.endpoint.graphql();
+        debug!(%url, "POST");
+        let mut response = self
+            .agent
+            .post(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .send_json(serde_json::json!({ "query": query, "variables": variables }))?;
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
+        }
+        let body: Response<T> = response.body_mut().read_json()?;
+        match (body.data, body.errors.into_iter().next()) {
+            (Some(data), _) => Ok(data),
+            (None, Some(error)) => Err(GitHubError::api(200, error.message)),
+            (None, None) => Err(GitHubError::api(200, "GraphQL answered without data")),
+        }
+    }
+
     /// `GET /orgs/{org}/teams` (flag `publish-team`): the organization's
     /// teams the account can see, as `(id, name)` sorted by name.
     pub fn org_teams(&self, org: &str) -> Result<Vec<(u64, String)>> {

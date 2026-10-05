@@ -53,6 +53,7 @@ pub mod repository_drag;
 pub mod repository_list;
 pub mod scrollbar;
 pub mod selected_commit;
+pub mod signature_badge;
 pub mod stash_conflicts;
 pub mod stash_list;
 pub mod stash_view;

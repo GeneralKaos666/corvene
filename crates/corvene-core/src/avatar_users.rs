@@ -152,6 +152,7 @@ mod tests {
                 .map(|v| ("Co-Authored-By".to_string(), v.to_string()))
                 .collect(),
             tags: Vec::new(),
+            signature: None,
         }
     }
 

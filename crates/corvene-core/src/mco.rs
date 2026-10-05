@@ -3406,6 +3406,7 @@ mod tests {
                 parents: Vec::new(),
                 trailers: Vec::new(),
                 tags: Vec::new(),
+                signature: None,
             }
         };
         let log = [

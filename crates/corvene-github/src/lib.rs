@@ -6,6 +6,7 @@ pub mod api;
 pub mod auth;
 pub mod endpoint;
 pub mod error;
+pub mod signatures;
 
 pub use api::{
     ApiBranch, ApiCheckSuite, ApiIdentity, ApiIssue, ApiIssueComment, ApiMentionableUser,

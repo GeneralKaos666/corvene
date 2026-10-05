@@ -435,6 +435,8 @@ impl Dispatcher {
             return;
         }
         if focused {
+            // `1214-commit-signatures`: a key may have been imported meanwhile
+            Self::forget_unsettled_signatures(cx);
             Self::restart_pull_request_updater(cx);
         } else {
             UPDATER_GENERATION.fetch_add(1, Ordering::Relaxed);

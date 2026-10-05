@@ -51,6 +51,7 @@ fn build_test_commit(trailers: &[Trailer]) -> Commit {
         parents: Vec::new(),
         trailers: trailers.to_vec(),
         tags: Vec::new(),
+        signature: None,
     }
 }
 

@@ -492,6 +492,7 @@ mod tests {
             parents: parents.iter().map(|p| sha(p)).collect(),
             trailers: Vec::new(),
             tags: Vec::new(),
+            signature: None,
         }
     }
 

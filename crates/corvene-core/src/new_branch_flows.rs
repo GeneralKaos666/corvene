@@ -234,6 +234,7 @@ mod tests {
             parents: parents.iter().map(|p| p.to_string()).collect(),
             trailers: Vec::new(),
             tags: Vec::new(),
+            signature: None,
         }
     }
 

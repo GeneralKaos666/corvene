@@ -134,6 +134,17 @@ impl Endpoint {
         format!("{base}/{relative}")
     }
 
+    /// The GraphQL endpoint: `https://api.github.com/graphql`, a `*.ghe.com`
+    /// API's `/graphql`, or `/api/graphql` beside an Enterprise Server's
+    /// `/api/v3`.
+    pub fn graphql(&self) -> String {
+        let base = self.api_base.trim_end_matches('/');
+        match base.strip_suffix("/api/v3") {
+            Some(server) => format!("{server}/api/graphql"),
+            None => format!("{base}/graphql"),
+        }
+    }
+
     pub fn web(&self, path: &str) -> String {
         format!("{}/{}", self.web_base, path.trim_start_matches('/'))
     }
@@ -288,6 +299,22 @@ mod tests {
         assert_eq!(
             Endpoint::github_com().api("user"),
             "https://api.github.com/user"
+        );
+    }
+
+    #[test]
+    fn graphql_urls() {
+        assert_eq!(
+            Endpoint::github_com().graphql(),
+            "https://api.github.com/graphql"
+        );
+        assert_eq!(
+            Endpoint::from_api_base("https://ghe.corp/api/v3").graphql(),
+            "https://ghe.corp/api/graphql"
+        );
+        assert_eq!(
+            Endpoint::from_api_base("https://api.acme.ghe.com/").graphql(),
+            "https://api.acme.ghe.com/graphql"
         );
     }
 

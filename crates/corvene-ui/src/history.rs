@@ -2175,6 +2175,8 @@ impl HistorySidebar {
                         }
                     }
                     let focused = list_focus.is_focused(window) || menu_open;
+                    // `1215-verify-visible-signatures`
+                    let verify_signatures = crate::signature_badge::verify_rows(cx);
                     range
                         .map(|ix| {
                             let commit = &commits[ix];
@@ -2182,6 +2184,13 @@ impl HistorySidebar {
                             let dimmed =
                                 !highlighted.is_empty() && !highlighted.contains(&commit.sha);
                             request_commit_avatars(commit, cx);
+                            if verify_signatures {
+                                crate::signature_badge::touch(
+                                    commit,
+                                    corvene_core::signatures::Priority::Row,
+                                    cx,
+                                );
+                            }
                             let insertion_here = match (&reorder, drop_hint) {
                                 (Some((_, at)), _) => Some(*at),
                                 (None, Some(DropHint::InsertAt(at))) => Some(at),
@@ -2647,6 +2656,17 @@ fn commit_row_contents_with(
                     .child(octicon(Octicon::ArrowUp, badge_text)),
             )
         })
+        // `1214-commit-signatures`: a signed commit's shield, last
+        .when_some(
+            crate::signature_badge::enabled(cx)
+                .then(|| {
+                    let on_accent = badge
+                        .is_some_and(|(bg, _)| bg == t.list_item_selected_active_badge_background);
+                    crate::signature_badge::row_icon(commit, on_accent.then_some(text), cx)
+                })
+                .flatten(),
+            |d, icon| d.child(icon),
+        )
 }
 
 /// `806`: the commit's tags as a tooltip on the tag pill and the details' tag list.

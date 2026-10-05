@@ -182,5 +182,6 @@ fn commit_with_sha(sha: &str) -> Commit {
         parents: Vec::new(),
         trailers: Vec::new(),
         tags: Vec::new(),
+        signature: None,
     }
 }

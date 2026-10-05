@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use corvene_models::{
     ChangesetData, Commit, CommitIdentity, CommittedFileChange, Diff, FileStatus, FileStatusKind,
-    GitStatusEntry,
+    GitStatusEntry, SignatureKind,
 };
 
 use crate::detect::GitBinary;
@@ -203,6 +203,11 @@ fn build_commit(
         parents,
         trailers,
         tags: tags.get(&id).cloned().unwrap_or_default(),
+        // `1214-commit-signatures`: the header is already decoded
+        signature: decoded
+            .extra_headers()
+            .pgp_signature()
+            .and_then(|sig| SignatureKind::from_armor(sig)),
     })
 }
 
@@ -1295,6 +1300,7 @@ mod tests {
             parents: Vec::new(),
             trailers: Vec::new(),
             tags: Vec::new(),
+            signature: None,
         };
         let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(commit_matches_words(&commit, &words(&["login", "mona"])));

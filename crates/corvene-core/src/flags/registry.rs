@@ -7523,6 +7523,41 @@ registry! {
         code: &["crates/corvene-core/src/commit_graph.rs", "crates/corvene-ui/src/commit_graph.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-git/src/log.rs"],
     },
 
+    /// Signature status on the selected commit and History rows.
+    COMMIT_SIGNATURES = 1214 "commit-signatures" {
+        title: "Commit signature status",
+        summary: "A signed commit's header shows a Verified, Unverified, Bad signature or \
+                  Can't verify badge (GPG, SSH and X.509) whose tooltip names the signer, key \
+                  and why; History rows of signed commits get a small badge, coloured once the \
+                  commit has been verified. Only the selected commit is checked with gpg or \
+                  ssh-keygen, in the background and cached. In a GitHub repository a pushed \
+                  commit shows GitHub's verdict, as github.com does, from one GraphQL query.",
+        ghd_behaviour: "Commits are signed when git is configured to, but whether a commit is \
+                        signed or its signature verifies is never shown.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2339), Upstream::issue(8052)],
+        code: &["crates/corvene-git/src/signature.rs", "crates/corvene-github/src/signatures.rs", "crates/corvene-core/src/signatures.rs", "crates/corvene-ui/src/signature_badge.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/history.rs"],
+    },
+
+    /// Verify the signatures of the History rows on screen too.
+    VERIFY_VISIBLE_SIGNATURES = 1215 "verify-visible-signatures" {
+        title: "Verify visible signatures",
+        summary: "With commit signature status on, the History rows on screen are verified \
+                  too, not just the selected commit: two gpg or ssh-keygen checks at a time \
+                  locally, and in a GitHub repository one GraphQL query for up to 100 commits \
+                  once scrolling stops.",
+        ghd_behaviour: "No signature status at all.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2339)],
+        code: &["crates/corvene-core/src/signatures.rs", "crates/corvene-ui/src/history.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.

@@ -1,0 +1,27 @@
+# Corvene only (GHD shows no signature status). The fixture's signing keys
+# are generated per run, so the tooltips' fingerprints change between runs.
+name: history-signatures
+description: Signature badges (1214-commit-signatures, 1215-verify-visible-signatures) on History rows and the selected commit for a bad, an unknown SSH key, an unknown GPG key and a good SSH signature
+setup: repo-signed
+corvene_flags: 1214-commit-signatures=on,1215-verify-visible-signatures=on
+steps:
+  - click: [187, 97]
+    wait: 1500
+  - snap: {name: rows, corvene_only: true}
+  # newest first: tampered (bad), unknown SSH key, unknown GPG key, good SSH
+  - click: [124, 183]
+    wait: 900
+  - snap: {name: bad-selected, corvene_only: true}
+  - click: [124, 233]
+    wait: 900
+  - snap: {name: unknown-ssh-selected, corvene_only: true}
+  - click: [124, 283]
+    wait: 900
+  - snap: {name: unknown-gpg-selected, corvene_only: true}
+  - click: [124, 333]
+    wait: 900
+  - snap: {name: verified-selected, corvene_only: true}
+  # the row's shield tooltip
+  - hover: [290, 333]
+    wait: 900
+  - snap: {name: verified-row-tooltip, corvene_only: true}

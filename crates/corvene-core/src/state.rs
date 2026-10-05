@@ -1383,6 +1383,9 @@ pub struct RepositoryState {
     /// Bumped with the commit History should scroll to (a blamed commit
     /// selected from the gutter).
     pub reveal_commit: (u64, Option<String>),
+
+    /// `1214-commit-signatures`: verified signatures by commit.
+    pub signatures: crate::signatures::SignatureStore,
 }
 
 /// GHD `IFileListFilterState` option flags; the text lives in the text box.

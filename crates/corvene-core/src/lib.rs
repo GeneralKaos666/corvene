@@ -69,6 +69,7 @@ pub mod round;
 pub mod samples;
 pub mod settings_file;
 pub mod shared_storage;
+pub mod signatures;
 pub mod sign_in;
 pub mod stash_flows;
 pub mod stash_list;

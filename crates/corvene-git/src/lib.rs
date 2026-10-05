@@ -37,6 +37,7 @@ pub mod remote_ops;
 #[cfg(windows)]
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub mod repo;
+pub mod signature;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;
 pub mod ssh;

@@ -1972,6 +1972,7 @@ mod tests {
             parents: Vec::new(),
             trailers: Vec::new(),
             tags: Vec::new(),
+            signature: None,
         };
         // squash "third" onto "second", keeping "first"
         let result = squash(
@@ -2129,6 +2130,7 @@ mod tests {
             parents: Vec::new(),
             trailers: Vec::new(),
             tags: Vec::new(),
+            signature: None,
         };
         std::fs::write(path.join("a.txt"), "local\n").unwrap();
         let result = squash(

@@ -95,7 +95,64 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path, onerror=writable)
 
 
-def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False) -> Path:
+def _signed(parent: Path, repo: Path) -> None:
+    """`1214-commit-signatures`: signed commits on top, newest first a
+    tampered (bad) SSH signature, an SSH key the allowed signers file does
+    not list, a GPG key no keyring here has (when gpg can make one) and a
+    good SSH signature. The keys live in `<parent>/parity-signing`; the
+    repository's own `gpg.ssh.allowedSignersFile` lists the good one, so
+    no environment is needed to verify."""
+    keys = parent / "parity-signing"
+    if keys.exists():
+        remove_tree(keys)
+    keys.mkdir(parents=True)
+    for name in ("good", "unknown"):
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", AUTHOR[1], "-f", str(keys / name)],
+                       check=True, capture_output=True)
+    allowed = keys / "allowed_signers"
+    allowed.write_text(f"{AUTHOR[1]} {(keys / 'good.pub').read_text()}")
+    _git(repo, "config", "gpg.ssh.allowedSignersFile", str(allowed))
+
+    def commit(summary: str, date: str, *sign: str):
+        (repo / "SIGNED.md").write_text(f"{summary}\n")
+        _git(repo, "add", "-A")
+        _git(repo, *sign, "commit", "-q", "-S", "-m", summary, date=date)
+
+    def ssh(key: str) -> tuple[str, ...]:
+        return ("-c", "gpg.format=ssh", "-c", f"user.signingkey={keys / key}.pub")
+
+    commit("Sign with a known SSH key", "2026-09-25T09:00:00+00:00", *ssh("good"))
+    # a short GNUPGHOME: gpg-agent's socket path has a length limit
+    import tempfile
+    home = Path(tempfile.mkdtemp(prefix="pg"))
+    home.chmod(0o700)
+    env = {**os.environ, "GNUPGHOME": str(home)}
+    made = shutil.which("gpg") and subprocess.run(
+        ["gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "", "--quick-gen-key",
+         f"{AUTHOR[0]} <{AUTHOR[1]}>", "ed25519", "sign", "never"], env=env, capture_output=True).returncode == 0
+    if made:
+        os.environ["GNUPGHOME"], saved = str(home), os.environ.get("GNUPGHOME")
+        try:
+            commit("Sign with a GPG key nobody has", "2026-09-25T10:00:00+00:00",
+                   "-c", "gpg.format=openpgp", "-c", f"user.signingkey={AUTHOR[1]}")
+        finally:
+            if saved is None:
+                del os.environ["GNUPGHOME"]
+            else:
+                os.environ["GNUPGHOME"] = saved
+        subprocess.run(["gpgconf", "--kill", "gpg-agent"], env=env, capture_output=True)
+    remove_tree(home)
+    commit("Sign with an SSH key nobody listed", "2026-09-25T11:00:00+00:00", *ssh("unknown"))
+    commit("Sign and then change the message", "2026-09-25T12:00:00+00:00", *ssh("good"))
+    raw = subprocess.run(["git", "cat-file", "commit", "HEAD"], cwd=repo, check=True, capture_output=True).stdout
+    tampered = raw.replace(b"\n\nSign and then change", b"\n\nSigned and then changed", 1)
+    oid = subprocess.run(["git", "hash-object", "-t", "commit", "-w", "--stdin"], cwd=repo, input=tampered,
+                         check=True, capture_output=True).stdout.decode().strip()
+    _git(repo, "update-ref", "HEAD", oid)
+
+
+def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
+          signed: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -103,7 +160,7 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     with the `v0.1.0` tag still to push (History's unpushed indicators, the
     toolbar's Push origin). With `coauthors`, `_CO_AUTHORED` commits go on
     top. With `graph`, a merged branch and an octopus merge of two more go on
-    top (History's commit graph)."""
+    top (History's commit graph). With `signed`, see `_signed`."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -153,6 +210,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "checkout", "-q", "-b", "topic/later", "main")
         commit("graph/later.md", "Start the next part", "2026-09-24T15:00:00+00:00")
         _git(repo, "checkout", "-q", "main")
+    if signed:
+        _signed(parent, repo)
     if remote:
         bare = parent / f"{NAME}.git"
         if bare.exists():

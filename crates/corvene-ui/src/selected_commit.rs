@@ -545,6 +545,12 @@ impl SelectedCommitView {
         let extras = s
             .flags
             .bool(corvene_core::flags::ids::COMMIT_DETAILS_EXTRAS);
+        // `1214-commit-signatures`: the pill after the SHA
+        let signature_pill = crate::signature_badge::enabled(cx)
+            .then(|| {
+                crate::signature_badge::header_pill(&commit, rs.signatures.get(&commit.sha), cx)
+            })
+            .flatten();
         // `883-unpublished-commit-links`: not for a commit no remote has
         let unpublished = rs
             .unpublished_commits
@@ -876,6 +882,7 @@ impl SelectedCommitView {
                                                 .justify_center()
                                         }),
                                 )
+                                .when_some(signature_pill, |d, pill| d.child(pill))
                                 .when(added > 0 || deleted > 0, |d| {
                                     // `.lines-added-deleted { margin-left: auto }`
                                     d.child(
@@ -1536,6 +1543,13 @@ impl Render for SelectedCommitView {
         });
         if let Some(commit) = commit {
             crate::history::request_commit_avatars(&commit, cx);
+            if crate::signature_badge::enabled(cx) {
+                crate::signature_badge::touch(
+                    &commit,
+                    corvene_core::signatures::Priority::Selected,
+                    cx,
+                );
+            }
         }
         let t = cx.ghd();
         let (id, has_commit, selected_file, non_contiguous) = {

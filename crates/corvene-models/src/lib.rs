@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+mod signature;
+pub use signature::*;
+
 /// A repository known to Corvene (`models/repository.ts`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Repository {
@@ -1541,6 +1544,10 @@ pub struct Commit {
     #[serde(default)]
     pub trailers: Vec<Trailer>,
     pub tags: Vec<String>,
+    /// The `gpgsig` header's armour, `None` when unsigned
+    /// (`1214-commit-signatures`).
+    #[serde(default)]
+    pub signature: Option<SignatureKind>,
 }
 
 impl Commit {
@@ -2548,6 +2555,7 @@ mod github_layer_tests {
             parents: vec![String::new(); parents],
             trailers: Vec::new(),
             tags: Vec::new(),
+            signature: None,
         };
         let commits = [
             commit("Fix a", "Details\n\nCo-authored-by: X <x@y.z>", 1),
@@ -2708,6 +2716,7 @@ mod commit_and_status_tests {
                 ("Signed-off-by".into(), "B <b@x>".into()),
             ],
             tags: Vec::new(),
+            signature: None,
         };
         assert_eq!(
             commit.co_authors(),
