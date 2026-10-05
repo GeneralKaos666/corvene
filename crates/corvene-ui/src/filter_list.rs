@@ -47,6 +47,16 @@ pub fn wrap_step(ix: usize, delta: isize, count: usize) -> usize {
     (ix as isize + delta).rem_euclid(count as isize) as usize
 }
 
+/// [`wrap_step`], or with `stop_at_ends` (Corvene `620-lists-stop-at-ends`)
+/// clamped: ↓ on the last row and ↑ on the first stay put.
+pub fn list_step(ix: usize, delta: isize, count: usize, stop_at_ends: bool) -> usize {
+    if stop_at_ends {
+        (ix as isize + delta).clamp(0, count.saturating_sub(1) as isize) as usize
+    } else {
+        wrap_step(ix, delta, count)
+    }
+}
+
 /// The top of selectable row `ix` in a list of groups of `group_sizes`
 /// rows, each group preceded by a `header` tall header (group headers are
 /// not selectable, `canSelectRow`): the groups above it, its own header and
@@ -92,8 +102,18 @@ pub fn scroll_into_view(handle: &ScrollHandle, top: Pixels, height: Pixels) {
 
 #[cfg(test)]
 mod tests {
-    use super::{row_offset_in_section, row_top, step, step_selectable};
+    use super::{list_step, row_offset_in_section, row_top, step, step_selectable};
     use gpui_kit::px;
+
+    #[test]
+    fn list_step_wraps_or_stops_at_the_ends() {
+        assert_eq!(list_step(2, 1, 3, false), 0);
+        assert_eq!(list_step(0, -1, 3, false), 2);
+        assert_eq!(list_step(2, 1, 3, true), 2);
+        assert_eq!(list_step(0, -1, 3, true), 0);
+        assert_eq!(list_step(1, 1, 3, true), 2);
+        assert_eq!(list_step(0, 1, 0, true), 0);
+    }
 
     #[test]
     fn step_starts_at_the_ends_and_wraps() {

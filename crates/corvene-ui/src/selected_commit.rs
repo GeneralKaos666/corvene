@@ -227,7 +227,20 @@ impl SelectedCommitView {
                 s.repo_states.get(&id)?.commit_selected_file.clone()
             })
             .and_then(|p| order.iter().position(|o| *o == p));
-        if let Some(ix) = corvene_core::list_selection::step_index(order.len(), current, delta) {
+        // Corvene `620-lists-stop-at-ends`: no wrap around the ends
+        let wrap = !self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::LISTS_STOP_AT_ENDS);
+        let next = corvene_core::list_selection::find_next_selectable_row(
+            order.len(),
+            current,
+            delta,
+            wrap,
+            |_| true,
+        );
+        if let Some(ix) = next {
             self.select_index(id, &order, ix, cx);
         }
     }

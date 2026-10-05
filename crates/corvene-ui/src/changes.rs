@@ -1899,10 +1899,16 @@ impl ChangesSidebar {
                 }),
             )
         };
+        // GHD `List.moveSelection` wraps around the ends (Corvene
+        // `620-lists-stop-at-ends`: stops there)
+        let stop = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::LISTS_STOP_AT_ENDS);
         let index = current
             .and_then(|p| files.position(&p))
-            // GHD `List.moveSelection` wraps around the ends
-            .map(|i| crate::filter_list::wrap_step(i, delta, files.len()))
+            .map(|i| crate::filter_list::list_step(i, delta, files.len(), stop))
             .unwrap_or(0);
         let Some(file) = files.get(index) else {
             return;

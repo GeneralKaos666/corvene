@@ -3816,6 +3816,21 @@ registry! {
         code: &["crates/corvene-ui/src/keymap.rs", "crates/corvene-ui/src/workspace.rs"],
     },
 
+    /// ↑ / ↓ stop at the ends of the changes, commit and file lists.
+    LISTS_STOP_AT_ENDS = 620 "lists-stop-at-ends" {
+        title: "Lists stop at their ends",
+        summary: "↓ on the last row and ↑ on the first row of the Changes file list, the History \
+                  commit list and a commit's file list stay there instead of jumping to the other \
+                  end.",
+        ghd_behaviour: "The selection wraps around: ↓ on the last row selects the first.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22222)],
+        code: &["crates/corvene-ui/src/filter_list.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

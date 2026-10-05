@@ -2163,9 +2163,11 @@ impl HistorySidebar {
                 .selected_commit
                 .as_ref()
                 .and_then(|sha| commits.iter().position(|c| &c.sha == sha));
+            // GHD `List.moveSelection` wraps around the ends (Corvene
+            // `620-lists-stop-at-ends`: stops there)
+            let stop = s.flags.bool(corvene_core::flags::ids::LISTS_STOP_AT_ENDS);
             let ix = match current {
-                // GHD `List.moveSelection` wraps around the ends
-                Some(ix) => crate::filter_list::wrap_step(ix, delta, commits.len()),
+                Some(ix) => crate::filter_list::list_step(ix, delta, commits.len(), stop),
                 None => 0,
             };
             commits.get(ix).map(|c| c.sha.clone())
