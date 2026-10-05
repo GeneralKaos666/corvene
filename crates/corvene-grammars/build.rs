@@ -34,14 +34,18 @@ fn main() {
         }
         let src = root.join(name).join("src");
         let parser = src.join("parser.c");
-        println!("cargo::rerun-if-changed={}", parser.display());
         if !parser.exists() {
+            // the grammar's folder, not parser.c: sources that show up with
+            // an older mtime than this run (an APFS clone of another
+            // checkout's) would not count as changed
+            println!("cargo::rerun-if-changed={}", root.join(name).display());
             println!(
                 "cargo::warning=no sources for the {name} grammar in {}: run tools/ts-queries/fetch.py",
                 root.display()
             );
             continue;
         }
+        println!("cargo::rerun-if-changed={}", parser.display());
         let mut c = cc::Build::new();
         c.include(&src).file(&parser).warnings(false).std("c11");
         if scanner == "scanner.c" {
