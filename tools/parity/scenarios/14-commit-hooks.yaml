@@ -1,0 +1,77 @@
+name: commit-hook-running
+description: A pre-commit hook running with Settings › Git › Hooks on. The hook progress under the commit button, its Show commit progress button and the Committing changes dialog with the hook's live output
+setup: repo
+ghd_local_storage: {git-hooks-env-enabled: "1"}
+steps:
+  - hooks:
+      pre-commit: "#!/bin/sh\necho 'Checking 2 staged files'\necho 'README.md: ok'\nsleep 30\n"
+  - ghd: {skip: true}
+    corvene: {hook: {name: hooks-env, arg: "on"}}
+  - click: [139, 583]
+  - type: "Update the README"
+  - click: [124, 747]
+    wait: 3000
+  - dump: {name: progress, root: ".commit-message-component"}
+  - snap: running
+  - hover: {css: ".commit-progress button"}
+    wait: 800
+  - snap: running-tooltip
+  - click: {css: ".commit-progress button"}
+    wait: 800
+  - dump: {name: commit-progress, root: "#commit-progress-dialog"}
+  - snap: commit-progress
+---
+name: commit-hook-failed
+description: A failing pre-commit hook. The pre-commit Failed dialog with the hook's output, then Ignore and Continue commits anyway
+setup: repo
+ghd_local_storage: {git-hooks-env-enabled: "1"}
+steps:
+  - hooks:
+      pre-commit: "#!/bin/sh\necho 'Checking 2 staged files'\necho 'README.md:3: trailing whitespace'\necho '1 problem found'\nexit 1\n"
+  - ghd: {skip: true}
+    corvene: {hook: {name: hooks-env, arg: "on"}}
+  - click: [139, 583]
+  - type: "Update the README"
+  - click: [124, 747]
+    wait: 10000
+  - dump: {name: hook-failed, root: "#hook-failed-dialog"}
+  - snap: {name: failed, mask: [[668, 350, 82, 14]], note: "the hook's run time (GHD's includes loading the shell environment, .docs/deviations.md)"}
+  - hover: {text: "Ignore and Continue", within: "dialog"}
+  - snap: {name: failed-ignore-hover, mask: [[668, 350, 82, 14]], note: "the hook's run time (GHD's includes loading the shell environment, .docs/deviations.md)"}
+  - click: {text: "Ignore and Continue", within: "dialog"}
+    wait: 3000
+  - snap: {name: ignored, region: [0, 32, 249, 665], note: "the commit went through: no changes left and the form cleared (below: the undo bar time differs, and GHD keeps focus on the commit button)"}
+---
+name: commit-hook-aborted
+description: A failing commit-msg hook, then Abort. No commit and no error, the message stays in the form
+setup: repo
+ghd_local_storage: {git-hooks-env-enabled: "1"}
+steps:
+  - hooks:
+      commit-msg: "#!/bin/sh\necho 'The summary must name a ticket (ABC-123)'\nexit 2\n"
+  - ghd: {skip: true}
+    corvene: {hook: {name: hooks-env, arg: "on"}}
+  - click: [139, 583]
+  - type: "Update the README"
+  - click: [124, 747]
+    wait: 10000
+  - snap: {name: failed, mask: [[668, 322, 82, 14]], note: "the hook's run time (GHD's includes loading the shell environment, .docs/deviations.md)"}
+  - click: {text: "Abort", within: "dialog"}
+    wait: 2000
+  - snap: aborted
+---
+name: push-hook-failed
+description: A failing pre-push hook. The pre-push Failed dialog, then Abort leaves the branch unpushed without an error
+setup: repo-remote
+ghd_local_storage: {git-hooks-env-enabled: "1"}
+steps:
+  - hooks:
+      pre-push: "#!/bin/sh\necho \"Pushing to $1\"\necho 'Tests failed: 1 of 12'\nexit 1\n"
+  - ghd: {skip: true}
+    corvene: {hook: {name: hooks-env, arg: "on"}}
+  - menu: push
+    wait: 15000
+  - snap: {name: failed, mask: [[654, 336, 82, 14]], note: "the hook's run time (GHD's includes loading the shell environment, .docs/deviations.md)"}
+  - click: {text: "Abort", within: "dialog"}
+    wait: 2000
+  - snap: aborted

@@ -927,7 +927,16 @@ pub fn pull(
     args.extend(["--progress", remote]);
     let cmd = remote_operation(git, workdir, remote, askpass)
         .args(&args)
-        .env("GIT_EDITOR", ":");
+        .env("GIT_EDITOR", ":")
+        .intercept_hooks(&[
+            "pre-merge-commit",
+            "prepare-commit-msg",
+            "commit-msg",
+            "post-merge",
+            "pre-rebase",
+            "pre-commit",
+            "post-rewrite",
+        ]);
     run_with_progress(cmd, &mut parser, &mut fetch_progress(on_progress))?;
     Ok(())
 }
@@ -1142,7 +1151,9 @@ pub fn push_with_progress(
         })
     };
     report(None, 0.);
-    let cmd = remote_operation(git, workdir, remote, askpass).args(&args);
+    let cmd = remote_operation(git, workdir, remote, askpass)
+        .args(&args)
+        .intercept_hooks(&["pre-push"]);
     run_with_progress(cmd, &mut parser, &mut |event| {
         report(Some(event.text().to_string()), event.percent() as f32)
     })?;

@@ -107,6 +107,7 @@ steps:
   - ghd: {eval: "…"}                     # app-specific step (either side can be `{skip: true}`)
     corvene: {hook: {name: popup, arg: about}}   # hooks: complete-welcome, add-repo, theme, popup, refresh (GHD's `focus` IPC)
   - fixture: move                        # rename both fixture repositories away (missing repository)
+  - hooks: {pre-commit: "#!/bin/sh\nexit 1\n"}   # executable git hooks in both fixture repositories
   - context_menu: add                    # compare both apps' last native menu (items, separators, disabled/checked)
   - context_menu_pick: "Clone Repository…"   # choose an item in both (GHD: resolves its IPC; Corvene: menu-pick)
   - corvene_menu: options                  # record Corvene's last menu in the report (a menu GHD lacks, no comparison)

@@ -640,6 +640,13 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
                 cx.notify();
             });
         }
+        // Settings › Git › Hooks › Load Git hook environment variables from
+        // shell (GHD's `git-hooks-env-enabled`): hooks interception
+        "hooks-env" => {
+            let enabled = arg != "off";
+            Dispatcher::update_settings(cx, |s| s.enable_git_hook_env = enabled);
+            Dispatcher::refresh_hook_env(cx);
+        }
         other => return Err(format!("unknown hook {other:?}")),
     }
     Ok(json!({}))

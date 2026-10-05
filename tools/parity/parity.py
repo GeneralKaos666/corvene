@@ -261,6 +261,15 @@ class Run:
             for repo in self.fixtures:
                 repo.rename(repo.with_name(repo.name + "-moved"))
             return
+        if "hooks" in step:
+            # `hooks: {pre-commit: script}`: executable hooks in both apps'
+            # fixture repositories; nothing is sent to either app
+            for repo in self.fixtures:
+                for hook, script in step["hooks"].items():
+                    path = repo / ".git" / "hooks" / hook
+                    path.write_text(script)
+                    path.chmod(0o755)
+            return
         if not step and not any(per_app.values()) and wait is not None:
             time.sleep(wait / 1000)
             return

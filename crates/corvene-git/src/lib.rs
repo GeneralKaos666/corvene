@@ -18,6 +18,7 @@ pub mod git_errors;
 pub mod handle;
 pub mod history_ops;
 pub mod hook_env;
+pub mod hooks;
 pub mod ignore;
 pub mod index_lock;
 pub mod lfs;
@@ -76,6 +77,7 @@ pub use branch_ops::{
 pub use clean::{clean_dry_run, clean_paths, parse_clean_dry_run, unquote_c_path};
 pub use commit::{
     CommitAuthor, CommitOptions, RECEIVE_LIMIT, add_paths, assume_unchanged_paths, commit,
+    commit_with_terminal_output,
     delete_worktree_paths, discard_changes, format_message, head_sha, hook_exists,
     large_file_paths, merge_trailers, parse_commit_author, parse_commit_sha, restore_mode_changes,
     set_assume_unchanged, stage_files, staged_mode_changes, undo_last_commit, unstage_all,

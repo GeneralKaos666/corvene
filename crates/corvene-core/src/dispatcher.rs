@@ -5930,10 +5930,20 @@ impl Dispatcher {
         {
             return;
         }
+        // GHD `withIsCommitting`
         Self::state(cx).update(cx, |s, cx| {
-            s.repo_state_mut(id).committing = true;
+            let rs = s.repo_state_mut(id);
+            rs.committing = true;
+            rs.hook_progress = None;
+            rs.commit_output = None;
             cx.notify();
         });
+        // GHD `onHookProgress` / `onHookFailure` / `onTerminalOutputAvailable`
+        let hooks = crate::hooks::hook_ui(id, true, cx);
+        let hook_callbacks = hooks.callbacks.clone();
+        let output_sink = crate::hooks::CommitOutputSink::new();
+        let output_tx = output_sink.sender();
+        output_sink.listen(id, cx);
         // Corvene (`1302-wrap-commit-body`)
         let description = if Self::state(cx)
             .read(cx)
@@ -6036,29 +6046,38 @@ impl Dispatcher {
                     .collect();
                 corvene_git::restore_mode_changes(git.clone(), &workdir, &modes)?;
             }
-            corvene_git::commit(
-                git.clone(),
-                &workdir,
-                &message,
-                &corvene_git::CommitOptions {
-                    amend,
-                    no_verify: options.skip_commit_hooks,
-                    signoff: options.sign_off_commits,
-                    allow_empty: options.allow_empty_commit,
-                    author,
-                    fixup: fixup_sha,
-                },
-            )?;
+            let on_output = crate::hooks::commit_output_callback(output_tx);
+            corvene_git::hooks::with_hook_callbacks(&hook_callbacks, || {
+                corvene_git::commit_with_terminal_output(
+                    git.clone(),
+                    &workdir,
+                    &message,
+                    &corvene_git::CommitOptions {
+                        amend,
+                        no_verify: options.skip_commit_hooks,
+                        signoff: options.sign_off_commits,
+                        allow_empty: options.allow_empty_commit,
+                        author,
+                        fixup: fixup_sha,
+                    },
+                    Some(&on_output),
+                )
+            })?;
             // `commit` returns git's abbreviated sha (GHD `parseCommitSHA`);
             // the undo bar and the force-push list keep the full one
             corvene_git::head_sha(git, &workdir).map(|sha| (sha, rewrites_pushed))
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
+            // GHD: `.catch(err => (aborted ? undefined : Promise.reject(err)))`
+            let aborted = hooks.aborted();
+            drop(hooks);
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, cx| {
                     let rs = s.repo_state_mut(id);
                     rs.committing = false;
+                    rs.hook_progress = None;
+                    rs.commit_output = None;
                     if let Ok((sha, rewrites_pushed)) = &result {
                         // GHD `_addBranchToForcePushList`: an amended tip
                         // makes "Force push" the recommended action.
@@ -6102,7 +6121,9 @@ impl Dispatcher {
                         cx,
                     );
                 }
-                if let Err(err) = result {
+                if let Err(err) = result
+                    && !aborted
+                {
                     // Corvene (`526-commit-signing`): a signing failure says
                     // so, git's words below
                     let signing = Self::state(cx)
@@ -7458,6 +7479,11 @@ fn closed_popup(s: &mut AppState, popup: &Popup) {
     if matches!(popup, Popup::SignIn { .. }) {
         cancel_authentication(s);
         sign_in_store(s).reset();
+    }
+    // GHD `HookFailed.onDismissed`: `resolve('abort')` (a no-op once the
+    // dialog answered)
+    if let Popup::HookFailed { reply, .. } = popup {
+        reply.send(corvene_git::hooks::HookFailureResolution::Abort);
     }
 }
 

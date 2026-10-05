@@ -59,6 +59,7 @@ pub mod stash_conflicts;
 pub mod stash_list;
 pub mod stash_view;
 pub mod tab_bar;
+pub mod terminal;
 pub mod theme;
 pub mod title_bar;
 #[cfg(windows)]

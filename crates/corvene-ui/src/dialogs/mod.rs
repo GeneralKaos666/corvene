@@ -26,6 +26,7 @@ mod discard_selection;
 mod flags;
 mod fork_dialogs;
 mod history_dialogs;
+mod hook_dialogs;
 mod ignore_with_pattern;
 mod import_git_config;
 mod import_github_desktop;
@@ -92,6 +93,7 @@ pub use history_dialogs::{
     ResetToCommitDialog, ResetToRemoteDialog, UnreachableCommitsDialog,
     WarnLocalChangesBeforeUndoDialog, WarnTaggedCommitBeforeUndoDialog,
 };
+pub use hook_dialogs::{CommitProgressDialog, HookFailedDialog};
 pub use mco_dialogs::{LocalChangesOverwrittenDialog, McoDialog, SquashCommitMessageDialog};
 pub use open_pull_request::OpenPullRequestDialog;
 pub use oversized_files::OversizedFilesDialog;
@@ -146,6 +148,18 @@ impl DialogHost {
             | Popup::IndexLockExists { .. }
             | Popup::InstallGit { .. }
             | Popup::CLIInstalled { .. } => cx.new(|_| SimpleDialog::new(popup.clone())).into(),
+            Popup::HookFailed {
+                hook_name,
+                terminal_output,
+                reply,
+            } => cx
+                .new(|cx| {
+                    HookFailedDialog::new(hook_name.clone(), terminal_output, reply.clone(), cx)
+                })
+                .into(),
+            Popup::CommitProgress { output } => cx
+                .new(|cx| CommitProgressDialog::new(state, output.clone(), cx))
+                .into(),
             Popup::AddExistingRepository { path } => cx
                 .new(|cx| AddExistingRepositoryDialog::new(state, path.clone(), window, cx))
                 .into(),

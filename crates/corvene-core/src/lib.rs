@@ -43,6 +43,7 @@ pub mod git_store;
 #[cfg(any(target_os = "android", test))]
 pub mod headless;
 pub mod history_filter;
+pub mod hooks;
 pub mod host;
 pub mod hosts;
 pub mod integrations;

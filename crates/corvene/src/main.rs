@@ -49,6 +49,16 @@ pub(crate) fn main() {
             }
         }
     }
+    // a stand-in git hook runs this same binary (`corvene_git::hooks`):
+    // proxy the hook and exit before touching GPUI
+    {
+        let mut args = std::env::args_os().skip(1);
+        if args.next().as_deref() == Some(std::ffi::OsStr::new(corvene_git::hooks::PROXY_ARG)) {
+            let hook = args.next().unwrap_or_default();
+            let rest: Vec<std::ffi::OsString> = args.collect();
+            std::process::exit(corvene_git::hooks::run_proxy(&hook, &rest));
+        }
+    }
     // `GIT_ASKPASS` runs this same binary; answer git and exit before touching GPUI.
     if std::env::var_os("CORVENE_ASKPASS").is_some() {
         askpass::run();

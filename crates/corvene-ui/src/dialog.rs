@@ -344,6 +344,17 @@ fn ghd_dialog_width(id: &str) -> Option<f32> {
     })
 }
 
+/// GHD's `max-width` rules above the 600 px default, for dialogs that
+/// size to their content.
+fn ghd_dialog_max_width(id: &str) -> Option<f32> {
+    Some(match id {
+        // "Make sure 80 cols fit comfortably" (`_commit_progress.scss`,
+        // `_hook-failed.scss`)
+        "commit-progress-dialog" | "hook-failed-dialog" => 800.,
+        _ => return None,
+    })
+}
+
 /// `421-larger-dialogs`: the dialogs whose lists grow with the window.
 const LARGER_DIALOGS: &[&str] = &["dialog-conflicts"];
 
@@ -736,9 +747,11 @@ fn dialog_impl(
                         .min_w(zpx(400.).min(widest))
                         // a dialog wider than GHD's 600 px cap says so in `ghd_dialog_width`
                         .max_w(
-                            zpx(ghd_dialog_width(id).map_or(600., |w| w.max(600.)))
-                                .max(large_width.unwrap_or_default())
-                                .min(widest),
+                            zpx(ghd_dialog_width(id)
+                                .or(ghd_dialog_max_width(id))
+                                .map_or(600., |w| w.max(600.)))
+                            .max(large_width.unwrap_or_default())
+                            .min(widest),
                         )
                         .when_some(large_width.or(ghd_dialog_width(id).map(zpx)), |d, w| {
                             d.w(w.min(widest))

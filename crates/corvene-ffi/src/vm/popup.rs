@@ -121,6 +121,16 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
                 .put("message", message)
                 .path("lock", lock);
         }
+        // hooks interception (`corvene_git::hooks`) never runs on Android
+        Popup::HookFailed {
+            hook_name,
+            terminal_output,
+            ..
+        } => {
+            f.put("hook_name", hook_name)
+                .put("terminal_output", terminal_output);
+        }
+        Popup::CommitProgress { .. } => {}
         Popup::AddExistingRepository { path } | Popup::CreateRepository { path } => {
             f.opt(
                 "path",

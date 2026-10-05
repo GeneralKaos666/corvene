@@ -115,6 +115,18 @@ pub enum Popup {
         /// exited non-zero); `message` then holds its full text.
         git: Option<corvene_git::GitFailure>,
     },
+    /// GHD `PopupType.HookFailed` (`ui/hook-failed/hook-failed.tsx`): a
+    /// hook failed and waits for Abort or Ignore and Continue.
+    HookFailed {
+        hook_name: String,
+        terminal_output: String,
+        reply: crate::hooks::HookFailureReply,
+    },
+    /// GHD `PopupType.CommitProgress` (`ui/commit-progress`): the commit's
+    /// live output.
+    CommitProgress {
+        output: crate::hooks::CommitOutput,
+    },
     /// `265-remove-stale-index-lock`: an error caused by a left-over
     /// `index.lock`, with a button to remove it.
     IndexLockExists {
@@ -1182,6 +1194,11 @@ pub struct RepositoryState {
     pub show_co_authored_by: bool,
     pub co_authors: Vec<corvene_models::Author>,
     pub committing: bool,
+    /// GHD `hookProgress`: the commit's hook running or just done (hooks
+    /// interception, Settings › Git › Hooks).
+    pub hook_progress: Option<corvene_git::hooks::HookProgress>,
+    /// GHD `subscribeToCommitOutput`: the output of the commit in progress.
+    pub commit_output: Option<crate::hooks::CommitOutput>,
     /// Discard Changes is running (`708-changes-busy-indicator`).
     pub discarding: bool,
     /// A refresh was requested while one was running; run again when done.

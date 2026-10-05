@@ -1334,6 +1334,8 @@ impl Dispatcher {
             let s = Self::state(cx).read(cx).settings.clone();
             (s.enable_git_hook_env, s.cache_git_hook_env)
         };
+        // GHD `getHooksEnvEnabled()` also turns hooks interception on
+        corvene_git::hooks::set_enabled(enabled);
         if !enabled {
             corvene_git::hook_env::clear_hook_env();
             return;

@@ -63,6 +63,8 @@ pub struct GitCommand {
     cancel: Option<CancelToken>,
     /// Known errors that are results ([`GitCommand::expected_errors`]).
     expected_errors: Vec<KnownGitError>,
+    /// The hooks it intercepts ([`GitCommand::intercept_hooks`]).
+    hooks: Option<crate::hooks::Interception>,
 }
 
 /// Stops a running [`GitCommand::run_streaming`] from another thread with
@@ -350,7 +352,41 @@ impl GitCommand {
             env_removed: Vec::new(),
             cancel: None,
             expected_errors: Vec::new(),
+            hooks: None,
         }
+    }
+
+    /// GHD `IGitExecutionOptions.interceptHooks`: while Settings › Git ›
+    /// Hooks is on, the repository's hooks among `names` run through the
+    /// hooks proxy (`crate::hooks`), with the callbacks
+    /// [`crate::hooks::with_hook_callbacks`] set on this thread.
+    pub fn intercept_hooks(mut self, names: &[&str]) -> Self {
+        self.hooks = crate::hooks::interception(names);
+        self
+    }
+
+    /// Runs `f` with the hooks proxy set up when the command intercepts
+    /// hooks the repository has (GHD `withHooksEnv`), else with `self`.
+    fn with_hooks<R>(&self, f: impl FnOnce(&Self) -> R) -> R {
+        let Some(session) = self
+            .hooks
+            .as_ref()
+            .and_then(|hooks| hooks.start(&self.bin, self.cwd.as_deref()))
+        else {
+            return f(self);
+        };
+        let mut cmd = self.clone();
+        cmd.hooks = None;
+        let existing = self
+            .env
+            .iter()
+            .rev()
+            .find(|(k, _)| k == "GIT_CONFIG_PARAMETERS")
+            .map(|(_, v)| v.as_os_str());
+        cmd.env.extend(session.env(existing));
+        let result = f(&cmd);
+        drop(session);
+        result
     }
 
     /// GHD `IGitExecutionOptions.expectedErrors`: when the command exits
@@ -534,6 +570,10 @@ impl GitCommand {
     /// [`GitError::Cancelled`] (not on Android, where `run` has no child to
     /// signal before it exits).
     pub fn run(&self) -> Result<GitOutput> {
+        self.with_hooks(Self::run_now)
+    }
+
+    fn run_now(&self) -> Result<GitOutput> {
         let started = Instant::now();
         let _network = NetworkGuard::for_command(self);
         let args = self.describe();
@@ -651,7 +691,11 @@ impl GitCommand {
         self.run_streaming_on(StreamedPipe::Stdout, on_stdout_line)
     }
 
-    fn run_streaming_on(
+    fn run_streaming_on(&self, pipe: StreamedPipe, on_line: impl FnMut(&str)) -> Result<GitOutput> {
+        self.with_hooks(|cmd| cmd.run_streaming_now(pipe, on_line))
+    }
+
+    fn run_streaming_now(
         &self,
         pipe: StreamedPipe,
         mut on_line: impl FnMut(&str),
@@ -766,6 +810,13 @@ impl GitCommand {
     /// it; the callbacks run on this thread. The error of a failed command
     /// carries the output in the order git wrote it.
     pub fn run_with_terminal_output(
+        &self,
+        on_terminal_output_available: &TerminalOutputCallback,
+    ) -> Result<GitOutput> {
+        self.with_hooks(|cmd| cmd.run_with_terminal_output_now(on_terminal_output_available))
+    }
+
+    fn run_with_terminal_output_now(
         &self,
         on_terminal_output_available: &TerminalOutputCallback,
     ) -> Result<GitOutput> {

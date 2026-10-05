@@ -1920,16 +1920,22 @@ impl Dispatcher {
         );
         let name = branch.clone();
         let submodules = Self::submodule_update_plan(id, cx);
+        // GHD `gitStore.merge(…, { onHookFailure })`
+        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let hook_callbacks = hooks.callbacks.clone();
         spawn_bg(
             cx,
             move || {
-                let result = corvene_git::merge_branch_with_message(
-                    git.clone(),
-                    &workdir,
-                    &branch,
-                    squash,
-                    message.as_deref(),
-                );
+                let result = corvene_git::hooks::with_hook_callbacks(&hook_callbacks, || {
+                    corvene_git::merge_branch_with_message(
+                        git.clone(),
+                        &workdir,
+                        &branch,
+                        squash,
+                        message.as_deref(),
+                    )
+                });
+                drop(hook_callbacks);
                 // `263-submodules-follow-checkout`
                 let submodule_error = match (&result, submodules) {
                     (Ok(corvene_git::MergeOutcome::Success), Some((skip, askpass))) => {
@@ -1955,6 +1961,12 @@ impl Dispatcher {
                         Self::apply_status(s.repo_state_mut(id), status);
                         cx.notify();
                     });
+                }
+                // GHD: `if (aborted) { return this._refreshRepository(repository) }`
+                if hooks.aborted() {
+                    Self::end_mco(id, cx);
+                    Self::refresh_repository(id, cx);
+                    return;
                 }
                 match result {
                     Ok(corvene_git::MergeOutcome::Success) => {
