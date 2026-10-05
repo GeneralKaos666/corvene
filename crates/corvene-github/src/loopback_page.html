@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{heading}} · Corvene</title>
+<link rel="icon" href="{{favicon}}">
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #24292e;
+    --text-secondary: #6a737d;
+    --text-muted: #959da5;
+    --rule: #e1e4e8;
+    --success: #28a745;
+    --danger: #d73a49;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #24292e;
+      --text: #f6f8fa;
+      --text-secondary: #959da5;
+      --text-muted: #6a737d;
+      --rule: #2f363d;
+      --success: #34d058;
+      --danger: #ea4a5a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 420px; text-align: center; text-wrap: balance; }
+  .mark { position: relative; width: 88px; height: 88px; margin: 0 auto 20px; }
+  .mark > svg { width: 88px; height: 88px; display: block; }
+  .badge {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--bg);
+    padding: 2px;
+  }
+  .badge svg { width: 24px; height: 24px; display: block; fill: var(--text-secondary); }
+  .success .badge svg { fill: var(--success); }
+  .failure .badge svg { fill: var(--danger); }
+  h1 { margin: 0 0 8px; font-size: 22px; font-weight: 600; line-height: 1.25; }
+  p { margin: 0; color: var(--text-secondary); }
+  footer {
+    margin-top: 28px;
+    padding-top: 14px;
+    border-top: 1px solid var(--rule);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+<main class="{{status}}">
+  <div class="mark">
+    {{icon}}
+    <span class="badge"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="{{badge}}"/></svg></span>
+  </div>
+  <h1>{{heading}}</h1>
+  <p>{{message}}</p>
+  <footer>Served by Corvene on this computer. You can close this tab.</footer>
+</main>
+<script>history.replaceState(null, "", "/");</script>
+</body>
+</html>

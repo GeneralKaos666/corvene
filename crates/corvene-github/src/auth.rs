@@ -297,6 +297,87 @@ fn url_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// The page the loopback listener answers a request with. GHD has no such
+/// page: its only callback is the `x-github-desktop-auth` scheme, so the
+/// browser stays on GitHub. The code is not exchanged yet when this is
+/// served, so a good callback sends the user back to the app instead of
+/// claiming the sign-in is done. A script drops the query from the address
+/// bar and the history entry.
+fn callback_page(query: Option<&str>) -> String {
+    const CHECK: &str = "M8 16A8 8 0 1 1 8 0a8 8 0 0 1 0 16Zm3.78-9.72a.751.751 0 0 0-.018-1.042.751.751 0 0 0-1.042-.018L6.75 9.19 5.28 7.72a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042l2 2a.75.75 0 0 0 1.06 0Z";
+    const CROSS: &str = "M2.343 13.657A8 8 0 1 1 13.658 2.343 8 8 0 0 1 2.343 13.657ZM6.03 4.97a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042L6.94 8 4.97 9.97a.749.749 0 0 0 .326 1.275.749.749 0 0 0 .734-.215L8 9.06l1.97 1.97a.749.749 0 0 0 1.275-.326.749.749 0 0 0-.215-.734L9.06 8l1.97-1.97a.749.749 0 0 0-.326-1.275.749.749 0 0 0-.734.215L8 6.94Z";
+    const ICON: &str = include_str!("../../../assets/icon/Corvene-small.svg");
+    let param = |name: &str| {
+        query?
+            .trim_start_matches('?')
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| url_decode(value))
+            .filter(|value| !value.is_empty())
+    };
+    let error = param("error");
+    let (status, badge, heading, message) = if query.and_then(parse_callback_query).is_some() {
+        (
+            "success",
+            CHECK,
+            "Authorized on GitHub",
+            "Switch back to Corvene to finish signing in.".to_string(),
+        )
+    } else if error.as_deref() == Some("access_denied") {
+        (
+            "failure",
+            CROSS,
+            "Sign-in cancelled",
+            "Corvene was not authorized. To try again, start signing in from Corvene.".to_string(),
+        )
+    } else if let Some(error) = error {
+        let reason = param("error_description").unwrap_or(error);
+        (
+            "failure",
+            CROSS,
+            "Sign-in failed",
+            format!(
+                "GitHub answered: {}. Start again from Corvene.",
+                escape_html(reason.trim_end_matches('.'))
+            ),
+        )
+    } else {
+        (
+            "failure",
+            CROSS,
+            "No sign-in code",
+            "Corvene did not receive a sign-in code from this request.".to_string(),
+        )
+    };
+    let favicon = format!(
+        "data:image/svg+xml;base64,{}",
+        data_encoding::BASE64.encode(ICON.as_bytes())
+    );
+    include_str!("loopback_page.html")
+        .replace("{{favicon}}", &favicon)
+        .replace("{{status}}", status)
+        .replace("{{icon}}", ICON)
+        .replace("{{badge}}", badge)
+        .replace("{{heading}}", heading)
+        .replace("{{message}}", &message)
+}
+
+fn escape_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// The loopback fallback (`http://127.0.0.1:<port>`): a one-shot
 /// HTTP listener on an ephemeral port for browsers that cannot hand the
 /// custom URL scheme to the app. `on_callback` runs on the listener thread
@@ -372,11 +453,7 @@ impl LoopbackListener {
                         .and_then(|line| line.split_whitespace().nth(1))
                         .and_then(|path| path.split_once('?').map(|(_, q)| q.to_string()));
                     let result = query.as_deref().and_then(parse_callback_query);
-                    let body = if result.is_some() {
-                        "<!doctype html><title>Corvene</title><p>Signed in. You can close this window and return to Corvene.</p>"
-                    } else {
-                        "<!doctype html><title>Corvene</title><p>Corvene did not receive a sign-in code from this request.</p>"
-                    };
+                    let body = callback_page(query.as_deref());
                     let _ = write!(
                         stream,
                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -457,6 +534,21 @@ mod web_flow_tests {
     }
 
     #[test]
+    fn callback_page_reports_the_outcome() {
+        assert!(callback_page(Some("code=c&state=s")).contains("Authorized on GitHub"));
+        assert!(
+            callback_page(Some(
+                "error=access_denied&error_description=The+user+has+denied&state=s"
+            ))
+            .contains("Sign-in cancelled")
+        );
+        let failed = callback_page(Some("error=x&error_description=%3Cb%3Ebad%3C%2Fb%3E"));
+        assert!(failed.contains("GitHub answered: &lt;b&gt;bad&lt;/b&gt;."));
+        assert!(callback_page(None).contains("No sign-in code"));
+        assert!(!callback_page(None).contains("{{"));
+    }
+
+    #[test]
     fn loopback_listener_hands_over_the_code() {
         use std::io::{Read, Write};
         let (tx, rx) = std::sync::mpsc::channel();
@@ -476,7 +568,7 @@ mod web_flow_tests {
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
         assert!(response.starts_with("HTTP/1.1 200 OK"));
-        assert!(response.contains("Signed in"));
+        assert!(response.contains("Authorized on GitHub"));
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(30)).unwrap(),
             Some(("xyz".into(), "123".into()))
