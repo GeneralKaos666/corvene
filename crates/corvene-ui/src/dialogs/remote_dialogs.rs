@@ -17,7 +17,8 @@ use gpui_kit::*;
 use crate::context_menu::MenuItem;
 use crate::context_menu::mac_or;
 use crate::dialog::{
-    DialogButton, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog, dialog_with_kind,
+    DialogButton, DialogFrame, DialogKind, GroupButtonSpec, OkCancelButtonGroup, dialog,
+    dialog_with_frame, dialog_with_kind, dialog_with_kind_framed,
 };
 use crate::icons::{Octicon, octicon};
 use crate::tab_bar::{TabModel, tab_bar};
@@ -603,7 +604,7 @@ impl Render for PushNeedsPullDialog {
                 },
             );
         }
-        dialog_with_kind(
+        dialog_with_kind_framed(
             "dialog-push-needs-pull",
             DialogKind::Warning,
             mac_or("Newer Commits on Remote", "Newer commits on remote"),
@@ -611,6 +612,11 @@ impl Render for PushNeedsPullDialog {
                 "Corvene is unable to push commits to this branch because there are commits on the remote that are not present on your local branch. Fetch these new commits before pushing in order to reconcile them with your local commits.",
             ),
             buttons,
+            // nothing focusable in the text: GHD focuses Fetch
+            DialogFrame {
+                focus_primary: true,
+                ..Default::default()
+            },
             close,
             window,
             cx,
@@ -907,7 +913,7 @@ impl Render for InitializeLfsDialog {
                     .text_color(t.text_secondary)
                     .children(paths.into_iter().map(|p| div().truncate().child(p))),
             );
-        dialog(
+        dialog_with_frame(
             "dialog-initialize-lfs",
             "Initialize Git LFS",
             content,
@@ -930,6 +936,12 @@ impl Render for InitializeLfsDialog {
                     }),
                 },
             ],
+            // GHD's focus search skips the Git LFS link (no `tabindex`) and
+            // lands on the submit button
+            DialogFrame {
+                focus_primary: true,
+                ..Default::default()
+            },
             close,
             window,
             cx,
