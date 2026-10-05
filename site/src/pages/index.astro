@@ -3,6 +3,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import HeroDownload from "../components/HeroDownload";
 import BenchmarkComparison from "../components/BenchmarkComparison";
 import DownloadsTable from "../components/DownloadsTable";
+import DownloadPicker from "../components/DownloadPicker";
 import { workspaceVersion } from "../lib/version";
 import { BENCHMARK_METRICS, formatMetric } from "../data/benchmarks";
 import { FAQS, faqLd, softwareApplicationLd, type SiteContext } from "../lib/seo";
@@ -156,6 +157,9 @@ const features = [
         <h2 class="eyebrow text-accent">Downloads</h2>
         <p class="font-display text-3xl font-bold text-fg sm:text-4xl">Every platform, every format</p>
         <p class="text-sm text-fg-muted sm:text-base">Direct links into the latest GitHub release. Pick the Standard edition unless you want every syntax grammar offline.</p>
+        <div class="pt-3">
+          <DownloadPicker client:idle fallbackVersion={version} />
+        </div>
       </div>
 
       <DownloadsTable client:visible fallbackVersion={version} />
@@ -168,23 +172,92 @@ const features = [
         <h2 class="eyebrow text-done">Questions</h2>
         <p class="font-display text-3xl font-bold text-fg sm:text-4xl">Frequently asked</p>
       </div>
-      <dl class="mt-10 divide-y divide-edge-muted rounded-2xl border border-edge bg-canvas">
+      <dl class="mt-10 divide-y divide-edge-muted overflow-hidden rounded-2xl border border-edge bg-canvas">
         {
           FAQS.map((faq) => (
-            <details class="group open:bg-canvas-subtle/40">
+            <details class="faq-item group transition-colors duration-300 data-[state=open]:bg-canvas-subtle/40" data-state="closed">
               <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 text-left text-sm font-semibold text-fg hover:text-accent [&::-webkit-details-marker]:hidden">
                 <dt>{faq.question}</dt>
-                <svg class="h-4 w-4 shrink-0 text-fg-muted transition-transform group-open:rotate-180" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <svg class="h-4 w-4 shrink-0 text-fg-muted transition-transform duration-300 ease-out group-data-[state=open]:rotate-180 group-data-[state=open]:text-accent" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                   <path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z" />
                 </svg>
               </summary>
-              <dd class="px-6 pb-5 text-sm leading-relaxed text-fg-muted">{faq.answer}</dd>
+              <dd class="faq-body px-6 pb-5 text-sm leading-relaxed text-fg-muted">{faq.answer}</dd>
             </details>
           ))
         }
       </dl>
     </div>
   </section>
+
+  <script>
+    // Ease the FAQ answers open and shut. <details> jumps between its two
+    // heights, so the click animates the element's height (and the answer's
+    // fade) with the Web Animations API, from wherever a running animation
+    // left it. data-state flips at the start, so the chevron and background
+    // turn with the motion rather than after it.
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const EASING = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+
+    for (const details of document.querySelectorAll<HTMLDetailsElement>("details.faq-item")) {
+      const summary = details.querySelector("summary");
+      const body = details.querySelector<HTMLElement>(".faq-body");
+      if (!summary || !body) continue;
+      let height: Animation | null = null;
+      let fade: Animation | null = null;
+      let closing = false;
+
+      // keyboard, find-in-page and reduced motion still toggle natively
+      details.addEventListener("toggle", () => {
+        if (!closing) details.dataset.state = details.open ? "open" : "closed";
+      });
+
+      const settle = () => {
+        height = fade = null;
+        closing = false;
+        details.style.overflow = "";
+      };
+
+      // `from` is measured before the content shows; the animation starts in
+      // the same task, so the full height never paints
+      const run = (open: boolean, from: number) => {
+        const style = getComputedStyle(details);
+        const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+        // fractional heights: offsetHeight rounds, and the last frame would jump a pixel
+        const to = border + summary.getBoundingClientRect().height + (open ? body.getBoundingClientRect().height : 0);
+        height?.cancel();
+        fade?.cancel();
+        closing = !open;
+        details.dataset.state = open ? "open" : "closed";
+        details.style.overflow = "hidden";
+        const duration = Math.min(380, 180 + Math.abs(to - from) * 0.6);
+        height = details.animate({ height: [`${from}px`, `${to}px`] }, { duration, easing: EASING });
+        fade = body.animate(
+          open
+            ? { opacity: [0, 1], transform: ["translateY(-6px)", "none"] }
+            : { opacity: [1, 0], transform: ["none", "translateY(-6px)"] },
+          { duration: duration * (open ? 1 : 0.7), easing: EASING, fill: "both" }
+        );
+        height.onfinish = () => {
+          if (!open) details.open = false;
+          fade?.cancel();
+          settle();
+        };
+      };
+
+      summary.addEventListener("click", (event) => {
+        if (reduceMotion.matches) return;
+        event.preventDefault();
+        const from = details.getBoundingClientRect().height;
+        if (closing || !details.open) {
+          details.open = true;
+          run(true, from);
+        } else {
+          run(false, from);
+        }
+      });
+    }
+  </script>
 
   <section class="bg-canvas py-20">
     <div class="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">

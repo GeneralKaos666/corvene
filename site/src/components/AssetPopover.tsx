@@ -6,7 +6,7 @@ import type { ReleaseAsset } from "../lib/github";
 const WIDTH = 264;
 const GUTTER = 12;
 
-function formatSize(bytes: number): [string, string] {
+export function formatSize(bytes: number): [string, string] {
   const units = ["B", "KB", "MB", "GB"];
   let size = bytes;
   let unit = 0;

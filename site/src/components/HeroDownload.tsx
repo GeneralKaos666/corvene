@@ -98,10 +98,10 @@ export default function HeroDownload({ fallbackVersion, base }: Props) {
   };
   const androidCard: Card = {
     title: "Android",
-    text: "Phones, tablets and Chromebooks, with git, OpenSSH and Git LFS built in. Experimental.",
+    text: "A new app built for phones, and Corvene Legacy, the desktop app for tablets and Chromebooks. Experimental.",
     links: [
       { label: "arm64 APK", href: url(names.android.apk("arm64")) },
-      { label: "Universal APK", href: url(names.android.apk("universal")) },
+      { label: "Legacy APK", href: url(names.android.apk("arm64", "legacy")) },
     ],
   };
 
@@ -166,22 +166,22 @@ export default function HeroDownload({ fallbackVersion, base }: Props) {
     android: {
       headline: "Download Corvene for Android",
       button: "Download the APK",
-      buttonNote: "arm64 · most phones and tablets",
+      buttonNote: "The new app for phones · arm64",
       href: url(names.android.apk("arm64")),
       cards: [
         {
-          title: "Other devices",
-          text: "A universal APK with every architecture, or one for Chromebooks and 32-bit phones.",
+          title: "Corvene Legacy",
+          text: "The desktop app itself, GitHub Desktop 1:1, for tablets, Chromebooks and desktop modes. Installs next to the new one.",
           links: [
-            { label: "Universal APK", href: url(names.android.apk("universal")) },
-            { label: "x86_64 (Chromebooks)", href: url(names.android.apk("x86_64")) },
-            { label: "armv7", href: url(names.android.apk("armv7")) },
+            { label: "arm64 APK", href: url(names.android.apk("arm64", "legacy")) },
+            { label: "x86_64 (Chromebooks)", href: url(names.android.apk("x86_64", "legacy")) },
+            { label: "Other devices", href: "#pick" },
           ],
         },
         { ...macCard, title: "Desktop", text: "The same app on macOS, Windows and Linux.", links: [macCard.links[0], windowsCard.links[0], linuxCard.links[0]] },
         {
           title: "What is inside",
-          text: "git, OpenSSH and Git LFS are bundled, so nothing else needs installing. Android support is experimental.",
+          text: "git, OpenSSH and Git LFS are bundled, so nothing else needs installing. A universal APK and 32-bit builds are on the release.",
           links: [{ label: "Android notes", href: `${base}/docs/installation#android` }],
         },
       ],
@@ -225,6 +225,10 @@ export default function HeroDownload({ fallbackVersion, base }: Props) {
           {current.buttonNote} · <span className="font-mono">v{version}</span> ·{" "}
           <a href="#downloads" className="text-accent hover:underline">
             all platforms and formats
+          </a>{" "}
+          ·{" "}
+          <a href="#pick" className="text-accent hover:underline">
+            help me pick
           </a>
         </p>
 

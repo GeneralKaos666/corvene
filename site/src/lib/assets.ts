@@ -1,10 +1,14 @@
 /**
  * The asset names a release carries (packaging/release.md), for the download
  * links. The Full edition (every tree-sitter grammar built in) is
- * `Corvene-Full-…`, `corvene-full` for the Linux .deb and .rpm.
+ * `Corvene-Full-…`, `corvene-full` for the Linux .deb and .rpm. Android has
+ * two apps: the Compose one (`Corvene-…`) and the desktop app in a
+ * NativeActivity (`Corvene-Legacy-…`, `Corvene-Legacy-Full-…`).
  */
 
 export type Edition = "standard" | "full";
+export type AndroidApp = "compose" | "legacy";
+export type AndroidAbi = "universal" | "arm64" | "armv7" | "x86_64" | "x86";
 
 export function assetNames(version: string, edition: Edition) {
   const full = edition === "full";
@@ -33,7 +37,8 @@ export function assetNames(version: string, edition: Edition) {
     },
     android: {
       // the Full edition has no universal APK: it would be several hundred MB
-      apk: (abi: "universal" | "arm64" | "armv7" | "x86_64" | "x86") => `${app}-${version}-android-foss-${abi}.apk`,
+      apk: (abi: AndroidAbi, android: AndroidApp = "compose") =>
+        `${android === "legacy" ? (full ? "Corvene-Legacy-Full" : "Corvene-Legacy") : app}-${version}-android-foss-${abi}.apk`,
     },
   };
 }

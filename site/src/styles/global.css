@@ -240,3 +240,147 @@
     transform: none;
   }
 }
+
+/* ---------- "Help me pick" (DownloadPicker.tsx) ---------- */
+
+@layer components {
+  /* the button above the downloads list: a pill with a soft gradient rim */
+  .picker-trigger {
+    @apply inline-flex items-center gap-2.5 rounded-full border border-transparent py-1.5 pl-1.5 pr-4 text-sm font-semibold shadow-lg shadow-black/30 transition-[transform,box-shadow] duration-200;
+    background:
+      linear-gradient(var(--color-canvas-subtle), var(--color-canvas-subtle)) padding-box,
+      linear-gradient(120deg, rgba(88, 166, 255, 0.7), rgba(163, 113, 247, 0.7), rgba(63, 185, 80, 0.5)) border-box;
+  }
+  .picker-trigger:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 10px 30px -10px rgba(88, 166, 255, 0.45),
+      0 4px 14px -6px rgba(163, 113, 247, 0.4);
+  }
+
+  /* an answer: a card that lifts on hover and rings when chosen */
+  .picker-option {
+    @apply relative rounded-xl border border-edge bg-canvas-subtle/50 outline-none transition-[border-color,background-color,box-shadow,transform] duration-200;
+  }
+  .picker-option:not(:disabled):hover {
+    @apply border-edge-hover/60 bg-canvas-subtle;
+  }
+  .picker-option:not(:disabled):active {
+    transform: scale(0.99);
+  }
+  .picker-option:focus-visible {
+    @apply border-accent;
+    box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.35);
+  }
+  .picker-option.is-selected {
+    @apply border-accent bg-accent-emphasis/10;
+    box-shadow:
+      0 0 0 1px var(--color-accent),
+      0 12px 32px -14px rgba(31, 111, 235, 0.55);
+  }
+  .picker-option[data-tone="done"].is-selected {
+    @apply border-done bg-done-emphasis/10;
+    box-shadow:
+      0 0 0 1px var(--color-done),
+      0 12px 32px -14px rgba(137, 87, 229, 0.6);
+  }
+  .picker-option[data-tone="success"].is-selected {
+    @apply border-success bg-success-emphasis/10;
+    box-shadow:
+      0 0 0 1px var(--color-success),
+      0 12px 32px -14px rgba(35, 134, 54, 0.6);
+  }
+  .picker-option[data-tone="done"].is-selected .bg-accent-emphasis {
+    @apply bg-done-emphasis;
+  }
+  .picker-option[data-tone="success"].is-selected .bg-accent-emphasis {
+    @apply bg-success-emphasis;
+  }
+
+  /* the result: a ticket with a glowing gradient edge */
+  .picker-ticket {
+    @apply relative overflow-hidden rounded-2xl border border-transparent;
+    background:
+      radial-gradient(120% 90% at 0% 0%, rgba(31, 111, 235, 0.16), transparent 55%),
+      linear-gradient(var(--color-canvas-subtle), var(--color-canvas-subtle)) padding-box,
+      linear-gradient(135deg, rgba(88, 166, 255, 0.8), rgba(63, 185, 80, 0.55) 60%, rgba(48, 54, 61, 0.9)) border-box;
+    box-shadow: 0 24px 60px -30px rgba(31, 111, 235, 0.6);
+  }
+  .picker-ticket.is-full {
+    background:
+      radial-gradient(120% 90% at 0% 0%, rgba(137, 87, 229, 0.2), transparent 55%),
+      linear-gradient(var(--color-canvas-subtle), var(--color-canvas-subtle)) padding-box,
+      linear-gradient(135deg, rgba(163, 113, 247, 0.9), rgba(88, 166, 255, 0.55) 60%, rgba(48, 54, 61, 0.9)) border-box;
+    box-shadow: 0 24px 60px -30px rgba(137, 87, 229, 0.65);
+  }
+
+  .picker-dialog[open] {
+    animation: picker-sheet-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @media (width >= 40rem) {
+    .picker-dialog[open] {
+      animation: dialog-in 200ms ease-out;
+    }
+  }
+  .picker-step-next {
+    animation: picker-step-next 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .picker-step-prev {
+    animation: picker-step-prev 300ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .picker-row-in {
+    animation: picker-row-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .picker-chip-in {
+    animation: picker-row-in 240ms ease-out both;
+  }
+  .picker-check {
+    animation: picker-check 260ms cubic-bezier(0.3, 1.6, 0.5, 1) both;
+  }
+}
+
+@keyframes picker-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes picker-step-next {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes picker-step-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* no "to": a disabled answer keeps its dimmed opacity */
+@keyframes picker-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes picker-check {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
