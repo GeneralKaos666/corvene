@@ -1,0 +1,28 @@
+name: menu-shortcuts
+description: Menu shortcuts pressed inside the window (GHD gets the menu event its accelerator sends), each after Escape closed the last foldout
+setup: repo
+steps:
+  # GHD drops a foldout opened by the first menu event right after setup
+  - menu: show-changes
+    wait: 500
+  - ghd: {menu: choose-repository}
+    corvene: {key: cmd-t}
+  - snap: repository-list
+  - key: escape
+  - ghd: {menu: show-branches}
+    corvene: {key: cmd-b}
+  - snap: branches-list
+  - key: escape
+  - snap: branches-list-closed
+  - ghd: {menu: go-to-commit-message}
+    corvene: {key: cmd-g}
+  - snap: summary-focused
+  - ghd: {menu: compare-to-branch}
+    corvene: {key: shift-cmd-b}
+  - snap: compare
+  # Escape in the compare box goes back to the history (`handleEscape`)
+  - key: escape
+  - snap: compare-escaped
+  - ghd: {menu: show-changes}
+    corvene: {key: cmd-1}
+  - snap: changes
