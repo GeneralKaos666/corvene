@@ -751,7 +751,8 @@ impl FlagsDialog {
         if let Some(reason) = unavailable_reason {
             aria.push_str(&format!(", unavailable in this build: {reason}"));
         } else if env_locked {
-            aria.push_str(", set by CORVENE_FLAGS");
+            let source = self.state.read(cx).flag_lock_source(Some(id));
+            aria.push_str(&format!(", set by {source}"));
         }
 
         let title = div()
@@ -816,8 +817,9 @@ impl FlagsDialog {
             ));
         }
         if env_locked {
+            let source = self.state.read(cx).flag_lock_source(Some(id));
             meta = meta.child(pill(
-                "Set by CORVENE_FLAGS",
+                format!("Set by {source}"),
                 Some(Octicon::Lock),
                 t.box_alt_background,
                 t.text,
@@ -1167,10 +1169,11 @@ impl FlagsDialog {
                     .bg(t.banner_warning_background)
                     .text_color(t.banner_warning_text)
                     .text_size(FONT_SIZE())
-                    .child(
-                        "CORVENE_FLAGS sets the preset for this session; relaunch without it \
-                         to pick another.",
-                    ),
+                    .child(format!(
+                        "{} sets the preset for this session; relaunch without it to pick \
+                         another.",
+                        self.state.read(cx).flag_lock_source(None)
+                    )),
             );
         }
         let weak = cx.weak_entity();
@@ -1910,7 +1913,11 @@ impl Render for FlagsDialog {
                         .text_size(FONT_SIZE_SM())
                         .text_color(t.text_secondary)
                         .child(if preset_from_env {
-                            format!("{} Set by CORVENE_FLAGS.", preset.description())
+                            format!(
+                                "{} Set by {}.",
+                                preset.description(),
+                                self.state.read(cx).flag_lock_source(None)
+                            )
                         } else {
                             preset.description().to_string()
                         })

@@ -3495,6 +3495,25 @@ registry! {
         code: &["crates/corvene-platform/src/editors.rs", "crates/corvene-core/src/integrations.rs"],
     },
 
+    /// `~/.config/corvene/settings.json` applied over the stored settings.
+    SETTINGS_FILE = 522 "settings-file" {
+        title: "Settings file",
+        summary: "At launch the settings in ~/.config/corvene/settings.json (on Windows \
+                  %APPDATA%\\corvene\\settings.json) override the stored ones, and its \"flags\" \
+                  entry sets flags for the session like CORVENE_FLAGS; Corvene never writes the \
+                  file nor saves what it set. Settings › Advanced › Export Settings… writes the \
+                  current settings and flags in its format. Keys it cannot use are listed in a \
+                  banner.",
+        ghd_behaviour: "Settings live in the app's own storage only; there is no file to keep in \
+                        dotfiles or to copy to another machine.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: true, visible: true, availability: available,
+        upstream: &[Upstream::issue(22464)],
+        code: &["crates/corvene-core/src/settings_file.rs", "crates/corvene/src/main.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

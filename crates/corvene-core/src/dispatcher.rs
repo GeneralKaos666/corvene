@@ -156,6 +156,8 @@ impl Dispatcher {
             navigation: Default::default(),
             keymap_overrides: Default::default(),
             keymap_load_errors: Vec::new(),
+            settings_overlay: Default::default(),
+            settings_file_flags: Default::default(),
             selected,
             repo_states: Default::default(),
             accounts,
@@ -6928,6 +6930,49 @@ impl Dispatcher {
         }
     }
 
+    /// Corvene (`522-settings-file`): what `settings_file::apply_at_launch`
+    /// took from the file, and what of it could not be used (a banner).
+    pub fn set_settings_file(
+        overlay: crate::settings_file::SettingsOverlay,
+        flags: crate::flags::EnvFlags,
+        errors: Vec<String>,
+        cx: &mut dyn Host,
+    ) {
+        Self::state(cx).update(cx, |s, _| {
+            s.settings_overlay = overlay;
+            s.settings_file_flags = flags;
+        });
+        if !errors.is_empty() {
+            Self::report_config_file_errors(corvene_platform::paths::settings_file(), errors, cx);
+        }
+    }
+
+    /// Corvene (`522-settings-file`): Settings › Advanced › "Export
+    /// Settings…" writes the settings in effect and the flags spec to `path`.
+    pub fn export_settings(path: PathBuf, cx: &mut dyn Host) {
+        let text = {
+            let s = Self::state(cx).read(cx);
+            crate::settings_file::export(
+                &s.settings,
+                Some(&crate::flags::env::render(&s.flag_overrides)),
+            )
+        };
+        crate::remote::spawn_bg(
+            cx,
+            move || {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&path, text)
+            },
+            |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not export settings", err.to_string(), cx);
+                }
+            },
+        );
+    }
+
     /// Corvene (`618-keymap-overrides`, `522-settings-file`): a banner
     /// naming the configuration file and what in it could not be used.
     pub fn report_config_file_errors(path: PathBuf, errors: Vec<String>, cx: &mut dyn Host) {
@@ -6945,7 +6990,9 @@ impl Dispatcher {
         let failed = Self::state(cx).update(cx, |s, cx| {
             edit(&mut s.settings);
             cx.notify();
-            let err = s.store.save_settings(&s.settings).err()?;
+            // `522-settings-file`: what the file set is not saved
+            let stored = s.settings_overlay.stored_form(&s.settings);
+            let err = s.store.save_settings(&stored).err()?;
             error!(?err, "could not save settings");
             let shown = s
                 .popups

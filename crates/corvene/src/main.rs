@@ -95,16 +95,30 @@ pub(crate) fn main() {
             Arc::new(corvene_store::Store::open_in(tmp).expect("temporary store"))
         }
     };
-    let settings = store.settings().unwrap_or_default();
+    let mut settings = store.settings().unwrap_or_default();
     // Feature flags: the stored preset + overrides, then CORVENE_FLAGS for
     // this session (bad entries are logged and skipped). Resolved here too
     // because the theme is applied before `AppState` exists.
     let flag_overrides = store.flags().unwrap_or_default();
-    let (flags_env, flag_errors) = corvene_core::flags::env::from_env();
+    let (mut flags_env, flag_errors) = corvene_core::flags::env::from_env();
     for err in &flag_errors {
         warn!("{err}");
     }
-    let launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
+    let mut launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
+    // Corvene (`522-settings-file`): the settings file over the stored
+    // settings, its flags under CORVENE_FLAGS
+    let settings_file = launch_flags
+        .bool(corvene_core::flags::ids::SETTINGS_FILE)
+        .then(|| {
+            corvene_core::settings_file::apply_at_launch(
+                &corvene_platform::paths::settings_file(),
+                &mut settings,
+                &mut flags_env,
+            )
+        });
+    if settings_file.is_some() {
+        launch_flags = corvene_core::Flags::resolve(&flag_overrides, &flags_env);
+    }
     sync_renderer_flags(&launch_flags);
     // Corvene (`287-repository-list-backup`): a copy of the store from
     // before an update, and a banner when this session cannot save
@@ -214,6 +228,9 @@ pub(crate) fn main() {
         );
         let sidebar_width = corvene_ui::theme::sizes::zpx(settings.sidebar_width);
         Dispatcher::init(store, settings, flag_overrides, flags_env, cx);
+        if let Some((overlay, file_flags, errors)) = settings_file {
+            Dispatcher::set_settings_file(overlay, file_flags, errors, cx);
+        }
         if let Some(path) = store_fallback {
             Dispatcher::set_banner(corvene_core::Banner::TemporaryStore { path }, cx);
         }

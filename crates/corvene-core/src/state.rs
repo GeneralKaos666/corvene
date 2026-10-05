@@ -1441,6 +1441,10 @@ pub struct AppState {
     /// the problems reading it found (shown once in a banner).
     pub keymap_overrides: crate::keymap_file::KeymapOverrides,
     pub keymap_load_errors: Vec<String>,
+    /// Corvene (`522-settings-file`): the keys the settings file set (saved
+    /// with their stored values) and the flags it decided.
+    pub settings_overlay: crate::settings_file::SettingsOverlay,
+    pub settings_file_flags: crate::flags::EnvFlags,
     pub selected: Option<u64>,
     pub repo_states: HashMap<u64, RepositoryState>,
     pub accounts: Vec<Account>,
@@ -1700,6 +1704,20 @@ impl AppState {
 
     pub fn selected_state(&self) -> Option<&RepositoryState> {
         self.selected.and_then(|id| self.repo_states.get(&id))
+    }
+
+    /// What locks flag `id` in the Flags dialog: the settings file
+    /// (`522-settings-file`) or `CORVENE_FLAGS`.
+    pub fn flag_lock_source(&self, id: Option<crate::flags::FlagId>) -> &'static str {
+        let from_file = match id {
+            Some(id) => self.settings_file_flags.values.contains_key(&id),
+            None => self.settings_file_flags.preset.is_some(),
+        };
+        if from_file {
+            crate::settings_file::FILE_NAME
+        } else {
+            crate::flags::env::VAR
+        }
     }
 
     /// Where the user is (`427-back-forward-navigation`): the selected

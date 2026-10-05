@@ -63,6 +63,7 @@ pub mod repositories_store;
 pub mod repository_list_file;
 pub mod round;
 pub mod samples;
+pub mod settings_file;
 pub mod shared_storage;
 pub mod sign_in;
 pub mod stash_flows;

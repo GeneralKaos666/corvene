@@ -19,6 +19,8 @@
 //! With flag `514-default-clone-location` Advanced has a "Clone location"
 //! folder picker (GHD has no setting; it remembers the last clone's parent
 //! folder, `ui/lib/default-dir.ts`).
+//! With flag `522-settings-file` Advanced names the settings file, the
+//! settings it set, and has "Export Settings…" (`corvene_core::settings_file`).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -1766,13 +1768,14 @@ impl PreferencesDialog {
 
     fn advanced_tab(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
-        let (crash_reports, offered_packs, clone_location) = {
+        let (crash_reports, offered_packs, clone_location, settings_file) = {
             use corvene_core::flags::ids;
             let flags = &self.state.read(cx).flags;
             (
                 flags.bool(ids::CRASH_REPORTS),
                 corvene_core::offered_packs(flags),
                 flags.bool(ids::DEFAULT_CLONE_LOCATION),
+                flags.bool(ids::SETTINGS_FILE),
             )
         };
         div()
@@ -1843,6 +1846,69 @@ impl PreferencesDialog {
                 d.child(div().mt(SPACING()).child(section_heading("Optional components", cx)))
                     .children(offered_packs.iter().map(|kind| self.pack_row(*kind, cx)))
             })
+            .when(settings_file, |d| d.child(self.settings_file_section(cx)))
+            .into_any_element()
+    }
+
+    /// Corvene (`522-settings-file`): where the settings file is, which
+    /// settings it set, and "Export Settings…".
+    fn settings_file_section(&self, cx: &Context<Self>) -> AnyElement {
+        let t = cx.ghd();
+        let path = corvene_platform::paths::settings_file();
+        let from_file: Vec<String> = self
+            .state
+            .read(cx)
+            .settings_overlay
+            .stored
+            .keys()
+            .cloned()
+            .collect();
+        let export_path = path.clone();
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .mt(SPACING())
+                    .child(section_heading("Settings file", cx)),
+            )
+            .child(settings_description(cx).child(format!(
+                "At launch Corvene applies the settings in {} over these; it never changes \
+                 that file.",
+                path.display()
+            )))
+            .when(!from_file.is_empty(), |d| {
+                d.child(
+                    settings_description(cx)
+                        .text_color(t.text_secondary)
+                        .child(format!("Set by the file: {}.", from_file.join(", "))),
+                )
+            })
+            .child(
+                div().mt(SPACING()).flex().flex_row().child(
+                    button(
+                        "prefs-export-settings",
+                        mac_or("Export Settings…", "Export settings…"),
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        let directory = export_path
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_default();
+                        let receiver = cx.prompt_for_new_path(
+                            &directory,
+                            Some(corvene_core::settings_file::FILE_NAME),
+                        );
+                        cx.spawn(async move |cx| {
+                            if let Ok(Ok(Some(path))) = receiver.await {
+                                cx.update(|cx| Dispatcher::export_settings(path, cx));
+                            }
+                        })
+                        .detach();
+                    }),
+                ),
+            )
             .into_any_element()
     }
 

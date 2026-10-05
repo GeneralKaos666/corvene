@@ -61,6 +61,8 @@ pub fn app_state() -> TestAppState {
         navigation: Default::default(),
         keymap_overrides: Default::default(),
         keymap_load_errors: Vec::new(),
+        settings_overlay: Default::default(),
+        settings_file_flags: Default::default(),
         selected: None,
         repo_states: HashMap::new(),
         accounts: Vec::new(),

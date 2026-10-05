@@ -73,6 +73,28 @@ pub mod paths {
             .join(DIR_NAME)
     }
 
+    /// Corvene `522-settings-file`: the read-only settings file,
+    /// `~/.config/corvene/settings.json` on macOS and Linux
+    /// (`%APPDATA%\corvene\settings.json` on Windows), or `settings.json`
+    /// in `CORVENE_DATA_DIR` when that is set, so a harness instance never
+    /// reads the user's.
+    pub fn settings_file() -> PathBuf {
+        if let Some(dir) = std::env::var_os("CORVENE_DATA_DIR") {
+            return PathBuf::from(dir).join("settings.json");
+        }
+        #[cfg(windows)]
+        {
+            dirs::config_dir()
+                .unwrap_or_else(home)
+                .join("corvene")
+                .join("settings.json")
+        }
+        #[cfg(not(windows))]
+        {
+            home().join(".config/corvene/settings.json")
+        }
+    }
+
     /// `~/Library/Logs/Corvene` (Linux: `$XDG_STATE_HOME/corvene/logs`,
     /// `~/.local/state/corvene/logs`; under `CORVENE_DATA_DIR` when set so a
     /// harness instance keeps its logs to itself).
