@@ -238,6 +238,10 @@ fn window_command(
             // (the macOS `NSMenu` holds this loop until it closes instead)
             #[cfg(not(target_os = "macos"))]
             corvene_ui::views_menu::close_all(cx);
+            // hit testing uses the last drawn frame, and an unfocused window
+            // gets none: without this a click right after a popup opened or
+            // a list changed lands on what was there before
+            window.draw(cx).clear(cx);
             window.dispatch_event(moved(position, None), cx);
             window.dispatch_event(down(position), cx);
             window.dispatch_event(up(position), cx);
