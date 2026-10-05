@@ -8,10 +8,14 @@ use tracing::{debug, info, warn};
 
 use crate::error::{GitError, Result};
 
-/// Oldest git Corvene supports (`--porcelain=v2`, `--force-with-lease`, sparse index fixes).
+/// Oldest git Corvene supports: `merge-tree --write-tree` (2.38), which GHD's
+/// `determineMergeability` needs. Newer options are checked where they are
+/// used ([`crate::REMERGE_DIFF_MIN_VERSION`],
+/// [`crate::ADD_TO_STASH_MIN_VERSION`], `cherry-pick --empty=keep`), so the
+/// git in Xcode 14.3 to 16's Command Line Tools (2.39) is enough.
 pub const MIN_VERSION: GitVersion = GitVersion {
     major: 2,
-    minor: 40,
+    minor: 38,
     patch: 0,
 };
 
@@ -246,7 +250,9 @@ mod tests {
         );
         let apple = GitVersion::parse("git version 2.39.5 (Apple Git-154)").unwrap();
         assert_eq!(apple.minor, 39);
-        assert!(apple < MIN_VERSION);
+        assert!(apple >= MIN_VERSION);
+        let old = GitVersion::parse("git version 2.37.3").unwrap();
+        assert!(old < MIN_VERSION);
         assert!(GitVersion::parse("nope").is_none());
         let rc = GitVersion::parse("git version 2.50.0-rc1").unwrap();
         assert_eq!(rc.patch, 0);

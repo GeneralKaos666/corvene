@@ -49,7 +49,7 @@ use corvene_models::{StashEntry, WorkingDirectoryFileChange};
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
-use crate::state::{Popup, RepositoryState};
+use crate::state::{AppState, Popup, RepositoryState};
 
 /// `774-stash-conflict-flow`: a stash entry git kept because restoring it
 /// conflicted, where (the worktree) and with which files.
@@ -85,6 +85,15 @@ impl RepositoryState {
 }
 
 impl Dispatcher {
+    /// `776-stash-add-to-existing`: Add to Stash is offered (the flag is on
+    /// and git is new enough for `merge-tree --merge-base`).
+    pub fn add_to_stash_available(s: &AppState) -> bool {
+        s.flags.bool(crate::flags::ids::STASH_ADD_TO_EXISTING)
+            && s.git.as_ref().is_some_and(|git| {
+                (git.version.major, git.version.minor) >= corvene_git::ADD_TO_STASH_MIN_VERSION
+            })
+    }
+
     /// The [`StashPopOptions`] the flags ask for.
     pub(crate) fn stash_pop_options(cx: &dyn Host) -> StashPopOptions {
         let flags = &Self::state(cx).read(cx).flags;
@@ -272,6 +281,10 @@ impl Dispatcher {
         then: impl FnOnce(bool, &mut dyn Host) + 'static,
         cx: &mut dyn Host,
     ) {
+        if !Self::add_to_stash_available(Self::state(cx).read(cx)) {
+            then(false, cx);
+            return;
+        }
         let (repo, branch, old, guard) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);

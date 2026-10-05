@@ -5128,7 +5128,8 @@ registry! {
                   present\" offers Add to Stash and Continue when the branch already has a \
                   stash. The stash is applied onto the current changes in a scratch copy first; \
                   when that is clean, one stash holding both replaces the old one. When the two \
-                  change the same lines nothing is touched and Corvene names the files.",
+                  change the same lines nothing is touched and Corvene names the files. Needs \
+                  git 2.40 or newer.",
         ghd_behaviour: "A branch holds one stash: stashing again overwrites it, and the \
                         overwritten dialog of a pull or cherry-pick offers only Close.",
         nature: Nature::Feature,

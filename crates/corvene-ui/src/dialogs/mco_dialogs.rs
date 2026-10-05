@@ -1408,12 +1408,7 @@ impl Render for LocalChangesOverwrittenDialog {
             .is_some_and(|r| r.desktop_stash().is_some());
         // Corvene (`776-stash-add-to-existing`): with a stash, the changes
         // can join it
-        let add_to_stash = has_stash
-            && self
-                .state
-                .read(cx)
-                .flags
-                .bool(corvene_core::flags::ids::STASH_ADD_TO_EXISTING);
+        let add_to_stash = has_stash && Dispatcher::add_to_stash_available(self.state.read(cx));
         let retry = self.retry.clone();
         // Corvene (`778-overwritten-discard-and-continue`)
         let offer_discard = !self.files.is_empty()

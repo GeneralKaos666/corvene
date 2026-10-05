@@ -1575,10 +1575,7 @@ impl Render for ConfirmOverwriteStashDialog {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let (repo, branch) = (self.repo, self.branch.clone());
         // Corvene (`776-stash-add-to-existing`): or fold the changes in
-        let add = AppState::global(cx)
-            .read(cx)
-            .flags
-            .bool(corvene_core::flags::ids::STASH_ADD_TO_EXISTING);
+        let add = Dispatcher::add_to_stash_available(AppState::global(cx).read(cx));
         let mut buttons = vec![DialogButton {
             id: "overwrite-cancel",
             label: "Cancel".into(),

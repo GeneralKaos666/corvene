@@ -301,6 +301,10 @@ pub enum AddToStash {
     Conflicts(Vec<String>),
 }
 
+/// The oldest git whose `merge-tree` takes `--merge-base`, which
+/// [`add_to_desktop_stash`] needs (`776-stash-add-to-existing`).
+pub const ADD_TO_STASH_MIN_VERSION: (u32, u32) = (2, 40);
+
 /// `776-stash-add-to-existing`: fold the working directory's changes into
 /// the Desktop stash entry `old_sha` as one new entry made on `branch`.
 ///

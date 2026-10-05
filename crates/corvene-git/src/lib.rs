@@ -175,9 +175,10 @@ pub use repo::{
 };
 pub use ssh::{AddSshHostInfo, parse_add_ssh_host_prompt};
 pub use stash_ops::{
-    AddToStash, StashPop, StashPopOptions, add_to_desktop_stash, apply_stash_entry_with,
-    create_branch_from_stash, create_desktop_stash_of_files, create_stash_with_message,
-    mark_conflicts_resolved, pop_stash_entry_with, stash_entry, store_stash, unmerged_paths,
+    ADD_TO_STASH_MIN_VERSION, AddToStash, StashPop, StashPopOptions, add_to_desktop_stash,
+    apply_stash_entry_with, create_branch_from_stash, create_desktop_stash_of_files,
+    create_stash_with_message, mark_conflicts_resolved, pop_stash_entry_with, stash_entry,
+    store_stash, unmerged_paths,
 };
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,
