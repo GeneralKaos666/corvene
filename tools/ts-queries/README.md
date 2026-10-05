@@ -25,7 +25,8 @@ in `languages.toml`; two scripts derive the rest.
   extracts `src/` + `queries/`; corvene-grammars' `build.rs` compiles
   `parser.c` and the scanner and sets `cfg(corvene_src = "<name>")`. Without
   fetched sources they are skipped, so a plain checkout still builds and
-  tests. `import_nvim.py` added nvim-treesitter's parser list this way, at
+  tests (`golden_spans` then skips the samples a missing grammar could
+  change, and `UPDATE_TS_GOLDEN` needs every grammar). `import_nvim.py` added nvim-treesitter's parser list this way, at
   nvim-treesitter's pinned revisions, so its queries match (GPL / LGPL
   grammars are skipped). Grammars that do not commit `parser.c`
   (`generate = true`: latex, perl, pod, teal, unison, mlir, ocamllex) are

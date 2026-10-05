@@ -3,11 +3,19 @@
 //! knows, the `tree-sitter-rest` set is what GitHub Desktop does not
 //! highlight, the languages reference is current, and the output on every
 //! sample matches `tests/ts/expected` (`UPDATE_TS_GOLDEN=1` rewrites it).
+//!
+//! A checkout without the fetched grammar sources (`target/grammar-src`,
+//! tools/ts-queries/fetch.py) builds without the grammars made from them.
+//! The set and reference checks read every grammar's entry in the generated
+//! table (`GRAMMAR_INFO`), so they do not depend on that; the golden check
+//! lets through only the changes a missing grammar can explain, and does
+//! not rewrite goldens without every grammar.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+use corvene_grammars::{GRAMMAR_INFO, Info};
 use corvene_highlight::treesitter::{self, Grammar, captures};
 
 fn grammars() -> Vec<Arc<Grammar>> {
@@ -24,21 +32,35 @@ fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Grammars the crate knows that this build left out.
+fn missing() -> BTreeSet<&'static str> {
+    let have: BTreeSet<String> = grammars().into_iter().map(|g| g.name.clone()).collect();
+    GRAMMAR_INFO
+        .iter()
+        .map(|g| g.name)
+        .filter(|name| !have.contains(*name))
+        .collect()
+}
+
 /// A path with `file_type` as extension or file name.
-fn path_for(grammar: &Grammar, file_type: &str) -> String {
-    if grammar.filenames.iter().any(|f| f == file_type) {
+fn path_for(grammar: &Info, file_type: &str) -> String {
+    if grammar.filenames.contains(&file_type) {
         file_type.to_string()
     } else {
         format!("x.{file_type}")
     }
 }
 
-fn ghd_covers(grammar: &Grammar) -> bool {
+fn ghd_covers(grammar: &Info) -> bool {
     grammar
         .extensions
         .iter()
-        .chain(&grammar.filenames)
+        .chain(grammar.filenames)
         .any(|t| corvene_highlight::cm_covers(&path_for(grammar, t), ""))
+}
+
+fn injection_only(grammar: &Info) -> bool {
+    grammar.extensions.is_empty() && grammar.filenames.is_empty()
 }
 
 #[test]
@@ -65,22 +87,21 @@ fn every_query_compiles_with_known_captures() {
 
 #[test]
 fn the_rest_pack_is_what_github_desktop_does_not_highlight() {
-    let grammars = grammars();
-    let mut expected: BTreeSet<String> = grammars
+    let mut expected: BTreeSet<&str> = GRAMMAR_INFO
         .iter()
-        .filter(|g| !(g.extensions.is_empty() && g.filenames.is_empty()) && !ghd_covers(g))
-        .map(|g| g.name.clone())
+        .filter(|g| !injection_only(g) && !ghd_covers(g))
+        .map(|g| g.name)
         .collect();
     // plus the injection-only grammars they use, transitively
     loop {
-        let more: Vec<String> = grammars
+        let more: Vec<&str> = GRAMMAR_INFO
             .iter()
-            .filter(|g| expected.contains(&g.name))
-            .flat_map(|g| g.injects.clone())
+            .filter(|g| expected.contains(g.name))
+            .flat_map(|g| g.injects.iter().copied())
             .filter(|name| {
-                grammars
+                GRAMMAR_INFO
                     .iter()
-                    .any(|g| g.name == *name && g.extensions.is_empty() && g.filenames.is_empty())
+                    .any(|g| g.name == *name && injection_only(g))
             })
             .filter(|name| !expected.contains(name))
             .collect();
@@ -89,16 +110,12 @@ fn the_rest_pack_is_what_github_desktop_does_not_highlight() {
         }
         expected.extend(more);
     }
-    let actual: BTreeSet<String> = corvene_grammars::REST
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let actual: BTreeSet<&str> = corvene_grammars::REST.iter().copied().collect();
     assert_eq!(actual, expected, "rerun tools/ts-queries/gen.py");
 }
 
 #[test]
 fn languages_doc() {
-    let grammars = grammars();
     let rest: BTreeSet<&str> = corvene_grammars::REST.iter().copied().collect();
     let mut doc = String::from(
         "# Tree-sitter languages\n\n\
@@ -111,7 +128,7 @@ fn languages_doc() {
          them, and the smaller `tree-sitter-rest` pack leaves them out.\n\n\
          | Grammar | Files | GHD | Rest pack | Queries |\n|---|---|---|---|---|\n",
     );
-    for grammar in &grammars {
+    for grammar in GRAMMAR_INFO {
         let files: Vec<String> = grammar
             .extensions
             .iter()
@@ -123,8 +140,12 @@ fn languages_doc() {
         } else {
             files.join(" ")
         };
-        let source = grammar
-            .highlights
+        let highlights = std::fs::read_to_string(root().join(format!(
+            "../corvene-grammars/queries/{}/highlights.scm",
+            grammar.name
+        )))
+        .expect("highlights.scm");
+        let source = highlights
             .lines()
             .take(3)
             .find_map(|l| l.strip_prefix("; Source: "))
@@ -135,7 +156,7 @@ fn languages_doc() {
             grammar.name,
             files,
             if ghd_covers(grammar) { "yes" } else { "" },
-            if rest.contains(grammar.name.as_str()) {
+            if rest.contains(grammar.name) {
                 "yes"
             } else {
                 ""
@@ -190,17 +211,72 @@ fn render(lines: &[&str], spans: &[Vec<corvene_highlight::Span>]) -> String {
     out
 }
 
+/// Whether a `missing` grammar can change the output for the sample `file`
+/// (highlighted with `grammar`, `None` for no grammar): one claims the file
+/// as `detect::for_path` matches, or the grammar injects one directly, through
+/// the grammars it injects, or by a name the text gives (a code fence).
+fn may_need(missing: &BTreeSet<&str>, grammar: Option<&str>, file: &str, first_line: &str) -> bool {
+    if missing.is_empty() {
+        return false;
+    }
+    let file = file.to_lowercase();
+    let claims = |g: &Info| {
+        g.filenames.contains(&file.as_str())
+            || g.extensions.iter().any(|ext| {
+                file.strip_suffix(ext)
+                    .is_some_and(|stem| stem.ends_with('.'))
+            })
+            || (!g.first_line.is_empty()
+                && regex::Regex::new(g.first_line).is_ok_and(|re| re.is_match(first_line)))
+    };
+    if GRAMMAR_INFO
+        .iter()
+        .any(|g| missing.contains(g.name) && claims(g))
+    {
+        return true;
+    }
+    let grammars = grammars();
+    let mut todo: Vec<String> = grammar.into_iter().map(str::to_string).collect();
+    let mut seen = BTreeSet::new();
+    while let Some(name) = todo.pop() {
+        if missing.contains(name.as_str()) {
+            return true;
+        }
+        let Some(g) = grammars.iter().find(|g| g.name == name) else {
+            continue;
+        };
+        if g.capture_names().contains("injection.language") {
+            return true;
+        }
+        todo.extend(
+            g.injects
+                .iter()
+                .filter(|n| seen.insert(n.to_string()))
+                .cloned(),
+        );
+    }
+    false
+}
+
 #[test]
 fn golden_spans() {
-    grammars();
+    let missing = missing();
     let entries = treesitter::library::entries();
     let update = std::env::var_os("UPDATE_TS_GOLDEN").is_some();
+    assert!(
+        !update || missing.is_empty(),
+        "UPDATE_TS_GOLDEN needs every grammar, and this build lacks {} (no sources in \
+         target/grammar-src): run tools/ts-queries/fetch.py first",
+        missing.len()
+    );
     let expected_dir = root().join("tests/ts/expected");
     if update {
         std::fs::create_dir_all(&expected_dir).expect("expected dir");
     }
     let mut checked = 0;
     let mut stale = Vec::new();
+    // samples a missing grammar may explain: not checked
+    let mut unchecked = Vec::new();
     for sample in samples() {
         let name = sample
             .file_name()
@@ -213,9 +289,12 @@ fn golden_spans() {
         let text = text.replace("\r\n", "\n");
         let lines: Vec<&str> = text.lines().collect();
         let first = lines.first().copied().unwrap_or("");
-        if treesitter::detect::for_path(&entries, &name, first).is_none() {
+        let Some(grammar) = treesitter::detect::for_path(&entries, &name, first) else {
+            if may_need(&missing, None, &name, first) {
+                unchecked.push(name);
+            }
             continue;
-        }
+        };
         let spans = treesitter::highlight(&name, &lines, corvene_highlight::MAX_HIGHLIGHT_BYTES)
             .unwrap_or_else(|| panic!("{name}: no tree-sitter spans"));
         let got = render(&lines, &spans);
@@ -231,11 +310,24 @@ fn golden_spans() {
         if update {
             std::fs::write(&path, &got).expect("write golden");
         } else if std::fs::read_to_string(&path).ok().as_deref() != Some(got.as_str()) {
+            if may_need(&missing, Some(&grammar.name), &name, first) {
+                unchecked.push(name);
+                continue;
+            }
             stale.push(name);
         }
         checked += 1;
     }
-    assert!(checked > 100, "only {checked} samples have a grammar");
+    if !unchecked.is_empty() {
+        eprintln!(
+            "not checked, as this build lacks {} grammars (run tools/ts-queries/fetch.py): {unchecked:?}",
+            missing.len()
+        );
+    }
+    assert!(
+        checked + unchecked.len() > 100,
+        "only {checked} samples have a grammar"
+    );
     assert!(
         stale.is_empty(),
         "tree-sitter output changed for {stale:?}: review, then UPDATE_TS_GOLDEN=1 cargo test -p corvene-highlight --test treesitter golden_spans"

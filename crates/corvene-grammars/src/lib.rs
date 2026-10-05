@@ -70,6 +70,16 @@ struct Shared(Table, #[allow(dead_code)] Vec<Grammar>);
 unsafe impl Send for Shared {}
 unsafe impl Sync for Shared {}
 
+/// What the table says about a grammar, without the grammar: see
+/// [`GRAMMAR_INFO`].
+pub struct Info {
+    pub name: &'static str,
+    pub extensions: &'static [&'static str],
+    pub filenames: &'static [&'static str],
+    pub first_line: &'static str,
+    pub injects: &'static [&'static str],
+}
+
 #[allow(dead_code)]
 const fn cstr(s: &'static str) -> *const c_char {
     s.as_ptr().cast()
@@ -87,6 +97,18 @@ macro_rules! grammars {
     )*) => {
         /// Every grammar the crate knows with the Cargo feature that enables it.
         pub const GRAMMAR_FEATURES: &[(&str, &str)] = &[$(($name, $feature)),*];
+
+        /// Every grammar the crate knows, whether or not this build carries
+        /// it: the table leaves out a grammar whose feature is off, and one
+        /// built from fetched sources when `target/grammar-src` lacks them
+        /// (build.rs).
+        pub const GRAMMAR_INFO: &[Info] = &[$(Info {
+            name: $name,
+            extensions: &[$($ext),*],
+            filenames: &[$($file),*],
+            first_line: $first,
+            injects: &[$($inject),*],
+        }),*];
 
         // one `push` per grammar, each behind its feature
         #[allow(clippy::vec_init_then_push)]
