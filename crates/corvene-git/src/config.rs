@@ -30,6 +30,73 @@ pub fn local_config_value(git: Arc<GitBinary>, workdir: &Path, key: &str) -> Opt
     )
 }
 
+/// Corvene (`1211-issuetracker-links`): an `[issuetracker "<name>"]`
+/// section of a repository's `.issuetracker` file (the format GitLens and
+/// Git Extensions read): `regex` finds references, `url` links them with
+/// `$1`… for the regex's groups.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct IssueTracker {
+    pub name: String,
+    pub regex: String,
+    pub url: String,
+}
+
+/// The trackers of `workdir`'s `.issuetracker` with both a `regex` and a
+/// `url` (`git config -f .issuetracker -z --get-regexp ^issuetracker\.`);
+/// none when there is no such file.
+pub fn issue_trackers(git: Arc<GitBinary>, workdir: &Path) -> Vec<IssueTracker> {
+    if !workdir.join(".issuetracker").is_file() {
+        return Vec::new();
+    }
+    GitCommand::new(git)
+        .args([
+            "config",
+            "-f",
+            ".issuetracker",
+            "-z",
+            "--get-regexp",
+            r"^issuetracker\.",
+        ])
+        .current_dir(workdir)
+        .allow_any_exit_code()
+        .run()
+        .ok()
+        .map(|out| parse_issue_trackers(&String::from_utf8_lossy(&out.stdout)))
+        .unwrap_or_default()
+}
+
+/// `git config -z --get-regexp` output (`<key>\n<value>\0` per entry) as
+/// trackers, in the order they first appear.
+fn parse_issue_trackers(output: &str) -> Vec<IssueTracker> {
+    let mut trackers: Vec<IssueTracker> = Vec::new();
+    for entry in output.split('\0') {
+        let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
+        let Some(rest) = key.strip_prefix("issuetracker.") else {
+            continue;
+        };
+        let Some((name, variable)) = rest.rsplit_once('.') else {
+            continue;
+        };
+        let at = match trackers.iter().position(|t| t.name == name) {
+            Some(at) => at,
+            None => {
+                trackers.push(IssueTracker {
+                    name: name.to_string(),
+                    ..IssueTracker::default()
+                });
+                trackers.len() - 1
+            }
+        };
+        match variable {
+            "regex" => trackers[at].regex = value.to_string(),
+            "url" => trackers[at].url = value.to_string(),
+            _ => {}
+        }
+    }
+    trackers.retain(|t| !t.regex.is_empty() && !t.url.is_empty());
+    trackers
+}
+
 /// `git config --global --get <key>`.
 pub fn global_config_value(git: Arc<GitBinary>, key: &str) -> Option<String> {
     value_of(GitCommand::new(git).args(["config", "--global", "--get", key]))
@@ -250,6 +317,28 @@ mod tests {
         assert_eq!(
             suggested_safe_directory("fatal: not a git repository"),
             None
+        );
+    }
+
+    #[test]
+    fn reads_issue_trackers() {
+        let git = Arc::new(find_git().expect("git"));
+        let dir = tempfile::tempdir().unwrap();
+        assert!(issue_trackers(git.clone(), dir.path()).is_empty());
+        std::fs::write(
+            dir.path().join(".issuetracker"),
+            "[issuetracker \"Jira.Main\"]\n\tregex = \"(PROJ-\\\\d+)\"\n\
+             \turl = \"https://jira.example/browse/$1\"\n\
+             [issuetracker \"half\"]\n\tregex = x\n",
+        )
+        .unwrap();
+        assert_eq!(
+            issue_trackers(git, dir.path()),
+            vec![IssueTracker {
+                name: "Jira.Main".into(),
+                regex: r"(PROJ-\d+)".into(),
+                url: "https://jira.example/browse/$1".into(),
+            }]
         );
     }
 

@@ -7369,6 +7369,22 @@ registry! {
         code: &["crates/corvene-ui/src/app_menu.rs", "crates/corvene-core/src/remote.rs", "crates/corvene/src/main.rs"],
     },
 
+    /// `.issuetracker` references link in commit messages.
+    ISSUETRACKER_LINKS = 1211 "issuetracker-links" {
+        title: ".issuetracker links",
+        summary: "A repository's .issuetracker file ([issuetracker \"name\"] with a regex and a \
+                  url using $1 for its groups, the format GitLens and Git Extensions read) turns \
+                  the references it describes in commit messages into links, in any repository. \
+                  Read when the repository is selected.",
+        ghd_behaviour: "Only #123, @mentions and URLs are links in commit messages.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19295)],
+        code: &["crates/corvene-git/src/config.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-core/src/text_tokens.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 }
 

@@ -1283,6 +1283,9 @@ pub struct RepositoryState {
     /// Corvene `341-custom-autolinks`: the GitHub repository's autolinks
     /// as its API gave them (only admins may read them).
     pub api_autolinks: Vec<corvene_models::Autolink>,
+    /// Corvene `1211-issuetracker-links`: the repository's `.issuetracker`
+    /// trackers, compiled when it is selected.
+    pub issue_trackers: Vec<crate::text_tokens::LinkRule>,
     pub pull_with_rebase: bool,
     /// Corvene `340-message-rules-defer-to-hooks`: git runs a
     /// `prepare-commit-msg` or `commit-msg` hook on a commit (read while the
@@ -1783,6 +1786,12 @@ impl AppState {
                         alphanumeric: a.is_alphanumeric,
                     }),
             );
+        }
+        // `1211-issuetracker-links`
+        if self.flags.bool(crate::flags::ids::ISSUETRACKER_LINKS)
+            && let Some(rs) = self.repo_states.get(&id)
+        {
+            rules.extend(rs.issue_trackers.iter().cloned());
         }
         (!rules.is_empty()).then(|| rules.into())
     }

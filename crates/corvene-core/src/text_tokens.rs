@@ -23,7 +23,8 @@
 //! Deviation (`341-custom-autolinks`, [`LinkRule`]): the repository's
 //! GitHub autolinks (`TICKET-123` → the tracker's URL) also become links,
 //! in GitHub and other repositories alike (GHD knows only GitHub's own
-//! references).
+//! references); so do the references its `.issuetracker` file describes
+//! (`1211-issuetracker-links`).
 //!
 //! [`wrap_rich_text_commit_message`] ports `lib/wrap-rich-text-commit-message.ts`:
 //! a commit summary longer than 72 characters (counted on the tokens' shown

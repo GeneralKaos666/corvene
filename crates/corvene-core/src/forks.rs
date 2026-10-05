@@ -126,6 +126,47 @@ impl Dispatcher {
         );
     }
 
+    /// Corvene (`1211-issuetracker-links`): the repository's `.issuetracker`
+    /// trackers as link rules, read when it is selected; a regex that does
+    /// not compile is left out (and logged).
+    pub fn load_issue_trackers(id: u64, cx: &mut dyn Host) {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::ISSUETRACKER_LINKS) {
+            return;
+        }
+        let (Some(git), Some(path)) = (s.git.clone(), s.repository(id).map(|r| r.path.clone()))
+        else {
+            return;
+        };
+        spawn_bg(
+            cx,
+            move || {
+                corvene_git::issue_trackers(git, &path)
+                    .into_iter()
+                    .filter_map(|tracker| match regex::Regex::new(&tracker.regex) {
+                        Ok(regex) => Some(crate::text_tokens::LinkRule::Pattern {
+                            regex,
+                            url: tracker.url,
+                        }),
+                        Err(err) => {
+                            warn!(name = %tracker.name, %err, "ignoring an .issuetracker regex");
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            },
+            move |rules, cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    let rs = s.repo_state_mut(id);
+                    if !(rs.issue_trackers.is_empty() && rules.is_empty()) {
+                        rs.issue_trackers = rules;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
     pub fn refresh_github_repository(id: u64, cx: &mut dyn Host) {
         let Some(github) = Self::state(cx)
             .read(cx)

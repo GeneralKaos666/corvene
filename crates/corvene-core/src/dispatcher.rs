@@ -971,6 +971,7 @@ impl Dispatcher {
             Self::ensure_pull_requests(id, cx);
             Self::refresh_github_repository(id, cx);
             Self::refresh_autolinks(id, cx);
+            Self::load_issue_trackers(id, cx);
             Self::resume_tutorial_on_other_repository(id, cx);
             Self::restart_pull_request_updater(cx);
         }
