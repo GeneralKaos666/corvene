@@ -136,6 +136,10 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         Popup::SignIn { enterprise } => {
             f.put("enterprise", enterprise);
         }
+        // flags 342-344 (the Compose app has no host sign-in dialog yet)
+        Popup::SignInHost { kind } => {
+            f.put("kind", kind.name());
+        }
         Popup::DiscardChanges {
             repo: r,
             paths,
