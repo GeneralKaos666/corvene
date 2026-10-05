@@ -5,6 +5,9 @@
 //! and merge, with the shared progress / conflicts / abort steps and the
 //! banners shown when they finish.
 //!
+//! Corvene addition (`799-fixup-commits`): a fixup commit made from the
+//! commit form offers to autosquash ([`Dispatcher::autosquash`], an
+//! `McoDetail::Autosquash` run like a squash).
 //! Deviation: while the repository is still conflicted, a new merge, rebase
 //! or update from the default branch is refused with an explanation (GHD
 //! starts it and shows git's error; `838-no-merge-while-conflicted`).
@@ -84,6 +87,14 @@ pub enum McoDetail {
         before_commit: Option<Commit>,
         last_retained_ref: Option<String>,
     },
+    /// Corvene `799-fixup-commits`: fold the branch's `fixup!` commits
+    /// (`commits`) into the commits they fix. A squash to the user (its
+    /// dialogs, banners and Undo); `count` is the commits involved.
+    Autosquash {
+        commits: Vec<Commit>,
+        last_retained_ref: Option<String>,
+        count: usize,
+    },
     Merge {
         squash: bool,
         source_branch: Option<String>,
@@ -97,6 +108,7 @@ impl McoDetail {
             McoDetail::CherryPick { .. } => MultiCommitOperationKind::CherryPick,
             McoDetail::Squash { .. } => MultiCommitOperationKind::Squash,
             McoDetail::Reorder { .. } => MultiCommitOperationKind::Reorder,
+            McoDetail::Autosquash { .. } => MultiCommitOperationKind::Squash,
             McoDetail::Merge { .. } => MultiCommitOperationKind::Merge,
         }
     }
@@ -418,6 +430,12 @@ pub enum Banner {
     SquashUndone {
         count: usize,
     },
+    /// Corvene (`799-fixup-commits`): "Created a fixup commit for
+    /// **{target}**" + Squash Now, which autosquashes the branch.
+    FixupCommitted {
+        repo: u64,
+        target: String,
+    },
     SuccessfulReorder {
         repo: u64,
         count: usize,
@@ -511,6 +529,7 @@ impl Banner {
             Banner::SuccessfulCherryPick { .. }
             | Banner::SuccessfulSquash { .. }
             | Banner::SuccessfulReorder { .. }
+            | Banner::FixupCommitted { .. }
             | Banner::BranchDeleted { .. }
             | Banner::BranchesDeleted { .. }
             | Banner::StashDropped { .. } => Some(Duration::from_secs(15)),
@@ -689,7 +708,9 @@ impl Dispatcher {
                     .unwrap_or_default(),
                 commits.len(),
             ),
-            McoDetail::Squash { commits, .. } | McoDetail::Reorder { commits, .. } => (
+            McoDetail::Squash { commits, .. }
+            | McoDetail::Reorder { commits, .. }
+            | McoDetail::Autosquash { commits, .. } => (
                 commits
                     .first()
                     .map(|c| c.summary.clone())
@@ -913,6 +934,7 @@ impl Dispatcher {
             RetryAction::Reorder { to_move, before } => {
                 Self::reorder_commits(id, to_move, before, false, cx)
             }
+            RetryAction::Autosquash => Self::autosquash(id, false, cx),
             RetryAction::Push {
                 force_with_lease,
                 branch,
@@ -988,7 +1010,9 @@ impl Dispatcher {
             s.repo_state_mut(id).rewritten_selection = if on { rewritten } else { Vec::new() };
         });
         let banner = match &mco.detail {
-            McoDetail::Squash { .. } => Banner::SuccessfulSquash { repo: id, count },
+            McoDetail::Squash { .. } | McoDetail::Autosquash { .. } => {
+                Banner::SuccessfulSquash { repo: id, count }
+            }
             McoDetail::Reorder { .. } => Banner::SuccessfulReorder { repo: id, count },
             McoDetail::CherryPick { .. } => Banner::SuccessfulCherryPick {
                 repo: id,
@@ -1446,6 +1470,7 @@ impl Dispatcher {
                 true,
                 cx,
             ),
+            McoDetail::Autosquash { .. } => Self::autosquash(id, true, cx),
             _ => Self::end_mco(id, cx),
         }
     }
@@ -1630,7 +1655,8 @@ impl Dispatcher {
                     },
                     McoDetail::Rebase { .. }
                     | McoDetail::Squash { .. }
-                    | McoDetail::Reorder { .. } => corvene_git::abort_rebase(git, &workdir),
+                    | McoDetail::Reorder { .. }
+                    | McoDetail::Autosquash { .. } => corvene_git::abort_rebase(git, &workdir),
                     McoDetail::CherryPick { .. } => {
                         corvene_git::abort_cherry_pick(git.clone(), &workdir)?;
                         if let Some(source) = source {
@@ -1743,7 +1769,9 @@ impl Dispatcher {
                     },
                 );
             }
-            detail @ (McoDetail::Squash { .. } | McoDetail::Reorder { .. }) => {
+            detail @ (McoDetail::Squash { .. }
+            | McoDetail::Reorder { .. }
+            | McoDetail::Autosquash { .. }) => {
                 // `892-squash-message-survives-conflicts`: the squash keeps
                 // the message typed for it once it is continued
                 let (commits, message) = match detail {
@@ -1758,6 +1786,7 @@ impl Dispatcher {
                             .then_some(message),
                     ),
                     McoDetail::Reorder { commits, .. } => (commits, None),
+                    McoDetail::Autosquash { commits, .. } => (commits, None),
                     _ => return,
                 };
                 let one_line: Vec<CommitOneLine> = commits
@@ -1767,10 +1796,10 @@ impl Dispatcher {
                         summary: c.summary.clone(),
                     })
                     .collect();
-                let count = if mco.kind() == MultiCommitOperationKind::Squash {
-                    commits.len() + 1
-                } else {
-                    commits.len()
+                let count = match &mco.detail {
+                    McoDetail::Autosquash { count, .. } => *count,
+                    _ if mco.kind() == MultiCommitOperationKind::Squash => commits.len() + 1,
+                    _ => commits.len(),
                 };
                 Self::set_mco_step(id, McoStep::ShowProgress, cx);
                 Self::run_with_progress(
@@ -2782,6 +2811,132 @@ impl Dispatcher {
         Self::maybe_warn_force_push(id, force_push_checked, last_retained, run, cx);
     }
 
+    /// Corvene `799-fixup-commits`: commit the included changes as a fixup
+    /// of `target` (`git commit --fixup`), then offer to squash it in.
+    pub fn commit_fixup(id: u64, target: String, cx: &mut dyn Host) {
+        Self::commit_with(
+            id,
+            String::new(),
+            String::new(),
+            crate::commit_checks::CommitChecks {
+                fixup: Some(target),
+                ..Default::default()
+            },
+            cx,
+        );
+    }
+
+    /// Corvene `799-fixup-commits`: Squash Fixup Commits (and the fixup
+    /// banner's Squash Now): fold every unpushed `fixup!` commit into the
+    /// commit it fixes, run like a squash.
+    pub fn autosquash(id: u64, force_push_checked: bool, cx: &mut dyn Host) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let autostash = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::SQUASH_AUTOSTASH)
+            && !Self::working_directory_files(id, cx).is_empty();
+        if !autostash && Self::blocked_by_local_changes(id, RetryAction::Autosquash, cx) {
+            return;
+        }
+        let Some((branch, tip)) = Self::current_branch_or_explain(id, "Could not squash", cx)
+        else {
+            return;
+        };
+        let (fixups, count, last_retained) = {
+            let s = Self::state(cx).read(cx);
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            let pairs = pending_fixups(rs);
+            if pairs.is_empty() {
+                return;
+            }
+            let fixups: Vec<Commit> = rs
+                .commits
+                .iter()
+                .filter(|c| pairs.iter().any(|(fixup, _)| *fixup == c.sha))
+                .cloned()
+                .collect();
+            let mut involved: Vec<String> = Vec::new();
+            for (fixup, target) in &pairs {
+                for sha in [fixup, target] {
+                    if !involved.contains(sha) {
+                        involved.push(sha.clone());
+                    }
+                }
+            }
+            let Some(last_retained) = Self::last_retained_ref(rs, &involved) else {
+                return;
+            };
+            (fixups, involved.len(), last_retained)
+        };
+        Self::init_mco(
+            id,
+            McoDetail::Autosquash {
+                commits: fixups,
+                last_retained_ref: last_retained.clone(),
+                count,
+            },
+            Some(branch.clone()),
+            tip.clone(),
+            McoStep::ShowProgress,
+            cx,
+        );
+        Self::show_mco_popup(id, cx);
+        if let Some(tip) = tip.clone() {
+            Self::state(cx).update(cx, |s, _| {
+                s.repo_state_mut(id).mco_undo = Some(McoUndo {
+                    sha: tip,
+                    branch: branch.clone(),
+                    kind: MultiCommitOperationKind::Squash,
+                    count,
+                    source_branch: None,
+                    branch_created: false,
+                });
+            });
+        }
+        let options = corvene_git::RebaseOptions {
+            keep_messages: Self::rebase_keeps_messages(cx),
+            autostash,
+        };
+        let last_retained_for_run = last_retained.clone();
+        let run = move |cx: &mut dyn Host| {
+            let (git, workdir) = (git.clone(), workdir.clone());
+            let branch = branch.clone();
+            let last_retained = last_retained_for_run.clone();
+            Self::run_with_progress(
+                id,
+                cx,
+                move |on_progress| {
+                    let (result, _) = corvene_git::autosquash(
+                        git.clone(),
+                        &workdir,
+                        last_retained.as_deref(),
+                        options,
+                        on_progress,
+                    );
+                    let status = corvene_git::get_status(git, &workdir).ok();
+                    (result, status)
+                },
+                move |(result, status), cx| {
+                    Self::process_rebase_result(
+                        id,
+                        result,
+                        status,
+                        count,
+                        Some(branch),
+                        Some("fixup commit".into()),
+                        cx,
+                    )
+                },
+            );
+        };
+        Self::maybe_warn_force_push(id, force_push_checked, last_retained, run, cx);
+    }
+
     /// Banner › Undo (`_undoMultiCommitOperation`).
     pub fn undo_mco(id: u64, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
@@ -3134,6 +3289,44 @@ impl Dispatcher {
 }
 
 /// A message's summary line and description (after the blank line).
+/// Corvene `799-fixup-commits`: the current branch's unpushed `fixup!`
+/// commits and the commits they fix ([`corvene_git::autosquash_pairs`] over
+/// the loaded history), as `(fixup, target)` shas.
+pub fn pending_fixups(rs: &RepositoryState) -> Vec<(String, String)> {
+    if !rs.commits.iter().any(|c| {
+        rs.local_commits.contains(&c.sha)
+            && c.summary.starts_with(corvene_git::rebase_ops::FIXUP_PREFIX)
+    }) {
+        return Vec::new();
+    }
+    let oldest_first: Vec<CommitOneLine> = rs
+        .commits
+        .iter()
+        .rev()
+        .map(|c| CommitOneLine {
+            sha: c.sha.clone(),
+            summary: c.summary.clone(),
+        })
+        .collect();
+    corvene_git::autosquash_pairs(&oldest_first)
+        .into_iter()
+        .filter(|(fixup, _)| rs.local_commits.contains(fixup))
+        .collect()
+}
+
+/// Corvene `799-fixup-commits`: the commits Fixup Into offers, the current
+/// branch's unpushed ones newest first (no merge commits, which a rebase
+/// would flatten).
+pub fn fixup_targets(rs: &RepositoryState) -> Vec<&Commit> {
+    rs.commits
+        .iter()
+        .take_while(|c| rs.local_commits.contains(&c.sha))
+        .filter(|c| {
+            c.parents.len() <= 1 && !c.summary.starts_with(corvene_git::rebase_ops::FIXUP_PREFIX)
+        })
+        .collect()
+}
+
 fn split_message(message: &str) -> (String, String) {
     let (summary, rest) = message.split_once('\n').unwrap_or((message, ""));
     (summary.trim().to_string(), rest.trim().to_string())
@@ -3145,6 +3338,9 @@ fn last_retained_for_warn(mco: &Option<MultiCommitOperation>) -> Option<String> 
             last_retained_ref, ..
         })
         | Some(McoDetail::Reorder {
+            last_retained_ref, ..
+        })
+        | Some(McoDetail::Autosquash {
             last_retained_ref, ..
         }) => last_retained_ref.clone(),
         _ => None,

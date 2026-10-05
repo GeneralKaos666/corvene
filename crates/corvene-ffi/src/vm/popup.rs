@@ -691,6 +691,10 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
         Banner::SquashUndone { count } | Banner::ReorderUndone { count } => {
             f.put("count", count);
         }
+        Banner::FixupCommitted { repo: r, target } => {
+            repo = Some(*r);
+            f.put("target", target);
+        }
         Banner::BranchDeleted {
             repo: r,
             branch,

@@ -5526,6 +5526,25 @@ registry! {
         code: &["crates/corvene-git/src/blame.rs", "crates/corvene-core/src/blame.rs", "crates/corvene-ui/src/blame_view.rs"],
     },
 
+    /// Fixup commits for unpushed commits, then autosquash.
+    FIXUP_COMMITS = 799 "fixup-commits" {
+        title: "Fixup commits",
+        summary: "The commit options menu offers Fixup Into, listing the branch's unpushed \
+                  commits: the included changes are committed with `git commit --fixup` for \
+                  the commit picked, and a banner offers to squash them in right away. Squash \
+                  Fixup Commits in the same menu folds every `fixup!` commit on the branch into \
+                  the commit it fixes (`rebase --autosquash`), with the usual progress, \
+                  conflict and Undo handling of a squash.",
+        ghd_behaviour: "No fixup commits; a change to an older commit needs a new commit and a \
+                        squash by drag and drop.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12354)],
+        code: &["crates/corvene-git/src/rebase_ops.rs", "crates/corvene-core/src/mco.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
     // ---- 800 History & branches ----
 
     /// History review mode: the diff alone, full width.
@@ -7505,6 +7524,39 @@ registry! {
     },
 
     // ---- 1300 Changes & diffs (overflow) ----
+
+    /// A Conventional Commits type menu next to the commit summary.
+    CONVENTIONAL_COMMIT_TYPES = 1301 "conventional-commit-types" {
+        title: "Conventional commit types",
+        summary: "A type button before the commit summary opens a menu of Conventional \
+                  Commits types (feat, fix, docs, style, refactor, perf, test, build, ci, \
+                  chore, revert). Picking one puts `type: ` in front of the summary or \
+                  replaces the type it has, keeping a scope and `!`; None removes the prefix. \
+                  The button shows the summary's current type.",
+        ghd_behaviour: "The summary is plain text; a type prefix has to be typed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(1646)],
+        code: &["crates/corvene-core/src/commit_message.rs", "crates/corvene-ui/src/changes.rs"],
+    },
+
+    /// The commit description is wrapped at 72 columns when committing.
+    WRAP_COMMIT_BODY = 1302 "wrap-commit-body" {
+        title: "Wrap the commit description at 72 characters",
+        summary: "Committing breaks description lines longer than 72 characters at spaces, \
+                  the width git and most tools expect. Line breaks you typed stay, list items \
+                  and quotes continue under their text, and code (fenced or indented), table \
+                  rows, trailers and long words such as URLs are left as they are.",
+        ghd_behaviour: "The description is committed as typed, one long line per paragraph.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(62), Upstream::issue(1646)],
+        code: &["crates/corvene-core/src/commit_message.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

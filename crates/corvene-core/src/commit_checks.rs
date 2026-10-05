@@ -34,6 +34,9 @@ pub struct CommitChecks {
     pub embedded: Option<Vec<corvene_git::EmbeddedRepository>>,
     /// Corvene `787-commit-to-new-branch`: what follows a successful commit.
     pub after: crate::new_branch_flows::AfterCommit,
+    /// Corvene `799-fixup-commits`: commit as `--fixup` of this commit (the
+    /// summary and description are not used).
+    pub fixup: Option<String>,
 }
 
 /// What the background check found.

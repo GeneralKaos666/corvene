@@ -114,13 +114,14 @@ pub use index_lock::{index_lock_path, remove_stale_index_lock};
 pub use lfs_progress::GitLfsProgressParser;
 pub use log::{
     COMMIT_BATCH_SIZE, HistoryQuery, LoggedCommit, LoggedHistory, NULL_TREE_SHA,
-    REMERGE_DIFF_MIN_VERSION, commit_file_diff, commit_matches_words, commit_range_file_diff,
-    commits_with_sha_prefix, filtered_history, filtered_history_page, get_all_tags,
-    get_changed_files, get_changed_files_in_process, get_commit_range_changed_files, get_commits,
-    get_commits_from, get_commits_in_range, get_commits_with, all_branch_tips, local_commit_shas, local_only_commits, merge_base,
-    merge_base_changed_files, merge_base_file_diff, most_recent_local_commit,
-    parse_filtered_history, parse_raw_log_with_numstat, parse_recent_authors, recent_authors,
-    remerge_changed_files, remerge_file_diff, resolve_commit, tag_names,
+    REMERGE_DIFF_MIN_VERSION, all_branch_tips, commit_file_diff, commit_matches_words,
+    commit_range_file_diff, commits_with_sha_prefix, filtered_history, filtered_history_page,
+    get_all_tags, get_changed_files, get_changed_files_in_process, get_commit_range_changed_files,
+    get_commits, get_commits_from, get_commits_in_range, get_commits_with, local_commit_shas,
+    local_only_commits, merge_base, merge_base_changed_files, merge_base_file_diff,
+    most_recent_local_commit, parse_filtered_history, parse_raw_log_with_numstat,
+    parse_recent_authors, recent_authors, remerge_changed_files, remerge_file_diff, resolve_commit,
+    tag_names,
 };
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,
@@ -145,13 +146,14 @@ pub use proxy::{
 };
 pub use rebase_ops::{
     CherryPickResult, CherryPickSnapshot, RebaseOptions, RebaseResult, RebaseSnapshot,
-    abort_cherry_pick, abort_rebase, abort_squash_merge, binary_paths, cherry_pick,
-    cherry_pick_head_found, cherry_pick_snapshot, commits_between, commits_in_range,
-    conflict_marker_counts, continue_cherry_pick, continue_rebase, continue_squash_rebase,
-    create_merge_commit, determine_mergeability, merge_commits_exist_after, merge_head_set,
-    merge_tree_conflicts, open_merge_tool, parse_merge_tree_names, rebase, rebase_head_set,
-    rebase_internal_state, rebase_snapshot, reorder, reword, reword_head, reword_todo, squash,
-    squash_msg_set, stage_manual_conflict_resolution, stash_tip,
+    abort_cherry_pick, abort_rebase, abort_squash_merge, autosquash, autosquash_pairs,
+    binary_paths, cherry_pick, cherry_pick_head_found, cherry_pick_snapshot, commits_between,
+    commits_in_range, conflict_marker_counts, continue_cherry_pick, continue_rebase,
+    continue_squash_rebase, create_merge_commit, determine_mergeability, fixup_todo,
+    merge_commits_exist_after, merge_head_set, merge_tree_conflicts, open_merge_tool,
+    parse_merge_tree_names, rebase, rebase_head_set, rebase_internal_state, rebase_snapshot,
+    reorder, reword, reword_head, reword_todo, squash, squash_msg_set,
+    stage_manual_conflict_resolution, stash_tip,
 };
 pub use refs::{delete_ref, format_as_local_ref, get_symbolic_ref};
 pub use remote_ops::{

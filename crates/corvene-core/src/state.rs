@@ -852,6 +852,8 @@ pub enum RetryAction {
         to_move: Vec<String>,
         before: Option<String>,
     },
+    /// Corvene `799-fixup-commits`: Squash Fixup Commits.
+    Autosquash,
     Push {
         force_with_lease: bool,
         branch: Option<String>,
@@ -877,7 +879,7 @@ impl RetryAction {
             RetryAction::CherryPick { .. } | RetryAction::CherryPickNewBranch { .. } => {
                 "cherry-pick"
             }
-            RetryAction::Squash { .. } => "squash",
+            RetryAction::Squash { .. } | RetryAction::Autosquash => "squash",
             RetryAction::Reorder { .. } => "reorder",
             RetryAction::Push { .. } | RetryAction::PushToRemote { .. } => "push",
             RetryAction::Pull => "pull",

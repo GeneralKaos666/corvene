@@ -13,6 +13,10 @@
 //! (flag `829`; GHD refuses to start with local changes). [`binary_paths`]
 //! counts a renamed binary file under its new path, where GHD's
 //! `binaryListRegex` (`lib/git/diff.ts`) captures an empty one.
+//!
+//! Corvene addition (`799-fixup-commits`): [`autosquash`] folds `fixup!`
+//! commits into their targets with a [`fixup_todo`] list (GHD has no fixup
+//! commits).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -998,6 +1002,128 @@ pub fn reorder_todo(
     Some(todo)
 }
 
+/// Corvene `799-fixup-commits`: the subject prefix `git commit --fixup`
+/// writes.
+pub const FIXUP_PREFIX: &str = "fixup! ";
+
+/// Corvene `799-fixup-commits`: which commit each `fixup!` commit among
+/// `commits` (oldest first) belongs to, as `(fixup, target)` shas, the way
+/// `rebase --autosquash` matches them (`todo_list_rearrange_squash`): the
+/// rest of the subject is an earlier commit's whole subject (the oldest
+/// such), else a prefix of its sha, else a prefix of its subject. A fixup of
+/// a fixup belongs to that one's target. Unmatched fixups are left out.
+pub fn autosquash_pairs(commits: &[CommitOneLine]) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for (i, commit) in commits.iter().enumerate() {
+        let Some(rest) = commit.summary.strip_prefix(FIXUP_PREFIX) else {
+            continue;
+        };
+        let rest = rest.trim();
+        if rest.is_empty() {
+            continue;
+        }
+        let earlier = &commits[..i];
+        let target = earlier
+            .iter()
+            .find(|c| c.summary == rest)
+            .or_else(|| {
+                (rest.len() >= 4 && !rest.contains(' '))
+                    .then(|| earlier.iter().find(|c| c.sha.starts_with(rest)))
+                    .flatten()
+            })
+            .or_else(|| earlier.iter().find(|c| c.summary.starts_with(rest)));
+        let Some(target) = target else {
+            continue;
+        };
+        // a fixup of a fixup goes where that one goes
+        let root = pairs
+            .iter()
+            .find(|(fixup, _)| *fixup == target.sha)
+            .map(|(_, root)| root.clone())
+            .unwrap_or_else(|| target.sha.clone());
+        pairs.push((commit.sha.clone(), root));
+    }
+    pairs
+}
+
+/// Corvene `799-fixup-commits`: the todo list folding each `(fixup,
+/// target)` of `pairs` into its target with git's `fixup` action (the
+/// target keeps its message), the fixups of one target in their order and
+/// everything else replayed as it was. `commits` are oldest first. `None`
+/// when a pair's commits are not both in the list or a fixup comes before
+/// its target.
+pub fn fixup_todo(commits: &[CommitOneLine], pairs: &[(String, String)]) -> Option<String> {
+    let position = |sha: &str| commits.iter().position(|c| c.sha == sha);
+    for (fixup, target) in pairs {
+        if position(fixup)? <= position(target)? {
+            return None;
+        }
+    }
+    let is_fixup = |sha: &str| pairs.iter().any(|(fixup, _)| fixup == sha);
+    let mut todo = String::new();
+    for commit in commits.iter().filter(|c| !is_fixup(&c.sha)) {
+        todo.push_str(&format!("pick {} {}\n", commit.sha, commit.summary));
+        for fixup in commits.iter().filter(|c| {
+            pairs
+                .iter()
+                .any(|(fixup, target)| *fixup == c.sha && *target == commit.sha)
+        }) {
+            todo.push_str(&format!("fixup {} {}\n", fixup.sha, fixup.summary));
+        }
+    }
+    Some(todo)
+}
+
+/// Corvene `799-fixup-commits`: fold the `fixup!` commits after
+/// `last_retained_ref` (`None`: the whole branch) into their targets
+/// ([`autosquash_pairs`], [`fixup_todo`]), what `rebase -i --autosquash`
+/// does, through [`rebase_interactive`] so progress and conflicts work as
+/// for a squash. Returns the result and how many fixups were folded.
+pub fn autosquash(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    last_retained_ref: Option<&str>,
+    options: RebaseOptions,
+    on_progress: impl FnMut(McoProgress),
+) -> (RebaseResult, usize) {
+    let commits = match commits_to_replay(git.clone(), workdir, last_retained_ref) {
+        Ok(c) if !c.is_empty() => c,
+        Ok(_) => {
+            return (
+                RebaseResult::Error("could not find commits to replay".into()),
+                0,
+            );
+        }
+        Err(err) => return (RebaseResult::Error(err.to_string()), 0),
+    };
+    let pairs = autosquash_pairs(&commits);
+    if pairs.is_empty() {
+        return (RebaseResult::AlreadyUpToDate, 0);
+    }
+    let Some(todo) = fixup_todo(&commits, &pairs) else {
+        return (
+            RebaseResult::Error("a fixup commit comes before the commit it fixes".into()),
+            0,
+        );
+    };
+    let todo_path = match temp_file("autosquash-todo", &todo) {
+        Ok(p) => p,
+        Err(err) => return (RebaseResult::Error(err.to_string()), 0),
+    };
+    let result = rebase_interactive(
+        git,
+        workdir,
+        &todo_path,
+        last_retained_ref,
+        None,
+        &commits,
+        options,
+        on_progress,
+    );
+    let _ = std::fs::remove_file(&todo_path);
+    (result, pairs.len())
+}
+
 #[doc(hidden)]
 pub fn temp_file(prefix: &str, contents: &str) -> Result<PathBuf> {
     let path = std::env::temp_dir().join(format!(
@@ -1529,6 +1655,57 @@ mod tests {
             "pick B b\npick A a\nsquash C c\nsquash E e\npick D d\n"
         );
         assert!(squash_todo(&commits, &to_squash, "Z").is_none());
+    }
+
+    #[test]
+    fn autosquash_pairs_match_like_git() {
+        let c = |sha: &str, summary: &str| CommitOneLine {
+            sha: sha.into(),
+            summary: summary.into(),
+        };
+        let commits = vec![
+            c("aaaa1111", "Add parser"),
+            c("bbbb2222", "Add parser tests"),
+            c("cccc3333", "fixup! Add parser"),
+            c("dddd4444", "fixup! fixup! Add parser"),
+            c("eeee5555", "fixup! bbbb"),
+            c("ffff6666", "fixup! Add pars"),
+            c("9999aaaa", "fixup! Nothing like this"),
+        ];
+        assert_eq!(
+            autosquash_pairs(&commits),
+            vec![
+                ("cccc3333".to_string(), "aaaa1111".to_string()),
+                ("dddd4444".to_string(), "aaaa1111".to_string()),
+                ("eeee5555".to_string(), "bbbb2222".to_string()),
+                ("ffff6666".to_string(), "aaaa1111".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn fixup_todo_folds_fixups_into_their_targets() {
+        let c = |sha: &str, summary: &str| CommitOneLine {
+            sha: sha.into(),
+            summary: summary.into(),
+        };
+        let commits = vec![
+            c("a", "A"),
+            c("b", "B"),
+            c("c", "fixup! A"),
+            c("d", "C"),
+            c("e", "fixup! A"),
+        ];
+        let pairs = vec![
+            ("c".to_string(), "a".to_string()),
+            ("e".to_string(), "a".to_string()),
+        ];
+        assert_eq!(
+            fixup_todo(&commits, &pairs).as_deref(),
+            Some("pick a A\nfixup c fixup! A\nfixup e fixup! A\npick b B\npick d C\n")
+        );
+        assert_eq!(fixup_todo(&commits, &[("a".into(), "c".into())]), None);
+        assert_eq!(fixup_todo(&commits, &[("x".into(), "a".into())]), None);
     }
 
     #[test]

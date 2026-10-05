@@ -16,6 +16,10 @@
 //! - committing on the default branch asks first
 //!   (`732-confirm-commit-to-default-branch`).
 //! - the summary can be capped at 72 characters (`733-summary-max-length`).
+//! - the commit options menu has Fixup Into ▸ an unpushed commit and Squash
+//!   Fixup Commits (`799-fixup-commits`).
+//! - a type button before the summary sets its Conventional Commits prefix
+//!   (`1301-conventional-commit-types`).
 //! - "Ignore All .x Files" items give the number of changed .x files
 //!   (`718-ignore-menu-counts`).
 //! - "Copy Diff" puts the selected files' changes on the clipboard as a patch
@@ -2177,7 +2181,177 @@ impl ChangesSidebar {
                 .enabled(enabled),
             );
         }
+        // Corvene: `799-fixup-commits`, Fixup Into ▸ an unpushed commit and
+        // Squash Fixup Commits
+        let included = self.visible(cx).data.included;
+        let fixups = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::FIXUP_COMMITS)
+                .then(|| {
+                    let rs = s.selected_state()?;
+                    let targets: Vec<(String, String)> = corvene_core::mco::fixup_targets(rs)
+                        .into_iter()
+                        .map(|c| (c.sha.clone(), c.summary.clone()))
+                        .collect();
+                    let idle = rs.commit_to_amend.is_none() && rs.mco.is_none() && !rs.committing;
+                    let pending = !corvene_core::mco::pending_fixups(rs).is_empty();
+                    Some((targets, idle, pending))
+                })
+                .flatten()
+        };
+        if let Some((targets, idle, pending)) = fixups {
+            let can_commit = idle && included > 0;
+            let fixup_items: Vec<MenuItem> = targets
+                .into_iter()
+                .map(|(sha, summary)| {
+                    let short: String = sha.chars().take(7).collect();
+                    MenuItem::new(format!("{short} {summary}"), move |_, cx| {
+                        Dispatcher::commit_fixup(id, sha.clone(), cx)
+                    })
+                })
+                .collect();
+            let has_targets = !fixup_items.is_empty();
+            items.push(MenuItem::separator());
+            items.push(
+                MenuItem::submenu(mac_or("Fixup Into", "Fixup into"), fixup_items)
+                    .enabled(can_commit && has_targets),
+            );
+            items.push(
+                MenuItem::new(
+                    mac_or("Squash Fixup Commits", "Squash fixup commits"),
+                    move |_, cx| Dispatcher::autosquash(id, false, cx),
+                )
+                .enabled(idle && pending),
+            );
+        }
         self.open_menu(items, position, window, cx);
+    }
+
+    /// Corvene (`1301-conventional-commit-types`): the type menu before the
+    /// summary; a pick rewrites the summary's `type: ` prefix.
+    fn open_conventional_type_menu(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use corvene_core::commit_message::{
+            CONVENTIONAL_TYPES, conventional_type, with_conventional_type,
+        };
+        let summary = self.summary.read(cx).value().to_string();
+        let current = conventional_type(&summary);
+        let weak = cx.weak_entity();
+        let pick = move |ty: Option<&'static str>| {
+            let weak = weak.clone();
+            move |window: &mut Window, cx: &mut App| {
+                weak.update(cx, |this, cx| {
+                    let summary = this.summary.read(cx).value().to_string();
+                    let text = with_conventional_type(&summary, ty);
+                    this.replace_message_field(CommitField::Summary, text, window, cx);
+                    this.focus_summary(window, cx);
+                })
+                .ok();
+            }
+        };
+        let mut items = vec![
+            MenuItem::checkbox("None", current.is_none(), pick(None)),
+            MenuItem::separator(),
+        ];
+        items.extend(CONVENTIONAL_TYPES.iter().map(|(ty, what)| {
+            MenuItem::checkbox(
+                format!("{ty}: {what}"),
+                current == Some(*ty),
+                pick(Some(*ty)),
+            )
+        }));
+        self.open_menu(items, position, window, cx);
+    }
+
+    /// Corvene (`1301-conventional-commit-types`): the button before the
+    /// summary showing its type.
+    fn conventional_type_button(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let t = cx.ghd();
+        if !self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::CONVENTIONAL_COMMIT_TYPES)
+        {
+            return None;
+        }
+        let summary = self.summary.read(cx).value().to_string();
+        let current = corvene_core::commit_message::conventional_type(&summary);
+        let (label, color) = match current {
+            Some(ty) => (ty, t.text),
+            None => ("type", t.text_secondary),
+        };
+        Some(
+            div()
+                .id("conventional-type-button")
+                .flex_none()
+                .h(TEXT_FIELD_HEIGHT())
+                .px(zpx(6.))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(zpx(2.))
+                .border_1()
+                .border_color(t.box_border_contrast)
+                .rounded(BORDER_RADIUS())
+                .bg(t.box_background)
+                .cursor_pointer()
+                .text_size(FONT_SIZE())
+                .text_color(color)
+                .hover(|s| s.bg(t.box_hover_background))
+                .a11y_button("Commit type")
+                .ghd_tooltip("Commit type")
+                .on_click(cx.listener(|this, ev: &ClickEvent, window, cx| {
+                    this.open_conventional_type_menu(ev.position(), window, cx)
+                }))
+                .child(label)
+                .child(octicon(Octicon::TriangleDown, t.text_secondary))
+                .into_any_element(),
+        )
+    }
+
+    /// GHD `renderSummaryLengthHint`: a light bulb at the end of the summary
+    /// past [`IDEAL_SUMMARY_LENGTH`](corvene_core::commit_message::IDEAL_SUMMARY_LENGTH)
+    /// characters, with Settings › Prompts › "Show commit length warning"
+    /// on and no repository rule hint there.
+    fn summary_length_hint(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let t = cx.ghd();
+        let rule_hint = self
+            .rules_snapshot(cx)
+            .is_some_and(|r| r.message_failures.status() != RepoRulesMetadataStatus::Pass);
+        if !self.state.read(cx).settings.show_commit_length_warning || rule_hint {
+            return None;
+        }
+        let summary = self.summary.read(cx).value().to_string();
+        if summary.chars().count() <= corvene_core::commit_message::IDEAL_SUMMARY_LENGTH {
+            return None;
+        }
+        let hint = div()
+            .id("length-hint")
+            .absolute()
+            .top(zpx(2.))
+            .right(zpx(2.))
+            .w(zpx(16.))
+            .h(TEXT_FIELD_HEIGHT() - zpx(4.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .a11y_button("Open Summary Length Info")
+            .child(octicon(Octicon::LightBulb, t.text).size(zpx(12.)));
+        Some(
+            crate::widgets::with_directed_tooltip_delay(
+                hint,
+                "Great commit summaries contain fewer than 50 characters\nPlace extra information in the description field.",
+                crate::widgets::TooltipDirection::North,
+                std::time::Duration::ZERO,
+            )
+            .into_any_element(),
+        )
     }
 
     /// Files that pass the text + option filters (cached until the status
@@ -5079,6 +5253,7 @@ impl ChangesSidebar {
                     .gap(SPACING_HALF())
                     .mb(SPACING())
                     .child(avatar_image(avatar, AVATAR_SIZE(), cx))
+                    .children(self.conventional_type_button(cx))
                     .child(
                         text_box_with_menu(
                             "commit-summary",
@@ -5090,7 +5265,8 @@ impl ChangesSidebar {
                         )
                         .relative()
                         .children(self.spell_overlay(CommitField::Summary, cx))
-                        .children(self.rule_failure_hint(cx)),
+                        .children(self.rule_failure_hint(cx))
+                        .children(self.summary_length_hint(cx)),
                     ),
             )
             .child(

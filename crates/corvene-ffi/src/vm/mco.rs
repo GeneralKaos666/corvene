@@ -92,9 +92,9 @@ pub fn mco(s: &AppState, repo: u64) -> Option<McoVm> {
             commits,
             ..
         } => (source_branch.clone(), commits.len()),
-        McoDetail::Squash { commits, .. } | McoDetail::Reorder { commits, .. } => {
-            (None, commits.len())
-        }
+        McoDetail::Squash { commits, .. }
+        | McoDetail::Reorder { commits, .. }
+        | McoDetail::Autosquash { commits, .. } => (None, commits.len()),
         McoDetail::Merge { source_branch, .. } => (source_branch.clone(), 0),
     };
     Some(McoVm {

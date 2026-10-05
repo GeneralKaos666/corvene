@@ -131,6 +131,9 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
             format!("Successfully squashed {count} {}.", plural(*count)),
             false,
         )],
+        Banner::FixupCommitted { target, .. } => {
+            vec![t("Created a fixup commit for\u{a0}"), b(target)]
+        }
         Banner::SquashUndone { count } => vec![(
             format!("Squash of {count} {} undone.", plural(*count)),
             false,
@@ -421,6 +424,20 @@ pub fn banner_bar(
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
                         Dispatcher::undo_mco(repo, cx);
+                    })
+                    .into_any_element(),
+            )
+        }
+        // Corvene (`799-fixup-commits`)
+        Banner::FixupCommitted { repo, .. } => {
+            let repo = *repo;
+            Some(
+                link_button("banner-squash-now", "Squash Now", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
+                    .ml(SPACING_HALF())
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::clear_banner(cx);
+                        Dispatcher::autosquash(repo, false, cx);
                     })
                     .into_any_element(),
             )

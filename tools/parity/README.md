@@ -109,6 +109,8 @@ steps:
   - fixture: move                        # rename both fixture repositories away (missing repository)
   - context_menu: add                    # compare both apps' last native menu (items, separators, disabled/checked)
   - context_menu_pick: "Clone Repository…"   # choose an item in both (GHD: resolves its IPC; Corvene: menu-pick)
+  - corvene_menu: options                  # record Corvene's last menu in the report (a menu GHD lacks, no comparison)
+  - corvene_menu_pick: "Fixup Into"        # choose an item in Corvene's last menu only (submenus searched)
   - dump: open                           # GHD DOM boxes + computed styles as JSON ({name, root: css})
   - snap: open                           # or {name, threshold, tolerance, edge_tolerance, radius, mask: [[x,y,w,h]…], region: [x,y,w,h], note}
                                          #   corvene_only: true records Corvene's shot without a comparison (a surface GHD lacks)

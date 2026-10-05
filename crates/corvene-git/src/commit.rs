@@ -26,6 +26,9 @@ pub struct CommitOptions {
     pub allow_empty: bool,
     /// Corvene `783-amend-author`: another author for the commit.
     pub author: Option<CommitAuthor>,
+    /// Corvene `799-fixup-commits`: `--fixup=<sha>`, git writes the message
+    /// (`fixup! <summary of sha>`) and the one passed in is not used.
+    pub fixup: Option<String>,
 }
 
 /// Corvene `783-amend-author`: who an amended commit is by.
@@ -324,8 +327,12 @@ pub fn commit(
     message: &str,
     opts: &CommitOptions,
 ) -> Result<String> {
-    let mut args = vec!["commit".to_string(), "-F".into(), "-".into()];
-    if opts.amend {
+    let mut args = vec!["commit".to_string()];
+    match &opts.fixup {
+        Some(sha) => args.push(format!("--fixup={sha}")),
+        None => args.extend(["-F".into(), "-".into()]),
+    }
+    if opts.amend && opts.fixup.is_none() {
         args.push("--amend".into());
     }
     if opts.no_verify {
@@ -344,11 +351,11 @@ pub fn commit(
         Some(CommitAuthor::ResetToCommitter) => args.push("--reset-author".into()),
         None => {}
     }
-    let out = GitCommand::new(git)
-        .args(args)
-        .current_dir(workdir)
-        .stdin(message.as_bytes().to_vec())
-        .run()?;
+    let mut cmd = GitCommand::new(git).args(args).current_dir(workdir);
+    if opts.fixup.is_none() {
+        cmd = cmd.stdin(message.as_bytes().to_vec());
+    }
+    let out = cmd.run()?;
     let sha = parse_commit_sha(&String::from_utf8_lossy(&out.stdout));
     info!(%sha, "created commit");
     Ok(sha)
@@ -1176,5 +1183,59 @@ mod tests {
         assert!(!sub.join("junkdir").exists());
         let status = crate::get_status(git, path).unwrap();
         assert!(status.files.is_empty());
+    }
+
+    #[test]
+    fn fixup_commits_fold_into_their_target() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        let log = |path: &Path| {
+            let out = Command::new("git")
+                .args(["log", "--format=%s", "--name-only"])
+                .current_dir(path)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+        let commit_file = |name: &str, contents: &str, opts: &CommitOptions| {
+            std::fs::write(path.join(name), contents).unwrap();
+            add_paths(git.clone(), path, &[name]).unwrap();
+            commit(git.clone(), path, &format!("Add {name}\n"), opts).unwrap();
+        };
+        commit_file("a.txt", "a\n", &CommitOptions::default());
+        commit_file("b.txt", "b\n", &CommitOptions::default());
+        commit_file("c.txt", "c\n", &CommitOptions::default());
+        let shas = Command::new("git")
+            .args(["rev-list", "HEAD"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        let shas: Vec<String> = String::from_utf8_lossy(&shas.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect();
+        // a fixup of "Add b.txt" (the middle commit)
+        commit_file(
+            "b2.txt",
+            "b2\n",
+            &CommitOptions {
+                fixup: Some(shas[1].clone()),
+                ..CommitOptions::default()
+            },
+        );
+        assert!(log(path).starts_with("fixup! Add b.txt\n"));
+        let (result, folded) = crate::autosquash(
+            git.clone(),
+            path,
+            Some(&format!("{}^", shas[1])),
+            crate::RebaseOptions::default(),
+            |_| {},
+        );
+        assert_eq!(result, crate::RebaseResult::CompletedWithoutError);
+        assert_eq!(folded, 1);
+        assert_eq!(
+            log(path),
+            "Add c.txt\n\nc.txt\nAdd b.txt\n\nb.txt\nb2.txt\nAdd a.txt\n\na.txt\n"
+        );
     }
 }

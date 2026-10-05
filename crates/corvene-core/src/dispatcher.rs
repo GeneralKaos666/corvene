@@ -5843,6 +5843,20 @@ impl Dispatcher {
         // request once the commit landed
         let publish =
             checks.after == crate::new_branch_flows::AfterCommit::PublishAndOpenPullRequest;
+        // Corvene (`799-fixup-commits`): `--fixup` of this commit, and its
+        // summary for the undo bar and the banner
+        let fixup = checks.fixup.clone().and_then(|sha| {
+            let s = Self::state(cx).read(cx);
+            let summary = s
+                .repo_states
+                .get(&id)?
+                .commits
+                .iter()
+                .find(|c| c.sha == sha)?
+                .summary
+                .clone();
+            Some((sha, summary))
+        });
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -5881,11 +5895,12 @@ impl Dispatcher {
             .repository(id)
             .map(|r| r.commit_options)
             .unwrap_or_default();
-        let amend = Self::state(cx)
-            .read(cx)
-            .repo_states
-            .get(&id)
-            .is_some_and(|rs| rs.commit_to_amend.is_some());
+        let amend = fixup.is_none()
+            && Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .is_some_and(|rs| rs.commit_to_amend.is_some());
         // Corvene (`783-amend-author`): the author field of an amend
         let author = {
             let s = Self::state(cx).read(cx);
@@ -5894,7 +5909,8 @@ impl Dispatcher {
                 .filter(|_| amend && s.flags.bool(crate::flags::ids::AMEND_AUTHOR))
                 .and_then(|rs| rs.amend_author.clone())
         };
-        if summary.trim().is_empty() || (files.is_empty() && !options.allow_empty_commit && !amend)
+        if (summary.trim().is_empty() && fixup.is_none())
+            || (files.is_empty() && !options.allow_empty_commit && !amend)
         {
             return;
         }
@@ -5902,13 +5918,23 @@ impl Dispatcher {
             s.repo_state_mut(id).committing = true;
             cx.notify();
         });
+        // Corvene (`1302-wrap-commit-body`)
+        let description = if Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::WRAP_COMMIT_BODY)
+        {
+            crate::commit_message::wrap_body(&description, crate::commit_message::BODY_WIDTH)
+        } else {
+            description
+        };
         let message = corvene_git::format_message(&summary, &description);
         // GHD `getCoAuthorTrailers`: known co-authors become `Co-Authored-By` trailers
         let trailers: Vec<(String, String)> = Self::state(cx)
             .read(cx)
             .repo_states
             .get(&id)
-            .filter(|rs| rs.show_co_authored_by)
+            .filter(|rs| rs.show_co_authored_by && fixup.is_none())
             .map(|rs| {
                 rs.co_authors
                     .iter()
@@ -5921,6 +5947,7 @@ impl Dispatcher {
         // not after an amend, whose rewritten tip may need a force push
         let push_after = options.push_after_commit
             && !amend
+            && fixup.is_none()
             && Self::state(cx)
                 .read(cx)
                 .flags
@@ -5936,7 +5963,11 @@ impl Dispatcher {
                 Some((old, upstream))
             })
         };
-        let summary_for_bar = summary.trim().to_string();
+        let summary_for_bar = match &fixup {
+            Some((_, target)) => format!("{}{target}", corvene_git::rebase_ops::FIXUP_PREFIX),
+            None => summary.trim().to_string(),
+        };
+        let fixup_sha = fixup.as_ref().map(|(sha, _)| sha.clone());
         // Corvene (`781-keep-staged-mode-changes`): executable bits staged
         // with `update-index --chmod` while `core.fileMode` is false
         let keep_modes = !restages_everything
@@ -5999,6 +6030,7 @@ impl Dispatcher {
                     signoff: options.sign_off_commits,
                     allow_empty: options.allow_empty_commit,
                     author,
+                    fixup: fixup_sha,
                 },
             )?;
             // `commit` returns git's abbreviated sha (GHD `parseCommitSHA`);
@@ -6032,8 +6064,11 @@ impl Dispatcher {
                         });
                         rs.commit_to_amend = None;
                         rs.amend_author = None;
-                        rs.co_authors.clear();
-                        rs.commit_nonce += 1;
+                        // a fixup leaves the message typed so far alone
+                        if fixup.is_none() {
+                            rs.co_authors.clear();
+                            rs.commit_nonce += 1;
+                        }
                         // GHD `refreshChangesSection({ clearPartialState:
                         // true })`: what stays partially selected after a
                         // partial commit starts unselected
@@ -6042,6 +6077,15 @@ impl Dispatcher {
                     cx.notify();
                 });
                 let committed = result.is_ok();
+                if committed && let Some((_, target)) = &fixup {
+                    Self::set_banner(
+                        crate::mco::Banner::FixupCommitted {
+                            repo: id,
+                            target: target.clone(),
+                        },
+                        cx,
+                    );
+                }
                 if let Err(err) = result {
                     // Corvene (`526-commit-signing`): a signing failure says
                     // so, git's words below

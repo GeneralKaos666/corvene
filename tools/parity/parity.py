@@ -222,6 +222,20 @@ class Run:
                 cv.pick_menu(label)
             time.sleep((wait if wait is not None else cfg["settle"]) / 1000)
             return
+        if "corvene_menu_pick" in step:
+            # a Corvene-only surface's menu: pick in Corvene, nothing in GHD
+            if not self.args.ghd_only:
+                cv.pick_menu(step["corvene_menu_pick"])
+            time.sleep((wait if wait is not None else cfg["settle"]) / 1000)
+            return
+        if "corvene_menu" in step:
+            # a Corvene-only menu's items, recorded in the report (no comparison)
+            name = step["corvene_menu"]
+            c = cv.menu_items() if not self.args.ghd_only else []
+            result.setdefault("menus", []).append({"name": name, "ghd": [], "corvene": c, "pass": True})
+            print(f"    menu {name}: {len(c)} Corvene items (Corvene only)", flush=True)
+            time.sleep((wait if wait is not None else cfg["settle"]) / 1000)
+            return
         if "context_menu_dismiss" in step:
             ghd.dismiss_menu()
             return
