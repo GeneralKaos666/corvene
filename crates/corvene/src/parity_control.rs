@@ -626,9 +626,82 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
             }
         }
         "fake-accounts" => fake_accounts(arg, cx)?,
+        "fake-github" => fake_github(arg, cx)?,
         other => return Err(format!("unknown hook {other:?}")),
     }
     Ok(json!({}))
+}
+
+/// `fake-github {port, owner, name, login}` (`tools/parity/github_stub.py`):
+/// an Enterprise account on the stub GitHub API at
+/// `http://127.0.0.1:<port>/api/v3` with an injected token, and the
+/// selected repository made the stub's `owner/name` GitHub repository, so
+/// the real API client runs against the stub (`345-issues`,
+/// `346-releases`).
+fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
+    let fake: Value = serde_json::from_str(arg).map_err(|e| e.to_string())?;
+    let owner = fake["owner"].as_str().unwrap_or("octocat").to_string();
+    let name = fake["name"]
+        .as_str()
+        .unwrap_or("parity-fixture")
+        .to_string();
+    let login = fake["login"].as_str().unwrap_or("octocat").to_string();
+    // `{"account": false}`: a GitHub.com repository with no account for it
+    // (the signed-out state of the views)
+    let with_account = fake["account"].as_bool().unwrap_or(true);
+    let (web, endpoint) = match fake["port"].as_u64() {
+        Some(port) if with_account => (
+            format!("http://127.0.0.1:{port}"),
+            format!("http://127.0.0.1:{port}/api/v3"),
+        ),
+        Some(_) | None if !with_account => (
+            "https://github.com".to_string(),
+            "https://api.github.com".to_string(),
+        ),
+        _ => return Err("fake-github: no port".to_string()),
+    };
+    let account = corvene_core::Account {
+        endpoint: endpoint.clone(),
+        id: 583231,
+        login: login.clone(),
+        name: Some("Mona Lisa Octocat".to_string()),
+        avatar_url: None,
+        emails: vec!["mona@example.com".to_string()],
+        scopes: vec!["repo".to_string(), "workflow".to_string()],
+        plan: Some("free".to_string()),
+        private_primary_email: false,
+    };
+    if with_account {
+        corvene_platform::keychain::inject_token(&account.host(), &login, "stub-token");
+    }
+    let github = corvene_core::GitHubRepository {
+        endpoint: endpoint.clone(),
+        owner: owner.clone(),
+        name: name.clone(),
+        html_url: format!("{web}/{owner}/{name}"),
+        clone_url: format!("{web}/{owner}/{name}.git"),
+        default_branch: Some("main".to_string()),
+        private: false,
+        fork: false,
+        parent: None,
+        archived: false,
+        permissions: Some(corvene_core::RepositoryPermission::Write),
+        allow_forking: Some(true),
+        node_id: Some("R_stub".to_string()),
+    };
+    corvene_core::AppState::global(cx).update(cx, |s, cx| {
+        s.accounts.retain(|a| a.endpoint != endpoint);
+        if with_account {
+            s.accounts.push(account);
+        }
+        if let Some(id) = s.selected
+            && let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
+        {
+            repo.github = Some(github);
+        }
+        cx.notify();
+    });
+    Ok(())
 }
 
 /// `fake-accounts {accounts, repositories}` (`tools/parity/accounts.py`):

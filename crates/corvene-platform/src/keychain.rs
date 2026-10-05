@@ -57,7 +57,30 @@ pub fn store_token(host: &str, login: &str, token: &str) -> Result<()> {
     Ok(())
 }
 
+/// Tokens handed in by [`inject_token`], consulted before the keychain.
+static INJECTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+    std::sync::OnceLock::new();
+
+/// A token for `(host, login)` that lives in this process only (the parity
+/// harness's stub GitHub API, tests): [`token`] answers with it and the
+/// keychain is never touched for that account.
+pub fn inject_token(host: &str, login: &str, token: &str) {
+    let mut map = INJECTED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    map.insert(format!("{login}@{host}"), token.to_string());
+}
+
 pub fn token(host: &str, login: &str) -> Result<Option<String>> {
+    if let Some(map) = INJECTED.get()
+        && let Some(token) = map
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&format!("{login}@{host}"))
+    {
+        return Ok(Some(token.clone()));
+    }
     match entry(host, login)?.get_password() {
         Ok(token) => Ok(Some(token)),
         Err(keyring::Error::NoEntry) => Ok(None),

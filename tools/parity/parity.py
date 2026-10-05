@@ -39,6 +39,7 @@ sys.path.insert(0, str(HERE))
 
 import accounts  # noqa: E402
 import fixture  # noqa: E402
+import github_stub  # noqa: E402
 import imgdiff  # noqa: E402
 import report  # noqa: E402
 from drivers import Corvene, Ghd, page_height, page_rect, park_pointer  # noqa: E402
@@ -100,6 +101,8 @@ def both(fa, fb):
 
 
 class Run:
+    stub = None
+
     def __init__(self, args):
         self.args = args
         self.out = Path(args.out)
@@ -140,6 +143,9 @@ class Run:
         repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog) if with_repo else None
 
+        # `github_stub: true`: a stub GitHub API for Corvene's Issues and
+        # Releases views (`github_stub.py`), reached by the `github: stub` step
+        self.stub = github_stub.start() if sc.get("github_stub") else None
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,
                                                          sc.get("corvene_flags"))
@@ -190,6 +196,9 @@ class Run:
                 print(f"    holding both apps open for {self.args.hold_open}s (GHD menus pop for real)", flush=True)
                 time.sleep(self.args.hold_open)
             both(ghd.stop, cv.stop)
+            if self.stub:
+                self.stub.stop()
+                self.stub = None
             if not self.args.keep_work:
                 shutil.rmtree(work / "ghd-profile", ignore_errors=True)
         result["seconds"] = round(time.time() - started, 1)
@@ -314,6 +323,18 @@ class Run:
             name = p.get(drv.name) if isinstance(p, dict) else p
             if name:
                 drv.popup(name)
+        if "github" in action and drv.name == "corvene":
+            # `github: stub`: sign Corvene in to the scenario's stub GitHub API
+            # (`github_stub.py`); GHD has no such surface
+            # `github: no-account`: a GitHub.com repository without an account
+            if action["github"] == "no-account":
+                drv.hook("fake-github", json.dumps({"account": False}))
+            elif action["github"] != "stub":
+                raise ValueError(f"unknown github step {action['github']!r}")
+            elif not self.stub:
+                raise RuntimeError("`github: stub` needs `github_stub: true` on the scenario")
+            else:
+                drv.hook("fake-github", self.stub.hook_arg())
         if "accounts" in action:
             # fake signed-in accounts (`accounts.py`)
             if drv.name == "ghd":

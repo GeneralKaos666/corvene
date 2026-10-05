@@ -86,6 +86,7 @@ name: branch-foldout
 description: What this covers
 setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | repo-graph (plus a merged branch, an octopus merge and an unmerged branch) | empty (no repositories) | welcome (first launch)
 corvene_flags: 1213-commit-graph=on   # optional: flags for Corvene after the GHD preset (a surface GHD lacks)
+github_stub: true                     # optional: a stub GitHub API for Corvene (`github_stub.py`), reached by the `github: stub` step
 ghd_env: {GITHUB_DESKTOP_PREVIEW_FEATURES: 1}   # optional: extra env for GHD (test-* popups need this; it also turns on beta features)
 threshold: 1.0         # optional per-scenario defaults: threshold, tolerance, radius, settle, width, height
 steps:
@@ -102,6 +103,7 @@ steps:
   - menu: show-preferences               # GHD menu-event name
   - popup: {ghd: test-release-notes-popup, corvene: release-notes}   # GHD test hook / CORVENE_POPUP
   - accounts: dotcom                     # fake signed-in accounts + repository lists (accounts.py: dotcom | enterprise | two)
+  - github: stub                         # Corvene only: sign in to the scenario's stub GitHub API (`github_stub: true`); `no-account` makes the fixture a GitHub repository with no account
   - resize: [1100, 700]
   - wait: 500                            # alone: sleep; on a step: settle time after it (default 350ms)
   - ghd: {eval: "…"}                     # app-specific step (either side can be `{skip: true}`)
@@ -129,6 +131,16 @@ control hook. No API call is made (every list is already loaded; the tokens
 are fake), so only views that render from that state can be compared: the
 signed-in blank slate, Welcome › Configure Git after "Skip this step",
 account pickers.
+
+Corvene's Issues and Releases views (`345-issues`, `346-releases`) go further:
+a scenario with `github_stub: true` gets a stub GitHub REST API
+(`github_stub.py`, fixed issues, labels, assignees and releases, `POST`
+answers for a created issue or release and for `generate-notes`) on a free
+port, and the `github: stub` step runs the `fake-github` control hook, which
+signs Corvene in to it as a GitHub Enterprise host with an injected token and
+makes the fixture repository the stub's `octocat/parity-fixture`. The real
+API client then talks to the stub. GHD has neither view, so those snaps are
+`corvene_only`.
 
 ## Linux
 

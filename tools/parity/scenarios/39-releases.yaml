@@ -1,0 +1,73 @@
+# Corvene's Releases view and Create Release… (flag 346-releases, off in
+# the GitHub Desktop preset the harness runs with). GHD has no releases, so
+# the snaps are recorded, not compared (`corvene_only`; deviations.md ›
+# GitHub layer). The releases come from the stub GitHub API
+# (`github_stub.py`): a draft, a pre-release and the latest release with
+# two assets; `generate-notes` answers for any tag and a created release
+# gets id 9. The `repo-remote` fixture's `v0.1.0` tag is not pushed yet, so
+# Create Release pushes it to the bare origin first.
+name: releases
+description: Repository › Releases… list and release pane, Create Release… from a tagged commit with generated notes, the tag row menu in the branch list (Corvene only, stub API)
+setup: repo-remote
+github_stub: true
+corvene_flags: 346-releases=on,899-tags-in-branch-list=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ShowReleases"}
+    wait: 2000
+  - snap: {name: list, corvene_only: true, note: "GHD has no releases (deviations.md, 346-releases)"}
+  # the draft at the top
+  - ghd: {skip: true}
+    corvene: {click: [68, 171]}
+    wait: 800
+  - snap: {name: draft-selected, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {rclick: [68, 171]}
+    wait: 600
+  - corvene_menu: release-row
+  # back to History (the header's close button), the tagged commit's menu:
+  # Create Release for v0.1.0…
+  - ghd: {skip: true}
+    corvene: {click: [231, 129]}
+    wait: 800
+  - snap: {name: history-again, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {rclick: [124, 225]}
+    wait: 600
+  - corvene_menu: commit-with-tag
+  - ghd: {skip: true}
+    corvene: {rclick: [124, 225]}
+    wait: 600
+  - corvene_menu_pick: "Create Release for v0.1.0…"
+    wait: 1200
+  - snap: {name: dialog, corvene_only: true}
+  # Generate Release Notes: the stub's notes land in the box and the title
+  - ghd: {skip: true}
+    corvene: {click: [896, 408]}
+    wait: 2000
+  - snap: {name: generated, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [412, 484]}
+    wait: 500
+  - snap: {name: prerelease, corvene_only: true}
+  # Create Release: the tag is pushed, the stub answers, the banner shows
+  - ghd: {skip: true}
+    corvene: {click: [904, 569]}
+    wait: 3000
+  - snap: {name: created, corvene_only: true}
+  # the tag row's menu in the branch list
+  - ghd: {skip: true}
+    corvene: {click: [365, 56]}
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {type: "v0."}
+    wait: 1000
+  - snap: {name: tag-filter, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {rclick: [500, 201]}
+    wait: 600
+  - corvene_menu: tag-row
+  - snap: {name: tag-row-menu, corvene_only: true}
