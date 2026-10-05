@@ -8,7 +8,10 @@
 
 // objc's macros probe a `cargo-clippy` cfg that this crate does not declare
 #![allow(unexpected_cfgs)]
+// cocoa's types are deprecated in favour of objc2, as in `native_menu`
+#![allow(deprecated)]
 
+use cocoa::foundation::NSPoint;
 use gpui_kit::*;
 use objc::runtime::Object;
 use objc::{msg_send, sel, sel_impl};
@@ -53,6 +56,23 @@ pub fn hide_window(window: &Window, cx: &mut App) {
             }
         }
         let _: () = unsafe { msg_send![ns_window as *mut Object, orderOut: nil] };
+    })
+    .detach();
+}
+
+/// Parity harness runs (`tools/parity`): keep the window out of the user's
+/// way. It goes transparent, lets clicks through and moves off the left edge
+/// (AppKit keeps a sliver on screen). The harness injects input and renders
+/// offscreen, so none of this changes what it sees.
+pub fn park_offscreen(window: &Window, cx: &mut App) {
+    let Some(ns_window) = ns_window(window) else {
+        return;
+    };
+    cx.spawn(async move |_| unsafe {
+        let ns_window = ns_window as *mut Object;
+        let _: () = msg_send![ns_window, setAlphaValue: 0.0f64];
+        let _: () = msg_send![ns_window, setIgnoresMouseEvents: objc::runtime::YES];
+        let _: () = msg_send![ns_window, setFrameOrigin: NSPoint::new(-30000., 0.)];
     })
     .detach();
 }

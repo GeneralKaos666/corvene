@@ -31,8 +31,14 @@ the run can gate a change.
 | Capture | `Page.captureScreenshot` | `Window::draw` + `render_to_image` |
 | Size | real window resized to 1367×814 (`window.resizeTo`; emulated viewport only if the screen is too small) | `Window::resize` 1367×814 |
 
-Neither app needs focus or Screen Recording permission; both windows do
-appear on screen while a scenario runs. Every scenario starts from fresh
+Neither app needs focus or Screen Recording permission. On macOS both
+launch in the background: they never activate, and their windows are
+transparent, let clicks through and sit off the left edge of the screen, so
+typing elsewhere during a run stays where it is (GHD's main process is
+patched over `--inspect-brk` before its code runs; Corvene does it itself
+under `CORVENE_CONTROL`). Native context menus still pop up when a scenario
+opens one. `PARITY_FOREGROUND=1` launches both the usual way, to watch a
+run. Every scenario starts from fresh
 instances: fresh profiles, a freshly built fixture repository per app
 (`fixture.py`: fixed author and dates, so both copies have identical SHAs and
 "x days ago" texts), default panel widths (250pt sidebar, 250pt commit

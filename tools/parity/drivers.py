@@ -64,6 +64,28 @@ GHD_APP = Path(
 OFFLINE = os.environ.get("PARITY_OFFLINE") == "1"
 DEAD_PROXY = "http://127.0.0.1:9"
 
+# PARITY_FOREGROUND=1: let both apps activate and show their windows as
+# they normally do. By default (macOS) they launch in the background with
+# their windows transparent and parked off screen: input and captures need
+# neither focus nor a visible window, and the user's typing stays put.
+BACKGROUND = IS_MAC and os.environ.get("PARITY_FOREGROUND") != "1"
+
+# Runs in GHD's main process before its own code (`--inspect-brk`): showing a
+# window never activates the app (`show` activates on macOS, `showInactive`
+# does not), focusing is a no-op, and a shown window goes transparent, lets
+# clicks through and moves off the left edge (AppKit keeps a sliver on screen).
+GHD_BACKGROUND_PATCH = """(() => {
+  const { app, BrowserWindow } = require('electron')
+  BrowserWindow.prototype.show = function () {
+    this.showInactive()
+    this.setOpacity(0)
+    this.setIgnoreMouseEvents(true)
+    this.setPosition(-30000, 0)
+  }
+  BrowserWindow.prototype.focus = function () {}
+  app.focus = function () {}
+})()"""
+
 # Retina on the Macs the harness grew up on; X11 under Xvfb is 1x
 DEFAULT_SCALE = 2.0 if IS_MAC else 1.0
 
@@ -256,10 +278,13 @@ class Ghd:
     # -- process -----------------------------------------------------------
     def start(self, timeout: float = 30):
         self.profile.mkdir(parents=True, exist_ok=True)
+        inspect_port = free_port() if BACKGROUND else None
         with open(self.log, "ab") as log:
             self.proc = _spawn(
                 [
                     str(GHD_APP),
+                    # the main process waits for `_background` to patch it
+                    *([f"--inspect-brk={inspect_port}"] if inspect_port else []),
                     f"--remote-debugging-port={self.port}",
                     f"--user-data-dir={self.profile}",
                     # captures in sRGB, like Corvene's render_to_image; without it
@@ -277,6 +302,8 @@ class Ghd:
                 log,
                 {**os.environ, **{k: str(v) for k, v in self.env.items()}},
             )
+        if inspect_port:
+            self._background(inspect_port, timeout)
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
@@ -291,6 +318,43 @@ class Ghd:
         else:
             raise RuntimeError("GitHub Desktop did not expose a DevTools page")
         self.wait_for("document.readyState === 'complete' && !!document.querySelector('#desktop-app-container, #desktop-app')", timeout)
+
+    def _background(self, port: int, timeout: float):
+        """Apply GHD_BACKGROUND_PATCH to the main process, paused on its first
+        line by `--inspect-brk`, then let it run."""
+        deadline = time.time() + timeout
+        while True:
+            try:
+                targets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=1))
+                if targets:
+                    break
+            except OSError:
+                pass
+            if time.time() > deadline:
+                raise RuntimeError("GitHub Desktop's main process did not open its inspector")
+            time.sleep(0.1)
+        ws = websocket.create_connection(targets[0]["webSocketDebuggerUrl"], suppress_origin=True, timeout=timeout)
+        try:
+            ws.send(json.dumps({"id": 1, "method": "Debugger.enable"}))
+            ws.send(json.dumps({"id": 2, "method": "Runtime.runIfWaitingForDebugger"}))
+            while True:
+                msg = json.loads(ws.recv())
+                if msg.get("method") == "Debugger.paused":
+                    frame = msg["params"]["callFrames"][0]["callFrameId"]
+                    break
+            # `require` only exists in the module's frame, not the global scope
+            ws.send(json.dumps({"id": 3, "method": "Debugger.evaluateOnCallFrame",
+                                "params": {"callFrameId": frame, "expression": GHD_BACKGROUND_PATCH}}))
+            while True:
+                msg = json.loads(ws.recv())
+                if msg.get("id") == 3:
+                    if "exceptionDetails" in msg.get("result", {}) or "error" in msg:
+                        print(f"note: GHD background patch failed: {msg}", file=sys.stderr)
+                    break
+            ws.send(json.dumps({"id": 4, "method": "Debugger.resume"}))
+            ws.recv()
+        finally:
+            ws.close()
 
     def stop(self):
         if self.ws:
@@ -668,6 +732,8 @@ class Corvene:
             # (.docs/flags.md); PARITY_CORVENE_FLAGS overrides
             CORVENE_FLAGS=env.get("PARITY_CORVENE_FLAGS", "preset=github-desktop"),
         )
+        if not BACKGROUND:
+            env["CORVENE_FOREGROUND"] = "1"
         if not IS_MAC and not IS_WIN:
             # the avatar and emoji caches live under XDG_CACHE_HOME, not the
             # data dir: a private one keeps earlier runs' downloads out

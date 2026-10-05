@@ -1300,10 +1300,30 @@ pub(crate) fn main() {
             }
             #[cfg(not(target_os = "macos"))]
             cx.hide();
+        } else if parity_run() {
+            #[cfg(target_os = "macos")]
+            for handle in cx.windows() {
+                handle
+                    .update(cx, |_, window, cx| {
+                        corvene_ui::native_window::park_offscreen(window, cx)
+                    })
+                    .ok();
+            }
         } else {
             cx.activate(true);
         }
     });
+}
+
+/// A parity harness run (`CORVENE_CONTROL`, `tools/parity`): the harness
+/// injects input and renders offscreen, so Corvene never activates itself
+/// and parks its window out of sight, leaving the keyboard with whatever
+/// the user is typing into. `CORVENE_FOREGROUND=1` (the harness's
+/// `PARITY_FOREGROUND=1`) keeps the usual launch.
+fn parity_run() -> bool {
+    cfg!(feature = "snapshots")
+        && std::env::var_os("CORVENE_CONTROL").is_some()
+        && std::env::var_os("CORVENE_FOREGROUND").is_none()
 }
 
 thread_local! {
@@ -1428,6 +1448,9 @@ fn focus_main_window_host(cx: &mut dyn corvene_core::Host) {
 /// GHD `focusWindow`: bring Corvene forward and show its window, even when
 /// it was hidden with ⌘W.
 fn focus_main_window(cx: &mut App) {
+    if parity_run() {
+        return;
+    }
     cx.activate(true);
     #[cfg(target_os = "macos")]
     for handle in cx.windows() {
