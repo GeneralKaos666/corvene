@@ -409,8 +409,8 @@ pub fn quick_view(
                                 .flex_none()
                                 .gap(SPACING_HALF())
                                 .role(Role::Link)
-                                .aria_label(format!("View on {}", pr.host_kind().name()))
-                                .child(format!("View on {}", pr.host_kind().name()))
+                                .aria_label(format!("View on {}", pr.host_site_name()))
+                                .child(format!("View on {}", pr.host_site_name()))
                                 .child(octicon(Octicon::LinkExternal, t.secondary_button_text))
                                 .on_click(move |_, _, cx| {
                                     Dispatcher::open_pull_request(&pr_for_view, cx)

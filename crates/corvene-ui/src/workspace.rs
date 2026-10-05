@@ -594,7 +594,7 @@ impl Workspace {
         // flags 342-344: GitLab, Gitea or Bitbucket
         let hosted_kind = repo
             .and_then(|r| state.hosted_repository(r.id))
-            .map(|h| h.kind);
+            .map(|h| h.kind.site_name(&h.repo.endpoint));
         let rs = state.selected_state();
         let selected_change = rs.and_then(|r| {
             let path = r.selected_file.as_ref()?;
@@ -918,13 +918,13 @@ impl Workspace {
                         on_click: std::rc::Rc::new(move |_, cx| Dispatcher::view_on_github(id, cx)),
                         title: format!(
                             "Open the repository page on {} in your browser",
-                            kind.name()
+                            kind
                         )
                         .into(),
                         description: None,
                         hint: "Repository menu or".into(),
                         keys: &["⌘", "⇧", "G"],
-                        button_label: format!("View on {}", kind.name()).into(),
+                        button_label: format!("View on {kind}").into(),
                         primary: false,
                         menu: None,
                     });

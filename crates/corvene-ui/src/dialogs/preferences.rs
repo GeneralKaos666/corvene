@@ -809,6 +809,7 @@ impl PreferencesDialog {
                 .into_any_element()
             } else {
                 div()
+                    .flex()
                     .mb(SPACING())
                     .child(button(add_id, add_label, cx).on_click(move |_, _, cx| {
                         Dispatcher::close_popup(cx);

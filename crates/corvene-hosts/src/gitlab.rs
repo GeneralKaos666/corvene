@@ -401,7 +401,7 @@ impl HostProvider for GitLab {
             "{}/merge_requests?state=opened&order_by=created_at&sort=desc&per_page=100",
             Self::project_path(repo)
         );
-        let requests: Vec<ApiMergeRequest> = self.http.get_all(&path, MAX_PAGES)?;
+        let requests: Vec<ApiMergeRequest> = self.http.get_all_parallel(&path, 100, MAX_PAGES)?;
         // the target project's id, and the fork projects requests come from
         let target_id = requests
             .first()

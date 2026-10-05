@@ -323,7 +323,7 @@ impl HostProvider for Gitea {
 
     fn open_pull_requests(&self, repo: &GitHubRepository) -> Result<Vec<PullRequest>> {
         let path = format!("{}/pulls?state=open&limit=50", Self::repo_path(repo));
-        let prs: Vec<ApiPullRequest> = self.http.get_all(&path, MAX_PAGES)?;
+        let prs: Vec<ApiPullRequest> = self.http.get_all_parallel(&path, 50, MAX_PAGES)?;
         let mut prs: Vec<PullRequest> = prs
             .into_iter()
             .map(|pr| convert_pull_request(&self.http.endpoint, pr))

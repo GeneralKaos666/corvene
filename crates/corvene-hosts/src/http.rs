@@ -251,6 +251,61 @@ impl Http {
         Ok(items)
     }
 
+    /// Every page of a list whose first page says how many there are
+    /// (GitLab `x-total-pages`, Gitea `x-total-count` over `per_page`): the
+    /// rest are read side by side, at most `max_pages` in all. Without those
+    /// headers it follows `Link: rel="next"` like [`Http::get_all`].
+    pub fn get_all_parallel<T: DeserializeOwned + Send>(
+        &self,
+        path: &str,
+        per_page: usize,
+        max_pages: usize,
+    ) -> Result<Vec<T>> {
+        let (first, headers): (Vec<T>, _) = self.get(path)?;
+        let header = |name: &str| {
+            headers
+                .iter()
+                .find(|(n, _)| n == name)
+                .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+        };
+        let pages = header("x-total-pages").or_else(|| {
+            header("x-total-count").map(|total| total.div_ceil(per_page.max(1)))
+        });
+        let Some(pages) = pages.map(|p| p.min(max_pages)) else {
+            let mut items = first;
+            let mut next = next_link(&headers);
+            let mut read = 1;
+            while let Some(url) = next.take().filter(|_| read < max_pages) {
+                let (page, headers): (Vec<T>, _) = self.get(&url)?;
+                items.extend(page);
+                read += 1;
+                next = next_link(&headers);
+            }
+            return Ok(items);
+        };
+        let separator = if path.contains('?') { '&' } else { '?' };
+        let rest: Vec<Result<Vec<T>>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (2..=pages)
+                .map(|page| {
+                    let url = format!("{path}{separator}page={page}");
+                    scope.spawn(move || self.get::<Vec<T>>(&url).map(|(items, _)| items))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join()
+                        .unwrap_or_else(|_| Err(HostError::Auth("a page read failed".into())))
+                })
+                .collect()
+        });
+        let mut items = first;
+        for page in rest {
+            items.extend(page?);
+        }
+        Ok(items)
+    }
+
     /// `POST path` with a JSON body → the decoded answer.
     pub fn post<B: Serialize, T: DeserializeOwned>(&self, path: &str, body: &B) -> Result<T> {
         let url = self.endpoint.api(path);

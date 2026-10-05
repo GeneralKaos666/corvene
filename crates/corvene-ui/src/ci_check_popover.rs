@@ -309,7 +309,7 @@ impl CiCheckPopover {
                                             format!(
                                                 "Open {}{number} on {}",
                                                 kind.number_prefix(),
-                                                kind.name()
+                                                kind.site_name(&snap.github.endpoint)
                                             )
                                         },
                                         cx,

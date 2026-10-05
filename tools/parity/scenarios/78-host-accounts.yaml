@@ -1,0 +1,38 @@
+# GitLab, Gitea / Forgejo and Bitbucket accounts (Corvene only, flags
+# 342-gitlab, 343-gitea, 344-bitbucket, off in the GitHub Desktop preset the
+# harness runs with). Run with
+#   PARITY_CORVENE_FLAGS=preset=github-desktop,342-gitlab=on,343-gitea=on,344-bitbucket=on
+# GHD signs in to GitHub only, so the snaps are recorded, not compared
+# (`corvene_only`; deviations.md › GitHub layer; design in .docs/hosts.md).
+name: host-accounts
+description: Settings › Accounts with host sections and the host sign-in dialogs (Corvene only)
+setup: repo
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "preferences:accounts"}}
+    wait: 800
+  - snap: {name: accounts-signed-out, corvene_only: true, note: "GHD has no GitLab, Gitea or Bitbucket accounts"}
+  - key: escape
+    wait: 400
+  - ghd: {skip: true}
+    corvene:
+      hook:
+        name: fake-host-accounts
+        arg: '[{"endpoint": {"kind": "gitlab", "web_base": "https://gitlab.com", "api_base": "https://gitlab.com/api/v4"}, "id": "1", "login": "mona", "name": "Mona Lisa"}, {"endpoint": {"kind": "gitea", "web_base": "https://codeberg.org", "api_base": "https://codeberg.org/api/v1"}, "id": "2", "login": "hubot", "needs_reauth": true}]'
+    wait: 300
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "preferences:accounts"}}
+    wait: 800
+  - snap: {name: accounts-signed-in, corvene_only: true}
+  - key: escape
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: sign-in-gitlab}}
+    wait: 800
+  - snap: {name: sign-in-gitlab, corvene_only: true}
+  - key: escape
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: sign-in-bitbucket}}
+    wait: 800
+  - snap: {name: sign-in-bitbucket, corvene_only: true}

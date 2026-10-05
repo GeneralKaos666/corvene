@@ -91,7 +91,7 @@ pub struct MenuLabelsEvent {
     /// Corvene (flags 342-344): the selected repository is on GitLab,
     /// Gitea or Bitbucket, so its items say "View on GitLab", "Create
     /// Merge Request"…
-    pub host: Option<corvene_core::HostKind>,
+    pub host: Option<(corvene_core::HostKind, &'static str)>,
 }
 
 impl Default for MenuLabelsEvent {
@@ -284,7 +284,9 @@ impl MenuLabelsEvent {
             ) != corvene_core::ForcePushState::NotAvailable,
             is_stashed_changes_visible: rs.showing_stash,
             has_current_pull_request: s.current_pull_request(repository.id).is_some(),
-            host: s.hosted_repository(repository.id).map(|h| h.kind),
+            host: s
+                .hosted_repository(repository.id)
+                .map(|h| (h.kind, h.kind.site_name(&h.repo.endpoint))),
             // `changesState.stashEntry !== null`
             ask_for_confirmation_when_stashing_all_changes: rs.desktop_stash().is_some(),
             remotes: corvene_core::Dispatcher::menu_remotes(s, repository.id),
@@ -407,9 +409,11 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         l("Remove", "&Remove")
     };
     // flags 342-344: the host's name and, on GitLab, "merge request"
-    let host = labels.host.unwrap_or(corvene_core::HostKind::GitHub);
+    let (host, site) = labels
+        .host
+        .unwrap_or((corvene_core::HostKind::GitHub, "GitHub"));
     let hosted = |label: &'static str| -> String {
-        let label = label.replace("GitHub", host.name());
+        let label = label.replace("GitHub", site);
         if host.is_merge_request() {
             label
                 .replace("Pull Request", "Merge Request")

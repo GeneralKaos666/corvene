@@ -43,6 +43,16 @@ impl HostKind {
         }
     }
 
+    /// The site's name for "View on …": Codeberg for codeberg.org, else
+    /// the kind's.
+    pub fn site_name(self, api_base: &str) -> &'static str {
+        if self == HostKind::Gitea && api_base.to_ascii_lowercase().contains("://codeberg.org/") {
+            "Codeberg"
+        } else {
+            self.name()
+        }
+    }
+
     /// The Settings › Accounts section heading.
     pub fn section_title(self) -> &'static str {
         match self {
@@ -399,6 +409,16 @@ impl crate::PullRequest {
             .map_or(HostKind::GitHub, |r| HostKind::of_api_base(&r.endpoint))
     }
 
+    /// "GitLab", "Codeberg"…: where the pull request's page is.
+    pub fn host_site_name(&self) -> &'static str {
+        let api_base = self
+            .base
+            .repository
+            .as_ref()
+            .map_or("", |r| r.endpoint.as_str());
+        self.host_kind().site_name(api_base)
+    }
+
     /// `#12`, or `!12` for a GitLab merge request.
     pub fn number_label(&self) -> String {
         format!("{}{}", self.host_kind().number_prefix(), self.number)
@@ -636,6 +656,20 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&HostKind::GitLab).unwrap(),
             "\"gitlab\""
+        );
+    }
+
+    #[test]
+    fn timestamps_with_offsets() {
+        let utc = crate::parse_iso8601("2026-10-05T19:55:00Z").unwrap();
+        assert_eq!(crate::parse_iso8601("2026-10-05T21:55:00+02:00"), Some(utc));
+        assert_eq!(
+            crate::parse_iso8601("2026-10-05T14:55:00.5-05:00"),
+            Some(utc)
+        );
+        assert_eq!(
+            crate::parse_iso8601("2026-10-05T19:55:00.123456+00:00"),
+            Some(utc)
         );
     }
 }
