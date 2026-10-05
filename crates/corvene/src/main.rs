@@ -761,13 +761,9 @@ pub(crate) fn main() {
         cx.on_action(|_: &CloseWindow, cx| {
             // GHD hides the window and keeps running; the Dock brings it back.
             #[cfg(target_os = "macos")]
-            if let Some(handle) = cx.active_window() {
-                handle
-                    .update(cx, |_, window, cx| {
-                        corvene_ui::native_window::hide_window(window, cx)
-                    })
-                    .ok();
-            }
+            defer_in_active_window(cx, |window, cx| {
+                corvene_ui::native_window::hide_window(window, cx)
+            });
             #[cfg(not(target_os = "macos"))]
             cx.hide();
         });
@@ -939,36 +935,15 @@ pub(crate) fn main() {
         });
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowRepositoryList, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.show_repository_list(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| w.show_repository_list(window, cx));
         });
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowBranchesList, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.show_branches_list(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| w.show_branches_list(window, cx));
         });
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowWorktreesList, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.show_worktrees_list(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| w.show_worktrees_list(window, cx));
         });
         // Corvene (`427-back-forward-navigation`)
         on_menu_action(cx, |_: &NavigateBack, cx| Dispatcher::navigate(true, cx));
@@ -983,25 +958,13 @@ pub(crate) fn main() {
         // Corvene (`612-navigation-shortcuts`)
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowPullRequestsList, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.show_pull_requests_list(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| {
+                w.show_pull_requests_list(window, cx)
+            });
         });
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &FocusDiff, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.focus_diff(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| w.focus_diff(window, cx));
         });
         let ws = workspace.clone();
         cx.on_action(move |_: &SelectNextFileFromDiff, cx| {
@@ -1030,25 +993,11 @@ pub(crate) fn main() {
         });
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &GoToSummary, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.focus_commit_summary(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| w.focus_commit_summary(window, cx));
         });
         let ws = workspace.clone();
         cx.on_action(move |_: &Find, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.focus_filter(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| w.focus_filter(window, cx));
         });
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &ToggleChangesFilter, cx| {
@@ -1063,14 +1012,7 @@ pub(crate) fn main() {
         cx.on_action(move |_: &ResetZoom, cx| ws.update(cx, |w, cx| w.zoom(0, cx)));
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &CompareToBranch, cx| {
-            if let Some(window) = cx.active_window() {
-                let ws = ws.clone();
-                window
-                    .update(cx, move |_, window, cx| {
-                        ws.update(cx, |w, cx| w.show_compare(window, cx))
-                    })
-                    .ok();
-            }
+            defer_in_workspace(&ws, cx, |w, window, cx| w.show_compare(window, cx));
         });
         // Branch menu
         let selected = |cx: &App| corvene_core::AppState::global(cx).read(cx).selected;
@@ -1315,27 +1257,15 @@ pub(crate) fn main() {
             }
         });
         cx.on_action(|_: &Minimize, cx| {
-            if let Some(window) = cx.active_window() {
-                window
-                    .update(cx, |_, window, _| window.minimize_window())
-                    .ok();
-            }
+            defer_in_active_window(cx, |window, _| window.minimize_window())
         });
-        cx.on_action(|_: &Zoom, cx| {
-            if let Some(window) = cx.active_window() {
-                window.update(cx, |_, window, _| window.zoom_window()).ok();
-            }
-        });
+        cx.on_action(|_: &Zoom, cx| defer_in_active_window(cx, |window, _| window.zoom_window()));
         cx.on_action(|_: &ToggleFullScreen, cx| {
             // Android: the window always fills the screen; the item shows
             // or hides the system's bars
             #[cfg(target_os = "android")]
             corvene_platform::android::toggle_full_screen();
-            if let Some(window) = cx.active_window() {
-                window
-                    .update(cx, |_, window, _| window.toggle_fullscreen())
-                    .ok();
-            }
+            defer_in_active_window(cx, |window, _| window.toggle_fullscreen());
         });
         // `--hidden` (flag `406-launch-hidden`, Corvene addition): start with
         // the window ordered out, as after ⌘W; the Dock icon shows it
@@ -1415,6 +1345,34 @@ fn resolve_theme_with(
         high_contrast && corvene_platform::accessibility::increase_contrast(),
     )
     .with_variants(variants)
+}
+
+/// Runs `f` on the workspace in its window once GPUI has handed that window
+/// back. A shortcut's handler runs while GPUI updates the window the key
+/// went to, and a menu item's does too (`Window::dispatch_action`): the
+/// window is out of the app until the dispatch returns, so updating it
+/// from the handler fails and the shortcut did nothing.
+fn defer_in_workspace(
+    workspace: &Entity<Workspace>,
+    cx: &mut App,
+    f: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
+) {
+    let workspace = workspace.clone();
+    cx.defer(move |cx| {
+        cx.with_window(workspace.entity_id(), |window, cx| {
+            workspace.update(cx, |w, cx| f(w, window, cx))
+        });
+    });
+}
+
+/// [`defer_in_workspace`] for the window commands (Close Window, Minimize,
+/// Zoom, Toggle Full Screen), which act on whichever window is active.
+fn defer_in_active_window(cx: &mut App, f: impl FnOnce(&mut Window, &mut App) + 'static) {
+    cx.defer(move |cx| {
+        if let Some(window) = cx.active_window() {
+            window.update(cx, |_, window, cx| f(window, cx)).ok();
+        }
+    });
 }
 
 /// Registers the handler of a menu item GitHub Desktop disables while a

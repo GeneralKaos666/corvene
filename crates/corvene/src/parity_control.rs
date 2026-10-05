@@ -40,7 +40,10 @@
 //!   current state, every view re-rendered; `scroll-frames {x, y, dy, n}`
 //!   scrolls by `dy` before each frame and draws what the scroll invalidated
 //! - `state` → the selected repository's selected file / commit, the first
-//!   200 history SHAs and the changed-file count
+//!   200 history SHAs, the changed-file count, the section and the open
+//!   foldout
+//! - `focus` → `{contexts}`: the focused element's key contexts, outermost
+//!   first (which bindings a key reaches)
 //! - `quit`
 
 use std::io::{BufRead, BufReader, Write};
@@ -201,6 +204,14 @@ fn window_command(
     };
     match cmd {
         "ping" => {}
+        "focus" => {
+            let contexts: Vec<String> = window
+                .context_stack()
+                .iter()
+                .map(|context| format!("{context:?}"))
+                .collect();
+            return Ok(json!({"contexts": contexts}));
+        }
         "resize" => window.resize(size(
             px(num(request, "w")),
             px(num(request, "h") + PAGE_TOP),
@@ -583,6 +594,7 @@ fn state_summary(cx: &mut App) -> Value {
         "undo_bar": rs.last_commit.is_some(),
         "repository": state.selected_repository().map(|r| r.name()),
         "section": format!("{:?}", rs.section),
+        "foldout": state.foldout.map(|f| format!("{f:?}")),
     })
 }
 
