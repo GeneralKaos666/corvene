@@ -581,6 +581,8 @@ fn state_summary(cx: &mut App) -> Value {
         "files": rs.status.as_deref().map(|s| s.files.len()),
         // the "Committed … Undo" bar moves the commit form up
         "undo_bar": rs.last_commit.is_some(),
+        "repository": state.selected_repository().map(|r| r.name()),
+        "section": format!("{:?}", rs.section),
     })
 }
 

@@ -3178,6 +3178,23 @@ registry! {
         code: &["crates/corvene-ui/src/repository_drag.rs", "crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/repository_list.rs"],
     },
 
+    /// View › Back / Forward through the repositories and sections shown.
+    BACK_FORWARD_NAVIGATION = 427 "back-forward-navigation" {
+        title: "Back and Forward",
+        summary: "View › Back (⌃-) and Forward (⌃⇧-) step through the repositories and the \
+                  Changes / History tabs shown before, like a browser's history (up to 50 steps; \
+                  removed repositories are skipped). Off macOS, where Ctrl+- zooms out, they are \
+                  Alt+Left and Alt+Right.",
+        ghd_behaviour: "No navigation history: going back to the previous repository or tab means \
+                        picking it again.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22775)],
+        code: &["crates/corvene-core/src/navigation.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/keymap.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

@@ -1435,6 +1435,8 @@ pub struct AppState {
     /// [`RECENT_WORKTREES_LENGTH`]); the Recent group lists a repository
     /// once per worktree.
     pub recent_worktrees: Vec<(u64, PathBuf)>,
+    /// Corvene (`427-back-forward-navigation`): View › Back / Forward.
+    pub navigation: crate::navigation::NavigationHistory,
     pub selected: Option<u64>,
     pub repo_states: HashMap<u64, RepositoryState>,
     pub accounts: Vec<Account>,
@@ -1694,6 +1696,31 @@ impl AppState {
 
     pub fn selected_state(&self) -> Option<&RepositoryState> {
         self.selected.and_then(|id| self.repo_states.get(&id))
+    }
+
+    /// Where the user is (`427-back-forward-navigation`): the selected
+    /// repository and its section.
+    pub fn navigation_entry(&self) -> Option<crate::navigation::NavigationEntry> {
+        let repository = self.selected?;
+        Some(crate::navigation::NavigationEntry {
+            repository,
+            section: self
+                .repo_states
+                .get(&repository)
+                .map(|rs| rs.section)
+                .unwrap_or_default(),
+        })
+    }
+
+    /// The user is about to leave [`Self::navigation_entry`]: a Back step
+    /// (`427-back-forward-navigation`).
+    pub(crate) fn record_navigation(&mut self) {
+        if !self.flags.bool(crate::flags::ids::BACK_FORWARD_NAVIGATION) {
+            return;
+        }
+        if let Some(entry) = self.navigation_entry() {
+            self.navigation.record(entry);
+        }
     }
 
     pub fn repo_state_mut(&mut self, id: u64) -> &mut RepositoryState {

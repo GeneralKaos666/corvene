@@ -37,6 +37,9 @@ pub struct KeymapFlags {
     pub history_review_mode: bool,
     /// `419-extra-zoom-inputs`: ⌘+ / ⇧⌘= (and the keypad's +) zoom in too.
     pub extra_zoom_inputs: bool,
+    /// `427-back-forward-navigation`: ⌃- / ⌃⇧- (Alt+← / Alt+→ off macOS)
+    /// go back / forward.
+    pub back_forward: bool,
 }
 
 impl KeymapFlags {
@@ -52,6 +55,7 @@ impl KeymapFlags {
             navigation_shortcuts: flags.bool(ids::NAVIGATION_SHORTCUTS),
             history_review_mode: flags.bool(ids::HISTORY_REVIEW_MODE),
             extra_zoom_inputs: flags.bool(ids::EXTRA_ZOOM_INPUTS),
+            back_forward: flags.bool(ids::BACK_FORWARD_NAVIGATION),
         }
     }
 }
@@ -315,6 +319,23 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
     }
     if flags.history_review_mode {
         bindings.push(KeyBinding::new(CTRL_CMD_S, ToggleHistoryReviewMode, MENU));
+    }
+    if flags.back_forward {
+        // Xcode's ⌃- / ⌃⇧-; off macOS Ctrl+- is Zoom Out, so the browsers'
+        // Alt+← / Alt+→. macOS may deliver ⌃⇧- as the shifted character:
+        // the menu shows the first binding
+        if cfg!(target_os = "macos") {
+            bindings.extend([
+                KeyBinding::new("ctrl--", NavigateBack, MENU),
+                KeyBinding::new("ctrl-shift--", NavigateForward, MENU),
+                KeyBinding::new("ctrl-_", NavigateForward, MENU),
+            ]);
+        } else {
+            bindings.extend([
+                KeyBinding::new("alt-left", NavigateBack, MENU),
+                KeyBinding::new("alt-right", NavigateForward, MENU),
+            ]);
+        }
     }
     if flags.extra_zoom_inputs {
         // macOS delivers ⇧⌘= as `cmd-+`; the keypad's + and - arrive as the

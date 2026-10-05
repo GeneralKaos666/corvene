@@ -33,7 +33,8 @@
 //! Reviewers… (flag `336-request-reviewers`), Repository ›
 //! View Upstream on GitHub, Repository › Add License… ("A&dd license…" off
 //! macOS: `Pu&ll` has the `l`), View › Show Pull Requests List and Toggle
-//! History Review Mode, File › Remove Repositories… (flag
+//! History Review Mode, View › Back / Forward (flag
+//! `427-back-forward-navigation`), File › Remove Repositories… (flag
 //! `269-bulk-remove-repositories`), Edit › Undo Last Commit (flag
 //! `423-undo-commit-menu-item`, enabled while the Changes tab's Undo bar
 //! shows), Window › Corvene (shows the window hidden with ⌘W)
@@ -74,6 +75,9 @@ pub struct MenuLabelsEvent {
     /// Corvene (`1210-push-to-other-remote`): the remotes of Branch › Push
     /// To ▸ and Fetch From ▸ (`Dispatcher::menu_remotes`; empty: no menus).
     pub remotes: Vec<String>,
+    /// Corvene (`427-back-forward-navigation`): whether View › Back /
+    /// Forward have a step.
+    pub navigation: (bool, bool),
     /// Corvene's flag-dependent items.
     pub extras: MenuExtras,
 }
@@ -92,6 +96,7 @@ impl Default for MenuLabelsEvent {
             ask_for_confirmation_when_stashing_all_changes: true,
             is_changes_filter_visible: true,
             remotes: Vec::new(),
+            navigation: (false, false),
             extras: MenuExtras::default(),
         }
     }
@@ -189,6 +194,7 @@ impl MenuLabelsEvent {
             ask_for_confirmation_on_force_push: s.settings.confirm_force_push,
             ask_for_confirmation_on_repository_removal: s.settings.confirm_repository_removal,
             ask_for_confirmation_when_stashing_all_changes: false,
+            navigation: (s.navigation.can_go(true), s.navigation.can_go(false)),
             extras,
             ..Self::default()
         };
@@ -482,6 +488,21 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             l("Toggle History Review Mode", "Toggle history &review mode"),
             ToggleHistoryReviewMode,
         ));
+    }
+    // Corvene (`427-back-forward-navigation`)
+    if extras.keymap.back_forward {
+        let (back, forward) = labels.navigation;
+        view.extend([
+            separator(),
+            MenuItemConstructorOptions {
+                enabled: Some(back),
+                ..item(l("Back", "B&ack"), NavigateBack)
+            },
+            MenuItemConstructorOptions {
+                enabled: Some(forward),
+                ..item(l("Forward", "F&orward"), NavigateForward)
+            },
+        ]);
     }
     let filter_verb = if labels.is_changes_filter_visible {
         "Hide"
@@ -939,6 +960,7 @@ mod tests {
                     keymap: KeymapFlags {
                         navigation_shortcuts: true,
                         history_review_mode: true,
+                        back_forward: true,
                         ..KeymapFlags::default()
                     },
                 },

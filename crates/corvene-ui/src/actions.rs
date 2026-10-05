@@ -34,6 +34,9 @@ gpui_kit::actions!(
         SelectPreviousFileFromDiff,
         // View › Toggle History Review Mode (`801-history-review-mode`)
         ToggleHistoryReviewMode,
+        // View › Back / Forward (`427-back-forward-navigation`)
+        NavigateBack,
+        NavigateForward,
         // Worktrees
         NewWorktree,
         ShowWorktreesList,

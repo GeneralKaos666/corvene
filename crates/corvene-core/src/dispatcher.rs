@@ -153,6 +153,7 @@ impl Dispatcher {
             repositories,
             recent,
             recent_worktrees,
+            navigation: Default::default(),
             selected,
             repo_states: Default::default(),
             accounts,
@@ -913,6 +914,9 @@ impl Dispatcher {
             if s.repository(id).is_none() {
                 return false;
             }
+            if s.selected != Some(id) {
+                s.record_navigation();
+            }
             s.selected = Some(id);
             s.recent.retain(|r| *r != id);
             s.recent.insert(0, id);
@@ -967,11 +971,40 @@ impl Dispatcher {
         }
     }
 
+    /// Corvene (`427-back-forward-navigation`): View › Back (`back`) or
+    /// Forward, to the repository and section shown before (after).
+    pub fn navigate(back: bool, cx: &mut dyn Host) {
+        let state = Self::state(cx);
+        let target = state.update(cx, |s, cx| {
+            if !s.flags.bool(crate::flags::ids::BACK_FORWARD_NAVIGATION) {
+                return None;
+            }
+            let current = s.navigation_entry();
+            let repositories: Vec<u64> = s.repositories.iter().map(|r| r.id).collect();
+            let target = s
+                .navigation
+                .step(back, current, |id| repositories.contains(&id));
+            // the menu items' enabled state follows
+            cx.notify();
+            target
+        });
+        let Some(target) = target else {
+            return;
+        };
+        state.update(cx, |s, _| s.navigation.replaying = true);
+        if state.read(cx).selected != Some(target.repository) {
+            Self::select_repository(target.repository, cx);
+        }
+        Self::show_section(target.repository, target.section, cx);
+        state.update(cx, |s, _| s.navigation.replaying = false);
+    }
+
     pub fn remove_repository(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (next, moved) = state.update(cx, |s, cx| {
             s.repositories.retain(|r| r.id != id);
             s.recent.retain(|r| *r != id);
+            s.navigation.forget(id);
             s.forget_recent_worktrees(id, None);
             s.remove_repo_state(id);
             let moved = s.selected == Some(id);
@@ -3645,6 +3678,9 @@ impl Dispatcher {
 
     pub fn show_section(id: u64, section: Section, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
+            if s.selected == Some(id) && s.repo_state_mut(id).section != section {
+                s.record_navigation();
+            }
             let rs = s.repo_state_mut(id);
             if rs.section != section {
                 rs.section = section;

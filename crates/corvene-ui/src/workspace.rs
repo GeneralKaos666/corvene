@@ -1117,6 +1117,17 @@ impl Render for Workspace {
             && section != self.section
         {
             self.section = section;
+            // `427-back-forward-navigation`: Back / Forward to the other
+            // section moves keyboard focus to its list, as a tab switch
+            // with `603` does (the focused list or field is going away)
+            let navigation = self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::BACK_FORWARD_NAVIGATION);
+            if navigation && self.focus_handle.contains_focused(window, cx) {
+                self.focus_section_list = true;
+            }
         }
         self.place_launch_focus(window, cx);
         // `115-sidebar-on-right` changed: the group's sizes belong to the

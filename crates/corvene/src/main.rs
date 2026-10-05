@@ -915,6 +915,11 @@ pub(crate) fn main() {
                     .ok();
             }
         });
+        // Corvene (`427-back-forward-navigation`)
+        on_menu_action(cx, |_: &NavigateBack, cx| Dispatcher::navigate(true, cx));
+        on_menu_action(cx, |_: &NavigateForward, cx| {
+            Dispatcher::navigate(false, cx)
+        });
         // Corvene (`801-history-review-mode`)
         let ws = workspace.clone();
         on_menu_action(cx, move |_: &ToggleHistoryReviewMode, cx| {

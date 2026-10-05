@@ -58,6 +58,7 @@ pub fn app_state() -> TestAppState {
         repositories: Vec::new(),
         recent: Vec::new(),
         recent_worktrees: Vec::new(),
+        navigation: Default::default(),
         selected: None,
         repo_states: HashMap::new(),
         accounts: Vec::new(),
