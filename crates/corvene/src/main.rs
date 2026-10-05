@@ -1257,10 +1257,11 @@ pub(crate) fn main() {
                 cx.propagate();
                 return;
             }
-            // the foldout's toolbar button keeps keyboard focus
+            // the toolbar button that opened the foldout keeps keyboard focus
+            let ring = open.is_some() && corvene_ui::toolbar::opened_by_button(cx) == open;
             Dispatcher::close_foldout(cx);
             Dispatcher::close_popup(cx);
-            if open.is_some() {
+            if ring {
                 corvene_ui::toolbar::set_focus_visible(open, cx);
             }
         });

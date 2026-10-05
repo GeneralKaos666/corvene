@@ -180,6 +180,9 @@ impl Workspace {
             // GHD foldouts put the caret in their filter box when they open,
             // however they were opened (`FilterList` autoFocus)
             if foldout != this.last_foldout {
+                if crate::toolbar::opened_by_button(cx) != foldout {
+                    crate::toolbar::forget_opened_by_button(cx);
+                }
                 this.last_foldout = foldout;
                 match foldout {
                     Some(corvene_core::Foldout::Repository) => this

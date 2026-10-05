@@ -125,6 +125,27 @@ pub struct ToolbarFocusVisible(pub Option<Foldout>);
 
 impl Global for ToolbarFocusVisible {}
 
+/// The open foldout when a click on its toolbar button opened it. GHD's
+/// dropdown focus trap gives focus back to what had it when the foldout
+/// opened: the clicked button, or for a shortcut or menu item whatever
+/// had focus before (no ring on the button).
+#[derive(Default)]
+struct OpenedByButton(Option<Foldout>);
+
+impl Global for OpenedByButton {}
+
+/// The open foldout, if its toolbar button opened it.
+pub fn opened_by_button(cx: &App) -> Option<Foldout> {
+    cx.try_global::<OpenedByButton>().and_then(|o| o.0)
+}
+
+/// The foldout closed (or another one replaced it).
+pub fn forget_opened_by_button(cx: &mut App) {
+    if opened_by_button(cx).is_some() {
+        cx.set_global(OpenedByButton(None));
+    }
+}
+
 /// Mark `foldout`'s button (or none) as keyboard-focused.
 pub fn set_focus_visible(foldout: Option<Foldout>, cx: &mut App) {
     cx.set_global(ToolbarFocusVisible(foldout));
@@ -802,6 +823,8 @@ pub fn toolbar_button(
                     }
                 } else if let Some(foldout) = foldout {
                     Dispatcher::toggle_foldout(foldout, cx);
+                    let open = corvene_core::AppState::global(cx).read(cx).foldout == Some(foldout);
+                    cx.set_global(OpenedByButton(open.then_some(foldout)));
                 }
             })
         })
