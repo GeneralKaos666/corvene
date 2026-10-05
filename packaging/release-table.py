@@ -16,7 +16,7 @@ import json
 import re
 import sys
 
-ROWS = ["Windows", "macOS", "Linux", "Android"]
+ROWS = ["Windows", "macOS", "Linux", "Android (Compose)", "Android (GPUI)"]
 COLUMNS = ["x86_64", "x86 (32-bit)", "ARMv7", "ARM64", "Universal"]
 # the spellings of an architecture in a file name, most specific first
 ARCHITECTURES = [
@@ -39,7 +39,8 @@ def classify(name):
         return None
     extension = extension.group(1)
     if extension == "apk" or "android" in lower:
-        row = "Android"
+        # Corvene-Legacy-… is the GPUI app, shipped beside the Compose one
+        row = "Android (GPUI)" if lower.startswith("corvene-legacy-") else "Android (Compose)"
     elif extension in ("exe", "msi") or "windows" in lower:
         row = "Windows"
     elif extension in ("appimage", "deb", "rpm", "tar.gz", "flatpak", "snap") or "linux" in lower:
@@ -51,11 +52,11 @@ def classify(name):
     column = next(
         (column for column, pattern in ARCHITECTURES if re.search(rf"(?<![a-z0-9])({pattern})(?![a-z0-9])", lower)),
         # an Android package that names no ABI carries every one
-        "Universal" if row == "Android" else None,
+        "Universal" if row.startswith("Android") else None,
     )
     if column is None:
         return None
-    if row == "Android":
+    if row.startswith("Android"):
         # the flavour: Corvene-<v>-android-<flavour>[-<arch>].apk
         flavour = re.search(r"android-([a-z]+)[-.]", lower)
         label = flavour.group(1) if flavour else ".apk"
@@ -63,7 +64,7 @@ def classify(name):
         label = "portable"
     else:
         label = ".AppImage" if extension == "appimage" else f".{extension}"
-    if lower.startswith("corvene-full"):
+    if lower.startswith(("corvene-full", "corvene-legacy-full")):
         label = f"Full {label}"
     return row, column, label
 
