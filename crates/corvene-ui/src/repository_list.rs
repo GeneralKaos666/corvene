@@ -857,8 +857,14 @@ impl RepositoryFoldout {
         } else {
             ("repo-row", id).into()
         };
+        let menu_color = if selected || highlighted {
+            t.box_selected_text
+        } else {
+            t.text_secondary
+        };
         div()
             .id(row_id)
+            .group("repository-row")
             .a11y_row(label, selected)
             .h(ROW_HEIGHT())
             .w_full()
@@ -1048,6 +1054,15 @@ impl RepositoryFoldout {
                 highlighted || (selected && self.highlighted.is_none()),
                 |d| d.child(self.menu_anchor.track()),
             )
+            // `621-context-menu-buttons`
+            .when(crate::context_menu::row_menu_buttons(cx), |d| {
+                d.child(crate::context_menu::row_menu_button(
+                    "row-menu",
+                    "repository-row",
+                    selected || highlighted,
+                    menu_color,
+                ))
+            })
     }
 
     /// Corvene (`207-repository-status-filter`): the filter options menu.

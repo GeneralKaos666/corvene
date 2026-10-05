@@ -3831,6 +3831,21 @@ registry! {
         code: &["crates/corvene-ui/src/filter_list.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
 
+    /// A "…" button on list rows opens their context menu.
+    CONTEXT_MENU_BUTTONS = 621 "context-menu-buttons" {
+        title: "Context menu buttons on rows",
+        summary: "Rows of the repository, branch, changes, history and commit file lists show a \
+                  \"…\" button at their right end while hovered or selected; it opens the row's \
+                  context menu, so the menus can be found without a right-click.",
+        ghd_behaviour: "The rows' menus open only with a right-click (or Shift+F10).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: OFF,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2718)],
+        code: &["crates/corvene-ui/src/context_menu.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

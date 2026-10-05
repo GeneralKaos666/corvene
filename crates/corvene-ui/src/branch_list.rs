@@ -1398,6 +1398,7 @@ impl BranchFoldout {
             .bool(corvene_core::flags::ids::BRANCH_LIST_LOCAL_REMOTE_ICONS);
         div()
             .id(SharedString::from(format!("branch-{}", branch.full_name)))
+            .group("branch-row")
             .a11y_row(
                 match (&date, &author) {
                     (Some(date), Some(author)) => format!("{}, {date} by {author}", branch.name),
@@ -1813,6 +1814,19 @@ impl BranchFoldout {
             })
             // Shift+F10 / Menu
             .when(selected, |d| d.child(self.menu_anchor.track()))
+            // `621-context-menu-buttons` (a tag row has no menu)
+            .when(!is_tag && crate::context_menu::row_menu_buttons(cx), |d| {
+                d.child(crate::context_menu::row_menu_button(
+                    "row-menu",
+                    "branch-row",
+                    selected,
+                    if selected && focused {
+                        t.box_selected_active_text
+                    } else {
+                        t.text_secondary
+                    },
+                ))
+            })
     }
 
     /// `895-bulk-delete-branches`: ⌘-click toggles `name` in the

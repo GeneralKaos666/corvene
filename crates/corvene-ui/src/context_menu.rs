@@ -4,7 +4,9 @@
 //!
 //! Shift+F10 (and the Menu key off macOS) open the selected row's menu in
 //! the repository, branch, changes, history and commit file lists
-//! ([`RowMenuAnchor`]), as in GHD.
+//! ([`RowMenuAnchor`]), as in GHD. Deviation (`621-context-menu-buttons`): a
+//! "…" button at the end of those rows opens it too ([`row_menu_button`]);
+//! GHD's menus open only by right-click (desktop/desktop#2718).
 
 use std::rc::Rc;
 
@@ -491,4 +493,43 @@ fn right_click_at(position: Point<Pixels>, window: &mut Window, cx: &mut App) {
             cx,
         );
     });
+}
+/// Corvene (`621-context-menu-buttons`): whether rows show the "…" button.
+pub fn row_menu_buttons(cx: &App) -> bool {
+    corvene_core::AppState::global(cx)
+        .read(cx)
+        .flags
+        .bool(corvene_core::flags::ids::CONTEXT_MENU_BUTTONS)
+}
+
+/// Corvene (`621-context-menu-buttons`): a "…" button for the end of a list
+/// row whose element is `.group(group)`: shown while the row is hovered or
+/// `selected`, it opens the row's context menu at the button (a right-click
+/// there, which reaches the row's own handler).
+pub fn row_menu_button(
+    id: impl Into<ElementId>,
+    group: &'static str,
+    selected: bool,
+    color: Hsla,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .size(zpx(20.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(zpx(4.))
+        .cursor_pointer()
+        .role(Role::Button)
+        .aria_label(mac_or("Show Context Menu", "Show context menu"))
+        .when(!selected, |d| {
+            d.invisible().group_hover(group, |s| s.visible())
+        })
+        .hover(|s| s.bg(color.opacity(0.15)))
+        .child(octicon(Octicon::KebabHorizontal, color).size(zpx(16.)))
+        .on_mouse_down(MouseButton::Left, |ev: &MouseDownEvent, window, cx| {
+            cx.stop_propagation();
+            right_click_at(ev.position, window, cx);
+        })
 }

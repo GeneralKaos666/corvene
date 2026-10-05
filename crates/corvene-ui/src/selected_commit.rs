@@ -1397,6 +1397,7 @@ fn commit_file_row(
     };
     div()
         .id(SharedString::from(format!("commit-file-{}", file.path)))
+        .group("commit-file-row")
         // GHD `SelectedCommits.onContextMenu`
         .on_mouse_down(MouseButton::Right, {
             let focus = focus.clone();
@@ -1495,6 +1496,22 @@ fn commit_file_row(
             .text_size(FONT_SIZE())
         })
         .child(octicon(icon, color))
+        // `621-context-menu-buttons`
+        .when(crate::context_menu::row_menu_buttons(cx), |d| {
+            d.child(
+                crate::context_menu::row_menu_button(
+                    "row-menu",
+                    "commit-file-row",
+                    is_selected,
+                    if is_selected && list_focused {
+                        t.box_selected_active_text
+                    } else {
+                        t.text_secondary
+                    },
+                )
+                .ml(SPACING_HALF()),
+            )
+        })
         .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
         .into_any_element()
 }

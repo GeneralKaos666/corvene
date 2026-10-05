@@ -5513,6 +5513,7 @@ fn file_row(
         .collect();
     div()
         .id(SharedString::from(format!("file-{}", file.path)))
+        .group("changes-row")
         .a11y_row(
             format!(
                 "{}, {}{}",
@@ -5663,6 +5664,22 @@ fn file_row(
             d.child(line_stats_label(stats, colours, t))
         })
         .child(octicon(icon, color))
+        // `621-context-menu-buttons`
+        .when(crate::context_menu::row_menu_buttons(cx), |d| {
+            d.child(
+                crate::context_menu::row_menu_button(
+                    "row-menu",
+                    "changes-row",
+                    is_selected,
+                    if is_selected && list_focused {
+                        t.box_selected_active_text
+                    } else {
+                        t.text_secondary
+                    },
+                )
+                .ml(SPACING_HALF()),
+            )
+        })
         .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
         .into_any_element()
 }

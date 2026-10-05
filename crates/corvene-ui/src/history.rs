@@ -2768,9 +2768,28 @@ fn commit_row(
                     .ok();
             })
         })
-        .child(commit_row_contents_with(
-            commit, text, secondary, badge, branches, cx,
-        ))
+        .map(|d| {
+            let contents = commit_row_contents_with(commit, text, secondary, badge, branches, cx);
+            // `621-context-menu-buttons`: after the contents
+            if crate::context_menu::row_menu_buttons(cx) {
+                d.group("commit-row")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .child(div().flex_1().min_w_0().h_full().child(contents))
+                    .child(
+                        crate::context_menu::row_menu_button(
+                            "row-menu",
+                            "commit-row",
+                            is_selected,
+                            secondary,
+                        )
+                        .mr(SPACING_HALF()),
+                    )
+            } else {
+                d.child(contents)
+            }
+        })
         .when(hint.line_above, |d| {
             d.child(
                 div()
