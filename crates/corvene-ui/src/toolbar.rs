@@ -184,7 +184,10 @@ pub fn toolbar_widths(
 /// `renderPullRequestInfo`
 pub struct PrBadge {
     /// `None`: the current branch's own checks (`334-branch-ci-status`).
-    pub number: Option<u64>,
+    /// `#12`, or `!12` on GitLab (flag `342-gitlab`).
+    pub number: Option<String>,
+    /// On GitHub: the badge has GitHub's reviewer menu.
+    pub github: bool,
     pub status: Option<(
         corvene_core::CheckStatus,
         Option<corvene_core::CheckConclusion>,
@@ -313,7 +316,8 @@ pub fn toolbar_models(
     let current_pr = repo.and_then(|r| state.current_pull_request(r.id));
     let pr_badge = current_pr
         .map(|pr| PrBadge {
-            number: Some(pr.number),
+            number: Some(pr.number_label()),
+            github: pr.host_kind() == corvene_core::HostKind::GitHub,
             status: state.commit_status_summary(pr),
             bounds: pr_badge_bounds.clone(),
         })
@@ -323,6 +327,7 @@ pub fn toolbar_models(
             let status = repo.and_then(|r| state.branch_ci_summary(r.id))?;
             Some(PrBadge {
                 number: None,
+                github: false,
                 status: Some(status),
                 bounds: pr_badge_bounds.clone(),
             })
@@ -944,7 +949,7 @@ pub fn toolbar_button(
                         )
                     })
                     // Corvene (`336-request-reviewers`): the badge's menu
-                    .when(badge.number.is_some(), |d| {
+                    .when(badge.number.is_some() && badge.github, |d| {
                         d.on_mouse_down(MouseButton::Right, |ev: &MouseDownEvent, window, cx| {
                             cx.stop_propagation();
                             let s = corvene_core::AppState::global(cx).read(cx);
@@ -965,12 +970,12 @@ pub fn toolbar_button(
                             .absolute()
                             .inset_0(),
                     )
-                    .when_some(badge.number, |d, number| {
+                    .when_some(badge.number.clone(), |d, number| {
                         d.child(
                             div()
                                 .text_size(FONT_SIZE_SM())
                                 .line_height(zpx(22.))
-                                .child(format!("#{number}")),
+                                .child(number),
                         )
                     })
                     .when_some(badge.status, |d, (status, conclusion)| {

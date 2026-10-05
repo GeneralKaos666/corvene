@@ -845,7 +845,13 @@ impl BranchFoldout {
             .repository(id)
             .and_then(|r| r.non_fork_github())
             .and_then(|gh| s.account_for(&gh.endpoint))
-            .map(|a| a.login.clone());
+            .map(|a| a.login.clone())
+            // flags 342-344: the host account's login
+            .or_else(|| {
+                s.pull_request_repository(id)
+                    .and_then(|gh| s.host_account_for(&gh.endpoint))
+                    .map(|a| a.login.clone())
+            });
         (self.pr_list_filter, login)
     }
 
@@ -1086,12 +1092,22 @@ impl BranchFoldout {
         window.focus(&handle, cx);
     }
 
-    /// The tab bar only exists for GitHub repositories.
+    /// The tab bar only exists for GitHub repositories (and, flags
+    /// 342-344, GitLab, Gitea and Bitbucket ones).
     fn is_github(&self, cx: &App) -> bool {
         let s = self.state.read(cx);
         s.selected
             .and_then(|id| s.repository(id))
             .is_some_and(|r| r.github.is_some())
+            || s.selected.and_then(|id| s.hosted_repository(id)).is_some()
+    }
+
+    /// GitLab calls them merge requests (flag `342-gitlab`).
+    fn merge_requests(&self, cx: &App) -> bool {
+        let s = self.state.read(cx);
+        s.selected
+            .and_then(|id| s.hosted_repository(id))
+            .is_some_and(|h| h.kind.is_merge_request())
     }
 
     fn pull_requests_tab_shown(&self, cx: &App) -> bool {
@@ -1105,8 +1121,7 @@ impl BranchFoldout {
         let s = self.state.read(cx);
         let loading = s.pull_requests_loading(id);
         let repository_name = s
-            .repository(id)
-            .and_then(|r| r.non_fork_github())
+            .pull_request_repository(id)
             .map(|gh| gh.full_name())
             .unwrap_or_default();
         // `pull-requests-signed-out`: no account for the endpoint, so the
@@ -1313,7 +1328,11 @@ impl BranchFoldout {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_size(FONT_SIZE())
                                 .truncate()
-                                .child(format!("Pull requests in {repository_name}")),
+                                .child(if self.merge_requests(cx) {
+                                    format!("Merge requests in {repository_name}")
+                                } else {
+                                    format!("Pull requests in {repository_name}")
+                                }),
                         )
                         .children(rows)
                         .with_scrollbar_handle(&self.pr_scroll)
@@ -2274,7 +2293,12 @@ impl BranchFoldout {
                     TabModel {
                         dot: false,
                         id: "pull-requests-tab",
-                        label: mac_or("Pull Requests", "Pull requests").into(),
+                        label: if self.merge_requests(cx) {
+                            mac_or("Merge Requests", "Merge requests")
+                        } else {
+                            mac_or("Pull Requests", "Pull requests")
+                        }
+                        .into(),
                         count: (open_prs > 0).then(|| open_prs.to_string().into()),
                     },
                 ],

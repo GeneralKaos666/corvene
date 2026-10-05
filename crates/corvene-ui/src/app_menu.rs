@@ -88,6 +88,10 @@ pub struct MenuLabelsEvent {
     pub navigation: (bool, bool),
     /// Corvene's flag-dependent items.
     pub extras: MenuExtras,
+    /// Corvene (flags 342-344): the selected repository is on GitLab,
+    /// Gitea or Bitbucket, so its items say "View on GitLab", "Create
+    /// Merge Request"…
+    pub host: Option<corvene_core::HostKind>,
 }
 
 impl Default for MenuLabelsEvent {
@@ -107,6 +111,7 @@ impl Default for MenuLabelsEvent {
             editors: Vec::new(),
             navigation: (false, false),
             extras: MenuExtras::default(),
+            host: None,
         }
     }
 }
@@ -279,6 +284,7 @@ impl MenuLabelsEvent {
             ) != corvene_core::ForcePushState::NotAvailable,
             is_stashed_changes_visible: rs.showing_stash,
             has_current_pull_request: s.current_pull_request(repository.id).is_some(),
+            host: s.hosted_repository(repository.id).map(|h| h.kind),
             // `changesState.stashEntry !== null`
             ask_for_confirmation_when_stashing_all_changes: rs.desktop_stash().is_some(),
             remotes: corvene_core::Dispatcher::menu_remotes(s, repository.id),
@@ -400,13 +406,26 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     } else {
         l("Remove", "&Remove")
     };
+    // flags 342-344: the host's name and, on GitLab, "merge request"
+    let host = labels.host.unwrap_or(corvene_core::HostKind::GitHub);
+    let hosted = |label: &'static str| -> String {
+        let label = label.replace("GitHub", host.name());
+        if host.is_merge_request() {
+            label
+                .replace("Pull Request", "Merge Request")
+                .replace("&pull request", "&merge request")
+                .replace("pull request", "merge request")
+        } else {
+            label
+        }
+    };
     let pull_request_label = if labels.has_current_pull_request {
-        l(
+        hosted(l(
             "View Pull Request on GitHub",
             "View &pull request on GitHub",
-        )
+        ))
     } else {
-        l("Create Pull Request", "Create &pull request")
+        hosted(l("Create Pull Request", "Create &pull request"))
     };
 
     let mut template = Vec::new();
@@ -630,7 +649,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     }
     repository.extend([
         separator(),
-        item(l("View on GitHub", "&View on GitHub"), ViewOnGitHub),
+        item(hosted(l("View on GitHub", "&View on GitHub")), ViewOnGitHub),
     ]);
     if extras.show_view_upstream {
         repository.push(item(
@@ -675,7 +694,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         item(l("Open With…", "Open &with…"), OpenWith),
         separator(),
         item(
-            l("Create Issue on GitHub", "Create &issue on GitHub"),
+            hosted(l("Create Issue on GitHub", "Create &issue on GitHub")),
             CreateIssue,
         ),
         separator(),
@@ -819,11 +838,11 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     branch.extend([
         separator(),
         item(
-            l("Compare on GitHub", "Compare on &GitHub"),
+            hosted(l("Compare on GitHub", "Compare on &GitHub")),
             CompareOnGitHub,
         ),
         item(
-            l("View Branch on GitHub", "View branch on GitHub"),
+            hosted(l("View Branch on GitHub", "View branch on GitHub")),
             ViewBranchOnGitHub,
         ),
     ]);
@@ -833,7 +852,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     }
     branch.extend([
         item(
-            l("Preview Pull Request", "Preview pull request"),
+            hosted(l("Preview Pull Request", "Preview pull request")),
             PreviewPullRequest,
         ),
         item(pull_request_label, CreatePullRequest),

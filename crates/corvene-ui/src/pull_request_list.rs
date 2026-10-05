@@ -59,7 +59,8 @@ fn opened_by(pr: &PullRequest) -> String {
 
 /// `getSubtitle`: `#12 opened 3 days ago by octocat • Draft`.
 pub fn subtitle(pr: &PullRequest) -> String {
-    let text = format!("#{} {}", pr.number, opened_by(pr));
+    // flags 342-344: GitLab numbers merge requests `!12`
+    let text = format!("{} {}", pr.number_label(), opened_by(pr));
     if pr.draft {
         format!("{text} • Draft")
     } else {
@@ -408,8 +409,8 @@ pub fn quick_view(
                                 .flex_none()
                                 .gap(SPACING_HALF())
                                 .role(Role::Link)
-                                .aria_label("View on GitHub")
-                                .child("View on GitHub")
+                                .aria_label(format!("View on {}", pr.host_kind().name()))
+                                .child(format!("View on {}", pr.host_kind().name()))
                                 .child(octicon(Octicon::LinkExternal, t.secondary_button_text))
                                 .on_click(move |_, _, cx| {
                                     Dispatcher::open_pull_request(&pr_for_view, cx)
@@ -484,7 +485,7 @@ pub fn quick_view(
                                                 .border_1()
                                                 .border_color(t.box_border)
                                                 .text_size(FONT_SIZE_SM())
-                                                .child(format!("#{}", pr.number))
+                                                .child(pr.number_label())
                                                 .when_some(status, |d, (status, conclusion)| {
                                                     d.child(
                                                         ci_status(status, conclusion)
@@ -701,6 +702,25 @@ pub fn no_pull_requests(
         is_search,
         is_loading_pull_requests: loading,
     });
+    // flag `342-gitlab`: GitLab's word for them
+    let merge_requests = corvene_core::AppState::try_global(cx)
+        .and_then(|s| s.read(cx).hosted_repository(id))
+        .is_some_and(|h| h.kind.is_merge_request());
+    let words = |text: String| {
+        if merge_requests {
+            text.replace("pull request", "merge request")
+        } else {
+            text
+        }
+    };
+    let title = words(title);
+    let no_prs = no_prs.map(|(text, name)| (words(text), name));
+    let call_to_action = match call_to_action {
+        NoPullRequestsCallToAction::Text(text) => NoPullRequestsCallToAction::Text(words(text)),
+        NoPullRequestsCallToAction::Link(label, action) => {
+            NoPullRequestsCallToAction::Link(words(label), action)
+        }
+    };
     let call_to_action: AnyElement = match call_to_action {
         NoPullRequestsCallToAction::Text(text) => div().child(text).into_any_element(),
         NoPullRequestsCallToAction::Link(label, action) => {

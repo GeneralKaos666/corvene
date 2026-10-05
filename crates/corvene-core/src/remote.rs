@@ -235,6 +235,12 @@ impl Dispatcher {
             .filter(|a| host.is_none_or(|host| a.host() != host))
             .map(|a| format!("{}={}", a.host(), a.login))
             .collect();
+        // flags 342-344: GitLab, Gitea and Bitbucket accounts
+        logins.extend(
+            s.host_askpass_logins()
+                .into_iter()
+                .filter(|pair| host.is_none_or(|host| !pair.starts_with(&format!("{host}=")))),
+        );
         logins.extend(
             s.generic_logins
                 .iter()

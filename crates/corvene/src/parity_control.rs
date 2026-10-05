@@ -23,7 +23,8 @@
 //! - `action {name}` (a registered action, e.g. `corvene::OpenSettings`)
 //! - `hook {name, arg}`: `complete-welcome`, `add-repo <path>`,
 //!   `theme light|dark|high-contrast|system`, `popup <name>` (a
-//!   `CORVENE_POPUP` name, opened now), `fake-accounts <json>` (signed-in
+//!   `CORVENE_POPUP` name, opened now), `fake-host-accounts <json>` (GitLab,
+//!   Gitea and Bitbucket accounts), `fake-accounts <json>` (signed-in
 //!   accounts + their repository lists, `tools/parity/accounts.py`)
 //! - `snap {path, cached}` → draws a fresh frame and saves it as PNG
 //!   (`cached`: re-render only invalidated views, like a real frame)
@@ -630,6 +631,15 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
             }
         }
         "fake-accounts" => fake_accounts(arg, cx)?,
+        // flags 342-344: GitLab / Gitea / Bitbucket accounts, no tokens
+        "fake-host-accounts" => {
+            let accounts: Vec<corvene_core::HostAccount> =
+                serde_json::from_str(arg).map_err(|e| e.to_string())?;
+            corvene_core::AppState::global(cx).update(cx, |s, cx| {
+                s.hosts.accounts = accounts;
+                cx.notify();
+            });
+        }
         other => return Err(format!("unknown hook {other:?}")),
     }
     Ok(json!({}))

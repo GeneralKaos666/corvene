@@ -446,8 +446,14 @@ impl MenuInputs {
             SelectedRepository {
                 missing: repository.missing,
                 has_github_repository: repository.github.is_some(),
-                hosted_on_github: is_repository_hosted_on_github(repository),
-                repo_issues_enabled: repo_issues_enabled(repository),
+                // flags 342-344: a GitLab, Gitea or Bitbucket repository gets
+                // the same items (View on, Compare, Create Pull Request…)
+                hosted_on_github: is_repository_hosted_on_github(repository)
+                    || state.hosted_repository(repository.id).is_some(),
+                repo_issues_enabled: repo_issues_enabled(repository)
+                    || state
+                        .hosted_repository(repository.id)
+                        .is_some_and(|h| !h.repo.archived),
                 facts,
             }
         });

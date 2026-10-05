@@ -1281,6 +1281,8 @@ pub(crate) fn main() {
         Dispatcher::start_alive(cx);
         Dispatcher::start_pull_request_updater(cx);
         Dispatcher::start_commit_status_refresh(cx);
+        // flags 342-344: OAuth tokens of GitLab and Gitea accounts expire
+        Dispatcher::start_host_token_refresh(cx);
         // GHD `componentDidMount`: offer the move to /Applications
         Dispatcher::check_move_to_applications_folder(cx);
         // `checkForUpdates(true)` at launch and every four hours (release builds)
@@ -1822,6 +1824,12 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         // the sign-in dialog (device flow by default, browser flow link)
         ("sign-in", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx),
         ("sign-in-enterprise", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: true }, cx),
+        // flags 342-344: the GitLab / Gitea / Bitbucket sign-in dialog
+        ("sign-in-gitlab", _) => Dispatcher::show_host_sign_in(corvene_core::HostKind::GitLab, cx),
+        ("sign-in-gitea", _) => Dispatcher::show_host_sign_in(corvene_core::HostKind::Gitea, cx),
+        ("sign-in-bitbucket", _) => {
+            Dispatcher::show_host_sign_in(corvene_core::HostKind::Bitbucket, cx)
+        }
         // `GenericGitAuthentication` after a failed fetch (`:user` with the
         // login known, so only the password is asked for)
         (name @ ("generic-git-auth" | "generic-git-auth:user"), Some(id)) => {

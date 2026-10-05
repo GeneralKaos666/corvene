@@ -48,6 +48,7 @@ mod repository_settings;
 mod request_reviewers;
 mod reset_to_reflog_entry;
 mod sign_in;
+pub mod sign_in_host;
 mod simple;
 mod ssh_key_passphrase;
 mod start_bisect;
@@ -168,6 +169,9 @@ impl DialogHost {
                 .into(),
             Popup::SignIn { enterprise } => cx
                 .new(|cx| SignInDialog::new(state, *enterprise, window, cx))
+                .into(),
+            Popup::SignInHost { kind } => cx
+                .new(|cx| sign_in_host::SignInHostDialog::new(state, *kind, window, cx))
                 .into(),
             Popup::DiscardChanges { repo, paths, all } => cx
                 .new(|_| DiscardChangesDialog::new(*repo, paths.clone(), *all))

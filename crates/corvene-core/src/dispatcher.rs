@@ -141,6 +141,7 @@ impl Dispatcher {
         corvene_git::text_encoding::set_decode_legacy_text(
             flags.bool(crate::flags::ids::NON_UTF8_DIFFS),
         );
+        let hosts = crate::hosts::HostsState::load(&store);
         cx.install_state(AppState {
             store,
             settings,
@@ -205,6 +206,7 @@ impl Dispatcher {
             commit_drafts_nonce: 0,
             excluded_files,
             excluded_files_restored: std::collections::HashSet::new(),
+            hosts,
         });
         let state = StateHandle;
         cx.background_executor()
@@ -973,6 +975,7 @@ impl Dispatcher {
             Self::check_lfs(id, cx);
             Self::ensure_pull_requests(id, cx);
             Self::refresh_github_repository(id, cx);
+            Self::hosted_repository_changed(id, cx);
             Self::refresh_autolinks(id, cx);
             Self::load_issue_trackers(id, cx);
             Self::resume_tutorial_on_other_repository(id, cx);
@@ -1784,6 +1787,9 @@ impl Dispatcher {
                 // `294-follow-moved-repositories`
                 Self::remember_repository_location(id, cx);
                 Self::subscribe_current_pull_request_status(id, cx);
+                // flags 342-344: a remote on GitLab, Gitea or Bitbucket
+                // (both throttled)
+                Self::hosted_repository_changed(id, cx);
                 Self::add_upstream_remote_if_needed(id, cx);
                 Self::refresh_branch_protection(id, cx);
                 let (rerun, prune) = Self::state(cx).update(cx, |s, _| {

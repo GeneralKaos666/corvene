@@ -2805,6 +2805,60 @@ registry! {
         code: &["crates/corvene-core/src/text_tokens.rs", "crates/corvene-core/src/forks.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs"],
     },
 
+    /// GitLab accounts, merge requests and pipelines.
+    GITLAB = 342 "gitlab" {
+        title: "GitLab",
+        summary: "Sign in to GitLab.com or a self-managed GitLab (browser or personal access \
+                  token) in Settings › Accounts. A repository on GitLab gets the Merge Requests \
+                  tab, Create Merge Request, the current branch's merge request with its pipeline \
+                  in the toolbar and the checks popover, View on GitLab, and HTTPS credentials \
+                  for git from the account. Public gitlab.com projects work without signing in.",
+        ghd_behaviour: "Only GitHub.com and GitHub Enterprise; a GitLab repository is a plain \
+                        repository and git asks for its credentials.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7875), Upstream::issue(18588)],
+        code: &["crates/corvene-hosts/src/gitlab.rs", "crates/corvene-core/src/hosts.rs", "crates/corvene-ui/src/dialogs/sign_in_host.rs"],
+    },
+
+    /// Gitea, Forgejo and Codeberg accounts, pull requests and statuses.
+    GITEA = 343 "gitea" {
+        title: "Gitea, Forgejo and Codeberg",
+        summary: "Sign in to Codeberg or a self-hosted Gitea or Forgejo (browser or access \
+                  token) in Settings › Accounts. A repository there gets the Pull Requests tab, \
+                  Create Pull Request, the current branch's pull request with its commit \
+                  statuses (Actions too) in the toolbar and the checks popover, View on the \
+                  host, and HTTPS credentials for git. Public Codeberg repositories work without \
+                  signing in.",
+        ghd_behaviour: "Only GitHub.com and GitHub Enterprise.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-hosts/src/gitea.rs", "crates/corvene-core/src/hosts.rs", "crates/corvene-ui/src/dialogs/sign_in_host.rs"],
+    },
+
+    /// Bitbucket Cloud accounts, pull requests and build statuses.
+    BITBUCKET = 344 "bitbucket" {
+        title: "Bitbucket",
+        summary: "Sign in to Bitbucket Cloud with an Atlassian API token in Settings › \
+                  Accounts. A repository on bitbucket.org gets the Pull Requests tab, Create Pull \
+                  Request, the current branch's pull request with its build statuses \
+                  (Pipelines too) in the toolbar and the checks popover, View on Bitbucket, and \
+                  HTTPS credentials for git. Public repositories work without signing in.",
+        ghd_behaviour: "Only GitHub.com and GitHub Enterprise; git asks for Bitbucket's \
+                        credentials and app passwords no longer work.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(14052)],
+        code: &["crates/corvene-hosts/src/bitbucket.rs", "crates/corvene-core/src/hosts.rs", "crates/corvene-ui/src/dialogs/sign_in_host.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

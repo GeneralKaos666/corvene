@@ -110,6 +110,7 @@ pub fn app_state() -> TestAppState {
         commit_drafts_nonce: 0,
         excluded_files: HashMap::new(),
         excluded_files_restored: HashSet::new(),
+        hosts: Default::default(),
     };
     TestAppState { state, _dir: dir }
 }

@@ -664,7 +664,158 @@ impl PreferencesDialog {
                     })
                     .into_any_element()
             })
+            .children(
+                corvene_core::HostKind::OTHERS
+                    .into_iter()
+                    .filter(|kind| s.host_kind_enabled(*kind))
+                    .map(|kind| self.host_accounts_section(kind, cx)),
+            )
             .into_any_element()
+    }
+
+    /// Flags 342-344: the GitLab, Gitea and Forgejo, and Bitbucket sections
+    /// (Corvene addition), laid out like GitHub Enterprise's.
+    fn host_accounts_section(&self, kind: corvene_core::HostKind, cx: &Context<Self>) -> Div {
+        use corvene_core::HostKind;
+        let t = cx.ghd();
+        let accounts: Vec<corvene_core::HostAccount> = self
+            .state
+            .read(cx)
+            .hosts
+            .accounts
+            .iter()
+            .filter(|a| a.kind() == kind)
+            .cloned()
+            .collect();
+        let (id, body, action, add_id, add_label): (
+            &'static str,
+            &'static str,
+            &'static str,
+            &'static str,
+            &'static str,
+        ) = match kind {
+            HostKind::Gitea => (
+                "prefs-signin-gitea",
+                "Sign in to Codeberg or your Gitea or Forgejo server to see pull requests and CI \
+                 statuses of its repositories.",
+                mac_or("Sign Into Gitea or Forgejo", "Sign into Gitea or Forgejo"),
+                "prefs-add-gitea",
+                "Add Gitea or Forgejo account",
+            ),
+            HostKind::Bitbucket => (
+                "prefs-signin-bitbucket",
+                "Sign in to Bitbucket to see pull requests and build statuses of your \
+                 repositories there.",
+                mac_or("Sign Into Bitbucket", "Sign into Bitbucket"),
+                "prefs-add-bitbucket",
+                "Add Bitbucket account",
+            ),
+            _ => (
+                "prefs-signin-gitlab",
+                "Sign in to GitLab.com or your GitLab server to see merge requests and pipelines \
+                 of its repositories.",
+                mac_or("Sign Into GitLab", "Sign into GitLab"),
+                "prefs-add-gitlab",
+                "Add GitLab account",
+            ),
+        };
+        let row = |account: &corvene_core::HostAccount, ix: usize| {
+            let api_base = account.endpoint.api_base.clone();
+            let login = account.login.clone();
+            let subtitle = if account.needs_reauth {
+                format!("{} · signed out by the server", account.endpoint.web_base)
+            } else {
+                account.endpoint.web_base.clone()
+            };
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(SPACING())
+                .mb(SPACING())
+                .child(crate::widgets::avatar_image(
+                    account
+                        .avatar_url
+                        .as_deref()
+                        .and_then(|u| crate::widgets::avatar_lookup_url(u, cx)),
+                    zpx(34.),
+                    cx,
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .truncate()
+                                .child(account.title()),
+                        )
+                        .child(
+                            div()
+                                .text_color(if account.needs_reauth {
+                                    t.error
+                                } else {
+                                    t.text_secondary
+                                })
+                                .truncate()
+                                .child(subtitle),
+                        ),
+                )
+                .when(account.needs_reauth, |d| {
+                    d.child(
+                        button(
+                            ("prefs-host-reauth", ix),
+                            mac_or("Sign In Again", "Sign in again"),
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            Dispatcher::close_popup(cx);
+                            Dispatcher::show_host_sign_in(kind, cx)
+                        }),
+                    )
+                })
+                .child(
+                    button(
+                        ("prefs-host-signout", ix),
+                        mac_or("Sign Out", "Sign out"),
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::host_sign_out(api_base.clone(), login.clone(), cx)
+                    }),
+                )
+        };
+        div()
+            .flex()
+            .flex_col()
+            .child(section_heading(kind.section_title(), cx))
+            .children(accounts.iter().enumerate().map(|(ix, a)| row(a, ix)))
+            .child(if accounts.is_empty() {
+                accounts_call_to_action(
+                    id,
+                    body,
+                    action,
+                    false,
+                    move |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::show_host_sign_in(kind, cx)
+                    },
+                    cx,
+                )
+                .mb(SPACING())
+                .into_any_element()
+            } else {
+                div()
+                    .mb(SPACING())
+                    .child(button(add_id, add_label, cx).on_click(move |_, _, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::show_host_sign_in(kind, cx)
+                    }))
+                    .into_any_element()
+            })
     }
 
     /// `CustomIntegrationForm`: Path + Choose…, Arguments, validation messages.

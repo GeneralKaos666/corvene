@@ -44,6 +44,7 @@ pub mod git_store;
 pub mod headless;
 pub mod history_filter;
 pub mod host;
+pub mod hosts;
 pub mod integrations;
 pub mod keymap_file;
 pub mod line_selection;
@@ -101,6 +102,7 @@ pub use emoji::CustomEmoji;
 pub use flags::{FlagId, FlagOverrides, Flags};
 pub use forks::UPSTREAM_REMOTE_NAME;
 pub use host::{AsyncCtx, Ctx, Host, HostServices, StateCx, StateHandle};
+pub use hosts::{HostSignIn, HostsState};
 pub use integrations::{EditorChoice, PreferencesSave, RepositorySettingsSave};
 pub use mco::{
     Banner, ConflictKind, ConflictState, McoConflicts, McoDetail, McoStep, McoUndo, MergePreview,

@@ -141,6 +141,11 @@ pub enum Popup {
     SignIn {
         enterprise: bool,
     },
+    /// Corvene (flags 342-344): sign in to GitLab, Gitea / Forgejo or
+    /// Bitbucket (`dialogs::sign_in_host`).
+    SignInHost {
+        kind: corvene_models::HostKind,
+    },
     /// `all` selects the "Discard All Changes" wording.
     DiscardChanges {
         repo: u64,
@@ -1693,6 +1698,9 @@ pub struct AppState {
     /// saved, and the repositories whose first status already got them.
     pub excluded_files: HashMap<u64, Vec<String>>,
     pub excluded_files_restored: std::collections::HashSet<u64>,
+    /// Corvene (flags `342-gitlab`, `343-gitea`, `344-bitbucket`): GitLab,
+    /// Gitea / Forgejo and Bitbucket accounts and data (`hosts.rs`).
+    pub hosts: crate::hosts::HostsState,
 }
 
 impl AppState {
