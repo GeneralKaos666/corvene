@@ -135,7 +135,9 @@ incremental = false
 # tree-sitter-scss: its build script passes a GCC flag MSVC refuses
 # (bindings/rust/build.rs); tree-sitter-agda: its scanner reads before an
 # empty array (src/scanner.c); gpui-pre-windows: anchored popups (the context
-# menus; src/window.rs, src/events.rs). All marked "Corvene patch".
+# menus; src/window.rs, src/events.rs); gpui-pre, gpui-pre-macos and
+# gpui-pre-apple: no image codecs Corvene never decodes (Cargo.toml). All
+# marked "Corvene patch".
 [patch.crates-io]
 tree-sitter-agda = { path = "vendor/tree-sitter-agda" }
 gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
@@ -144,3 +146,4 @@ gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 gpui-pre = { path = "vendor/gpui-pre" }
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
+gpui-pre-apple = { path = "vendor/gpui-pre-apple" }

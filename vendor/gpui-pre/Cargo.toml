@@ -345,21 +345,18 @@ version = "0.9.2"
 version = "=0.3.7"
 package = "gpui-pre-http-client"
 
+# Corvene patch: only the formats GPUI names in its `ImageFormat` and
+# Corvene's image diffs; DDS, OpenEXR, farbfeld, HDR, QOI and rayon's
+# thread pool were about 1 MB of the binary
 [dependencies.image]
 version = "0.25.1"
 features = [
     "bmp",
-    "dds",
-    "exr",
-    "ff",
     "gif",
-    "hdr",
     "ico",
     "jpeg",
     "png",
     "pnm",
-    "qoi",
-    "rayon",
     "tga",
     "tiff",
     "webp",

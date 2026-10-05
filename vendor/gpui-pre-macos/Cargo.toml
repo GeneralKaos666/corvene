@@ -115,21 +115,18 @@ package = "gpui-pre-apple"
 version = "=0.3.7"
 package = "gpui-pre-util"
 
+# Corvene patch: only the formats GPUI names in its `ImageFormat` and
+# Corvene's image diffs; DDS, OpenEXR, farbfeld, HDR, QOI and rayon's
+# thread pool were about 1 MB of the binary
 [target.'cfg(target_os = "macos")'.dependencies.image]
 version = "0.25.1"
 features = [
     "bmp",
-    "dds",
-    "exr",
-    "ff",
     "gif",
-    "hdr",
     "ico",
     "jpeg",
     "png",
     "pnm",
-    "qoi",
-    "rayon",
     "tga",
     "tiff",
     "webp",
