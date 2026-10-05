@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+mod hosts;
 mod signature;
+pub use hosts::*;
 pub use signature::*;
 
 /// A repository known to Corvene (`models/repository.ts`).

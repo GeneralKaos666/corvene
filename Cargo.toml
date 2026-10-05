@@ -22,6 +22,7 @@ corvene-git = { path = "crates/corvene-git" }
 corvene-github = { path = "crates/corvene-github" }
 corvene-grammars = { path = "crates/corvene-grammars" }
 corvene-highlight = { path = "crates/corvene-highlight" }
+corvene-hosts = { path = "crates/corvene-hosts" }
 syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-onig", "dump-load", "default-syntaxes"] }
 two-face = { version = "0.4", default-features = false, features = ["syntect-fancy"] }
 # Opt-in tree-sitter highlighting (grammars live in corvene-grammars / the tree-sitter packs)
