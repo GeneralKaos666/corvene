@@ -59,7 +59,8 @@ impl Client {
         let mut out = HashMap::new();
         let shas: Vec<&String> = shas
             .iter()
-            .filter(|s| s.len() >= 7 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+            // a `GitObjectID` is a full id; one bad literal fails the whole query
+            .filter(|s| matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit()))
             .collect();
         for chunk in shas.chunks(BATCH) {
             let data: Data = self.post_graphql(

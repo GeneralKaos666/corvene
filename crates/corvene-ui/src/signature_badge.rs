@@ -5,7 +5,7 @@
 //! indicators. The verdicts come from `corvene_core::signatures`.
 
 use corvene_core::signatures::{Priority, SignatureEntry, Source};
-use corvene_core::{AppState, Commit, Dispatcher, SignatureKind, SignatureState};
+use corvene_core::{AppState, Commit, Dispatcher, SignatureKind, SignatureReason, SignatureState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -71,8 +71,15 @@ pub(crate) fn tooltip_text(kind: SignatureKind, entry: Option<&SignatureEntry>) 
         None => None,
     };
     let mut heading = label(verdict.map(|(s, _)| s), loading).to_string();
-    if let Some(reason) = reason {
-        heading = format!("{heading}: {}", reason.describe());
+    match reason {
+        // git's `U` for SSH: the allowed signers file does not list the key
+        Some(SignatureReason::UnknownKey)
+            if kind == SignatureKind::Ssh && verdict.is_some_and(|(_, s)| s == Source::Local) =>
+        {
+            heading.push_str(": The key is not in gpg.ssh.allowedSignersFile");
+        }
+        Some(reason) => heading = format!("{heading}: {}", reason.describe()),
+        None => {}
     }
     let bold = heading.len();
     let mut lines = vec![heading];
@@ -211,9 +218,10 @@ pub(crate) fn row_icon(commit: &Commit, selected: Option<Hsla>, cx: &App) -> Opt
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use corvene_core::signatures::{GitHubSlot, LocalSlot};
-    use corvene_core::{LocalSignature, SignatureReason};
+    // not `super::*`: gpui's `test` attribute would shadow the built-in one
+    use super::tooltip_text;
+    use corvene_core::signatures::{GitHubSlot, LocalSlot, SignatureEntry};
+    use corvene_core::{LocalSignature, SignatureKind, SignatureReason, SignatureState};
 
     #[test]
     fn tooltip_names_signer_key_and_reason() {
