@@ -8,70 +8,47 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 <DocsLayout
   currentSlug="parity"
   title="Parity harness"
-  description="How Corvene is kept identical to GitHub Desktop 3.6.6, and how its deliberate differences are tracked."
+  description="How Corvene is compared against GitHub Desktop, screenshot by screenshot."
 >
-  <h2 id="goal">The goal</h2>
   <p>
-    Corvene is a port, not a reimagining. Layout, colours, wording, shortcuts, dialogs, foldouts and menus follow GitHub
-    Desktop 3.6.6, down to the pixel on macOS. Where Corvene improves on it, the improvement is a
-    <a href={`${base}/docs/flags`}>flag</a> that can be switched off, and the <em>GitHub Desktop</em> preset switches them all off.
+    Corvene should look and behave like GitHub Desktop 3.6.6. To check that, <code>tools/parity</code> runs both apps
+    side by side, sends them the same clicks and keys, screenshots both, and compares the screenshots pixel by pixel.
   </p>
 
-  <h2 id="harness">The harness</h2>
+  <h2 id="run">Running it</h2>
+  <CodeBlock code={"pip3 install -r tools/parity/requirements.txt\ncargo build -p corvene --features snapshots\npython3 tools/parity/parity.py [scenario…]"} />
   <p>
-    <code>tools/parity</code> drives both applications through the same scenarios and diffs what they draw:
-  </p>
-  <ul>
-    <li>
-      A private copy of GitHub Desktop runs under the Chrome DevTools Protocol with a fresh profile; Corvene runs with
-      <code>CORVENE_CONTROL=&lt;port&gt;</code> and the <code>snapshots</code> feature, which lets the harness click, type and
-      capture the window off screen.
-    </li>
-    <li>
-      Both get a freshly built fixture repository with fixed authors and dates, so the two copies have identical commit
-      ids, and fake signed-in accounts, since neither app can sign in during a run.
-    </li>
-    <li>
-      Every scenario is a list of steps (click, type, press, open a dialog, snap). After every <code>snap</code> both
-      windows are captured at 1367×814 in the dark and the light theme and compared pixel by pixel, with a tolerance and
-      optional masks per snap.
-    </li>
-    <li>
-      The report in <code>target/parity/latest/index.html</code> shows each pair as an overlay, side by side, swipe and
-      blink. The run fails when any snap exceeds its threshold.
-    </li>
-  </ul>
-  <CodeBlock code={"cargo build -p corvene --features snapshots\npython3 tools/parity/parity.py [scenario…]"} />
-  <p>
-    Corvene runs under <code>CORVENE_FLAGS=preset=github-desktop</code> during a parity run. A touched view's scenarios may
-    not get worse, and every new surface or state gets a scenario.
+    The report ends up in <code>target/parity/latest/index.html</code>, with each pair of screenshots overlaid, side by
+    side, and as a swipe. The run fails if any screenshot differs by more than its threshold.
   </p>
 
-  <h2 id="deviations">Deliberate differences</h2>
-  <p>
-    Every difference is recorded with the GitHub Desktop source file it departs from, and when it can be switched off it is
-    a flag. A few examples:
-  </p>
+  <h2 id="how">What it does</h2>
   <ul>
-    <li><code>202-fs-watcher</code>: the repository refreshes when files change, not only on window focus.</li>
-    <li><code>201-commit-templates</code>: the repository's <code>commit.template</code> prefills the description.</li>
-    <li><code>102-smooth-wheel-scrolling</code>: mouse-wheel ticks animate instead of jumping 40 px.</li>
-    <li><code>206-import-from-github-desktop</code>: File › Import Repositories from GitHub Desktop…</li>
-    <li><code>105-tree-sitter-highlighting</code>: highlighting for languages GitHub Desktop leaves plain (off by default).</li>
     <li>
-      <strong>Bug fixes</strong>, tagged as such in the registry, fix behaviour GitHub Desktop plainly gets wrong (a selected
-      row losing its colour under the pointer, a stale warning in Add Local Repository). They too can be switched back.
+      Both apps run as private copies with fresh settings, so your own GitHub Desktop and Corvene are left alone. Neither
+      needs focus; you can keep working while it runs.
+    </li>
+    <li>
+      Each gets its own copy of a test repository with fixed authors and dates, so commit ids and "3 days ago" match.
+    </li>
+    <li>Screenshots are taken at 1367×814, in the dark and the light theme.</li>
+    <li>
+      Anti-aliasing differs between Chromium and Corvene, so pixels next to text get more tolerance than flat areas.
+      A 1px shift or a slightly wrong colour still fails.
+    </li>
+    <li>
+      Corvene runs with the <em>GitHub Desktop</em> <a href={`${base}/docs/flags`}>preset</a>, which switches off
+      everything Corvene does differently.
     </li>
   </ul>
   <p>
-    Not flagged, because there is nothing to switch: no telemetry or crash reporting of any kind, and the native engine
-    itself.
+    A change to a view shouldn't make its scenarios worse, and anything new on screen gets a scenario of its own. The full
+    details are in <code>tools/parity/README.md</code>.
   </p>
 
   <h2 id="linux">Linux and Windows</h2>
   <p>
-    GitHub Desktop has no Linux release, so Linux Corvene follows the community build's menus and wording. The Linux and
-    Windows chrome (title bar, menu bar, window controls) is newer than the macOS one and not yet pixel-identical
-    everywhere; expect small differences.
+    GitHub Desktop has no official Linux build, so on Linux Corvene uses the menus and wording of the community one. The
+    window frame on Linux and Windows is newer than the macOS one and doesn't match pixel for pixel everywhere yet.
   </p>
 </DocsLayout>

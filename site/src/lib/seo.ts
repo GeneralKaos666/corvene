@@ -142,30 +142,30 @@ export const FAQS: Faq[] = [
   {
     question: "Is Corvene made by GitHub?",
     answer:
-      "No. Corvene is an independent open-source project and is not affiliated with, sponsored by or endorsed by GitHub, Inc. It recreates the interface of GitHub Desktop 3.6.6 with its own engine written in Rust.",
+      "No. It's an independent open-source project with no connection to GitHub, Inc. It copies GitHub Desktop 3.6.6's interface on top of its own Rust engine.",
   },
   {
     question: "Is it free?",
-    answer: "Yes. Corvene is free software under the MIT License, with no paid tiers, accounts or telemetry.",
+    answer: "Yes. It's MIT licensed. No paid tier, no account, no telemetry.",
   },
   {
     question: "Why does macOS say the app cannot be verified?",
     answer:
-      "Corvene is signed with a self-signed certificate rather than notarized by Apple, so Gatekeeper blocks the first launch of a downloaded copy. Allow it once under System Settings › Privacy & Security › Open Anyway, or install with Homebrew, which clears the quarantine flag.",
+      "It isn't notarized by Apple, so macOS blocks the first launch of a downloaded copy. Allow it once in System Settings › Privacy & Security › Open Anyway, or install with Homebrew and it won't ask.",
   },
   {
     question: "Does it work with my existing GitHub Desktop setup?",
     answer:
-      "Yes. Corvene uses your own git, so hooks, credential helpers and configuration keep working, and it can import your repository list from GitHub Desktop. Sign in once more so the token is stored in Corvene's own keychain entry.",
+      "Yes. It uses your own git, so hooks, credential helpers and config keep working, and File › Import Repositories from GitHub Desktop brings your repository list over. You'll need to sign in again.",
   },
   {
     question: "Which platforms are supported?",
     answer:
-      "macOS 10.15.7 or newer (Intel) and 11 or newer (Apple Silicon), Windows 10 and 11, Linux distributions with glibc 2.35 or newer, and Android 8.0 or newer. Windows builds are new and Android is experimental.",
+      "macOS 10.15.7 and later on Intel, 11 and later on Apple Silicon, Windows 10 and 11, Linux with glibc 2.35 or later, and Android 8.0 and later. Windows is new and Android is experimental.",
   },
   {
     question: "Can I make it behave exactly like GitHub Desktop?",
     answer:
-      "Yes. Every deviation from GitHub Desktop 3.6.6 is a flag, and the GitHub Desktop preset switches all of them off, bugs included.",
+      "Yes. Pick the GitHub Desktop preset in the Flags dialog and every change Corvene makes is switched off, bug fixes included.",
   },
 ];

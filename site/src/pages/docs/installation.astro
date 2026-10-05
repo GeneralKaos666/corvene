@@ -9,149 +9,138 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 <DocsLayout
   currentSlug="installation"
   title="Installation"
-  description="Requirements and packages for macOS, Windows, Linux and Android, and what the Standard and Full editions are."
+  description="Every package for every platform, and Standard vs Full."
 >
   <p>
-    Every package is on <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">GitHub Releases</a> and linked
-    from the <a href={`${base}/#downloads`}>downloads list</a>, which also shows each file's size and sha256. Replace
-    <code>&lt;version&gt;</code> below with the release you downloaded.
+    Everything is on <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">GitHub Releases</a>. The
+    <a href={`${base}/#downloads`}>downloads list</a> links each file with its size and sha256, and
+    <a href={`${base}/#pick`}>Help me pick</a> narrows it down to one. Swap <code>&lt;version&gt;</code> below for the
+    release you have.
   </p>
 
-  <h2 id="editions">Standard and Full editions</h2>
-  <p>Every format on every platform comes twice:</p>
-  <ul>
-    <li>
-      <strong>Standard</strong> (<code>Corvene-…</code>, about 23 MB on macOS): GitHub Desktop's syntax highlighter is built
-      in. Tree-sitter grammars for 300+ more languages are an optional download under Settings › Advanced.
-    </li>
-    <li>
-      <strong>Full</strong> (<code>Corvene-Full-…</code>, <code>corvene-full</code> for the .deb and .rpm): the same app with
-      every tree-sitter grammar compiled in, about 170 MB more per architecture, for machines without internet access.
-      It replaces the Standard package and updates to the next Full release.
-    </li>
-  </ul>
+  <h2 id="editions">Standard or Full</h2>
+  <p>
+    Every package comes in two editions. They're the same app; the only difference is the tree-sitter grammars used for
+    syntax highlighting.
+  </p>
+  <p>
+    Tree-sitter highlighting is off by default (flag <code>105-tree-sitter-highlighting</code>, on in the Max preset).
+    Without it you get GitHub Desktop's highlighting, which both editions have built in. Turn it on in Standard and
+    Settings › Advanced downloads the grammars, 300+ languages' worth. Full (<code>Corvene-Full-…</code>,
+    <code>corvene-full</code> for .deb and .rpm) already has them, so it never needs to download anything. That's the one
+    for machines without internet access. It's about 170 MB bigger once installed.
+  </p>
+  <p>Full updates to the next Full release.</p>
 
   <h2 id="macos">macOS</h2>
-  <ul>
-    <li>macOS 10.15.7 Catalina or newer on Intel, macOS 11 Big Sur or newer on Apple Silicon.</li>
-    <li>
-      <code>git</code> 2.38 or newer on your <code>PATH</code>: the Xcode Command Line Tools from Xcode 14.3 on ship 2.39,
-      or install Homebrew's.
-    </li>
-  </ul>
-  <h3>Homebrew (recommended)</h3>
+  <p>
+    macOS 10.15.7 or later on Intel, 11 or later on Apple Silicon. You also need <code>git</code> 2.38 or later: the
+    Command Line Tools from Xcode 14.3 on have it (<code>xcode-select --install</code>), or <code>brew install git</code>.
+    Adding to an existing stash needs 2.40.
+  </p>
+  <h3>Homebrew</h3>
   <CodeBlock code={BREW_COMMAND} />
+  <p>The easiest way. Homebrew clears the quarantine flag, so macOS doesn't stop the first launch.</p>
+  <h3>Download</h3>
   <p>
-    The cask clears the quarantine attribute, so Gatekeeper does not block the app. <code>brew upgrade</code> updates it,
-    as does the app's own updater.
-  </p>
-  <h3>Direct download</h3>
-  <p>
-    <code>Corvene-&lt;version&gt;-macos-universal.dmg</code> runs on both architectures; the <code>-arm64</code> and
-    <code>-x86_64</code> files are smaller downloads of one slice each. The <code>.zip</code> files hold the same app and
-    are what the updater installs.
+    The <code>universal</code> .dmg runs on any Mac. The <code>arm64</code> (Apple Silicon) and <code>x86_64</code> (Intel)
+    ones are smaller. The .zip files hold the same app.
   </p>
   <p>
-    Corvene is signed with a self-signed certificate rather than notarized by Apple, so the first launch of a downloaded
-    copy is blocked. Click <strong>Done</strong>, then open <strong>System Settings › Privacy &amp; Security</strong> and click
-    <strong>Open Anyway</strong> (on macOS 14 and older, right-click the app and choose Open). Or clear the flag:
+    Corvene isn't notarized by Apple, so macOS blocks the first launch of a downloaded copy. Click Done, then go to System
+    Settings › Privacy &amp; Security and click Open Anyway. On macOS 14 and older, right-click the app and choose Open
+    instead. Or from Terminal:
   </p>
   <CodeBlock code="xattr -d com.apple.quarantine /Applications/Corvene.app" />
-  <p>Updates the app downloads itself carry no quarantine flag, so this happens once.</p>
+  <p>You only do this once. Updates install without asking.</p>
 
   <h2 id="windows">Windows</h2>
-  <ul>
-    <li>Windows 10 or 11 on x64, ARM64 or 32-bit x86.</li>
-    <li><a href="https://git-scm.com/download/win" target="_blank" rel="noopener noreferrer">Git for Windows</a> on your <code>PATH</code>.</li>
-  </ul>
+  <p>
+    Windows 10 or 11, on x64, ARM64 or 32-bit. The packages aren't code-signed yet, so SmartScreen warns the first time:
+    click More info, then Run anyway. With Smart App Control turned on, Windows won't run them at all.
+  </p>
   <h3>Installer</h3>
   <p>
-    <code>Corvene-&lt;version&gt;-&lt;x86_64|aarch64|i686&gt;-setup.exe</code> installs per user without administrator
-    rights into <code>%LOCALAPPDATA%\Programs\Corvene</code>, puts <code>corvene</code> on your <code>PATH</code>, registers
-    the <code>x-corvene://</code> links and updates itself.
+    <code>Corvene-&lt;version&gt;-x86_64-setup.exe</code> (or <code>aarch64</code>, <code>i686</code>). Installs for your
+    user only, no admin rights needed. It adds Corvene to the Start menu and <code>corvene</code> to your
+    <code>PATH</code>, and keeps itself up to date. If there's no Git on the PC it offers to download one for Corvene.
   </p>
-  <h3>Windows Installer (.msi)</h3>
+  <h3>.msi</h3>
   <p>
-    For deployment with Group Policy or Intune: <code>Corvene-&lt;version&gt;-&lt;arch&gt;.msi</code> installs for every user
-    into <code>Program Files\Corvene</code>. Deploy a newer .msi to update; the app only announces new releases.
+    Installs for every user into Program Files, for deploying with Group Policy or Intune. It doesn't update itself;
+    deploy the next .msi instead. Needs <a href="https://git-scm.com/download/win" target="_blank" rel="noopener noreferrer">Git for Windows</a>.
   </p>
   <CodeBlock code="msiexec /i Corvene-<version>-x86_64.msi /qn" />
   <h3>Portable</h3>
   <p>
-    <code>Corvene-&lt;version&gt;-windows-&lt;arch&gt;-portable.zip</code> holds a folder with <code>corvene.exe</code>: unzip
-    anywhere (a USB stick works) and run. No installer, no <code>PATH</code> entry, no self-update.
+    Unzip <code>Corvene-&lt;version&gt;-windows-x86_64-portable.zip</code> anywhere, a USB stick included, and run
+    <code>Corvene\corvene.exe</code>. Nothing gets installed and it doesn't update itself. Needs Git for Windows.
   </p>
 
   <h2 id="linux">Linux</h2>
-  <ul>
-    <li>A distribution with glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 or later) on x86_64 or arm64. 32-bit i686 and armhf packages exist but have had little testing.</li>
-    <li>An X11 or Wayland session and a Vulkan driver (Mesa's work).</li>
-    <li>A Secret Service keyring for signed-in accounts: GNOME Keyring, KWallet or KeePassXC.</li>
-    <li><code>git</code> 2.40 or newer. Ubuntu 22.04 ships an older one; use the git-core PPA there.</li>
-  </ul>
-  <p>Install a newer package the same way to update. Only the AppImage (and so the Homebrew cask) updates itself.</p>
+  <p>
+    Any distribution with glibc 2.35 or later (Ubuntu 22.04, Debian 12, Fedora 36 and newer), X11 or Wayland, and a
+    Vulkan driver. For signed-in accounts you need a keyring: GNOME Keyring, KWallet or KeePassXC. And <code>git</code>
+    2.38 or later, which Ubuntu 22.04 doesn't ship (use the git-core PPA there).
+  </p>
+  <p>
+    Builds exist for x86_64 and arm64, plus 32-bit i686 and armhf that have had very little testing. Only the AppImage
+    updates itself; for everything else, install the newer package.
+  </p>
 
   <h3>Homebrew</h3>
   <CodeBlock code={BREW_COMMAND} />
-  <p>Installs the AppImage as <code>~/Applications/Corvene.AppImage</code>; <code>brew upgrade corvene</code> updates it.</p>
+  <p>Installs the AppImage as <code>~/Applications/Corvene.AppImage</code>. <code>brew upgrade</code> updates it.</p>
 
   <h3>Debian, Ubuntu, Mint</h3>
   <CodeBlock code="sudo apt install ./corvene_<version>_amd64.deb" />
 
-  <h3>Fedora, openSUSE, RHEL</h3>
+  <h3>Fedora, RHEL, openSUSE</h3>
   <CodeBlock code="sudo dnf install ./corvene-<version>-1.x86_64.rpm" />
-  <p><code>zypper install</code> on openSUSE.</p>
+  <p>Or <code>sudo zypper install</code> on openSUSE.</p>
 
   <h3>AppImage</h3>
   <CodeBlock code={"chmod +x Corvene-<version>-x86_64.AppImage\n./Corvene-<version>-x86_64.AppImage"} />
-  <p>
-    On first launch the AppImage adds itself to the application menu and registers the <code>x-corvene://</code> links,
-    unless AppImageLauncher or appimaged already did. It updates itself in place.
-  </p>
+  <p>The first run adds it to your app menu. It updates itself in place.</p>
 
   <h3>Flatpak</h3>
   <CodeBlock code="flatpak install --user Corvene-<version>-x86_64.flatpak" />
   <p>
-    The runtime comes from Flathub. The sandbox has its own git and sees your home folder;
-    <code>flatpak override --user --filesystem=&lt;path&gt; com.wasimaster.corvene</code> adds other locations. External
-    editors and shells are limited to what the sandbox contains.
+    Comes with its own git and sees your home folder. To give it another folder:
+    <code>flatpak override --user --filesystem=&lt;path&gt; com.wasimaster.corvene</code>.
   </p>
 
   <h3>Snap</h3>
   <CodeBlock code={"sudo snap install --dangerous Corvene-<version>-x86_64.snap\nsudo snap connect corvene:password-manager-service\nsudo snap connect corvene:ssh-keys"} />
-  <p>Strictly confined, with git, Git LFS and OpenSSH inside. The two interfaces are for signed-in accounts and git over SSH.</p>
+  <p>Comes with git, Git LFS and OpenSSH. The two connects are for signing in and for git over SSH.</p>
 
-  <h3>Tarball and Arch Linux</h3>
+  <h3>Tarball and Arch</h3>
   <p>
-    <code>Corvene-&lt;version&gt;-linux-&lt;arch&gt;.tar.gz</code> holds the .deb's <code>usr/</code> tree. Run
-    <code>usr/lib/corvene/corvene</code> in place or unpack it into <code>/</code>. Each release also produces
-    <code>corvene-bin</code> and <code>corvene-full-bin</code> PKGBUILDs that install this tarball.
+    <code>Corvene-&lt;version&gt;-linux-x86_64.tar.gz</code> has the same files as the .deb. Run
+    <code>usr/lib/corvene/corvene</code> from where you unpacked it. On Arch, the <code>corvene-bin</code> and
+    <code>corvene-full-bin</code> PKGBUILDs install this tarball.
   </p>
 
   <h2 id="android">Android</h2>
+  <p>Android 8.0 or later. git, OpenSSH and Git LFS come inside the app. There are two apps, and they install side by side:</p>
   <ul>
-    <li>Android 8.0 or newer on arm64, armv7, x86_64 or x86, with a Vulkan driver (OpenGL ES is the fallback).</li>
-    <li>Nothing else: git, OpenSSH and Git LFS are bundled.</li>
+    <li>
+      <strong>Corvene</strong> is new and made for phones. Still in progress.
+      <code>Corvene-&lt;version&gt;-android-foss-arm64.apk</code>
+    </li>
+    <li>
+      <strong>Corvene Legacy</strong> is the desktop app itself, for tablets, Chromebooks and desktop mode.
+      <code>Corvene-Legacy-&lt;version&gt;-android-foss-arm64.apk</code>
+    </li>
   </ul>
   <p>
-    Two apps: <strong>Corvene Legacy</strong> (<code>com.wasimaster.corvene.legacy</code>) is the desktop application
-    itself, GitHub Desktop 1:1, for tablets, Chromebooks and desktop modes; <strong>Corvene</strong> for Android
-    (<code>com.wasimaster.corvene</code>, in progress) is built for phones. They install side by side.
+    <code>arm64</code> fits nearly every device. There's also <code>armv7</code> for old 32-bit phones,
+    <code>x86_64</code> for Intel and AMD Chromebooks, and <code>universal</code> if you're not sure. Open the APK on the
+    device; Android asks once whether your browser may install apps. To update, install the newer APK over it.
   </p>
   <p>
-    Download <code>Corvene-Legacy-&lt;version&gt;-android-foss-arm64.apk</code> for most phones and tablets
-    (<code>-armv7</code> for 32-bit ones, <code>-x86_64</code> for most Chromebooks and emulators, <code>-universal</code>
-    for every architecture) and open it. Android asks once to let your browser or file manager install apps. Install a
-    newer APK the same way to update; repositories, accounts and settings stay.
+    The <code>play</code> APKs are the Google Play version, without "All files access". Full APKs come one per
+    architecture, no universal one.
   </p>
-  <p>
-    The <code>play</code> package next to it is the Google Play flavour without "All files access". The Full edition is one
-    APK per architecture; a universal one would be several hundred megabytes.
-  </p>
-  <div class="note note-attention">
-    <svg class="text-attention" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" />
-    </svg>
-    <p>Android support is experimental and has been tested on few devices. Expect rough edges.</p>
-  </div>
+  <p>Android support is experimental and has been tried on only a few devices.</p>
 </DocsLayout>

@@ -25,95 +25,72 @@
 export interface BenchmarkMetric {
   id: string;
   name: string;
-  /** what the number is and how it was taken */
+  /** what the number is */
   description: string;
+  /** how it was taken, one or two sentences */
   methodology: string;
   unit: "ms" | "MB";
   corvene: number;
-  /** the project's budget for this metric, where PLAN.md sets one */
-  budget?: number;
-  /** GitHub Desktop 3.6.6 on the same machine; null until measured */
+  /** GitHub Desktop 3.6.6 on the same machine */
   githubDesktop: number | null;
-  /** GitKraken on the same machine; null until measured */
+  /** GitKraken 12.6.0 on the same machine; null when it has no such action */
   gitKraken: number | null;
+  /** why an app has no number */
+  unavailable?: string;
 }
 
 export const BENCHMARK_METRICS: BenchmarkMetric[] = [
   {
     id: "cold-start",
     name: "Launch to window",
-    description: "From starting the executable to its first window on screen, with a repository open.",
-    methodology:
-      "Median of five warm launches each, the three apps in turn (tools/perf/apps.py). Corvene's own `main window opened` span read 248 ms; the Electron apps' first contentful paint followed their window within 60 ms.",
+    description: "Start the app until its window is on screen, with a repository open.",
+    methodology: "Median of five launches, the three apps taking turns. The clock stops when the window shows up in CGWindowList.",
     unit: "ms",
     corvene: 289,
-    budget: 300,
     githubDesktop: 2504,
     gitKraken: 4874,
   },
   {
     id: "memory-rss",
     name: "Idle memory",
-    description: "Physical memory footprint after a minute idle with one repository open, helper processes included.",
-    methodology:
-      "`footprint` (Activity Monitor's Memory column) summed over the app and its helpers after 60 s idle: Corvene 1 process (RSS 109 MB), GitHub Desktop 4 (RSS 486 MB), GitKraken 7 (RSS 1,026 MB).",
+    description: "Memory after a minute of doing nothing with one repository open, helper processes included.",
+    methodology: "Physical footprint, the number Activity Monitor shows, summed over every process of the app.",
     unit: "MB",
     corvene: 51,
-    budget: 80,
     githubDesktop: 175,
     gitKraken: 575,
   },
   {
     id: "diff-open",
     name: "Open a 5,000-line diff",
-    description: "From clicking a changed file with 5,000 changed lines to its diff on screen, in the 50,000-file fixture repository.",
-    methodology:
-      "Median of five. Corvene: tools/perf/bench.py over CORVENE_CONTROL, click until the frame that draws the diff. GitHub Desktop and GitKraken: tools/perf/apps_latency.py, a DevTools-protocol click timed in the renderer until the first frame whose diff shows the file. GitKraken's Monaco editor only lays out the visible lines, GitHub Desktop renders the whole file.",
+    description: "Click a file with 5,000 changed lines until its diff is drawn, in a 50,000-file repository.",
+    methodology: "Median of five. Each app gets a real click and the clock stops on the first frame that shows the diff.",
     unit: "ms",
     corvene: 6.4,
-    budget: 50,
     githubDesktop: 3277,
     gitKraken: 101,
   },
   {
     id: "file-select",
     name: "Select the next file",
-    description: "Pressing ↓ in the changes list until the next file's diff is drawn, in the 50,000-file fixture repository.",
-    methodology:
-      "Median of 25 keypresses (five rounds of five). Corvene over CORVENE_CONTROL, GitHub Desktop over the DevTools protocol, both from the key event to the frame that draws the next diff. GitKraken's file list has no keyboard navigation.",
+    description: "Press ↓ in the list of changes until the next file's diff is drawn.",
+    methodology: "Median of 25 key presses, timed the same way as the click above.",
     unit: "ms",
     corvene: 2.5,
     githubDesktop: 67,
     gitKraken: null,
+    unavailable: "No keyboard navigation in its file list",
   },
   {
     id: "binary-size",
     name: "Installed size",
-    description: "What the application takes on disk.",
-    methodology:
-      "`du` on the installed app bundles; Corvene is its 22.7 MB release executable plus the icon (the Full edition adds about 170 MB of grammars).",
+    description: "What the app takes on disk.",
+    methodology: "du on the installed app. The Full edition of Corvene adds about 170 MB of grammars.",
     unit: "MB",
     corvene: 23,
-    budget: 25,
     githubDesktop: 681,
     gitKraken: 633,
   },
-];
-
-/** The 2026-09-30 latency pass: Corvene before and after its optimisation work (.docs/perf.md). */
-export const LATENCY_PASS: { action: string; before: string; after: string }[] = [
-  { action: "Refresh (focus or watcher), nothing changed", before: "1,300–2,700", after: "140–240" },
-  { action: "Select a file", before: "42–145", after: "5–9" },
-  { action: "Next file (↓)", before: "35–64", after: "4–5" },
-  { action: "Open a 5,000-line diff", before: "12–185", after: "9" },
-  { action: "Next commit (↓) in History", before: "56–113", after: "11–12" },
-  { action: "Open History", before: "30–63", after: "8–11" },
-  { action: "Open the branch list (500 branches)", before: "43–76", after: "7–8" },
-  { action: "Branch filter keystroke", before: "13–26", after: "3–4" },
-  { action: "Scroll the diff, per frame", before: "9–26", after: "6" },
-  { action: "Commit (⌘↩ until the list is empty)", before: "580–2,800", after: "280–460" },
-  { action: "Checkout a branch five commits away", before: "540", after: "255" },
-  { action: "Switch repository (50,000 files)", before: "356", after: "207" },
 ];
 
 export const COMPARED = {
@@ -124,7 +101,7 @@ export const COMPARED = {
 
 export const SYSTEM_SPECS = {
   machine: "Apple M2 MacBook Air, 16 GB, macOS 26.4",
-  fixture: "tools/perf/fixture.py big: 50,000 files, 20,000 commits, 500 branches, 231 changes",
+  fixture: "50,000 files, 20,000 commits, 500 branches, 231 changed files",
 };
 
 export function formatMetric(value: number, unit: BenchmarkMetric["unit"]): string {

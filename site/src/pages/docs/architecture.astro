@@ -4,33 +4,36 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const crates = [
-  ["corvene", "The binary: window, native menus, keymap, single-instance lock, the x-corvene:// links."],
-  ["corvene-ui", "Every view, dialog, foldout and menu, built with GPUI. Never touches git, the network or disk."],
-  ["corvene-core", "The dispatcher and application state: actions come in, git jobs run, state updates go out. The flags registry."],
-  ["corvene-git", "Repository reads with gitoxide and every git subprocess, through one entry point with tracing and cancellation."],
-  ["corvene-github", "The GitHub API: accounts, pull requests, checks, notifications."],
-  ["corvene-store", "Settings, the repository list and the per-repository state in a redb database."],
-  ["corvene-highlight", "Syntax highlighting: GitHub Desktop's modes, plus tree-sitter behind a flag."],
-  ["corvene-grammars and corvene-packs", "The tree-sitter grammars and the on-demand packs that deliver them."],
-  ["corvene-platform", "Keychain, Secret Service and Credential Manager, editors and shells, desktop entries, the Android bridge."],
-  ["corvene-askpass", "The helper git calls for credentials, the same role GitHub Desktop's askpass trampoline plays."],
+  ["corvene", "The app: window, menus, keyboard shortcuts, x-corvene:// links."],
+  ["corvene-ui", "Every view and dialog, in GPUI. Never touches git, the network or the disk."],
+  ["corvene-core", "App state and the dispatcher that runs actions. Also the flags."],
+  ["corvene-models", "Types the other crates share."],
+  ["corvene-git", "gitoxide for reading, the git command for writing."],
+  ["corvene-github", "The GitHub API and signing in."],
+  ["corvene-store", "Settings and the repository list, in redb."],
+  ["corvene-highlight", "Syntax highlighting: GitHub Desktop's, syntect and tree-sitter."],
+  ["corvene-grammars", "The tree-sitter grammars."],
+  ["corvene-packs", "Downloads optional parts like the grammars."],
+  ["corvene-extensions", "Grammars from VS Code, Zed, Pulsar, Sublime Text and TextMate."],
+  ["corvene-platform", "Keychains, editors, shells, paths, trash."],
+  ["corvene-ffi", "The engine for the Compose Android app, exposed through UniFFI."],
+  ["corvene-askpass", "Answers git's credential prompts on Android."],
 ];
 ---
 
 <DocsLayout
   currentSlug="architecture"
   title="Architecture"
-  description="A Cargo workspace of focused crates: GPUI for rendering, gitoxide for reads, the git command line for writes, redb for state."
+  description="How the code is laid out and how it talks to git."
 >
-  <h2 id="crates">The workspace</h2>
   <p>
-    Corvene is a workspace of crates with one direction of dependencies: the UI dispatches actions on
-    <code>corvene_core::Dispatcher</code>, the core runs them against <code>corvene-git</code> and the platform crates, and
-    the resulting state flows back into the views. UI crates never touch git, the network or disk.
+    The UI sends actions to <code>corvene_core::Dispatcher</code>. The dispatcher does the git, network and disk work,
+    updates the state, and the views redraw from it. Views never do that work themselves.
   </p>
+
   <table>
     <thead>
-      <tr><th>Crate</th><th>Responsibility</th></tr>
+      <tr><th>Crate</th><th>Does</th></tr>
     </thead>
     <tbody>
       {crates.map(([name, text]) => (
@@ -42,45 +45,34 @@ const crates = [
     </tbody>
   </table>
 
-  <h2 id="git">Two ways of talking to git</h2>
-  <h3>Reads in process, with gitoxide</h3>
+  <h2 id="git">Git</h2>
   <p>
-    Status, the commit log, diffs, blobs and refs come from <a href="https://github.com/GitoxideLabs/gitoxide" target="_blank" rel="noopener noreferrer">gitoxide</a>
-    in the app's own process. There is no process to spawn and no output to parse, which is what makes selecting a file
-    or scrolling History cheap, and it lets results be cached by object id so a refresh that changed nothing draws nothing.
+    Reads go through <a href="https://github.com/GitoxideLabs/gitoxide" target="_blank" rel="noopener noreferrer">gitoxide</a>,
+    inside the app: status, history, diffs, file contents. No process to start, no output to parse. Results are cached by
+    object id, so a refresh where nothing changed costs next to nothing.
   </p>
-  <h3>Writes through your git</h3>
   <p>
-    Anything that changes the repository (commit, checkout, merge, rebase, stash, push, fetch) runs the
-    <code>git</code> on your <code>PATH</code>, through a single entry point that sets the environment, records a tracing
-    span and supports cancellation. Hooks, credential helpers, signing, LFS and every setting in your
-    <code>.gitconfig</code> therefore behave exactly as they do in GitHub Desktop, which does the same.
+    Writes (commit, checkout, merge, rebase, stash, fetch, push) run the <code>git</code> on your machine, like GitHub
+    Desktop does. Your hooks, credential helpers, signing and config all apply. Every one of those calls goes through
+    <code>corvene_git::process::run</code>, which sets up the environment, logs it and can cancel it. Corvene needs git
+    2.38 or later.
   </p>
 
-  <h2 id="gpui">Rendering with GPUI</h2>
+  <h2 id="ui">Drawing</h2>
   <p>
-    <a href="https://gpui.rs" target="_blank" rel="noopener noreferrer">GPUI</a> is the UI framework the Zed editor is built
-    on. Views describe a tree of elements each frame; GPUI lays it out and draws it with Metal on macOS, Vulkan on Linux
-    and Android, and DirectX on Windows. There is no DOM and no browser between the app and the screen. Long lists (the
-    diff, History, the branch list) are virtualized, and expensive views are cached between frames.
+    <a href="https://gpui.rs" target="_blank" rel="noopener noreferrer">GPUI</a>, from the Zed editor, draws everything
+    on the GPU: Metal on macOS, DirectX on Windows, Vulkan on Linux. Long lists like the diff and History only
+    draw the rows on screen.
   </p>
   <p>
-    GitHub Desktop's layout constants, Primer colour tokens and both themes are reproduced from its source, which is what
-    the <a href={`${base}/docs/parity`}>parity harness</a> checks.
-  </p>
-
-  <h2 id="state">State and settings</h2>
-  <p>
-    Settings, the repository list, per-repository state (last branch, commit message drafts) and the flags live in a
-    <a href="https://github.com/cberner/redb" target="_blank" rel="noopener noreferrer">redb</a> database in the platform's
-    data directory. Account tokens go to the operating system's keychain, never to disk in the clear.
+    The sizes, colours and both themes come straight from GitHub Desktop's source, and the
+    <a href={`${base}/docs/parity`}>parity harness</a> checks the result against the real app.
   </p>
 
-  <h2 id="highlighting">Syntax highlighting</h2>
+  <h2 id="state">Settings</h2>
   <p>
-    The default highlighter covers the languages GitHub Desktop's CodeMirror modes cover, so diffs look the same. Behind
-    flag <code>105-tree-sitter-highlighting</code>, tree-sitter grammars take over for the 300+ languages it does not
-    know (or for everything). The grammars are an optional download, one pack per OS and architecture, unpacked lazily
-    the first time a language appears; the Full edition compiles them all in instead.
+    Settings, the repository list and per-repository state live in a <a href="https://github.com/cberner/redb" target="_blank" rel="noopener noreferrer">redb</a>
+    database in your data folder. Tokens go to the system keychain: Keychain on macOS, Credential Manager on Windows,
+    Secret Service on Linux.
   </p>
 </DocsLayout>

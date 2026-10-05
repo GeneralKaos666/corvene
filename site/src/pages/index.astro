@@ -30,31 +30,31 @@ const stats = [
 const features = [
   {
     title: "The workflow you already know",
-    text: "Changes, History, the branch and repository lists, every dialog and shortcut: a one-to-one recreation of GitHub Desktop 3.6.6, checked against the real thing by an automated harness.",
+    text: "Changes, History, branches, every dialog and shortcut, just like GitHub Desktop 3.6.6. A test harness compares the two screenshot by screenshot.",
     color: "text-success bg-success-emphasis/15 border-success-emphasis/40",
     icon: "M8 16A8 8 0 1 1 8 0a8 8 0 0 1 0 16Zm3.78-9.72a.751.751 0 0 0-.018-1.042.751.751 0 0 0-1.042-.018L6.75 9.19 5.28 7.72a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042l2 2a.75.75 0 0 0 1.06 0Z",
   },
   {
     title: "Rendered on the GPU",
-    text: "GPUI, the framework behind the Zed editor, draws the window through Metal and Vulkan. No Chromium, no DOM, no layout thrash on long diffs.",
+    text: "Drawn with GPUI, the framework the Zed editor uses. No Chromium, so long diffs stay fast.",
     color: "text-accent bg-accent-emphasis/15 border-accent-emphasis/40",
     icon: "M9.504.43a1.516 1.516 0 0 1 2.437 1.713L10.415 5.5h2.123c1.57 0 2.346 1.909 1.22 3.004l-7.34 7.142a1.249 1.249 0 0 1-.871.354h-.302a1.25 1.25 0 0 1-1.157-1.723L5.633 10.5H3.462c-1.57 0-2.346-1.909-1.22-3.004L9.503.429Z",
   },
   {
     title: "gitoxide reads, git writes",
-    text: "Status, logs, diffs and blobs come from gitoxide in process. Commits, checkouts, merges and pushes go through your own git, so hooks, credential helpers and configuration behave exactly as they do today.",
+    text: "Reading the repository happens in process with gitoxide. Commits, checkouts and pushes run your own git, so hooks, credential helpers and config work as before.",
     color: "text-done bg-done-emphasis/15 border-done-emphasis/40",
     icon: "M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z",
   },
   {
     title: "Syntax highlighting for 300+ languages",
-    text: "GitHub Desktop's highlighter for the languages it knows, and optional tree-sitter grammars for everything else, downloaded on demand or built into the Full edition.",
+    text: "GitHub Desktop's highlighting out of the box. Turn on tree-sitter for everything else; the grammars download, or come built into the Full edition.",
     color: "text-attention-bright bg-attention/15 border-attention/40",
     icon: "M4.72 3.22a.75.75 0 0 1 1.06 1.06L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Zm6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L13.94 8l-3.72 3.72a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L12.94 8 9.22 4.28a.75.75 0 0 1 0-1.06Z",
   },
   {
     title: "macOS, Windows, Linux, Android",
-    text: "Native packages for each: .dmg and Homebrew, an installer, .msi and portable zip, .deb, .rpm, AppImage, Flatpak, snap and APKs. The app updates itself where the format allows.",
+    text: "Homebrew, .dmg, an installer, .msi, .deb, .rpm, AppImage, Flatpak, snap and APKs.",
     color: "text-accent-muted bg-accent-emphasis/15 border-accent-emphasis/40",
     icon: "M14.25 1c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 14.25 12h-3.727c.099 1.041.52 1.872 1.292 2.757A.752.752 0 0 1 11.25 16h-6.5a.75.75 0 0 1-.565-1.243c.772-.885 1.192-1.716 1.292-2.757H1.75A1.75 1.75 0 0 1 0 10.25v-7.5C0 1.784.784 1 1.75 1ZM1.75 2.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25ZM9.018 12H6.982a5.72 5.72 0 0 1-.765 2.5h3.566a5.72 5.72 0 0 1-.765-2.5Z",
   },
@@ -106,7 +106,7 @@ const features = [
         }
       </dl>
       <p class="mt-5 text-center text-xs text-fg-subtle">
-        Measured on one Apple M2 MacBook Air against GitHub Desktop 3.6.6 and GitKraken 12.6. <a href={`${base}/docs/benchmarks`} class="text-fg-muted hover:text-fg hover:underline">How</a>
+        On an M2 MacBook Air, against GitHub Desktop 3.6.6 and GitKraken 12.6. <a href={`${base}/docs/benchmarks`} class="text-fg-muted hover:text-fg hover:underline">How</a>
       </p>
     </div>
   </section>
@@ -141,9 +141,9 @@ const features = [
     <div class="mx-auto max-w-7xl space-y-10 px-4 sm:px-6 lg:px-8">
       <div class="mx-auto max-w-2xl space-y-3 text-center">
         <h2 class="eyebrow text-accent">Speed and memory</h2>
-        <p class="font-display text-3xl font-bold text-fg sm:text-4xl">Measured, not estimated</p>
+        <p class="font-display text-3xl font-bold text-fg sm:text-4xl">Side by side</p>
         <p class="text-sm text-fg-muted sm:text-base">
-          Corvene, GitHub Desktop 3.6.6 and GitKraken 12.6 launched in turn on the same machine, in the same minute, with the method next to every number.
+          Corvene, GitHub Desktop 3.6.6 and GitKraken 12.6 on the same Mac, taking turns.
         </p>
       </div>
 

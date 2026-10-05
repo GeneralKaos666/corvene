@@ -17,3 +17,20 @@ export function workspaceVersion(): string {
   }
   return "0.1.0";
 }
+
+/**
+ * How many flags the registry defines (`NAME = 123 "slug" {` entries before
+ * the retired list), counted at build time. Null outside the checkout.
+ */
+export function flagCount(): number | null {
+  try {
+    const registry = readFileSync(
+      fileURLToPath(new URL("../../../crates/corvene-core/src/flags/registry.rs", import.meta.url)),
+      "utf8"
+    );
+    const live = registry.split(/^pub const RETIRED/m)[0];
+    return (live.match(/^\s+[A-Z][A-Z0-9_]* = \d+ "[a-z0-9-]+" \{/gm) ?? []).length;
+  } catch {
+    return null;
+  }
+}

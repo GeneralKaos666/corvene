@@ -8,70 +8,55 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 <DocsLayout
   currentSlug="overview"
   title="Overview"
-  description="Corvene is a native recreation of GitHub Desktop written in Rust: the same interface and workflow, a different engine."
+  description="Corvene is GitHub Desktop rewritten in Rust. Same app on the outside, no Electron on the inside."
 >
-  <div class="note note-success">
-    <svg class="text-success" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" />
+  <p>
+    Corvene is a rewrite of
+    <a href="https://github.com/desktop/desktop/releases/tag/release-3.6.6" target="_blank" rel="noopener noreferrer">GitHub Desktop 3.6.6</a>
+    in Rust. The layout, menus, dialogs and shortcuts are the same, so if you know GitHub Desktop you already know
+    Corvene. What's different is underneath: no Chromium, no Node. It starts in a fraction of a second and idles at
+    around 50 MB.
+  </p>
+
+  <div class="note note-attention">
+    <svg class="text-attention" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z" />
     </svg>
     <p>
-      <strong>Status: pre-release.</strong> Feature-complete with GitHub Desktop 3.6.6 on macOS, minus a few gaps. Linux
-      runs the same app with GitHub Desktop's Linux menus and wording and is not yet pixel-identical everywhere. Windows
-      builds are new. Android is experimental.
+      Corvene hasn't reached 1.0. macOS is the most complete. Linux works but looks slightly different in places, Windows
+      is new, and Android is experimental.
     </p>
   </div>
 
-  <h2 id="why">Why Corvene</h2>
-  <p>
-    GitHub Desktop has the best-understood Git workflow of any desktop client: a clear changes list, effortless branching,
-    pull requests a click away, and years of muscle memory in many hands. It is also an Electron application. It idles at
-    hundreds of megabytes, starts slowly and renders through a browser.
-  </p>
-  <p>
-    Corvene keeps the interface and replaces the engine. Every layout constant, menu, dialog and shortcut follows
-    <a href="https://github.com/desktop/desktop/releases/tag/release-3.6.6" target="_blank" rel="noopener noreferrer">GitHub Desktop 3.6.6</a>
-    (the <a href={`${base}/docs/parity`}>parity harness</a> checks that). Underneath there is no Chromium and no Node:
-  </p>
+  <h2 id="how">How it works</h2>
   <ul>
-    <li>
-      <strong>GPUI</strong>, the GPU-accelerated UI framework behind the Zed editor, draws the window through Metal on
-      macOS and Vulkan on Linux and Android.
-    </li>
-    <li>
-      <strong>gitoxide</strong> reads the repository in process: status, history, diffs and file contents without
-      spawning a process for each.
-    </li>
-    <li>
-      <strong>Your own git</strong> performs every write (commit, checkout, merge, rebase, push, stash), so hooks,
-      credential helpers and your configuration behave exactly as they do in GitHub Desktop.
-    </li>
-    <li>
-      <strong>No telemetry.</strong> Nothing is reported anywhere.
-    </li>
+    <li>The window is drawn on the GPU by <a href="https://gpui.rs" target="_blank" rel="noopener noreferrer">GPUI</a>, the UI framework the Zed editor uses.</li>
+    <li>Reading the repository (status, history, diffs) happens in process with gitoxide, so nothing has to start a <code>git</code> process for it.</li>
+    <li>Anything that changes the repository runs your own <code>git</code>, so hooks, credential helpers and your config work as usual.</li>
+    <li>Nothing is sent anywhere. There's no telemetry.</li>
   </ul>
 
-  <h2 id="improvements">Improvements, each behind a flag</h2>
+  <h2 id="flags">Changes from GitHub Desktop</h2>
   <p>
-    Where Corvene does something GitHub Desktop does not, from a filesystem watcher to commit templates and optional
-    tree-sitter highlighting for 300+ languages, the change is a <a href={`${base}/docs/flags`}>flag</a>. The
-    <em>GitHub Desktop</em> preset switches every one of them off, bugs included, so the two apps can be compared side by
-    side or used interchangeably.
+    Corvene adds things GitHub Desktop doesn't have and fixes some of its bugs. Each of those is a
+    <a href={`${base}/docs/flags`}>flag</a> you can switch off. Pick the <em>GitHub Desktop</em> preset and they all go,
+    leaving you with 3.6.6 as it ships.
   </p>
 
   <h2 id="platforms">Platforms</h2>
   <table>
     <thead>
-      <tr><th>Platform</th><th>State</th><th>Packages</th></tr>
+      <tr><th></th><th>Needs</th><th>Packages</th></tr>
     </thead>
     <tbody>
-      <tr><td>macOS 10.15.7+ (Intel), 11+ (Apple Silicon)</td><td>Complete, pixel-checked</td><td>Homebrew cask, .dmg, .zip</td></tr>
-      <tr><td>Linux (glibc 2.35+, X11 or Wayland)</td><td>Complete, small visual differences</td><td>.deb, .rpm, AppImage, Flatpak, snap, .tar.gz, AUR</td></tr>
-      <tr><td>Windows 10 and 11</td><td>New, less tested</td><td>Installer, .msi, portable zip</td></tr>
-      <tr><td>Android 8.0+</td><td>Experimental</td><td>APK (git, OpenSSH and Git LFS bundled)</td></tr>
+      <tr><td>macOS</td><td>10.15.7 on Intel, 11 on Apple Silicon</td><td>Homebrew, .dmg, .zip</td></tr>
+      <tr><td>Windows</td><td>10 or 11</td><td>Installer, .msi, portable .zip</td></tr>
+      <tr><td>Linux</td><td>glibc 2.35, X11 or Wayland</td><td>.deb, .rpm, AppImage, Flatpak, snap, .tar.gz</td></tr>
+      <tr><td>Android</td><td>8.0</td><td>Two APKs: Corvene for phones, Corvene Legacy for tablets</td></tr>
     </tbody>
   </table>
 
-  <h2 id="next">Where to go next</h2>
+  <h2 id="next">Next</h2>
   <ul>
     {DOC_ITEMS.filter((d) => d.slug !== "overview").map((d) => (
       <li>

@@ -6,53 +6,46 @@ import { REPO_URL } from "../../lib/github";
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 ---
 
-<DocsLayout
-  currentSlug="building"
-  title="Building from source"
-  description="The toolchain, the Linux build dependencies, the checks CI runs and the Android build."
->
-  <h2 id="prerequisites">Prerequisites</h2>
-  <ul>
-    <li>Stable Rust via <a href="https://rustup.rs" target="_blank" rel="noopener noreferrer">rustup</a>; <code>rust-toolchain.toml</code> picks the channel and components (rustfmt and clippy).</li>
-    <li><code>git</code> 2.38 or newer on your <code>PATH</code>.</li>
-    <li>macOS: the Xcode Command Line Tools. A full Xcode is not needed; development builds compile the Metal shaders at launch.</li>
-  </ul>
-
-  <h2 id="run">Build and run</h2>
+<DocsLayout currentSlug="building" title="Building from source" description="Build it yourself, desktop and Android.">
+  <p>
+    You need stable Rust from <a href="https://rustup.rs" target="_blank" rel="noopener noreferrer">rustup</a>
+    (<code>rust-toolchain.toml</code> picks the rest) and git 2.38 or later. On a Mac, the Command Line Tools are enough;
+    you don't need Xcode.
+  </p>
   <CodeBlock code={"git clone " + REPO_URL + ".git\ncd corvene\ncargo run -p corvene"} />
 
-  <h2 id="linux">Linux build dependencies</h2>
-  <p>Debian and Ubuntu package names; other distributions have the same libraries under their own names:</p>
+  <h2 id="linux">Linux</h2>
+  <p>Install these first (Debian and Ubuntu names):</p>
   <CodeBlock
     code="sudo apt install clang mold pkg-config libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libfontconfig-dev libfreetype-dev libvulkan-dev"
   />
 
-  <h2 id="checks">The checks CI runs</h2>
-  <p>Formatting, clippy with warnings as errors, and the test suite must pass on every push:</p>
+  <h2 id="checks">Before you send a change</h2>
   <CodeBlock code={"cargo fmt --check\ncargo clippy --all-targets -- -D warnings\ncargo test --workspace"} />
   <p>
-    Changes to a view are compared against GitHub Desktop with the <a href={`${base}/docs/parity`}>parity harness</a>, and
-    performance work against the budgets on the <a href={`${base}/docs/benchmarks`}>performance page</a>.
+    CI runs the same three. If you changed something on screen, run the <a href={`${base}/docs/parity`}>parity harness</a>
+    for it too.
   </p>
 
-  <h2 id="full">The Full edition</h2>
-  <p>
-    <code>cargo build --release -p corvene --features full</code> compiles every tree-sitter grammar into the binary. It
-    takes considerably longer and the result is about 170 MB larger.
-  </p>
+  <h2 id="full">Full edition</h2>
+  <p>Full compiles every tree-sitter grammar in. Fetch the grammar sources once, then build with the feature:</p>
+  <CodeBlock code={"python3 tools/ts-queries/fetch.py\ncargo build --release -p corvene --features full"} />
+  <p>It takes a good while longer than a normal build.</p>
 
   <h2 id="android">Android</h2>
   <p>
-    <code>packaging/android/build.sh</code> builds the APK with the Android SDK and NDK and, on the first run, cross-builds
-    what the app bundles: git, curl, OpenSSL, OpenSSH and Git LFS. <code>ABIS=arm64-v8a</code> limits it to one
-    architecture; <code>play</code> instead of <code>foss</code> selects the Google Play flavour. See the README for the
-    environment variables it expects.
+    Both apps need the Android SDK and NDK, a JDK 17 or later, and <code>cargo install cargo-ndk</code>. The first build
+    also cross-compiles the git, OpenSSH and Git LFS the apps ship with, which needs make, perl and Go.
   </p>
+  <p>Corvene Legacy:</p>
+  <CodeBlock code="ABIS=arm64-v8a packaging/android/build.sh debug foss" />
+  <p>The new Corvene app, once <code>packaging/android/git/build.sh</code> has built the bundled git:</p>
+  <CodeBlock code={"cd android\n./gradlew :app:installFossDebug"} />
+  <p><code>android/README.md</code> has the rest, including how to run it on a phone.</p>
 
-  <h2 id="layout">Finding your way around</h2>
+  <h2 id="code">Finding things</h2>
   <p>
-    The crates and their responsibilities are on the <a href={`${base}/docs/architecture`}>architecture page</a>. GitHub
-    Desktop's dialog, foldout and menu names are kept as Rust type names, so <code>ConfirmDiscardChanges</code> in GitHub
-    Desktop's source is <code>dialogs::confirm_discard_changes</code> here.
+    The <a href={`${base}/docs/architecture`}>architecture page</a> lists the crates. Dialogs, foldouts and menus keep
+    GitHub Desktop's names, so its <code>ConfirmDiscardChanges</code> is <code>dialogs::confirm_discard_changes</code> here.
   </p>
 </DocsLayout>

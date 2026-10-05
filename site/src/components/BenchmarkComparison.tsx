@@ -2,8 +2,8 @@ import { useId, useState, type KeyboardEvent } from "react";
 import { BENCHMARK_METRICS, SYSTEM_SPECS, formatMetric } from "../data/benchmarks";
 
 /**
- * One metric at a time: Corvene's measured value against GitHub Desktop and
- * GitKraken, where measured. Tabs, no auto-advance (a carousel that moves on
+ * One metric at a time: Corvene against GitHub Desktop and GitKraken. The
+ * tag next to each app is what it is built with. Tabs, no auto-advance (a carousel that moves on
  * its own is hard to read and fails WCAG 2.2.2).
  */
 export default function BenchmarkComparison() {
@@ -60,7 +60,7 @@ export default function BenchmarkComparison() {
         <div className="mx-auto max-w-3xl space-y-5">
           <Bar
             label="Corvene"
-            tag="measured"
+            tag="GPUI"
             value={formatMetric(metric.corvene, metric.unit)}
             width={widthOf(metric.corvene)}
             barClass="bg-gradient-to-r from-success-emphasis to-success"
@@ -77,6 +77,7 @@ export default function BenchmarkComparison() {
           <Competitor
             label="GitKraken"
             value={metric.gitKraken}
+            unavailable={metric.unavailable}
             unit={metric.unit}
             width={metric.gitKraken !== null ? widthOf(metric.gitKraken) : ""}
             barClass="bg-gradient-to-r from-accent-emphasis to-accent opacity-70"
@@ -95,8 +96,16 @@ export default function BenchmarkComparison() {
   );
 }
 
-function Competitor(props: { label: string; value: number | null; unit: "ms" | "MB"; width: string; barClass: string; dotClass: string }) {
-  const { label, value, unit, width, barClass, dotClass } = props;
+function Competitor(props: {
+  label: string;
+  value: number | null;
+  unavailable?: string;
+  unit: "ms" | "MB";
+  width: string;
+  barClass: string;
+  dotClass: string;
+}) {
+  const { label, value, unavailable, unit, width, barClass, dotClass } = props;
   if (value === null) {
     return (
       <div className="flex items-center justify-between gap-4 rounded-lg border border-dashed border-edge px-4 py-3 text-xs text-fg-muted">
@@ -104,7 +113,7 @@ function Competitor(props: { label: string; value: number | null; unit: "ms" | "
           <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
           {label}
         </span>
-        <span>Not measured yet on the same machine</span>
+        <span>{unavailable ?? "No equivalent"}</span>
       </div>
     );
   }
