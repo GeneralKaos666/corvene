@@ -361,9 +361,9 @@ mod tests {
 
     #[test]
     fn parses_tag_lists() {
-        let text = "v1\0commit\0aaa\0\0\0100\0Fix it\0\n\
-                    v2\0tag\0ttt\0commit\0bbb\0200\0Release two\0Bump\n\
-                    tree-tag\0tree\0ccc\0\0\0300\0\0\n";
+        let text = "v1\0commit\0aaa\0\0\x00100\0Fix it\0\n\
+                    v2\0tag\0ttt\0commit\0bbb\x00200\0Release two\0Bump\n\
+                    tree-tag\0tree\0ccc\0\0\x00300\0\0\n";
         let tags = parse_tag_list(text);
         assert_eq!(tags.len(), 2);
         assert_eq!(tags[0].name, "v2");

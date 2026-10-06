@@ -3047,7 +3047,7 @@ fn ssh_key_section(cx: &App) -> AnyElement {
             .child(text)
     });
     let waiting = busy.is_some();
-    let element = match corvene_platform::ssh_key::ssh_public_key() {
+    match corvene_platform::ssh_key::ssh_public_key() {
         Some(key) => {
             let copy = key.clone();
             let mut buttons = div()
@@ -3143,8 +3143,7 @@ fn ssh_key_section(cx: &App) -> AnyElement {
                 .children(note)
                 .into_any_element()
         }
-    };
-    element
+    }
 }
 
 /// Create SSH key: Android makes one at once (no passphrase, no agent);

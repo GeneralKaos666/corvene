@@ -126,6 +126,10 @@ pub struct RepositorySettingsDialog {
     branch_push: Option<(String, Option<usize>)>,
 }
 
+/// `1109-remote-manager`: what picking a push remote (a row, or `None` for
+/// the default) does to the dialog.
+type PushPick = Rc<dyn Fn(&mut RepositorySettingsDialog, Option<usize>)>;
+
 /// `1109-remote-manager`: one remote of the Remote tab.
 struct RemoteRow {
     original: Option<corvene_core::Remote>,
@@ -612,7 +616,9 @@ impl RepositorySettingsDialog {
             .filter(|r| r.removed || (!r.name.is_empty() && !r.url.is_empty()))
             .collect();
         self.remotes_error(cx)
-            .and(corvene_core::remote_manager::edited_remotes_error(&complete))
+            .and(corvene_core::remote_manager::edited_remotes_error(
+                &complete,
+            ))
     }
 
     /// `1109-remote-manager`: the remotes, Add Remote, and the push selects.
@@ -702,7 +708,7 @@ impl RepositorySettingsDialog {
         let select = |id: &'static str,
                       default_label: &str,
                       picked: Option<usize>,
-                      on_pick: Rc<dyn Fn(&mut Self, Option<usize>)>,
+                      on_pick: PushPick,
                       cx: &Context<Self>| {
             let mut options: Vec<SharedString> = vec![default_label.to_string().into()];
             options.extend(names.iter().map(|(_, n)| SharedString::from(n.clone())));
