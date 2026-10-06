@@ -152,7 +152,7 @@ fn own_process_group(cmd: &mut Command) -> bool {
     true
 }
 
-#[cfg(not(all(unix, not(target_os = "android"))))]
+#[cfg(not(unix))]
 fn own_process_group(_cmd: &mut Command) -> bool {
     false
 }
