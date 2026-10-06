@@ -167,6 +167,10 @@ impl SparseSelection {
     }
 
     fn tick(&mut self, dir: &str) {
+        // already in through a ticked parent
+        if self.selected.iter().any(|s| s == dir || is_inside(dir, s)) {
+            return;
+        }
         self.selected.retain(|s| !is_inside(s, dir));
         self.selected.insert(dir.to_string());
     }
