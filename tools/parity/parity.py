@@ -66,6 +66,11 @@ DEFAULTS = {
 }
 
 
+
+# `ssh_key: true` scenarios: a public key line that belongs to no one
+PARITY_SSH_KEY = ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGFyaXR5LWZpeHR1cmUtcHVibGljLWtleS0wMDAx "
+                  "parity@example.com")
+
 def load_scenarios(names: list[str]) -> list[dict]:
     out = []
     for path in sorted((HERE / "scenarios").glob("*.yaml")):
@@ -137,10 +142,12 @@ class Run:
         # a rebase, a deleted branch and a hard reset in HEAD's reflog;
         # `repo-tools`: with ignored files and a patch and a mailbox beside it
         # `repo-structure`: with submodules and Git LFS files (`lfs_stub: true`
-        # serves their locks)
+        # serves their locks); `repo-remotes`: `repo-remote` plus a `fork`
+        # remote and more tags
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
-                             "repo-reflog", "repo-tools", "repo-structure")
-        remote = setup == "repo-remote"
+                             "repo-reflog", "repo-tools", "repo-structure", "repo-remotes")
+        remote = setup in ("repo-remote", "repo-remotes")
+        remotes = setup == "repo-remotes"
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
         signed = setup == "repo-signed"
@@ -152,9 +159,9 @@ class Run:
         self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
         lfs_url = self.lfs_stub.url() if self.lfs_stub else None
         repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, structure,
-                               lfs_url) if with_repo else None
+                               lfs_url, remotes) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
-                               lfs_url) if with_repo else None
+                               lfs_url, remotes) if with_repo else None
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues and
         # Releases views (`github_stub.py`), reached by the `github: stub` step
@@ -162,6 +169,12 @@ class Run:
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,
                                                          sc.get("corvene_flags"))
+        # `ssh_key: true`: a fixed public key in Corvene's private SSH dir
+        # (`CORVENE_SSH_DIR`, flag 350); no private half is needed to show it
+        if sc.get("ssh_key"):
+            ssh = work / "corvene-data" / "ssh"
+            ssh.mkdir(parents=True, exist_ok=True)
+            (ssh / "id_ed25519.pub").write_text(PARITY_SSH_KEY + "\n")
         result = {"name": sc["name"], "theme": theme, "file": sc["_file"], "description": sc.get("description", ""), "snaps": [], "error": None, "notes": []}
         started = time.time()
         try:

@@ -1,0 +1,33 @@
+# Corvene's Branch › Tags… (flag 1219-tag-manager, off in the GitHub
+# Desktop preset the harness runs with). GHD has no tag list, so the snaps
+# are recorded, not compared (`corvene_only`; deviations.md › History). The
+# `repo-remotes` fixture has an annotated `v0.2.0` with a message and the
+# lightweight `nightly` and `v0.1.0`.
+name: tags
+description: Branch › Tags… list, a tag selected, the filter, the row menu and Delete Tag from origin's confirmation (Corvene only)
+setup: repo-remotes
+corvene_flags: 1219-tag-manager=on
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ShowTags"}
+    wait: 2000
+  - snap: {name: list, corvene_only: true, note: "GHD has no tag list (deviations.md, 1219-tag-manager)"}
+  # nightly
+  - ghd: {skip: true}
+    corvene: {click: [130, 259]}
+    wait: 800
+  - snap: {name: nightly-selected, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [120, 165]}
+  - ghd: {skip: true}
+    corvene: {type: "v0."}
+    wait: 600
+  - snap: {name: filtered, corvene_only: true}
+  # v0.2.0's menu, then Delete Tag from origin…
+  - ghd: {skip: true}
+    corvene: {rclick: [130, 209]}
+    wait: 600
+  - corvene_menu: tag-row
+  - corvene_menu_pick: "Delete Tag from origin…"
+    wait: 800
+  - snap: {name: delete-from-remote, corvene_only: true}

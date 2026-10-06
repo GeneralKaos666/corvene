@@ -84,10 +84,11 @@ same data for scripts.
 ```yaml
 name: branch-foldout
 description: What this covers
-setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | repo-graph (plus a merged branch, an octopus merge and an unmerged branch) | repo-tools (plus ignored files, and `../parity-fixture.patch` / `.mbox` beside the repository) | repo-structure (plus three submodules in different states and Git LFS files) | empty (no repositories) | welcome (first launch)
+setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | repo-graph (plus a merged branch, an octopus merge and an unmerged branch) | repo-tools (plus ignored files, and `../parity-fixture.patch` / `.mbox` beside the repository) | repo-remotes (repo-remote plus a `fork` remote with all of main, an annotated `v0.2.0` and a lightweight `nightly` tag) | repo-structure (plus three submodules in different states and Git LFS files) | empty (no repositories) | welcome (first launch)
 corvene_flags: 1213-commit-graph=on   # optional: flags for Corvene after the GHD preset (a surface GHD lacks)
 github_stub: true                     # optional: a stub GitHub API for Corvene (`github_stub.py`), reached by the `github: stub` step
 lfs_stub: true                        # optional: a stub Git LFS locking API (`lfs_stub.py`), the fixtures' `lfs.url`
+ssh_key: true                         # optional: a fixed public key in Corvene's private SSH dir (Corvene always runs with `CORVENE_SSH_DIR=<data>/ssh`, never the user's ~/.ssh)
 ghd_env: {GITHUB_DESKTOP_PREVIEW_FEATURES: 1}   # optional: extra env for GHD (test-* popups need this; it also turns on beta features)
 threshold: 1.0         # optional per-scenario defaults: threshold, tolerance, radius, settle, width, height
 steps:

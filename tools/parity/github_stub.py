@@ -93,12 +93,14 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-    def _send(self, status: int, body) -> None:
+    def _send(self, status: int, body, headers: dict | None = None) -> None:
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("X-GitHub-Request-Id", "STUB:1")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -115,7 +117,11 @@ class _Handler(BaseHTTPRequestHandler):
         repo = f"/api/v3/repos/{OWNER}/{NAME}"
         params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
         if path == "/api/v3/user":
-            return self._send(200, {**_user("octocat"), "name": "Mona Lisa Octocat", "plan": {"name": "free"}})
+            # the token's scopes: Corvene's sign-in, without `write:public_key`
+            # (Settings › Integrations' Add to GitHub then asks to sign in again,
+            # flag 350)
+            return self._send(200, {**_user("octocat"), "name": "Mona Lisa Octocat", "plan": {"name": "free"}},
+                              {"X-OAuth-Scopes": ", ".join(self.server.scopes)})
         if path == repo:
             return self._send(200, {"name": NAME, "owner": _user(OWNER), "html_url": f"http://127.0.0.1/{OWNER}/{NAME}",
                                     "clone_url": f"http://127.0.0.1/{OWNER}/{NAME}.git", "default_branch": "main",
@@ -189,6 +195,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(201, release)
         if path == "/api/graphql":
             return self._send(200, {"data": {"createLinkedBranch": {"linkedBranch": {"id": "LB_stub"}}}})
+        if path == "/api/v3/user/keys":
+            if "write:public_key" not in self.server.scopes:
+                return self._send(404, {"message": "Not Found"})
+            return self._send(201, {"id": 1, "title": body.get("title", ""), "key": body.get("key", "")})
         return self._send(404, {"message": f"stub: no POST {path}"})
 
 
@@ -269,6 +279,8 @@ class Stub(HTTPServer):
         self.created_issues: list[dict] = []
         self.created_releases: list[dict] = []
         self.posts: list[tuple[str, dict]] = []
+        self.scopes: list[str] = os.environ.get(
+            "GITHUB_STUB_SCOPES", "repo workflow read:user user:email").split()
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
 
     @property

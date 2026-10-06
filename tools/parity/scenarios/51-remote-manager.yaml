@@ -1,0 +1,49 @@
+# Repository Settings › Remote with Corvene's remote manager (flag
+# 1109-remote-manager, off in the GitHub Desktop preset the harness runs
+# with). GHD's Remote tab edits the primary remote's URL only, so the snaps
+# are recorded, not compared (`corvene_only`; deviations.md › Repository).
+# The `repo-remotes` fixture has `origin` (two commits behind) and `fork`
+# (all of main). `fork` is renamed `mine`, `upstream` is added, pushes go
+# to `mine`, and Save writes it all: the toolbar then counts main against
+# mine/main, which has every commit, so it offers Fetch origin.
+name: remote-manager
+description: Repository Settings › Remote listing every remote, one renamed and one added, the push remote picked, then saved (Corvene only)
+setup: repo-remotes
+corvene_flags: 1109-remote-manager=on
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: repository-settings}}
+    wait: 1500
+  - snap: {name: remotes, corvene_only: true, note: "GHD edits the primary remote's URL only (deviations.md, 1109-remote-manager)"}
+  # fork's name box
+  - ghd: {skip: true}
+    corvene: {click: [649, 287]}
+  - ghd: {skip: true}
+    corvene: {key: cmd-a}
+  - ghd: {skip: true}
+    corvene: {type: "mine"}
+  # Add Remote: the new row's name box takes the focus
+  - ghd: {skip: true}
+    corvene: {click: [640, 352]}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {type: "upstream"}
+  - ghd: {skip: true}
+    corvene: {click: [807, 332]}
+  - ghd: {skip: true}
+    corvene: {type: "https://example.com/upstream.git"}
+    wait: 400
+  - snap: {name: edited, corvene_only: true}
+  # Push branches to ▾
+  - ghd: {skip: true}
+    corvene: {click: [780, 464]}
+    wait: 400
+  - corvene_menu: push-default
+  - corvene_menu_pick: "mine"
+    wait: 400
+  - snap: {name: push-remote-picked, corvene_only: true}
+  # Save
+  - ghd: {skip: true}
+    corvene: {click: [902, 633]}
+    wait: 2500
+  - snap: {name: saved, corvene_only: true}

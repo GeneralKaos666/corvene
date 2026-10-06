@@ -240,9 +240,24 @@ def _structure(parent: Path, repo: Path, lfs_url: str | None) -> None:
         (repo / "art" / f"{name}.psd").write_text(f"{name} artwork v2\n")
 
 
+def _remotes(parent: Path, repo: Path) -> None:
+    """A second bare remote, `fork`, with all of `main`, and more tags: an
+    annotated `v0.2.0` with a message and a lightweight `nightly`."""
+    fork = parent / f"{NAME}-fork.git"
+    if fork.exists():
+        remove_tree(fork)
+    _git(repo, "init", "-q", "--bare", str(fork))
+    _git(repo, "remote", "add", "fork", str(fork))
+    _git(repo, "push", "-q", "fork", "main:refs/heads/main")
+    _git(repo, "fetch", "-q", "fork")
+    _git(repo, "tag", "-a", "-m", "Second release", "v0.2.0", "HEAD~2",
+         date="2026-09-26T12:00:00+00:00")
+    _git(repo, "tag", "nightly", "HEAD")
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
-          structure: bool = False, lfs_url: str | None = None) -> Path:
+          structure: bool = False, lfs_url: str | None = None, remotes: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -256,7 +271,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     `1216-recent-activity`). With `tools`, see `_tools` (Clean Untracked
     Files and Apply Patch, flags 1105 and 1106). With `structure`, see
     `_structure` (submodules, sparse checkout and LFS locks, flags
-    1111-1113)."""
+    1111-1113). With `remotes` (and `remote`), see `_remotes` (Repository
+    Settings' remotes and Branch › Tags…, flags 1109 and 1219)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -341,6 +357,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         # the two newest commits and the tag stay behind
         _git(repo, "push", "-q", "origin", "main~2:refs/heads/main")
         _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    if remote and remotes:
+        _remotes(parent, repo)
     if tools:
         _tools(parent, repo)
     if structure:

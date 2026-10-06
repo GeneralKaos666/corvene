@@ -730,6 +730,8 @@ class Corvene:
             CORVENE_CONTROL=str(self.port),
             CORVENE_THEME=self.theme,
             CORVENE_LOG=env.get("PARITY_CORVENE_LOG", "info"),
+            # Settings › Integrations' SSH key (flag 350) reads this, not ~/.ssh
+            CORVENE_SSH_DIR=str(self.data_dir / "ssh"),
             # every flag at its GHD value, so the diff measures true parity
             # (.docs/flags.md); PARITY_CORVENE_FLAGS overrides
             CORVENE_FLAGS=",".join(

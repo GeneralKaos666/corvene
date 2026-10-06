@@ -1,0 +1,33 @@
+# Settings › Integrations' SSH key with Corvene's key helper (flag
+# 350-ssh-key-helper, off in the GitHub Desktop preset the harness runs
+# with). GHD has no SSH key help, so the snaps are recorded, not compared
+# (`corvene_only`; deviations.md › GitHub layer). Corvene reads a private
+# SSH dir (`CORVENE_SSH_DIR`), never ~/.ssh: empty at first, then the fixed
+# public key `ssh_key: true` puts there. The stub GitHub API's token lacks
+# write:public_key, so Add to GitHub asks to sign in again.
+name: ssh-key
+description: Settings › Integrations' SSH key section, Create SSH Key, and the permission prompt Add to GitHub shows (Corvene only, stub API)
+setup: repo
+github_stub: true
+ssh_key: true
+corvene_flags: 350-ssh-key-helper=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "preferences:integrations"}}
+    wait: 1200
+  - snap: {name: key, corvene_only: true, note: "GHD has no SSH key help (deviations.md, 350-ssh-key-helper)"}
+  # Add to GitHub
+  - ghd: {skip: true}
+    corvene: {click: [896, 428]}
+    wait: 2500
+  - snap: {name: needs-scope, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: create-ssh-key}}
+    wait: 800
+  - snap: {name: create-dialog, corvene_only: true}
