@@ -75,11 +75,14 @@ pub struct CommitMessageAvatar {
     name: Entity<InputState>,
     avatar_bounds: Rc<Cell<Bounds<Pixels>>>,
     badge_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The open balloon takes focus, so Escape closes it (GHD `Popover`).
+    focus: FocusHandle,
 }
 
 impl CommitMessageAvatar {
+    /// The commit form renders this view, so its own state observer
+    /// redraws it.
     pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
             state,
             open: false,
@@ -87,6 +90,7 @@ impl CommitMessageAvatar {
             name: cx.new(|cx| InputState::new(window, cx)),
             avatar_bounds: Rc::default(),
             badge_bounds: Rc::default(),
+            focus: cx.focus_handle(),
         }
     }
 
@@ -155,6 +159,7 @@ impl CommitMessageAvatar {
                 let name = model.account_name.or(model.name).unwrap_or_default();
                 self.name.update(cx, |s, cx| s.set_value(name, window, cx));
             }
+            window.focus(&self.focus, cx);
         }
         cx.notify();
     }
@@ -575,6 +580,12 @@ impl CommitMessageAvatar {
                     anchor,
                     crate::popover::popover_component(cx)
                         .id("commit-avatar-popover")
+                        .track_focus(&self.focus)
+                        .on_action(
+                            cx.listener(|this, _: &crate::actions::CloseFoldout, _, cx| {
+                                this.close(cx)
+                            }),
+                        )
                         .occlude()
                         // `.popover-component { width: 300px }`,
                         // `.popover-content { padding: var(--spacing-double) }`
