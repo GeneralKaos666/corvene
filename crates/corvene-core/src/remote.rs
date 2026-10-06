@@ -2626,10 +2626,20 @@ impl Dispatcher {
     /// and ahead/behind, shown in the repository list.
     pub fn refresh_indicators(cx: &mut dyn Host) {
         LAST_INDICATOR_REFRESH.with(|last| last.set(Some(Instant::now())));
-        let enabled = Self::state(cx)
-            .read(cx)
-            .settings
-            .repository_indicators_enabled;
+        let (enabled, watched) = {
+            let s = Self::state(cx).read(cx);
+            (
+                s.settings.repository_indicators_enabled,
+                // `428-menu-bar-status-item`: the watched repositories get
+                // their branch, ahead/behind and CI ref in the same pass,
+                // with the sidebar's icons off too
+                if s.menu_bar_enabled() {
+                    s.watched_repositories()
+                } else {
+                    Vec::new()
+                },
+            )
+        };
         if !enabled {
             Self::state(cx).update(cx, |s, cx| {
                 if !s.indicators.is_empty() {
@@ -2638,7 +2648,9 @@ impl Dispatcher {
                     cx.notify();
                 }
             });
-            return;
+            if watched.is_empty() {
+                return;
+            }
         }
         let (git, repos, stash_icon, other_stash) = {
             let s = Self::state(cx).read(cx);
@@ -2647,8 +2659,8 @@ impl Dispatcher {
                 git,
                 s.repositories
                     .iter()
-                    .filter(|r| !r.missing)
-                    .map(|r| (r.id, r.path.clone()))
+                    .filter(|r| !r.missing && (enabled || watched.contains(&r.id)))
+                    .map(|r| (r.id, r.path.clone(), r.github.clone()))
                     .collect::<Vec<_>>(),
                 s.flags.bool(crate::flags::ids::REPOSITORY_LIST_STASH_ICON),
                 s.flags.bool(crate::flags::ids::SHOW_LATEST_OTHER_STASH),
@@ -2658,19 +2670,35 @@ impl Dispatcher {
             cx,
             move || {
                 let mut out: HashMap<u64, RepoIndicator> = HashMap::new();
-                for (id, path) in repos {
+                let mut statuses: crate::menu_bar_status::MenuBarStatuses = HashMap::new();
+                for (id, path, github) in repos {
                     let Ok(info) = corvene_git::open_repository(&path) else {
                         continue;
                     };
-                    let changed = corvene_git::get_status(git.clone(), &info.workdir)
-                        .map(|st| st.files.len())
-                        .unwrap_or(0);
                     let ahead_behind = info.current_branch().and_then(|b| {
                         corvene_git::ahead_behind(git.clone(), &info.workdir, b)
                             .ok()
                             .flatten()
                     });
                     let branch = info.current_branch().map(|b| b.name.clone());
+                    if watched.contains(&id) {
+                        statuses.insert(
+                            id,
+                            crate::menu_bar_status::WatchedRepoStatus {
+                                branch: branch.clone(),
+                                ahead_behind,
+                                ci_ref: github
+                                    .as_ref()
+                                    .and_then(|gh| crate::menu_bar_status::ci_ref_of(&info, gh)),
+                            },
+                        );
+                    }
+                    if !enabled {
+                        continue;
+                    }
+                    let changed = corvene_git::get_status(git.clone(), &info.workdir)
+                        .map(|st| st.files.len())
+                        .unwrap_or(0);
                     let has_stash =
                         stash_icon && corvene_git::has_stash(&info.workdir, other_stash);
                     out.insert(
@@ -2683,14 +2711,18 @@ impl Dispatcher {
                         },
                     );
                 }
-                out
+                (out, statuses)
             },
-            move |indicators, cx| {
+            move |(indicators, statuses), cx| {
                 Self::state(cx).update(cx, |s, cx| {
-                    s.indicators = indicators;
-                    save_indicators(s);
+                    if enabled {
+                        s.indicators = indicators;
+                        save_indicators(s);
+                    }
+                    s.menu_bar_statuses = statuses;
                     cx.notify();
                 });
+                Self::touch_menu_bar_statuses(cx);
             },
         );
     }

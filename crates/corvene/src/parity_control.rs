@@ -648,12 +648,38 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
             Dispatcher::refresh_hook_env(cx);
         }
         "fake-github" => fake_github(arg, cx)?,
+        // `428-menu-bar-status-item`: what the status item shows (the model)
+        // and whether the NSStatusItem is in the menu bar
+        "menu-bar-model" => {
+            let model = corvene_core::AppState::global(cx).read(cx).menu_bar_model();
+            #[cfg(target_os = "macos")]
+            let shown = corvene_ui::status_item::is_shown();
+            #[cfg(not(target_os = "macos"))]
+            let shown = false;
+            return Ok(json!({"model": model, "shown": shown}));
+        }
+        // `menu-bar-watch <id>` / `menu-bar-unwatch <id>`: Settings › Advanced
+        // › Menu bar without the dialog
+        "menu-bar-watch" => {
+            let id: u64 = arg
+                .trim()
+                .parse()
+                .map_err(|e| format!("menu-bar-watch: {e}"))?;
+            Dispatcher::set_menu_bar_repository(id, true, cx);
+        }
+        "menu-bar-unwatch" => {
+            let id: u64 = arg
+                .trim()
+                .parse()
+                .map_err(|e| format!("menu-bar-unwatch: {e}"))?;
+            Dispatcher::set_menu_bar_repository(id, false, cx);
+        }
         other => return Err(format!("unknown hook {other:?}")),
     }
     Ok(json!({}))
 }
 
-/// `fake-github {port, owner, name, login}` (`tools/parity/github_stub.py`):
+/// `fake-github {port, owner, name, login[, remote]}` (`tools/parity/github_stub.py`):
 /// an Enterprise account on the stub GitHub API at
 /// `http://127.0.0.1:<port>/api/v3` with an injected token, and the
 /// selected repository made the stub's `owner/name` GitHub repository, so

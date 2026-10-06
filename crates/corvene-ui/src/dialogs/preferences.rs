@@ -2183,9 +2183,83 @@ impl PreferencesDialog {
             .into_any_element()
     }
 
+    /// Settings › Advanced › Menu bar (`428-menu-bar-status-item`): which
+    /// repositories the status item watches, one checkbox each.
+    fn menu_bar_section(&self, cx: &Context<Self>) -> Div {
+        let t = cx.ghd();
+        let repos: Vec<(u64, String, bool)> = self
+            .state
+            .read(cx)
+            .repositories
+            .iter()
+            .filter(|r| !r.missing)
+            .map(|r| {
+                (
+                    r.id,
+                    r.name(),
+                    self.draft.menu_bar_repositories.contains(&r.id),
+                )
+            })
+            .collect();
+        let weak = cx.weak_entity();
+        div()
+            .mt(SPACING())
+            .flex()
+            .flex_col()
+            .child(section_heading("Menu bar", cx))
+            .child(settings_description(cx).mb(SPACING()).child(
+                "Show the ticked repositories in the menu bar: how far their branch is \
+                         ahead of or behind its upstream, and the checks of what was pushed. The \
+                         item's menu opens a repository or a failing check.",
+            ))
+            .when(repos.is_empty(), |d| {
+                d.child(
+                    div()
+                        .text_size(FONT_SIZE_SM())
+                        .text_color(t.text_secondary)
+                        .child("No repositories added yet."),
+                )
+            })
+            .children(repos.into_iter().map(|(id, name, watched)| {
+                let weak = weak.clone();
+                div()
+                    .id(SharedString::from(format!("prefs-menu-bar-{id}")))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING_HALF())
+                    .mb(SPACING_HALF())
+                    .cursor_pointer()
+                    .on_click(move |_, _, cx| {
+                        weak.update(cx, |this, cx| {
+                            this.draft.menu_bar_repositories.retain(|&r| r != id);
+                            if !watched {
+                                this.draft.menu_bar_repositories.push(id);
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                    })
+                    .child(crate::widgets::checkbox(
+                        ElementId::from(SharedString::from(format!("prefs-menu-bar-{id}-box"))),
+                        watched,
+                        false,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(FONT_SIZE())
+                            .child(name),
+                    )
+            }))
+    }
+
     fn advanced_tab(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
-        let (crash_reports, offered_packs, clone_location, settings_file) = {
+        let (crash_reports, offered_packs, clone_location, settings_file, menu_bar) = {
             use corvene_core::flags::ids;
             let flags = &self.state.read(cx).flags;
             (
@@ -2193,6 +2267,7 @@ impl PreferencesDialog {
                 corvene_core::offered_packs(flags),
                 flags.bool(ids::DEFAULT_CLONE_LOCATION),
                 flags.bool(ids::SETTINGS_FILE),
+                cfg!(target_os = "macos") && flags.bool(ids::MENU_BAR_STATUS_ITEM),
             )
         };
         div()
@@ -2240,6 +2315,8 @@ impl PreferencesDialog {
                 .text_size(FONT_SIZE_SM())
                 .text_color(t.text_secondary),
             )
+            // Corvene addition: `428-menu-bar-status-item`
+            .when(menu_bar, |d| d.child(self.menu_bar_section(cx)))
             // Corvene addition: `514-default-clone-location`
             .when(clone_location, |d| d.child(self.clone_location_section(cx)))
             // Corvene addition in place of GHD's Usage section (no telemetry);

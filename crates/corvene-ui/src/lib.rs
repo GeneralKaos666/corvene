@@ -45,6 +45,8 @@ pub mod native_menu;
 mod native_menu_common;
 #[cfg(target_os = "macos")]
 pub mod native_window;
+#[cfg(target_os = "macos")]
+pub mod status_item;
 pub mod no_changes;
 pub mod no_repositories;
 pub mod path_label;

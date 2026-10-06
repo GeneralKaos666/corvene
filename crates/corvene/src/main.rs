@@ -283,6 +283,10 @@ pub(crate) fn main() {
                 .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
         );
         corvene_ui::widgets::sync_hover_while_typing(cx);
+        // `428-menu-bar-status-item`
+        #[cfg(target_os = "macos")]
+        corvene_ui::status_item::sync(state.read(cx).menu_bar_model().as_ref(), cx);
+        let mut last_watched = state.read(cx).watched_repositories();
         let mut last_reduce_motion_flag = sync_reduce_motion(cx);
         let mut last_preferences_open = false;
         let mut last_keymap_file_flag = state
@@ -291,6 +295,16 @@ pub(crate) fn main() {
             .bool(corvene_core::flags::ids::KEYMAP_OVERRIDES);
         cx.observe(&state, move |state, cx| {
             corvene_ui::widgets::sync_hover_while_typing(cx);
+            // `428-menu-bar-status-item`: the item follows the model; a
+            // newly watched repository gets its status at once
+            #[cfg(target_os = "macos")]
+            corvene_ui::status_item::sync(state.read(cx).menu_bar_model().as_ref(), cx);
+            let watched = state.read(cx).watched_repositories();
+            if watched != last_watched {
+                last_watched = watched;
+                Dispatcher::refresh_indicators_if_stale(cx);
+                Dispatcher::touch_menu_bar_statuses(cx);
+            }
             let reduce_motion_flag = state
                 .read(cx)
                 .flags

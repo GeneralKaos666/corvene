@@ -124,6 +124,10 @@ pub struct Settings {
     /// GHD `repositoryIndicatorsEnabled` (Advanced › Background updates).
     #[serde(default = "default_true")]
     pub repository_indicators_enabled: bool,
+    /// Corvene (`428-menu-bar-status-item`): the repositories (ids) the menu
+    /// bar status item watches.
+    #[serde(default)]
+    pub menu_bar_repositories: Vec<u64>,
     /// GHD `useExternalCredentialHelper` (Git Credential Manager).
     #[serde(default)]
     pub use_external_credential_helper: bool,
@@ -406,6 +410,7 @@ impl Default for Settings {
             show_commit_length_warning: true,
             commit_spellcheck_enabled: true,
             repository_indicators_enabled: true,
+            menu_bar_repositories: Vec::new(),
             use_external_credential_helper: false,
             underline_links: true,
             show_diff_check_marks: true,

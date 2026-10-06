@@ -1721,6 +1721,9 @@ pub struct AppState {
     pub commit_statuses: crate::commit_status::CommitStatusStore,
     /// Corvene (`347-actions-job-logs`): Actions job logs fetched this session.
     pub job_logs: crate::job_log::JobLogStore,
+    /// Corvene (`428-menu-bar-status-item`): what the indicator pass recorded
+    /// for the watched repositories.
+    pub menu_bar_statuses: crate::menu_bar_status::MenuBarStatuses,
     /// `cachedRepoRulesets`: ruleset id → the ruleset (how it applies to the user).
     pub repo_rulesets: HashMap<u64, corvene_github::ApiRepoRuleset>,
     /// Installed editors / shells (`getAvailableEditors` / `getAvailableShells`).

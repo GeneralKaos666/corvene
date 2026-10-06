@@ -60,6 +60,16 @@ fn macos_only() -> Availability {
     }
 }
 
+/// The menu bar status item is built for macOS only so far (Linux and
+/// Windows trays can follow).
+fn macos_status_item() -> Availability {
+    if cfg!(target_os = "macos") {
+        Availability::Available
+    } else {
+        Availability::BuiltIn("The status item is only built for macOS so far.")
+    }
+}
+
 /// The system's sleep and wake notifications reach the app (not on Android,
 /// where WorkManager runs the background fetch).
 fn wake_events() -> Availability {
@@ -3336,6 +3346,24 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(22775)],
         code: &["crates/corvene-core/src/navigation.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/keymap.rs"],
+    },
+
+    /// A menu bar status item with the watched repositories' sync state and checks.
+    MENU_BAR_STATUS_ITEM = 428 "menu-bar-status-item" {
+        title: "Menu bar status item",
+        summary: "A status item in the menu bar for the repositories ticked in Settings › \
+                  Advanced › Menu bar: its icon is the worst state of their pushed tips' \
+                  checks, its title the ahead/behind counts, and its menu lists each \
+                  repository (opens it) with the branch's sync state, its checks and every \
+                  failing check (opens it on GitHub). Fed by the repository indicators pass \
+                  and the check status refresh; nothing polls on its own.",
+        ghd_behaviour: "No status item; the Dock icon shows nothing either.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: macos_status_item,
+        upstream: &[],
+        code: &["crates/corvene-core/src/menu_bar_status.rs", "crates/corvene-ui/src/status_item.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/remote.rs"],
     },
 
     // ---- 500 Settings & updates ----
