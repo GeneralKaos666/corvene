@@ -5,6 +5,7 @@
 //! view is recreated only when its popup's value changes.
 
 mod acknowledgements;
+mod actions_job_log;
 mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
@@ -15,8 +16,10 @@ mod change_repository_alias;
 mod ci_check_run_rerun;
 mod clean_untracked_files;
 pub(crate) mod clone_repository;
+mod compare_refs;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
+mod confirm_force_unlock;
 mod confirm_quit;
 mod crash_report_found;
 mod create_release;
@@ -37,7 +40,7 @@ mod move_repository_to_group;
 mod move_to_applications_folder;
 mod move_to_shared_storage;
 mod new_issue;
-mod open_pull_request;
+pub(crate) mod open_pull_request;
 mod oversized_files;
 mod preferences;
 mod pull_request_notifications;
@@ -53,10 +56,12 @@ mod reset_to_reflog_entry;
 mod sign_in;
 pub mod sign_in_host;
 mod simple;
+mod sparse_checkout;
 mod ssh_key_passphrase;
 mod start_bisect;
 mod stash_list_dialogs;
 mod submit_pull_request_review;
+mod submodules;
 mod test_notifications;
 mod tutorial_dialogs;
 mod unknown_authors;
@@ -66,6 +71,7 @@ use corvene_core::{AppState, Popup};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+pub use actions_job_log::ActionsJobLogDialog;
 pub use add_embedded_repositories::AddEmbeddedRepositoriesDialog;
 pub use add_existing::AddExistingRepositoryDialog;
 pub use app_dialogs::{AboutDialog, ConfirmRemoveRepositoryDialog, IntegrationErrorDialog};
@@ -273,6 +279,23 @@ impl DialogHost {
                         checks.clone(),
                         git_ref.clone(),
                         *failed_only,
+                        cx,
+                    )
+                })
+                .into(),
+            Popup::ActionsJobLog {
+                github,
+                check,
+                step,
+                ..
+            } => cx
+                .new(|cx| {
+                    ActionsJobLogDialog::new(
+                        state,
+                        github.clone(),
+                        check.clone(),
+                        step.clone(),
+                        window,
                         cx,
                     )
                 })
@@ -567,6 +590,18 @@ impl DialogHost {
             Popup::SubmitPullRequestReview { repo } => cx
                 .new(|cx| SubmitPullRequestReviewDialog::new(state, *repo, window, cx))
                 .into(),
+            Popup::CompareRefs { repo, base, head } => cx
+                .new(|cx| {
+                    compare_refs::CompareRefsDialog::new(
+                        state,
+                        *repo,
+                        base.clone(),
+                        head.clone(),
+                        window,
+                        cx,
+                    )
+                })
+                .into(),
             Popup::CreateRelease { repo, tag, sha } => cx
                 .new(|cx| {
                     CreateReleaseDialog::new(state, *repo, tag.clone(), sha.clone(), window, cx)
@@ -598,6 +633,21 @@ impl DialogHost {
                 .into(),
             Popup::CleanUntrackedFiles { repo } => cx
                 .new(|cx| clean_untracked_files::CleanUntrackedFilesDialog::new(state, *repo, cx))
+                .into(),
+            Popup::Submodules { repo } => cx
+                .new(|cx| submodules::SubmodulesDialog::new(state, *repo, cx))
+                .into(),
+            Popup::SparseCheckout { repo } => cx
+                .new(|cx| sparse_checkout::SparseCheckoutDialog::new(state, *repo, cx))
+                .into(),
+            Popup::ConfirmForceUnlock { repo, path, owner } => cx
+                .new(|_| {
+                    confirm_force_unlock::ConfirmForceUnlockDialog::new(
+                        *repo,
+                        path.clone(),
+                        owner.clone(),
+                    )
+                })
                 .into(),
             Popup::ApplyPatch {
                 repo,

@@ -389,6 +389,8 @@ pub enum DiffSource {
     /// `348-pull-request-review`: the reviewed pull request's selected
     /// file, with its review threads under the lines.
     Review,
+    /// `1218-compare-refs`: the selected file of two refs' combined diff.
+    RefCompare,
 }
 
 /// Which "hide whitespace" setting a source uses.
@@ -398,7 +400,9 @@ fn set_hide_whitespace(source: DiffSource, hide: bool, cx: &mut App) {
         DiffSource::Commit | DiffSource::Stash => {
             Dispatcher::set_hide_whitespace_in_diff(true, hide, cx)
         }
-        DiffSource::PullRequest => Dispatcher::set_hide_whitespace_in_pull_request_diff(hide, cx),
+        DiffSource::PullRequest | DiffSource::RefCompare => {
+            Dispatcher::set_hide_whitespace_in_pull_request_diff(hide, cx)
+        }
         DiffSource::Review => {
             Dispatcher::set_hide_whitespace_in_diff(true, hide, cx);
             // the file's diff is read with the new setting
@@ -765,8 +769,12 @@ impl DiffView {
                     s.settings.hide_whitespace_in_history_diff,
                 )
             }
-            DiffSource::PullRequest => {
-                let preview = rs.pull_request_preview.as_ref()?;
+            DiffSource::PullRequest | DiffSource::RefCompare => {
+                let preview = if self.source == DiffSource::RefCompare {
+                    rs.ref_compare_changes.as_ref()?
+                } else {
+                    rs.pull_request_preview.as_ref()?
+                };
                 let file = preview.file.as_ref().and_then(|p| {
                     preview
                         .changeset

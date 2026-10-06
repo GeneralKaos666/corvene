@@ -189,6 +189,8 @@ impl Dispatcher {
             tutorial_step_override: None,
             show_ci_status_popover: false,
             commit_statuses: crate::commit_status::CommitStatusStore::default(),
+            job_logs: crate::job_log::JobLogStore::default(),
+            menu_bar_statuses: Default::default(),
             repo_rulesets: std::collections::HashMap::new(),
             issues: std::collections::HashMap::new(),
             mentionables: std::collections::HashMap::new(),
@@ -1153,6 +1155,7 @@ impl Dispatcher {
             read_message_hooks,
             read_implicit_upstream,
             read_signing,
+            (read_sparse, read_lfs),
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -1198,6 +1201,10 @@ impl Dispatcher {
                 s.flags
                     .bool(crate::flags::ids::IMPLICIT_UPSTREAM_PUSH_DEFAULT),
                 s.flags.bool(crate::flags::ids::COMMIT_SIGNING),
+                (
+                    s.flags.bool(crate::flags::ids::SPARSE_CHECKOUT),
+                    s.flags.bool(crate::flags::ids::LFS_LOCKS),
+                ),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -1310,6 +1317,25 @@ impl Dispatcher {
                         spawn_git(scope, &git, move |git| {
                             corvene_git::boolean_config_value(git, path, "commit.gpgsign", false)
                                 .unwrap_or(false)
+                        })
+                    });
+                    // `1112-sparse-checkout`: the Changes tab's banner
+                    let sparse = read_sparse.then(|| {
+                        spawn_git(scope, &git, move |git| {
+                            corvene_git::sparse_checkout(git, path)
+                                .ok()
+                                .filter(|sparse| sparse.enabled)
+                                .map(|sparse| crate::sparse_checkout::SparseSummary {
+                                    cone: sparse.cone,
+                                    patterns: sparse.patterns.len(),
+                                })
+                        })
+                    });
+                    // `1113-lfs-locks`: locks are only asked for in a
+                    // repository that uses LFS
+                    let uses_lfs = read_lfs.then(|| {
+                        spawn_git(scope, &git, move |git| {
+                            corvene_git::is_using_lfs_by_attributes(git, path)
                         })
                     });
                     // `340-message-rules-defer-to-hooks`
@@ -1512,6 +1538,8 @@ impl Dispatcher {
                         pull_with_rebase: join(pull_with_rebase),
                         commit_message_hook: message_hook.is_some_and(join),
                         signs_commits: signs_commits.is_some_and(join),
+                        sparse_checkout: sparse.and_then(join),
+                        uses_lfs: uses_lfs.is_some_and(join),
                         implicit_upstream,
                         worktrees,
                         upstream_rewritten,
@@ -1642,6 +1670,9 @@ impl Dispatcher {
                                     extras.commit_message_hook,
                                 );
                                 changed |= set(&mut repo_state.signs_commits, extras.signs_commits);
+                                changed |=
+                                    set(&mut repo_state.sparse_checkout, extras.sparse_checkout);
+                                changed |= set(&mut repo_state.uses_lfs, extras.uses_lfs);
                                 changed |= set(
                                     &mut repo_state.implicit_upstream,
                                     extras.implicit_upstream,
@@ -1799,6 +1830,8 @@ impl Dispatcher {
                 Self::hosted_repository_changed(id, cx);
                 Self::add_upstream_remote_if_needed(id, cx);
                 Self::refresh_branch_protection(id, cx);
+                // `1113-lfs-locks` (throttled)
+                Self::refresh_lfs_locks(id, false, cx);
                 let (rerun, prune) = Self::state(cx).update(cx, |s, _| {
                     let rs = s.repo_state_mut(id);
                     (
@@ -1839,6 +1872,8 @@ impl Dispatcher {
         if changed {
             // `798-blame`: another file was picked
             Self::close_blame(id, cx);
+            // `1110-repository-insights`: so does Insights
+            Self::close_insights(id, cx);
             Self::load_diff(id, cx);
         }
     }
@@ -2486,6 +2521,10 @@ impl Dispatcher {
         if !more && Self::history_all_branches(Self::state(cx).read(cx)) {
             Self::load_all_branches(id, false, cx);
         }
+        // `1110-repository-insights`: the numbers may be out of date now
+        if !more {
+            Self::check_insights_stale(id, cx);
+        }
         // `1216-recent-activity`: and the reflog while it is listed
         if !more
             && Self::state(cx)
@@ -2740,6 +2779,8 @@ impl Dispatcher {
         if changed {
             // `798-blame`: another commit was picked
             Self::close_blame(id, cx);
+            // `1110-repository-insights`: so does Insights
+            Self::close_insights(id, cx);
             Self::load_changeset(id, cx);
         }
     }
@@ -4017,6 +4058,8 @@ impl Dispatcher {
     pub fn show_section(id: u64, section: Section, cx: &mut dyn Host) {
         // `798-blame`: the view belongs to the tab it was opened in
         Self::close_blame_unless(id, |b| b.section == section, cx);
+        // `1110-repository-insights`: so does Insights
+        Self::close_insights_unless(id, |i| i.section == section, cx);
         Self::state(cx).update(cx, |s, cx| {
             if s.selected == Some(id) && s.repo_state_mut(id).section != section {
                 s.record_navigation();
@@ -7645,6 +7688,10 @@ struct RefreshExtras {
     commit_message_hook: bool,
     /// `526-commit-signing`: the effective `commit.gpgsign`.
     signs_commits: bool,
+    /// `1112-sparse-checkout`: while sparse checkout is on.
+    sparse_checkout: Option<crate::sparse_checkout::SparseSummary>,
+    /// `1113-lfs-locks`: `.gitattributes` has `filter=lfs`.
+    uses_lfs: bool,
     /// `1103-implicit-upstream-push-default`
     implicit_upstream: Option<(String, corvene_models::AheadBehind)>,
     worktrees: Vec<corvene_models::WorktreeEntry>,

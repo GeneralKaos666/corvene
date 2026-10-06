@@ -79,6 +79,17 @@ unsafe fn set_image(ns_item: id, icon: &Image) {
 
 /// Build an `NSMenu` (+1 retained) and collect the actions by tag.
 unsafe fn build_menu(items: &[MenuItem], actions: &mut Vec<Option<MenuAction>>) -> id {
+    unsafe { build_menu_for(items, actions, target(), sel!(menuAction:)) }
+}
+
+/// [`build_menu`] with the items' target and action (the status item's menu
+/// has its own, `crate::status_item`).
+pub(crate) unsafe fn build_menu_for(
+    items: &[MenuItem],
+    actions: &mut Vec<Option<MenuAction>>,
+    target: id,
+    action_sel: Sel,
+) -> id {
     unsafe {
         let menu: id = msg_send![class!(NSMenu), new];
         let _: () = msg_send![menu, setAutoenablesItems: NO];
@@ -93,8 +104,8 @@ unsafe fn build_menu(items: &[MenuItem], actions: &mut Vec<Option<MenuAction>>) 
                     actions.push(Some(action.clone()));
                     let title = ns_string(&item.label);
                     let ns_item: id = msg_send![class!(NSMenuItem), alloc];
-                    let ns_item: id = msg_send![ns_item, initWithTitle: title action: sel!(menuAction:) keyEquivalent: ns_string("")];
-                    let _: () = msg_send![ns_item, setTarget: target()];
+                    let ns_item: id = msg_send![ns_item, initWithTitle: title action: action_sel keyEquivalent: ns_string("")];
+                    let _: () = msg_send![ns_item, setTarget: target];
                     let _: () = msg_send![ns_item, setTag: tag];
                     let _: () = msg_send![ns_item, setEnabled: if item.enabled { YES } else { NO }];
                     if item.checked == Some(true) {
@@ -112,7 +123,7 @@ unsafe fn build_menu(items: &[MenuItem], actions: &mut Vec<Option<MenuAction>>) 
                     let ns_item: id = msg_send![class!(NSMenuItem), alloc];
                     let ns_item: id = msg_send![ns_item, initWithTitle: title action: nil keyEquivalent: ns_string("")];
                     let _: () = msg_send![ns_item, setEnabled: if item.enabled { YES } else { NO }];
-                    let submenu = build_menu(children, actions);
+                    let submenu = build_menu_for(children, actions, target, action_sel);
                     let _: () = msg_send![ns_item, setSubmenu: submenu];
                     let _: () = msg_send![submenu, release];
                     let _: () = msg_send![menu, addItem: ns_item];

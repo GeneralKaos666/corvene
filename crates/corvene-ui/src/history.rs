@@ -881,6 +881,163 @@ impl HistorySidebar {
             ))
     }
 
+    /// `1218-compare-refs`: the `..` / `...` tabs (with their commit
+    /// counts) and the swap button.
+    fn ref_compare_tabs(
+        &self,
+        id: u64,
+        range: corvene_core::ref_compare::RefRange,
+        base_only: u32,
+        head_only: u32,
+        cx: &Context<Self>,
+    ) -> Div {
+        use corvene_core::ref_compare::RefRange;
+        let t = cx.ghd();
+        let tab = |id_str: &'static str,
+                   label: String,
+                   tip: &'static str,
+                   target: RefRange,
+                   first: bool| {
+            let selected = range == target;
+            let hover_bg = t.tab_bar_hover_background;
+            div()
+                .id(id_str)
+                .a11y_button(label.clone())
+                .ghd_tooltip(tip)
+                .flex_1()
+                .h(zpx(25.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(FONT_SIZE())
+                .border_1()
+                .border_color(if selected {
+                    t.box_border_accent
+                } else {
+                    t.box_border
+                })
+                .when(first, |d| d.rounded_l(BORDER_RADIUS()))
+                .when(!first, |d| d.rounded_r(BORDER_RADIUS()).ml(zpx(-1.)))
+                .bg(if selected {
+                    t.box_selected_active_background
+                } else {
+                    t.tab_bar_background
+                })
+                .text_color(if selected {
+                    t.box_selected_active_text
+                } else {
+                    t.text
+                })
+                .cursor_pointer()
+                .when(!selected, move |d| d.hover(move |s| s.bg(hover_bg)))
+                .on_click(move |_, _, cx| Dispatcher::set_ref_compare_range(id, target, cx))
+                .child(label)
+        };
+        let hover_bg = t.tab_bar_hover_background;
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(SPACING_HALF())
+            .p(SPACING_HALF())
+            .border_b_1()
+            .border_color(t.box_border)
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_row()
+                    .child(tab(
+                        "ref-compare-range",
+                        format!(".. ({head_only})"),
+                        "Commits only the second ref has (base..head)",
+                        RefRange::Range,
+                        true,
+                    ))
+                    .child(tab(
+                        "ref-compare-symmetric",
+                        format!("... ({})", base_only + head_only),
+                        "Commits only one of the refs has (base...head)",
+                        RefRange::Symmetric,
+                        false,
+                    )),
+            )
+            .child(
+                div()
+                    .id("ref-compare-swap")
+                    .icon_button_label("Swap the refs")
+                    .flex_none()
+                    .size(zpx(25.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(BORDER_RADIUS())
+                    .border_1()
+                    .border_color(t.box_border)
+                    .bg(t.tab_bar_background)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover_bg))
+                    .on_click(move |_, _, cx| Dispatcher::swap_compare_refs(id, cx))
+                    .child(octicon(Octicon::GitCompare, t.text)),
+            )
+    }
+
+    /// `1218-compare-refs`: the row that shows the combined diff, selected
+    /// while it shows.
+    fn ref_compare_changed_files(&self, id: u64, cx: &Context<Self>) -> AnyElement {
+        let t = cx.ghd();
+        let (selected, files) = {
+            let s = self.state.read(cx);
+            let rs = s.repo_states.get(&id);
+            (
+                rs.is_some_and(corvene_core::ref_compare::showing_changes),
+                rs.and_then(|rs| rs.ref_compare_changes.as_ref())
+                    .and_then(|p| p.changeset.as_ref())
+                    .map(|c| c.files.len()),
+            )
+        };
+        let focused = selected;
+        let (bg, text, secondary) = if focused {
+            (
+                t.box_selected_active_background,
+                t.box_selected_active_text,
+                t.box_selected_active_text,
+            )
+        } else {
+            (t.background, t.text, t.text_secondary)
+        };
+        let label = mac_or("Changed Files", "Changed files");
+        let hover_bg = t.list_item_hover_background;
+        div()
+            .id("ref-compare-changed-files")
+            .a11y_row(label, selected)
+            .flex_none()
+            .h(ROW_HEIGHT())
+            .px(SPACING())
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(SPACING_HALF())
+            .border_b_1()
+            .border_color(t.box_border)
+            .bg(bg)
+            .text_color(text)
+            .text_size(FONT_SIZE())
+            .cursor_pointer()
+            .when(!selected, move |d| d.hover(move |s| s.bg(hover_bg)))
+            .on_click(move |_, _, cx| Dispatcher::show_ref_compare_changes(id, cx))
+            .child(octicon(Octicon::FileDiff, secondary))
+            .child(div().flex_1().child(label))
+            .children(files.map(|n| {
+                div()
+                    .flex_none()
+                    .text_color(secondary)
+                    .child(format!("{n} {}", if n == 1 { "file" } else { "files" }))
+            }))
+            .into_any_element()
+    }
+
     /// `889-compare-shows-conflicts`: "N conflicting files", opening into
     /// their paths.
     fn compare_conflicts(&self, id: u64, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -1753,6 +1910,15 @@ impl HistorySidebar {
                 )),
             }
         }
+        // `1218-compare-refs`: this commit against the current branch
+        if corvene_core::ref_compare::enabled(self.state.read(cx)) {
+            let head = current_ref(id, cx);
+            let base = commit.short_sha().to_string();
+            items.push(MenuItem::separator());
+            items.push(MenuItem::new("Compare with…", move |_, cx| {
+                Dispatcher::show_compare_refs(id, Some(base.clone()), head.clone(), cx)
+            }));
+        }
         // `893`: a commit the current branch is behind can come over
         let pick_from_compare = {
             let s = self.state.read(cx);
@@ -2099,6 +2265,19 @@ impl HistorySidebar {
         );
         // `1212-bisect`: marked commits and the range still in question
         let bisect = rs.and_then(|r| crate::bisect_bar::BisectRows::of(s, r));
+        // `1218-compare-refs`: `base...head` marks each row with its side
+        let sides: Option<(
+            SharedString,
+            SharedString,
+            Rc<std::collections::HashSet<String>>,
+        )> = rs.and_then(|r| match r.compare.refs()? {
+            (base, head, corvene_core::ref_compare::RefRange::Symmetric) => Some((
+                SharedString::from(base.to_string()),
+                SharedString::from(head.to_string()),
+                Rc::new(r.compare.base_only_shas.clone()),
+            )),
+            _ => None,
+        });
         if commits.is_empty() {
             let compare_loading = rs.is_some_and(|r| r.compare.loading);
             let filter_message = filter.map(|filter| {
@@ -2122,6 +2301,17 @@ impl HistorySidebar {
                         }
                     }
                 }
+                // `1218-compare-refs`
+                Some(corvene_core::CompareForm::Refs {
+                    base, head, range, ..
+                }) if !compare_loading => match range {
+                    corvene_core::ref_compare::RefRange::Range => {
+                        format!("{head} has no commits that {base} does not have")
+                    }
+                    corvene_core::ref_compare::RefRange::Symmetric => {
+                        format!("{base} and {head} have the same commits")
+                    }
+                },
                 _ if loaded && exhausted && !compare_loading => "No history".to_string(),
                 _ => String::new(),
             };
@@ -2262,6 +2452,13 @@ impl HistorySidebar {
                                     mark: b.mark(&commit.sha),
                                     in_range: b.in_range(&commit.sha),
                                     rows: b.clone(),
+                                }),
+                                side: sides.as_ref().map(|(base, head, base_only)| {
+                                    if base_only.contains(&commit.sha) {
+                                        (base.clone(), true)
+                                    } else {
+                                        (head.clone(), false)
+                                    }
                                 }),
                             };
                             commit_row(
@@ -2442,6 +2639,9 @@ struct RowHint {
     keyboard_selected: bool,
     /// `1212-bisect`
     bisect: Option<BisectHint>,
+    /// `1218-compare-refs` (`base...head`): the ref only it is on, and
+    /// whether that is the base.
+    side: Option<(SharedString, bool)>,
 }
 
 /// `1212-bisect`: a row's mark and whether it is still in question.
@@ -3037,6 +3237,11 @@ fn commit_row(
                     .children(hint.bisect.as_ref().and_then(|b| {
                         let selected = (is_selected || hint.keyboard_selected).then_some(text);
                         Some(b.rows.pill(b.mark?, selected, cx))
+                    }))
+                    // `1218-compare-refs`: the side of a `base...head` row
+                    .children(hint.side.as_ref().map(|(name, base)| {
+                        let selected = (is_selected || hint.keyboard_selected).then_some(text);
+                        side_pill(name.clone(), *base, selected, cx)
                     }));
             // `1213`: the graph column before the contents (painted in
             // the row, the contents moved over: no extra layout per row)
@@ -3207,6 +3412,25 @@ impl Render for HistorySidebar {
                     d.child(self.merge_cta(id, &branch, ahead_behind.behind, merge_status, cx))
                 })
                 .into_any_element(),
+            // `1218-compare-refs`
+            (
+                Some(id),
+                false,
+                Some(corvene_core::CompareForm::Refs {
+                    range,
+                    base_only,
+                    head_only,
+                    ..
+                }),
+            ) => div()
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .child(self.ref_compare_tabs(id, range, base_only, head_only, cx))
+                .child(self.ref_compare_changed_files(id, cx))
+                .child(self.commit_list(cx))
+                .into_any_element(),
             _ => self.commit_list(cx).into_any_element(),
         };
         let t = cx.ghd().clone();
@@ -3325,6 +3549,40 @@ impl Render for HistorySidebar {
             .children(self.context_menu.clone())
             .into_any_element()
     }
+}
+
+/// `1218-compare-refs`: the current branch's name (`HEAD` when detached),
+/// the Compare… dialog's other side.
+pub fn current_ref(id: u64, cx: &App) -> Option<String> {
+    let s = AppState::global(cx).read(cx);
+    let info = s.repo_states.get(&id)?.info.as_ref()?;
+    Some(
+        info.current_branch()
+            .map(|b| b.name.clone())
+            .unwrap_or_else(|| "HEAD".to_string()),
+    )
+}
+
+/// `1218-compare-refs`: the ref a `base...head` commit is only on, in the
+/// colours of a diff's removed (base) and added (head) lines.
+fn side_pill(name: SharedString, base: bool, selected: Option<Hsla>, cx: &App) -> Div {
+    let t = cx.ghd();
+    let color = selected.unwrap_or(if base { t.color_deleted } else { t.color_new });
+    div()
+        .flex_none()
+        .ml(SPACING())
+        .max_w(zpx(110.))
+        .h(zpx(16.))
+        .px(SPACING_HALF())
+        .flex()
+        .items_center()
+        .rounded(BORDER_RADIUS())
+        .border_1()
+        .border_color(color)
+        .text_color(color)
+        .text_size(FONT_SIZE_SM())
+        .line_height(zpx(14.))
+        .child(div().min_w_0().truncate().child(name))
 }
 
 /// Flag `821`: ask for a folder, then write the patches there.

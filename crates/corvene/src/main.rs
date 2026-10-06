@@ -283,6 +283,10 @@ pub(crate) fn main() {
                 .bool(corvene_core::flags::ids::MORE_HIGHLIGHT_EXTENSIONS),
         );
         corvene_ui::widgets::sync_hover_while_typing(cx);
+        // `428-menu-bar-status-item`
+        #[cfg(target_os = "macos")]
+        corvene_ui::status_item::sync(state.read(cx).menu_bar_model().as_ref(), cx);
+        let mut last_watched = state.read(cx).watched_repositories();
         let mut last_reduce_motion_flag = sync_reduce_motion(cx);
         let mut last_preferences_open = false;
         let mut last_keymap_file_flag = state
@@ -291,6 +295,16 @@ pub(crate) fn main() {
             .bool(corvene_core::flags::ids::KEYMAP_OVERRIDES);
         cx.observe(&state, move |state, cx| {
             corvene_ui::widgets::sync_hover_while_typing(cx);
+            // `428-menu-bar-status-item`: the item follows the model; a
+            // newly watched repository gets its status at once
+            #[cfg(target_os = "macos")]
+            corvene_ui::status_item::sync(state.read(cx).menu_bar_model().as_ref(), cx);
+            let watched = state.read(cx).watched_repositories();
+            if watched != last_watched {
+                last_watched = watched;
+                Dispatcher::refresh_indicators_if_stale(cx);
+                Dispatcher::touch_menu_bar_statuses(cx);
+            }
             let reduce_motion_flag = state
                 .read(cx)
                 .flags
@@ -533,6 +547,7 @@ pub(crate) fn main() {
         //   push-needs-pull | initialize-lfs (for the selected repository)
         //   pr-review[:approved|:commented] (changes requested by default)
         //   pr-comment | pr-checks-failed
+        //   job-log (the sample failed job's Actions log, flag 347)
         //   pr-list (sample pull requests in the branch foldout's Pull Requests tab)
         //   pull-request-review (the review of a sample pull request with sample threads;
         //     `348-pull-request-review`)
@@ -567,6 +582,9 @@ pub(crate) fn main() {
         //   failure GHD describes, a push a protected branch rejected, or an error
         //   git did not produce)
         //   recent-activity (Repository › Recent Activity…, flag 1216),
+        //   insights[:all] (Repository › Insights…, :all over all time; flag 1110),
+        //   compare-refs[:<base>[:<head>[:...]]] (Branch › Compare…, or with
+        //   both refs the comparison itself, `...` for base...head; flag 1218)
         //   issues | new-issue (Repository › Issues… with sample issues, New
         //   Issue…; flag 345), releases | create-release[:<tag>] (Repository ›
         //   Releases… with sample releases, Create Release…; flag 346)
@@ -575,6 +593,9 @@ pub(crate) fn main() {
         //   clean-untracked[:ignored] (Repository › Clean Untracked Files…, flag 1105)
         //   apply-patch:<path> (Apply Patch's preview of a patch file, the path
         //   relative to the repository; flag 1106)
+        //   submodules (Repository › Submodules…, flag 1111)
+        //   sparse-checkout (Repository › Sparse Checkout…, flag 1112)
+        //   force-unlock:<path> (Force Unlock of an LFS lock, flag 1113)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1256,10 +1277,35 @@ pub(crate) fn main() {
                 Dispatcher::show_recent_activity(id, cx);
             }
         });
+        // `1110-repository-insights`
+        on_menu_action(cx, move |_: &ShowInsights, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_insights(id, cx);
+            }
+        });
+        // `1218-compare-refs`: the current branch as the second ref
+        on_menu_action(cx, move |_: &CompareRefs, cx| {
+            if let Some(id) = selected(cx) {
+                let head = corvene_ui::history::current_ref(id, cx);
+                Dispatcher::show_compare_refs(id, None, head, cx);
+            }
+        });
         // `1105-clean-untracked-files`
         on_menu_action(cx, move |_: &CleanUntrackedFiles, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::show_clean_untracked_files(id, cx);
+            }
+        });
+        // `1111-submodules`
+        on_menu_action(cx, move |_: &ShowSubmodules, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_submodules(id, cx);
+            }
+        });
+        // `1112-sparse-checkout`
+        on_menu_action(cx, move |_: &ShowSparseCheckout, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_sparse_checkout(id, cx);
             }
         });
         // `1106-apply-patch`
@@ -1921,11 +1967,43 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         // `1216-recent-activity`
         ("recent-activity", Some(id)) => Dispatcher::show_recent_activity(id, cx),
+        // `1110-repository-insights`
+        ("insights", Some(id)) => Dispatcher::show_insights(id, cx),
+        ("insights:all", Some(id)) => {
+            Dispatcher::show_insights(id, cx);
+            Dispatcher::set_insights_range(id, corvene_core::insights::InsightsRange::AllTime, cx);
+        }
+        // `1218-compare-refs`: `compare-refs[:<base>[:<head>[:...]]]`
+        (other, Some(id)) if other == "compare-refs" || other.starts_with("compare-refs:") => {
+            let mut parts = other.split(':').skip(1).map(str::to_string);
+            let (base, head, dots) = (parts.next(), parts.next(), parts.next());
+            match (base, head) {
+                (Some(base), Some(head)) => {
+                    let range = if dots.as_deref() == Some("...") {
+                        corvene_core::ref_compare::RefRange::Symmetric
+                    } else {
+                        corvene_core::ref_compare::RefRange::Range
+                    };
+                    Dispatcher::compare_refs(id, base, head, range, false, cx);
+                }
+                (base, _) => {
+                    let head = corvene_ui::history::current_ref(id, cx);
+                    Dispatcher::show_compare_refs(id, base, head, cx);
+                }
+            }
+        }
         // `1105-clean-untracked-files`: `clean-untracked[:ignored]`
         ("clean-untracked", Some(id)) => Dispatcher::show_clean_untracked_files(id, cx),
         ("clean-untracked:ignored", Some(id)) => {
             Dispatcher::show_clean_untracked_files(id, cx);
             Dispatcher::load_clean_preview(id, true, cx);
+        }
+        // `1111-submodules`, `1112-sparse-checkout`
+        ("submodules", Some(id)) => Dispatcher::show_submodules(id, cx),
+        ("sparse-checkout", Some(id)) => Dispatcher::show_sparse_checkout(id, cx),
+        // `1113-lfs-locks`: `force-unlock:<path>`
+        (other, Some(id)) if other.starts_with("force-unlock:") => {
+            Dispatcher::request_force_unlock(id, other["force-unlock:".len()..].to_string(), cx)
         }
         // `1106-apply-patch`: `apply-patch:<path>`, relative to the repository
         (other, Some(id)) if other.starts_with("apply-patch:") => {
@@ -1991,6 +2069,16 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
             },
             cx,
         ),
+        // `347-actions-job-logs`: the sample failed job's log, no API
+        ("job-log", Some(id)) => {
+            let github = corvene_core::samples::github_repository(id, cx);
+            let check = dev_samples::failed_checks()
+                .into_iter()
+                .find(|c| c.job_steps.is_some())
+                .unwrap_or_else(|| dev_samples::failed_checks().remove(0));
+            Dispatcher::install_job_log(&github, check.id, &corvene_core::samples::job_log(), cx);
+            Dispatcher::show_job_log(id, github, check, None, cx);
+        }
         ("pr-checks-failed", Some(id)) => Dispatcher::show_popup(
             Popup::PullRequestChecksFailed {
                 repo: id,

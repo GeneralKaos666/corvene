@@ -648,17 +648,44 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
             Dispatcher::refresh_hook_env(cx);
         }
         "fake-github" => fake_github(arg, cx)?,
+        // `428-menu-bar-status-item`: what the status item shows (the model)
+        // and whether the NSStatusItem is in the menu bar
+        "menu-bar-model" => {
+            let model = corvene_core::AppState::global(cx).read(cx).menu_bar_model();
+            #[cfg(target_os = "macos")]
+            let shown = corvene_ui::status_item::is_shown();
+            #[cfg(not(target_os = "macos"))]
+            let shown = false;
+            return Ok(json!({"model": model, "shown": shown}));
+        }
+        // `menu-bar-watch <id>` / `menu-bar-unwatch <id>`: Settings › Advanced
+        // › Menu bar without the dialog
+        "menu-bar-watch" => {
+            let id: u64 = arg
+                .trim()
+                .parse()
+                .map_err(|e| format!("menu-bar-watch: {e}"))?;
+            Dispatcher::set_menu_bar_repository(id, true, cx);
+        }
+        "menu-bar-unwatch" => {
+            let id: u64 = arg
+                .trim()
+                .parse()
+                .map_err(|e| format!("menu-bar-unwatch: {e}"))?;
+            Dispatcher::set_menu_bar_repository(id, false, cx);
+        }
         other => return Err(format!("unknown hook {other:?}")),
     }
     Ok(json!({}))
 }
 
-/// `fake-github {port, owner, name, login}` (`tools/parity/github_stub.py`):
+/// `fake-github {port, owner, name, login[, remote]}` (`tools/parity/github_stub.py`):
 /// an Enterprise account on the stub GitHub API at
 /// `http://127.0.0.1:<port>/api/v3` with an injected token, and the
 /// selected repository made the stub's `owner/name` GitHub repository, so
 /// the real API client runs against the stub (`345-issues`,
-/// `346-releases`).
+/// `346-releases`). `{"permission": "admin" | "read"}` sets the
+/// repository permission (write otherwise).
 fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
     let fake: Value = serde_json::from_str(arg).map_err(|e| e.to_string())?;
     let owner = fake["owner"].as_str().unwrap_or("octocat").to_string();
@@ -706,22 +733,44 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
         fork: false,
         parent: None,
         archived: false,
-        permissions: Some(corvene_core::RepositoryPermission::Write),
+        // `{"permission": "admin"}`: `1113-lfs-locks`' Force Unlock
+        permissions: Some(match fake["permission"].as_str() {
+            Some("admin") => corvene_core::RepositoryPermission::Admin,
+            Some("read") => corvene_core::RepositoryPermission::Read,
+            _ => corvene_core::RepositoryPermission::Write,
+        }),
         allow_forking: Some(true),
         node_id: Some("R_stub".to_string()),
     };
-    corvene_core::AppState::global(cx).update(cx, |s, cx| {
+    // `remote`: `origin` becomes the stub repository's clone URL, so the
+    // current branch's pushed tip is a ref on it (`334-branch-ci-status`,
+    // `41-ci-checks.yaml`)
+    let point_origin = fake["remote"].as_bool().unwrap_or(false);
+    let clone_url = github.clone_url.clone();
+    let (selected, retarget) = corvene_core::AppState::global(cx).update(cx, |s, cx| {
         s.accounts.retain(|a| a.endpoint != endpoint);
         if with_account {
             s.accounts.push(account);
         }
+        let mut retarget = None;
         if let Some(id) = s.selected
             && let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
         {
             repo.github = Some(github);
+            if point_origin && let Some(git) = s.git.clone() {
+                retarget = Some((git, repo.path.clone()));
+            }
         }
         cx.notify();
+        (s.selected, retarget)
     });
+    if let Some((git, path)) = retarget {
+        corvene_git::remote_ops::set_remote_url(git, &path, "origin", &clone_url)
+            .map_err(|e| format!("fake-github: set-url: {e}"))?;
+        if let Some(id) = selected {
+            Dispatcher::refresh_repository(id, cx);
+        }
+    }
     // `348-pull-request-review`: the stub's pull requests fill the cache
     // (Branch › Review Pull Request… needs the branch's pull request)
     if with_account && let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {

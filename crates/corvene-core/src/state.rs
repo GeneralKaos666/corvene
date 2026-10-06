@@ -289,6 +289,15 @@ pub enum Popup {
         git_ref: String,
         failed_only: bool,
     },
+    /// Corvene (`347-actions-job-logs`): the log of an Actions job from the
+    /// check-run popover; `step` is the step to scroll to (the API's name),
+    /// `None` the failure.
+    ActionsJobLog {
+        repo: u64,
+        github: GitHubRepository,
+        check: corvene_models::RefCheck,
+        step: Option<String>,
+    },
     /// `PullRequestReview`: a review on one of the user's pull requests
     /// (GHD shows it from a notification). `should_*` pick the OK button:
     /// switch repository and/or check out the PR branch.
@@ -423,6 +432,13 @@ pub enum Popup {
     /// approve or request changes with the pending review's comments).
     SubmitPullRequestReview {
         repo: u64,
+    },
+    /// Corvene `1218-compare-refs`: Compare…, its pickers filled with
+    /// `base` and `head`.
+    CompareRefs {
+        repo: u64,
+        base: Option<String>,
+        head: Option<String>,
     },
     /// Corvene `346-releases`: Create Release… for `tag` (none: a new tag)
     /// at `sha` (none: the current branch's tip).
@@ -572,6 +588,22 @@ pub enum Popup {
     CleanUntrackedFiles {
         repo: u64,
     },
+    /// Corvene (`1111-submodules`): the submodules and their actions
+    /// (`RepositoryState::submodules`).
+    Submodules {
+        repo: u64,
+    },
+    /// Corvene (`1112-sparse-checkout`): the folders to check out
+    /// (`RepositoryState::sparse_editor`).
+    SparseCheckout {
+        repo: u64,
+    },
+    /// Corvene (`1113-lfs-locks`): release a lock someone else holds.
+    ConfirmForceUnlock {
+        repo: u64,
+        path: String,
+        owner: String,
+    },
     /// Corvene (`1106-apply-patch`): the files patch `name` touches, before
     /// it is applied.
     ApplyPatch {
@@ -720,6 +752,7 @@ impl Popup {
             | Self::SAMLReauthRequired { repo, .. }
             | Self::TestNotifications { repo, .. }
             | Self::CICheckRunRerun { repo, .. }
+            | Self::ActionsJobLog { repo, .. }
             | Self::PullRequestReview { repo, .. }
             | Self::PullRequestComment { repo, .. }
             | Self::PullRequestChecksFailed { repo, .. }
@@ -736,6 +769,7 @@ impl Popup {
             | Self::NewIssue { repo, .. }
             | Self::SubmitPullRequestReview { repo, .. }
             | Self::CreateRelease { repo, .. }
+            | Self::CompareRefs { repo, .. }
             | Self::StartBisect { repo, .. }
             | Self::WarnLocalChangesBeforeUndo { repo, .. }
             | Self::CreateBranch { repo, .. }
@@ -757,6 +791,9 @@ impl Popup {
             | Self::ConfirmDropStashEntry { repo, .. }
             | Self::StashWithMessage { repo }
             | Self::CleanUntrackedFiles { repo }
+            | Self::Submodules { repo }
+            | Self::SparseCheckout { repo }
+            | Self::ConfirmForceUnlock { repo, .. }
             | Self::ApplyPatch { repo, .. }
             | Self::CreateBranchFromStash { repo, .. }
             | Self::MoveChangesToWorktree { repo, .. }
@@ -1454,12 +1491,32 @@ pub struct RepositoryState {
     /// `1214-commit-signatures`: verified signatures by commit.
     pub signatures: crate::signatures::SignatureStore,
 
+    // ---- `1218-compare-refs` ----
+    /// The combined diff of the two compared refs.
+    pub ref_compare_changes: Option<crate::pull_request_preview::PullRequestPreview>,
+
+    // ---- `1110-repository-insights` ----
+    /// Repository › Insights…, shown in place of the tab's content.
+    pub insights: Option<crate::insights::InsightsState>,
+    /// Finished statistics by scope, range and tips (newest last).
+    pub insights_cache: Vec<(crate::insights::InsightsKey, Arc<corvene_git::RepoStats>)>,
+
     // ---- `1216-recent-activity` ----
     /// Repository › Recent Activity…: History lists the reflog instead.
     pub reflog: Option<crate::reflog::ReflogState>,
 
     /// `1105-clean-untracked-files`: the dry run Clean Untracked Files shows.
     pub clean_preview: Option<crate::clean_untracked::CleanPreview>,
+    /// `1111-submodules`: what Repository › Submodules… lists.
+    pub submodules: Option<crate::submodules::SubmodulesState>,
+    /// `1112-sparse-checkout`: set while sparse checkout is on (refresh).
+    pub sparse_checkout: Option<crate::sparse_checkout::SparseSummary>,
+    /// `1112-sparse-checkout`: the folders Sparse Checkout… shows.
+    pub sparse_editor: Option<crate::sparse_checkout::SparseEditor>,
+    /// `1113-lfs-locks`: `.gitattributes` has `filter=lfs` (refresh).
+    pub uses_lfs: bool,
+    /// `1113-lfs-locks`: the LFS server's locks, once asked.
+    pub lfs_locks: Option<crate::lfs_locks::LfsLockState>,
     // ---- `345-issues` ----
     /// Repository › Issues…: History lists the issues instead (also holds
     /// the New Issue… labels and assignees while the list is closed).
@@ -1720,6 +1777,11 @@ pub struct AppState {
     pub show_ci_status_popover: bool,
     /// `CommitStatusStore`: CI statuses of refs.
     pub commit_statuses: crate::commit_status::CommitStatusStore,
+    /// Corvene (`347-actions-job-logs`): Actions job logs fetched this session.
+    pub job_logs: crate::job_log::JobLogStore,
+    /// Corvene (`428-menu-bar-status-item`): what the indicator pass recorded
+    /// for the watched repositories.
+    pub menu_bar_statuses: crate::menu_bar_status::MenuBarStatuses,
     /// `cachedRepoRulesets`: ruleset id → the ruleset (how it applies to the user).
     pub repo_rulesets: HashMap<u64, corvene_github::ApiRepoRuleset>,
     /// Installed editors / shells (`getAvailableEditors` / `getAvailableShells`).

@@ -2462,6 +2462,72 @@ impl ChangesSidebar {
     }
 
     /// `.hidden-changes-warning` between the list and the commit form.
+    /// Corvene (`1112-sparse-checkout`): "Sparse checkout is on" over the
+    /// list, with Edit… and Turn Off.
+    fn sparse_checkout_banner(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
+        let s = self.state.read(cx);
+        if !s.flags.bool(corvene_core::flags::ids::SPARSE_CHECKOUT) {
+            return None;
+        }
+        let id = s.selected?;
+        let sparse = s.selected_state()?.sparse_checkout?;
+        let t = cx.ghd();
+        let detail = match (sparse.cone, sparse.patterns) {
+            (true, 0) => "Only the files at the top".to_string(),
+            (true, 1) => "1 folder checked out".to_string(),
+            (true, n) => format!("{n} folders checked out"),
+            (false, 1) => "1 pattern".to_string(),
+            (false, n) => format!("{n} patterns"),
+        };
+        Some(
+            div()
+                .id("sparse-checkout-banner")
+                .flex_none()
+                .flex()
+                .flex_col()
+                .py(SPACING_HALF())
+                .px(SPACING())
+                .bg(t.box_alt_background)
+                .border_b_1()
+                .border_color(t.box_border)
+                .text_size(FONT_SIZE())
+                .line_height(zpx(18.))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .child(
+                            octicon(Octicon::FileDirectory, t.text_secondary)
+                                .flex_none()
+                                .mr(SPACING_HALF()),
+                        )
+                        .child(div().min_w_0().truncate().child("Sparse checkout is on")),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_x(SPACING())
+                        .child(div().text_color(t.text_secondary).child(detail))
+                        .child(
+                            crate::widgets::link_button("sparse-checkout-edit", "Edit…", cx)
+                                .on_click(move |_, _, cx| Dispatcher::show_sparse_checkout(id, cx)),
+                        )
+                        .child(
+                            crate::widgets::link_button(
+                                "sparse-checkout-off",
+                                mac_or("Turn Off", "Turn off"),
+                                cx,
+                            )
+                            .on_click(move |_, _, cx| Dispatcher::disable_sparse_checkout(id, cx)),
+                        ),
+                ),
+        )
+    }
+
     fn hidden_changes_warning(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
         let count = self.committing_hidden_files(cx)?;
         let id = self.state.read(cx).selected?;
@@ -3091,6 +3157,12 @@ impl ChangesSidebar {
                 )
                 .enabled(tracked),
             );
+        }
+        // `1113-lfs-locks`
+        let lock_items = lfs_lock_items(self.state.read(cx), id, &paths);
+        if !lock_items.is_empty() {
+            items.push(MenuItem::separator());
+            items.extend(lock_items);
         }
         if paths.len() > 1 {
             items.push(MenuItem::separator());
@@ -5778,6 +5850,8 @@ impl Render for ChangesSidebar {
             .flex_col()
             .min_h_0()
             .when(tight, |d| d.overflow_y_scroll())
+            // `1112-sparse-checkout`
+            .children(self.sparse_checkout_banner(cx))
             .child(
                 div()
                     .id("changes-list-container")
@@ -5998,6 +6072,7 @@ fn file_row(
     let hits = corvene_core::filter::path_match(&mode, query, &file.path)
         .map(|(_, hits)| hits)
         .unwrap_or_default();
+    let lfs_lock = file_lfs_lock(repo_id, &file.path, cx);
     let dir_len = directory.chars().count();
     let name_hits: Vec<usize> = hits
         .iter()
@@ -6156,6 +6231,17 @@ fn file_row(
             let colours = (is_selected && list_focused).then_some(t.box_selected_active_text);
             d.child(line_stats_label(stats, colours, t))
         })
+        // `1113-lfs-locks`
+        .when_some(lfs_lock.as_ref(), |d, lock| {
+            d.child(lfs_lock_badge(
+                lock,
+                if is_selected && list_focused {
+                    t.box_selected_active_text
+                } else {
+                    t.text_secondary
+                },
+            ))
+        })
         .child(octicon(icon, color))
         // `621-context-menu-buttons`
         .when(crate::context_menu::row_menu_buttons(cx), |d| {
@@ -6175,6 +6261,98 @@ fn file_row(
         })
         .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
         .into_any_element()
+}
+
+/// Corvene (`1113-lfs-locks`): the file menus' lock items for `paths`, in
+/// a repository whose LFS server has locks: Lock File(s) for the unlocked
+/// ones, Unlock File(s) for the user's own (or, when the server cannot
+/// tell, any), and for one file someone else holds a disabled "Locked by
+/// X" with Force Unlock… for admins. Empty without locking.
+pub(crate) fn lfs_lock_items(state: &AppState, id: u64, paths: &[String]) -> Vec<MenuItem> {
+    let Some(rs) = state
+        .repo_states
+        .get(&id)
+        .filter(|_| state.flags.bool(corvene_core::flags::ids::LFS_LOCKS))
+        .filter(|rs| rs.lfs_locking())
+    else {
+        return Vec::new();
+    };
+    let paths: Vec<String> = paths
+        .iter()
+        .filter(|p| !p.ends_with('/'))
+        .cloned()
+        .collect();
+    let unlocked: Vec<String> = paths
+        .iter()
+        .filter(|p| rs.lfs_lock(p).is_none())
+        .cloned()
+        .collect();
+    let mine: Vec<String> = paths
+        .iter()
+        .filter(|p| rs.lfs_lock(p).is_some_and(|l| l.ours != Some(false)))
+        .cloned()
+        .collect();
+    let mut items = Vec::new();
+    let count_label = |verb: &str, n: usize| match (n, IS_MAC) {
+        (1, true) => format!("{verb} File"),
+        (1, false) => format!("{verb} file"),
+        (n, true) => format!("{verb} {n} Files"),
+        (n, false) => format!("{verb} {n} files"),
+    };
+    if !unlocked.is_empty() {
+        let label = count_label("Lock", unlocked.len());
+        items.push(MenuItem::new(label, move |_, cx| {
+            Dispatcher::lock_lfs_files(id, unlocked.clone(), cx)
+        }));
+    }
+    if !mine.is_empty() {
+        let label = count_label("Unlock", mine.len());
+        items.push(MenuItem::new(label, move |_, cx| {
+            Dispatcher::unlock_lfs_files(id, mine.clone(), false, cx)
+        }));
+    }
+    if let [path] = paths.as_slice()
+        && let Some(lock) = rs.lfs_lock(path).filter(|l| l.ours == Some(false))
+    {
+        items.push(MenuItem::new(format!("Locked by {}", lock.owner), |_, _| {}).enabled(false));
+        if state.is_repository_admin(id) {
+            let path = path.clone();
+            items.push(MenuItem::new(
+                mac_or("Force Unlock…", "Force unlock…"),
+                move |_, cx| Dispatcher::request_force_unlock(id, path.clone(), cx),
+            ));
+        }
+    }
+    items
+}
+
+/// Corvene (`1113-lfs-locks`): the lock on `path` in repository `id`.
+pub(crate) fn file_lfs_lock(id: Option<u64>, path: &str, cx: &App) -> Option<corvene_git::LfsLock> {
+    let s = AppState::try_global(cx)?.read(cx);
+    if !s.flags.bool(corvene_core::flags::ids::LFS_LOCKS) {
+        return None;
+    }
+    s.repo_states.get(&id?)?.lfs_lock(path).cloned()
+}
+
+/// Corvene (`1113-lfs-locks`): a lock and its holder ("You" for the
+/// user's own) at the end of a file row.
+pub(crate) fn lfs_lock_badge(lock: &corvene_git::LfsLock, colour: Hsla) -> Div {
+    let holder = match lock.ours {
+        Some(true) => "You".to_string(),
+        _ => lock.owner.clone(),
+    };
+    div()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(zpx(2.))
+        .max_w(zpx(120.))
+        .text_size(FONT_SIZE_SM())
+        .text_color(colour)
+        .child(octicon(Octicon::Lock, colour).flex_none())
+        .child(div().min_w_0().truncate().child(holder))
 }
 
 /// "+N -M" in the added / deleted colours (Corvene addition, flag

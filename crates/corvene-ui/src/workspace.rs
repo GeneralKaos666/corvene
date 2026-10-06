@@ -96,6 +96,10 @@ pub struct Workspace {
     /// `348-pull-request-review`: the overview or the file under review.
     review_view: Entity<crate::pull_request_review_view::PullRequestReviewView>,
     release_view: Entity<crate::release_view::ReleaseView>,
+    /// `1218-compare-refs`: the combined diff of two compared refs.
+    ref_compare_view: Entity<crate::ref_compare_view::RefCompareView>,
+    /// `1110-repository-insights`: shown in place of the tab's content.
+    insights_view: Entity<crate::insights_view::InsightsView>,
     /// The onboarding tutorial's right-hand panel.
     tutorial_panel: Entity<crate::tutorial_panel::TutorialPanel>,
     repository_foldout: Entity<RepositoryFoldout>,
@@ -246,6 +250,9 @@ impl Workspace {
             crate::pull_request_review_view::PullRequestReviewView::new(state.clone(), cx)
         });
         let release_view = cx.new(|cx| crate::release_view::ReleaseView::new(state.clone(), cx));
+        let ref_compare_view =
+            cx.new(|cx| crate::ref_compare_view::RefCompareView::new(state.clone(), cx));
+        let insights_view = cx.new(|cx| crate::insights_view::InsightsView::new(state.clone(), cx));
         let tutorial_panel =
             cx.new(|cx| crate::tutorial_panel::TutorialPanel::new(state.clone(), cx));
         let repository_foldout = cx.new(|cx| RepositoryFoldout::new(state.clone(), window, cx));
@@ -287,6 +294,8 @@ impl Workspace {
             issue_view,
             review_view,
             release_view,
+            ref_compare_view,
+            insights_view,
             tutorial_panel,
             repository_foldout,
             branch_foldout,
@@ -627,6 +636,21 @@ impl Workspace {
             .is_some_and(|b| b.section == self.section)
         {
             return self.blame_view.clone().into_any_element();
+        }
+        // `1110-repository-insights`: so does Insights
+        if rs
+            .and_then(|r| r.insights.as_ref())
+            .is_some_and(|i| i.section == self.section)
+            && corvene_core::insights::enabled(state)
+        {
+            return self.insights_view.clone().into_any_element();
+        }
+        // `1218-compare-refs`: the combined diff of two compared refs
+        if self.section == Section::History
+            && rs.is_some_and(corvene_core::ref_compare::showing_changes)
+            && corvene_core::ref_compare::enabled(state)
+        {
+            return self.ref_compare_view.clone().into_any_element();
         }
         // `345-issues` / `346-releases`: the selected issue / release
         // replaces History's commit view

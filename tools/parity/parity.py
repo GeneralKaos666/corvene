@@ -40,6 +40,7 @@ sys.path.insert(0, str(HERE))
 import accounts  # noqa: E402
 import fixture  # noqa: E402
 import github_stub  # noqa: E402
+import lfs_stub  # noqa: E402
 import imgdiff  # noqa: E402
 import report  # noqa: E402
 from drivers import Corvene, Ghd, page_height, page_rect, park_pointer  # noqa: E402
@@ -102,6 +103,7 @@ def both(fa, fb):
 
 class Run:
     stub = None
+    lfs_stub = None
 
     def __init__(self, args):
         self.args = args
@@ -134,10 +136,12 @@ class Run:
         # with good, unknown-key and bad signatures on top; `repo-reflog`: with
         # a rebase, a deleted branch and a hard reset in HEAD's reflog;
         # `repo-tools`: with ignored files and a patch and a mailbox beside it
+        # `repo-structure`: with submodules and Git LFS files (`lfs_stub: true`
+        # serves their locks)
         # `repo-pull-request`: `repo-remote` plus a pushed `feature/login` the
         # stub API serves as pull request #7 (`348-pull-request-review`)
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
-                             "repo-reflog", "repo-tools", "repo-pull-request")
+                             "repo-reflog", "repo-tools", "repo-structure", "repo-pull-request")
         pull_request = setup == "repo-pull-request"
         remote = setup == "repo-remote" or pull_request
         coauthors = setup == "repo-coauthors"
@@ -145,8 +149,15 @@ class Run:
         signed = setup == "repo-signed"
         reflog = setup == "repo-reflog"
         tools = setup == "repo-tools"
-        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, pull_request) if with_repo else None
-        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, pull_request) if with_repo else None
+        structure = setup == "repo-structure"
+        # `lfs_stub: true`: a stub Git LFS locking API (`lfs_stub.py`), the
+        # fixtures' `lfs.url`
+        self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
+        lfs_url = self.lfs_stub.url() if self.lfs_stub else None
+        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, structure,
+                               lfs_url, pull_request) if with_repo else None
+        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
+                               lfs_url, pull_request) if with_repo else None
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues, Releases
         # and pull request review views (`github_stub.py`), reached by the
@@ -206,6 +217,9 @@ class Run:
             if self.stub:
                 self.stub.stop()
                 self.stub = None
+            if self.lfs_stub:
+                self.lfs_stub.stop()
+                self.lfs_stub = None
             if not self.args.keep_work:
                 shutil.rmtree(work / "ghd-profile", ignore_errors=True)
         result["seconds"] = round(time.time() - started, 1)
@@ -343,12 +357,22 @@ class Run:
             # `github: stub`: sign Corvene in to the scenario's stub GitHub API
             # (`github_stub.py`); GHD has no such surface
             # `github: no-account`: a GitHub.com repository without an account
+            # `github: stub-ci`: the same, and `origin` is pointed at the stub
+            # repository, so the branch's pushed tip gets the stub's checks
             if action["github"] == "no-account":
                 drv.hook("fake-github", json.dumps({"account": False}))
-            elif action["github"] != "stub":
+            # `github: admin`: the same, the user an admin of the repository
+            # (`1113-lfs-locks`' Force Unlock)
+            elif action["github"] == "admin":
+                drv.hook("fake-github", json.dumps({"account": False, "permission": "admin"}))
+            elif action["github"] not in ("stub", "stub-ci"):
                 raise ValueError(f"unknown github step {action['github']!r}")
             elif not self.stub:
-                raise RuntimeError("`github: stub` needs `github_stub: true` on the scenario")
+                raise RuntimeError(f"`github: {action['github']}` needs `github_stub: true` on the scenario")
+            elif action["github"] == "stub-ci":
+                arg = json.loads(self.stub.hook_arg())
+                arg["remote"] = True
+                drv.hook("fake-github", json.dumps(arg))
             else:
                 drv.hook("fake-github", self.stub.hook_arg())
         if "accounts" in action:

@@ -1,0 +1,42 @@
+# Git LFS file locks (Corvene only, flag 1113-lfs-locks, off in the GitHub
+# Desktop preset the harness runs with). GHD shows no locks, so the snaps
+# are recorded, not compared (`corvene_only`; deviations.md › Changes). The
+# locks come from the stub LFS server (`lfs_stub.py`): art/hero.psd is
+# Mona Lisa's, art/logo.psd the user's. `github: admin` makes the user an
+# admin of the repository, which offers Force Unlock.
+name: lfs-locks
+description: Lock badges in Changes and History, the file menus' lock items, Force Unlock (Corvene only, stub LFS server)
+setup: repo-structure
+lfs_stub: true
+corvene_flags: 1113-lfs-locks=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: admin}
+    wait: 2500
+  - snap: {name: changes, corvene_only: true, note: "GHD shows no LFS locks (deviations.md, 1113-lfs-locks)"}
+  # art/hero.psd, someone else's lock
+  - ghd: {skip: true}
+    corvene: {rclick: [68, 185]}
+    wait: 600
+  - corvene_menu: theirs
+  - ghd: {skip: true}
+    corvene: {rclick: [68, 185]}
+    wait: 600
+  - corvene_menu_pick: "Force Unlock…"
+    wait: 800
+  - snap: {name: force-unlock, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [847, 485]}
+    wait: 3000
+  - snap: {name: unlocked, corvene_only: true}
+  # History: Add artwork, art/banner.psd › Lock File
+  - ghd: {skip: true}
+    corvene: {click: [187, 97]}
+    wait: 2000
+  - ghd: {skip: true}
+    corvene: {rclick: [301, 210]}
+    wait: 600
+  - corvene_menu: history
+  - corvene_menu_pick: "Lock File"
+    wait: 3000
+  - snap: {name: history-locked, corvene_only: true}

@@ -1,0 +1,12 @@
+name: 42-menu-bar
+description: "Corvene-only: Settings › Advanced › Menu bar (428), the watched repositories' checkboxes before and after ticking one; the NSStatusItem itself is outside the window (checked over CORVENE_CONTROL `menu-bar-model`)"
+setup: repo-remote
+github_stub: true
+corvene_flags: 334-branch-ci-status=on,428-menu-bar-status-item=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub-ci}
+    wait: 2500
+  - popup: {corvene: "preferences:advanced"}
+    wait: 1200
+  - snap: {name: advanced, corvene_only: true, note: "GHD's Advanced tab has no Menu bar section (deviations.md, 428-menu-bar-status-item)"}

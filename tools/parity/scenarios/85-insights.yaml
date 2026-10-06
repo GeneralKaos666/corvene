@@ -1,0 +1,18 @@
+# Corvene's Repository › Insights… (flag 1110-repository-insights, off in
+# the GitHub Desktop preset the harness runs with). GHD has no statistics,
+# so the snaps are recorded, not compared (`corvene_only`; deviations.md ›
+# Repository). The range is All time so the weeks do not move with the
+# date the harness runs on.
+name: insights
+description: Repository › Insights… over all time, a week of the chart hovered (Corvene only)
+setup: repo-graph
+corvene_flags: 1110-repository-insights=on
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "insights:all"}}
+    wait: 2500
+  - snap: {name: all-time, corvene_only: true, note: "GHD has no repository statistics (deviations.md, 1110-repository-insights)"}
+  - ghd: {skip: true}
+    corvene: {hover: [1226, 380]}
+    wait: 400
+  - snap: {name: week-hovered, corvene_only: true}

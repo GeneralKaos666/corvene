@@ -336,20 +336,7 @@ impl AppState {
             }
         };
         let info = self.repo_states.get(&id)?.info.as_ref()?;
-        let branch = info.current_branch()?;
-        let upstream = branch.upstream_short()?;
-        let remote_name = branch.upstream_remote_name()?;
-        let remote = info.remotes.iter().find(|r| r.name == remote_name)?;
-        let target = std::iter::once(gh)
-            .chain(gh.parent.as_deref())
-            .find(|g| corvene_models::url_matches_remote(&remote.url, &g.clone_url))?;
-        let tip = info
-            .branches
-            .iter()
-            .find(|b| b.kind == corvene_models::BranchKind::Remote && b.name == upstream)?
-            .tip
-            .clone()?;
-        Some((target.clone(), tip))
+        crate::menu_bar_status::ci_ref_of(info, gh)
     }
 
     /// [`Self::branch_ci_ref`]'s status icon, once it has checks.
@@ -480,6 +467,9 @@ impl Dispatcher {
 
     /// `refreshEligibleSubscriptions`
     fn refresh_eligible_commit_statuses(cx: &mut dyn Host) {
+        // `428-menu-bar-status-item`: the watched repositories' refs stay
+        // subscribed through this loop (nobody renders them)
+        Self::touch_menu_bar_statuses(cx);
         let keys: Vec<String> = Self::state(cx).update(cx, |s, _| {
             // `308-ci-status-idle-minutes`: a key nobody rendered for this
             // long stops refreshing (0: never, as GHD's mount / unmount)

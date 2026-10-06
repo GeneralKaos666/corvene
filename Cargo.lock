@@ -1682,6 +1682,8 @@ dependencies = [
  "encoding_rs",
  "gix",
  "libc",
+ "serde",
+ "serde_json",
  "similar",
  "tempfile",
  "thiserror 2.0.21",

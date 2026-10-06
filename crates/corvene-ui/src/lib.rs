@@ -33,6 +33,7 @@ pub mod github_list;
 pub mod history;
 pub mod icons;
 pub mod image_diff;
+pub mod insights_view;
 pub mod issue_view;
 pub mod issues_list;
 pub mod keymap;
@@ -45,6 +46,8 @@ pub mod native_menu;
 mod native_menu_common;
 #[cfg(target_os = "macos")]
 pub mod native_window;
+#[cfg(target_os = "macos")]
+pub mod status_item;
 pub mod no_changes;
 pub mod no_repositories;
 pub mod path_label;
@@ -54,6 +57,7 @@ pub mod pull_request_list;
 pub mod pull_request_overview;
 pub mod pull_request_review_list;
 pub mod pull_request_review_view;
+pub mod ref_compare_view;
 pub mod reflog_list;
 pub mod relative_time;
 pub mod release_view;

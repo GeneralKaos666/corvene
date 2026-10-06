@@ -28,9 +28,13 @@
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
 //! Pull All Repositories (flag `299-pull-all-repositories`), Repository ›
 //! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Recent
-//! Activity… (flag `1216-recent-activity`), Repository › Clean Untracked
+//! Activity… (flag `1216-recent-activity`), Repository › Insights… (flag
+//! `1110-repository-insights`), Branch › Compare… (flag `1218-compare-refs`),
+//! Repository › Clean Untracked
 //! Files… (flag `1105-clean-untracked-files`), Repository › Apply Patch ▸
-//! (flag `1106-apply-patch`), Repository › Start
+//! (flag `1106-apply-patch`), Repository › Submodules… (flag
+//! `1111-submodules`), Repository › Sparse Checkout… (flag
+//! `1112-sparse-checkout`), Repository › Start
 //! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
 //! Fetch From ▸ with a repository's remotes when it has several (flag
 //! `1210-push-to-other-remote`), Branch › Request
@@ -142,12 +146,20 @@ pub struct MenuExtras {
     pub bisect: Option<bool>,
     /// Flag `1216-recent-activity`: Repository › Recent Activity….
     pub recent_activity: bool,
+    /// Flag `1110-repository-insights`: Repository › Insights….
+    pub insights: bool,
+    /// Flag `1218-compare-refs`: Branch › Compare….
+    pub compare_refs: bool,
     /// Flag `1105-clean-untracked-files`: Repository › Clean Untracked
     /// Files….
     pub clean_untracked: bool,
     /// Flag `1106-apply-patch`: Repository › Apply Patch ▸ From File… /
     /// From Clipboard.
     pub apply_patch: bool,
+    /// Flag `1111-submodules`: Repository › Submodules….
+    pub submodules: bool,
+    /// Flag `1112-sparse-checkout`: Repository › Sparse Checkout….
+    pub sparse_checkout: bool,
     /// Flag `345-issues`: Repository › Issues… and New Issue…, enabled
     /// for a GitHub repository that is not archived (set by
     /// [`MenuLabelsEvent::of`]).
@@ -196,8 +208,12 @@ impl MenuExtras {
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             bisect: flags.bool(ids::BISECT).then_some(false),
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
+            insights: flags.bool(ids::REPOSITORY_INSIGHTS),
+            compare_refs: flags.bool(ids::COMPARE_REFS),
             clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
             apply_patch: flags.bool(ids::APPLY_PATCH),
+            submodules: flags.bool(ids::SUBMODULES),
+            sparse_checkout: flags.bool(ids::SPARSE_CHECKOUT),
             issues: flags.bool(ids::ISSUES).then_some(false),
             releases: flags.bool(ids::RELEASES).then_some(false),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
@@ -749,6 +765,19 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         }
         repository.push(separator());
     }
+    // Corvene (`1111-submodules`, `1112-sparse-checkout`)
+    if extras.submodules || extras.sparse_checkout {
+        if extras.submodules {
+            repository.push(item(l("Submodules…", "Sub&modules…"), ShowSubmodules));
+        }
+        if extras.sparse_checkout {
+            repository.push(item(
+                l("Sparse Checkout…", "Spa&rse checkout…"),
+                ShowSparseCheckout,
+            ));
+        }
+        repository.push(separator());
+    }
     // Corvene (`345-issues`)
     if let Some(enabled) = extras.issues {
         repository.extend([
@@ -777,15 +806,18 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             separator(),
         ]);
     }
-    // Corvene (`1216-recent-activity`)
+    // Corvene (`1216-recent-activity`, `1110-repository-insights`)
     if extras.recent_activity {
-        repository.extend([
-            item(
-                l("Recent Activity…", "Recent activit&y…"),
-                ShowRecentActivity,
-            ),
-            separator(),
-        ]);
+        repository.push(item(
+            l("Recent Activity…", "Recent activit&y…"),
+            ShowRecentActivity,
+        ));
+    }
+    if extras.insights {
+        repository.push(item(l("Insights…", "Insi&ghts…"), ShowInsights));
+    }
+    if extras.recent_activity || extras.insights {
+        repository.push(separator());
     }
     // Corvene (`1212-bisect`)
     if let Some(bisecting) = extras.bisect {
@@ -860,6 +892,12 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             l("Compare to Branch", "&Compare to branch"),
             CompareToBranch,
         ),
+    ]);
+    // Corvene (`1218-compare-refs`)
+    if extras.compare_refs {
+        branch.push(item(l("Compare…", "Comp&are…"), CompareRefs));
+    }
+    branch.extend([
         item(
             l("Merge into Current Branch…", "&Merge into current branch…"),
             MergeIntoCurrentBranch,
@@ -1161,8 +1199,12 @@ mod tests {
                     fetch_tags: true,
                     bisect: Some(bits & 1 != 0),
                     recent_activity: true,
+                    insights: true,
+                    compare_refs: true,
                     clean_untracked: true,
                     apply_patch: true,
+                    submodules: true,
+                    sparse_checkout: true,
                     issues: Some(true),
                     releases: Some(true),
                     request_reviewers: true,

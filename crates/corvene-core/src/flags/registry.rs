@@ -60,6 +60,16 @@ fn macos_only() -> Availability {
     }
 }
 
+/// The menu bar status item is built for macOS only so far (Linux and
+/// Windows trays can follow).
+fn macos_status_item() -> Availability {
+    if cfg!(target_os = "macos") {
+        Availability::Available
+    } else {
+        Availability::BuiltIn("The status item is only built for macOS so far.")
+    }
+}
+
 /// The system's sleep and wake notifications reach the app (not on Android,
 /// where WorkManager runs the background fetch).
 fn wake_events() -> Availability {
@@ -2898,6 +2908,22 @@ registry! {
         code: &["crates/corvene-core/src/releases.rs", "crates/corvene-ui/src/releases_list.rs", "crates/corvene-ui/src/release_view.rs", "crates/corvene-ui/src/dialogs/create_release.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// The check-run popover opens an Actions job's log in the app.
+    ACTIONS_JOB_LOGS = 347 "actions-job-logs" {
+        title: "Actions job logs",
+        summary: "In the check-run popover a GitHub Actions job's steps open the job's log in a \
+                  dialog (View log, or a click on a step): the log's text with its timestamps \
+                  and colour codes removed, errors and groups marked, a search box, Jump to \
+                  failure, Copy, and Open on GitHub for the job's page.",
+        ghd_behaviour: "Every step links to its page on GitHub; logs are read in the browser.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/job_log.rs", "crates/corvene-ui/src/dialogs/actions_job_log.rs", "crates/corvene-ui/src/ci_check_popover.rs", "crates/corvene-github/src/api.rs"],
+    },
+
     /// Review Pull Request: the pull request's files, overview and
     /// review threads in the app, with replies, resolving and a review to
     /// submit.
@@ -3364,6 +3390,24 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(22775)],
         code: &["crates/corvene-core/src/navigation.rs", "crates/corvene-ui/src/app_menu.rs", "crates/corvene-ui/src/keymap.rs"],
+    },
+
+    /// A menu bar status item with the watched repositories' sync state and checks.
+    MENU_BAR_STATUS_ITEM = 428 "menu-bar-status-item" {
+        title: "Menu bar status item",
+        summary: "A status item in the menu bar for the repositories ticked in Settings › \
+                  Advanced › Menu bar: its icon is the worst state of their pushed tips' \
+                  checks, its title the ahead/behind counts, and its menu lists each \
+                  repository (opens it) with the branch's sync state, its checks and every \
+                  failing check (opens it on GitHub). Fed by the repository indicators pass \
+                  and the check status refresh; nothing polls on its own.",
+        ghd_behaviour: "No status item; the Dock icon shows nothing either.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: macos_status_item,
+        upstream: &[],
+        code: &["crates/corvene-core/src/menu_bar_status.rs", "crates/corvene-ui/src/status_item.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/remote.rs"],
     },
 
     // ---- 500 Settings & updates ----
@@ -7486,6 +7530,76 @@ registry! {
         code: &["crates/corvene-core/src/apply_patch.rs", "crates/corvene-git/src/patch_import.rs", "crates/corvene-ui/src/dialogs/apply_patch.rs"],
     },
 
+    /// Repository › Insights…: contributors, commits per week, file churn.
+    REPOSITORY_INSIGHTS = 1110 "repository-insights" {
+        title: "Repository insights",
+        summary: "Repository › Insights… shows, in place of the diff, who contributed to the \
+                  current branch (or every branch, or any branch picked) and how much (commits, \
+                  lines added and removed), the commits of every week as bars, and the files \
+                  with the most changed lines, over the past week, month, 3 or 6 months, year \
+                  or all time. Merge commits are not counted. The numbers are read in the \
+                  background with git log, can be stopped, and are kept for the session until \
+                  the branch moves.",
+        ghd_behaviour: "No statistics: the contributors and activity of a repository are only \
+                        on GitHub's Insights pages, for its default branch.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/stats.rs", "crates/corvene-core/src/insights.rs", "crates/corvene-ui/src/insights_view.rs"],
+    },
+    /// Repository › Submodules…: list, initialize, update and sync submodules.
+    SUBMODULES = 1111 "submodules" {
+        title: "Submodules panel",
+        summary: "Repository › Submodules… lists every submodule with its path, URL, the \
+                  commit the repository records and the one checked out, and whether it is \
+                  initialized, up to date or at another commit. Submodules can be \
+                  initialized, updated (optionally recursively) and synced one by one or all \
+                  at once, and opened as repositories of their own.",
+        ghd_behaviour: "Submodules are updated after a branch switch only; there is no list of \
+                        them and no way to initialize, update or sync one.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7523), Upstream::issue(20921)],
+        code: &["crates/corvene-core/src/submodules.rs", "crates/corvene-git/src/submodule.rs", "crates/corvene-ui/src/dialogs/submodules.rs"],
+    },
+    /// Repository › Sparse Checkout…: pick the folders to check out.
+    SPARSE_CHECKOUT = 1112 "sparse-checkout" {
+        title: "Sparse checkout",
+        summary: "Repository › Sparse Checkout… shows the repository's folders with \
+                  checkboxes; only the ticked folders and the files at the top are checked \
+                  out (git sparse-checkout in cone mode). It can also be turned off again. \
+                  While it is on, the Changes tab says so.",
+        ghd_behaviour: "Every file is checked out. A repository set up for sparse checkout on \
+                        the command line works, but nothing shows that files are missing.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12567), Upstream::issue(22835)],
+        code: &["crates/corvene-core/src/sparse_checkout.rs", "crates/corvene-git/src/sparse.rs", "crates/corvene-ui/src/dialogs/sparse_checkout.rs"],
+    },
+    /// Git LFS file locks in the Changes and History file menus.
+    LFS_LOCKS = 1113 "lfs-locks" {
+        title: "Git LFS file locks",
+        summary: "In a repository that uses Git LFS on a server with file locking, the file \
+                  menus of Changes and History can lock and unlock files, and locked files \
+                  show a lock and who holds it. Repository administrators can force a lock \
+                  someone else holds open.",
+        ghd_behaviour: "Locks can only be taken and released with git lfs on the command line; \
+                        nothing shows which files are locked.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8419), Upstream::issue(22494)],
+        code: &["crates/corvene-core/src/lfs_locks.rs", "crates/corvene-git/src/lfs_locks.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
+
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.
@@ -7765,6 +7879,26 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(20750)],
         code: &["crates/corvene-git/src/reflog.rs", "crates/corvene-core/src/reflog.rs", "crates/corvene-ui/src/reflog_list.rs", "crates/corvene-ui/src/dialogs/reset_to_reflog_entry.rs"],
+    },
+
+    /// Branch › Compare…: any two refs, their commits and combined diff.
+    COMPARE_REFS = 1218 "compare-refs" {
+        title: "Compare any two refs",
+        summary: "Branch › Compare… (and Compare with… in the menus of History commits and of \
+                  the branch list) picks two branches, tags or commits. History then lists the \
+                  commits of base..head, or with the ... toggle those only one side has, each \
+                  marked with its side, and a Changed Files row shows the combined diff with \
+                  its file list: straight from base to head for .., from their merge base for \
+                  ..., as git diff reads the same range. Selecting a commit shows it as usual.",
+        ghd_behaviour: "History compares the current branch with one other branch, commits only; \
+                        the files changed between two branches show only in Preview Pull \
+                        Request.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19253)],
+        code: &["crates/corvene-core/src/ref_compare.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-ui/src/dialogs/compare_refs.rs", "crates/corvene-ui/src/ref_compare_view.rs"],
     },
 
     // ---- 1300 Changes & diffs (overflow) ----

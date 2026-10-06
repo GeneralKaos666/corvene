@@ -22,6 +22,7 @@ pub mod hooks;
 pub mod ignore;
 pub mod index_lock;
 pub mod lfs;
+pub mod lfs_locks;
 pub mod lfs_progress;
 pub mod log;
 mod log_gix;
@@ -43,10 +44,12 @@ pub mod remote_ops;
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub mod repo;
 pub mod signature;
+pub mod sparse;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;
 pub mod ssh;
 pub mod stash_ops;
+pub mod stats;
 pub mod status;
 mod status_gix;
 pub mod submodule;
@@ -119,17 +122,18 @@ pub use ignore::{
     escape_gitignore_pattern, excludes_file, gitignore_dirs_above, read_gitignore, save_gitignore,
 };
 pub use index_lock::{index_lock_path, remove_stale_index_lock};
+pub use lfs_locks::{LfsLock, LfsLocks, lfs_lock, lfs_locks, lfs_unlock};
 pub use lfs_progress::GitLfsProgressParser;
 pub use log::{
     COMMIT_BATCH_SIZE, HistoryQuery, LoggedCommit, LoggedHistory, NULL_TREE_SHA,
-    REMERGE_DIFF_MIN_VERSION, all_branch_tips, commit_exists, commit_file_diff,
-    commit_matches_words, commit_range_file_diff, commits_by_sha, commits_with_sha_prefix,
-    filtered_history, filtered_history_page, get_all_tags, get_changed_files,
-    get_changed_files_in_process, get_commit_range_changed_files, get_commits, get_commits_from,
-    get_commits_in_range, get_commits_with, local_commit_shas, local_only_commits, merge_base,
-    merge_base_changed_files, merge_base_file_diff, most_recent_local_commit,
-    parse_filtered_history, parse_raw_log_with_numstat, parse_recent_authors, recent_authors,
-    remerge_changed_files, remerge_file_diff, resolve_commit, tag_names,
+    REMERGE_DIFF_MIN_VERSION, all_branch_tips, commit_exists, commit_file_diff, commit_matches_words,
+    commit_range_file_diff, commits_by_sha, commits_with_sha_prefix, filtered_history,
+    filtered_history_page, get_all_tags, get_changed_files, get_changed_files_in_process,
+    get_commit_range_changed_files, get_commits, get_commits_from, get_commits_in_range,
+    get_commits_with, local_commit_shas, local_only_commits, merge_base, merge_base_changed_files,
+    merge_base_file_diff, most_recent_local_commit, parse_filtered_history,
+    parse_raw_log_with_numstat, parse_recent_authors, range_changed_files, range_file_diff,
+    recent_authors, remerge_changed_files, remerge_file_diff, resolve_commit, tag_names,
 };
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,
@@ -193,6 +197,10 @@ pub use repo::{
     ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,
     top_level_working_directory,
 };
+pub use sparse::{
+    SparseCheckout, sparse_checkout, sparse_checkout_disable, sparse_checkout_enabled,
+    sparse_checkout_set, tree_directories,
+};
 pub use ssh::{AddSshHostInfo, parse_add_ssh_host_prompt};
 pub use stash_ops::{
     ADD_TO_STASH_MIN_VERSION, AddToStash, StashPop, StashPopOptions, add_to_desktop_stash,
@@ -200,13 +208,19 @@ pub use stash_ops::{
     create_stash_with_message, mark_conflicts_resolved, pop_stash_entry_with, stash_entry,
     store_stash, unmerged_paths,
 };
+pub use stats::{
+    Contributor, FileChurn, RepoStats, StatsScope, TOP_FILES, WeekBucket, repository_stats,
+    week_start,
+};
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,
     map_status, parse_porcelain_v2, refresh_stale_index, working_directory_line_stats,
 };
 pub use submodule::{
-    EmbeddedRepository, SubmoduleEntry, add_embedded_repositories, embedded_repositories,
-    list_submodules, reset_submodule_paths, update_submodules_after_operation,
+    EmbeddedRepository, SubmoduleDetails, SubmoduleEntry, SubmoduleState,
+    add_embedded_repositories, embedded_repositories, list_submodules, reset_submodule_paths,
+    submodule_details, submodule_init, submodule_sync, submodule_update,
+    update_submodules_after_operation,
 };
 pub use terminal::{
     TailStream, TerminalOutput, TerminalOutputCallback, TerminalOutputListener,

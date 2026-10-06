@@ -172,6 +172,8 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::ConfirmDiscardStash { repo: r }
         | Popup::StashWithMessage { repo: r }
         | Popup::CleanUntrackedFiles { repo: r }
+        | Popup::Submodules { repo: r }
+        | Popup::SparseCheckout { repo: r }
         | Popup::PublishRepository { repo: r }
         | Popup::PushNeedsPull { repo: r }
         | Popup::ConfirmRemoveRepository { repo: r } => {
@@ -381,6 +383,14 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::CreateTag { repo: r, sha } => {
             repo = Some(*r);
             f.put("sha", sha);
+        }
+        Popup::ConfirmForceUnlock {
+            repo: r,
+            path,
+            owner,
+        } => {
+            repo = Some(*r);
+            f.put("path", path).put("owner", owner);
         }
         Popup::ApplyPatch {
             repo: r,
@@ -623,6 +633,25 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         }
         Popup::SubmitPullRequestReview { repo: r } => {
             repo = Some(*r);
+        }
+        Popup::ActionsJobLog {
+            repo: r,
+            check,
+            step,
+            ..
+        } => {
+            repo = Some(*r);
+            f.put("check", &check.name);
+            f.opt("step", step.as_deref());
+        }
+        Popup::CompareRefs {
+            repo: r,
+            base,
+            head,
+        } => {
+            repo = Some(*r);
+            f.opt("base", base.as_deref());
+            f.opt("head", head.as_deref());
         }
         Popup::CreateRelease { repo: r, tag, sha } => {
             repo = Some(*r);

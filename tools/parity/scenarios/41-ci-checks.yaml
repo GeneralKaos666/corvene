@@ -1,0 +1,26 @@
+name: 41-ci-checks
+description: "Corvene-only: the pushed tip's checks from the stub API in the toolbar and the check-run popover (334), and the failed job's log dialog with search and Jump to failure (347)"
+setup: repo-remote
+github_stub: true
+corvene_flags: 334-branch-ci-status=on,347-actions-job-logs=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub-ci}
+    wait: 3000
+  - snap: {name: toolbar, corvene_only: true, note: "GHD shows checks only for pull requests (deviations.md, 334-branch-ci-status)"}
+  - ghd: {skip: true}
+    corvene: {click: [428, 55]}
+    wait: 1500
+  - snap: {name: popover, corvene_only: true, note: "the branch's checks with the failed job expanded; GHD has no popover without a pull request"}
+  - ghd: {skip: true}
+    corvene: {click: [593, 332]}
+    wait: 2000
+  - snap: {name: log, corvene_only: true, note: "the failed job's log, opened at its failure (deviations.md, 347-actions-job-logs)"}
+  - ghd: {skip: true}
+    corvene: {type: "FAILED"}
+    wait: 800
+  - snap: {name: log-search, corvene_only: true, note: "search hits highlighted, the first one shown"}
+  - ghd: {skip: true}
+    corvene: {click: [847, 197]}
+    wait: 800
+  - snap: {name: log-failure, corvene_only: true, note: "Jump to failure scrolls to the next ##[error] line"}

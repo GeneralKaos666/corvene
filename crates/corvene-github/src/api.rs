@@ -17,6 +17,10 @@ use crate::USER_AGENT;
 use crate::endpoint::Endpoint;
 use crate::error::{ApiErrorBody, GitHubError, Result};
 
+/// The most of a job log that is read (`347-actions-job-logs`); GitHub's own
+/// viewer cuts off far below this.
+const MAX_JOB_LOG_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The response headers the paging helpers read (GHD `Response.headers`):
 /// `(name, value)` pairs, names matched without regard to case.
 pub type ResponseHeaders = [(String, String)];
@@ -1784,6 +1788,33 @@ impl Client {
     /// `rerequestCheckSuite`
     pub fn rerequest_check_suite(&self, owner: &str, name: &str, id: u64) -> Result<bool> {
         self.post_empty(&format!("repos/{owner}/{name}/check-suites/{id}/rerequest"))
+    }
+
+    /// Corvene (`347-actions-job-logs`): `GET
+    /// repos/{owner}/{name}/actions/jobs/{job_id}/logs`, the job's plain text
+    /// log. GitHub answers with a redirect to a short-lived download URL,
+    /// which the agent follows without the token (ureq drops `Authorization`
+    /// on a cross-host redirect). `None` when the log is gone (expired or
+    /// not an Actions job). Not in GHD, which only links to the job page.
+    pub fn job_logs(&self, owner: &str, name: &str, job_id: u64) -> Result<Option<String>> {
+        let path = format!("repos/{owner}/{name}/actions/jobs/{job_id}/logs");
+        let mut response = match self.get_response(&path, "application/vnd.github+json") {
+            Ok(response) => response,
+            Err(err) if err.is_token_invalidated() => return Err(err),
+            Err(GitHubError::Api {
+                status, message, ..
+            }) => {
+                debug!(status, %message, %path, "no job log");
+                return Ok(None);
+            }
+            Err(err) => return Err(err),
+        };
+        let text = response
+            .body_mut()
+            .with_config()
+            .limit(MAX_JOB_LOG_BYTES)
+            .read_to_string()?;
+        Ok(Some(text))
     }
 
     /// `rerunJob`
