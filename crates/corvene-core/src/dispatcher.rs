@@ -6739,6 +6739,12 @@ impl Dispatcher {
         Self::update_settings(cx, |s| s.show_side_by_side_diff = show);
     }
 
+    /// Corvene `1304-diff-no-wrap`: View › Wrap Diff Lines and Diff
+    /// Settings › Wrap Long Lines.
+    pub fn set_diff_wrap_lines(wrap: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.diff_wrap_lines = wrap);
+    }
+
     /// Modified-image diff tab (`_changeImageDiffType`).
     pub fn set_image_diff_type(kind: corvene_models::ImageDiffType, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.image_diff_type = kind);

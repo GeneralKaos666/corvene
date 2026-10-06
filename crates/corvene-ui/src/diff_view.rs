@@ -90,6 +90,11 @@
 //! takes longer than [`LOADING_INDICATOR_DELAY`] to compute, a spinner covers
 //! the pane (GHD keeps showing the previous diff, or nothing).
 //!
+//! Deviation (`1304-diff-no-wrap`): View › Wrap Diff Lines and Diff
+//! Settings › Wrap Long Lines can keep each line on one row; the text then
+//! scrolls sideways under fixed gutters (`diff_view_rows::HScroll`, a
+//! horizontal scrollbar, trackpad and ⇧-wheel). GHD always wraps.
+//!
 //! Deviation (`1305-diff-find-controls`): the ⌘F box shows "N of M",
 //! previous / next buttons and an Aa (match case) toggle; GHD's
 //! `DiffSearchInput` is a bare text box that ignores case. Enter, ⇧Enter
@@ -117,7 +122,7 @@ use crate::diff_expansion::{
     expand_whole, from_hunks,
 };
 use crate::diff_view_rows::{
-    Column, IntraLineOptions, RangeType, Row, RowContext, RowText, SearchHit, SearchIndex,
+    Column, HScroll, IntraLineOptions, RangeType, Row, RowContext, RowText, SearchHit, SearchIndex,
     SplitRow, TempSelection, TextBounds, build_rows, build_split_rows, line_number_width,
     max_line_number, render_row, render_split_row, search_rows, spans_for_row, unified_inner,
     unified_to_split,
@@ -521,6 +526,13 @@ pub struct DiffView {
     unified_inner: Rc<Vec<Vec<std::ops::Range<usize>>>>,
     /// Whether the list currently shows `split_rows`.
     split_mode: bool,
+    /// `1304-diff-no-wrap`: lines stay on one row (as last rendered).
+    no_wrap: bool,
+    /// `1304-diff-no-wrap`: the sideways scroll the rows share.
+    h_scroll: HScroll,
+    /// The rows (`Rc` address) and their longest line in characters, for
+    /// the width estimate.
+    longest_line: (usize, usize),
     /// New-side file lines for expansion (`fileContents.newContents`).
     contents: Option<Arc<Vec<String>>>,
     /// Old-side file lines, highlighted for deleted rows like GHD.
@@ -618,6 +630,9 @@ impl DiffView {
             unified_to_split: Rc::new(Vec::new()),
             unified_inner: Rc::new(Vec::new()),
             split_mode: false,
+            no_wrap: false,
+            h_scroll: HScroll::default(),
+            longest_line: (0, 0),
             contents: None,
             old_contents: None,
             expanded: false,
@@ -1101,6 +1116,8 @@ impl DiffView {
         self.previous_rows = same_file.then(|| self.rows.clone());
         if !same_file {
             self.tokens = None;
+            // `1304-diff-no-wrap`: another file starts at its lines' start
+            self.h_scroll.reset();
         }
         self.rows = Rc::new(build_rows(&self.hunks));
         self.rebuild_split_rows(cx);
@@ -1919,6 +1936,14 @@ impl DiffView {
                 hit.row
             };
             self.list_state.scroll_to_reveal_item(row);
+            // `1304-diff-no-wrap`: and sideways
+            if self.no_wrap
+                && let Some(text) = self.rows.get(hit.row).map(|r| r.text.as_str())
+            {
+                let column = |byte: usize| text.get(..byte).map_or(0, |t| t.chars().count());
+                self.h_scroll
+                    .reveal_columns(column(hit.range.start), column(hit.range.end));
+            }
         }
     }
 
@@ -2073,6 +2098,13 @@ impl DiffView {
         let interactive = self.source == DiffSource::WorkingDirectory;
         let hide = snap.hide_whitespace;
         let split = self.state.read(cx).settings.show_side_by_side_diff;
+        // `1304-diff-no-wrap`
+        let wrap = {
+            let s = self.state.read(cx);
+            s.flags
+                .bool(corvene_core::flags::ids::DIFF_NO_WRAP)
+                .then_some(s.settings.diff_wrap_lines)
+        };
         let _ = window;
         let legend = |text: &str| {
             div()
@@ -2152,7 +2184,16 @@ impl DiffView {
                             "Split",
                             |_, cx| Dispatcher::set_show_side_by_side_diff(true, cx),
                             cx,
-                        ))),
+                        )))
+                        .when_some(wrap, |d, wrap| {
+                            d.child(div().mt(zpx(6.)).child(checkbox_row(
+                                "diff-wrap-lines",
+                                wrap,
+                                mac_or("Wrap Long Lines", "Wrap long lines"),
+                                |checked, _, cx| Dispatcher::set_diff_wrap_lines(checked, cx),
+                                cx,
+                            )))
+                        }),
                 ),
             cx,
         )
@@ -3097,6 +3138,16 @@ impl Render for DiffView {
             s.settings.show_side_by_side_diff && !one_sided
         };
         self.set_split_mode(split);
+        // `1304-diff-no-wrap`: rows are one line high and measured again
+        let no_wrap = {
+            let s = self.state.read(cx);
+            s.flags.bool(corvene_core::flags::ids::DIFF_NO_WRAP) && !s.settings.diff_wrap_lines
+        };
+        if self.no_wrap != no_wrap {
+            self.no_wrap = no_wrap;
+            self.h_scroll.reset();
+            self.list_state.remeasure();
+        }
         let background = cx.ghd().background;
         let options = self
             .options_open
@@ -3313,6 +3364,79 @@ impl DiffView {
         )
     }
 
+    /// `1304-diff-no-wrap`: start a frame of the sideways scroll (the
+    /// widest line estimated from the longest one in characters).
+    fn h_scroll_frame(&mut self, window: &Window) -> HScroll {
+        let key = Rc::as_ptr(&self.rows) as usize;
+        let changed = self.longest_line.0 != key;
+        if changed {
+            let longest = self
+                .rows
+                .iter()
+                .map(|r| r.text.chars().count() + if r.no_newline { 30 } else { 0 })
+                .max()
+                .unwrap_or(0);
+            self.longest_line = (key, longest);
+        }
+        let text = window.text_system();
+        let font = text.resolve_font(&gpui_kit::font(mono_font()));
+        let column = text
+            .em_advance(font, self.text_size)
+            .unwrap_or(self.text_size * 0.6);
+        // the five-column prefix and a little room after the last character
+        let estimate = column * (self.longest_line.1 + 7) as f32;
+        if changed {
+            self.h_scroll.reset_width(estimate);
+        }
+        self.h_scroll
+            .begin_frame(estimate, column, self.list_state.viewport_bounds());
+        self.h_scroll.clone()
+    }
+
+    /// `1304-diff-no-wrap`: sideways wheel input over the rows. A trackpad
+    /// swipe that is mostly sideways scrolls only sideways (the list keeps
+    /// still); ⇧ + a wheel's vertical ticks scroll sideways (macOS already
+    /// sends those as sideways ticks, which the scrollbar animates over the
+    /// text, so only ticks over the gutters are taken here).
+    fn sideways_wheel(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let h = self.h_scroll.clone();
+        let view = cx.entity_id();
+        canvas(
+            |_, _, _| {},
+            move |bounds, _, window, _| {
+                window.on_mouse_event(move |ev: &ScrollWheelEvent, phase, _, cx| {
+                    if phase != DispatchPhase::Capture || !bounds.contains(&ev.position) {
+                        return;
+                    }
+                    let (dx, only) = match ev.delta {
+                        ScrollDelta::Pixels(d) => (d.x, d.x.abs() > d.y.abs()),
+                        ScrollDelta::Lines(l) if ev.modifiers.shift && l.x == 0. => {
+                            (px(l.y * 40.), true)
+                        }
+                        ScrollDelta::Lines(l)
+                            if !gpui_kit::base::ScrollbarHandle::viewport_bounds(&h)
+                                .contains(&ev.position) =>
+                        {
+                            (px(l.x * 40.), false)
+                        }
+                        ScrollDelta::Lines(_) => (Pixels::ZERO, false),
+                    };
+                    if dx == Pixels::ZERO {
+                        return;
+                    }
+                    if only {
+                        cx.stop_propagation();
+                    }
+                    if h.scroll_by(-dx) {
+                        cx.notify(view);
+                    }
+                });
+            },
+        )
+        .absolute()
+        .inset_0()
+    }
+
     /// The virtualized rows plus the search box (`DiffSearchInput`).
     fn text_diff(
         &mut self,
@@ -3372,6 +3496,7 @@ impl DiffView {
                     .bool(corvene_core::flags::ids::WIDE_HUNK_HANDLE)
             }),
             review: review.clone(),
+            h_scroll: self.no_wrap.then(|| self.h_scroll_frame(window)),
         });
         let rows = self.rows.clone();
         let split_rows = self.split_rows.clone();
@@ -3479,6 +3604,10 @@ impl DiffView {
                 .pr(gutter(&self.list_state)),
             )
             .child(scrollbar("diff-scrollbar", self.list_state.clone()))
+            .when(self.no_wrap, |d| {
+                d.child(self.sideways_wheel(cx))
+                    .child(scrollbar("diff-hscrollbar", self.h_scroll.clone()).horizontal())
+            })
             .children(search)
             .into_any_element()
     }

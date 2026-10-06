@@ -636,6 +636,14 @@ pub(crate) fn main() {
                 .show_side_by_side_diff;
             Dispatcher::set_show_side_by_side_diff(!split, cx);
         });
+        // Corvene (`1304-diff-no-wrap`): View › Wrap Diff Lines
+        on_menu_action(cx, |_: &ToggleDiffWordWrap, cx| {
+            let wrap = corvene_core::AppState::global(cx)
+                .read(cx)
+                .settings
+                .diff_wrap_lines;
+            Dispatcher::set_diff_wrap_lines(!wrap, cx);
+        });
         on_menu_action(cx, |_: &OpenSettings, cx| {
             Dispatcher::open_preferences(corvene_core::PreferencesTab::Accounts, cx)
         });

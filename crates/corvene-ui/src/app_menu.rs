@@ -43,7 +43,8 @@
 //! View Upstream on GitHub, Repository › Add License… ("A&dd license…" off
 //! macOS: `Pu&ll` has the `l`), View › Show Pull Requests List and Toggle
 //! History Review Mode, View › Back / Forward (flag
-//! `427-back-forward-navigation`), File › Remove Repositories… (flag
+//! `427-back-forward-navigation`), View › Wrap Diff Lines (flag
+//! `1304-diff-no-wrap`), File › Remove Repositories… (flag
 //! `269-bulk-remove-repositories`), Edit › Undo Last Commit (flag
 //! `423-undo-commit-menu-item`, enabled while the Changes tab's Undo bar
 //! shows), Window › Corvene (shows the window hidden with ⌘W)
@@ -195,6 +196,9 @@ pub struct MenuExtras {
     /// while the Changes tab's Undo bar shows (set by
     /// [`MenuLabelsEvent::of`]).
     pub undo_last_commit: Option<bool>,
+    /// Flag `1304-diff-no-wrap`: View › Wrap Diff Lines, checked while
+    /// diff lines wrap (set by [`MenuLabelsEvent::of`]).
+    pub diff_wrap_lines: Option<bool>,
     /// Flags that add key bindings and their View menu items
     /// (`612-navigation-shortcuts`, `801-history-review-mode`).
     pub keymap: KeymapFlags,
@@ -234,6 +238,7 @@ impl MenuExtras {
                 && flags.bool(ids::LINUX_INSTALL_CLI),
             show_remove_repositories: flags.bool(ids::BULK_REMOVE_REPOSITORIES),
             undo_last_commit: flags.bool(ids::UNDO_COMMIT_MENU_ITEM).then_some(false),
+            diff_wrap_lines: flags.bool(ids::DIFF_NO_WRAP).then_some(true),
             keymap: KeymapFlags::from_flags(flags),
         }
     }
@@ -268,6 +273,10 @@ impl MenuLabelsEvent {
         }
         if extras.releases.is_some() {
             extras.releases = Some(github.is_some());
+        }
+        // `1304-diff-no-wrap`: checked while lines wrap
+        if extras.diff_wrap_lines.is_some() {
+            extras.diff_wrap_lines = Some(s.settings.diff_wrap_lines);
         }
         // `1212-bisect`: whether the selected repository bisects
         if extras.bisect.is_some() {
@@ -623,6 +632,16 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             MenuItemConstructorOptions {
                 enabled: Some(forward),
                 ..item(l("Forward", "F&orward"), NavigateForward)
+            },
+        ]);
+    }
+    // Corvene (`1304-diff-no-wrap`)
+    if let Some(wrap) = extras.diff_wrap_lines {
+        view.extend([
+            separator(),
+            MenuItemConstructorOptions {
+                checked: wrap,
+                ..item(l("Wrap Diff Lines", "&Wrap diff lines"), ToggleDiffWordWrap)
             },
         ]);
     }
@@ -1242,6 +1261,7 @@ mod tests {
                     install_cli: true,
                     show_remove_repositories: true,
                     undo_last_commit: Some(true),
+                    diff_wrap_lines: Some(bits & 2 != 0),
                     keymap: KeymapFlags {
                         navigation_shortcuts: true,
                         history_review_mode: true,
@@ -1254,6 +1274,32 @@ mod tests {
             let mut out = Vec::new();
             duplicates(&build_default_menu_template(&labels), "root", &mut out);
             assert_eq!(out, Vec::<String>::new());
+        }
+    }
+
+    /// `1304-diff-no-wrap`: View › Wrap Diff Lines is checked while lines
+    /// wrap, and absent without the flag.
+    #[test]
+    fn wrap_diff_lines_is_a_checked_view_item() {
+        let wrap_item = |extras: MenuExtras| {
+            let labels = MenuLabelsEvent {
+                extras,
+                ..MenuLabelsEvent::default()
+            };
+            build_default_menu_template(&labels)
+                .iter()
+                .filter_map(|m| m.submenu.as_ref())
+                .flatten()
+                .find(|i| i.label.as_deref() == Some(l("Wrap Diff Lines", "&Wrap diff lines")))
+                .map(|i| i.checked)
+        };
+        assert_eq!(wrap_item(MenuExtras::default()), None);
+        for wrap in [true, false] {
+            let extras = MenuExtras {
+                diff_wrap_lines: Some(wrap),
+                ..MenuExtras::default()
+            };
+            assert_eq!(wrap_item(extras), Some(wrap));
         }
     }
 

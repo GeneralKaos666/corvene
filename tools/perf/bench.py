@@ -134,6 +134,16 @@ class Bench:
             if want("scroll-diff"):
                 r = self.cv.cmd("scroll-frames", x=DIFF_POINT[0], y=DIFF_POINT[1], dy=120, n=30)
                 self.record("scroll diff (frame)", {"total_ms": r["max_ms"], **r})
+            if want("scroll-diff-nowrap"):
+                # `1304-diff-no-wrap`: the same scroll with one-line rows, then sideways
+                self.cv.cmd("action", name="corvene::ToggleDiffWordWrap")
+                self.cv.cmd("scroll-frames", x=DIFF_POINT[0], y=DIFF_POINT[1], dy=-6000, n=1)
+                r = self.cv.cmd("scroll-frames", x=DIFF_POINT[0], y=DIFF_POINT[1], dy=120, n=30)
+                self.record("scroll diff, no wrap (frame)", {"total_ms": r["max_ms"], **r})
+                r = self.cv.cmd("scroll-frames", x=DIFF_POINT[0], y=DIFF_POINT[1], dx=40, n=30)
+                self.record("scroll diff sideways (frame)", {"total_ms": r["max_ms"], **r})
+                self.cv.cmd("scroll-frames", x=DIFF_POINT[0], y=DIFF_POINT[1], dx=-6000, n=1)
+                self.cv.cmd("action", name="corvene::ToggleDiffWordWrap")
             if want("scroll-changes"):
                 r = self.cv.cmd("scroll-frames", x=SIDEBAR_X, y=400, dy=120, n=30)
                 self.record("scroll changes list (frame)", {"total_ms": r["max_ms"], **r})

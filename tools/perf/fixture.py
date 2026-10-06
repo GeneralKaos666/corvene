@@ -102,6 +102,9 @@ def big(root: Path, files: int = 50_000, commits: int = 20_000, branches: int = 
     text = big_rs.read_text().splitlines(keepends=True)
     for i in range(0, len(text), 25):
         text[i] = text[i].replace("wrapping_mul", "wrapping_add")
+    # lines wider than the diff (wrapping vs `1304-diff-no-wrap`)
+    for i in range(10, len(text), 40):
+        text[i] = text[i].rstrip("\n") + " // " + "long line padding " * 16 + "\n"
     big_rs.write_text("".join(text))
     for i in range(30):
         (root / f"untracked-{i:02}.txt").write_text(f"new file {i}\n" * 20)

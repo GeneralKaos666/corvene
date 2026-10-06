@@ -22,6 +22,8 @@ gpui_kit::actions!(
         OpenSelectedFileWithDefaultProgram,
         // ⌥⌘S: unified ⇄ split diff (`610-diff-mode-shortcut`)
         ToggleDiffDisplayMode,
+        // View › Wrap Diff Lines (`1304-diff-no-wrap`)
+        ToggleDiffWordWrap,
         // ⌥⌘C / ⇧⌥⌘C in a file list (`611-copy-path-shortcuts`)
         CopySelectedFilePaths,
         CopySelectedRelativeFilePaths,

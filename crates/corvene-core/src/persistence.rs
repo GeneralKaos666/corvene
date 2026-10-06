@@ -150,6 +150,10 @@ pub struct Settings {
     pub pull_request_file_list_width: f32,
     /// Diff Settings › Diff display › Split (`showSideBySideDiff`).
     pub show_side_by_side_diff: bool,
+    /// Corvene `1304-diff-no-wrap`: View › Wrap Diff Lines (on: long
+    /// lines wrap, GHD's only behaviour).
+    #[serde(default = "default_true")]
+    pub diff_wrap_lines: bool,
     /// Last chosen tab of a modified-image diff (`imageDiffType`).
     pub image_diff_type: corvene_models::ImageDiffType,
     /// GHD `tabSize` for diffs (Appearance › Diff).
@@ -419,6 +423,7 @@ impl Default for Settings {
             hide_whitespace_in_pull_request_diff: false,
             pull_request_file_list_width: 250.0,
             show_side_by_side_diff: false,
+            diff_wrap_lines: true,
             image_diff_type: corvene_models::ImageDiffType::TwoUp,
             tab_size: TAB_SIZE_DEFAULT,
             syntax_highlighter: SyntaxHighlighter::GitHubDesktop,

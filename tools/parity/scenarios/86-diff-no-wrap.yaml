@@ -1,0 +1,46 @@
+# Diffs without line wrapping (flag 1304-diff-no-wrap, off in the GitHub
+# Desktop preset the harness runs with). With the flag on, lines still wrap
+# until the option is turned off, so the first snap is compared with GHD;
+# the rest are Corvene only (deviations.md › Diff viewer). src/main.rs has
+# a line long enough to wrap.
+name: diff-no-wrap
+description: A long diff line wrapped (compared), the Wrap Long Lines option, unwrapped, scrolled sideways, selected text and split mode (Corvene only)
+setup: repo
+corvene_flags: 1304-diff-no-wrap=on
+steps:
+  - click: [125, 300]
+    wait: 600
+  - snap: wrapped
+  - click: [1320, 97]
+    wait: 400
+  - snap: {name: options, corvene_only: true, note: "Wrap Long Lines is Corvene's (deviations.md, 1304-diff-no-wrap)"}
+  # Diff Settings › Wrap Long Lines off
+  - ghd: {skip: true}
+    corvene: {click: [1113, 377]}
+    wait: 400
+  - snap: {name: options-unchecked, corvene_only: true}
+  # out of the popover, below the rows
+  - click: [900, 600]
+    wait: 300
+  - snap: {name: no-wrap, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 300], dx: 400}}
+    wait: 300
+  - snap: {name: scrolled-sideways, corvene_only: true}
+  # a text selection from past the end of a short line into the long one
+  - ghd: {skip: true}
+    corvene: {drag: {from: [700, 222], to: [1100, 262]}}
+    wait: 300
+  - snap: {name: text-selected, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ToggleDiffDisplayMode"}
+    wait: 500
+  - snap: {name: split, corvene_only: true}
+  # View › Wrap Diff Lines back on
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ToggleDiffWordWrap"}
+    wait: 500
+  - snap: {name: split-wrapped, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ToggleDiffDisplayMode"}
+    wait: 500

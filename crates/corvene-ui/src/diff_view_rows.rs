@@ -3,8 +3,13 @@
 //! only the visible rows. Rows are built from the (possibly expanded) hunks
 //! of `diff_expansion`; `Row::original` keeps the model's line index so
 //! selections and discard patches ignore expanded context.
+//!
+//! Deviation (`1304-diff-no-wrap`): with View › Wrap Diff Lines off a row's
+//! text stays on one line, clipped beside the gutters and moved by the
+//! shared horizontal offset in [`HScroll`] (GHD always wraps:
+//! `_side-by-side-diff.scss` `white-space: pre-wrap`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::rc::Rc;
@@ -196,6 +201,197 @@ pub struct RowContext {
     /// `348-pull-request-review`: the review threads under the rows and
     /// the `+` that starts a comment (a pull request's diff only).
     pub review: Option<Rc<crate::review_threads::ReviewUi>>,
+    /// `1304-diff-no-wrap`: lines do not wrap and scroll sideways together.
+    pub h_scroll: Option<HScroll>,
+}
+
+/// `1304-diff-no-wrap`: the horizontal scroll of a diff whose lines do not
+/// wrap, shared by every row's text (gutters stay put) and by the
+/// horizontal scrollbar, which drives it through [`ScrollbarHandle`]. The
+/// rows report where their text is clipped and how wide their lines are
+/// as they paint.
+#[derive(Clone, Default)]
+pub struct HScroll(Rc<HScrollState>);
+
+#[derive(Default)]
+struct HScrollState {
+    /// How far the text is moved left (≥ 0).
+    offset: Cell<Pixels>,
+    /// The widest line the rows are known to have: an estimate from the
+    /// character count, raised by what painted rows measure.
+    widest: Cell<Pixels>,
+    /// One monospace column, for the estimate and for revealing a column.
+    column: Cell<Pixels>,
+    /// Where the scrollbar goes: from the left of the leftmost text clip to
+    /// the right of the rightmost, over the list's height.
+    span: Cell<Bounds<Pixels>>,
+    /// The narrowest text clip (one column's in split mode).
+    clip_width: Cell<Pixels>,
+    /// The frame `span` was recorded in (the first row of a frame resets it).
+    recorded: Cell<usize>,
+    frame: Cell<usize>,
+}
+
+impl HScroll {
+    pub fn offset(&self) -> Pixels {
+        self.0.offset.get()
+    }
+
+    /// How far the text can move: the widest line past the clip.
+    pub fn max_offset(&self) -> Pixels {
+        (self.0.widest.get() - self.0.clip_width.get()).max(Pixels::ZERO)
+    }
+
+    pub fn set(&self, offset: Pixels) {
+        self.0
+            .offset
+            .set(offset.clamp(Pixels::ZERO, self.max_offset()));
+    }
+
+    /// Move by `delta` (positive: right, towards the ends of lines); whether
+    /// the offset changed.
+    pub fn scroll_by(&self, delta: Pixels) -> bool {
+        let before = self.offset();
+        self.set(before + delta);
+        self.offset() != before
+    }
+
+    /// A new frame over a list at `list`: the rows record their clips
+    /// again; the widest line is at least `estimate`, and `column` is one
+    /// character's advance.
+    pub fn begin_frame(&self, estimate: Pixels, column: Pixels, list: Bounds<Pixels>) {
+        let s = &self.0;
+        s.frame.set(s.frame.get() + 1);
+        s.widest.set(s.widest.get().max(estimate));
+        s.column.set(column);
+        let mut span = s.span.get();
+        if span.size.width <= Pixels::ZERO {
+            // until a row paints, the list's own bounds
+            span = list;
+            s.clip_width.set(list.size.width);
+        }
+        span.origin.y = list.origin.y;
+        span.size.height = list.size.height;
+        s.span.set(span);
+    }
+
+    /// The rows changed: forget the measured widths.
+    pub fn reset_width(&self, estimate: Pixels) {
+        self.0.widest.set(estimate);
+        self.set(self.offset());
+    }
+
+    /// The least width of a row's line box: past the right of the clip, so
+    /// a press after the end of a short line still lands on its text.
+    fn min_line_width(&self) -> Pixels {
+        self.0.clip_width.get() + self.offset()
+    }
+
+    /// Back to the start of the lines.
+    pub fn reset(&self) {
+        self.0.offset.set(Pixels::ZERO);
+    }
+
+    /// A row's text clip area painted at `bounds`.
+    fn record_clip(&self, bounds: Bounds<Pixels>) {
+        let s = &self.0;
+        let mut span = s.span.get();
+        if s.recorded.get() != s.frame.get() {
+            s.recorded.set(s.frame.get());
+            span.origin.x = bounds.origin.x;
+            span.size.width = bounds.size.width;
+            s.clip_width.set(bounds.size.width);
+        } else {
+            let right = span.right().max(bounds.right());
+            span.origin.x = span.origin.x.min(bounds.origin.x);
+            span.size.width = right - span.origin.x;
+            s.clip_width.set(s.clip_width.get().min(bounds.size.width));
+        }
+        s.span.set(span);
+    }
+
+    /// A painted line box is `width` wide (at least
+    /// [`Self::min_line_width`], which never moves the end further).
+    fn record_line(&self, width: Pixels) {
+        if width > self.0.widest.get() {
+            self.0.widest.set(width);
+        }
+    }
+
+    /// Scroll so that columns `start..end` of a line's text (after its
+    /// five-column prefix) are visible, with five columns of context.
+    pub fn reveal_columns(&self, start: usize, end: usize) {
+        let column = self.0.column.get();
+        let width = self.0.clip_width.get();
+        let left = column * start as f32;
+        let right = column * (end + 10) as f32;
+        let offset = self.offset();
+        if left < offset {
+            self.set(left);
+        } else if right > offset + width {
+            self.set(right - width);
+        }
+    }
+}
+
+impl gpui_kit::base::ScrollbarHandle for HScroll {
+    fn viewport_bounds(&self) -> Bounds<Pixels> {
+        self.0.span.get()
+    }
+
+    fn offset(&self) -> Point<Pixels> {
+        point(-self.offset(), Pixels::ZERO)
+    }
+
+    fn set_offset(&self, offset: Point<Pixels>) {
+        self.set(-offset.x);
+    }
+
+    fn content_size(&self) -> Size<Pixels> {
+        let span = self.0.span.get().size;
+        size(span.width + self.max_offset(), span.height)
+    }
+}
+
+/// The text part of a row (`parts`: prefix, text, "No newline" note) in
+/// `area`: laid out in the row's width, wrapping, or with
+/// `1304-diff-no-wrap` on one line, clipped and moved left by the
+/// horizontal scroll.
+fn row_text_area(
+    ctx: &RowContext,
+    area: Stateful<Div>,
+    parts: impl IntoIterator<Item = AnyElement>,
+) -> Stateful<Div> {
+    let Some(h) = ctx.h_scroll.clone() else {
+        return area.flex().flex_row().children(parts);
+    };
+    let (clip, line) = (h.clone(), h.clone());
+    area.relative()
+        .overflow_hidden()
+        .child(
+            canvas(move |b, _, _| clip.record_clip(b), |_, _, _, _| {})
+                .absolute()
+                .inset_0(),
+        )
+        .child(
+            div()
+                .relative()
+                .flex_none()
+                .flex()
+                .flex_row()
+                .whitespace_nowrap()
+                .ml(-h.offset())
+                .min_w(h.min_line_width())
+                .child(
+                    canvas(
+                        move |b, _, _| line.record_line(b.size.width),
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0(),
+                )
+                .children(parts),
+        )
 }
 
 /// `348-pull-request-review`: the side and line a row's number stands for
@@ -319,9 +515,11 @@ fn selectable_text(
     let styled = StyledText::new(SharedString::from(text.to_string())).with_highlights(highlights);
     let layout = styled.layout().clone();
     let hit_layout = layout.clone();
+    // `1304-diff-no-wrap`: at least as wide as the line
+    let no_wrap = ctx.h_scroll.is_some();
     div()
-        .flex_1()
-        .min_w_0()
+        .when(!no_wrap, |d| d.flex_1().min_w_0())
+        .when(no_wrap, |d| d.flex_grow_1().flex_shrink_0())
         .relative()
         .cursor_text()
         .child(
@@ -836,12 +1034,10 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
     let view_for_open = ctx.view.clone();
     let line = row.new;
     let discard = row.discard_target();
-    let content = div()
+    let area = div()
         .id(("diff-text", abs as usize))
         .flex_1()
         .min_w_0()
-        .flex()
-        .flex_row()
         .capture_any_mouse_down(move |ev, _, cx| {
             open_at_line_on_alt_click(&view_for_open, ev, line, cx)
         })
@@ -851,53 +1047,58 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
                     this.text_menu(ev.position, line, discard, window, cx)
                 })
                 .ok();
-        })
-        .child(div().flex_none().whitespace_nowrap().child(prefix))
-        .child({
-            let spans: &[Span] = ctx
-                .tokens
-                .as_ref()
-                .and_then(|tk| tk.get(ix))
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
-            let hits: &[(Range<usize>, bool)] = ctx
-                .search
-                .as_ref()
-                .and_then(|s| s.by_row.get(&ix))
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
-            let (inner_bg_color, inner_fg_color) = if row.kind == DiffLineKind::Delete {
-                (t.diff_delete_inner_background, t.diff_delete_text)
-            } else {
-                (t.diff_add_inner_background, t.diff_add_text)
-            };
-            let ranges = ctx.inner.get(ix).map(Vec::as_slice).unwrap_or(&[]);
-            let inner_fg: Vec<(Range<usize>, Hsla)> =
-                ranges.iter().map(|r| (r.clone(), inner_fg_color)).collect();
-            let inner_bg: Vec<(Range<usize>, Hsla)> =
-                ranges.iter().map(|r| (r.clone(), inner_bg_color)).collect();
-            let selection = ctx.selection_range(ix, Column::Before, row.text.len());
-            let highlights = if spans.is_empty()
-                && hits.is_empty()
-                && inner_fg.is_empty()
-                && selection.is_none()
-            {
+        });
+    let mut parts: Vec<AnyElement> = vec![
+        div()
+            .flex_none()
+            .whitespace_nowrap()
+            .child(prefix)
+            .into_any_element(),
+    ];
+    parts.push({
+        let spans: &[Span] = ctx
+            .tokens
+            .as_ref()
+            .and_then(|tk| tk.get(ix))
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let hits: &[(Range<usize>, bool)] = ctx
+            .search
+            .as_ref()
+            .and_then(|s| s.by_row.get(&ix))
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+        let (inner_bg_color, inner_fg_color) = if row.kind == DiffLineKind::Delete {
+            (t.diff_delete_inner_background, t.diff_delete_text)
+        } else {
+            (t.diff_add_inner_background, t.diff_add_text)
+        };
+        let ranges = ctx.inner.get(ix).map(Vec::as_slice).unwrap_or(&[]);
+        let inner_fg: Vec<(Range<usize>, Hsla)> =
+            ranges.iter().map(|r| (r.clone(), inner_fg_color)).collect();
+        let inner_bg: Vec<(Range<usize>, Hsla)> =
+            ranges.iter().map(|r| (r.clone(), inner_bg_color)).collect();
+        let selection = ctx.selection_range(ix, Column::Before, row.text.len());
+        let highlights =
+            if spans.is_empty() && hits.is_empty() && inner_fg.is_empty() && selection.is_none() {
                 Vec::new()
             } else {
                 merge_highlights(spans, hits, &inner_fg, selection, row.text.len(), t)
             };
-            selectable_text(ctx, ix, Column::Before, row, highlights, inner_bg)
-        })
-        .when(row.no_newline, |d| {
-            d.child(
-                div()
-                    .flex_none()
-                    .italic()
-                    .ml(zpx(4.))
-                    .text_color(t.diff_alt_text)
-                    .child("No newline at end of file"),
-            )
-        });
+        selectable_text(ctx, ix, Column::Before, row, highlights, inner_bg).into_any_element()
+    });
+    if row.no_newline {
+        parts.push(
+            div()
+                .flex_none()
+                .italic()
+                .ml(zpx(4.))
+                .text_color(t.diff_alt_text)
+                .child("No newline at end of file")
+                .into_any_element(),
+        );
+    }
+    let content = row_text_area(ctx, area, parts);
     // `.has-check-all-control`: 16 px strip with check marks, 4 px without
     let check_marks = selectable && ctx.show_check_marks;
     let handle_width = match (selectable, check_marks) {
@@ -1792,12 +1993,10 @@ fn split_content(
     let view_for_open = ctx.view.clone();
     let line = row.new;
     let discard = row.discard_target();
-    div()
+    let area = div()
         .id(("split-text", unified))
         .flex_1()
         .min_w_0()
-        .flex()
-        .flex_row()
         .capture_any_mouse_down(move |ev, _, cx| {
             open_at_line_on_alt_click(&view_for_open, ev, line, cx)
         })
@@ -1807,20 +2006,27 @@ fn split_content(
                     this.text_menu(ev.position, line, discard, window, cx)
                 })
                 .ok();
-        })
-        .child(div().flex_none().whitespace_nowrap().child(prefix))
-        .child(body)
-        .when(row.no_newline, |d| {
-            d.child(
-                div()
-                    .flex_none()
-                    .italic()
-                    .ml(zpx(4.))
-                    .text_color(t.diff_alt_text)
-                    .child("No newline at end of file"),
-            )
-        })
-        .into_any_element()
+        });
+    let mut parts = vec![
+        div()
+            .flex_none()
+            .whitespace_nowrap()
+            .child(prefix)
+            .into_any_element(),
+        body.into_any_element(),
+    ];
+    if row.no_newline {
+        parts.push(
+            div()
+                .flex_none()
+                .italic()
+                .ml(zpx(4.))
+                .text_color(t.diff_alt_text)
+                .child("No newline at end of file")
+                .into_any_element(),
+        );
+    }
+    row_text_area(ctx, area, parts).into_any_element()
 }
 
 /// `.hunk-handle`: the block toggle laid over a changed split row's

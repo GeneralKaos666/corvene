@@ -38,8 +38,9 @@
 //!   the time from the first step to the predicate, `draw_ms` the frame
 //!   (layout + paint on the main thread). Latency benchmarks (`tools/perf`).
 //! - `frames {n}` → `{avg_ms, max_ms, cpu_ms, minstr}`: draws `n` frames of the
-//!   current state, every view re-rendered; `scroll-frames {x, y, dy, n}`
-//!   scrolls by `dy` before each frame and draws what the scroll invalidated
+//!   current state, every view re-rendered; `scroll-frames {x, y, dx, dy, n}`
+//!   scrolls by `dx` / `dy` before each frame and draws what the scroll
+//!   invalidated
 //! - `state` → the selected repository's selected file / commit, the first
 //!   200 history SHAs, the changed-file count, the section and the open
 //!   foldout
@@ -339,13 +340,14 @@ fn window_command(
         "frames" | "scroll-frames" => {
             let n = request["n"].as_u64().unwrap_or(20).max(1);
             let dy = num(request, "dy");
+            let dx = num(request, "dx");
             let (mut total, mut max, mut cpu_total, mut instr_total) = (0.0f64, 0.0f64, 0.0, 0.0);
             for _ in 0..n {
                 if cmd == "scroll-frames" {
                     window.dispatch_event(
                         PlatformInput::ScrollWheel(ScrollWheelEvent {
                             position,
-                            delta: ScrollDelta::Pixels(point(px(0.), px(-dy))),
+                            delta: ScrollDelta::Pixels(point(px(-dx), px(-dy))),
                             modifiers,
                             touch_phase: TouchPhase::Moved,
                         }),

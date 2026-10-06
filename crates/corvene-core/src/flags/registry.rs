@@ -8028,6 +8028,22 @@ registry! {
         code: &["crates/corvene-core/src/stash_flows.rs", "crates/corvene-git/src/partial_stash.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// Diff lines can stay on one line and scroll sideways.
+    DIFF_NO_WRAP = 1304 "diff-no-wrap" {
+        title: "Diffs without line wrapping",
+        summary: "View › Wrap Diff Lines and the diff's Diff Settings › Wrap Long Lines turn \
+                  wrapping off: each line stays on one row and the text scrolls sideways \
+                  (trackpad, shift-wheel or the horizontal scroll bar) under fixed line \
+                  numbers. Line, hunk and text selection work as with wrapping.",
+        ghd_behaviour: "Long diff lines always wrap.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11052)],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs", "crates/corvene-ui/src/app_menu.rs"],
+    },
+
     /// The diff's ⌘F box shows a match count, arrows and a case toggle.
     DIFF_FIND_CONTROLS = 1305 "diff-find-controls" {
         title: "Find in diff controls",
