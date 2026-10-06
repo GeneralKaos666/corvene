@@ -22,6 +22,12 @@ name: the review threads (one open, one resolved range, one outdated, one
 pending), the overview, and the mutations, which change the stub's threads
 so a reload shows the reply, the resolved state, the new comment or the
 submitted review (`348-pull-request-review`).
+
+Several accounts (`527-multiple-accounts`, `github: stub-accounts`): the
+token names its account (`stub-token-<login>`; plain `stub-token` is
+octocat), `/user` answers with that login, `permissions` (login → admin,
+write or read) sets what each sees of the repository, and `requests` logs
+(login, method, path) so a driver can check which account a call used.
 """
 
 from __future__ import annotations
@@ -332,21 +338,33 @@ class _Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return {}
 
+    def _login(self) -> str:
+        """The account the request's token belongs to."""
+        token = (self.headers.get("Authorization") or "").split(" ")[-1]
+        return token[len("stub-token-"):] if token.startswith("stub-token-") else "octocat"
+
     def do_GET(self):  # noqa: N802
         path, _, query = self.path.partition("?")
         repo = f"/api/v3/repos/{OWNER}/{NAME}"
         params = dict(p.split("=", 1) for p in query.split("&") if "=" in p)
+        login = self._login()
+        self.server.requests.append((login, "GET", path))
         if path == "/api/v3/user":
             # the token's scopes: Corvene's sign-in, without `write:public_key`
             # (Settings › Integrations' Add to GitHub then asks to sign in again,
             # flag 350)
-            return self._send(200, {**_user("octocat"), "name": "Mona Lisa Octocat", "plan": {"name": "free"}},
+            name = "Mona Lisa Octocat" if login == "octocat" else f"{login} at work"
+            return self._send(200, {**_user(login), "name": name, "plan": {"name": "free"}},
                               {"X-OAuth-Scopes": ", ".join(self.server.scopes)})
+        if path == "/api/v3/user/orgs":
+            return self._send(200, [])
         if path == repo:
+            perm = self.server.permissions.get(login, "admin")
             return self._send(200, {"name": NAME, "owner": _user(OWNER), "html_url": f"http://127.0.0.1/{OWNER}/{NAME}",
                                     "clone_url": f"http://127.0.0.1/{OWNER}/{NAME}.git", "default_branch": "main",
                                     "private": False, "fork": False, "parent": None, "node_id": "R_stub",
-                                    "permissions": {"admin": True, "push": True, "pull": True}})
+                                    "permissions": {"admin": perm == "admin", "push": perm in ("admin", "write"),
+                                                    "pull": True}})
         if path == f"{repo}/issues":
             state = params.get("state", "open")
             issues = {"open": OPEN_ISSUES, "closed": CLOSED_ISSUES, "all": OPEN_ISSUES + CLOSED_ISSUES}[state]
@@ -397,6 +415,7 @@ class _Handler(BaseHTTPRequestHandler):
         repo = f"/api/v3/repos/{OWNER}/{NAME}"
         body = self._body()
         self.server.posts.append((path, body))
+        self.server.requests.append((self._login(), "POST", path))
         if path == f"{repo}/issues":
             number = 101 + len(self.server.created_issues)
             issue = _issue(number, body.get("title", ""), "open", "2024-05-01T10:00:00Z",
@@ -508,6 +527,10 @@ class Stub(HTTPServer):
         self.created_issues: list[dict] = []
         self.created_releases: list[dict] = []
         self.posts: list[tuple[str, dict]] = []
+        # `527-multiple-accounts`: (login, method, path) of every request,
+        # and what each login may do with the repository (admin by default)
+        self.requests: list[tuple[str, str, str]] = []
+        self.permissions: dict[str, str] = {}
         # `348-pull-request-review`: pull request #7 over the fixture
         self.pull_request = PullRequestFixture(repo) if repo else None
         self.scopes: list[str] = os.environ.get(
@@ -518,9 +541,13 @@ class Stub(HTTPServer):
     def port(self) -> int:
         return self.server_address[1]
 
-    def hook_arg(self) -> str:
-        """The `fake-github` control hook's argument."""
-        return json.dumps({"port": self.port, "owner": OWNER, "name": NAME, "login": "octocat"})
+    def hook_arg(self, extra_logins: list[str] | None = None) -> str:
+        """The `fake-github` control hook's argument; `extra_logins` sign in
+        more accounts on the stub (`527-multiple-accounts`)."""
+        arg = {"port": self.port, "owner": OWNER, "name": NAME, "login": "octocat"}
+        if extra_logins:
+            arg["extra_logins"] = extra_logins
+        return json.dumps(arg)
 
     def start(self) -> "Stub":
         self.thread.start()

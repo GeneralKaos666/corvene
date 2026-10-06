@@ -387,10 +387,15 @@ class Run:
             # (`1113-lfs-locks`' Force Unlock)
             elif action["github"] == "admin":
                 drv.hook("fake-github", json.dumps({"account": False, "permission": "admin"}))
-            elif action["github"] not in ("stub", "stub-ci"):
+            elif action["github"] not in ("stub", "stub-ci", "stub-accounts"):
                 raise ValueError(f"unknown github step {action['github']!r}")
             elif not self.stub:
                 raise RuntimeError(f"`github: {action['github']}` needs `github_stub: true` on the scenario")
+            # `github: stub-accounts`: a second account on the stub,
+            # octocat-work, that can push too, so the repository's account
+            # is asked (`527-multiple-accounts`)
+            elif action["github"] == "stub-accounts":
+                drv.hook("fake-github", self.stub.hook_arg(["octocat-work"]))
             elif action["github"] == "stub-ci":
                 arg = json.loads(self.stub.hook_arg())
                 arg["remote"] = True

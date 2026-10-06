@@ -56,10 +56,22 @@ _ENTERPRISE = {
     ],
 }
 
+# `527-multiple-accounts`: a second GitHub.com account (Corvene only; GHD
+# keeps one per endpoint)
+_OCTOCAT_WORK = {
+    "endpoint": DOTCOM, "id": 583232, "login": "octocat-work", "name": "Mona at Work",
+    "emails": [{"email": "mona@work.example.com", "primary": True, "visibility": "public"}],
+    "repositories": [
+        _repo(DOTCOM, "acme", "platform", private=True),
+        _repo(DOTCOM, "acme", "website"),
+    ],
+}
+
 FIXTURES = {
     "dotcom": [_OCTOCAT],
     "enterprise": [_ENTERPRISE],
     "two": [_OCTOCAT, _ENTERPRISE],
+    "two-dotcom": [_OCTOCAT, _OCTOCAT_WORK, _ENTERPRISE],
 }
 
 
@@ -114,5 +126,7 @@ def corvene_arg(name: str) -> str:
                          "name": a["name"] or None, "avatar_url": None, "emails": emails,
                          "private_primary_email": bool(primary and primary["visibility"] == "private"),
                          "scopes": ["repo", "user", "workflow"], "plan": "free"})
-        repositories[a["endpoint"]] = [{**r, "endpoint": a["endpoint"]} for r in a["repositories"]]
+        # per account (`Account::key`), an endpoint can have several
+        repositories[f'{a["endpoint"]}|{a["login"]}'] = [
+            {**r, "endpoint": a["endpoint"]} for r in a["repositories"]]
     return json.dumps({"accounts": accounts, "repositories": repositories})

@@ -1,0 +1,54 @@
+# Several accounts per host (Corvene only, flag 527-multiple-accounts, off
+# in the GitHub Desktop preset the harness runs with). `github:
+# stub-accounts` signs in octocat and octocat-work on the stub GitHub API
+# (`github_stub.py`), both admins of the fixture repository, so Corvene
+# asks once which account the repository uses (the owner's is picked
+# first). octocat-work is chosen; Repository Settings › Remote shows it,
+# the toolbar's account button lists both, and Settings › Accounts lists
+# every account with its own Sign Out, also two GitHub.com accounts with
+# Add GitHub.com Account. GHD keeps one account per endpoint, so the snaps
+# are recorded, not compared (deviations.md › Settings).
+name: multiple-accounts
+description: Two accounts on one host, the ask-once account choice, Repository Settings › Remote › Account, the toolbar account menu and Settings › Accounts (Corvene only, stub API)
+setup: repo-remote
+github_stub: true
+corvene_flags: 527-multiple-accounts=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub-accounts}
+    wait: 3000
+  - snap: {name: choose-account, corvene_only: true, note: "GHD has one account per endpoint (deviations.md, 527-multiple-accounts)"}
+  # octocat-work's row, then Use Account
+  - ghd: {skip: true}
+    corvene: {click: [489, 431]}
+    wait: 300
+  - ghd: {skip: true}
+    corvene: {click: [823, 525]}
+    wait: 2000
+  - snap: {name: toolbar-account, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {popup: repository-settings}
+    wait: 1200
+  - snap: {name: repository-settings-account, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 500
+  # the toolbar's account button
+  - ghd: {skip: true}
+    corvene: {click: [1340, 56]}
+    wait: 600
+  - corvene_menu: toolbar-account
+  - ghd: {skip: true}
+    corvene: {popup: "preferences:accounts"}
+    wait: 1200
+  - snap: {name: settings-accounts-enterprise, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {accounts: two-dotcom}
+    wait: 300
+  - ghd: {skip: true}
+    corvene: {popup: "preferences:accounts"}
+    wait: 1200
+  - snap: {name: settings-accounts-dotcom, corvene_only: true}
