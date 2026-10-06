@@ -571,6 +571,8 @@ mod tests {
         assert_eq!(score(&flatpak, "other", exe), 0);
     }
 
+    // `/home/u` is not an absolute path on Windows
+    #[cfg(unix)]
     #[test]
     fn data_dirs_defaults_and_dedupes() {
         let dirs = data_dirs(Some(Path::new("/home/u")), None, Some(""));

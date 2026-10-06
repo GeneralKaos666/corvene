@@ -86,7 +86,8 @@ pub fn run(
     ))
 }
 
-#[cfg(test)]
+// the test drives /bin/sh
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
