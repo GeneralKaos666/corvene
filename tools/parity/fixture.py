@@ -193,8 +193,56 @@ def _tools(parent: Path, repo: Path) -> None:
     _git(repo, "branch", "-q", "-D", "changelog", date=date)
 
 
+def _structure(parent: Path, repo: Path, lfs_url: str | None) -> None:
+    """Submodules and Git LFS files in `repo` (flags 1111-1113).
+
+    `vendor/lib` is checked out one commit past the one recorded,
+    `vendor/theme` was deinitialized (its `.git/modules` stays, so Update
+    needs no clone from a local path, which git refuses in submodules) and
+    `tools/scripts` is up to date. `art/*.psd` are LFS files; `lfs_url` (the
+    `lfs_stub.py` server) is their LFS server, where `art/hero.psd` is
+    locked by Mona Lisa and `art/logo.psd` by the user. Both are changed in
+    the working tree."""
+    date = "2026-09-26T10:00:00+00:00"
+    sources = {"vendor/lib": "parity-lib", "vendor/theme": "parity-theme", "tools/scripts": "parity-scripts"}
+    for name in sources.values():
+        source = parent / name
+        if source.exists():
+            remove_tree(source)
+        source.mkdir(parents=True)
+        _git(source, "init", "-q", "-b", "main")
+        _git(source, "config", "commit.gpgsign", "false")
+        (source / "README.md").write_text(f"# {name}\n")
+        _git(source, "add", "-A", date=date)
+        _git(source, "commit", "-q", "-m", f"Start {name}", date=date)
+    for path, name in sources.items():
+        _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str((parent / name).resolve()), path, date=date)
+    _git(repo, "commit", "-q", "-m", "Add submodules", date=date)
+    # vendor/lib: a newer commit checked out
+    lib = parent / sources["vendor/lib"]
+    (lib / "lib.txt").write_text("more\n")
+    _git(lib, "add", "-A", date=date)
+    _git(lib, "commit", "-q", "-m", "Grow the library", date=date)
+    _git(repo / "vendor" / "lib", "pull", "-q", "origin", "main", date=date)
+    # vendor/theme: deinitialized
+    _git(repo, "submodule", "deinit", "-q", "-f", "vendor/theme", date=date)
+    # Git LFS
+    _git(repo, "lfs", "install", "--local", date=date)
+    (repo / ".gitattributes").write_text("*.psd filter=lfs diff=lfs merge=lfs -text\n")
+    (repo / "art").mkdir(exist_ok=True)
+    for name in ("hero", "logo", "banner"):
+        (repo / "art" / f"{name}.psd").write_text(f"{name} artwork v1\n")
+    _git(repo, "add", ".gitattributes", "art", date=date)
+    _git(repo, "commit", "-q", "-m", "Add artwork", date=date)
+    if lfs_url:
+        _git(repo, "config", "lfs.url", lfs_url)
+    for name in ("hero", "logo"):
+        (repo / "art" / f"{name}.psd").write_text(f"{name} artwork v2\n")
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
-          signed: bool = False, reflog: bool = False, tools: bool = False) -> Path:
+          signed: bool = False, reflog: bool = False, tools: bool = False,
+          structure: bool = False, lfs_url: str | None = None) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -206,7 +254,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     `reflog`, HEAD's reflog gets a rebase, a branch deleted after use and
     three commits a hard reset left behind (Recent Activity,
     `1216-recent-activity`). With `tools`, see `_tools` (Clean Untracked
-    Files and Apply Patch, flags 1105 and 1106)."""
+    Files and Apply Patch, flags 1105 and 1106). With `structure`, see
+    `_structure` (submodules, sparse checkout and LFS locks, flags
+    1111-1113)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -293,6 +343,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main")
     if tools:
         _tools(parent, repo)
+    if structure:
+        _structure(parent, repo, lfs_url)
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)

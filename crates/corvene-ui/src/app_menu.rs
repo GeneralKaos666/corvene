@@ -30,7 +30,9 @@
 //! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Recent
 //! Activity… (flag `1216-recent-activity`), Repository › Clean Untracked
 //! Files… (flag `1105-clean-untracked-files`), Repository › Apply Patch ▸
-//! (flag `1106-apply-patch`), Repository › Start
+//! (flag `1106-apply-patch`), Repository › Submodules… (flag
+//! `1111-submodules`), Repository › Sparse Checkout… (flag
+//! `1112-sparse-checkout`), Repository › Start
 //! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
 //! Fetch From ▸ with a repository's remotes when it has several (flag
 //! `1210-push-to-other-remote`), Branch › Request
@@ -148,6 +150,10 @@ pub struct MenuExtras {
     /// Flag `1106-apply-patch`: Repository › Apply Patch ▸ From File… /
     /// From Clipboard.
     pub apply_patch: bool,
+    /// Flag `1111-submodules`: Repository › Submodules….
+    pub submodules: bool,
+    /// Flag `1112-sparse-checkout`: Repository › Sparse Checkout….
+    pub sparse_checkout: bool,
     /// Flag `345-issues`: Repository › Issues… and New Issue…, enabled
     /// for a GitHub repository that is not archived (set by
     /// [`MenuLabelsEvent::of`]).
@@ -195,6 +201,8 @@ impl MenuExtras {
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
             clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
             apply_patch: flags.bool(ids::APPLY_PATCH),
+            submodules: flags.bool(ids::SUBMODULES),
+            sparse_checkout: flags.bool(ids::SPARSE_CHECKOUT),
             issues: flags.bool(ids::ISSUES).then_some(false),
             releases: flags.bool(ids::RELEASES).then_some(false),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
@@ -745,6 +753,19 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         }
         repository.push(separator());
     }
+    // Corvene (`1111-submodules`, `1112-sparse-checkout`)
+    if extras.submodules || extras.sparse_checkout {
+        if extras.submodules {
+            repository.push(item(l("Submodules…", "Sub&modules…"), ShowSubmodules));
+        }
+        if extras.sparse_checkout {
+            repository.push(item(
+                l("Sparse Checkout…", "Spa&rse checkout…"),
+                ShowSparseCheckout,
+            ));
+        }
+        repository.push(separator());
+    }
     // Corvene (`345-issues`)
     if let Some(enabled) = extras.issues {
         repository.extend([
@@ -1152,6 +1173,8 @@ mod tests {
                     recent_activity: true,
                     clean_untracked: true,
                     apply_patch: true,
+                    submodules: true,
+                    sparse_checkout: true,
                     issues: Some(true),
                     releases: Some(true),
                     request_reviewers: true,

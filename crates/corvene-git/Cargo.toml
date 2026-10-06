@@ -14,6 +14,9 @@ dunce = "1"
 encoding_rs = "0.8"
 chardetng = "1"
 similar.workspace = true
+# flag 1113-lfs-locks: `git lfs locks --json`
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 

@@ -17,6 +17,7 @@ mod clean_untracked_files;
 pub(crate) mod clone_repository;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
+mod confirm_force_unlock;
 mod confirm_quit;
 mod crash_report_found;
 mod create_release;
@@ -53,9 +54,11 @@ mod reset_to_reflog_entry;
 mod sign_in;
 pub mod sign_in_host;
 mod simple;
+mod sparse_checkout;
 mod ssh_key_passphrase;
 mod start_bisect;
 mod stash_list_dialogs;
+mod submodules;
 mod test_notifications;
 mod tutorial_dialogs;
 mod unknown_authors;
@@ -593,6 +596,21 @@ impl DialogHost {
                 .into(),
             Popup::CleanUntrackedFiles { repo } => cx
                 .new(|cx| clean_untracked_files::CleanUntrackedFilesDialog::new(state, *repo, cx))
+                .into(),
+            Popup::Submodules { repo } => cx
+                .new(|cx| submodules::SubmodulesDialog::new(state, *repo, cx))
+                .into(),
+            Popup::SparseCheckout { repo } => cx
+                .new(|cx| sparse_checkout::SparseCheckoutDialog::new(state, *repo, cx))
+                .into(),
+            Popup::ConfirmForceUnlock { repo, path, owner } => cx
+                .new(|_| {
+                    confirm_force_unlock::ConfirmForceUnlockDialog::new(
+                        *repo,
+                        path.clone(),
+                        owner.clone(),
+                    )
+                })
                 .into(),
             Popup::ApplyPatch {
                 repo,

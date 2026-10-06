@@ -172,6 +172,8 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::ConfirmDiscardStash { repo: r }
         | Popup::StashWithMessage { repo: r }
         | Popup::CleanUntrackedFiles { repo: r }
+        | Popup::Submodules { repo: r }
+        | Popup::SparseCheckout { repo: r }
         | Popup::PublishRepository { repo: r }
         | Popup::PushNeedsPull { repo: r }
         | Popup::ConfirmRemoveRepository { repo: r } => {
@@ -381,6 +383,14 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::CreateTag { repo: r, sha } => {
             repo = Some(*r);
             f.put("sha", sha);
+        }
+        Popup::ConfirmForceUnlock {
+            repo: r,
+            path,
+            owner,
+        } => {
+            repo = Some(*r);
+            f.put("path", path).put("owner", owner);
         }
         Popup::ApplyPatch {
             repo: r,

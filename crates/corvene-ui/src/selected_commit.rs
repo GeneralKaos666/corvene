@@ -1359,6 +1359,12 @@ fn open_commit_file_menu(
             Dispatcher::show_blame_for_commit_file(id, path.clone(), cx)
         }));
     }
+    // `1113-lfs-locks`: the file as it is named now
+    let lock_items = crate::changes::lfs_lock_items(state, id, &[path.to_string()]);
+    if !lock_items.is_empty() {
+        items.push(MenuItem::separator());
+        items.extend(lock_items);
+    }
     if let Some(files) = open_all {
         items.push(MenuItem::separator());
         items.push(crate::changes::open_all_in_editor_item(
@@ -1512,6 +1518,20 @@ fn commit_file_row(
             )
             .text_size(FONT_SIZE())
         })
+        // `1113-lfs-locks`
+        .when_some(
+            crate::changes::file_lfs_lock(Some(id), &file.path, cx),
+            |d, lock| {
+                d.child(crate::changes::lfs_lock_badge(
+                    &lock,
+                    if is_selected && list_focused {
+                        t.box_selected_active_text
+                    } else {
+                        t.text_secondary
+                    },
+                ))
+            },
+        )
         .child(octicon(icon, color))
         // `621-context-menu-buttons`
         .when(crate::context_menu::row_menu_buttons(cx), |d| {

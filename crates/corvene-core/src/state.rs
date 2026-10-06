@@ -567,6 +567,22 @@ pub enum Popup {
     CleanUntrackedFiles {
         repo: u64,
     },
+    /// Corvene (`1111-submodules`): the submodules and their actions
+    /// (`RepositoryState::submodules`).
+    Submodules {
+        repo: u64,
+    },
+    /// Corvene (`1112-sparse-checkout`): the folders to check out
+    /// (`RepositoryState::sparse_editor`).
+    SparseCheckout {
+        repo: u64,
+    },
+    /// Corvene (`1113-lfs-locks`): release a lock someone else holds.
+    ConfirmForceUnlock {
+        repo: u64,
+        path: String,
+        owner: String,
+    },
     /// Corvene (`1106-apply-patch`): the files patch `name` touches, before
     /// it is applied.
     ApplyPatch {
@@ -751,6 +767,9 @@ impl Popup {
             | Self::ConfirmDropStashEntry { repo, .. }
             | Self::StashWithMessage { repo }
             | Self::CleanUntrackedFiles { repo }
+            | Self::Submodules { repo }
+            | Self::SparseCheckout { repo }
+            | Self::ConfirmForceUnlock { repo, .. }
             | Self::ApplyPatch { repo, .. }
             | Self::CreateBranchFromStash { repo, .. }
             | Self::MoveChangesToWorktree { repo, .. }
@@ -1454,6 +1473,16 @@ pub struct RepositoryState {
 
     /// `1105-clean-untracked-files`: the dry run Clean Untracked Files shows.
     pub clean_preview: Option<crate::clean_untracked::CleanPreview>,
+    /// `1111-submodules`: what Repository › Submodules… lists.
+    pub submodules: Option<crate::submodules::SubmodulesState>,
+    /// `1112-sparse-checkout`: set while sparse checkout is on (refresh).
+    pub sparse_checkout: Option<crate::sparse_checkout::SparseSummary>,
+    /// `1112-sparse-checkout`: the folders Sparse Checkout… shows.
+    pub sparse_editor: Option<crate::sparse_checkout::SparseEditor>,
+    /// `1113-lfs-locks`: `.gitattributes` has `filter=lfs` (refresh).
+    pub uses_lfs: bool,
+    /// `1113-lfs-locks`: the LFS server's locks, once asked.
+    pub lfs_locks: Option<crate::lfs_locks::LfsLockState>,
     // ---- `345-issues` ----
     /// Repository › Issues…: History lists the issues instead (also holds
     /// the New Issue… labels and assignees while the list is closed).

@@ -84,9 +84,10 @@ same data for scripts.
 ```yaml
 name: branch-foldout
 description: What this covers
-setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | repo-graph (plus a merged branch, an octopus merge and an unmerged branch) | repo-tools (plus ignored files, and `../parity-fixture.patch` / `.mbox` beside the repository) | empty (no repositories) | welcome (first launch)
+setup: repo            # repo (fixture added + selected) | repo-remote (the same behind a bare origin, two commits ahead) | repo-coauthors (plus commits by two, three, four and six people) | repo-graph (plus a merged branch, an octopus merge and an unmerged branch) | repo-tools (plus ignored files, and `../parity-fixture.patch` / `.mbox` beside the repository) | repo-structure (plus three submodules in different states and Git LFS files) | empty (no repositories) | welcome (first launch)
 corvene_flags: 1213-commit-graph=on   # optional: flags for Corvene after the GHD preset (a surface GHD lacks)
 github_stub: true                     # optional: a stub GitHub API for Corvene (`github_stub.py`), reached by the `github: stub` step
+lfs_stub: true                        # optional: a stub Git LFS locking API (`lfs_stub.py`), the fixtures' `lfs.url`
 ghd_env: {GITHUB_DESKTOP_PREVIEW_FEATURES: 1}   # optional: extra env for GHD (test-* popups need this; it also turns on beta features)
 threshold: 1.0         # optional per-scenario defaults: threshold, tolerance, radius, settle, width, height
 steps:
@@ -103,7 +104,7 @@ steps:
   - menu: show-preferences               # GHD menu-event name
   - popup: {ghd: test-release-notes-popup, corvene: release-notes}   # GHD test hook / CORVENE_POPUP
   - accounts: dotcom                     # fake signed-in accounts + repository lists (accounts.py: dotcom | enterprise | two)
-  - github: stub                         # Corvene only: sign in to the scenario's stub GitHub API (`github_stub: true`); `no-account` makes the fixture a GitHub repository with no account
+  - github: stub                         # Corvene only: sign in to the scenario's stub GitHub API (`github_stub: true`); `no-account` makes the fixture a GitHub repository with no account, `admin` the same with the user an admin of it
   - resize: [1100, 700]
   - wait: 500                            # alone: sleep; on a step: settle time after it (default 350ms)
   - ghd: {eval: "…"}                     # app-specific step (either side can be `{skip: true}`)
@@ -142,6 +143,11 @@ signs Corvene in to it as a GitHub Enterprise host with an injected token and
 makes the fixture repository the stub's `octocat/parity-fixture`. The real
 API client then talks to the stub. GHD has neither view, so those snaps are
 `corvene_only`.
+
+Git LFS locks (`1113-lfs-locks`) come from `lfs_stub.py` (`lfs_stub: true`):
+the locking API on a free port, set as the `repo-structure` fixtures'
+`lfs.url`, with one lock held by Mona Lisa and one by the user. git-lfs
+talks to it without credentials.
 
 ## Linux
 

@@ -1,0 +1,32 @@
+# Repository › Submodules… (Corvene only, flag 1111-submodules, off in the
+# GitHub Desktop preset the harness runs with). GHD has no submodule panel,
+# so the snaps are recorded, not compared (`corvene_only`; deviations.md ›
+# Repository). The `repo-structure` fixture has three submodules: one up
+# to date, one checked out at a newer commit, one deinitialized.
+name: submodules
+description: Submodules panel with each state, a row's menu, then Update and Initialize (Corvene only)
+setup: repo-structure
+corvene_flags: 1111-submodules=on
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ShowSubmodules"}
+    wait: 1500
+  - snap: {name: panel, corvene_only: true, note: "GHD has no submodule panel (deviations.md, 1111-submodules)"}
+  # vendor/lib's ⋯ button
+  - ghd: {skip: true}
+    corvene: {click: [941, 363]}
+    wait: 600
+  - corvene_menu: row
+  - ghd: {skip: true}
+    corvene: {key: "escape"}
+    wait: 300
+  # vendor/lib: Update (back to the recorded commit)
+  - ghd: {skip: true}
+    corvene: {click: [890, 363]}
+    wait: 2500
+  - snap: {name: updated, corvene_only: true}
+  # vendor/theme: Initialize (then Not cloned, Update offered)
+  - ghd: {skip: true}
+    corvene: {click: [888, 428]}
+    wait: 2500
+  - snap: {name: initialized, corvene_only: true}

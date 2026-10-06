@@ -40,6 +40,7 @@ sys.path.insert(0, str(HERE))
 import accounts  # noqa: E402
 import fixture  # noqa: E402
 import github_stub  # noqa: E402
+import lfs_stub  # noqa: E402
 import imgdiff  # noqa: E402
 import report  # noqa: E402
 from drivers import Corvene, Ghd, page_height, page_rect, park_pointer  # noqa: E402
@@ -102,6 +103,7 @@ def both(fa, fb):
 
 class Run:
     stub = None
+    lfs_stub = None
 
     def __init__(self, args):
         self.args = args
@@ -134,16 +136,25 @@ class Run:
         # with good, unknown-key and bad signatures on top; `repo-reflog`: with
         # a rebase, a deleted branch and a hard reset in HEAD's reflog;
         # `repo-tools`: with ignored files and a patch and a mailbox beside it
+        # `repo-structure`: with submodules and Git LFS files (`lfs_stub: true`
+        # serves their locks)
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
-                             "repo-reflog", "repo-tools")
+                             "repo-reflog", "repo-tools", "repo-structure")
         remote = setup == "repo-remote"
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
         signed = setup == "repo-signed"
         reflog = setup == "repo-reflog"
         tools = setup == "repo-tools"
-        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
-        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
+        structure = setup == "repo-structure"
+        # `lfs_stub: true`: a stub Git LFS locking API (`lfs_stub.py`), the
+        # fixtures' `lfs.url`
+        self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
+        lfs_url = self.lfs_stub.url() if self.lfs_stub else None
+        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, structure,
+                               lfs_url) if with_repo else None
+        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
+                               lfs_url) if with_repo else None
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues and
         # Releases views (`github_stub.py`), reached by the `github: stub` step
@@ -201,6 +212,9 @@ class Run:
             if self.stub:
                 self.stub.stop()
                 self.stub = None
+            if self.lfs_stub:
+                self.lfs_stub.stop()
+                self.lfs_stub = None
             if not self.args.keep_work:
                 shutil.rmtree(work / "ghd-profile", ignore_errors=True)
         result["seconds"] = round(time.time() - started, 1)
@@ -340,6 +354,10 @@ class Run:
             # `github: no-account`: a GitHub.com repository without an account
             if action["github"] == "no-account":
                 drv.hook("fake-github", json.dumps({"account": False}))
+            # `github: admin`: the same, the user an admin of the repository
+            # (`1113-lfs-locks`' Force Unlock)
+            elif action["github"] == "admin":
+                drv.hook("fake-github", json.dumps({"account": False, "permission": "admin"}))
             elif action["github"] != "stub":
                 raise ValueError(f"unknown github step {action['github']!r}")
             elif not self.stub:

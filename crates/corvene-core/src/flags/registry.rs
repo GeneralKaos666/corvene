@@ -7441,6 +7441,55 @@ registry! {
         upstream: &[Upstream::issue(8703)],
         code: &["crates/corvene-core/src/apply_patch.rs", "crates/corvene-git/src/patch_import.rs", "crates/corvene-ui/src/dialogs/apply_patch.rs"],
     },
+    /// Repository › Submodules…: list, initialize, update and sync submodules.
+    SUBMODULES = 1111 "submodules" {
+        title: "Submodules panel",
+        summary: "Repository › Submodules… lists every submodule with its path, URL, the \
+                  commit the repository records and the one checked out, and whether it is \
+                  initialized, up to date or at another commit. Submodules can be \
+                  initialized, updated (optionally recursively) and synced one by one or all \
+                  at once, and opened as repositories of their own.",
+        ghd_behaviour: "Submodules are updated after a branch switch only; there is no list of \
+                        them and no way to initialize, update or sync one.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(7523), Upstream::issue(20921)],
+        code: &["crates/corvene-core/src/submodules.rs", "crates/corvene-git/src/submodule.rs", "crates/corvene-ui/src/dialogs/submodules.rs"],
+    },
+    /// Repository › Sparse Checkout…: pick the folders to check out.
+    SPARSE_CHECKOUT = 1112 "sparse-checkout" {
+        title: "Sparse checkout",
+        summary: "Repository › Sparse Checkout… shows the repository's folders with \
+                  checkboxes; only the ticked folders and the files at the top are checked \
+                  out (git sparse-checkout in cone mode). It can also be turned off again. \
+                  While it is on, the Changes tab says so.",
+        ghd_behaviour: "Every file is checked out. A repository set up for sparse checkout on \
+                        the command line works, but nothing shows that files are missing.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(12567), Upstream::issue(22835)],
+        code: &["crates/corvene-core/src/sparse_checkout.rs", "crates/corvene-git/src/sparse.rs", "crates/corvene-ui/src/dialogs/sparse_checkout.rs"],
+    },
+    /// Git LFS file locks in the Changes and History file menus.
+    LFS_LOCKS = 1113 "lfs-locks" {
+        title: "Git LFS file locks",
+        summary: "In a repository that uses Git LFS on a server with file locking, the file \
+                  menus of Changes and History can lock and unlock files, and locked files \
+                  show a lock and who holds it. Repository administrators can force a lock \
+                  someone else holds open.",
+        ghd_behaviour: "Locks can only be taken and released with git lfs on the command line; \
+                        nothing shows which files are locked.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(8419), Upstream::issue(22494)],
+        code: &["crates/corvene-core/src/lfs_locks.rs", "crates/corvene-git/src/lfs_locks.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
+    },
 
     // ---- 1200 History & branches (overflow) ----
 

@@ -573,6 +573,9 @@ pub(crate) fn main() {
         //   clean-untracked[:ignored] (Repository › Clean Untracked Files…, flag 1105)
         //   apply-patch:<path> (Apply Patch's preview of a patch file, the path
         //   relative to the repository; flag 1106)
+        //   submodules (Repository › Submodules…, flag 1111)
+        //   sparse-checkout (Repository › Sparse Checkout…, flag 1112)
+        //   force-unlock:<path> (Force Unlock of an LFS lock, flag 1113)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -1260,6 +1263,18 @@ pub(crate) fn main() {
                 Dispatcher::show_clean_untracked_files(id, cx);
             }
         });
+        // `1111-submodules`
+        on_menu_action(cx, move |_: &ShowSubmodules, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_submodules(id, cx);
+            }
+        });
+        // `1112-sparse-checkout`
+        on_menu_action(cx, move |_: &ShowSparseCheckout, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_sparse_checkout(id, cx);
+            }
+        });
         // `1106-apply-patch`
         on_menu_action(cx, move |_: &ApplyPatchFromFile, cx| {
             if let Some(id) = selected(cx) {
@@ -1918,6 +1933,13 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         ("clean-untracked:ignored", Some(id)) => {
             Dispatcher::show_clean_untracked_files(id, cx);
             Dispatcher::load_clean_preview(id, true, cx);
+        }
+        // `1111-submodules`, `1112-sparse-checkout`
+        ("submodules", Some(id)) => Dispatcher::show_submodules(id, cx),
+        ("sparse-checkout", Some(id)) => Dispatcher::show_sparse_checkout(id, cx),
+        // `1113-lfs-locks`: `force-unlock:<path>`
+        (other, Some(id)) if other.starts_with("force-unlock:") => {
+            Dispatcher::request_force_unlock(id, other["force-unlock:".len()..].to_string(), cx)
         }
         // `1106-apply-patch`: `apply-patch:<path>`, relative to the repository
         (other, Some(id)) if other.starts_with("apply-patch:") => {

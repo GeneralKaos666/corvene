@@ -658,7 +658,8 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
 /// `http://127.0.0.1:<port>/api/v3` with an injected token, and the
 /// selected repository made the stub's `owner/name` GitHub repository, so
 /// the real API client runs against the stub (`345-issues`,
-/// `346-releases`).
+/// `346-releases`). `{"permission": "admin" | "read"}` sets the
+/// repository permission (write otherwise).
 fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
     let fake: Value = serde_json::from_str(arg).map_err(|e| e.to_string())?;
     let owner = fake["owner"].as_str().unwrap_or("octocat").to_string();
@@ -706,7 +707,12 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
         fork: false,
         parent: None,
         archived: false,
-        permissions: Some(corvene_core::RepositoryPermission::Write),
+        // `{"permission": "admin"}`: `1113-lfs-locks`' Force Unlock
+        permissions: Some(match fake["permission"].as_str() {
+            Some("admin") => corvene_core::RepositoryPermission::Admin,
+            Some("read") => corvene_core::RepositoryPermission::Read,
+            _ => corvene_core::RepositoryPermission::Write,
+        }),
         allow_forking: Some(true),
         node_id: Some("R_stub".to_string()),
     };

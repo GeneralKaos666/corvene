@@ -119,6 +119,10 @@ gpui_kit::actions!(
         // Repository › Apply Patch from File… / from Clipboard (`1106-apply-patch`)
         ApplyPatchFromFile,
         ApplyPatchFromClipboard,
+        // Repository › Submodules… (`1111-submodules`)
+        ShowSubmodules,
+        // Repository › Sparse Checkout… (`1112-sparse-checkout`)
+        ShowSparseCheckout,
         // Repository › Issues… / New Issue… (`345-issues`)
         ShowIssues,
         NewIssue,

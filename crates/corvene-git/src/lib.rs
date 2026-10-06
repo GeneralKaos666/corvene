@@ -22,6 +22,7 @@ pub mod hooks;
 pub mod ignore;
 pub mod index_lock;
 pub mod lfs;
+pub mod lfs_locks;
 pub mod lfs_progress;
 pub mod log;
 mod log_gix;
@@ -43,6 +44,7 @@ pub mod remote_ops;
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub mod repo;
 pub mod signature;
+pub mod sparse;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;
 pub mod ssh;
@@ -119,6 +121,7 @@ pub use ignore::{
     escape_gitignore_pattern, excludes_file, gitignore_dirs_above, read_gitignore, save_gitignore,
 };
 pub use index_lock::{index_lock_path, remove_stale_index_lock};
+pub use lfs_locks::{LfsLock, LfsLocks, lfs_lock, lfs_locks, lfs_unlock};
 pub use lfs_progress::GitLfsProgressParser;
 pub use log::{
     COMMIT_BATCH_SIZE, HistoryQuery, LoggedCommit, LoggedHistory, NULL_TREE_SHA,
@@ -193,6 +196,10 @@ pub use repo::{
     ahead_behind, has_stash, main_worktree_path, open_repository, symmetric_ahead_behind,
     top_level_working_directory,
 };
+pub use sparse::{
+    SparseCheckout, sparse_checkout, sparse_checkout_disable, sparse_checkout_enabled,
+    sparse_checkout_set, tree_directories,
+};
 pub use ssh::{AddSshHostInfo, parse_add_ssh_host_prompt};
 pub use stash_ops::{
     ADD_TO_STASH_MIN_VERSION, AddToStash, StashPop, StashPopOptions, add_to_desktop_stash,
@@ -205,8 +212,10 @@ pub use status::{
     map_status, parse_porcelain_v2, refresh_stale_index, working_directory_line_stats,
 };
 pub use submodule::{
-    EmbeddedRepository, SubmoduleEntry, add_embedded_repositories, embedded_repositories,
-    list_submodules, reset_submodule_paths, update_submodules_after_operation,
+    EmbeddedRepository, SubmoduleDetails, SubmoduleEntry, SubmoduleState,
+    add_embedded_repositories, embedded_repositories, list_submodules, reset_submodule_paths,
+    submodule_details, submodule_init, submodule_sync, submodule_update,
+    update_submodules_after_operation,
 };
 pub use terminal::{
     TailStream, TerminalOutput, TerminalOutputCallback, TerminalOutputListener,

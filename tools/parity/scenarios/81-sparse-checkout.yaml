@@ -1,0 +1,29 @@
+# Repository › Sparse Checkout… (Corvene only, flag 1112-sparse-checkout,
+# off in the GitHub Desktop preset the harness runs with). GHD has no sparse
+# checkout, so the snaps are recorded, not compared (`corvene_only`;
+# deviations.md › Repository). Every folder starts ticked (sparse checkout
+# is off); unticking docs and applying leaves the Changes banner.
+name: sparse-checkout
+description: Sparse Checkout dialog, a folder unticked, applied, the Changes banner (Corvene only)
+setup: repo-structure
+corvene_flags: 1112-sparse-checkout=on
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ShowSparseCheckout"}
+    wait: 1500
+  - snap: {name: dialog, corvene_only: true, note: "GHD has no sparse checkout (deviations.md, 1112-sparse-checkout)"}
+  # docs
+  - ghd: {skip: true}
+    corvene: {click: [520, 319]}
+    wait: 400
+  - snap: {name: unticked, corvene_only: true}
+  # Apply
+  - ghd: {skip: true}
+    corvene: {click: [864, 640]}
+    wait: 3000
+  - snap: {name: banner, corvene_only: true}
+  # the banner's Edit… opens the dialog with the folders left
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "sparse-checkout"}}
+    wait: 1500
+  - snap: {name: edit, corvene_only: true}
