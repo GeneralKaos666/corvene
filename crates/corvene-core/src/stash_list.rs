@@ -130,7 +130,8 @@ impl Dispatcher {
             move || corvene_git::apply_stash_entry_with(git, &workdir, &sha, options),
             move |result, cx| {
                 match result {
-                    Ok(()) => Self::note_changelist_stash_fate(
+                    Ok(corvene_git::StashPop::Missing) => {}
+                    Ok(_) => Self::note_changelist_stash_fate(
                         id,
                         &applied,
                         crate::changelists::StashFate::Applied,
