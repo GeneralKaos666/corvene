@@ -231,7 +231,13 @@ jobs:
           go-version: stable
       - name: install the NDK
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          # `yes |` under pipefail fails the step when sdkmanager stops reading
+          for attempt in 1 2 3; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" < <(yes) > "$RUNNER_TEMP/sdkmanager.log" 2>&1 && break
+            tail -n 30 "$RUNNER_TEMP/sdkmanager.log"
+            [[ $attempt == 3 ]] && exit 1
+            sleep 15
+          done
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@v2
         with:
@@ -303,7 +309,13 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - name: install the NDK
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          # `yes |` under pipefail fails the step when sdkmanager stops reading
+          for attempt in 1 2 3; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" < <(yes) > "$RUNNER_TEMP/sdkmanager.log" 2>&1 && break
+            tail -n 30 "$RUNNER_TEMP/sdkmanager.log"
+            [[ $attempt == 3 ]] && exit 1
+            sleep 15
+          done
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@v2
         with:

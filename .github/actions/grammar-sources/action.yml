@@ -17,6 +17,7 @@ runs:
           Linux-X64) asset=linux-x64 ;;
           Linux-ARM64) asset=linux-arm64 ;;
           Windows-X64) asset=windows-x64 exe=.exe ;;
+          Windows-ARM64) asset=windows-arm64 exe=.exe ;;
           *) echo "::error::no tree-sitter CLI for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
         esac
         mkdir -p "$RUNNER_TEMP/ts-cli/bin"
