@@ -777,7 +777,10 @@ pub(crate) fn header<'a>(headers: &'a ResponseHeaders, name: &str) -> Option<&'a
 }
 
 /// The headers of a response as [`ResponseHeaders`] pairs.
-pub(crate) fn header_pairs(headers: &ureq::http::HeaderMap) -> Vec<(String, String)> {
+/// A response's headers as `(name, value)` pairs.
+pub(crate) type HeaderPairs = Vec<(String, String)>;
+
+pub(crate) fn header_pairs(headers: &ureq::http::HeaderMap) -> HeaderPairs {
     headers
         .iter()
         .filter_map(|(name, value)| Some((name.to_string(), value.to_str().ok()?.to_string())))
@@ -1203,7 +1206,7 @@ impl Client {
         &self,
         path: &str,
         since: Option<&str>,
-    ) -> Result<(Option<T>, Vec<(String, String)>)> {
+    ) -> Result<(Option<T>, HeaderPairs)> {
         let url = self.endpoint.api(path);
         debug!(%url, since, "GET");
         let mut request = self

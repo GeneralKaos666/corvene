@@ -350,7 +350,11 @@ impl Dispatcher {
     /// `1314-code-owners`: read the work tree's CODEOWNERS file (after a
     /// refresh), then the user's teams once.
     pub fn refresh_code_owners(id: u64, cx: &mut dyn Host) {
-        if !Self::state(cx).read(cx).flags.bool(crate::flags::ids::CODE_OWNERS) {
+        if !Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::CODE_OWNERS)
+        {
             return;
         }
         let Some((_, workdir)) = Self::repo_context(id, cx) else {
@@ -458,7 +462,9 @@ impl Dispatcher {
             });
             return;
         };
-        state.update(cx, |s, _| s.repo_state_mut(id).code_owners.teams_loading = true);
+        state.update(cx, |s, _| {
+            s.repo_state_mut(id).code_owners.teams_loading = true
+        });
         spawn_bg(
             cx,
             move || client.user_teams(),
@@ -555,9 +561,15 @@ mod tests {
             Some(vec!["@global-owner1".into(), "@global-owner2".into()])
         );
         assert_eq!(owners(&file, "src/a.js"), Some(vec!["@js-owner".into()]));
-        assert_eq!(owners(&file, "apps/web/a.rb"), Some(vec!["@octocat".into()]));
+        assert_eq!(
+            owners(&file, "apps/web/a.rb"),
+            Some(vec!["@octocat".into()])
+        );
         assert_eq!(owners(&file, "apps/github/a.rb"), None);
-        assert_eq!(owners(&file, "docs/a.md"), Some(vec!["docs@example.com".into()]));
+        assert_eq!(
+            owners(&file, "docs/a.md"),
+            Some(vec!["docs@example.com".into()])
+        );
         let o = file.owners_of("src/a.js").unwrap();
         assert_eq!((o.line, o.pattern.as_str()), (3, "*.js"));
     }
@@ -586,7 +598,10 @@ mod tests {
 
     #[test]
     fn labels_tooltips_and_summaries() {
-        let file = CodeOwners::parse("* @org/web\n*.rs @me @org/core @hubot\n", ".github/CODEOWNERS");
+        let file = CodeOwners::parse(
+            "* @org/web\n*.rs @me @org/core @hubot\n",
+            ".github/CODEOWNERS",
+        );
         let mut state = CodeOwnersState {
             worktree: Some(Arc::new(file)),
             yours: Some(Arc::new(["@me".to_string()].into_iter().collect())),
@@ -601,7 +616,10 @@ mod tests {
         );
         let web = state.row(CodeOwnersSource::WorkTree, "index.html").unwrap();
         assert!(!web.yours);
-        assert_eq!(web.tooltip("CODEOWNERS"), "Owned by @org/web (from CODEOWNERS line 1)");
+        assert_eq!(
+            web.tooltip("CODEOWNERS"),
+            "Owned by @org/web (from CODEOWNERS line 1)"
+        );
         let summary = state.summary(CodeOwnersSource::WorkTree, ["a.rs", "b.rs", "c.html"]);
         assert_eq!(summary[0], ("@hubot".to_string(), 2, false));
         assert_eq!(summary.last().unwrap(), &("@me".to_string(), 2, true));

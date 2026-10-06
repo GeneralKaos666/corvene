@@ -965,10 +965,11 @@ fn notification_for(
     pr: ApiPullRequest,
     event: PullRequestEvent,
 ) -> PullRequestEventNotification {
-    let html_url = pr
-        .html_url
-        .clone()
-        .unwrap_or_else(|| client.endpoint().web(&format!("{owner}/{name}/pull/{}", pr.number)));
+    let html_url = pr.html_url.clone().unwrap_or_else(|| {
+        client
+            .endpoint()
+            .web(&format!("{owner}/{name}/pull/{}", pr.number))
+    });
     let (pull_request, _) = crate::pull_requests::convert_pull_request(client, pr);
     PullRequestEventNotification {
         account: request.account_key.clone(),
@@ -1113,8 +1114,10 @@ mod tests {
             "@octocat requested changes on your pull request"
         );
         assert_eq!(reviewed.key(), review_key(review.id));
-        let mut off = PullRequestEventNotifications::default();
-        off.merged = false;
+        let off = PullRequestEventNotifications {
+            merged: false,
+            ..Default::default()
+        };
         assert!(!merged.wanted(&off));
         assert!(rr.wanted(&off));
     }

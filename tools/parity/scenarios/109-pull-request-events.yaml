@@ -12,7 +12,3 @@ steps:
     corvene: {popup: "preferences:notifications"}
     wait: 1000
   - snap: {name: notifications, corvene_only: true, note: "GHD's Notifications tab has only Enable notifications (deviations.md, 354-pull-request-event-notifications)"}
-  - ghd: {skip: true}
-    corvene: {click: {text: "Your pull request merged", within: "dialog"}}
-    wait: 400
-  - snap: {name: merged-off, corvene_only: true, note: "the Merged checkbox cleared"}

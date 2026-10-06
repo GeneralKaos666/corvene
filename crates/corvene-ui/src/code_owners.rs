@@ -61,7 +61,9 @@ pub fn badge(
         .text_color(colour)
         .ghd_tooltip(owners.tooltip(location));
     match display {
-        CodeOwnersDisplay::Icon => base.child(octicon(Octicon::Shield, colour)).into_any_element(),
+        CodeOwnersDisplay::Icon => base
+            .child(octicon(Octicon::Shield, colour))
+            .into_any_element(),
         CodeOwnersDisplay::Label => base
             .max_w(zpx(140.))
             .child(div().min_w_0().truncate().child(owners.label()))
