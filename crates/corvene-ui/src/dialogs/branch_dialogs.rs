@@ -31,6 +31,10 @@
 //! and warns when the branch the changes go to is behind its upstream
 //! (`1207-switch-warns-target-behind`).
 //! Squash and merge has commit message fields (flag `837`).
+//! New Branch and Rename Branch check the name against the repository rules
+//! (GHD `ui/lib/branch-name-rule-validation.tsx`); "repo rules" in their
+//! message links to the branch's rulesets (`1225-branch-rules-link`, GHD
+//! 3.6.6 shows plain text).
 
 use corvene_core::{
     AppState, Branch, BranchKind, Dispatcher, Mergeability, Tip, UncommittedChangesStrategy,
@@ -352,6 +356,99 @@ enum Base {
     Other,
 }
 
+/// GHD `checkBranchRules` delay after the last keystroke.
+const BRANCH_RULES_DEBOUNCE: Duration = Duration::from_millis(500);
+
+/// GHD `branchRulesDebounceId`: asks for the repository rules of the name
+/// once it has rested [`BRANCH_RULES_DEBOUNCE`].
+#[derive(Default)]
+struct BranchRulesCheck {
+    name: String,
+    _task: Option<Task<()>>,
+}
+
+impl BranchRulesCheck {
+    fn schedule<T: 'static>(&mut self, repo: u64, name: String, cx: &mut Context<T>) {
+        if name == self.name {
+            return;
+        }
+        self.name = name.clone();
+        self._task = (!name.is_empty()).then(|| {
+            cx.spawn(async move |_, cx| {
+                cx.background_executor().timer(BRANCH_RULES_DEBOUNCE).await;
+                cx.update(|cx| Dispatcher::check_branch_name_rules(repo, name, cx));
+            })
+        });
+    }
+}
+
+/// GHD `renderBranchNameRuleError`: "Branch name '<name>' is restricted by
+/// repo rules." as an `InputError`, or with ", but you can bypass them.
+/// Proceed with caution!" as an `InputWarning`, while the result is for
+/// `name`. The flag tells whether it is an error (OK disabled).
+///
+/// Deviation (`1225-branch-rules-link`; GHD 3.6.6 shows the text only,
+/// desktop#21824): "repo rules" links to the rulesets that apply to the
+/// branch, like the commit form's "one or more rules".
+fn branch_name_rule_notice(
+    state: &AppState,
+    repo: u64,
+    name: &str,
+    cx: &App,
+) -> Option<(AnyElement, bool)> {
+    let error = state
+        .repo_states
+        .get(&repo)?
+        .branch_name_rule_error
+        .as_ref()
+        .filter(|e| e.name == name)?;
+    let t = cx.ghd();
+    let link = state
+        .flags
+        .bool(corvene_core::flags::ids::BRANCH_RULES_LINK)
+        .then(|| {
+            crate::changes::repo_rulesets_for_branch_link(
+                state.repository(repo).and_then(|r| r.github.as_ref()),
+                Some(name),
+            )
+        })
+        .flatten();
+    let rules: Inline = match link {
+        Some(url) => crate::widgets::link_button("branch-name-rules-link", "repo rules", cx)
+            .on_click(move |_, _, cx| Dispatcher::open_url(&url, cx))
+            .into_any_element()
+            .into(),
+        None => "repo rules".into(),
+    };
+    let tail = if error.is_warning {
+        ", but you can bypass them. Proceed with caution!"
+    } else {
+        "."
+    };
+    let parts = vec![
+        format!("Branch name '{name}' is restricted by ").into(),
+        rules,
+        tail.into(),
+    ];
+    // `.input-description-warning` / `-error`
+    let (icon, icon_color, text_color) = if error.is_warning {
+        (Octicon::Alert, t.dialog_warning, t.text_secondary)
+    } else {
+        (Octicon::Stop, t.input_error_text, t.input_error_text)
+    };
+    let row = div()
+        .flex()
+        .flex_row()
+        .items_start()
+        .text_size(FONT_SIZE_SM())
+        .line_height(zpx(16.5))
+        .text_color(text_color)
+        .child(octicon(icon, icon_color).flex_none().mr(SPACING_HALF()))
+        .child(paragraph(parts).flex_1().min_w_0())
+        .into_any_element();
+    Some((row, !error.is_warning))
+}
+
 pub struct CreateBranchDialog {
     state: Entity<AppState>,
     repo: u64,
@@ -369,6 +466,7 @@ pub struct CreateBranchDialog {
     /// `787-commit-to-new-branch`: "Remove them from <branch>" (unticked
     /// until the user asks).
     remove_from_current: bool,
+    rules_check: BranchRulesCheck,
 }
 
 /// `787-commit-to-new-branch`: what OK does with the branch name.
@@ -410,7 +508,11 @@ impl CreateBranchDialog {
         if !initial_name.is_empty() {
             name.update(cx, |s, cx| s.set_value(initial_name, window, cx));
         }
-        cx.observe(&name, |_, _, cx| cx.notify()).detach();
+        cx.observe(&name, |this: &mut Self, _, cx| {
+            this.check_rules(cx);
+            cx.notify();
+        })
+        .detach();
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         // `RefNameTextBox` autoFocus
         let handle = name.read(cx).focus_handle(cx);
@@ -448,7 +550,15 @@ impl CreateBranchDialog {
             cherry_pick: false,
             purpose: Purpose::Branch,
             remove_from_current: false,
+            rules_check: BranchRulesCheck::default(),
         }
+    }
+
+    /// GHD `updateBranchName`: check the repository rules once the name
+    /// rests.
+    fn check_rules(&mut self, cx: &mut Context<Self>) {
+        let name = sanitize_branch_name(self.name.read(cx).value().as_ref(), cx);
+        self.rules_check.schedule(self.repo, name, cx);
     }
 
     /// `787-commit-to-new-branch`: "Commit to New Branch…": the branch
@@ -824,7 +934,9 @@ crate::branch_list::sort_by_date(cx),
             }
         }
         let _ = current;
-        let disabled = name.is_empty() || exists || reserved || needs_pick;
+        let rule_notice = branch_name_rule_notice(self.state.read(cx), self.repo, &name, cx);
+        let rule_error = rule_notice.as_ref().is_some_and(|(_, error)| *error);
+        let disabled = name.is_empty() || exists || reserved || needs_pick || rule_error;
 
         let repo = self.repo;
         let unborn = matches!(tip, Tip::Unborn { .. });
@@ -859,6 +971,7 @@ crate::branch_list::sort_by_date(cx),
                     cx,
                 ))
             })
+            .children(rule_notice.map(|(row, _)| row))
             .when_some(remote_warning, |d, warning| {
                 d.child(branch_name_warning(warning, cx))
             })
@@ -988,6 +1101,7 @@ pub struct RenameBranchDialog {
     name: Entity<InputState>,
     /// The close button's focus ring, until a mouse press.
     close_focus_visible: bool,
+    rules_check: BranchRulesCheck,
 }
 
 impl RenameBranchDialog {
@@ -1000,7 +1114,13 @@ impl RenameBranchDialog {
     ) -> Self {
         let name = cx.new(|cx| InputState::new(window, cx));
         name.update(cx, |s, cx| s.set_value(branch.clone(), window, cx));
-        cx.observe(&name, |_, _, cx| cx.notify()).detach();
+        // GHD `onNameChange`: only an edited name is checked
+        cx.observe(&name, |this: &mut Self, name, cx| {
+            let new_name = sanitize_branch_name(name.read(cx).value().as_ref(), cx);
+            this.rules_check.schedule(this.repo, new_name, cx);
+            cx.notify();
+        })
+        .detach();
         // `872-rename-branch-focuses-name`: the name box takes the focus with
         // the name selected (GHD `focusCloseButtonOnOpen` focuses the close
         // button)
@@ -1013,10 +1133,15 @@ impl RenameBranchDialog {
             window.focus(&handle, cx);
             name.update(cx, |input, cx| input.select_all(window, cx));
         }
+        let rules_check = BranchRulesCheck {
+            name: sanitize_branch_name(&branch, cx),
+            _task: None,
+        };
         Self {
             state,
             repo,
             branch,
+            rules_check,
             name,
             close_focus_visible: !focus_name,
         }
@@ -1049,7 +1174,9 @@ impl Render for RenameBranchDialog {
         // GHD: disabled only while the name is empty or invalid (renaming to
         // the same name is allowed); `head` is refused (`reserved_head_name`)
         let reserved = reserved_head_name(&new_name, cx);
-        let disabled = new_name.is_empty() || exists || reserved;
+        let rule_notice = branch_name_rule_notice(self.state.read(cx), self.repo, &new_name, cx);
+        let rule_error = rule_notice.as_ref().is_some_and(|(_, error)| *error);
+        let disabled = new_name.is_empty() || exists || reserved || rule_error;
         let (repo, old) = (self.repo, self.branch.clone());
         let content = div()
             .on_mouse_down(
@@ -1069,9 +1196,10 @@ impl Render for RenameBranchDialog {
             })
             .child(
                 // `.ref-name-text-box`: label, 3.33 px, the box; 10 px below
-                // (kept inside the content's padding, as in GHD)
+                // (kept inside the content's padding, as in GHD); a rule
+                // notice below takes the margin over
                 div()
-                    .mb(SPACING())
+                    .when(rule_notice.is_none(), |d| d.mb(SPACING()))
                     .flex()
                     .flex_col()
                     .gap(SPACING_THIRD())
@@ -1084,6 +1212,7 @@ impl Render for RenameBranchDialog {
                         cx,
                     )),
             )
+            .children(rule_notice.map(|(row, _)| div().mb(SPACING()).child(row)))
             .when(exists, |d| {
                 d.child(
                     div()

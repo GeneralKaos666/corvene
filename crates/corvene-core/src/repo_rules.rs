@@ -21,7 +21,7 @@ use crate::host::Host;
 use corvene_github::{ApiRepoRule, ApiRepoRuleset, Client};
 use corvene_models::{
     Account, GitHubRepository, RepoRuleEnforced, RepoRulesInfo, RepoRulesMetadataFailure,
-    RepoRulesMetadataFailures, RepoRulesMetadataRule, RuleOperator, Tip,
+    RepoRulesMetadataFailures, RepoRulesMetadataRule, RepoRulesMetadataStatus, RuleOperator, Tip,
 };
 use tracing::warn;
 
@@ -217,7 +217,118 @@ fn enforced_rulesets(
         .collect()
 }
 
+/// GHD `IBranchRuleError`: `name` breaks a creation or branch name rule.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchNameRuleError {
+    pub name: String,
+    /// Every such ruleset can be bypassed by the user.
+    pub is_warning: bool,
+}
+
+/// The `checkBranchNameRules` verdict from the rules GitHub reports for a
+/// branch named `name`: `None` when no creation or branch name rule applies
+/// or the name passes them.
+fn branch_name_rule_error(
+    name: &str,
+    rules: &[ApiRepoRule],
+    rulesets: &HashMap<u64, ApiRepoRuleset>,
+    exempt_skips: bool,
+) -> Option<BranchNameRuleError> {
+    let mut to_check: Vec<u64> = rules
+        .iter()
+        .filter(|r| r.kind == "creation" || r.kind == "branch_name_pattern")
+        .map(|r| r.ruleset_id)
+        .collect();
+    to_check.sort_unstable();
+    to_check.dedup();
+    if to_check.is_empty() {
+        return None;
+    }
+    let info = parse_repo_rules(rules, &enforced_rulesets(rulesets, exempt_skips), false);
+    let status = failed_rules(&info.branch_name_patterns, name).status();
+    if info.creation_restricted != RepoRuleEnforced::Yes && status == RepoRulesMetadataStatus::Pass
+    {
+        return None;
+    }
+    // GHD: anything but `always`; an `exempt` ruleset does not apply with
+    // `338-ruleset-exempt-bypass`
+    let cannot_bypass = to_check.iter().any(|id| {
+        rulesets
+            .get(id)
+            .is_none_or(|r| r.enforced_for(exempt_skips) == RepoRuleEnforced::Yes)
+    });
+    Some(BranchNameRuleError {
+        name: name.to_string(),
+        is_warning: !cannot_bypass,
+    })
+}
+
 impl Dispatcher {
+    /// GHD `checkBranchNameRules` (Create Branch / Rename Branch, after the
+    /// name has rested 500 ms): the result lands in
+    /// `RepositoryState.branch_name_rule_error`.
+    pub fn check_branch_name_rules(id: u64, name: String, cx: &mut dyn Host) {
+        let (github, prior_rulesets, exempt_skips) = {
+            let s = Self::state(cx).read(cx);
+            let Some(gh) = s.repository(id).and_then(|r| r.github.clone()) else {
+                return;
+            };
+            if name.is_empty()
+                || !s
+                    .account_for(&gh.endpoint)
+                    .is_some_and(|account| use_repo_rules_logic(account, &gh))
+            {
+                return;
+            }
+            (
+                gh,
+                s.repo_rulesets.clone(),
+                s.flags.bool(crate::flags::ids::RULESET_EXEMPT_BYPASS),
+            )
+        };
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &github, cx) else {
+            return;
+        };
+        // an answer for an earlier name arriving late is dropped
+        Self::state(cx).update(cx, |s, _| {
+            let rs = s.repo_state_mut(id);
+            rs.branch_name_rule_requested = name.clone();
+            rs.branch_name_rule_error = None;
+        });
+        let (owner, repo_name) = (github.owner.clone(), github.name.clone());
+        let branch = name.clone();
+        spawn_bg(
+            cx,
+            move || {
+                let client = Client::new(endpoint, token);
+                let rules = client
+                    .repo_rules_for_branch(&owner, &repo_name, &branch)
+                    .unwrap_or_default();
+                let mut rulesets = prior_rulesets;
+                // `cachedRepoRulesets`: fill in the ones not fetched yet
+                for id in rules.iter().map(|r| r.ruleset_id) {
+                    if !rulesets.contains_key(&id)
+                        && let Ok(Some(ruleset)) = client.repo_ruleset(&owner, &repo_name, id)
+                    {
+                        rulesets.insert(id, ruleset);
+                    }
+                }
+                let error = branch_name_rule_error(&branch, &rules, &rulesets, exempt_skips);
+                (error, rulesets)
+            },
+            move |(error, rulesets), cx| {
+                Self::state(cx).update(cx, |s, cx| {
+                    s.repo_rulesets = rulesets;
+                    let rs = s.repo_state_mut(id);
+                    if rs.branch_name_rule_requested == name {
+                        rs.branch_name_rule_error = error;
+                        cx.notify();
+                    }
+                });
+            },
+        );
+    }
+
     /// `refreshBranchProtectionState`: push control + rulesets + branch
     /// rules for the current branch, throttled per branch.
     pub(crate) fn refresh_branch_protection(id: u64, cx: &mut dyn Host) {

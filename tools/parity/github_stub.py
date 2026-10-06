@@ -36,6 +36,10 @@ branches, tags and environments, and the Release workflow's file. Re-run,
 cancel and delete-logs answer as GitHub does and change the stub's runs;
 a dispatch adds a queued run dated now. Runs and jobs carry an `ETag` and
 answer 304 to a matching `If-None-Match`.
+
+Repository rules (`1225-branch-rules-link`): creating a `release/*` branch
+is restricted by a rule nobody can bypass (ruleset 41); a `hotfix/*` name
+must end in a number by a ruleset the user always bypasses (42).
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ import json
 import os
 import time
 import re
+import urllib.parse
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -404,6 +409,26 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, issues + self.server.created_issues if state != "closed" else issues)
         if path == f"{repo}/labels":
             return self._send(200, LABELS)
+        # repository rules (`1225-branch-rules-link`): creating `release/*`
+        # is restricted by a ruleset nobody bypasses; `hotfix/*` names must
+        # end in a number by a ruleset the user always bypasses
+        if path.startswith(f"{repo}/rules/branches/"):
+            branch = urllib.parse.unquote(path[len(f"{repo}/rules/branches/"):])
+            source = {"ruleset_source_type": "Repository", "ruleset_source": f"{OWNER}/{NAME}"}
+            if branch.startswith("release/"):
+                return self._send(200, [{"type": "creation", "ruleset_id": 41, **source}])
+            if branch.startswith("hotfix/"):
+                return self._send(200, [{"type": "branch_name_pattern", "ruleset_id": 42, **source,
+                                         "parameters": {"name": "numbered", "negate": False,
+                                                        "pattern": "^hotfix/[0-9]+$",
+                                                        "operator": "regex"}}])
+            return self._send(200, [])
+        if path == f"{repo}/rulesets":
+            return self._send(200, [{"id": 41, "name": "Releases"}, {"id": 42, "name": "Hotfixes"}])
+        if path in (f"{repo}/rulesets/41", f"{repo}/rulesets/42"):
+            rid = int(path.rsplit("/", 1)[1])
+            return self._send(200, {"id": rid, "name": "Releases" if rid == 41 else "Hotfixes",
+                                    "current_user_can_bypass": "never" if rid == 41 else "always"})
         if path == f"{repo}/assignees":
             return self._send(200, ASSIGNEES)
         if path == f"{repo}/releases":

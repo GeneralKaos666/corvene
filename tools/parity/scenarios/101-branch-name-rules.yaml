@@ -1,0 +1,46 @@
+# The repository rules check of New Branch and Rename Branch (GHD
+# `checkBranchNameRules`), with "repo rules" linking to the branch's
+# rulesets (flag 1225-branch-rules-link, off in the GitHub Desktop preset;
+# desktop/desktop#21824). The rules come from the stub GitHub API
+# (`github_stub.py`): `release/*` is restricted by a ruleset nobody can
+# bypass (an error, OK disabled), a `hotfix/*` name not ending in a number
+# by one the user bypasses (a warning). GHD cannot reach the stub, so the
+# snaps are recorded only.
+name: branch-name-rules
+description: New Branch and Rename Branch saying a name is restricted by repo rules (error and bypass warning, the rules link; Corvene only, stub API)
+setup: repo-remote
+github_stub: true
+corvene_flags: 1225-branch-rules-link=on,872-rename-branch-focuses-name=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {menu: create-branch}
+    wait: 600
+  - ghd: {skip: true}
+    corvene: {type: "release/2.0"}
+    wait: 2000
+  - snap: {name: create-restricted, corvene_only: true, note: "stub rules; the link is 1225-branch-rules-link"}
+  - ghd: {skip: true}
+    corvene: {key: cmd-a backspace}
+    wait: 200
+  - ghd: {skip: true}
+    corvene: {type: "hotfix/login"}
+    wait: 2000
+  - snap: {name: create-bypass, corvene_only: true, note: "a ruleset the user bypasses: a warning, OK enabled"}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {menu: rename-branch}
+    wait: 600
+  - ghd: {skip: true}
+    corvene: {key: cmd-a backspace}
+    wait: 200
+  - ghd: {skip: true}
+    corvene: {type: "release/old"}
+    wait: 2000
+  - snap: {name: rename-restricted, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: escape}

@@ -8127,6 +8127,21 @@ registry! {
         code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-core/src/mco.rs"],
     },
 
+    /// The repo rules in the branch dialogs' rule message link to them.
+    BRANCH_RULES_LINK = 1225 "branch-rules-link" {
+        title: "Link to the rules that block a branch name",
+        summary: "When Create Branch or Rename Branch says a name is restricted by repo rules, \
+                  \"repo rules\" is a link to the repository's rulesets for that branch on \
+                  GitHub, as in the commit form's rule warnings.",
+        ghd_behaviour: "The message is plain text; the rules have to be found on GitHub by hand.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21824)],
+        code: &["crates/corvene-ui/src/dialogs/branch_dialogs.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.

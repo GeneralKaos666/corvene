@@ -1451,6 +1451,11 @@ pub struct RepositoryState {
     /// Which branch the rules were fetched for, and when.
     pub repo_rules_branch: Option<String>,
     pub repo_rules_fetched_at: Option<Instant>,
+    /// GHD `checkBranchNameRules` for the name typed in Create Branch or
+    /// Rename Branch (the dialogs show it while their name matches).
+    pub branch_name_rule_error: Option<crate::repo_rules::BranchNameRuleError>,
+    /// The name the last of those checks asked about.
+    pub branch_name_rule_requested: String,
     /// Rebase dialog preview.
     pub rebase_preview: Option<crate::mco::RebasePreview>,
 
