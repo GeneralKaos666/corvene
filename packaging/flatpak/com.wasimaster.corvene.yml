@@ -41,12 +41,16 @@ modules:
       - NO_PYTHON=YesPlease
       - NO_GETTEXT=YesPlease
       - NO_TCLTK=YesPlease
+      # git 2.52+ builds Rust parts with cargo, which the SDK lacks
+      - NO_RUST=YesPlease
       - INSTALL_SYMLINKS=YesPlease
     make-install-args:
       - NO_PERL=YesPlease
       - NO_PYTHON=YesPlease
       - NO_GETTEXT=YesPlease
       - NO_TCLTK=YesPlease
+      # git 2.52+ builds Rust parts with cargo, which the SDK lacks
+      - NO_RUST=YesPlease
       - INSTALL_SYMLINKS=YesPlease
     sources:
       - type: archive
