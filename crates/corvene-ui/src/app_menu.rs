@@ -672,7 +672,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             separator(),
             MenuItemConstructorOptions {
                 checked: wrap,
-                ..item(l("Wrap Diff Lines", "&Wrap diff lines"), ToggleDiffWordWrap)
+                ..item(l("Wrap Diff Lines", "Wrap &diff lines"), ToggleDiffWordWrap)
             },
         ]);
     }
@@ -701,7 +701,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     if let Some(tree) = extras.file_list_tree {
         view.push(item(
             if tree {
-                l("Show Changes as List", "Show changes as &list")
+                l("Show Changes as List", "Show chang&es as list")
             } else {
                 l("Show Changes as Tree", "Show changes as &tree")
             },
@@ -736,7 +736,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     if extras.tabs && !cfg!(target_os = "macos") {
         view.extend([
             separator(),
-            item("Show next &tab", NextTab),
+            item("Show &next tab", NextTab),
             item("Show previo&us tab", PreviousTab),
         ]);
     }
@@ -857,7 +857,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         }
         if extras.sparse_checkout {
             repository.push(item(
-                l("Sparse Checkout…", "Spa&rse checkout…"),
+                l("Sparse Checkout…", "Sparse checkout…"),
                 ShowSparseCheckout,
             ));
         }
@@ -868,11 +868,11 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         repository.extend([
             MenuItemConstructorOptions {
                 enabled: Some(enabled),
-                ..item(l("New Issue…", "New iss&ue…"), NewIssue)
+                ..item(l("New Issue…", "New issue…"), NewIssue)
             },
             MenuItemConstructorOptions {
                 enabled: Some(enabled),
-                ..item(l("Issues…", "Iss&ues…"), ShowIssues)
+                ..item(l("Issues…", "Issues…"), ShowIssues)
             },
             separator(),
         ]);
@@ -882,11 +882,11 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         repository.extend([
             MenuItemConstructorOptions {
                 enabled: Some(enabled),
-                ..item(l("Create Release…", "Create re&lease…"), CreateRelease)
+                ..item(l("Create Release…", "Create release…"), CreateRelease)
             },
             MenuItemConstructorOptions {
                 enabled: Some(enabled),
-                ..item(l("Releases…", "Re&leases…"), ShowReleases)
+                ..item(l("Releases…", "Releases…"), ShowReleases)
             },
             separator(),
         ]);
@@ -909,7 +909,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         ));
     }
     if extras.insights {
-        repository.push(item(l("Insights…", "Insi&ghts…"), ShowInsights));
+        repository.push(item(l("Insights…", "Insights…"), ShowInsights));
     }
     if extras.recent_activity || extras.insights {
         repository.push(separator());
@@ -1011,12 +1011,12 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     ]);
     // Corvene (`1219-tag-manager`)
     if extras.tags {
-        branch.push(item(l("Tags…", "T&ags…"), ShowTags));
+        branch.push(item(l("Tags…", "Tags…"), ShowTags));
     }
     // Corvene (`1223-checkout-from-fork`)
     if extras.checkout_from_fork {
         branch.push(item(
-            l("Check Out from Fork…", "Check out from fo&rk…"),
+            l("Check Out from Fork…", "Check &out from fork…"),
             CheckoutFromFork,
         ));
     }
@@ -1072,7 +1072,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     // Corvene (`348-pull-request-review`)
     if extras.review_pull_request && labels.has_current_pull_request {
         branch.push(item(
-            l("Review Pull Request…", "Re&view pull request…"),
+            l("Review Pull Request…", "Rev&iew pull request…"),
             ReviewPullRequest,
         ));
     }
@@ -1375,7 +1375,7 @@ mod tests {
                 .iter()
                 .filter_map(|m| m.submenu.as_ref())
                 .flatten()
-                .find(|i| i.label.as_deref() == Some(l("Wrap Diff Lines", "&Wrap diff lines")))
+                .find(|i| i.label.as_deref() == Some(l("Wrap Diff Lines", "Wrap &diff lines")))
                 .map(|i| i.checked)
         };
         assert_eq!(wrap_item(MenuExtras::default()), None);
