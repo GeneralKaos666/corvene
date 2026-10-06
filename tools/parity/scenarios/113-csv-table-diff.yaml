@@ -1,0 +1,19 @@
+# A CSV file's diff as a table (1318-csv-table-diff, off in the GitHub
+# Desktop preset; deviations.md › Diff viewer): an edited, a removed, an
+# added row and a cell with a quoted comma. The Text segment of the header
+# switch goes back to GHD's text diff, which is compared.
+name: csv-table-diff
+description: A CSV diff as a table, then the header's Text switch back to the text diff
+setup: repo-diff-marks
+corvene_flags: 1318-csv-table-diff=on
+steps:
+  - click: [125, 214]
+    wait: 800
+  - snap: {name: table, corvene_only: true, note: "GHD has only the text diff for CSV files (1318-csv-table-diff)"}
+  - ghd: {skip: true}
+    corvene: {click: [1242, 97]}
+    wait: 600
+  - snap: {name: text, mask: [[1222, 85, 80, 24]], note: "the Text / Table switch (1318-csv-table-diff)"}
+  - ghd: {skip: true}
+    corvene: {click: [1278, 97]}
+    wait: 600

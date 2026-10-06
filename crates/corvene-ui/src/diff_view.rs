@@ -106,6 +106,7 @@
 //! `DiffSearchInput` is a bare text box that ignores case. Enter, ⇧Enter
 //! and Esc are unchanged.
 
+use crate::csv_table_diff::CsvTable;
 use corvene_core::diff_line_class::{ClassLine, ClassOptions, LineMark, classify};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -238,6 +239,8 @@ pub fn diff_header(
         }))
         // `794-svg-image-diff`
         .children(svg_switch(path, cx))
+        // `1318-csv-table-diff`
+        .children(csv_switch(path, cx))
         // `798-blame`
         .children(blame_button(path, kind, view, cx))
         // `.path-label-component { margin-right: 5px }`,
@@ -309,11 +312,49 @@ fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
     }
     let repo = s.selected?;
     let as_image = s.repo_states.get(&repo)?.svg_as_image.contains(path);
+    let path = path.to_string();
+    Some(view_switch(
+        ["svg-view-switch", "svg-view-text", "svg-view-image"],
+        ["Text", "Image"],
+        as_image,
+        move |image, cx| Dispatcher::set_svg_as_image(repo, path.clone(), image, cx),
+        cx,
+    ))
+}
+
+/// `1318-csv-table-diff`: the Text / Table switch of a CSV or TSV file's
+/// header (one setting for every such file).
+fn csv_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
+    let s = AppState::try_global(cx)?.read(cx);
+    if corvene_core::csv_diff::table_delimiter(path).is_none()
+        || !s.flags.bool(corvene_core::flags::ids::CSV_TABLE_DIFF)
+    {
+        return None;
+    }
+    Some(view_switch(
+        ["csv-view-switch", "csv-view-text", "csv-view-table"],
+        ["Text", "Table"],
+        s.settings.csv_table_diff,
+        |table, cx| Dispatcher::set_csv_table_diff(table, cx),
+        cx,
+    ))
+}
+
+/// A two-segment switch in the diff header (`[container, left, right]`
+/// ids); `on_pick(true)` picks the right segment.
+fn view_switch(
+    ids: [&'static str; 3],
+    labels: [&'static str; 2],
+    right: bool,
+    on_pick: impl Fn(bool, &mut App) + 'static,
+    cx: &App,
+) -> Stateful<Div> {
     let t = cx.ghd();
-    let segment = |id: &'static str, label: &'static str, image: bool| {
-        let path = path.to_string();
-        let selected = image == as_image;
+    let on_pick = Rc::new(on_pick);
+    let segment = |id: &'static str, label: &'static str, value: bool| {
+        let selected = value == right;
         let (bg, hover) = (t.box_selected_active_background, t.box_hover_background);
+        let on_pick = on_pick.clone();
         div()
             .id(id)
             .a11y_button(label)
@@ -328,28 +369,24 @@ fn svg_switch(path: &str, cx: &App) -> Option<impl IntoElement + use<>> {
                 d.cursor_pointer()
                     .text_color(t.text)
                     .hover(move |d| d.bg(hover))
-                    .on_click(move |_, _, cx| {
-                        Dispatcher::set_svg_as_image(repo, path.clone(), image, cx)
-                    })
+                    .on_click(move |_, _, cx| on_pick(value, cx))
             })
             .child(label)
     };
-    Some(
-        div()
-            .id("svg-view-switch")
-            .flex_none()
-            .ml(SPACING())
-            .h(zpx(19.))
-            .flex()
-            .flex_row()
-            .overflow_hidden()
-            .rounded(BORDER_RADIUS())
-            .border_1()
-            .border_color(t.box_border)
-            .text_size(FONT_SIZE_SM())
-            .child(segment("svg-view-text", "Text", false))
-            .child(segment("svg-view-image", "Image", true)),
-    )
+    div()
+        .id(ids[0])
+        .flex_none()
+        .ml(SPACING())
+        .h(zpx(19.))
+        .flex()
+        .flex_row()
+        .overflow_hidden()
+        .rounded(BORDER_RADIUS())
+        .border_1()
+        .border_color(t.box_border)
+        .text_size(FONT_SIZE_SM())
+        .child(segment(ids[1], labels[0], false))
+        .child(segment(ids[2], labels[1], true))
 }
 
 /// `DiffOptions`' gear (`.diff-options-component > button`); opens `view`'s
@@ -448,6 +485,15 @@ struct MarksCache {
     options: ClassOptions,
     marks: LineMarks,
 }
+
+/// `1318-csv-table-diff`: the diff key, both sides' contents (kept alive)
+/// and the text size and zoom the column widths were measured at.
+type CsvKey = (
+    (u64, String, u64),
+    Option<Arc<Vec<String>>>,
+    Option<Arc<Vec<String>>>,
+    (u32, u32),
+);
 
 struct Snapshot {
     repo: u64,
@@ -555,6 +601,11 @@ pub struct DiffView {
     /// of the unified rows, with the rows (kept alive, so their address is
     /// not reused) and options they were computed for.
     line_marks: Option<MarksCache>,
+    /// `1318-csv-table-diff`: the table of a CSV / TSV diff, keyed by the
+    /// diff and both sides' contents (`Err`: why it is shown as text).
+    csv: Option<(CsvKey, Result<Rc<CsvTable>, String>)>,
+    csv_list: ListState,
+    csv_h_scroll: HScroll,
     /// Whether the list currently shows `split_rows`.
     split_mode: bool,
     /// `1304-diff-no-wrap`: lines stay on one row (as last rendered).
@@ -667,6 +718,9 @@ impl DiffView {
             unified_to_split: Rc::new(Vec::new()),
             unified_inner: Rc::new(Vec::new()),
             line_marks: None,
+            csv: None,
+            csv_list: ListState::new(0, ListAlignment::Top, zpx(200.)),
+            csv_h_scroll: HScroll::default(),
             split_mode: false,
             no_wrap: false,
             h_scroll: HScroll::default(),
@@ -3609,7 +3663,10 @@ impl Render for DiffView {
             .then(|| self.options_popover(&snap, window, cx));
         let body: AnyElement = match self.non_text_panel(&snap, cx) {
             Some(panel) => panel,
-            None => self.text_diff(&snap, window, cx),
+            None => match self.csv_table(&snap, window, cx) {
+                Some(table) => self.csv_table_view(&snap, table, window, cx),
+                None => self.text_diff(&snap, window, cx),
+            },
         };
         let hint = self.highlighting_hint(&snap, cx);
         div()
@@ -3826,7 +3883,11 @@ impl DiffView {
     /// sends those as sideways ticks, which the scrollbar animates over the
     /// text, so only ticks over the gutters are taken here).
     fn sideways_wheel(&self, cx: &Context<Self>) -> impl IntoElement + use<> {
-        let h = self.h_scroll.clone();
+        self.sideways_wheel_for(self.h_scroll.clone(), cx)
+    }
+
+    /// Sideways wheel and trackpad scrolling of `h` over this element.
+    fn sideways_wheel_for(&self, h: HScroll, cx: &Context<Self>) -> impl IntoElement + use<> {
         let view = cx.entity_id();
         canvas(
             |_, _, _| {},
@@ -3862,6 +3923,159 @@ impl DiffView {
         )
         .absolute()
         .inset_0()
+    }
+
+    /// `1318-csv-table-diff`: the table to show instead of the text rows
+    /// (a CSV or TSV text diff with the table view picked). A file that
+    /// cannot be read as a table gets the text diff with a notice.
+    fn csv_table(
+        &mut self,
+        snap: &Snapshot,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Result<Rc<CsvTable>, String>> {
+        let delimiter = corvene_core::csv_diff::table_delimiter(&snap.path)?;
+        {
+            let s = self.state.read(cx);
+            if !s.flags.bool(corvene_core::flags::ids::CSV_TABLE_DIFF) || !s.settings.csv_table_diff
+            {
+                return None;
+            }
+        }
+        if !matches!(*snap.diff, Diff::Text { .. } | Diff::LargeText { .. }) || snap.as_text {
+            return None;
+        }
+        let same = |a: &Option<Arc<Vec<String>>>, b: &Option<Arc<Vec<String>>>| match (a, b) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        let measure = (self.text_size.to_f64() as f32).to_bits();
+        let zoom = f32::from(zpx(1.)).to_bits();
+        if let Some(((key, contents, old_contents, at), table)) = &self.csv
+            && *key == snap.key
+            && same(contents, &snap.contents)
+            && same(old_contents, &snap.old_contents)
+            && *at == (measure, zoom)
+        {
+            return Some(table.clone());
+        }
+        // a side whose contents were not loaded (a pull request preview or
+        // a ref comparison has no old contents) gets the text diff
+        let new = if snap.kind == FileStatusKind::Deleted {
+            None
+        } else {
+            Some(snap.contents.as_ref()?.join("\n"))
+        };
+        let old = if snap.kind.is_new_or_untracked() {
+            None
+        } else {
+            Some(snap.old_contents.as_ref()?.join("\n"))
+        };
+        let table = corvene_core::csv_diff::table_diff(old.as_deref(), new.as_deref(), delimiter)
+            .map_err(|e| format!("Showing the text diff: the table could not be read ({e})."));
+        let table = table.map(|diff| {
+            let text = window.text_system();
+            let font = text.resolve_font(&gpui_kit::font(mono_font()));
+            let column = text
+                .em_advance(font, self.text_size)
+                .unwrap_or(self.text_size * 0.6);
+            let table = Rc::new(CsvTable::new(Rc::new(diff), column));
+            let same_file = self
+                .csv
+                .as_ref()
+                .is_some_and(|((k, ..), _)| k.0 == snap.key.0 && k.1 == snap.key.1);
+            if !same_file {
+                self.csv_h_scroll.reset();
+            }
+            self.csv_list
+                .reset_with_uniform_height(table.diff.rows.len(), DIFF_LINE_HEIGHT());
+            self.csv_h_scroll.reset_width(table.width());
+            table
+        });
+        self.csv = Some((
+            (
+                snap.key.clone(),
+                snap.contents.clone(),
+                snap.old_contents.clone(),
+                (measure, zoom),
+            ),
+            table.clone(),
+        ));
+        Some(table)
+    }
+
+    /// `1318-csv-table-diff`: the table with its pinned header, or the
+    /// text diff under a notice when the file is not a readable table.
+    fn csv_table_view(
+        &mut self,
+        snap: &Snapshot,
+        table: Result<Rc<CsvTable>, String>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let table = match table {
+            Ok(table) => table,
+            Err(reason) => {
+                let body = self.text_diff(snap, window, cx);
+                let t = cx.ghd();
+                let notice = div()
+                    .flex_none()
+                    .px(SPACING())
+                    .py(SPACING_HALF())
+                    .border_b_1()
+                    .border_color(t.diff_border)
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .child(reason);
+                return div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(notice)
+                    .child(body)
+                    .into_any_element();
+            }
+        };
+        let h = self.csv_h_scroll.clone();
+        h.begin_frame(table.width(), px(0.), self.csv_list.viewport_bounds());
+        let t = cx.ghd();
+        let header = crate::csv_table_diff::header_row(&table, &h, cx);
+        let rows_table = table.clone();
+        let rows_h = h.clone();
+        div()
+            .id("csv-table")
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .font_family(mono_font())
+            .text_size(self.text_size)
+            .line_height(DIFF_LINE_HEIGHT())
+            .text_color(t.diff_text)
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(
+                list(
+                    self.csv_list.clone(),
+                    move |ix, _window, cx| match rows_table.diff.rows.get(ix) {
+                        Some(row) => {
+                            crate::csv_table_diff::table_row(&rows_table, ix, row, &rows_h, cx)
+                        }
+                        None => div().into_any_element(),
+                    },
+                )
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .pr(gutter(&self.csv_list)),
+            )
+            .child(scrollbar("csv-scrollbar", self.csv_list.clone()))
+            .child(self.sideways_wheel_for(h.clone(), cx))
+            .child(scrollbar("csv-hscrollbar", h).horizontal())
+            .into_any_element()
     }
 
     /// `1316-diff-moved-lines` / `1317-diff-stylistic-changes`: the marks

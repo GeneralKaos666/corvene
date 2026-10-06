@@ -7060,6 +7060,11 @@ impl Dispatcher {
         Self::update_settings(cx, |s| s.diff_mark_stylistic_changes = on);
     }
 
+    /// Corvene `1318-csv-table-diff`: the diff header's Table/Text switch.
+    pub fn set_csv_table_diff(on: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.csv_table_diff = on);
+    }
+
     /// Modified-image diff tab (`_changeImageDiffType`).
     pub fn set_image_diff_type(kind: corvene_models::ImageDiffType, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.image_diff_type = kind);

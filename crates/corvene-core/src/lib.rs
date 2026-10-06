@@ -31,6 +31,7 @@ pub mod commit_progress;
 pub mod commit_status;
 pub mod compare;
 pub mod crash_reports;
+pub mod csv_diff;
 pub mod delete_branches;
 pub mod diff_cache;
 pub mod diff_line_class;

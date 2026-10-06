@@ -8610,6 +8610,23 @@ registry! {
         upstream: &[Upstream::issue(20361)],
         code: &["crates/corvene-core/src/diff_line_class.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
     },
+    /// CSV and TSV diffs as a table of cells.
+    CSV_TABLE_DIFF = 1318 "csv-table-diff" {
+        title: "CSV and TSV diffs as tables",
+        summary: "A changed .csv or .tsv file opens as a table: the header row stays on top, \
+                  added rows are green, removed rows red, and a modified row shows each changed \
+                  cell's old value struck through above the new one. Columns are matched by \
+                  name, added and removed ones are coloured in the header. The diff header's \
+                  Text / Table switch goes back to the text diff (remembered for every such \
+                  file). Files over 20,000 rows or that do not parse show the text diff.",
+        ghd_behaviour: "CSV and TSV files only have the text diff.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21518)],
+        code: &["crates/corvene-core/src/csv_diff.rs", "crates/corvene-ui/src/csv_table_diff.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
 
 }
 

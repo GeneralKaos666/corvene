@@ -297,7 +297,7 @@ impl HScroll {
     }
 
     /// A row's text clip area painted at `bounds`.
-    fn record_clip(&self, bounds: Bounds<Pixels>) {
+    pub(crate) fn record_clip(&self, bounds: Bounds<Pixels>) {
         let s = &self.0;
         let mut span = s.span.get();
         if s.recorded.get() != s.frame.get() {
