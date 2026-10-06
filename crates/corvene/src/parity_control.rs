@@ -722,6 +722,11 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
         }
         cx.notify();
     });
+    // `348-pull-request-review`: the stub's pull requests fill the cache
+    // (Branch › Review Pull Request… needs the branch's pull request)
+    if with_account && let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+        Dispatcher::refresh_pull_requests(id, true, cx);
+    }
     Ok(())
 }
 

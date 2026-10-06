@@ -419,6 +419,11 @@ pub enum Popup {
     NewIssue {
         repo: u64,
     },
+    /// Corvene `348-pull-request-review`: Review changes… (comment,
+    /// approve or request changes with the pending review's comments).
+    SubmitPullRequestReview {
+        repo: u64,
+    },
     /// Corvene `346-releases`: Create Release… for `tag` (none: a new tag)
     /// at `sha` (none: the current branch's tip).
     CreateRelease {
@@ -729,6 +734,7 @@ impl Popup {
             | Self::CheckoutCommit { repo, .. }
             | Self::CreateTag { repo, .. }
             | Self::NewIssue { repo, .. }
+            | Self::SubmitPullRequestReview { repo, .. }
             | Self::CreateRelease { repo, .. }
             | Self::StartBisect { repo, .. }
             | Self::WarnLocalChangesBeforeUndo { repo, .. }
@@ -1460,6 +1466,11 @@ pub struct RepositoryState {
     pub issues: Option<crate::issues::IssuesViewState>,
     /// The issue the Create Branch dialog was opened for.
     pub pending_issue_link: Option<crate::issues::PendingIssueLink>,
+
+    // ---- `348-pull-request-review` ----
+    /// Review Pull Request: History shows the pull request's files and
+    /// overview instead.
+    pub pull_request_review: Option<crate::pull_request_review::PullRequestReviewState>,
 
     // ---- `346-releases` ----
     /// Repository › Releases…: History lists the releases instead.

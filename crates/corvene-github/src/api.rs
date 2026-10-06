@@ -1074,6 +1074,26 @@ impl Client {
         query: &str,
         variables: &serde_json::Value,
     ) -> Result<T> {
+        self.post_graphql_with(query, variables, false)
+    }
+
+    /// [`Self::post_graphql`] for a mutation: an answer that carries
+    /// `errors` is an error even when `data` came with it (a refused
+    /// mutation answers `data: { field: null }` plus the reason).
+    pub(crate) fn post_graphql_strict<T: serde::de::DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: &serde_json::Value,
+    ) -> Result<T> {
+        self.post_graphql_with(query, variables, true)
+    }
+
+    fn post_graphql_with<T: serde::de::DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: &serde_json::Value,
+        strict: bool,
+    ) -> Result<T> {
         #[derive(Deserialize)]
         struct Message {
             message: String,
@@ -1096,6 +1116,7 @@ impl Client {
         }
         let body: Response<T> = response.body_mut().read_json()?;
         match (body.data, body.errors.into_iter().next()) {
+            (Some(_), Some(error)) if strict => Err(GitHubError::api(200, error.message)),
             (Some(data), _) => Ok(data),
             (None, Some(error)) => Err(GitHubError::api(200, error.message)),
             (None, None) => Err(GitHubError::api(200, "GraphQL answered without data")),

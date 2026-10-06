@@ -621,6 +621,9 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         Popup::NewIssue { repo: r } => {
             repo = Some(*r);
         }
+        Popup::SubmitPullRequestReview { repo: r } => {
+            repo = Some(*r);
+        }
         Popup::CreateRelease { repo: r, tag, sha } => {
             repo = Some(*r);
             f.opt("tag", tag.as_deref());
@@ -745,6 +748,15 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
         // `345-issues` / `346-releases`
         Banner::IssueCreated { number, html_url } => {
             f.put("number", number).put("html_url", html_url);
+        }
+        Banner::ReviewSubmitted {
+            number,
+            event,
+            html_url,
+        } => {
+            f.put("number", number)
+                .put("html_url", html_url)
+                .put("event", event.graphql());
         }
         Banner::ReleaseCreated {
             name,

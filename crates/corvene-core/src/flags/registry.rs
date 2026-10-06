@@ -2898,6 +2898,50 @@ registry! {
         code: &["crates/corvene-core/src/releases.rs", "crates/corvene-ui/src/releases_list.rs", "crates/corvene-ui/src/release_view.rs", "crates/corvene-ui/src/dialogs/create_release.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// Review Pull Request: the pull request's files, overview and
+    /// review threads in the app, with replies, resolving and a review to
+    /// submit.
+    PULL_REQUEST_REVIEW = 348 "pull-request-review" {
+        title: "Pull request review",
+        summary: "Branch › Review Pull Request… (or Review Pull Request in a row of the Pull \
+                  Requests tab) shows the pull request in place of History: its changed files \
+                  with their thread counts, an overview pane (description, reviewers, checks, \
+                  labels and the timeline) and each file's diff with the review threads under \
+                  the lines they belong to. Threads can be replied to, resolved and unresolved; \
+                  a + button on a line (shift-click for a range) writes a comment, posted at once \
+                  or into a pending review; Review changes… submits the pending review as a \
+                  comment, an approval or a request for changes. The diff is the local branch \
+                  tip when the pull request's branch is checked out, else GitHub's head (fetched \
+                  when missing).",
+        ghd_behaviour: "A pull request can only be checked out, previewed before it exists and \
+                        opened in the browser; reviews happen on github.com.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20614)],
+        code: &["crates/corvene-core/src/pull_request_review.rs", "crates/corvene-ui/src/pull_request_review_list.rs", "crates/corvene-ui/src/pull_request_overview.rs", "crates/corvene-ui/src/review_threads.rs", "crates/corvene-ui/src/dialogs/submit_pull_request_review.rs", "crates/corvene-github/src/review.rs"],
+    },
+
+    /// Review threads follow the lines across force-pushes and local
+    /// commits.
+    REVIEW_THREAD_REMAPPING = 349 "review-thread-remapping" {
+        title: "Review threads follow the lines",
+        summary: "When the diff shown is not the head GitHub has (local commits not pushed \
+                  yet, or a branch behind a force-push), review threads are carried to the \
+                  lines they belong to with a line map of the two versions of the file, and a \
+                  thread github.com lists as outdated is placed again when the lines it was \
+                  written on are still there. A new comment's line is carried back the same way.",
+        ghd_behaviour: "Threads are shown only at the lines GitHub reports, and only while the \
+                        diff shown is GitHub's head; the rest are listed as outdated.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/review_anchor.rs", "crates/corvene-core/src/pull_request_review.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

@@ -56,6 +56,7 @@ mod simple;
 mod ssh_key_passphrase;
 mod start_bisect;
 mod stash_list_dialogs;
+mod submit_pull_request_review;
 mod test_notifications;
 mod tutorial_dialogs;
 mod unknown_authors;
@@ -125,6 +126,7 @@ pub use sign_in::{
 };
 pub use simple::{CliInstalledAction, CliInstalledContent, SimpleDialog, cli_installed};
 pub use start_bisect::StartBisectDialog;
+pub use submit_pull_request_review::SubmitPullRequestReviewDialog;
 pub use unknown_authors::UnknownAuthorsDialog;
 pub use worktree_dialogs::{
     AddWorktreeDialog, DeleteWorktreeDialog, DeleteWorktreeFailedDialog, RenameWorktreeDialog,
@@ -561,6 +563,9 @@ impl DialogHost {
                 .into(),
             Popup::NewIssue { repo } => cx
                 .new(|cx| NewIssueDialog::new(state, *repo, window, cx))
+                .into(),
+            Popup::SubmitPullRequestReview { repo } => cx
+                .new(|cx| SubmitPullRequestReviewDialog::new(state, *repo, window, cx))
                 .into(),
             Popup::CreateRelease { repo, tag, sha } => cx
                 .new(|cx| {

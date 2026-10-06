@@ -191,6 +191,8 @@ gpui_kit::actions!(
         ViewBranchOnGitHub,
         PreviewPullRequest,
         CreatePullRequest,
+        // Branch › Review Pull Request… (`348-pull-request-review`)
+        ReviewPullRequest,
         // Window
         Minimize,
         Zoom,

@@ -93,6 +93,8 @@ pub struct Workspace {
     /// `345-issues` / `346-releases`: shown in place of the commit view
     /// while those lists are open.
     issue_view: Entity<crate::issue_view::IssueView>,
+    /// `348-pull-request-review`: the overview or the file under review.
+    review_view: Entity<crate::pull_request_review_view::PullRequestReviewView>,
     release_view: Entity<crate::release_view::ReleaseView>,
     /// The onboarding tutorial's right-hand panel.
     tutorial_panel: Entity<crate::tutorial_panel::TutorialPanel>,
@@ -240,6 +242,9 @@ impl Workspace {
         let stash_view = cx.new(|cx| StashDiffViewer::new(state.clone(), cx));
         let blame_view = cx.new(|cx| crate::blame_view::BlameView::new(state.clone(), cx));
         let issue_view = cx.new(|cx| crate::issue_view::IssueView::new(state.clone(), cx));
+        let review_view = cx.new(|cx| {
+            crate::pull_request_review_view::PullRequestReviewView::new(state.clone(), cx)
+        });
         let release_view = cx.new(|cx| crate::release_view::ReleaseView::new(state.clone(), cx));
         let tutorial_panel =
             cx.new(|cx| crate::tutorial_panel::TutorialPanel::new(state.clone(), cx));
@@ -280,6 +285,7 @@ impl Workspace {
             stash_view,
             blame_view,
             issue_view,
+            review_view,
             release_view,
             tutorial_panel,
             repository_foldout,
@@ -625,6 +631,11 @@ impl Workspace {
         // `345-issues` / `346-releases`: the selected issue / release
         // replaces History's commit view
         if self.section == Section::History {
+            // `348-pull-request-review`
+            if rs.is_some_and(|r| corvene_core::pull_request_review::review_of(state, r).is_some())
+            {
+                return self.review_view.clone().into_any_element();
+            }
             if rs.is_some_and(|r| {
                 corvene_core::issues::issues_of(state, r).is_some_and(|i| i.loaded || i.loading)
             }) {

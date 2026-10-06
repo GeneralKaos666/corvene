@@ -300,6 +300,8 @@ pub struct HistorySidebar {
     reflog: Entity<crate::reflog_list::ReflogList>,
     /// `345-issues` / `346-releases`: shown instead while those are open.
     issues: Entity<crate::issues_list::IssuesList>,
+    /// `348-pull-request-review`: the pull request's files while under review.
+    review: Entity<crate::pull_request_review_list::PullRequestReviewList>,
     releases: Entity<crate::releases_list::ReleasesList>,
 }
 
@@ -383,6 +385,12 @@ impl HistorySidebar {
             graph: Default::default(),
             issues: cx.new(|cx| {
                 crate::issues_list::IssuesList::new(state_for_reflog.clone(), window, cx)
+            }),
+            review: cx.new(|cx| {
+                crate::pull_request_review_list::PullRequestReviewList::new(
+                    state_for_reflog.clone(),
+                    cx,
+                )
             }),
             releases: cx.new(|cx| {
                 crate::releases_list::ReleasesList::new(state_for_reflog.clone(), window, cx)
@@ -3129,6 +3137,15 @@ impl Render for HistorySidebar {
         };
         if reflog_open {
             return self.reflog.clone().into_any_element();
+        }
+        // `348-pull-request-review`: so does a pull request under review
+        let review_open = {
+            let s = self.state.read(cx);
+            s.selected_state()
+                .is_some_and(|rs| corvene_core::pull_request_review::review_of(s, rs).is_some())
+        };
+        if review_open {
+            return self.review.clone().into_any_element();
         }
         // `345-issues` / `346-releases`: so do the issues and the releases
         let (issues_open, releases_open) = {

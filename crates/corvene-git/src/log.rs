@@ -1163,6 +1163,18 @@ pub fn remerge_file_diff(
     ))
 }
 
+/// Whether `commitish` names a commit the repository has (`git cat-file -e
+/// <commitish>^{commit}`): a pull request head may not be fetched yet.
+pub fn commit_exists(git: Arc<GitBinary>, workdir: &Path, commitish: &str) -> bool {
+    GitCommand::new(git)
+        .args(["cat-file", "-e", &format!("{commitish}^{{commit}}")])
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .allow_exit_code(128)
+        .run()
+        .is_ok_and(|out| out.status.success())
+}
+
 /// `getMergeBase`: `None` when the two commits have unrelated histories
 /// (exit code 1) or a ref cannot be found (128).
 pub fn merge_base(git: Arc<GitBinary>, workdir: &Path, a: &str, b: &str) -> Result<Option<String>> {

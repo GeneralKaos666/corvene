@@ -1976,7 +1976,7 @@ impl Diff {
 
 /// `PullRequestRef`: a ref in a GitHub repository. `repository` is `None`
 /// when the head repository was deleted after the pull request was opened.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequestRef {
     pub ref_name: String,
     pub sha: String,
@@ -1984,7 +1984,7 @@ pub struct PullRequestRef {
 }
 
 /// `PullRequest`
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullRequest {
     pub number: u64,
     pub title: String,
@@ -2080,6 +2080,17 @@ pub fn url_matches_remote(a: &str, b: &str) -> bool {
     }
     match (key(a), key(b)) {
         (Some(a), Some(b)) => a == b,
+        // Corvene: two local paths (a bare repository beside the working
+        // copy, as the parity harness's fixture has) match when they are
+        // the same path; GHD's `urlMatchesRemote` needs a host in both.
+        (None, None) => {
+            let local = |s: &str| {
+                let s = s.trim().trim_end_matches('/');
+                s.strip_suffix(".git").unwrap_or(s).to_string()
+            };
+            let (a, b) = (local(a), local(b));
+            !a.is_empty() && a == b
+        }
         _ => false,
     }
 }
@@ -2618,6 +2629,14 @@ mod github_layer_tests {
         assert!(!url_matches_remote(
             "https://github.com/octocat/hello-world",
             "https://github.com/octocat/other"
+        ));
+        // two local paths: the same bare repository
+        assert!(url_matches_remote("/tmp/fixture.git", "/tmp/fixture.git/"));
+        assert!(!url_matches_remote("/tmp/fixture.git", "/tmp/other.git"));
+        assert!(!url_matches_remote("", ""));
+        assert!(!url_matches_remote(
+            "/tmp/fixture.git",
+            "https://github.com/octocat/hello-world"
         ));
     }
 

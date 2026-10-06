@@ -534,6 +534,8 @@ pub(crate) fn main() {
         //   pr-review[:approved|:commented] (changes requested by default)
         //   pr-comment | pr-checks-failed
         //   pr-list (sample pull requests in the branch foldout's Pull Requests tab)
+        //   pull-request-review (the review of a sample pull request with sample threads;
+        //     `348-pull-request-review`)
         //   tutorial:<step> (the repository becomes the tutorial repository, shown at
         //   <step>: pick-editor, create-branch, edit-file, make-commit, push-branch,
         //   open-pull-request, all-done, announced, paused)
@@ -1275,6 +1277,12 @@ pub(crate) fn main() {
                 Dispatcher::preview_patch_text(id, text, cx);
             }
         });
+        // `348-pull-request-review`
+        on_menu_action(cx, move |_: &ReviewPullRequest, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::review_current_pull_request(id, cx);
+            }
+        });
         // `345-issues`
         on_menu_action(cx, move |_: &ShowIssues, cx| {
             if let Some(id) = selected(cx) {
@@ -1927,6 +1935,11 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 _ => path,
             };
             Dispatcher::preview_patch_file(id, path, cx);
+        }
+        // `348-pull-request-review`: the review of a sample pull request
+        // with sample threads (no GitHub behind it)
+        ("pull-request-review", Some(id)) => {
+            corvene_core::pull_request_review::install_samples(id, cx);
         }
         // `345-issues`: the view with sample issues, the New Issue… dialog
         ("issues", Some(id)) => {

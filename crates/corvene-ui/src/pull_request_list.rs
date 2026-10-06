@@ -23,7 +23,7 @@
 //! all set!" and a refresh button that does nothing).
 
 use corvene_core::filter::match_keys;
-use corvene_core::{Dispatcher, Popup, PullRequest, parse_iso8601};
+use corvene_core::{AppState, Dispatcher, Popup, PullRequest, parse_iso8601};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -143,6 +143,7 @@ pub fn pull_request_row(
     };
     let pr_for_click = pr.clone();
     let pr_for_menu = pr.clone();
+    let pr_for_review = pr.clone();
     let pr_for_drop = pr.clone();
     let pr_for_drop_target = pr.head.ref_name.clone();
     div()
@@ -203,26 +204,41 @@ pub fn pull_request_row(
             let pr = pr_for_menu.clone();
             let head = pr.head.ref_name.clone();
             let worktree_name = format!("{repository_name}-{}", pr.number);
+            // Corvene (`348-pull-request-review`): review it in the app
+            let review = AppState::global(cx)
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::PULL_REQUEST_REVIEW)
+                .then(|| {
+                    let pr = pr_for_review.clone();
+                    MenuItem::new("Review Pull Request", move |_, cx| {
+                        Dispatcher::close_foldout(cx);
+                        Dispatcher::review_pull_request(id, pr.clone(), cx);
+                    })
+                });
             crate::native_menu::show_context_menu(
-                vec![
-                    MenuItem::new("View Pull Request on GitHub", move |_, cx| {
-                        Dispatcher::open_pull_request(&pr, cx)
-                    }),
-                    MenuItem::new(
-                        mac_or("Checkout in New Worktree…", "Checkout in new worktree…"),
-                        move |_, cx| {
-                            Dispatcher::close_foldout(cx);
-                            Dispatcher::show_popup(
-                                Popup::AddWorktree {
-                                    repo: id,
-                                    initial_branch_name: Some(head.clone()),
-                                    initial_worktree_name: Some(worktree_name.clone()),
-                                },
-                                cx,
-                            )
-                        },
-                    ),
-                ],
+                review
+                    .into_iter()
+                    .chain(vec![
+                        MenuItem::new("View Pull Request on GitHub", move |_, cx| {
+                            Dispatcher::open_pull_request(&pr, cx)
+                        }),
+                        MenuItem::new(
+                            mac_or("Checkout in New Worktree…", "Checkout in new worktree…"),
+                            move |_, cx| {
+                                Dispatcher::close_foldout(cx);
+                                Dispatcher::show_popup(
+                                    Popup::AddWorktree {
+                                        repo: id,
+                                        initial_branch_name: Some(head.clone()),
+                                        initial_worktree_name: Some(worktree_name.clone()),
+                                    },
+                                    cx,
+                                )
+                            },
+                        ),
+                    ])
+                    .collect(),
                 ev.position,
                 window,
                 cx,

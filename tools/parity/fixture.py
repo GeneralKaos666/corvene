@@ -193,8 +193,61 @@ def _tools(parent: Path, repo: Path) -> None:
     _git(repo, "branch", "-q", "-D", "changelog", date=date)
 
 
+# `repo-pull-request`: the stub GitHub API's pull request #7, `feature/login`
+# into `main`, two commits (the second one "not pushed yet" as far as the stub
+# is concerned: its pull request head is the first); the review threads in
+# `github_stub.py` name lines of these files. The stub names the bare
+# `origin` as the pull request's repository, so the branch matches it.
+_PULL_REQUEST_COMMITS = [
+    ("2026-09-16T09:00:00+00:00", "Add a --login flag", {
+        "src/main.rs": 'fn main() {\n'
+                       '    let args: Vec<String> = std::env::args().skip(1).collect();\n'
+                       '    let shout = args.iter().any(|a| a == "--shout");\n'
+                       '    let login = args.iter().any(|a| a == "--login");\n'
+                       '    let name = args.iter().find(|a| !a.starts_with("--")).cloned();\n'
+                       '    let name = name.unwrap_or_else(|| "world".into());\n'
+                       '    let greeting = if login {\n'
+                       '        format!("Welcome back, {name}!")\n'
+                       '    } else {\n'
+                       '        format!("Hello, {name}!")\n'
+                       '    };\n'
+                       '    if shout {\n'
+                       '        println!("{}", greeting.to_uppercase());\n'
+                       '    } else {\n'
+                       '        println!("{greeting}");\n'
+                       '    }\n'
+                       '}\n',
+        "README.md": "# Parity fixture\n\nA small repository for GitHub Desktop parity runs.\n\n## Flags\n\n"
+                     "- `--shout`: upper-case the greeting\n- `--login`: greet a returning user\n",
+    }),
+    ("2026-09-17T10:00:00+00:00", "Document the greeter", {
+        "src/main.rs": '//! The parity fixture\'s greeter.\n'
+                       'fn main() {\n'
+                       '    let args: Vec<String> = std::env::args().skip(1).collect();\n'
+                       '    let shout = args.iter().any(|a| a == "--shout");\n'
+                       '    let login = args.iter().any(|a| a == "--login");\n'
+                       '    let name = args.iter().find(|a| !a.starts_with("--")).cloned();\n'
+                       '    let name = name.unwrap_or_else(|| "world".into());\n'
+                       '    let greeting = if login {\n'
+                       '        format!("Welcome back, {name}!")\n'
+                       '    } else {\n'
+                       '        format!("Hello, {name}!")\n'
+                       '    };\n'
+                       '    if shout {\n'
+                       '        println!("{}", greeting.to_uppercase());\n'
+                       '    } else {\n'
+                       '        println!("{greeting}");\n'
+                       '    }\n'
+                       '}\n',
+        "docs/guide.md": "# Guide\n\n1. Build with `cargo build`.\n2. Run `parity-fixture <name>`.\n"
+                         "3. Add `--login` to greet a returning user.\n\nThat is all.\n",
+    }),
+]
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
-          signed: bool = False, reflog: bool = False, tools: bool = False) -> Path:
+          signed: bool = False, reflog: bool = False, tools: bool = False,
+          pull_request: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -206,7 +259,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     `reflog`, HEAD's reflog gets a rebase, a branch deleted after use and
     three commits a hard reset left behind (Recent Activity,
     `1216-recent-activity`). With `tools`, see `_tools` (Clean Untracked
-    Files and Apply Patch, flags 1105 and 1106)."""
+    Files and Apply Patch, flags 1105 and 1106). With `pull_request` (and
+    `remote`), `main` is pushed whole and `feature/login` is checked out
+    with `_PULL_REQUEST_COMMITS` pushed (`348-pull-request-review`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -293,6 +348,18 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main")
     if tools:
         _tools(parent, repo)
+    if pull_request and remote:
+        _git(repo, "push", "-q", "origin", "main")
+        # the fixture already has a stale `feature/login`: reset it onto main
+        _git(repo, "checkout", "-q", "-B", "feature/login", "main")
+        for date, summary, files in _PULL_REQUEST_COMMITS:
+            for rel, text in files.items():
+                p = repo / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(text)
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-q", "-m", summary, date=date)
+        _git(repo, "push", "-q", "-u", "origin", "feature/login")
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)

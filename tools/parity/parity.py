@@ -134,20 +134,25 @@ class Run:
         # with good, unknown-key and bad signatures on top; `repo-reflog`: with
         # a rebase, a deleted branch and a hard reset in HEAD's reflog;
         # `repo-tools`: with ignored files and a patch and a mailbox beside it
+        # `repo-pull-request`: `repo-remote` plus a pushed `feature/login` the
+        # stub API serves as pull request #7 (`348-pull-request-review`)
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
-                             "repo-reflog", "repo-tools")
-        remote = setup == "repo-remote"
+                             "repo-reflog", "repo-tools", "repo-pull-request")
+        pull_request = setup == "repo-pull-request"
+        remote = setup == "repo-remote" or pull_request
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
         signed = setup == "repo-signed"
         reflog = setup == "repo-reflog"
         tools = setup == "repo-tools"
-        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
-        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools) if with_repo else None
+        repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, pull_request) if with_repo else None
+        repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, pull_request) if with_repo else None
 
-        # `github_stub: true`: a stub GitHub API for Corvene's Issues and
-        # Releases views (`github_stub.py`), reached by the `github: stub` step
-        self.stub = github_stub.start() if sc.get("github_stub") else None
+        # `github_stub: true`: a stub GitHub API for Corvene's Issues, Releases
+        # and pull request review views (`github_stub.py`), reached by the
+        # `github: stub` step; with the pull request fixture it serves the
+        # fixture branch as pull request #7
+        self.stub = github_stub.start(repo_c if pull_request else None) if sc.get("github_stub") else None
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,
                                                          sc.get("corvene_flags"))

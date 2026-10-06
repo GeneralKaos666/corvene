@@ -149,6 +149,15 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
         Banner::IssueCreated { number, .. } => {
             vec![t("Created issue\u{a0}"), b(&format!("#{number}"))]
         }
+        Banner::ReviewSubmitted { number, event, .. } => {
+            use corvene_core::pull_request_review::ReviewEvent;
+            let verb = match event {
+                ReviewEvent::Approve => "Approved pull request\u{a0}",
+                ReviewEvent::RequestChanges => "Requested changes on pull request\u{a0}",
+                ReviewEvent::Comment => "Reviewed pull request\u{a0}",
+            };
+            vec![t(verb), b(&format!("#{number}"))]
+        }
         Banner::ReleaseCreated { name, draft, .. } => vec![
             t(if *draft {
                 "Saved draft release\u{a0}"
@@ -488,7 +497,9 @@ pub fn banner_bar(
             )
         }
         // Corvene (`345-issues`, `346-releases`)
-        Banner::IssueCreated { html_url, .. } | Banner::ReleaseCreated { html_url, .. } => {
+        Banner::IssueCreated { html_url, .. }
+        | Banner::ReleaseCreated { html_url, .. }
+        | Banner::ReviewSubmitted { html_url, .. } => {
             let url = html_url.clone();
             Some(
                 link_button("banner-view-on-github", "View on GitHub", cx)

@@ -91,14 +91,15 @@
 //! the pane (GHD keeps showing the previous diff, or nothing).
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use corvene_core::{
-    AppState, Diff, DiffSelection, DiffSelectionType, Dispatcher, FileStatusKind, SubmoduleDiff,
+    AppState, Diff, DiffLineKind, DiffSelection, DiffSelectionType, Dispatcher, FileStatusKind,
+    SubmoduleDiff,
 };
-use gpui_kit::component::input::{Escape, InputEvent, InputState};
+use gpui_kit::component::input::{Escape, InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
@@ -385,6 +386,9 @@ pub enum DiffSource {
     Stash,
     /// Preview Pull Request dialog: the selected file's merge-base diff.
     PullRequest,
+    /// `348-pull-request-review`: the reviewed pull request's selected
+    /// file, with its review threads under the lines.
+    Review,
 }
 
 /// Which "hide whitespace" setting a source uses.
@@ -395,6 +399,19 @@ fn set_hide_whitespace(source: DiffSource, hide: bool, cx: &mut App) {
             Dispatcher::set_hide_whitespace_in_diff(true, hide, cx)
         }
         DiffSource::PullRequest => Dispatcher::set_hide_whitespace_in_pull_request_diff(hide, cx),
+        DiffSource::Review => {
+            Dispatcher::set_hide_whitespace_in_diff(true, hide, cx);
+            // the file's diff is read with the new setting
+            let reselect = AppState::try_global(cx).and_then(|s| {
+                let s = s.read(cx);
+                let id = s.selected?;
+                let review = crate::review_threads::review_state_of(s, id)?;
+                Some((id, review.selected_file()?.to_string()))
+            });
+            if let Some((id, path)) = reselect {
+                Dispatcher::select_review_file(id, path, cx);
+            }
+        }
     }
 }
 
@@ -519,6 +536,40 @@ pub struct DiffView {
     focus_handle: FocusHandle,
     /// When the working-directory diff started loading, for the spinner.
     loading_since: Option<std::time::Instant>,
+    /// `348-pull-request-review`: the view-local state of the threads.
+    review: ReviewLocal,
+}
+
+/// The threads and their parsed bodies at one version of the state.
+type ReviewThreadsSnapshot = (
+    u64,
+    Rc<Vec<corvene_core::pull_request_review::ReviewThread>>,
+    Rc<HashMap<String, Arc<Vec<corvene_core::markdown::Block>>>>,
+);
+
+/// `348-pull-request-review`: what the threads keep in the view: the open
+/// reply boxes, the comment being edited, the resolved threads unfolded,
+/// the composer's text box, and a snapshot of the threads shared with the
+/// rows (rebuilt when the state's version changes).
+#[derive(Default)]
+struct ReviewLocal {
+    reply_boxes: Rc<HashMap<String, Entity<TextareaState>>>,
+    editing: Option<(String, Entity<TextareaState>)>,
+    expanded: Rc<HashSet<String>>,
+    /// The composer's target and text box (the box is remade for a new
+    /// target).
+    composer: Option<(
+        corvene_core::pull_request_review::ComposeTarget,
+        Entity<TextareaState>,
+    )>,
+    /// The outdated / file-level threads panel is open.
+    unplaced_open: bool,
+    /// (threads version, threads, bodies) as last snapshotted.
+    threads: Option<ReviewThreadsSnapshot>,
+    /// What the rows were last measured with; a change remeasures them.
+    layout_key: Option<String>,
+    /// Avatar URLs already asked for.
+    avatars: HashSet<String>,
 }
 
 impl DiffView {
@@ -571,6 +622,7 @@ impl DiffView {
             context_menu: None,
             focus_handle: cx.focus_handle(),
             loading_since: None,
+            review: ReviewLocal::default(),
         }
     }
 
@@ -689,6 +741,27 @@ impl DiffView {
                         rs.stash_diff_contents.clone(),
                         rs.stash_diff_old_contents.clone(),
                     ),
+                    s.settings.hide_whitespace_in_history_diff,
+                )
+            }
+            DiffSource::Review => {
+                let review = corvene_core::pull_request_review::review_of(s, rs)?;
+                let path = review.selected_file()?.to_string();
+                let file = review.file.as_ref().filter(|f| f.path == path)?;
+                let change = review
+                    .changeset
+                    .as_ref()
+                    .and_then(|c| c.files.iter().find(|f| f.path == path))?;
+                (
+                    path,
+                    (
+                        change.status.kind,
+                        change.status.rename_includes_modifications(),
+                    ),
+                    DiffSelection::all(),
+                    file.diff.clone()?,
+                    file.diff_generation,
+                    (file.diff_contents.clone(), file.diff_old_contents.clone()),
                     s.settings.hide_whitespace_in_history_diff,
                 )
             }
@@ -2860,6 +2933,7 @@ impl Render for DiffView {
             self.list_state.remeasure();
         }
         let loading = self.loading_overlay(cx);
+        self.sync_review_composer(window, cx);
         let Some(snap) = self.snapshot(cx) else {
             return div()
                 .relative()
@@ -3110,6 +3184,9 @@ impl DiffView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        // `348-pull-request-review`: the threads' row map (borrows `cx`
+        // mutably, so before the theme is borrowed)
+        let review = self.review_ui(snap, cx);
         let t = cx.ghd();
         // `canSelect`: working-directory files that are not conflicted.
         // a binary file shown as text cannot be committed line by line
@@ -3158,11 +3235,18 @@ impl DiffView {
                     .flags
                     .bool(corvene_core::flags::ids::WIDE_HUNK_HANDLE)
             }),
+            review: review.clone(),
         });
         let rows = self.rows.clone();
         let split_rows = self.split_rows.clone();
         let split_mode = self.split_mode;
         let warnings = self.warnings(snap, cx);
+        // `348-pull-request-review`: the threads without a row, above them
+        let unplaced = review.as_ref().and_then(|review| {
+            let s = self.state.read(cx);
+            let file = crate::review_threads::review_state_of(s, snap.repo)?.shown_file()?;
+            review.unplaced_panel(file, self.review.unplaced_open, cx)
+        });
         let search = self
             .search_input
             .clone()
@@ -3215,18 +3299,24 @@ impl DiffView {
             .flex()
             .flex_col()
             .children(warnings)
+            .children(unplaced)
             .child(
                 list(self.list_state.clone(), move |ix, _window, cx| {
                     let (row, count) = if split_mode {
                         (
-                            split_rows
-                                .get(ix)
-                                .map(|row| render_split_row(&ctx, ix, row, &rows, cx)),
+                            split_rows.get(ix).map(|row| {
+                                let el = render_split_row(&ctx, ix, row, &rows, cx);
+                                let (before, after) = row.unified_rows();
+                                decorate_row(&ctx, el, before.into_iter().chain(after), cx)
+                            }),
                             split_rows.len(),
                         )
                     } else {
                         (
-                            rows.get(ix).map(|row| render_row(&ctx, ix, row, cx)),
+                            rows.get(ix).map(|row| {
+                                let el = render_row(&ctx, ix, row, cx);
+                                decorate_row(&ctx, el, std::iter::once(ix), cx)
+                            }),
                             rows.len(),
                         )
                     };
@@ -3250,6 +3340,305 @@ impl DiffView {
             .child(scrollbar("diff-scrollbar", self.list_state.clone()))
             .children(search)
             .into_any_element()
+    }
+}
+
+/// `348-pull-request-review`: the row with its threads and the composer
+/// underneath (a column in one list item, so the list's indices stay the
+/// rows').
+fn decorate_row(
+    ctx: &RowContext,
+    row: AnyElement,
+    unified: impl Iterator<Item = usize>,
+    cx: &App,
+) -> AnyElement {
+    let Some(review) = ctx.review.as_ref() else {
+        return row;
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    let decorations: Vec<AnyElement> = unified
+        .filter(|ix| seen.insert(*ix))
+        .filter_map(|ix| review.decorations(ix, cx))
+        .collect();
+    if decorations.is_empty() {
+        return row;
+    }
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .child(row)
+        .children(decorations)
+        .into_any_element()
+}
+
+impl DiffView {
+    /// `348-pull-request-review`: the threads' row map for this render
+    /// (`None` for every other source).
+    fn review_ui(
+        &mut self,
+        snap: &Snapshot,
+        cx: &mut Context<Self>,
+    ) -> Option<Rc<crate::review_threads::ReviewUi>> {
+        if self.source != DiffSource::Review {
+            return None;
+        }
+        let (
+            threads,
+            bodies,
+            by_row,
+            composer,
+            can_write,
+            has_pending,
+            busy,
+            error,
+            show_resolved,
+            signed_out,
+            layout_key,
+        ) = {
+            let s = self.state.read(cx);
+            let review = crate::review_threads::review_state_of(s, snap.repo)?;
+            let file = review.shown_file()?;
+            // the threads are shared with the rows as one snapshot per version
+            if self
+                .review
+                .threads
+                .as_ref()
+                .is_none_or(|(v, _, _)| *v != review.threads_version)
+                || self
+                    .review
+                    .threads
+                    .as_ref()
+                    .is_some_and(|(_, _, b)| b.len() != review.bodies.len())
+            {
+                self.review.threads = Some((
+                    review.threads_version,
+                    Rc::new(review.threads.clone()),
+                    Rc::new(review.bodies.clone()),
+                ));
+            }
+            let (_, threads, bodies) = self.review.threads.clone().expect("set above");
+            // which row carries which thread: new numbers on the right,
+            // old numbers on the left
+            let mut by_new: HashMap<u32, usize> = HashMap::new();
+            let mut by_old: HashMap<u32, usize> = HashMap::new();
+            for (ix, row) in self.rows.iter().enumerate() {
+                if row.kind == DiffLineKind::Hunk {
+                    continue;
+                }
+                if let Some(n) = row.new {
+                    by_new.entry(n).or_insert(ix);
+                }
+                if let Some(o) = row.old {
+                    by_old.entry(o).or_insert(ix);
+                }
+            }
+            use corvene_core::pull_request_review::DiffSide;
+            use corvene_core::review_anchor::ThreadAnchor;
+            let mut by_row: HashMap<usize, Vec<corvene_core::review_anchor::AnchoredThread>> =
+                HashMap::new();
+            for anchored in &file.anchors {
+                if let ThreadAnchor::Line { side, line, .. } = anchored.anchor {
+                    let row = match side {
+                        DiffSide::Right => by_new.get(&line),
+                        DiffSide::Left => by_old.get(&line),
+                    };
+                    if let Some(row) = row {
+                        by_row.entry(*row).or_default().push(anchored.clone());
+                    }
+                }
+            }
+            let composer = review.composer.as_ref().and_then(|target| {
+                let row = match target.side {
+                    DiffSide::Right => by_new.get(&target.line),
+                    DiffSide::Left => by_old.get(&target.line),
+                }?;
+                let input = self
+                    .review
+                    .composer
+                    .as_ref()
+                    .filter(|(t, _)| t == target)
+                    .map(|(_, input)| input.clone())?;
+                Some((target.clone(), *row, input))
+            });
+            let can_write = !review.signed_out && review.busy.is_none();
+            let layout_key = format!(
+                "{}|{:?}|{}|{}|{:?}|{}|{:?}|{:?}|{}",
+                review.threads_version,
+                review.composer,
+                self.review.reply_boxes.len(),
+                self.review.expanded.len(),
+                self.review.editing.as_ref().map(|(id, _)| id),
+                review.show_resolved,
+                review.busy,
+                review.error,
+                file.anchors.len(),
+            );
+            (
+                threads,
+                bodies,
+                by_row,
+                composer,
+                can_write,
+                review.pending_review.is_some() || review.pending_count() > 0,
+                review.busy.clone(),
+                review.error.clone(),
+                review.show_resolved,
+                review.signed_out,
+                layout_key,
+            )
+        };
+        if self.review.layout_key.as_ref() != Some(&layout_key) {
+            self.review.layout_key = Some(layout_key);
+            self.list_state.remeasure();
+        }
+        // the authors' avatars, once each
+        let wanted: Vec<String> = threads
+            .iter()
+            .flat_map(|t| t.comments.iter())
+            .filter_map(|c| c.author.as_ref()?.avatar_url.clone())
+            .filter(|url| !url.is_empty() && !self.review.avatars.contains(url))
+            .collect();
+        if !wanted.is_empty() {
+            self.review.avatars.extend(wanted.iter().cloned());
+            cx.spawn(async move |_, cx| {
+                cx.update(|cx| {
+                    for url in wanted {
+                        Dispatcher::request_avatar_url(&url, cx);
+                    }
+                });
+            })
+            .detach();
+        }
+        Some(Rc::new(crate::review_threads::ReviewUi {
+            repo: snap.repo,
+            view: cx.weak_entity(),
+            threads,
+            bodies,
+            by_row,
+            composer,
+            can_write,
+            has_pending,
+            busy,
+            error,
+            show_resolved,
+            expanded: self.review.expanded.clone(),
+            reply_boxes: self.review.reply_boxes.clone(),
+            editing: self.review.editing.clone(),
+            signed_out,
+        }))
+    }
+
+    /// The composer's text box follows the state's target: made (and
+    /// focused) for a new target, dropped when the composer closes.
+    fn sync_review_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.source != DiffSource::Review {
+            return;
+        }
+        let (repo, target) = {
+            let s = self.state.read(cx);
+            let Some(id) = s.selected else {
+                return;
+            };
+            let target =
+                crate::review_threads::review_state_of(s, id).and_then(|r| r.composer.clone());
+            (id, target)
+        };
+        match target {
+            None => {
+                if self.review.composer.take().is_some() {
+                    cx.notify();
+                }
+            }
+            Some(target) => {
+                if self
+                    .review
+                    .composer
+                    .as_ref()
+                    .is_some_and(|(t, _)| *t == target)
+                {
+                    return;
+                }
+                let keep_text = self
+                    .review
+                    .composer
+                    .as_ref()
+                    .filter(|(t, _)| t.path == target.path && t.side == target.side)
+                    .map(|(_, input)| input.read(cx).value().to_string());
+                let input = cx.new(|cx| {
+                    let mut state = TextareaState::new(window, cx)
+                        .placeholder("Leave a comment")
+                        .rows(3);
+                    if let Some(text) = keep_text {
+                        state.set_value(text, window, cx);
+                    }
+                    state
+                });
+                cx.subscribe(&input, move |_, input, ev: &InputEvent, cx| {
+                    if let InputEvent::PressEnter {
+                        secondary: true, ..
+                    } = ev
+                    {
+                        let text = input.read(cx).value().to_string();
+                        Dispatcher::add_review_comment(repo, text, false, cx);
+                    }
+                })
+                .detach();
+                window.focus(&input.read(cx).focus_handle(cx), cx);
+                self.review.composer = Some((target, input));
+                cx.notify();
+            }
+        }
+    }
+
+    pub(crate) fn toggle_thread_expanded(&mut self, id: &str, cx: &mut Context<Self>) {
+        let mut set = (*self.review.expanded).clone();
+        if !set.remove(id) {
+            set.insert(id.to_string());
+        }
+        self.review.expanded = Rc::new(set);
+        cx.notify();
+    }
+
+    pub(crate) fn open_reply_box(
+        &mut self,
+        id: &str,
+        input: Entity<TextareaState>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut boxes = (*self.review.reply_boxes).clone();
+        boxes.insert(id.to_string(), input);
+        self.review.reply_boxes = Rc::new(boxes);
+        cx.notify();
+    }
+
+    pub(crate) fn close_reply_box(&mut self, id: &str, cx: &mut Context<Self>) {
+        let mut boxes = (*self.review.reply_boxes).clone();
+        if boxes.remove(id).is_some() {
+            self.review.reply_boxes = Rc::new(boxes);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn start_comment_edit(
+        &mut self,
+        id: &str,
+        input: Entity<TextareaState>,
+        cx: &mut Context<Self>,
+    ) {
+        self.review.editing = Some((id.to_string(), input));
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_comment_edit(&mut self, cx: &mut Context<Self>) {
+        if self.review.editing.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_unplaced_threads(&mut self, cx: &mut Context<Self>) {
+        self.review.unplaced_open = !self.review.unplaced_open;
+        cx.notify();
     }
 }
 

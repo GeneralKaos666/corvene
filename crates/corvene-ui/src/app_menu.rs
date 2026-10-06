@@ -158,6 +158,9 @@ pub struct MenuExtras {
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
     /// branch has a pull request).
     pub request_reviewers: bool,
+    /// Flag `348-pull-request-review`: Branch › Review Pull Request… (while
+    /// the branch has a pull request).
+    pub review_pull_request: bool,
     /// Flag `283-move-changes-to-worktree`: Branch › Move Changes to
     /// Worktree…, enabled with changes and another worktree (set by
     /// [`MenuLabelsEvent::of`]).
@@ -198,6 +201,7 @@ impl MenuExtras {
             issues: flags.bool(ids::ISSUES).then_some(false),
             releases: flags.bool(ids::RELEASES).then_some(false),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
+            review_pull_request: flags.bool(ids::PULL_REQUEST_REVIEW),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
             stash_with_message: flags.bool(ids::STASH_LIST).then_some(false),
             // Windows: the installer puts the command line tool on the PATH
@@ -913,6 +917,13 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             RequestReviewers,
         ));
     }
+    // Corvene (`348-pull-request-review`)
+    if extras.review_pull_request && labels.has_current_pull_request {
+        branch.push(item(
+            l("Review Pull Request…", "Re&view pull request…"),
+            ReviewPullRequest,
+        ));
+    }
     template.push(submenu(l("Branch", "&Branch"), branch));
 
     if cfg!(target_os = "macos") {
@@ -1155,6 +1166,7 @@ mod tests {
                     issues: Some(true),
                     releases: Some(true),
                     request_reviewers: true,
+                    review_pull_request: true,
                     move_changes_to_worktree: Some(true),
                     stash_with_message: Some(true),
                     install_cli: true,

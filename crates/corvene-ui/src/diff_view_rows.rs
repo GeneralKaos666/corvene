@@ -193,6 +193,68 @@ pub struct RowContext {
     pub show_whitespace: bool,
     /// `759-wide-hunk-handle`: the old-number column toggles the group.
     pub wide_hunk_handle: bool,
+    /// `348-pull-request-review`: the review threads under the rows and
+    /// the `+` that starts a comment (a pull request's diff only).
+    pub review: Option<Rc<crate::review_threads::ReviewUi>>,
+}
+
+/// `348-pull-request-review`: the side and line a row's number stands for
+/// (old numbers are the LEFT side).
+fn review_line(
+    kind: DiffLineKind,
+    old: Option<u32>,
+    new: Option<u32>,
+) -> Option<(corvene_core::pull_request_review::DiffSide, u32)> {
+    use corvene_core::pull_request_review::DiffSide;
+    match kind {
+        DiffLineKind::Delete => old.map(|n| (DiffSide::Left, n)),
+        DiffLineKind::Add | DiffLineKind::Context => new.map(|n| (DiffSide::Right, n)),
+        DiffLineKind::Hunk => None,
+    }
+}
+
+/// The hover group of a row (unified) or of one side of a split row.
+fn review_group(abs: u32, column: Option<Column>) -> SharedString {
+    match column {
+        None => SharedString::from(format!("review-row-{abs}")),
+        Some(Column::Before) => SharedString::from(format!("review-before-{abs}")),
+        Some(Column::After) => SharedString::from(format!("review-after-{abs}")),
+    }
+}
+
+/// The `+` of a line, when the review can take a comment.
+fn review_add_button(
+    ctx: &RowContext,
+    kind: DiffLineKind,
+    old: Option<u32>,
+    new: Option<u32>,
+    group: SharedString,
+    cx: &App,
+) -> Option<AnyElement> {
+    let review = ctx.review.as_ref().filter(|r| r.can_write)?;
+    let (side, line) = review_line(kind, old, new)?;
+    Some(crate::review_threads::add_comment_button(
+        ctx.repo,
+        &ctx.path,
+        side,
+        line,
+        review.composer.as_ref().map(|(t, _, _)| t),
+        group,
+        cx,
+    ))
+}
+
+/// Whether the row's line is inside the composer's range.
+fn review_in_range(
+    ctx: &RowContext,
+    kind: DiffLineKind,
+    old: Option<u32>,
+    new: Option<u32>,
+) -> bool {
+    match (&ctx.review, review_line(kind, old, new)) {
+        (Some(review), Some((side, line))) => review.in_composer_range(side, Some(line)),
+        _ => false,
+    }
 }
 
 impl RowContext {
@@ -1136,6 +1198,19 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         })
         .child(number(row.new));
 
+    // `348-pull-request-review`: the composer's range and the `+` on hover
+    if ctx.review.is_some() {
+        let group = review_group(abs, None);
+        if review_in_range(ctx, row.kind, row.old, row.new) {
+            el = el
+                .bg(t.diff_selected_background)
+                .text_color(t.diff_selected_text);
+        }
+        el = el.relative().group(group.clone());
+        el = el.children(review_add_button(
+            ctx, row.kind, row.old, row.new, group, cx,
+        ));
+    }
     el = el.child(gutter).child(content);
     if selectable && changed && !hide_whitespace {
         // extend the drag as the pointer crosses changed rows
@@ -1563,6 +1638,27 @@ fn split_line_number(
     let hide_whitespace = ctx.hide_whitespace;
     let group_type = row.group_type;
     let side = if column == Column::Before { 0 } else { 1 };
+    // `348-pull-request-review`: the `+` of this side's line (the old
+    // side's number is a LEFT comment, the new side's a RIGHT one)
+    let review_button = match (ctx.review.as_ref().filter(|r| r.can_write), number, empty) {
+        (Some(review), Some(line), false) => {
+            let side = if column == Column::Before {
+                corvene_core::pull_request_review::DiffSide::Left
+            } else {
+                corvene_core::pull_request_review::DiffSide::Right
+            };
+            Some(crate::review_threads::add_comment_button(
+                ctx.repo,
+                &ctx.path,
+                side,
+                line,
+                review.composer.as_ref().map(|(t, _, _)| t),
+                review_group(row.abs, Some(column)),
+                cx,
+            ))
+        }
+        _ => None,
+    };
     div()
         .id(("split-gutter", row.abs as usize * 2 + side))
         .w(zpx(ctx.line_number_width + check_width))
@@ -1570,6 +1666,8 @@ fn split_line_number(
         .flex()
         .flex_row()
         .items_stretch()
+        .relative()
+        .children(review_button)
         .bg(bg)
         .when(column == Column::Before, |d| d.border_l_1())
         .when(column == Column::After, |d| d.border_r_1())
@@ -1888,6 +1986,19 @@ pub fn render_split_row(
                     .items_stretch()
                     .bg(t.background)
                     .text_color(t.diff_text)
+                    // `348-pull-request-review`
+                    .when(ctx.review.is_some(), |d| {
+                        let in_range = ctx.review.as_ref().is_some_and(|review| {
+                            use corvene_core::pull_request_review::DiffSide;
+                            match column {
+                                Column::Before => review.in_composer_range(DiffSide::Left, r.old),
+                                Column::After => review.in_composer_range(DiffSide::Right, r.new),
+                            }
+                        });
+                        d.relative()
+                            .group(review_group(r.abs, Some(column)))
+                            .when(in_range, |d| d.bg(t.diff_selected_background))
+                    })
                     // `.editable .row.context .before/.after`: half the
                     // handle width as a border on each side of the centre
                     .when(selectable, |d| {
@@ -1935,7 +2046,15 @@ pub fn render_split_row(
                     .flex_row()
                     .items_stretch()
                     .bg(bg)
-                    .text_color(fg);
+                    .text_color(fg)
+                    // `348-pull-request-review`
+                    .when_some(side.filter(|_| ctx.review.is_some()), |d, s| {
+                        let r = &rows[s.unified];
+                        let in_range = review_in_range(ctx, r.kind, r.old, r.new);
+                        d.relative()
+                            .group(review_group(r.abs, Some(column)))
+                            .when(in_range, |d| d.bg(t.diff_selected_background))
+                    });
                 let (ln, content): (AnyElement, AnyElement) = match side {
                     Some(s) => {
                         let r = &rows[s.unified];

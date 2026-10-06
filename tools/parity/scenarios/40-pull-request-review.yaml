@@ -1,0 +1,55 @@
+# Corvene's pull request review (flag 348-pull-request-review, off in the
+# GitHub Desktop preset the harness runs with). GHD can only check a pull
+# request out, so the snaps are recorded, not compared (`corvene_only`;
+# deviations.md › GitHub layer). The `repo-pull-request` fixture has
+# `feature/login` checked out, two commits ahead of `main` and pushed; the
+# stub GitHub API (`github_stub.py`) serves it as pull request #7 whose head
+# is the first of the two commits, so the diff shown is one local commit
+# ahead of GitHub's head and the threads are carried over to it
+# (349-review-thread-remapping): the outdated one comes back at its lines.
+name: pull-request-review
+description: Branch › Review Pull Request… overview pane, a file's diff with its threads (unified and split), resolving, replying, a new comment and Review changes… (Corvene only, stub API)
+setup: repo-pull-request
+github_stub: true
+corvene_flags: 348-pull-request-review=on,349-review-thread-remapping=on,610-diff-mode-shortcut=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 1500
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ReviewPullRequest"}
+    wait: 3000
+  - snap: {name: overview, corvene_only: true, note: "GHD has no review surface (deviations.md, 348-pull-request-review)"}
+  # the third file row: src/main.rs, its threads under the lines
+  - ghd: {skip: true}
+    corvene: {click: [103, 220]}
+    wait: 2000
+  - snap: {name: threads, corvene_only: true}
+  # split view (⌥⌘S, flag 610) and back
+  - ghd: {skip: true}
+    corvene: {key: "alt-cmd-s"}
+    wait: 1200
+  - snap: {name: threads-split, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: "alt-cmd-s"}
+    wait: 1200
+  # README.md: the pending comment, then the overview's Review changes…
+  - ghd: {skip: true}
+    corvene: {click: [103, 191]}
+    wait: 2000
+  - snap: {name: pending-thread, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [128, 777]}
+    wait: 1200
+  - snap: {name: review-changes, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 600
+  # Escape in the list closes the review: History as it was
+  - ghd: {skip: true}
+    corvene: {click: [103, 162]}
+    wait: 600
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 1000
+  - snap: {name: closed-again, corvene_only: true}

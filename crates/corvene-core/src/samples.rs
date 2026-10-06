@@ -255,3 +255,228 @@ pub fn notification(
         kind,
     }
 }
+
+/// `348-pull-request-review`: sample review threads on the sample pull
+/// request: one open on a line, one resolved, one outdated, one pending.
+pub fn review_threads() -> Vec<corvene_github::review::ReviewThread> {
+    use corvene_github::review::{DiffSide, ReviewActor, ReviewComment, ReviewThread};
+    let actor = |login: &str| {
+        Some(ReviewActor {
+            login: login.into(),
+            avatar_url: None,
+        })
+    };
+    let comment = |id: &str, login: &str, body: &str, hours: u64, pending: bool| ReviewComment {
+        id: id.into(),
+        database_id: None,
+        author: actor(login),
+        body: body.into(),
+        created_at: iso_ago(hours * 3600),
+        updated_at: iso_ago(hours * 3600),
+        url: String::new(),
+        pending,
+        outdated: false,
+        viewer_can_update: pending,
+        viewer_can_delete: pending,
+        viewer_did_author: pending,
+        original_commit: Some("4f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c".into()),
+        commit: Some("4f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c".into()),
+        diff_hunk: "@@ -1,3 +1,4 @@\n fn main() {\n+    let name = \"world\";".into(),
+        reply_to: None,
+        review_id: Some("R_sample".into()),
+        review_state: Some(if pending { "PENDING" } else { "COMMENTED" }.into()),
+    };
+    vec![
+        ReviewThread {
+            id: "T_1".into(),
+            path: "src/main.rs".into(),
+            line: Some(2),
+            diff_side: Some(DiffSide::Right),
+            original_line: Some(2),
+            viewer_can_resolve: true,
+            viewer_can_reply: true,
+            comments: vec![
+                comment(
+                    "C_1",
+                    "octocat",
+                    "Should this read the name from the arguments?",
+                    30,
+                    false,
+                ),
+                comment(
+                    "C_2",
+                    "wasi-master",
+                    "It does on the next line; this is the default.",
+                    28,
+                    false,
+                ),
+            ],
+            ..Default::default()
+        },
+        ReviewThread {
+            id: "T_2".into(),
+            path: "README.md".into(),
+            line: Some(7),
+            start_line: Some(5),
+            diff_side: Some(DiffSide::Right),
+            start_diff_side: Some(DiffSide::Right),
+            original_line: Some(7),
+            is_resolved: true,
+            resolved_by: Some("wasi-master".into()),
+            viewer_can_unresolve: true,
+            viewer_can_reply: true,
+            comments: vec![comment(
+                "C_3",
+                "hubot",
+                "Typo: *greating* → greeting.",
+                50,
+                false,
+            )],
+            ..Default::default()
+        },
+        ReviewThread {
+            id: "T_3".into(),
+            path: "src/main.rs".into(),
+            line: None,
+            diff_side: Some(DiffSide::Right),
+            original_line: Some(9),
+            is_outdated: true,
+            viewer_can_resolve: true,
+            viewer_can_reply: true,
+            comments: vec![comment(
+                "C_4",
+                "octocat",
+                "This branch was unreachable.",
+                72,
+                false,
+            )],
+            ..Default::default()
+        },
+        ReviewThread {
+            id: "T_4".into(),
+            path: "src/main.rs".into(),
+            line: Some(3),
+            diff_side: Some(DiffSide::Left),
+            original_line: Some(3),
+            viewer_can_resolve: true,
+            viewer_can_reply: true,
+            comments: vec![comment(
+                "C_5",
+                "wasi-master",
+                "Keep the old greeting as a fallback?",
+                1,
+                true,
+            )],
+            ..Default::default()
+        },
+    ]
+}
+
+/// `348-pull-request-review`: the sample pull request's overview.
+pub fn pull_request_overview(pr: &PullRequest) -> corvene_github::review::PullRequestOverview {
+    use corvene_github::review::{
+        OverviewLabel, OverviewReview, PendingReview, PullRequestOverview, ReviewActor,
+        ReviewRequest, RollupState, TimelineItem,
+    };
+    let actor = |login: &str| {
+        Some(ReviewActor {
+            login: login.into(),
+            avatar_url: None,
+        })
+    };
+    PullRequestOverview {
+        id: "PR_sample".into(),
+        number: pr.number,
+        title: pr.title.clone(),
+        body: REVIEW_BODY.into(),
+        state: "OPEN".into(),
+        is_draft: pr.draft,
+        author: actor(&pr.author),
+        created_at: pr.created_at.clone(),
+        merged_at: None,
+        closed_at: None,
+        url: pr.html_url().unwrap_or_default(),
+        base_ref_name: pr.base.ref_name.clone(),
+        head_ref_name: pr.head.ref_name.clone(),
+        base_ref_oid: pr.base.sha.clone(),
+        head_ref_oid: pr.head.sha.clone(),
+        head_repository: pr.head.repository.as_ref().map(|r| r.full_name()),
+        is_cross_repository: false,
+        mergeable: "MERGEABLE".into(),
+        review_decision: Some("CHANGES_REQUESTED".into()),
+        additions: 48,
+        deletions: 7,
+        changed_files: 3,
+        commit_count: 2,
+        checks: Some(RollupState::Success),
+        labels: vec![
+            OverviewLabel {
+                name: "enhancement".into(),
+                color: "a2eeef".into(),
+            },
+            OverviewLabel {
+                name: "markdown".into(),
+                color: "0075ca".into(),
+            },
+        ],
+        milestone: Some("v0.2".into()),
+        assignees: vec![pr.author.clone()],
+        review_requests: vec![ReviewRequest {
+            name: "hubot".into(),
+            avatar_url: None,
+            team: false,
+        }],
+        reviews: vec![OverviewReview {
+            id: "R_1".into(),
+            author: actor("octocat"),
+            state: "CHANGES_REQUESTED".into(),
+            body: "A few things before this lands.".into(),
+            submitted_at: Some(iso_ago(30 * 3600)),
+            url: String::new(),
+            comment_count: 2,
+        }],
+        pending_review: Some(PendingReview {
+            id: "R_sample".into(),
+            body: String::new(),
+            comment_count: 1,
+        }),
+        viewer_login: "wasi-master".into(),
+        viewer_can_update: true,
+        timeline: vec![
+            TimelineItem::Commit {
+                oid: pr.base.sha.clone(),
+                headline: "Parse Markdown bodies".into(),
+                author: pr.author.clone(),
+                date: iso_ago(3 * 86_400),
+            },
+            TimelineItem::ReviewRequested {
+                actor: pr.author.clone(),
+                reviewer: "octocat".into(),
+                date: iso_ago(3 * 86_400 - 600),
+            },
+            TimelineItem::Comment {
+                id: "IC_1".into(),
+                author: actor("hubot"),
+                body: "CI is green on this one.".into(),
+                created_at: iso_ago(2 * 86_400),
+                url: String::new(),
+            },
+            TimelineItem::Review(OverviewReview {
+                id: "R_1".into(),
+                author: actor("octocat"),
+                state: "CHANGES_REQUESTED".into(),
+                body: "A few things before this lands.".into(),
+                submitted_at: Some(iso_ago(30 * 3600)),
+                url: String::new(),
+                comment_count: 2,
+            }),
+            TimelineItem::Commit {
+                oid: pr.head.sha.clone(),
+                headline: "Render pull request bodies as Markdown".into(),
+                author: pr.author.clone(),
+                date: iso_ago(2 * 3600),
+            },
+        ],
+        timeline_more: 0,
+    }
+}

@@ -13,14 +13,26 @@ to run ("last year"). A created issue is `#101`; a created release gets
 id 9. `generate-notes` answers for any tag; with `GITHUB_STUB_NO_NOTES=1`
 it answers 404 (a GitHub Enterprise Server before 3.5), so Corvene builds
 the notes from the local history instead.
+
+With a fixture repository (`start(repo)`, the `repo-pull-request` setup) the
+stub also serves pull request #7, `feature/login` into `main`, whose head is
+the branch's first commit (the second counts as not pushed yet), its check
+runs, and the GraphQL operations of `corvene_github::review` by operation
+name: the review threads (one open, one resolved range, one outdated, one
+pending), the overview, and the mutations, which change the stub's threads
+so a reload shows the reply, the resolved state, the new comment or the
+submitted review (`348-pull-request-review`).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 OWNER, NAME = "octocat", "parity-fixture"
 
@@ -87,6 +99,223 @@ RELEASES = [
 ]
 
 
+PR_NUMBER = 7
+PR_NODE = "PR_stub7"
+WEB = f"http://127.0.0.1/{OWNER}/{NAME}"
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+class PullRequestFixture:
+    """Pull request #7 over the fixture repository, with its review threads
+    and the mutations' effects."""
+
+    def __init__(self, repo: Path):
+        self.head = _git(repo, "rev-parse", "feature/login~1")
+        self.tip = _git(repo, "rev-parse", "feature/login")
+        self.base = _git(repo, "rev-parse", "origin/main")
+        # the pull request's repository is the fixture's bare origin, as `git
+        # remote -v` prints it, so the checked-out branch matches it
+        self.clone_url = _git(repo, "remote", "get-url", "origin")
+        self.comments = 0
+        self.pending_review = "PRR_pending"
+        self.submitted = []
+        self.conversation = []
+        self.threads = [
+            self._thread("PRRT_1", "src/main.rs", 4, None, "RIGHT", False, False, [
+                self._comment("octocat", "Should `--login` also accept a user name?", 40),
+                self._comment("mona", "Not yet: the greeting only changes its words.", 38),
+            ]),
+            self._thread("PRRT_2", "src/main.rs", 9, 7, "RIGHT", True, False, [
+                self._comment("hubot", "Collapse this into one `format!` with a conditional verb.", 50),
+            ], resolved_by="mona"),
+            self._thread("PRRT_3", "src/main.rs", None, None, "RIGHT", False, True, [
+                self._comment("octocat", "Upper-casing the whole greeting also shouts the name.", 60),
+            ], original_line=13),
+            self._thread("PRRT_4", "README.md", 8, None, "RIGHT", False, False, [
+                self._comment("octocat", "Say what a returning user is.", 1, pending=True),
+            ]),
+        ]
+
+    def _comment(self, login: str, body: str, hours_ago: int, pending: bool = False) -> dict:
+        self.comments += 1
+        hour = 23 - min(hours_ago, 23)
+        return {
+            "id": f"PRRC_{self.comments}", "databaseId": 500 + self.comments, "body": body,
+            "createdAt": f"2024-03-{1 + hours_ago // 24:02d}T{hour:02d}:00:00Z",
+            "updatedAt": f"2024-03-{1 + hours_ago // 24:02d}T{hour:02d}:00:00Z",
+            "url": f"{WEB}/pull/{PR_NUMBER}#discussion_r{500 + self.comments}",
+            "state": "PENDING" if pending else "SUBMITTED", "outdated": False,
+            "viewerCanUpdate": login == "octocat", "viewerCanDelete": login == "octocat",
+            "viewerDidAuthor": login == "octocat", "diffHunk": "@@ -1,6 +1,8 @@\n fn main() {",
+            "author": {"login": login, "avatarUrl": None}, "originalCommit": {"oid": self.head},
+            "commit": {"oid": self.head}, "replyTo": None,
+            "pullRequestReview": {"id": self.pending_review if pending else "PRR_1",
+                                  "state": "PENDING" if pending else "COMMENTED"},
+        }
+
+    def _thread(self, tid: str, path: str, line, start_line, side: str, resolved: bool, outdated: bool,
+                comments: list, resolved_by: str | None = None, original_line: int | None = None) -> dict:
+        return {
+            "id": tid, "path": path, "line": line, "startLine": start_line,
+            "originalLine": original_line if original_line is not None else line,
+            "originalStartLine": start_line, "diffSide": side, "startDiffSide": side if start_line else None,
+            "isResolved": resolved, "isOutdated": outdated,
+            "resolvedBy": {"login": resolved_by} if resolved_by else None,
+            "viewerCanResolve": True, "viewerCanUnresolve": True, "viewerCanReply": True,
+            "comments": {"nodes": comments},
+        }
+
+    def pending_count(self) -> int:
+        return sum(1 for t in self.threads for c in t["comments"]["nodes"] if c["state"] == "PENDING")
+
+    def rest(self) -> dict:
+        repo = {"name": NAME, "owner": _user(OWNER), "html_url": WEB, "clone_url": self.clone_url,
+                "default_branch": "main", "private": False, "fork": False, "parent": None,
+                "node_id": "R_stub", "permissions": {"admin": True, "push": True, "pull": True}}
+        return {
+            "number": PR_NUMBER, "title": "Add a --login flag", "state": "open", "draft": False,
+            "created_at": "2024-02-28T10:00:00Z", "updated_at": "2024-03-03T10:00:00Z",
+            "user": _user("mona"), "body": "Greets returning users with `--login`.\n\nCloses #41.",
+            "head": {"ref": "feature/login", "sha": self.head, "repo": repo},
+            "base": {"ref": "main", "sha": self.base, "repo": repo},
+            "assignees": [], "requested_reviewers": [_user("hubot")],
+            "html_url": f"{WEB}/pull/{PR_NUMBER}",
+        }
+
+    def check_runs(self) -> dict:
+        run = lambda rid, name, conclusion: {  # noqa: E731
+            "id": rid, "name": name, "status": "completed", "conclusion": conclusion,
+            "check_suite": {"id": 90}, "app": {"name": "GitHub Actions"},
+            "started_at": "2024-03-03T10:00:00Z", "completed_at": "2024-03-03T10:04:00Z",
+            "html_url": f"{WEB}/actions/runs/{rid}", "pull_requests": [],
+        }
+        return {"total_count": 2, "check_runs": [run(1, "build", "success"), run(2, "lint", "success")]}
+
+    def overview(self) -> dict:
+        pending = [{"id": self.pending_review, "body": "", "author": {"login": "octocat"},
+                    "comments": {"totalCount": self.pending_count()}}] if self.pending_count() else []
+        reviews = [{"id": "PRR_1", "state": "CHANGES_REQUESTED", "body": "A couple of things before this lands.",
+                    "submittedAt": "2024-03-01T12:00:00Z", "url": f"{WEB}/pull/{PR_NUMBER}#pullrequestreview-1",
+                    "author": {"login": "hubot", "avatarUrl": None}, "comments": {"totalCount": 1}}]
+        reviews += self.submitted
+        timeline = [
+            {"__typename": "PullRequestCommit", "commit": {"oid": self.head, "messageHeadline": "Add a --login flag",
+             "committedDate": "2024-02-28T09:00:00Z", "author": {"name": "Mona", "user": {"login": "mona"}}}},
+            {"__typename": "ReviewRequestedEvent", "createdAt": "2024-02-28T10:05:00Z", "actor": {"login": "mona"},
+             "requestedReviewer": {"__typename": "User", "login": "hubot"}},
+            {"__typename": "IssueComment", "id": "IC_1", "body": "CI is green on this one.",
+             "createdAt": "2024-02-29T08:00:00Z", "url": f"{WEB}/pull/{PR_NUMBER}#issuecomment-1",
+             "author": {"login": "octocat", "avatarUrl": None}},
+            {"__typename": "LabeledEvent", "createdAt": "2024-02-29T09:00:00Z", "actor": {"login": "mona"},
+             "label": {"name": "enhancement", "color": "a2eeef"}},
+            dict(reviews[0], __typename="PullRequestReview"),
+        ] + self.conversation + [dict(r, __typename="PullRequestReview") for r in self.submitted]
+        return {
+            "id": PR_NODE, "number": PR_NUMBER, "title": "Add a --login flag",
+            "body": "Greets returning users with `--login`.\n\n- [x] flag\n- [ ] docs\n\nCloses #41.",
+            "state": "OPEN", "isDraft": False, "createdAt": "2024-02-28T10:00:00Z", "mergedAt": None,
+            "closedAt": None, "url": f"{WEB}/pull/{PR_NUMBER}", "author": {"login": "mona", "avatarUrl": None},
+            "baseRefName": "main", "headRefName": "feature/login", "baseRefOid": self.base,
+            "headRefOid": self.head, "isCrossRepository": False, "headRepository": {"nameWithOwner": f"{OWNER}/{NAME}"},
+            "mergeable": "MERGEABLE", "reviewDecision": "CHANGES_REQUESTED", "additions": 14, "deletions": 3,
+            "changedFiles": 2, "viewerCanUpdate": True,
+            "commits": {"totalCount": 1, "nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]},
+            "labels": {"nodes": [{"name": "enhancement", "color": "a2eeef"}]},
+            "milestone": {"title": "v0.2"}, "assignees": {"nodes": [{"login": "mona"}]},
+            "reviewRequests": {"nodes": [{"requestedReviewer": {"__typename": "User", "login": "hubot", "avatarUrl": None}}]},
+            "latestOpinionatedReviews": {"nodes": reviews},
+            "pendingReviews": {"nodes": pending},
+            "timelineItems": {"totalCount": len(timeline), "nodes": timeline},
+        }
+
+    def find_thread(self, tid: str) -> dict | None:
+        return next((t for t in self.threads if t["id"] == tid), None)
+
+    def graphql(self, query: str, variables: dict) -> dict:
+        """The answer's `data` for one of `corvene_github::review`'s operations."""
+        m = re.match(r"\s*(query|mutation)\s+(\w+)", query)
+        op = m.group(2) if m else ""
+        v = variables or {}
+        if op == "ReviewThreads":
+            return {"repository": {"pullRequest": {"id": PR_NODE, "reviewThreads": {
+                "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": self.threads}}}}
+        if op == "PullRequestOverview":
+            return {"viewer": {"login": "octocat"}, "repository": {"pullRequest": self.overview()}}
+        if op == "AddThreadReply":
+            thread = self.find_thread(v.get("thread", ""))
+            if thread is None:
+                return {"addPullRequestReviewThreadReply": None}
+            comment = self._comment("octocat", v.get("body", ""), 0, pending=bool(v.get("review")))
+            comment["replyTo"] = {"id": thread["comments"]["nodes"][0]["id"]}
+            thread["comments"]["nodes"].append(comment)
+            return {"addPullRequestReviewThreadReply": {"comment": {"id": comment["id"]}}}
+        if op in ("ResolveThread", "UnresolveThread"):
+            thread = self.find_thread(v.get("thread", ""))
+            if thread is None:
+                return {"resolveReviewThread": None, "unresolveReviewThread": None}
+            thread["isResolved"] = op == "ResolveThread"
+            thread["resolvedBy"] = {"login": "octocat"} if thread["isResolved"] else None
+            key = "resolveReviewThread" if op == "ResolveThread" else "unresolveReviewThread"
+            return {key: {"thread": {"id": thread["id"], "isResolved": thread["isResolved"]}}}
+        if op == "StartReview":
+            return {"addPullRequestReview": {"pullRequestReview": {"id": self.pending_review, "state": "PENDING"}}}
+        if op in ("AddReviewThread", "AddSingleComment"):
+            inp = v.get("input") if op == "AddReviewThread" else (v.get("threads") or [{}])[0]
+            pending = op == "AddReviewThread"
+            tid = f"PRRT_{len(self.threads) + 1}"
+            thread = self._thread(tid, inp.get("path", ""), inp.get("line"), inp.get("startLine"),
+                                  inp.get("side", "RIGHT"), False, False,
+                                  [self._comment("octocat", inp.get("body", ""), 0, pending=pending)])
+            self.threads.append(thread)
+            if pending:
+                return {"addPullRequestReviewThread": {"thread": {"id": tid}}}
+            return {"addPullRequestReview": {"pullRequestReview": {"id": f"PRR_{tid}", "state": "COMMENTED"}}}
+        if op in ("SubmitReview", "AddReview"):
+            event = v.get("event", "COMMENT")
+            state = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(event, "COMMENTED")
+            count = 0
+            for t in self.threads:
+                for c in t["comments"]["nodes"]:
+                    if c["state"] == "PENDING":
+                        c["state"] = "SUBMITTED"
+                        c["pullRequestReview"] = {"id": "PRR_submitted", "state": state}
+                        count += 1
+            self.submitted.append({"id": "PRR_submitted", "state": state, "body": v.get("body", ""),
+                                   "submittedAt": "2024-03-04T10:00:00Z",
+                                   "url": f"{WEB}/pull/{PR_NUMBER}#pullrequestreview-9",
+                                   "author": {"login": "octocat", "avatarUrl": None},
+                                   "comments": {"totalCount": count}})
+            key = "submitPullRequestReview" if op == "SubmitReview" else "addPullRequestReview"
+            return {key: {"pullRequestReview": {"id": "PRR_submitted", "state": state}}}
+        if op == "DeleteReview":
+            for t in self.threads:
+                t["comments"]["nodes"] = [c for c in t["comments"]["nodes"] if c["state"] != "PENDING"]
+            self.threads = [t for t in self.threads if t["comments"]["nodes"]]
+            return {"deletePullRequestReview": {"pullRequestReview": {"id": self.pending_review, "state": "DISMISSED"}}}
+        if op == "UpdateReviewComment":
+            for t in self.threads:
+                for c in t["comments"]["nodes"]:
+                    if c["id"] == v.get("comment"):
+                        c["body"] = v.get("body", "")
+            return {"updatePullRequestReviewComment": {"pullRequestReviewComment": {"id": v.get("comment")}}}
+        if op == "DeleteReviewComment":
+            for t in self.threads:
+                t["comments"]["nodes"] = [c for c in t["comments"]["nodes"] if c["id"] != v.get("comment")]
+            self.threads = [t for t in self.threads if t["comments"]["nodes"]]
+            return {"deletePullRequestReviewComment": {"pullRequestReview": {"id": self.pending_review}}}
+        if op == "AddConversationComment":
+            cid = f"IC_{len(self.conversation) + 2}"
+            self.conversation.append({"__typename": "IssueComment", "id": cid, "body": v.get("body", ""),
+                                      "createdAt": "2024-03-04T09:00:00Z",
+                                      "url": f"{WEB}/pull/{PR_NUMBER}#issuecomment-{cid}",
+                                      "author": {"login": "octocat", "avatarUrl": None}})
+            return {"addComment": {"commentEdge": {"node": {"id": cid}}}}
+        return {"createLinkedBranch": {"linkedBranch": {"id": "LB_stub"}}}
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "github-stub/1"
 
@@ -137,6 +366,18 @@ class _Handler(BaseHTTPRequestHandler):
                 if r["tag_name"] == tag:
                     return self._send(200, r)
             return self._send(404, {"message": "Not Found"})
+        pr = self.server.pull_request
+        if pr is not None:
+            if path == f"{repo}/pulls":
+                return self._send(200, [pr.rest()] if params.get("state", "open") != "closed" else [])
+            if path == f"{repo}/pulls/{PR_NUMBER}":
+                return self._send(200, pr.rest())
+            if path.startswith(f"{repo}/commits/") and path.endswith("/check-runs"):
+                return self._send(200, pr.check_runs())
+            if path.startswith(f"{repo}/commits/") and path.endswith("/status"):
+                return self._send(200, {"state": "success", "total_count": 0, "statuses": []})
+            if path.startswith(f"{repo}/actions/"):
+                return self._send(200, {"total_count": 0, "workflow_runs": [], "jobs": []})
         return self._send(404, {"message": f"stub: no GET {path}"})
 
     def do_POST(self):  # noqa: N802
@@ -167,16 +408,21 @@ class _Handler(BaseHTTPRequestHandler):
             self.server.created_releases.insert(0, release)
             return self._send(201, release)
         if path == "/api/graphql":
-            return self._send(200, {"data": {"createLinkedBranch": {"linkedBranch": {"id": "LB_stub"}}}})
+            pr = self.server.pull_request
+            if pr is None:
+                return self._send(200, {"data": {"createLinkedBranch": {"linkedBranch": {"id": "LB_stub"}}}})
+            return self._send(200, {"data": pr.graphql(body.get("query", ""), body.get("variables") or {})})
         return self._send(404, {"message": f"stub: no POST {path}"})
 
 
 class Stub(HTTPServer):
-    def __init__(self):
+    def __init__(self, repo: Path | None = None):
         super().__init__(("127.0.0.1", 0), _Handler)
         self.created_issues: list[dict] = []
         self.created_releases: list[dict] = []
         self.posts: list[tuple[str, dict]] = []
+        # `348-pull-request-review`: pull request #7 over the fixture
+        self.pull_request = PullRequestFixture(repo) if repo else None
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
 
     @property
@@ -196,8 +442,8 @@ class Stub(HTTPServer):
         self.server_close()
 
 
-def start() -> Stub:
-    return Stub().start()
+def start(repo: Path | None = None) -> Stub:
+    return Stub(repo).start()
 
 
 if __name__ == "__main__":

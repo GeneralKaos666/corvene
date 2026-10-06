@@ -122,14 +122,14 @@ pub use index_lock::{index_lock_path, remove_stale_index_lock};
 pub use lfs_progress::GitLfsProgressParser;
 pub use log::{
     COMMIT_BATCH_SIZE, HistoryQuery, LoggedCommit, LoggedHistory, NULL_TREE_SHA,
-    REMERGE_DIFF_MIN_VERSION, all_branch_tips, commit_file_diff, commit_matches_words,
-    commit_range_file_diff, commits_by_sha, commits_with_sha_prefix, filtered_history,
-    filtered_history_page, get_all_tags, get_changed_files, get_changed_files_in_process,
-    get_commit_range_changed_files, get_commits, get_commits_from, get_commits_in_range,
-    get_commits_with, local_commit_shas, local_only_commits, merge_base, merge_base_changed_files,
-    merge_base_file_diff, most_recent_local_commit, parse_filtered_history,
-    parse_raw_log_with_numstat, parse_recent_authors, recent_authors, remerge_changed_files,
-    remerge_file_diff, resolve_commit, tag_names,
+    REMERGE_DIFF_MIN_VERSION, all_branch_tips, commit_exists, commit_file_diff,
+    commit_matches_words, commit_range_file_diff, commits_by_sha, commits_with_sha_prefix,
+    filtered_history, filtered_history_page, get_all_tags, get_changed_files,
+    get_changed_files_in_process, get_commit_range_changed_files, get_commits, get_commits_from,
+    get_commits_in_range, get_commits_with, local_commit_shas, local_only_commits, merge_base,
+    merge_base_changed_files, merge_base_file_diff, most_recent_local_commit,
+    parse_filtered_history, parse_raw_log_with_numstat, parse_recent_authors, recent_authors,
+    remerge_changed_files, remerge_file_diff, resolve_commit, tag_names,
 };
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,

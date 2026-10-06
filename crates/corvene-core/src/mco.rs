@@ -448,6 +448,14 @@ pub enum Banner {
         number: u64,
         html_url: String,
     },
+    /// Corvene (`348-pull-request-review`): "Submitted review of pull
+    /// request **#N**" (approved / changes requested / commented) + View on
+    /// GitHub.
+    ReviewSubmitted {
+        number: u64,
+        event: corvene_github::review::ReviewEvent,
+        html_url: String,
+    },
     /// Corvene (`346-releases`): "Created release **{name}**" (or "Saved
     /// draft release") + View on GitHub.
     ReleaseCreated {
@@ -556,6 +564,7 @@ impl Banner {
             | Banner::BranchDeleted { .. }
             | Banner::BranchesDeleted { .. }
             | Banner::IssueCreated { .. }
+            | Banner::ReviewSubmitted { .. }
             | Banner::ReleaseCreated { .. }
             | Banner::StashDropped { .. } => Some(Duration::from_secs(15)),
             Banner::ConflictsFound { .. }
