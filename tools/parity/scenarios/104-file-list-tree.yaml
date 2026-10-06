@@ -1,0 +1,24 @@
+# The changes list and a commit's files as folder trees
+# (1310-file-list-tree, off in the GitHub Desktop preset; desktop/desktop
+# #20624 and #20529): recorded, not compared (GHD lists files flat).
+name: file-list-tree
+description: Changes and History file lists as folder trees (Corvene only)
+setup: repo
+corvene_flags: 1310-file-list-tree=on
+steps:
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ToggleFileListTree"}
+    wait: 500
+  - snap: {name: tree, corvene_only: true, note: "GHD lists changed files flat (deviations.md, 1310-file-list-tree)"}
+  - ghd: {skip: true}
+    corvene: {click: [125, 242]}
+    wait: 500
+  - snap: {name: folder-selected, corvene_only: true, note: "a folder row selects its files"}
+  - ghd: {skip: true}
+    corvene: {key: left}
+    wait: 400
+  - snap: {name: collapsed, corvene_only: true, note: "← collapses the folder"}
+  - ghd: {skip: true}
+    corvene: {click: [187, 97]}
+    wait: 1200
+  - snap: {name: history-tree, corvene_only: true, note: "a commit's files as a tree"}

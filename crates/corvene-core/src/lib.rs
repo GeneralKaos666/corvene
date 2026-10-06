@@ -35,6 +35,7 @@ pub mod dispatcher;
 pub mod drafts;
 pub mod emoji;
 pub mod extensions;
+pub mod file_tree;
 pub mod filter;
 pub mod flags;
 pub mod fork_checkout;

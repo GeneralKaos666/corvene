@@ -107,6 +107,9 @@
 //!   ("Committing 1,234 of 5,000 files", then "Writing commit to main") over
 //!   a thin bar (`1307-commit-progress`, `corvene_core::commit_progress`;
 //!   GHD says "Committing 5000 files to main" until git is done).
+//! - the list can show the files as a folder tree with folder checkboxes,
+//!   folder selection and ← / → folding (`1310-file-list-tree`,
+//!   `crate::file_tree_rows`; GHD `filter-changes-list.tsx` lists them flat).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
@@ -325,6 +328,11 @@ pub struct ChangesSidebar {
     windows_names_cache: RefCell<Option<(std::sync::Weak<Status>, WindowsNames)>>,
     /// `797-stash-list`: the Stashes section is collapsed.
     stash_list_collapsed: bool,
+    /// `1310-file-list-tree`: the visible files as a tree (rebuilt with them
+    /// or when a folder collapses).
+    tree_cache: RefCell<Option<Rc<TreeData>>>,
+    /// `1310-file-list-tree`: the folder row whose files the user selected.
+    tree_cursor: Option<String>,
 }
 
 /// Included files Windows cannot check out: how many, and the first one
@@ -505,6 +513,28 @@ impl VisibleFiles {
         );
         *self.data.line_totals.borrow_mut() = Some((std::sync::Arc::downgrade(stats), totals));
         totals
+    }
+}
+
+/// `1310-file-list-tree`: the visible files as folders.
+struct TreeData {
+    /// Built from these visible files (held, so the pointer stays theirs).
+    visible: Rc<VisibleData>,
+    /// The collapsed folders' set, by address (held in `_collapsed`).
+    collapsed: Option<usize>,
+    _collapsed: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
+    expand_all: bool,
+    tree: corvene_core::file_tree::FileTree,
+    /// Each row's checkbox: its file's, or `getCheckAllValue` of a folder's.
+    include: Vec<Option<bool>>,
+}
+
+/// A file's checkbox value.
+fn include_value(file: &WorkingDirectoryFileChange) -> Option<bool> {
+    match file.selection.kind() {
+        DiffSelectionType::All => Some(true),
+        DiffSelectionType::None => Some(false),
+        DiffSelectionType::Partial => None,
     }
 }
 
@@ -870,6 +900,8 @@ impl ChangesSidebar {
             selected_cache: RefCell::new(None),
             windows_names_cache: RefCell::new(None),
             stash_list_collapsed: false,
+            tree_cache: RefCell::new(None),
+            tree_cursor: None,
         }
     }
 
@@ -1946,6 +1978,29 @@ impl ChangesSidebar {
         if files.is_empty() {
             return;
         }
+        // `1310-file-list-tree`: through the tree's rows, folders included
+        if let Some(t) = self.tree(cx) {
+            let count = t.tree.rows.len();
+            let stop = self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::LISTS_STOP_AT_ENDS);
+            let row = match self.current_tree_row(&t, cx) {
+                // Home / End
+                _ if delta.unsigned_abs() >= count.max(2) => {
+                    if delta < 0 {
+                        0
+                    } else {
+                        count - 1
+                    }
+                }
+                Some(row) => crate::filter_list::list_step(row, delta, count, stop),
+                None => 0,
+            };
+            self.select_tree_row(row, cx);
+            return;
+        }
         let (id, current) = {
             let s = self.state.read(cx);
             let Some(id) = s.selected else { return };
@@ -2076,7 +2131,20 @@ impl ChangesSidebar {
 
     /// ⇧↑ / ⇧↓: extend the range selection (GHD `List.addSelection`).
     fn extend_relative(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let order = self.visible(cx).paths();
+        // `1310-file-list-tree`: the file rows of the expanded tree
+        let order = match self.tree(cx) {
+            Some(t) => {
+                let visible = self.visible(cx);
+                t.tree
+                    .visible_items()
+                    .into_iter()
+                    .filter_map(|i| visible.get(i))
+                    .map(|f| f.path.clone())
+                    .collect()
+            }
+            None => self.visible(cx).paths(),
+        };
+        self.tree_cursor = None;
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
@@ -2086,7 +2154,13 @@ impl ChangesSidebar {
             .read(cx)
             .selected_state()
             .and_then(|rs| rs.selected_files.last().cloned());
-        if let Some(index) = end.and_then(|p| order.iter().position(|o| *o == p)) {
+        let index = match self.tree(cx) {
+            Some(t) => end
+                .and_then(|p| self.visible(cx).position(&p))
+                .and_then(|i| t.tree.row_of_item(i)),
+            None => end.and_then(|p| order.iter().position(|o| *o == p)),
+        };
+        if let Some(index) = index {
             self.list_scroll
                 .scroll_to_item(index, ScrollStrategy::Nearest);
         }
@@ -2454,6 +2528,182 @@ impl ChangesSidebar {
         Rc::new(VisibleFiles { status, data })
     }
 
+    /// `1310-file-list-tree`: the visible files as a tree, while file lists
+    /// show trees.
+    fn tree(&self, cx: &App) -> Option<Rc<TreeData>> {
+        use corvene_core::file_tree::{FileTree, TreeRow};
+        if !crate::file_tree_rows::tree_mode(cx) {
+            return None;
+        }
+        let visible = self.visible(cx);
+        let s = self.state.read(cx);
+        let collapsed = s
+            .selected
+            .and_then(|id| s.collapsed_folders.get(&id))
+            .cloned();
+        // a filter shows every match, collapsed or not
+        let expand_all = !self.filter.read(cx).value().trim().is_empty();
+        if let Some(hit) = self.tree_cache.borrow().as_ref().filter(|t| {
+            Rc::ptr_eq(&t.visible, &visible.data)
+                && t.collapsed
+                    == collapsed
+                        .as_ref()
+                        .map(|c| std::sync::Arc::as_ptr(c) as usize)
+                && t.expand_all == expand_all
+        }) {
+            return Some(hit.clone());
+        }
+        let paths: Vec<&str> = visible.iter().map(|f| f.path.as_str()).collect();
+        let tree = FileTree::build(&paths, |folder| {
+            !expand_all && collapsed.as_ref().is_some_and(|c| c.contains(folder))
+        });
+        let include = tree
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(row, r)| match r {
+                TreeRow::File { item, .. } => visible.get(*item).and_then(include_value),
+                TreeRow::Folder { .. } => crate::file_tree_rows::check_value(
+                    tree.row_items(row)
+                        .iter()
+                        .filter_map(|&i| visible.get(i))
+                        .map(include_value),
+                ),
+            })
+            .collect();
+        let data = Rc::new(TreeData {
+            visible: visible.data.clone(),
+            collapsed: collapsed
+                .as_ref()
+                .map(|c| std::sync::Arc::as_ptr(c) as usize),
+            _collapsed: collapsed,
+            expand_all,
+            tree,
+            include,
+        });
+        *self.tree_cache.borrow_mut() = Some(data.clone());
+        Some(data)
+    }
+
+    /// `1310-file-list-tree`: the order a ⇧-click range follows (the tree's
+    /// while it shows, collapsed folders' files included).
+    fn selection_order(&self, cx: &App) -> Vec<String> {
+        let visible = self.visible(cx);
+        match self.tree(cx) {
+            Some(t) => t
+                .tree
+                .order
+                .iter()
+                .filter_map(|&i| visible.get(i))
+                .map(|f| f.path.clone())
+                .collect(),
+            None => visible.paths(),
+        }
+    }
+
+    /// `1310-file-list-tree`: the files of tree row `row` (a folder's all).
+    fn tree_row_files(&self, t: &TreeData, row: usize, cx: &App) -> Vec<String> {
+        let visible = self.visible(cx);
+        t.tree
+            .row_items(row)
+            .iter()
+            .filter_map(|&i| visible.get(i))
+            .map(|f| f.path.clone())
+            .collect()
+    }
+
+    /// `1310-file-list-tree`: the row of folder `folder`.
+    fn folder_row_index(t: &TreeData, folder: &str) -> Option<usize> {
+        t.tree.rows.iter().position(|r| {
+            matches!(r, corvene_core::file_tree::TreeRow::Folder { path, .. } if path == folder)
+        })
+    }
+
+    /// `1310-file-list-tree`: the files of the folder row for `folder`.
+    fn folder_files(&self, folder: &str, cx: &App) -> Vec<String> {
+        self.tree(cx)
+            .and_then(|t| {
+                Self::folder_row_index(&t, folder).map(|row| self.tree_row_files(&t, row, cx))
+            })
+            .unwrap_or_default()
+    }
+
+    /// `1310-file-list-tree`: select tree row `row` (a folder selects its
+    /// files) and keep it in view.
+    fn select_tree_row(&mut self, row: usize, cx: &mut Context<Self>) {
+        use corvene_core::file_tree::TreeRow;
+        let Some(t) = self.tree(cx) else { return };
+        let Some(id) = self.state.read(cx).selected else {
+            return;
+        };
+        match t.tree.rows.get(row) {
+            Some(TreeRow::File { item, .. }) => {
+                let Some(path) = self.visible(cx).get(*item).map(|f| f.path.clone()) else {
+                    return;
+                };
+                self.tree_cursor = None;
+                Dispatcher::select_file(id, path, cx);
+            }
+            Some(TreeRow::Folder { path, .. }) => {
+                let files = self.tree_row_files(&t, row, cx);
+                self.tree_cursor = Some(path.clone());
+                Dispatcher::select_all_files(id, files, cx);
+                cx.notify();
+            }
+            None => return,
+        }
+        self.list_scroll
+            .scroll_to_item(row, ScrollStrategy::Nearest);
+    }
+
+    /// `1310-file-list-tree`: the tree row the keyboard moves from.
+    fn current_tree_row(&self, t: &TreeData, cx: &App) -> Option<usize> {
+        let s = self.state.read(cx);
+        let rs = s.selected_state()?;
+        let last = rs.selected_files.last().or(rs.selected_file.as_ref());
+        let item = last.and_then(|p| self.visible(cx).position(p));
+        crate::file_tree_rows::current_row(
+            &t.tree,
+            self.tree_cursor.as_deref(),
+            rs.selected_files.len(),
+            item,
+        )
+    }
+
+    /// `1310-file-list-tree`: collapse or expand `folders`.
+    fn set_collapsed(&mut self, folders: Vec<String>, collapsed: bool, cx: &mut Context<Self>) {
+        if let Some(id) = self.state.read(cx).selected {
+            Dispatcher::set_folders_collapsed(id, folders, collapsed, cx);
+        }
+    }
+
+    /// `1310-file-list-tree`: ← collapses the folder or goes to its parent.
+    fn tree_left(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::file_tree_rows::LeftKey;
+        let Some(t) = self.tree(cx) else { return };
+        let Some(row) = self.current_tree_row(&t, cx) else {
+            return;
+        };
+        match crate::file_tree_rows::left_key(&t.tree, row) {
+            LeftKey::Collapse(folder) => self.set_collapsed(vec![folder], true, cx),
+            LeftKey::Select(parent) => self.select_tree_row(parent, cx),
+            LeftKey::Nothing => crate::file_tree_rows::focus_pane(false, window, cx),
+        }
+    }
+
+    /// `1310-file-list-tree`: → expands the folder or goes into it; on a file
+    /// it does what → does in the flat list.
+    fn tree_right(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::file_tree_rows::RightKey;
+        let Some(t) = self.tree(cx) else { return };
+        let row = self.current_tree_row(&t, cx);
+        match row.and_then(|row| crate::file_tree_rows::right_key(&t.tree, row)) {
+            Some(RightKey::Expand(folder)) => self.set_collapsed(vec![folder], false, cx),
+            Some(RightKey::Select(row)) => self.select_tree_row(row, cx),
+            None => crate::file_tree_rows::focus_pane(true, window, cx),
+        }
+    }
+
     /// The selection for the rows (cached while it does not change).
     fn selected_paths(&self, cx: &App) -> Rc<SelectedPaths> {
         let s = self.state.read(cx);
@@ -2780,6 +3030,148 @@ impl ChangesSidebar {
     ) {
         // GHD's Electron `Menu.popup`: an NSMenu on macOS, a views menu on Linux
         crate::native_menu::show_context_menu(items, position, window, cx);
+    }
+
+    /// `1310-file-list-tree`: select the folder row for `folder`.
+    fn select_folder(&mut self, folder: &str, cx: &mut Context<Self>) {
+        if let Some(row) = self
+            .tree(cx)
+            .and_then(|t| Self::folder_row_index(&t, folder))
+        {
+            self.select_tree_row(row, cx);
+        }
+    }
+
+    /// `1310-file-list-tree`: a folder row's menu; its items act on every
+    /// file inside.
+    fn open_folder_menu(
+        &mut self,
+        folder: String,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (id, confirm, repo_path, stash_files, rebase_conflict, on_disk) = {
+            let s = self.state.read(cx);
+            let Some(id) = s.selected else { return };
+            let Some(rs) = s.selected_state() else { return };
+            if rs.committing {
+                return;
+            }
+            let Some(repo) = s.repository(id) else { return };
+            let stash_files = s
+                .flags
+                .bool(corvene_core::flags::ids::STASH_SELECTED_FILES)
+                .then(|| {
+                    (
+                        rs.desktop_stash().is_some(),
+                        rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
+                            && rs.conflict_state.is_none()
+                            && !rs.status.as_deref().is_some_and(|st| {
+                                st.files.iter().any(|f| f.status.is_conflicted())
+                            }),
+                    )
+                });
+            // a folder whose files are all deleted is gone from disk
+            let prefix = format!("{folder}/");
+            let on_disk = rs.status.as_deref().is_some_and(|st| {
+                st.files.iter().any(|f| {
+                    f.path.starts_with(&prefix) && f.status.kind != FileStatusKind::Deleted
+                })
+            });
+            (
+                id,
+                s.settings.confirm_discard_changes,
+                repo.path.clone(),
+                stash_files,
+                rs.conflict_state.is_some(),
+                on_disk,
+            )
+        };
+        let paths = self.folder_files(&folder, cx);
+        if paths.is_empty() {
+            return;
+        }
+        let ellipsis = if confirm { "…" } else { "" };
+        let mut items = Vec::new();
+        let discard = paths.clone();
+        items.push(
+            MenuItem::new(
+                format!(
+                    "{}{ellipsis}",
+                    mac_or("Discard Changes in Folder", "Discard changes in folder")
+                ),
+                move |_, cx| Dispatcher::request_discard_changes(id, discard.clone(), cx),
+            )
+            .enabled(!rebase_conflict),
+        );
+        if let Some((has_stash, can_stash)) = stash_files {
+            let to_stash = paths.clone();
+            items.push(
+                MenuItem::new(
+                    mac_or("Stash Files in Folder", "Stash files in folder"),
+                    move |_, cx| Dispatcher::stash_selected_files(id, to_stash.clone(), cx),
+                )
+                .enabled(can_stash && !has_stash),
+            );
+        }
+        items.push(MenuItem::separator());
+        let pattern = format!("/{folder}");
+        items.push(
+            MenuItem::new(
+                mac_or(
+                    "Ignore Folder (Add to .gitignore)",
+                    "Ignore folder (add to .gitignore)",
+                ),
+                move |_, cx| Dispatcher::ignore_files(id, vec![pattern.clone()], cx),
+            )
+            .enabled(!rebase_conflict),
+        );
+        items.push(MenuItem::separator());
+        let include = paths.clone();
+        items.push(MenuItem::new(
+            mac_or("Include Files in Folder", "Include files in folder"),
+            move |_, cx| Dispatcher::set_files_included(id, include.clone(), true, cx),
+        ));
+        let exclude = paths.clone();
+        items.push(MenuItem::new(
+            mac_or("Exclude Files in Folder", "Exclude files in folder"),
+            move |_, cx| Dispatcher::set_files_included(id, exclude.clone(), false, cx),
+        ));
+        items.push(MenuItem::separator());
+        let full = repo_path.join(&folder);
+        let absolute = full.to_string_lossy().into_owned();
+        items.push(MenuItem::new(
+            mac_or("Copy Folder Path", "Copy folder path"),
+            move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(absolute.clone())),
+        ));
+        let relative = folder.clone();
+        items.push(MenuItem::new(
+            mac_or("Copy Relative Folder Path", "Copy relative folder path"),
+            move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(relative.clone())),
+        ));
+        items.push(
+            MenuItem::new(labels::REVEAL_IN_FILE_MANAGER, move |_, cx| {
+                Dispatcher::show_in_finder(&full, cx)
+            })
+            .enabled(on_disk),
+        );
+        items.push(MenuItem::separator());
+        let all = {
+            let visible = self.visible(cx);
+            let paths: Vec<&str> = visible.iter().map(|f| f.path.as_str()).collect();
+            corvene_core::file_tree::FileTree::folder_paths(&paths)
+        };
+        let expand = all.clone();
+        items.push(MenuItem::new(
+            mac_or("Expand All", "Expand all"),
+            move |_, cx| Dispatcher::set_folders_collapsed(id, expand.clone(), false, cx),
+        ));
+        items.push(MenuItem::new(
+            mac_or("Collapse All", "Collapse all"),
+            move |_, cx| Dispatcher::set_folders_collapsed(id, all.clone(), true, cx),
+        ));
+        self.open_menu(items, position, window, cx);
     }
 
     /// GHD `onItemContextMenu`: the default menu, or the reduced one while a
@@ -3759,7 +4151,11 @@ impl ChangesSidebar {
                     .children(
                         self.busy_indicator(cx)
                             .map(|spinner| div().ml_auto().flex_none().child(spinner)),
-                    ),
+                    )
+                    // `1310-file-list-tree`
+                    .when(crate::file_tree_rows::tree_available(cx), |d| {
+                        d.child(crate::file_tree_rows::view_toggle_button(cx))
+                    }),
             )
     }
 
@@ -3838,6 +4234,11 @@ impl ChangesSidebar {
         // Shift+F10 / Menu: the row the arrows move from
         let anchor_path = selected.list.last().cloned();
         let menu_anchor = self.menu_anchor.clone();
+        // `1310-file-list-tree`
+        let tree = self.tree(cx);
+        let tree_anchor = tree.as_ref().and_then(|t| self.current_tree_row(t, cx));
+        let tree_cursor = self.tree_cursor.clone();
+        let rows = tree.as_ref().map_or(files.len(), |t| t.tree.rows.len());
         let query: SharedString = self.filter.read(cx).value().trim().to_string().into();
         let weak = cx.weak_entity();
         let list_focus = self.list_focus.clone();
@@ -3864,10 +4265,71 @@ impl ChangesSidebar {
                 )
             })
             .child(
-                uniform_list("changes-list-rows", files.len(), move |range, _, cx| {
+                uniform_list("changes-list-rows", rows, move |range, _, cx| {
                     let query = query.clone();
                     range
                         .filter_map(|ix| {
+                            if let Some(t) = &tree {
+                                use corvene_core::file_tree::TreeRow;
+                                let anchor = (tree_anchor == Some(ix)).then_some(&menu_anchor);
+                                return match t.tree.rows.get(ix)? {
+                                    TreeRow::File { item, depth } => {
+                                        let file = files.get(*item)?;
+                                        Some(file_row(
+                                            file,
+                                            line_stats
+                                                .as_ref()
+                                                .and_then(|m| m.get(&file.path))
+                                                .copied(),
+                                            selected.contains(&file.path),
+                                            list_focused,
+                                            &query,
+                                            repo_id,
+                                            weak.clone(),
+                                            list_focus.clone(),
+                                            anchor,
+                                            Some(*depth),
+                                            cx,
+                                        ))
+                                    }
+                                    TreeRow::Folder {
+                                        path,
+                                        label,
+                                        depth,
+                                        items,
+                                        expanded,
+                                    } => {
+                                        let first = t.tree.order.get(items.start);
+                                        let is_selected = tree_cursor.as_deref()
+                                            == Some(path.as_str())
+                                            && selected.list.len() == items.len()
+                                            && first
+                                                .and_then(|&i| files.get(i))
+                                                .is_some_and(|f| selected.contains(&f.path));
+                                        Some(folder_row(
+                                            FolderRow {
+                                                path,
+                                                label,
+                                                depth: *depth,
+                                                count: items.len(),
+                                                expanded: *expanded,
+                                                include: t
+                                                    .include
+                                                    .get(ix)
+                                                    .copied()
+                                                    .unwrap_or(Some(false)),
+                                            },
+                                            is_selected,
+                                            list_focused,
+                                            repo_id,
+                                            weak.clone(),
+                                            list_focus.clone(),
+                                            anchor,
+                                            cx,
+                                        ))
+                                    }
+                                };
+                            }
                             let file = files.get(ix)?;
                             let is_selected = selected.contains(&file.path);
                             Some(file_row(
@@ -3880,6 +4342,7 @@ impl ChangesSidebar {
                                 weak.clone(),
                                 list_focus.clone(),
                                 (anchor_path.as_ref() == Some(&file.path)).then_some(&menu_anchor),
+                                None,
                                 cx,
                             ))
                         })
@@ -5974,7 +6437,22 @@ impl Render for ChangesSidebar {
                 div()
                     .id("changes-list-container")
                     .track_focus(&self.list_focus)
-                    .key_context("ChangesList")
+                    // `1310-file-list-tree`: ← / → fold the tree's folders
+                    .key_context(if crate::file_tree_rows::tree_mode(cx) {
+                        "ChangesList FileTree"
+                    } else {
+                        "ChangesList"
+                    })
+                    .on_action(cx.listener(
+                        |this, _: &crate::actions::CollapseFolder, window, cx| {
+                            this.tree_left(window, cx)
+                        },
+                    ))
+                    .on_action(
+                        cx.listener(|this, _: &crate::actions::ExpandFolder, window, cx| {
+                            this.tree_right(window, cx)
+                        }),
+                    )
                     .on_action(self.menu_anchor.action_handler())
                     .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                         if this.type_into_summary(ev, window, cx) {
@@ -6149,6 +6627,8 @@ fn file_row(
     weak: WeakEntity<ChangesSidebar>,
     list_focus: FocusHandle,
     menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
+    // `1310-file-list-tree`: the row's depth in the tree
+    depth: Option<usize>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -6163,12 +6643,9 @@ fn file_row(
     };
     let path_for_select = file.path.clone();
     let path_for_toggle = file.path.clone();
-    let include_value = match file.selection.kind() {
-        DiffSelectionType::All => Some(true),
-        DiffSelectionType::None => Some(false),
-        DiffSelectionType::Partial => None,
-    };
+    let include_value = include_value(file);
     let weak_for_order = weak.clone();
+    let weak_for_left = weak.clone();
     let weak_for_open = weak.clone();
     let file_for_menu = file.clone();
     let checkbox_focus = list_focus.clone();
@@ -6223,18 +6700,24 @@ fn file_row(
         .gap(SPACING_HALF())
         .px(SPACING())
         // `.list-item { border-bottom: 1px solid var(--box-border-color) }`
-        .border_b_1()
-        .border_color(t.box_border)
+        // (`1310-file-list-tree`: none in the tree)
+        .when(depth.is_none(), |d| {
+            d.border_b_1().border_color(t.box_border)
+        })
         .cursor_pointer()
         .on_mouse_down(MouseButton::Right, {
             // GHD `List.onRowMouseDown`: a right-click selects the row unless
             // it is already part of the selection, then the menu opens
             let list_focus = list_focus.clone();
             let path = file.path.clone();
+            let weak_for_cursor = weak.clone();
             move |ev: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 window.focus(&list_focus, cx);
                 if !is_selected && let Some(id) = repo_id {
+                    weak_for_cursor
+                        .update(cx, |this, _| this.tree_cursor = None)
+                        .ok();
                     Dispatcher::select_file(id, path.clone(), cx);
                 }
                 let position = ev.position;
@@ -6249,12 +6732,14 @@ fn file_row(
         .on_mouse_down(MouseButton::Left, {
             let list_focus = list_focus.clone();
             let path = file.path.clone();
+            let weak = weak_for_left;
             move |ev: &MouseDownEvent, window, cx| {
                 let m = ev.modifiers;
                 if m.secondary() || m.shift || m.control {
                     return;
                 }
                 window.focus(&list_focus, cx);
+                weak.update(cx, |this, _| this.tree_cursor = None).ok();
                 if !is_selected && let Some(id) = repo_id {
                     Dispatcher::select_file(id, path.clone(), cx);
                 }
@@ -6283,7 +6768,7 @@ fn file_row(
                 } else if modifiers.shift {
                     let order = weak_for_order
                         .upgrade()
-                        .map(|this| this.read(cx).visible(cx).paths())
+                        .map(|this| this.read(cx).selection_order(cx))
                         .unwrap_or_default();
                     Dispatcher::extend_file_selection(id, path_for_select.clone(), order, cx)
                 } else {
@@ -6317,7 +6802,26 @@ fn file_row(
                 }),
             ),
         )
-        .child(if names_only {
+        .child(if let Some(depth) = depth {
+            // `1310-file-list-tree`: the name under its folder
+            let (name_color, arrow_color) = match (is_selected, list_focused) {
+                (true, true) => (t.box_selected_active_text, t.box_selected_active_text),
+                (true, false) => (t.box_selected_text, t.box_selected_text),
+                _ => (t.text_secondary, t.text),
+            };
+            crate::path_label::path_label_element(
+                crate::file_tree_rows::tree_label(
+                    &file.path,
+                    file.status.kind,
+                    file.old_path.as_deref(),
+                ),
+                name_hits.clone(),
+                name_color,
+                arrow_color,
+            )
+            .ml(crate::file_tree_rows::file_label_margin(depth))
+            .text_size(FONT_SIZE())
+        } else if names_only {
             div()
                 .flex_1()
                 .min_w_0()
@@ -6373,6 +6877,195 @@ fn file_row(
                     } else {
                         t.text_secondary
                     },
+                )
+                .ml(SPACING_HALF()),
+            )
+        })
+        .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
+        .into_any_element()
+}
+
+/// `1310-file-list-tree`: what a folder row shows.
+struct FolderRow<'a> {
+    path: &'a str,
+    label: &'a str,
+    depth: usize,
+    count: usize,
+    expanded: bool,
+    include: Option<bool>,
+}
+
+/// `1310-file-list-tree`: one folder row of the changes tree.
+#[allow(clippy::too_many_arguments)]
+fn folder_row(
+    folder: FolderRow<'_>,
+    is_selected: bool,
+    list_focused: bool,
+    repo_id: Option<u64>,
+    weak: WeakEntity<ChangesSidebar>,
+    list_focus: FocusHandle,
+    menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
+    cx: &App,
+) -> AnyElement {
+    let t = cx.ghd();
+    let hover_bg = t.list_item_hover_background;
+    let path = folder.path.to_string();
+    let text_color = match (is_selected, list_focused) {
+        (true, true) => Some(t.box_selected_active_text),
+        (true, false) => Some(t.box_selected_text),
+        _ => None,
+    };
+    let toggle = {
+        let weak = weak.clone();
+        let path = path.clone();
+        let expanded = folder.expanded;
+        move |_: &mut Window, cx: &mut App| {
+            weak.update(cx, |this, cx| {
+                this.set_collapsed(vec![path.clone()], expanded, cx)
+            })
+            .ok();
+        }
+    };
+    let toggle_on_double = toggle.clone();
+    div()
+        .id(SharedString::from(format!("folder-{path}")))
+        .group("changes-row")
+        .a11y_row(
+            format!(
+                "{path}, folder, {} {}{}",
+                folder.count,
+                if folder.count == 1 { "file" } else { "files" },
+                match folder.include {
+                    Some(true) => "",
+                    Some(false) => ", not included",
+                    None => ", partially included",
+                }
+            ),
+            is_selected,
+        )
+        .w_full()
+        .h(crate::diff_view::diff_line_height_setting(cx).map_or_else(ROW_HEIGHT, |h| zpx(h + 9.)))
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(SPACING_HALF())
+        .px(SPACING())
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Right, {
+            let list_focus = list_focus.clone();
+            let weak = weak.clone();
+            let path = path.clone();
+            move |ev: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                window.focus(&list_focus, cx);
+                let position = ev.position;
+                weak.update(cx, |this, cx| {
+                    if !is_selected {
+                        this.select_folder(&path, cx);
+                    }
+                    this.open_folder_menu(path.clone(), position, window, cx)
+                })
+                .ok();
+            }
+        })
+        .on_mouse_down(MouseButton::Left, {
+            let list_focus = list_focus.clone();
+            let weak = weak.clone();
+            let path = path.clone();
+            move |ev: &MouseDownEvent, window, cx| {
+                let m = ev.modifiers;
+                if m.secondary() || m.shift || m.control {
+                    return;
+                }
+                window.focus(&list_focus, cx);
+                if !is_selected {
+                    weak.update(cx, |this, cx| this.select_folder(&path, cx))
+                        .ok();
+                }
+            }
+        })
+        .when(is_selected, |d| {
+            if list_focused {
+                d.bg(t.box_selected_active_background)
+                    .text_color(t.box_selected_active_text)
+            } else {
+                d.bg(t.box_selected_background)
+                    .text_color(t.box_selected_text)
+            }
+        })
+        .when(
+            !(is_selected && (list_focused || crate::widgets::selection_keeps_colour_on_hover(cx))),
+            move |d| d.hover(move |s| s.bg(hover_bg)),
+        )
+        .when_some(repo_id, {
+            let weak = weak.clone();
+            let path = path.clone();
+            let list_focus = list_focus.clone();
+            move |d, id| {
+                d.on_click(move |ev: &ClickEvent, window, cx| {
+                    window.focus(&list_focus, cx);
+                    let Some(this) = weak.upgrade() else { return };
+                    let files = this.read(cx).folder_files(&path, cx);
+                    let modifiers = ev.modifiers();
+                    if modifiers.secondary() {
+                        this.update(cx, |this, _| this.tree_cursor = None);
+                        Dispatcher::toggle_files_selection(id, files, cx)
+                    } else if modifiers.shift {
+                        let order = this.read(cx).selection_order(cx);
+                        if let Some(last) = files.last() {
+                            Dispatcher::extend_file_selection(id, last.clone(), order, cx)
+                        }
+                    } else if ev.click_count() == 2 {
+                        toggle_on_double(window, cx);
+                    }
+                })
+            }
+        })
+        .child(
+            div().w(zpx(15.)).flex_none().child(
+                checkbox_tristate(
+                    SharedString::from(format!("include-folder-{path}")),
+                    folder.include,
+                    false,
+                    cx,
+                )
+                .when_some(repo_id, {
+                    let weak = weak.clone();
+                    let path = path.clone();
+                    let include = folder.include != Some(true);
+                    let list_focus = list_focus.clone();
+                    move |d, id| {
+                        d.on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            window.focus(&list_focus, cx);
+                            let files = weak
+                                .upgrade()
+                                .map(|this| this.read(cx).folder_files(&path, cx))
+                                .unwrap_or_default();
+                            Dispatcher::set_files_included(id, files, include, cx)
+                        })
+                    }
+                }),
+            ),
+        )
+        .children(crate::file_tree_rows::folder_cells(
+            folder.label,
+            folder.depth,
+            folder.count,
+            folder.expanded,
+            text_color,
+            toggle,
+            cx,
+        ))
+        // `621-context-menu-buttons`
+        .when(crate::context_menu::row_menu_buttons(cx), |d| {
+            d.child(
+                crate::context_menu::row_menu_button(
+                    "row-menu",
+                    "changes-row",
+                    is_selected,
+                    text_color.unwrap_or(t.text_secondary),
                 )
                 .ml(SPACING_HALF()),
             )

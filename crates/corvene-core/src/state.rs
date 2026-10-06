@@ -1952,6 +1952,9 @@ pub struct AppState {
     /// saved, and the repositories whose first status already got them.
     pub excluded_files: HashMap<u64, Vec<String>>,
     pub excluded_files_restored: std::collections::HashSet<u64>,
+    /// `1310-file-list-tree`: each repository's collapsed folders in the
+    /// changes tree, as saved.
+    pub collapsed_folders: HashMap<u64, std::sync::Arc<std::collections::BTreeSet<String>>>,
     /// Corvene (flags `342-gitlab`, `343-gitea`, `344-bitbucket`): GitLab,
     /// Gitea / Forgejo and Bitbucket accounts and data (`hosts.rs`).
     pub hosts: crate::hosts::HostsState,

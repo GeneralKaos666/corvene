@@ -8,11 +8,13 @@ action takes until the state it asks for is there (`bench` command in
 
     cargo build --profile profiling -p corvene --features snapshots
     python3 tools/perf/fixture.py big target/perf/big
-    python3 tools/perf/bench.py [--binary target/profiling/corvene] [--repo target/perf/big] [--runs 5] [case…]
+    python3 tools/perf/bench.py [--binary target/profiling/corvene] [--repo target/perf/big] [--runs 5] [--tree] [case…]
 
 Prints a table (median / p90 / max of total ms per case) and writes
 `target/perf/latest.json`. `CORVENE_FLAGS` passes through (compare presets
-or experimental flags: `CORVENE_FLAGS=preset=github-desktop`).
+or experimental flags: `CORVENE_FLAGS=preset=github-desktop`). `--tree`
+shows file lists as folder trees first (flag `1310-file-list-tree`), and the
+changes cases click and step through the tree's rows.
 """
 
 from __future__ import annotations
@@ -50,9 +52,73 @@ def row_y(index: int, top: int = LIST_TOP) -> float:
     return top + index * ROW + ROW / 2
 
 
+def tree_targets(paths: list[str]) -> list[tuple[str, frozenset | None]]:
+    """The changes tree's rows (`corvene_core::file_tree`, nothing collapsed)
+    as (first file, the folder's files or None for a file row): selecting a
+    folder row selects its files and diffs the first, unless the diffed
+    file is one of them."""
+    def key(path: str):
+        parts = path.rstrip("/").split("/")
+        return [(i + 1 == len(parts), p.lower(), p) for i, p in enumerate(parts)]
+
+    entries = sorted(((p.rstrip("/").split("/"), p) for p in paths), key=lambda e: key(e[1]))
+    rows: list = []
+
+    def emit(group, at):
+        i = 0
+        while i < len(group):
+            parts, path = group[i]
+            if len(parts) <= at + 1:
+                rows.append((path, None))
+                i += 1
+                continue
+            j = i
+            while j < len(group) and len(group[j][0]) > at + 1 and group[j][0][at] == parts[at]:
+                j += 1
+            sub = group[i:j]
+            end = at + 1
+            while all(len(p) > end + 1 and p[end] == sub[0][0][end] for p, _ in sub):
+                end += 1
+            rows.append(None)
+            folder = len(rows) - 1
+            emit(sub, end)
+            first = next(r for r, members in rows[folder + 1:] if members is None)
+            rows[folder] = (first, frozenset(p for _, p in sub))
+            i = j
+
+    emit(entries, 0)
+    return rows
+
+
+class Targets:
+    """Which file's diff selecting a row shows: the flat list's file, or
+    in the tree a folder's first file unless the diffed one is inside."""
+
+    def __init__(self, flat: list[str] | None, tree: list[tuple[str, frozenset | None]] | None):
+        self.flat, self.tree, self.shown = flat, tree, None
+
+    def __len__(self):
+        return len(self.flat if self.flat is not None else self.tree)
+
+    def select(self, i: int) -> str:
+        if self.flat is not None:
+            self.shown = self.flat[i]
+        else:
+            first, members = self.tree[i]
+            if members is None or self.shown not in members:
+                self.shown = first
+        return self.shown
+
+    def row_of(self, path: str) -> int:
+        if self.flat is not None:
+            return self.flat.index(path)
+        return next(i for i, (p, m) in enumerate(self.tree) if m is None and p == path)
+
+
 class Bench:
-    def __init__(self, binary: Path, repo: Path, runs: int, extra_env: dict):
+    def __init__(self, binary: Path, repo: Path, runs: int, extra_env: dict, tree: bool = False):
         self.binary, self.repo, self.runs, self.extra_env = binary, repo, runs, extra_env
+        self.tree = tree
         self.results: dict[str, list[dict]] = {}
         self.data = Path(tempfile.mkdtemp(prefix="corvene-perf-"))
         self.cv: Corvene | None = None
@@ -96,6 +162,15 @@ class Bench:
         paths = [e[3:] for e in out.split("\0") if e]
         return sorted(paths, key=str.lower)
 
+    def targets(self) -> Targets:
+        paths = self.status_files()
+        if not self.tree:
+            return Targets(paths, None)
+        targets = Targets(None, tree_targets(paths))
+        # a fresh status selects the first file in path order
+        targets.shown = paths[0] if paths else None
+        return targets
+
     def commits(self, n: int) -> list[str]:
         out = subprocess.run(["git", "-C", str(self.repo), "log", f"-{n}", "--format=%H"],
                              capture_output=True, check=True, text=True).stdout
@@ -111,9 +186,12 @@ class Bench:
         reply = self.bench([], f"repo:{self.repo.name}", 60_000)
         reply["total_ms"] = (time.perf_counter() - started) * 1000
         self.record("first-open (spawn → repo ready)", reply)
+        if self.tree:
+            self.record("show as tree (menu)",
+                        self.bench([{"cmd": "action", "name": "corvene::ToggleFileListTree"}], "frame"))
 
     def run_cases(self, cases: set[str]):
-        files = self.status_files()
+        files = self.targets()
         want = lambda c: not cases or c in cases  # noqa: E731
         for _ in range(self.runs):
             if want("refresh"):
@@ -121,16 +199,16 @@ class Bench:
             if want("select-file"):
                 self.bench([self.click(*TAB_CHANGES)], "idle")
                 for i in (3, 0, 5):
-                    self.record("select file (click)", self.bench([self.click(SIDEBAR_X, row_y(i))], f"diff:{files[i]}"))
+                    self.record("select file (click)", self.bench([self.click(SIDEBAR_X, row_y(i))], f"diff:{files.select(i)}"))
             if want("next-file"):
-                self.bench([self.click(SIDEBAR_X, row_y(0))], f"diff:{files[0]}")
+                self.bench([self.click(SIDEBAR_X, row_y(0))], f"diff:{files.select(0)}")
                 for i in range(1, 6):
-                    self.record("next file (↓)", self.bench([self.key("down")], f"diff:{files[i]}"))
+                    self.record("next file (↓)", self.bench([self.key("down")], f"diff:{files.select(i)}"))
             if want("big-diff"):
-                i = files.index("src/big.rs") if "src/big.rs" in files else 0
+                i = files.row_of("src/big.rs") if "src/big.rs" in self.status_files() else 0
                 j = 1 if i == 0 else 0
-                self.bench([self.click(SIDEBAR_X, row_y(j))], f"diff:{files[j]}")
-                self.record("open 5k-line diff", self.bench([self.click(SIDEBAR_X, row_y(i))], f"diff:{files[i]}"))
+                self.bench([self.click(SIDEBAR_X, row_y(j))], f"diff:{files.select(j)}")
+                self.record("open 5k-line diff", self.bench([self.click(SIDEBAR_X, row_y(i))], f"diff:{files.select(i)}"))
             if want("scroll-diff"):
                 r = self.cv.cmd("scroll-frames", x=DIFF_POINT[0], y=DIFF_POINT[1], dy=120, n=30)
                 self.record("scroll diff (frame)", {"total_ms": r["max_ms"], **r})
@@ -151,6 +229,7 @@ class Bench:
             if want("toggle"):
                 self.record("toggle include (click)", self.bench([self.click(16, row_y(2))], "frame"))
                 self.bench([self.click(16, row_y(2))], "frame")
+                files.select(2)  # the press selects the row too
             if want("history"):
                 self.bench([self.key("cmd-1")], "idle")
                 self.record("open History (⌘2)", self.bench([self.key("cmd-2")], "commits:1"))
@@ -263,11 +342,12 @@ def main():
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--out", type=Path, default=ROOT / "target" / "perf" / "latest.json")
     ap.add_argument("--keep", action="store_true", help="leave the app running")
+    ap.add_argument("--tree", action="store_true", help="file lists as folder trees")
     ap.add_argument("cases", nargs="*")
     args = ap.parse_args()
     # the default preset unless asked (the parity driver pins github-desktop)
     extra = {"CORVENE_FLAGS": os.environ.get("CORVENE_FLAGS", "")}
-    b = Bench(args.binary.resolve(), args.repo.resolve(), args.runs, extra)
+    b = Bench(args.binary.resolve(), args.repo.resolve(), args.runs, extra, args.tree)
     try:
         b.setup()
         b.run_cases(set(args.cases))

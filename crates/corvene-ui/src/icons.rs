@@ -115,6 +115,9 @@ pub enum Octicon {
     Workflow,
     Clock,
     Stopwatch,
+    /// `1310-file-list-tree` folder rows.
+    FileDirectoryFill,
+    FileDirectoryOpenFill,
 }
 
 impl Octicon {
@@ -204,6 +207,8 @@ impl Octicon {
             Octicon::Workflow => "octicons/workflow-16.svg",
             Octicon::Clock => "octicons/clock-16.svg",
             Octicon::Stopwatch => "octicons/stopwatch-16.svg",
+            Octicon::FileDirectoryFill => "octicons/file-directory-fill-16.svg",
+            Octicon::FileDirectoryOpenFill => "octicons/file-directory-open-fill-16.svg",
             Octicon::Telescope => "octicons/telescope-16.svg",
             Octicon::Zap => "octicons/zap-16.svg",
             Octicon::Terminal => "octicons/terminal-16.svg",

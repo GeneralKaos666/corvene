@@ -154,6 +154,10 @@ pub struct Settings {
     /// lines wrap, GHD's only behaviour).
     #[serde(default = "default_true")]
     pub diff_wrap_lines: bool,
+    /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
+    /// lists show folders; off: GHD's flat list).
+    #[serde(default)]
+    pub file_list_tree: bool,
     /// Last chosen tab of a modified-image diff (`imageDiffType`).
     pub image_diff_type: corvene_models::ImageDiffType,
     /// GHD `tabSize` for diffs (Appearance › Diff).
@@ -424,6 +428,7 @@ impl Default for Settings {
             pull_request_file_list_width: 250.0,
             show_side_by_side_diff: false,
             diff_wrap_lines: true,
+            file_list_tree: false,
             image_diff_type: corvene_models::ImageDiffType::TwoUp,
             tab_size: TAB_SIZE_DEFAULT,
             syntax_highlighter: SyntaxHighlighter::GitHubDesktop,
@@ -693,6 +698,13 @@ pub trait StoreExt {
         &self,
         excluded: &std::collections::HashMap<u64, Vec<String>>,
     ) -> Result<()>;
+    /// Collapsed folders of the changes tree by repository id (flag
+    /// `1310-file-list-tree`).
+    fn collapsed_folders(&self) -> Result<std::collections::HashMap<u64, Vec<String>>>;
+    fn save_collapsed_folders(
+        &self,
+        folders: &std::collections::HashMap<u64, Vec<String>>,
+    ) -> Result<()>;
 
     fn accounts(&self) -> Result<Vec<Account>>;
     fn save_accounts(&self, accounts: &[Account]) -> Result<()>;
@@ -910,6 +922,17 @@ impl StoreExt for Store {
         excluded: &std::collections::HashMap<u64, Vec<String>>,
     ) -> Result<()> {
         self.set("changes.excluded_files", excluded)
+    }
+
+    fn collapsed_folders(&self) -> Result<std::collections::HashMap<u64, Vec<String>>> {
+        Ok(self.get("changes.collapsed_folders")?.unwrap_or_default())
+    }
+
+    fn save_collapsed_folders(
+        &self,
+        folders: &std::collections::HashMap<u64, Vec<String>>,
+    ) -> Result<()> {
+        self.set("changes.collapsed_folders", folders)
     }
 
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()> {

@@ -5,6 +5,9 @@
 //! Deviation (`797-stash-list`): the viewer shows the entry picked in the
 //! Stashes section under its own title, with Apply (keep the stash) between
 //! Restore and Discard; GHD's always shows the branch's Desktop stash.
+//!
+//! Deviation (`1310-file-list-tree`): the file list can show the stash's
+//! files as a folder tree (GHD `stash-diff-viewer.tsx` lists them flat).
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher};
 use gpui_kit::component::resizable::{
@@ -44,7 +47,12 @@ pub struct StashDiffViewer {
     /// `file_list_focus` held focus at the last render (active selection colours).
     file_list_focused: bool,
     file_scroll: UniformListScrollHandle,
+    /// `1310-file-list-tree`: the file list's folders.
+    tree: crate::file_tree_rows::ListTree,
 }
+
+/// `1310-file-list-tree`: a tree over the stash's paths.
+type StashTree = crate::file_tree_rows::PathTree;
 
 impl StashDiffViewer {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
@@ -69,6 +77,94 @@ impl StashDiffViewer {
             file_list_focus: cx.focus_handle().tab_stop(true),
             file_list_focused: false,
             file_scroll: UniformListScrollHandle::new(),
+            tree: Default::default(),
+        }
+    }
+
+    /// `1310-file-list-tree`: the stash's files as a tree, while file lists
+    /// show trees.
+    fn file_tree(&self, cx: &App) -> Option<StashTree> {
+        if !crate::file_tree_rows::tree_mode(cx) {
+            return None;
+        }
+        let s = self.state.read(cx);
+        let files = s
+            .selected
+            .and_then(|id| s.repo_states.get(&id)?.stash_files.as_deref())
+            .unwrap_or(&[]);
+        Some(self.tree.tree(files.iter().map(|f| f.path.as_str())))
+    }
+
+    /// `1310-file-list-tree`: the tree row the keyboard moves from.
+    fn tree_current_row(&self, t: &StashTree, cx: &App) -> Option<usize> {
+        if let Some(row) = self.tree.cursor_row(&t.2) {
+            return Some(row);
+        }
+        let (_, _, current) = self.file_order(cx)?;
+        t.2.row_of_item(current?)
+    }
+
+    /// `1310-file-list-tree`: select tree row `row`; a folder takes the
+    /// cursor (the list selects one file), its only file the selection.
+    fn select_tree_row(&mut self, t: &StashTree, row: usize, cx: &mut Context<Self>) {
+        use corvene_core::file_tree::TreeRow;
+        let Some(id) = self.state.read(cx).selected else {
+            return;
+        };
+        match t.2.rows.get(row) {
+            Some(TreeRow::File { item, .. }) => {
+                self.tree.clear_cursor();
+                if let Some(path) = t.0.get(*item) {
+                    Dispatcher::select_stash_file(id, path.clone(), cx);
+                }
+            }
+            Some(TreeRow::Folder { path, .. }) => {
+                self.tree.set_cursor(path.clone());
+                if let [only] = crate::file_tree_rows::row_paths(&t.2, row, &t.0).as_slice() {
+                    Dispatcher::select_stash_file(id, only.clone(), cx);
+                }
+            }
+            None => return,
+        }
+        self.file_scroll
+            .scroll_to_item(row, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    fn select_folder(&mut self, folder: &str, cx: &mut Context<Self>) {
+        let Some(t) = self.file_tree(cx) else { return };
+        let row = t.2.rows.iter().position(|r| {
+            matches!(r, corvene_core::file_tree::TreeRow::Folder { path, .. } if path == folder)
+        });
+        if let Some(row) = row {
+            self.select_tree_row(&t, row, cx);
+        }
+    }
+
+    fn set_collapsed(&mut self, folders: Vec<String>, collapsed: bool, cx: &mut Context<Self>) {
+        self.tree.collapse.set(folders, collapsed);
+        cx.notify();
+    }
+
+    /// `1310-file-list-tree`: ← / → on the tree.
+    fn tree_key(&mut self, right: bool, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::file_tree_rows::{LeftKey, RightKey};
+        let Some(t) = self.file_tree(cx) else { return };
+        let Some(row) = self.tree_current_row(&t, cx) else {
+            return;
+        };
+        if right {
+            match crate::file_tree_rows::right_key(&t.2, row) {
+                Some(RightKey::Expand(folder)) => self.set_collapsed(vec![folder], false, cx),
+                Some(RightKey::Select(row)) => self.select_tree_row(&t, row, cx),
+                None => crate::file_tree_rows::focus_pane(true, window, cx),
+            }
+        } else {
+            match crate::file_tree_rows::left_key(&t.2, row) {
+                LeftKey::Collapse(folder) => self.set_collapsed(vec![folder], true, cx),
+                LeftKey::Select(parent) => self.select_tree_row(&t, parent, cx),
+                LeftKey::Nothing => crate::file_tree_rows::focus_pane(false, window, cx),
+            }
         }
     }
 
@@ -94,6 +190,16 @@ impl StashDiffViewer {
     /// ⌥↑ from the diff; single selection, so ⇧↑ / ⇧↓ too): the file
     /// `delta` rows away, wrapping around the ends (GHD `List.moveSelection`), scrolled into view.
     pub fn select_relative(&mut self, delta: isize, cx: &mut Context<Self>) {
+        // `1310-file-list-tree`: through the tree's rows
+        if let Some(t) = self.file_tree(cx) {
+            let current = self.tree_current_row(&t, cx);
+            if let Some(row) =
+                corvene_core::list_selection::step_index(t.2.rows.len(), current, delta)
+            {
+                self.select_tree_row(&t, row, cx);
+            }
+            return;
+        }
         let Some((id, order, current)) = self.file_order(cx) else {
             return;
         };
@@ -104,6 +210,12 @@ impl StashDiffViewer {
 
     /// Home / End, ⌘↑ / ⌘↓: the first or last file.
     fn select_edge(&mut self, last: bool, cx: &mut Context<Self>) {
+        if let Some(t) = self.file_tree(cx) {
+            if let Some(end) = t.2.rows.len().checked_sub(1) {
+                self.select_tree_row(&t, if last { end } else { 0 }, cx);
+            }
+            return;
+        }
         let Some((id, order, _)) = self.file_order(cx) else {
             return;
         };
@@ -114,6 +226,7 @@ impl StashDiffViewer {
     }
 
     fn select_index(&mut self, id: u64, order: &[String], ix: usize, cx: &mut Context<Self>) {
+        self.tree.clear_cursor();
         Dispatcher::select_stash_file(id, order[ix].clone(), cx);
         self.file_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
     }
@@ -125,7 +238,12 @@ impl StashDiffViewer {
         let files: Vec<CommittedFileChange> =
             rs.and_then(|r| r.stash_files.clone()).unwrap_or_default();
         let selected = rs.and_then(|r| r.stash_selected_file.clone());
-        let count = files.len();
+        // `1310-file-list-tree`
+        let tree = self.file_tree(cx);
+        let cursor_row = tree.as_ref().and_then(|t| self.tree.cursor_row(&t.2));
+        let weak = cx.weak_entity();
+        let focus = self.file_list_focus.clone();
+        let count = tree.as_ref().map_or(files.len(), |t| t.2.rows.len());
         let files = std::rc::Rc::new(files);
         let scroll = self.file_scroll.clone();
         let focused = self.file_list_focused;
@@ -149,10 +267,24 @@ impl StashDiffViewer {
                         uniform_list("stash-file-rows", count, move |range, _, cx| {
                             range
                                 .map(|ix| {
+                                    if let Some(t) = &tree {
+                                        return stash_tree_row(
+                                            id,
+                                            t,
+                                            ix,
+                                            &files,
+                                            selected.as_deref(),
+                                            cursor_row,
+                                            focused,
+                                            &focus,
+                                            &weak,
+                                            cx,
+                                        );
+                                    }
                                     let file = &files[ix];
                                     let is_selected =
                                         selected.as_deref() == Some(file.path.as_str());
-                                    stash_file_row(id, file, is_selected, focused, cx)
+                                    stash_file_row(id, file, is_selected, focused, None, None, cx)
                                 })
                                 .collect()
                         })
@@ -165,11 +297,111 @@ impl StashDiffViewer {
     }
 }
 
+/// `1310-file-list-tree`: row `ix` of the stash's file tree.
+#[allow(clippy::too_many_arguments)]
+fn stash_tree_row(
+    id: u64,
+    tree: &StashTree,
+    ix: usize,
+    files: &[CommittedFileChange],
+    selected: Option<&str>,
+    cursor_row: Option<usize>,
+    list_focused: bool,
+    focus: &FocusHandle,
+    view: &WeakEntity<StashDiffViewer>,
+    cx: &App,
+) -> AnyElement {
+    use corvene_core::file_tree::TreeRow;
+    match tree.2.rows.get(ix) {
+        Some(TreeRow::File { item, depth }) => {
+            let Some(file) = files.get(*item) else {
+                return div().into_any_element();
+            };
+            // the folder cursor stands for the selection
+            let is_selected = cursor_row.is_none() && selected == Some(file.path.as_str());
+            stash_file_row(
+                id,
+                file,
+                is_selected,
+                list_focused,
+                Some(*depth),
+                Some(view.clone()),
+                cx,
+            )
+        }
+        Some(row @ TreeRow::Folder { path, expanded, .. }) => {
+            let folder = path.clone();
+            let select = {
+                let view = view.clone();
+                let focus = focus.clone();
+                let folder = folder.clone();
+                move |window: &mut Window, cx: &mut App| {
+                    window.focus(&focus, cx);
+                    view.update(cx, |this, cx| this.select_folder(&folder, cx))
+                        .ok();
+                }
+            };
+            let toggle = {
+                let view = view.clone();
+                let folder = folder.clone();
+                let expanded = *expanded;
+                move |_: &mut Window, cx: &mut App| {
+                    view.update(cx, |this, cx| {
+                        this.set_collapsed(vec![folder.clone()], expanded, cx)
+                    })
+                    .ok();
+                }
+            };
+            let menu = {
+                let view = view.clone();
+                let tree = tree.clone();
+                move |position: Point<Pixels>, window: &mut Window, cx: &mut App| {
+                    let Some(repo) = AppState::global(cx)
+                        .read(cx)
+                        .repository(id)
+                        .map(|r| r.path.clone())
+                    else {
+                        return;
+                    };
+                    let view = view.clone();
+                    let items = crate::file_tree_rows::plain_folder_menu(
+                        &repo,
+                        &folder,
+                        crate::file_tree_rows::all_folders(&tree.0),
+                        move |folders, collapsed, cx| {
+                            view.update(cx, |this, cx| this.set_collapsed(folders, collapsed, cx))
+                                .ok();
+                        },
+                    );
+                    crate::native_menu::show_context_menu(items, position, window, cx);
+                }
+            };
+            crate::file_tree_rows::plain_folder_row(
+                SharedString::from(format!("stash-folder-{path}")),
+                "stash-file-row",
+                row,
+                cursor_row == Some(ix),
+                list_focused,
+                select,
+                toggle,
+                menu,
+                None,
+                cx,
+            )
+        }
+        None => div().into_any_element(),
+    }
+}
+
 fn stash_file_row(
     id: u64,
     file: &CommittedFileChange,
     is_selected: bool,
     list_focused: bool,
+    // `1310-file-list-tree`: the row's depth in the tree, and the view
+    // whose folder cursor a click clears
+    depth: Option<usize>,
+    view: Option<WeakEntity<StashDiffViewer>>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -215,7 +447,12 @@ fn stash_file_row(
             !(is_selected && (list_focused || crate::widgets::selection_keeps_colour_on_hover(cx))),
             move |d| d.hover(move |s| s.bg(hover_bg)),
         )
-        .on_click(move |_, _, cx| Dispatcher::select_stash_file(id, path.clone(), cx))
+        .on_click(move |_, _, cx| {
+            if let Some(view) = &view {
+                view.update(cx, |this, _| this.tree.clear_cursor()).ok();
+            }
+            Dispatcher::select_stash_file(id, path.clone(), cx)
+        })
         .child({
             // GHD `PathLabel`; `.list-item.selected .dirname` inherits the
             // row colour
@@ -224,16 +461,30 @@ fn stash_file_row(
                 (true, false) => (t.box_selected_text, t.box_selected_text),
                 _ => (t.text_secondary, t.text),
             };
-            crate::path_label::path_label_element(
-                crate::path_label::path_label(
-                    &file.path,
-                    file.status.kind,
-                    file.old_path.as_deref(),
+            match depth {
+                // `1310-file-list-tree`: the name under its folder
+                Some(depth) => crate::path_label::path_label_element(
+                    crate::file_tree_rows::tree_label(
+                        &file.path,
+                        file.status.kind,
+                        file.old_path.as_deref(),
+                    ),
+                    Vec::new(),
+                    directory_color,
+                    arrow_color,
+                )
+                .ml(crate::file_tree_rows::file_label_margin(depth)),
+                None => crate::path_label::path_label_element(
+                    crate::path_label::path_label(
+                        &file.path,
+                        file.status.kind,
+                        file.old_path.as_deref(),
+                    ),
+                    Vec::new(),
+                    directory_color,
+                    arrow_color,
                 ),
-                Vec::new(),
-                directory_color,
-                arrow_color,
-            )
+            }
             .text_size(FONT_SIZE())
         })
         .child(octicon(icon, color))
@@ -351,7 +602,22 @@ impl Render for StashDiffViewer {
                                     ),
                                     self.file_list(id, cx),
                                 )
-                                .key_context("StashFileList")
+                                // `1310-file-list-tree`: ← / → fold the tree's folders
+                                .key_context(if crate::file_tree_rows::tree_mode(cx) {
+                                    "StashFileList FileTree"
+                                } else {
+                                    "StashFileList"
+                                })
+                                .on_action(cx.listener(
+                                    |this, _: &crate::actions::CollapseFolder, window, cx| {
+                                        this.tree_key(false, window, cx)
+                                    },
+                                ))
+                                .on_action(cx.listener(
+                                    |this, _: &crate::actions::ExpandFolder, window, cx| {
+                                        this.tree_key(true, window, cx)
+                                    },
+                                ))
                                 .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| {
                                     this.select_relative(1, cx)
                                 }))

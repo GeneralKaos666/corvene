@@ -666,6 +666,14 @@ pub(crate) fn main() {
                 .diff_wrap_lines;
             Dispatcher::set_diff_wrap_lines(!wrap, cx);
         });
+        // Corvene (`1310-file-list-tree`): View › Show Changes as Tree / as List
+        on_menu_action(cx, |_: &ToggleFileListTree, cx| {
+            let tree = corvene_core::AppState::global(cx)
+                .read(cx)
+                .settings
+                .file_list_tree;
+            Dispatcher::set_file_list_tree(!tree, cx);
+        });
         on_menu_action(cx, |_: &OpenSettings, cx| {
             Dispatcher::open_preferences(corvene_core::PreferencesTab::Accounts, cx)
         });

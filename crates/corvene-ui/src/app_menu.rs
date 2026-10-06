@@ -208,6 +208,9 @@ pub struct MenuExtras {
     /// Flag `1304-diff-no-wrap`: View › Wrap Diff Lines, checked while
     /// diff lines wrap (set by [`MenuLabelsEvent::of`]).
     pub diff_wrap_lines: Option<bool>,
+    /// Flag `1310-file-list-tree`: View › Show Changes as Tree / as List,
+    /// `true` while file lists show trees (set by [`MenuLabelsEvent::of`]).
+    pub file_list_tree: Option<bool>,
     /// Flags that add key bindings and their View menu items
     /// (`612-navigation-shortcuts`, `801-history-review-mode`).
     pub keymap: KeymapFlags,
@@ -252,6 +255,7 @@ impl MenuExtras {
             show_remove_repositories: flags.bool(ids::BULK_REMOVE_REPOSITORIES),
             undo_last_commit: flags.bool(ids::UNDO_COMMIT_MENU_ITEM).then_some(false),
             diff_wrap_lines: flags.bool(ids::DIFF_NO_WRAP).then_some(true),
+            file_list_tree: flags.bool(ids::FILE_LIST_TREE).then_some(false),
             keymap: KeymapFlags::from_flags(flags),
         }
     }
@@ -294,6 +298,10 @@ impl MenuLabelsEvent {
         // `1304-diff-no-wrap`: checked while lines wrap
         if extras.diff_wrap_lines.is_some() {
             extras.diff_wrap_lines = Some(s.settings.diff_wrap_lines);
+        }
+        // `1310-file-list-tree`
+        if extras.file_list_tree.is_some() {
+            extras.file_list_tree = Some(s.settings.file_list_tree);
         }
         // `1212-bisect`: whether the selected repository bisects
         if extras.bisect.is_some() {
@@ -689,6 +697,17 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             ToggleChangesFilter,
         ),
     ]);
+    // Corvene (`1310-file-list-tree`)
+    if let Some(tree) = extras.file_list_tree {
+        view.push(item(
+            if tree {
+                l("Show Changes as List", "Show changes as &list")
+            } else {
+                l("Show Changes as Tree", "Show changes as &tree")
+            },
+            ToggleFileListTree,
+        ));
+    }
     // Corvene's macOS menu sets Toggle Full Screen apart; GHD has no
     // separator before it (kept on macOS, GHD's layout elsewhere)
     if cfg!(target_os = "macos") {
@@ -1325,6 +1344,7 @@ mod tests {
                     show_remove_repositories: true,
                     undo_last_commit: Some(true),
                     diff_wrap_lines: Some(bits & 2 != 0),
+                    file_list_tree: Some(bits & 2 != 0),
                     keymap: KeymapFlags {
                         navigation_shortcuts: true,
                         history_review_mode: true,

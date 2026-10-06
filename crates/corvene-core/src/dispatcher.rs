@@ -134,6 +134,15 @@ impl Dispatcher {
         } else {
             std::collections::HashMap::new()
         };
+        // Corvene (`1310-file-list-tree`): the changes trees' collapsed folders
+        let collapsed_folders = {
+            let mut saved = store.collapsed_folders().unwrap_or_default();
+            saved.retain(|id, _| repositories.iter().any(|r| r.id == *id));
+            saved
+                .into_iter()
+                .map(|(id, folders)| (id, std::sync::Arc::new(folders.into_iter().collect())))
+                .collect()
+        };
         // `876-git-spawn-error-details`
         corvene_git::set_explain_missing_workdir(
             flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
@@ -217,6 +226,7 @@ impl Dispatcher {
             commit_drafts_nonce: 0,
             excluded_files,
             excluded_files_restored: std::collections::HashSet::new(),
+            collapsed_folders,
             hosts,
         });
         let state = StateHandle;

@@ -15,6 +15,11 @@ gpui_kit::actions!(
         SelectLastFile,
         // Space in the changes list: include / exclude the highlighted files
         ToggleIncludeSelected,
+        // ← / → on a file tree's row (`1310-file-list-tree`)
+        CollapseFolder,
+        ExpandFolder,
+        // View › Show Changes as Tree / as List (`1310-file-list-tree`)
+        ToggleFileListTree,
         // ⌘⌫ in the changes list (`605-cmd-backspace-discards-files`)
         DiscardSelectedFiles,
         // ⇧⌘A / ⌥⌘O in a file list (`606-open-file-shortcuts`)

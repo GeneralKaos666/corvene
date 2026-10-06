@@ -8416,6 +8416,25 @@ registry! {
         upstream: &[Upstream::issue(11760)],
         code: &["crates/corvene-ui/src/commit_message_avatar.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-git/src/repo.rs"],
     },
+    /// Changes / History / stash file lists as a folder tree.
+    FILE_LIST_TREE = 1310 "file-list-tree" {
+        title: "Show changed files as a folder tree",
+        summary: "A button at the end of the \"N changed files\" row, and View › Show \
+                  Changes as Tree, switch the changes list, a commit's files in History and a \
+                  stash's files between the flat list and a folder tree. Folder rows have a \
+                  checkbox for every file inside (mixed when only some are included), a file \
+                  count and their own menu. Clicking one selects its files; ← and → collapse \
+                  and expand it. Collapsed folders are remembered per repository. The flat \
+                  list stays the default.",
+        ghd_behaviour: "Changed files are always one flat list with each file's directory \
+                        before its name.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20624), Upstream::issue(20529)],
+        code: &["crates/corvene-core/src/file_tree.rs", "crates/corvene-ui/src/file_tree_rows.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/stash_view.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

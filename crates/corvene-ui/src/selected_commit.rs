@@ -24,6 +24,9 @@
 //! diffs merges against their first parent only. While whitespace is hidden,
 //! files with whitespace changes only can be left out of the list, with a
 //! note under it (`793-hide-whitespace-only-files`).
+//!
+//! Deviation (`1310-file-list-tree`): the file list can show the commit's
+//! files as a folder tree (GHD `file-list.tsx` lists them flat).
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher, Popup, UnreachableCommitsTab};
 use gpui_kit::component::resizable::{
@@ -80,7 +83,13 @@ pub struct SelectedCommitView {
     file_list_hidden: bool,
     /// GHD `CopyButton` of the commit's SHA (its copied state).
     copy_sha: Option<crate::copy_button::CopyButton>,
+    /// `1310-file-list-tree`: the file list's folders.
+    tree: crate::file_tree_rows::ListTree,
 }
+
+/// `1310-file-list-tree`: a tree over the commit's paths (the paths, the
+/// collapse key it was built for, the tree).
+type CommitTree = crate::file_tree_rows::PathTree;
 
 /// How a click in the commit file list changes the selection.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -120,6 +129,7 @@ impl SelectedCommitView {
             menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&file_scroll),
             file_scroll,
             file_list_hidden: false,
+            tree: Default::default(),
         }
     }
 
@@ -214,6 +224,130 @@ impl SelectedCommitView {
             .unwrap_or_default()
     }
 
+    /// `1310-file-list-tree`: the commit's files as a tree, while file lists
+    /// show trees.
+    fn file_tree(&self, id: u64, cx: &App) -> Option<CommitTree> {
+        if !crate::file_tree_rows::tree_mode(cx) {
+            return None;
+        }
+        let s = self.state.read(cx);
+        let files = s
+            .repo_states
+            .get(&id)
+            .and_then(|rs| rs.changeset.as_ref())
+            .map_or(&[][..], |c| &c.files[..]);
+        Some(self.tree.tree(files.iter().map(|f| f.path.as_str())))
+    }
+
+    /// `1310-file-list-tree`: the tree row the keyboard moves from.
+    fn tree_current_row(&self, id: u64, t: &CommitTree, cx: &App) -> Option<usize> {
+        if let Some(row) = self.tree.cursor_row(&t.2) {
+            return Some(row);
+        }
+        let current = self
+            .multi_end
+            .clone()
+            .filter(|end| self.multi_selected(id, cx).contains(end))
+            .or_else(|| {
+                let s = self.state.read(cx);
+                s.repo_states.get(&id)?.commit_selected_file.clone()
+            })?;
+        let item = t.0.iter().position(|p| *p == current)?;
+        t.2.row_of_item(item)
+    }
+
+    /// `1310-file-list-tree`: select tree row `row` (a folder selects its
+    /// files with flag `810`, else it only takes the cursor).
+    fn select_tree_row(&mut self, id: u64, t: &CommitTree, row: usize, cx: &mut Context<Self>) {
+        use corvene_core::file_tree::TreeRow;
+        match t.2.rows.get(row) {
+            Some(TreeRow::File { item, .. }) => {
+                let Some(path) = t.0.get(*item).cloned() else {
+                    return;
+                };
+                self.tree.clear_cursor();
+                self.multi_files = None;
+                self.multi_end = None;
+                Dispatcher::select_commit_file(id, path, cx);
+            }
+            Some(TreeRow::Folder { path, .. }) => {
+                let files = crate::file_tree_rows::row_paths(&t.2, row, &t.0);
+                let (commits, multi_select) = {
+                    let s = self.state.read(cx);
+                    (
+                        s.repo_states
+                            .get(&id)
+                            .map(|rs| rs.selected_commits.clone())
+                            .unwrap_or_default(),
+                        s.flags
+                            .bool(corvene_core::flags::ids::COMMIT_FILES_MULTI_SELECT),
+                    )
+                };
+                self.tree.set_cursor(path.clone());
+                self.multi_end = None;
+                if files.len() == 1 || multi_select {
+                    self.multi_files = (files.len() > 1).then(|| (commits, files.clone()));
+                    if let Some(first) = files.first() {
+                        Dispatcher::select_commit_file(id, first.clone(), cx);
+                    }
+                }
+            }
+            None => return,
+        }
+        self.file_scroll
+            .scroll_to_item(row, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    /// `1310-file-list-tree`: the folder row for `folder`.
+    fn select_folder(&mut self, folder: &str, cx: &mut Context<Self>) {
+        let Some(id) = self.state.read(cx).selected else {
+            return;
+        };
+        let Some(t) = self.file_tree(id, cx) else {
+            return;
+        };
+        let row = t.2.rows.iter().position(|r| {
+            matches!(r, corvene_core::file_tree::TreeRow::Folder { path, .. } if path == folder)
+        });
+        if let Some(row) = row {
+            self.select_tree_row(id, &t, row, cx);
+        }
+    }
+
+    /// `1310-file-list-tree`: collapse or expand `folders`.
+    fn set_collapsed(&mut self, folders: Vec<String>, collapsed: bool, cx: &mut Context<Self>) {
+        self.tree.collapse.set(folders, collapsed);
+        cx.notify();
+    }
+
+    /// `1310-file-list-tree`: ← / → on the tree.
+    fn tree_key(&mut self, right: bool, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::file_tree_rows::{LeftKey, RightKey};
+        let Some(id) = self.state.read(cx).selected else {
+            return;
+        };
+        let Some(t) = self.file_tree(id, cx) else {
+            return;
+        };
+        let Some(row) = self.tree_current_row(id, &t, cx) else {
+            return;
+        };
+        if right {
+            match crate::file_tree_rows::right_key(&t.2, row) {
+                Some(RightKey::Expand(folder)) => self.set_collapsed(vec![folder], false, cx),
+                Some(RightKey::Select(row)) => self.select_tree_row(id, &t, row, cx),
+                None => crate::file_tree_rows::focus_pane(true, window, cx),
+            }
+        } else {
+            match crate::file_tree_rows::left_key(&t.2, row) {
+                LeftKey::Collapse(folder) => self.set_collapsed(vec![folder], true, cx),
+                LeftKey::Select(parent) => self.select_tree_row(id, &t, parent, cx),
+                LeftKey::Nothing => crate::file_tree_rows::focus_pane(false, window, cx),
+            }
+        }
+    }
+
     /// GHD `List.moveSelection` on the commit's `FileList` (↑ / ↓, and ⌥↓ /
     /// ⌥↑ from the diff): the file `delta` rows from the moving end of the
     /// selection, wrapping around the ends (GHD `List.moveSelection`), scrolled into view.
@@ -221,6 +355,26 @@ impl SelectedCommitView {
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
+        // `1310-file-list-tree`: through the tree's rows
+        if let Some(t) = self.file_tree(id, cx) {
+            let count = t.2.rows.len();
+            let wrap = !self
+                .state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::LISTS_STOP_AT_ENDS);
+            let current = self.tree_current_row(id, &t, cx);
+            if let Some(row) = corvene_core::list_selection::find_next_selectable_row(
+                count,
+                current,
+                delta,
+                wrap,
+                |_| true,
+            ) {
+                self.select_tree_row(id, &t, row, cx);
+            }
+            return;
+        }
         let order = self.file_order(id, cx);
         let current = self
             .multi_end
@@ -254,6 +408,12 @@ impl SelectedCommitView {
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
+        if let Some(t) = self.file_tree(id, cx) {
+            if let Some(end) = t.2.rows.len().checked_sub(1) {
+                self.select_tree_row(id, &t, if last { end } else { 0 }, cx);
+            }
+            return;
+        }
         let order = self.file_order(id, cx);
         if !order.is_empty() {
             let ix = if last { order.len() - 1 } else { 0 };
@@ -262,6 +422,7 @@ impl SelectedCommitView {
     }
 
     fn select_index(&mut self, id: u64, order: &[String], ix: usize, cx: &mut Context<Self>) {
+        self.tree.clear_cursor();
         self.multi_files = None;
         self.multi_end = None;
         Dispatcher::select_commit_file(id, order[ix].clone(), cx);
@@ -290,7 +451,18 @@ impl SelectedCommitView {
         let Some(anchor) = anchor.filter(|_| multi_select) else {
             return self.select_relative(delta, cx);
         };
-        let order = self.file_order(id, cx);
+        self.tree.clear_cursor();
+        // `1310-file-list-tree`: the expanded tree's file rows
+        let tree = self.file_tree(id, cx);
+        let order = match &tree {
+            Some(t) => {
+                t.2.visible_items()
+                    .into_iter()
+                    .map(|i| t.0[i].clone())
+                    .collect()
+            }
+            None => self.file_order(id, cx),
+        };
         let multi = self.multi_selected(id, cx);
         let end = self
             .multi_end
@@ -308,7 +480,15 @@ impl SelectedCommitView {
         let Some(new_end) = range.last().cloned() else {
             return;
         };
-        if let Some(ix) = order.iter().position(|p| *p == new_end) {
+        let row = match &tree {
+            Some(t) => {
+                t.0.iter()
+                    .position(|p| *p == new_end)
+                    .and_then(|i| t.2.row_of_item(i))
+            }
+            None => order.iter().position(|p| *p == new_end),
+        };
+        if let Some(ix) = row {
             self.file_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
         }
         let next: Vec<String> = order.into_iter().filter(|p| range.contains(p)).collect();
@@ -320,6 +500,11 @@ impl SelectedCommitView {
     /// ⌘-click toggles `path`, ⇧-click selects from the diffed file to
     /// `path`, a plain click leaves a single selection.
     fn click_file(&mut self, id: u64, path: String, click: FileClick, cx: &mut Context<Self>) {
+        self.tree.clear_cursor();
+        // `1310-file-list-tree`: ranges follow the tree
+        let tree_order: Option<Vec<String>> = self
+            .file_tree(id, cx)
+            .map(|t| t.2.order.iter().map(|&i| t.0[i].clone()).collect());
         let (order, anchor, commits) = {
             let s = self.state.read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
@@ -331,7 +516,7 @@ impl SelectedCommitView {
                 .map(|c| c.files.iter().map(|f| f.path.clone()).collect())
                 .unwrap_or_default();
             (
-                order,
+                tree_order.unwrap_or(order),
                 rs.commit_selected_file.clone(),
                 rs.selected_commits.clone(),
             )
@@ -1054,6 +1239,11 @@ impl SelectedCommitView {
             };
         }
         let count = files.len();
+        // `1310-file-list-tree`
+        let tree = self.file_tree(id, cx);
+        let tree_anchor = tree.as_ref().and_then(|t| self.tree_current_row(id, t, cx));
+        let cursor_row = tree.as_ref().and_then(|t| self.tree.cursor_row(&t.2));
+        let rows = tree.as_ref().map_or(count, |t| t.2.rows.len());
         let files = std::rc::Rc::new(files);
         let focus = self.file_list_focus.clone();
         let focused = self.file_list_focused;
@@ -1089,9 +1279,25 @@ impl SelectedCommitView {
                     .flex()
                     .flex_col()
                     .child(
-                        uniform_list("commit-file-rows", count, move |range, _, cx| {
+                        uniform_list("commit-file-rows", rows, move |range, _, cx| {
                             range
                                 .map(|ix| {
+                                    if let Some(t) = &tree {
+                                        return commit_tree_row(
+                                            id,
+                                            t,
+                                            ix,
+                                            &files,
+                                            selected.as_deref(),
+                                            cursor_row == Some(ix),
+                                            &focus,
+                                            focused,
+                                            &multi,
+                                            &weak,
+                                            (tree_anchor == Some(ix)).then_some(&menu_anchor),
+                                            cx,
+                                        );
+                                    }
                                     let file = &files[ix];
                                     let is_selected = if multi.is_empty() {
                                         selected.as_deref() == Some(file.path.as_str())
@@ -1108,6 +1314,7 @@ impl SelectedCommitView {
                                         &weak,
                                         (selected.as_deref() == Some(file.path.as_str()))
                                             .then_some(&menu_anchor),
+                                        None,
                                         cx,
                                     )
                                 })
@@ -1389,6 +1596,8 @@ fn commit_file_row(
     multi: &std::rc::Rc<Vec<String>>,
     view: &WeakEntity<SelectedCommitView>,
     menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
+    // `1310-file-list-tree`: the row's depth in the tree
+    depth: Option<usize>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -1473,8 +1682,10 @@ fn commit_file_row(
         .gap(SPACING_HALF())
         .px(SPACING())
         // `.list-item { border-bottom: 1px solid var(--box-border-color) }`
-        .border_b_1()
-        .border_color(t.box_border)
+        // (`1310-file-list-tree`: none in the tree)
+        .when(depth.is_none(), |d| {
+            d.border_b_1().border_color(t.box_border)
+        })
         .cursor_pointer()
         .when(is_selected, |d| {
             if list_focused {
@@ -1506,16 +1717,30 @@ fn commit_file_row(
                 (true, false) => (t.box_selected_text, t.box_selected_text),
                 _ => (t.text_secondary, t.text),
             };
-            crate::path_label::path_label_element(
-                crate::path_label::path_label(
-                    &file.path,
-                    file.status.kind,
-                    file.old_path.as_deref(),
+            match depth {
+                // `1310-file-list-tree`: the name under its folder
+                Some(depth) => crate::path_label::path_label_element(
+                    crate::file_tree_rows::tree_label(
+                        &file.path,
+                        file.status.kind,
+                        file.old_path.as_deref(),
+                    ),
+                    Vec::new(),
+                    directory_color,
+                    arrow_color,
+                )
+                .ml(crate::file_tree_rows::file_label_margin(depth)),
+                None => crate::path_label::path_label_element(
+                    crate::path_label::path_label(
+                        &file.path,
+                        file.status.kind,
+                        file.old_path.as_deref(),
+                    ),
+                    Vec::new(),
+                    directory_color,
+                    arrow_color,
                 ),
-                Vec::new(),
-                directory_color,
-                arrow_color,
-            )
+            }
             .text_size(FONT_SIZE())
         })
         // `1113-lfs-locks`
@@ -1551,6 +1776,110 @@ fn commit_file_row(
         })
         .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
         .into_any_element()
+}
+
+/// `1310-file-list-tree`: row `ix` of the commit's file tree.
+#[allow(clippy::too_many_arguments)]
+fn commit_tree_row(
+    id: u64,
+    tree: &CommitTree,
+    ix: usize,
+    files: &[CommittedFileChange],
+    selected: Option<&str>,
+    cursor_here: bool,
+    focus: &FocusHandle,
+    list_focused: bool,
+    multi: &std::rc::Rc<Vec<String>>,
+    view: &WeakEntity<SelectedCommitView>,
+    menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
+    cx: &App,
+) -> AnyElement {
+    use corvene_core::file_tree::TreeRow;
+    match tree.2.rows.get(ix) {
+        Some(TreeRow::File { item, depth }) => {
+            let Some(file) = files.get(*item) else {
+                return div().into_any_element();
+            };
+            let is_selected = if multi.is_empty() {
+                selected == Some(file.path.as_str())
+            } else {
+                multi.contains(&file.path)
+            };
+            commit_file_row(
+                id,
+                file,
+                is_selected,
+                focus,
+                list_focused,
+                multi,
+                view,
+                menu_anchor,
+                Some(*depth),
+                cx,
+            )
+        }
+        Some(row @ TreeRow::Folder { path, expanded, .. }) => {
+            let folder = path.clone();
+            let select = {
+                let view = view.clone();
+                let focus = focus.clone();
+                let folder = folder.clone();
+                move |window: &mut Window, cx: &mut App| {
+                    window.focus(&focus, cx);
+                    view.update(cx, |this, cx| this.select_folder(&folder, cx))
+                        .ok();
+                }
+            };
+            let toggle = {
+                let view = view.clone();
+                let folder = folder.clone();
+                let expanded = *expanded;
+                move |_: &mut Window, cx: &mut App| {
+                    view.update(cx, |this, cx| {
+                        this.set_collapsed(vec![folder.clone()], expanded, cx)
+                    })
+                    .ok();
+                }
+            };
+            let menu = {
+                let view = view.clone();
+                let tree = tree.clone();
+                move |position: Point<Pixels>, window: &mut Window, cx: &mut App| {
+                    let Some(repo) = AppState::global(cx)
+                        .read(cx)
+                        .repository(id)
+                        .map(|r| r.path.clone())
+                    else {
+                        return;
+                    };
+                    let view = view.clone();
+                    let items = crate::file_tree_rows::plain_folder_menu(
+                        &repo,
+                        &folder,
+                        crate::file_tree_rows::all_folders(&tree.0),
+                        move |folders, collapsed, cx| {
+                            view.update(cx, |this, cx| this.set_collapsed(folders, collapsed, cx))
+                                .ok();
+                        },
+                    );
+                    crate::native_menu::show_context_menu(items, position, window, cx);
+                }
+            };
+            crate::file_tree_rows::plain_folder_row(
+                SharedString::from(format!("commit-folder-{path}")),
+                "commit-file-row",
+                row,
+                cursor_here,
+                list_focused,
+                select,
+                toggle,
+                menu,
+                menu_anchor,
+                cx,
+            )
+        }
+        None => div().into_any_element(),
+    }
 }
 
 impl Render for SelectedCommitView {
@@ -1701,7 +2030,22 @@ impl Render for SelectedCommitView {
                                 ),
                                 self.file_list(id, cx),
                             )
-                            .key_context("CommitFileList")
+                            // `1310-file-list-tree`: ← / → fold the tree's folders
+                            .key_context(if crate::file_tree_rows::tree_mode(cx) {
+                                "CommitFileList FileTree"
+                            } else {
+                                "CommitFileList"
+                            })
+                            .on_action(cx.listener(
+                                |this, _: &crate::actions::CollapseFolder, window, cx| {
+                                    this.tree_key(false, window, cx)
+                                },
+                            ))
+                            .on_action(cx.listener(
+                                |this, _: &crate::actions::ExpandFolder, window, cx| {
+                                    this.tree_key(true, window, cx)
+                                },
+                            ))
                             .on_action(self.menu_anchor.action_handler())
                             .on_action(cx.listener(|this, _: &SelectNextFile, _, cx| {
                                 this.select_relative(1, cx)

@@ -511,5 +511,11 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("secondary-m", Minimize, None),
         KeyBinding::new("secondary-w", CloseWindow, None),
     ]);
+    // `1310-file-list-tree`: a list showing a tree adds `FileTree` to its
+    // context; last, so these win over `619-arrow-keys-between-panes`
+    bindings.extend([
+        KeyBinding::new("left", CollapseFolder, Some("FileTree")),
+        KeyBinding::new("right", ExpandFolder, Some("FileTree")),
+    ]);
     bindings
 }
