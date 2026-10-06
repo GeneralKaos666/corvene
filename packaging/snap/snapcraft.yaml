@@ -44,8 +44,7 @@ apps:
 parts:
   corvene:
     plugin: dump
-    source: corvene.tar.gz
-    source-type: tar
+    source: corvene
     stage-packages:
       - git
       - git-lfs
@@ -54,7 +53,6 @@ parts:
       - libxkbcommon-x11-0
     override-prime: |
       craftctl default
-      # the scriptlet does not start in the prime directory
       cd "$CRAFT_PRIME"
       # the snap's entry runs the snap's app, with the icon from inside it
       sed -i \

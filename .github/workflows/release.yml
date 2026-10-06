@@ -364,7 +364,8 @@ jobs:
       - name: flatpak-builder
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          # elfutils: flatpak-builder strips with eu-strip
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
       - name: build
         run: |
           packaging/flatpak/build.sh linux/*-linux-${{ matrix.arch }}.tar.gz target/flatpak-out

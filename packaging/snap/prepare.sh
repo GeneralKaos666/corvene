@@ -17,9 +17,8 @@ DIR="${2:?usage: prepare.sh <archive> <dir>}"
 VERSION="$(basename "$ARCHIVE" .tar.gz | sed -E 's/^Corvene(-Full)?-(.*)-linux-[^-]+$/\2/')"
 
 rm -rf "$DIR"
-mkdir -p "$DIR/snap" "$DIR/tree"
-tar -xzf "$ARCHIVE" -C "$DIR/tree" --strip-components=1
-tar -C "$DIR/tree" -czf "$DIR/corvene.tar.gz" usr
-rm -rf "$DIR/tree"
+mkdir -p "$DIR/snap" "$DIR/corvene"
+# a folder, not a tarball: snapcraft strips a tarball's only top folder (usr)
+tar -xzf "$ARCHIVE" -C "$DIR/corvene" --strip-components=1
 sed "s|@VERSION@|$VERSION|" "$ROOT/packaging/snap/snapcraft.yaml" > "$DIR/snap/snapcraft.yaml"
 echo "prepared $DIR (corvene $VERSION)"
