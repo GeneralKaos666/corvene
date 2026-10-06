@@ -194,7 +194,7 @@ impl WelcomeView {
         let had_account = !state.read(cx).accounts.is_empty();
         let sign_in_focus = cx.focus_handle();
         // A successful sign-in advances to Configure Git (GHD `Welcome.componentWillReceiveProps`).
-        cx.observe_in(&state, window, |this, state, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             let has_account = !state.read(cx).accounts.is_empty();
             if has_account && !this.had_account && this.step == WelcomeStep::Start {
                 this.advance(window, cx);

@@ -3429,6 +3429,39 @@ registry! {
         code: &["crates/corvene-core/src/menu_bar_status.rs", "crates/corvene-ui/src/status_item.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-core/src/remote.rs"],
     },
 
+    /// File › New Window, "Open in New Window" in the repository list.
+    MULTIPLE_WINDOWS = 429 "multiple-windows" {
+        title: "Multiple windows",
+        summary: "File › New Window (⌥⌘N) opens another window, and a repository's context \
+                  menu in the repository list has Open in New Window, so two repositories sit \
+                  side by side. Each window has its own repository, foldouts, dialogs and \
+                  Back / Forward history; the windows open again at the next launch. Closing a \
+                  window that is not the last one closes it for good.",
+        ghd_behaviour: "One window; switching repositories is the only way to see another.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3606), Upstream::issue(22427), Upstream::issue(4340), Upstream::issue(12290)],
+        code: &["crates/corvene-core/src/workspace.rs", "crates/corvene-ui/src/windows.rs", "crates/corvene/src/main.rs"],
+    },
+
+    /// A tab strip of repositories above the toolbar.
+    REPOSITORY_TABS = 430 "repository-tabs" {
+        title: "Repository tabs",
+        summary: "A strip of tabs above the toolbar, one per open repository: the repository \
+                  list's context menu has Open in New Tab, + opens the list, ⌥⌘→ / ⌥⌘← step \
+                  through the tabs and ⌘W closes the current one while the window has more than \
+                  one. Picking a repository from the list switches the current tab to it.",
+        ghd_behaviour: "No tabs; the toolbar's repository button switches the one view.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20026), Upstream::issue(12290)],
+        code: &["crates/corvene-ui/src/tab_strip.rs", "crates/corvene-core/src/workspace.rs"],
+    },
+
     // ---- 500 Settings & updates ----
 
     /// Settings › Advanced › Save crash reports locally.

@@ -332,6 +332,9 @@ class Run:
     def apply(self, action: dict, resolved: dict, drv, ghd: Ghd):
         mods = action.get("mods", "")
         pt = lambda key: resolved.get(key) or ghd.resolve(action[key])  # noqa: E731
+        if "window" in action and drv.name == "corvene":
+            # `429-multiple-windows`: later Corvene commands target this window
+            drv.activate_window(action["window"])
         if "hover" in action:
             drv.move(*pt("hover"), mods=mods)
         if "click" in action:
@@ -412,20 +415,23 @@ class Run:
                 drv.resize(w, h)
 
     @staticmethod
-    def stable_snap(drv, path: Path, timeout: float = 4.0, interval: float = 0.25):
+    def stable_snap(drv, path: Path, timeout: float = 4.0, interval: float = 0.25, window=None):
         """Capture until two consecutive frames agree (async work such as
         syntax highlighting or avatars has landed). A few hundred changed
-        pixels (a blinking caret) still count as stable."""
+        pixels (a blinking caret) still count as stable. `window`: a
+        Corvene window other than the focused one (`429-multiple-windows`)."""
         import numpy as np
         from PIL import Image
 
+        extra = {"window": window} if window is not None else {}
+        snap = lambda p: drv.snap(p, **extra)  # noqa: E731
         tmp = path.with_suffix(".prev.png")
-        drv.snap(path)
+        snap(path)
         prev = np.asarray(Image.open(path).convert("RGB"))
         deadline = time.time() + timeout
         while time.time() < deadline:
             time.sleep(interval)
-            drv.snap(tmp)
+            snap(tmp)
             cur = np.asarray(Image.open(tmp).convert("RGB"))
             changed = cur.shape != prev.shape or int((np.abs(cur.astype(int) - prev).max(axis=2) > 8).sum()) > 400
             tmp.replace(path)
@@ -447,7 +453,7 @@ class Run:
             return
         if spec.get("corvene_only"):
             # a Corvene-only surface (a dialog GHD lacks): recorded, not compared
-            self.stable_snap(cv, pc)
+            self.stable_snap(cv, pc, window=spec.get("window"))
             result["snaps"].append({"name": name, "stem": stem, "note": spec.get("note", ""), "corvene_only": True,
                                     "percent": 0.0, "coverage": 0.0, "threshold": 0, "pass": True, "size_mismatch": "",
                                     "ghd": "", "corvene": pc.name, "diff": "", "regions": []})

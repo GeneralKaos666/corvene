@@ -328,7 +328,7 @@ impl HistorySidebar {
             }
         })
         .detach();
-        cx.observe_in(&state, window, |this, state, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             let filter_text = state
                 .read(cx)
                 .selected_state()
@@ -354,7 +354,7 @@ impl HistorySidebar {
             }
         })
         .detach();
-        cx.observe_in(&state, window, |this, state, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             let text = state
                 .read(cx)
                 .selected_state()

@@ -174,7 +174,8 @@ enum CommitField {
 /// The commit button's focus handle, for GHD `App.onPopupDismissed`: closing
 /// the Committing changes dialog after the commit moves focus back to the
 /// button (see [`focus_commit_button`]).
-struct CommitButtonFocus(FocusHandle);
+#[derive(Default)]
+struct CommitButtonFocus(Vec<(WindowId, FocusHandle)>);
 
 impl Global for CommitButtonFocus {}
 
@@ -182,7 +183,12 @@ impl Global for CommitButtonFocus {}
 /// commit is done hands focus back to the commit button (its button under
 /// the commit button is gone by then).
 pub fn focus_commit_button(window: &mut Window, cx: &mut App) {
-    if let Some(focus) = cx.try_global::<CommitButtonFocus>().map(|f| f.0.clone()) {
+    let id = window.window_handle().window_id();
+    let focus = cx
+        .try_global::<CommitButtonFocus>()
+        .and_then(|f| f.0.iter().find(|(w, _)| *w == id))
+        .map(|(_, focus)| focus.clone());
+    if let Some(focus) = focus {
         window.focus(&focus, cx);
     }
 }
@@ -563,7 +569,7 @@ impl ChangesSidebar {
     pub fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         // Clear the form after a successful commit (GHD resets `commitMessage`).
-        cx.observe_in(&state, window, |this, state, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             let nonce = state
                 .read(cx)
                 .selected_state()
@@ -744,7 +750,13 @@ impl ChangesSidebar {
         let description_focus = description.read(cx).focus_handle(cx);
         let co_authors_focus = co_authors.read(cx).focus_handle(cx);
         let commit_button_focus = cx.focus_handle();
-        cx.set_global(CommitButtonFocus(commit_button_focus.clone()));
+        {
+            // one commit button per window (`429-multiple-windows`)
+            let id = window.window_handle().window_id();
+            let registry = cx.default_global::<CommitButtonFocus>();
+            registry.0.retain(|(w, _)| *w != id);
+            registry.0.push((id, commit_button_focus.clone()));
+        }
         cx.subscribe(&summary, |this, _, ev: &InputEvent, cx| {
             this.on_input_event(CommitField::Summary, ev, cx)
         })

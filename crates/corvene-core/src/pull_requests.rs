@@ -455,9 +455,13 @@ impl Dispatcher {
         if !APP_FOCUSED.load(Ordering::Relaxed) {
             return;
         }
-        let Some(id) = Self::state(cx).read(cx).selected else {
-            return;
-        };
+        for id in Self::state(cx).read(cx).visible_repositories() {
+            Self::start_repository_pull_request_updater(id, generation, cx);
+        }
+    }
+
+    /// One repository's updater loop (one per visible repository).
+    fn start_repository_pull_request_updater(id: u64, generation: u64, cx: &mut dyn Host) {
         if Self::pull_requests_last_refreshed(id, cx).is_none() {
             return;
         }

@@ -273,7 +273,7 @@ impl PreferencesDialog {
                 (key, input)
             })
             .collect();
-        cx.observe_in(&state, window, |this, state, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             this.fill_from_git_config(&state, window, cx);
             cx.notify();
         })

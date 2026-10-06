@@ -341,7 +341,9 @@ impl BannerView {
         let container = cx.focus_handle();
         let first = cx.focus_handle();
         let subscriptions = vec![
-            cx.observe_in(&state, window, |this, _, window, cx| this.sync(window, cx)),
+            crate::windows::observe_state_in(&state, window, cx, |this, _, window, cx| {
+                this.sync(window, cx)
+            }),
             // `onFocusIn`
             cx.on_focus_in(&container, window, |this, window, cx| {
                 if let Some((_, focus)) = this.focus.as_mut() {

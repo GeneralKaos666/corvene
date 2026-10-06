@@ -122,10 +122,7 @@ impl Dispatcher {
                 return Some(Err(result.repository.id));
             }
             // force the file watcher onto the new directory
-            if s.watched_repo == Some(id) {
-                s.watched_repo = None;
-                s.watcher = None;
-            }
+            s.watchers.remove(&id);
             let slash_remotes = s.flags.bool(crate::flags::ids::REMOTE_NAMES_WITH_SLASHES);
             let rs = s.repo_state_mut(id);
             rs.loading = false;

@@ -10,6 +10,7 @@ use corvene_git::GitBinary;
 use corvene_store::Store;
 
 use crate::persistence::Settings;
+pub use crate::workspace::{SavedWorkspace, WorkspaceId, WorkspaceState};
 use corvene_models::{
     Account, AheadBehind, Diff, GitHubRepository, Identity, Remote, Repository, RepositoryInfo,
     Section, WorkingDirectoryStatus,
@@ -1732,8 +1733,16 @@ pub struct AppState {
     /// [`RECENT_WORKTREES_LENGTH`]); the Recent group lists a repository
     /// once per worktree.
     pub recent_worktrees: Vec<(u64, PathBuf)>,
-    /// Corvene (`427-back-forward-navigation`): View › Back / Forward.
-    pub navigation: crate::navigation::NavigationHistory,
+    /// One per window (`429-multiple-windows`; `crate::workspace`): the
+    /// selected repository, foldout, popups, banner and navigation history
+    /// of each. Never empty: the last workspace is never removed.
+    /// `AppState` derefs to the one `current` names.
+    pub workspaces: Vec<WorkspaceState>,
+    /// The workspace code is running for right now (see `crate::workspace`).
+    pub current: WorkspaceId,
+    /// The workspace of the window that was last active.
+    pub focused: WorkspaceId,
+    pub next_workspace_id: u32,
     /// Corvene (`618-keymap-overrides`): `keymap.json` as last read, and
     /// the problems reading it found (shown once in a banner).
     pub keymap_overrides: crate::keymap_file::KeymapOverrides,
@@ -1742,21 +1751,13 @@ pub struct AppState {
     /// with their stored values) and the flags it decided.
     pub settings_overlay: crate::settings_file::SettingsOverlay,
     pub settings_file_flags: crate::flags::EnvFlags,
-    pub selected: Option<u64>,
     pub repo_states: HashMap<u64, RepositoryState>,
     pub accounts: Vec<Account>,
-    pub foldout: Option<Foldout>,
-    /// The open popups (GHD `PopupManager`); [`AppState::popup`] is the one
-    /// shown.
-    pub popups: crate::popup_manager::PopupManager,
     /// GHD `CloningRepositoriesStore`: the clones in progress.
     pub cloning: crate::cloning_repositories_store::CloningRepositoriesStore,
     /// GHD `AheadBehindStore`: ahead/behind counts of commit ranges, cached
     /// by repository and tip shas (the compare branch list).
     pub ahead_behind: crate::ahead_behind_store::AheadBehindStore,
-    /// Bumped by `Dispatcher::start_background_pruner`, so the previous
-    /// repository's pruning timer stops (GHD `currentBranchPruner`).
-    pub branch_pruner_generation: u64,
     /// Android: a repository being moved to shared storage.
     pub shared_storage_move: Option<SharedStorageMoveState>,
     /// `224-alias-when-adding`: aliases typed in New / Add / Clone, applied
@@ -1774,12 +1775,14 @@ pub struct AppState {
     pub extra_oauth_scopes: Vec<String>,
     /// Corvene `350-ssh-key-helper`: Settings › Integrations' SSH key work.
     pub ssh_key: crate::ssh_keys::SshKeyState,
-    /// Watcher for the selected repository's worktree.
-    pub watcher: Option<crate::watcher::RepoWatcher>,
-    pub watched_repo: Option<u64>,
-    /// `currentBanner`
-    pub banner: Option<crate::mco::Banner>,
-    pub banner_nonce: u64,
+    /// Watchers of the visible repositories' worktrees (one per repository
+    /// some workspace shows), each with the generation it was started at.
+    pub watchers: HashMap<u64, (u64, crate::watcher::RepoWatcher)>,
+    pub watcher_generation: u64,
+    /// Bumped per repository by `Dispatcher::start_background_pruner`, so an
+    /// earlier pruning timer of the same repository stops (GHD
+    /// `currentBranchPruner`).
+    pub pruner_generations: HashMap<u64, u64>,
     /// Sidebar indicators per repository (`localRepositoryStateLookup`).
     pub indicators: HashMap<u64, crate::remote::RepoIndicator>,
     /// Generic git server logins (host → username) for the askpass helper.
@@ -1789,8 +1792,6 @@ pub struct AppState {
     pub enterprise_oauth_apps: HashMap<String, String>,
     /// Avatar cache (`crate::avatars`).
     pub avatars: crate::avatars::Avatars,
-    /// `dragAndDropManager` drop target during a commit drag.
-    pub drag_target: Option<DropTarget>,
     /// Clone dialog: `GET /user/repos` per account endpoint (`ApiRepositoriesStore`).
     pub api_repositories: HashMap<String, Vec<corvene_models::GitHubRepository>>,
     pub api_repositories_loading: std::collections::HashSet<String>,
@@ -1799,15 +1800,11 @@ pub struct AppState {
     pub mentionables: crate::autocomplete::MentionableCaches,
     /// Open pull requests per GitHub repository (`PullRequestCoordinator`).
     pub pull_requests: crate::pull_requests::PullRequestCaches,
-    /// `selectedBranchesTab`
-    pub branches_tab: crate::pull_requests::BranchesTab,
     /// `OnboardingTutorialAssessor.tutorialAnnounced` (per session).
     pub tutorial_announced: bool,
     /// `CORVENE_POPUP=tutorial:<step>`: the step the tutorial repository is
     /// shown at, whatever its state (dev/testing convenience).
     pub tutorial_step_override: Option<crate::tutorial::TutorialStep>,
-    /// `showCIStatusPopover`: the check-run popover under the PR badge.
-    pub show_ci_status_popover: bool,
     /// `CommitStatusStore`: CI statuses of refs.
     pub commit_statuses: crate::commit_status::CommitStatusStore,
     /// Corvene (`347-actions-job-logs`): Actions job logs fetched this session.
@@ -1852,7 +1849,124 @@ pub struct AppState {
     pub hosts: crate::hosts::HostsState,
 }
 
+/// `AppState` reads and writes the current workspace's slots as its own
+/// (`s.selected`, `s.foldout`, `s.popups`, `s.banner`, `s.navigation`,
+/// `s.drag_target`, `s.branches_tab`, `s.show_ci_status_popover`); see
+/// `crate::workspace`.
+impl std::ops::Deref for AppState {
+    type Target = WorkspaceState;
+
+    fn deref(&self) -> &WorkspaceState {
+        &self.workspaces[self.current_index()]
+    }
+}
+
+impl std::ops::DerefMut for AppState {
+    fn deref_mut(&mut self) -> &mut WorkspaceState {
+        let index = self.current_index();
+        &mut self.workspaces[index]
+    }
+}
+
 impl AppState {
+    /// Where `current` is in `workspaces` (the first when it is gone;
+    /// `workspaces` is never empty).
+    fn current_index(&self) -> usize {
+        self.workspaces
+            .iter()
+            .position(|w| w.id == self.current)
+            .unwrap_or(0)
+    }
+
+    pub fn workspace(&self, id: WorkspaceId) -> Option<&WorkspaceState> {
+        self.workspaces.iter().find(|w| w.id == id)
+    }
+
+    pub fn workspace_mut(&mut self, id: WorkspaceId) -> Option<&mut WorkspaceState> {
+        self.workspaces.iter_mut().find(|w| w.id == id)
+    }
+
+    /// The workspace of the window last active (`current` outside a frame).
+    pub fn focused_workspace(&self) -> &WorkspaceState {
+        self.workspace(self.focused)
+            .unwrap_or_else(|| &self.workspaces[0])
+    }
+
+    /// The repositories some window shows (each once, first workspace
+    /// first): what the watchers, the pruners and the background fetch
+    /// cover.
+    pub fn visible_repositories(&self) -> Vec<u64> {
+        let mut ids: Vec<u64> = Vec::new();
+        for w in &self.workspaces {
+            if let Some(id) = w.selected
+                && !ids.contains(&id)
+            {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
+    /// The workspace whose window shows repository `id`, if any.
+    pub fn workspace_showing(&self, id: u64) -> Option<WorkspaceId> {
+        self.workspaces
+            .iter()
+            .find(|w| w.selected == Some(id))
+            .map(|w| w.id)
+    }
+
+    /// Add a workspace (its window opens next); it becomes `current` and
+    /// `focused`.
+    pub fn add_workspace(&mut self, selected: Option<u64>, tabs: Vec<u64>) -> WorkspaceId {
+        let id = WorkspaceId(self.next_workspace_id);
+        self.next_workspace_id += 1;
+        let mut workspace = WorkspaceState::new(id, selected);
+        if !tabs.is_empty() {
+            workspace.tabs = tabs;
+            if let Some(selected) = selected
+                && !workspace.tabs.contains(&selected)
+            {
+                workspace.tabs.push(selected);
+            }
+        }
+        self.workspaces.push(workspace);
+        self.current = id;
+        self.focused = id;
+        id
+    }
+
+    /// Remove a workspace (its window closed); the last one stays. The
+    /// cursors move to the first remaining workspace when they named it.
+    pub fn remove_workspace(&mut self, id: WorkspaceId) -> bool {
+        if self.workspaces.len() < 2 {
+            return false;
+        }
+        let Some(index) = self.workspaces.iter().position(|w| w.id == id) else {
+            return false;
+        };
+        self.workspaces.remove(index);
+        let fallback = self.workspaces[0].id;
+        if self.focused == id {
+            self.focused = fallback;
+        }
+        if self.current == id {
+            self.current = fallback;
+        }
+        true
+    }
+
+    /// What `ui.workspaces` stores.
+    pub fn saved_workspaces(&self) -> Vec<SavedWorkspace> {
+        self.workspaces.iter().map(WorkspaceState::saved).collect()
+    }
+
+    /// `429-multiple-windows` or `430-repository-tabs`: the workspace list
+    /// is kept across launches.
+    pub fn persists_workspaces(&self) -> bool {
+        self.flags.bool(crate::flags::ids::MULTIPLE_WINDOWS)
+            || self.flags.bool(crate::flags::ids::REPOSITORY_TABS)
+    }
+
     /// Restart-required flags changed since launch (the Flags dialog's
     /// Relaunch bar).
     pub fn flags_restart_pending(&self) -> Vec<crate::flags::FlagId> {

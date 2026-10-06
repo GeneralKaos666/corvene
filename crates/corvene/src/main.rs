@@ -487,7 +487,19 @@ pub(crate) fn main() {
                     .timer(std::time::Duration::from_millis(1500))
                     .await;
                 cx.update(|cx| {
-                    for handle in cx.windows() {
+                    // `429-multiple-windows`: the first window at `path`,
+                    // the others at `<stem>-2.png`, `<stem>-3.png`
+                    for (index, handle) in cx.windows().into_iter().enumerate() {
+                        let path = if index == 0 {
+                            path.clone()
+                        } else {
+                            let p = std::path::Path::new(&path);
+                            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("snapshot");
+                            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("png");
+                            p.with_file_name(format!("{stem}-{}.{ext}", index + 1))
+                                .to_string_lossy()
+                                .into_owned()
+                        };
                         let image = handle.update(cx, |_, window, cx| {
                             // draw now: an unfocused window gets no display-link
                             // frames, and render_to_image uses the last scene
@@ -804,6 +816,20 @@ pub(crate) fn main() {
         });
         // Window
         cx.on_action(|_: &CloseWindow, cx| {
+            // `430-repository-tabs`: ⌘W closes the tab while there is another
+            let tabs = corvene_core::AppState::global(cx)
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::REPOSITORY_TABS);
+            if tabs && Dispatcher::close_tab(None, cx) {
+                return;
+            }
+            // `429-multiple-windows`: a window that is not the last closes
+            // for good (`on_window_closed` drops its workspace)
+            if corvene_ui::windows::count(cx) > 1 {
+                defer_in_active_window(cx, |window, _| window.remove_window());
+                return;
+            }
             // GHD hides the window and keeps running; the Dock brings it back.
             #[cfg(target_os = "macos")]
             defer_in_active_window(cx, |window, cx| {
@@ -814,63 +840,14 @@ pub(crate) fn main() {
         });
         cx.on_action(|_: &BringAllToFront, cx| cx.activate(true));
         cx.on_action(|_: &ShowMainWindow, cx| focus_main_window(cx));
-
-        // Same size as the GitHub Desktop reference captures in .docs.
-        let window_size = size(px(1367.), px(814.));
-        // CORVENE_WINDOW_SIZE=<width>x<height> (build with `--features
-        // snapshots`): another size, also below the minimum, for snapshots
-        // of the compact layout phones get.
-        #[cfg(feature = "snapshots")]
-        let forced_size = std::env::var("CORVENE_WINDOW_SIZE").ok().and_then(|spec| {
-            let (width, height) = spec.split_once('x')?;
-            Some(size(px(width.parse().ok()?), px(height.parse().ok()?)))
+        // `429-multiple-windows`
+        on_menu_action(cx, |_: &NewWindow, cx| corvene_ui::windows::new_window(cx));
+        // `430-repository-tabs`
+        on_menu_action(cx, |_: &NextTab, cx| Dispatcher::step_tab(true, cx));
+        on_menu_action(cx, |_: &PreviousTab, cx| Dispatcher::step_tab(false, cx));
+        on_menu_action(cx, |_: &CloseTab, cx| {
+            Dispatcher::close_tab(None, cx);
         });
-        #[cfg(not(feature = "snapshots"))]
-        let forced_size = None::<Size<Pixels>>.filter(|_| false);
-        let window_size = forced_size.unwrap_or(window_size);
-        let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("Corvene".into()),
-                // macOS: hiddenInset; Linux keeps the window manager's frame
-                // (Electron's default there)
-                // Windows: no frame either, GHD draws its own title bar
-                // there (`corvene_ui::title_bar_windows`)
-                appears_transparent: cfg!(any(target_os = "macos", windows)),
-                traffic_light_position: Some(point(px(9.), px(9.))),
-            }),
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                window_size,
-                cx,
-            ))),
-            // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400;
-            // `420-min-size-fits-display`: never more than the primary
-            // display's visible area (GHD's minimum can exceed a small
-            // screen, `main-process/app-window.ts` `minWidth` / `minHeight`)
-            window_min_size: Some(if let Some(forced) = forced_size {
-                forced
-            } else {
-                let flags = &state.read(cx).flags;
-                let min = if flags.bool(corvene_core::flags::ids::SMALLER_MINIMUM_SIZES) {
-                    size(px(600.), px(400.))
-                } else {
-                    size(px(960.), px(660.))
-                };
-                match cx.primary_display() {
-                    Some(display)
-                        if flags.bool(corvene_core::flags::ids::MIN_SIZE_FITS_DISPLAY) =>
-                    {
-                        min.min(&display.visible_bounds().size)
-                    }
-                    _ => min,
-                }
-            }),
-            app_id: Some(corvene_platform::BUNDLE_ID.into()),
-            // X11 `_NET_WM_ICON` (Electron sets the app icon on its window)
-            #[cfg(not(target_os = "macos"))]
-            icon: corvene_ui::title_bar::window_icon(),
-            ..Default::default()
-        };
 
         // Chromium's text antialiasing follows the desktop's (grayscale
         // unless it asks for subpixel order); GPUI would use subpixel
@@ -882,41 +859,35 @@ pub(crate) fn main() {
         // Linux: Electron's classic menu bar over the app (`corvene_ui::menu_bar`)
         #[cfg(not(target_os = "macos"))]
         corvene_ui::views_menu::install(cx);
-        #[cfg(not(target_os = "macos"))]
-        let opened = {
-            let workspace_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
-            let slot = workspace_slot.clone();
-            gpui_kit::open_window(options, cx, move |window, cx| {
-                let workspace = cx.new(|cx| Workspace::new(state, sidebar_width, window, cx));
-                *slot.borrow_mut() = Some(workspace.clone());
-                cx.new(|cx| corvene_ui::menu_bar::MenuBarShell::new(workspace.into(), cx))
-            })
-            .map(|_| workspace_slot.borrow_mut().take())
-        };
-        #[cfg(target_os = "macos")]
-        let opened = gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| Workspace::new(state, sidebar_width, window, cx))
+        // `429-multiple-windows`: one window per workspace (one in GitHub
+        // Desktop's model), opened through `corvene_ui::windows` so "Open in
+        // New Window" and File › New Window can open more later
+        // (`open_workspace_window`); a closed window drops its workspace.
+        {
+            let state = state.clone();
+            corvene_ui::windows::set_opener(
+                move |workspace, cx| {
+                    open_workspace_window(workspace, state.clone(), sidebar_width, started, cx)
+                },
+                cx,
+            );
+        }
+        cx.on_window_closed(|cx, window| {
+            if let Some(workspace) = corvene_ui::windows::unregister(window, cx) {
+                Dispatcher::close_workspace(workspace, cx);
+            }
         })
-        .map(|(_, workspace)| Some(workspace));
-        let workspace = match opened {
-            Ok(Some(workspace)) => {
-                info!(
-                    elapsed_ms = started.elapsed().as_millis(),
-                    "main window opened"
-                );
-                workspace
-            }
-            Ok(None) => {
-                error!("the main window opened without a workspace");
-                cx.quit();
-                return;
-            }
-            Err(err) => {
-                error!(?err, "failed to open main window");
-                cx.quit();
-                return;
-            }
-        };
+        .detach();
+        let workspaces: Vec<corvene_core::WorkspaceId> =
+            state.read(cx).workspaces.iter().map(|w| w.id).collect();
+        for workspace in workspaces {
+            open_workspace_window(workspace, state.clone(), sidebar_width, started, cx);
+        }
+        if corvene_ui::windows::count(cx) == 0 {
+            error!("failed to open main window");
+            cx.quit();
+            return;
+        }
 
         // Once the window is on screen: AppKit takes 30-60 ms to build the
         // macOS menu bar (the Edit menu's text input items load the Writing
@@ -960,59 +931,15 @@ pub(crate) fn main() {
         })
         .detach();
 
-        // System theme follows macOS light/dark switches (`supportsSystemThemeChanges`)
-        // and, back in Corvene, the "Increase contrast" display option.
-        if let Some(window) = cx.active_window() {
-            let ws = workspace.clone();
-            window
-                .update(cx, |_, window, cx| {
-                    ws.update(cx, |_, cx| {
-                        cx.observe_window_activation(window, |_, window, cx| {
-                            if window.is_window_active() {
-                                sync_reduce_motion(cx);
-                            }
-                            let theme = APPLIED_THEME.with(|t| t.get());
-                            if window.is_window_active()
-                                && theme == ThemeSetting::System
-                                && resolve_theme(theme, cx).name
-                                    != corvene_ui::theme::ActiveGhdTheme::ghd(&**cx).name
-                            {
-                                apply_theme(theme, cx);
-                            }
-                        })
-                        .detach();
-                    });
-                    // the red close button hides the window like ⌘W (GHD
-                    // `window.on('close')` → `hide()` unless quitting)
-                    #[cfg(target_os = "macos")]
-                    window.on_window_should_close(cx, |window, cx| {
-                        corvene_ui::native_window::hide_window(window, cx);
-                        false
-                    });
-                    window
-                        .observe_window_appearance(|_, cx| {
-                            let theme = APPLIED_THEME.with(|t| t.get());
-                            if theme == ThemeSetting::System {
-                                apply_theme(theme, cx);
-                            }
-                        })
-                        .detach();
-                })
-                .ok();
-        }
-
         // View / Window actions are global so the menu items stay enabled whatever has focus.
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowChanges, cx| {
-            ws.update(cx, |w, cx| w.switch_section(Section::Changes, cx))
+            with_focused_workspace(cx, |w, cx| w.switch_section(Section::Changes, cx))
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowHistory, cx| {
-            ws.update(cx, |w, cx| w.switch_section(Section::History, cx))
+            with_focused_workspace(cx, |w, cx| w.switch_section(Section::History, cx))
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ToggleSection, cx| {
-            ws.update(cx, |w, cx| {
+            with_focused_workspace(cx, |w, cx| {
                 let next = match w.section() {
                     Section::Changes => Section::History,
                     Section::History => Section::Changes,
@@ -1020,17 +947,14 @@ pub(crate) fn main() {
                 w.switch_section(next, cx)
             })
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowRepositoryList, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| w.show_repository_list(window, cx));
+            defer_in_focused_workspace(cx, |w, window, cx| w.show_repository_list(window, cx));
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowBranchesList, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| w.show_branches_list(window, cx));
+            defer_in_focused_workspace(cx, |w, window, cx| w.show_branches_list(window, cx));
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowWorktreesList, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| w.show_worktrees_list(window, cx));
+            defer_in_focused_workspace(cx, |w, window, cx| w.show_worktrees_list(window, cx));
         });
         // Corvene (`427-back-forward-navigation`)
         on_menu_action(cx, |_: &NavigateBack, cx| Dispatcher::navigate(true, cx));
@@ -1038,28 +962,21 @@ pub(crate) fn main() {
             Dispatcher::navigate(false, cx)
         });
         // Corvene (`801-history-review-mode`)
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ToggleHistoryReviewMode, cx| {
-            ws.update(cx, |w, cx| w.toggle_review_mode(cx))
+            with_focused_workspace(cx, |w, cx| w.toggle_review_mode(cx))
         });
         // Corvene (`612-navigation-shortcuts`)
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ShowPullRequestsList, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| {
-                w.show_pull_requests_list(window, cx)
-            });
+            defer_in_focused_workspace(cx, |w, window, cx| w.show_pull_requests_list(window, cx));
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &FocusDiff, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| w.focus_diff(window, cx));
+            defer_in_focused_workspace(cx, |w, window, cx| w.focus_diff(window, cx));
         });
-        let ws = workspace.clone();
         cx.on_action(move |_: &SelectNextFileFromDiff, cx| {
-            ws.update(cx, |w, cx| w.step_file(1, cx))
+            with_focused_workspace(cx, |w, cx| w.step_file(1, cx))
         });
-        let ws = workspace.clone();
         cx.on_action(move |_: &SelectPreviousFileFromDiff, cx| {
-            ws.update(cx, |w, cx| w.step_file(-1, cx))
+            with_focused_workspace(cx, |w, cx| w.step_file(-1, cx))
         });
         let step_repository = |step: isize, cx: &mut App| {
             let next = {
@@ -1078,32 +995,24 @@ pub(crate) fn main() {
         on_menu_action(cx, move |_: &PreviousRepository, cx| {
             step_repository(-1, cx)
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &GoToSummary, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| w.focus_commit_summary(window, cx));
+            defer_in_focused_workspace(cx, |w, window, cx| w.focus_commit_summary(window, cx));
         });
-        let ws = workspace.clone();
         cx.on_action(move |_: &Find, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| w.focus_filter(window, cx));
+            defer_in_focused_workspace(cx, |w, window, cx| w.focus_filter(window, cx));
         });
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &ToggleChangesFilter, cx| {
-            ws.update(cx, |w, cx| w.toggle_changes_filter(cx))
+            with_focused_workspace(cx, |w, cx| w.toggle_changes_filter(cx))
         });
         // View › Reset Zoom / Zoom In / Zoom Out (GHD `zoom(ZoomDirection)`)
-        let ws = workspace.clone();
-        cx.on_action(move |_: &ZoomIn, cx| ws.update(cx, |w, cx| w.zoom(1, cx)));
-        let ws = workspace.clone();
-        cx.on_action(move |_: &ZoomOut, cx| ws.update(cx, |w, cx| w.zoom(-1, cx)));
-        let ws = workspace.clone();
-        cx.on_action(move |_: &ResetZoom, cx| ws.update(cx, |w, cx| w.zoom(0, cx)));
-        let ws = workspace.clone();
+        cx.on_action(move |_: &ZoomIn, cx| with_focused_workspace(cx, |w, cx| w.zoom(1, cx)));
+        cx.on_action(move |_: &ZoomOut, cx| with_focused_workspace(cx, |w, cx| w.zoom(-1, cx)));
+        cx.on_action(move |_: &ResetZoom, cx| with_focused_workspace(cx, |w, cx| w.zoom(0, cx)));
         on_menu_action(cx, move |_: &CompareToBranch, cx| {
-            defer_in_workspace(&ws, cx, |w, window, cx| w.show_compare(window, cx));
+            defer_in_focused_workspace(cx, |w, window, cx| w.show_compare(window, cx));
         });
         // Branch menu
         let selected = |cx: &App| corvene_core::AppState::global(cx).read(cx).selected;
-        let ws = workspace.clone();
         on_menu_action(cx, move |_: &NewBranch, cx| {
             if let Some(id) = selected(cx) {
                 // `847-new-branch-from-filter`: like the foldout's New Branch
@@ -1112,7 +1021,10 @@ pub(crate) fn main() {
                     .read(cx)
                     .flags
                     .bool(corvene_core::flags::ids::NEW_BRANCH_FROM_FILTER)
-                    .then(|| ws.read(cx).open_branch_filter(cx))
+                    .then(|| {
+                        corvene_ui::windows::focused(cx)
+                            .and_then(|e| e.view.read(cx).open_branch_filter(cx))
+                    })
                     .flatten();
                 if from_filter.is_some() {
                     Dispatcher::close_foldout(cx);
@@ -1496,6 +1408,186 @@ pub(crate) fn main() {
     });
 }
 
+/// Open the window of workspace `workspace` (`429-multiple-windows`; the
+/// main window at launch, then File › New Window and "Open in New
+/// Window"): GHD's `BrowserWindow` options, the `Workspace` view, the
+/// per-window observers (system theme, reduce motion, the close button) and
+/// its entry in `corvene_ui::windows`. A later window cascades 22 px from
+/// the focused one.
+fn open_workspace_window(
+    workspace: corvene_core::WorkspaceId,
+    state: Entity<corvene_core::AppState>,
+    sidebar_width: Pixels,
+    started: Instant,
+    cx: &mut App,
+) {
+    if corvene_ui::windows::for_workspace(workspace, cx).is_some()
+        || state.read(cx).workspace(workspace).is_none()
+    {
+        return;
+    }
+    let first = corvene_ui::windows::count(cx) == 0;
+    // Same size as the GitHub Desktop reference captures in .docs.
+    let window_size = size(px(1367.), px(814.));
+    // CORVENE_WINDOW_SIZE=<width>x<height> (build with `--features
+    // snapshots`): another size, also below the minimum, for snapshots
+    // of the compact layout phones get.
+    #[cfg(feature = "snapshots")]
+    let forced_size = std::env::var("CORVENE_WINDOW_SIZE").ok().and_then(|spec| {
+        let (width, height) = spec.split_once('x')?;
+        Some(size(px(width.parse().ok()?), px(height.parse().ok()?)))
+    });
+    #[cfg(not(feature = "snapshots"))]
+    let forced_size = None::<Size<Pixels>>.filter(|_| false);
+    let window_size = forced_size.unwrap_or(window_size);
+    let cascaded = corvene_ui::windows::focused(cx).and_then(|entry| {
+        entry
+            .window
+            .update(cx, |_, window, _| match window.window_bounds() {
+                WindowBounds::Windowed(bounds) => Some(Bounds {
+                    origin: bounds.origin + point(px(22.), px(22.)),
+                    size: bounds.size,
+                }),
+                _ => None,
+            })
+            .ok()
+            .flatten()
+    });
+    let bounds = match cascaded {
+        Some(bounds) if !first => bounds,
+        _ => Bounds::centered(None, window_size, cx),
+    };
+    let options = WindowOptions {
+        titlebar: Some(TitlebarOptions {
+            title: Some("Corvene".into()),
+            // macOS: hiddenInset; Linux keeps the window manager's frame
+            // (Electron's default there)
+            // Windows: no frame either, GHD draws its own title bar
+            // there (`corvene_ui::title_bar_windows`)
+            appears_transparent: cfg!(any(target_os = "macos", windows)),
+            traffic_light_position: Some(point(px(9.), px(9.))),
+        }),
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        // GHD's 960 × 660; `407-smaller-minimum-sizes`: 600 × 400;
+        // `420-min-size-fits-display`: never more than the primary
+        // display's visible area (GHD's minimum can exceed a small
+        // screen, `main-process/app-window.ts` `minWidth` / `minHeight`)
+        window_min_size: Some(if let Some(forced) = forced_size {
+            forced
+        } else {
+            let flags = &state.read(cx).flags;
+            let min = if flags.bool(corvene_core::flags::ids::SMALLER_MINIMUM_SIZES) {
+                size(px(600.), px(400.))
+            } else {
+                size(px(960.), px(660.))
+            };
+            match cx.primary_display() {
+                Some(display) if flags.bool(corvene_core::flags::ids::MIN_SIZE_FITS_DISPLAY) => {
+                    min.min(&display.visible_bounds().size)
+                }
+                _ => min,
+            }
+        }),
+        app_id: Some(corvene_platform::BUNDLE_ID.into()),
+        // X11 `_NET_WM_ICON` (Electron sets the app icon on its window)
+        #[cfg(not(target_os = "macos"))]
+        icon: corvene_ui::title_bar::window_icon(),
+        ..Default::default()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let opened = {
+        let workspace_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let slot = workspace_slot.clone();
+        let state = state.clone();
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            let view = cx.new(|cx| Workspace::new(state, workspace, sidebar_width, window, cx));
+            *slot.borrow_mut() = Some(view.clone());
+            cx.new(|cx| corvene_ui::menu_bar::MenuBarShell::new(view.into(), cx))
+        })
+        .map(|(handle, _)| (handle, workspace_slot.borrow_mut().take()))
+    };
+    #[cfg(target_os = "macos")]
+    let opened = {
+        let state = state.clone();
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| Workspace::new(state, workspace, sidebar_width, window, cx))
+        })
+        .map(|(handle, view)| (handle, Some(view)))
+    };
+    let (handle, view): (AnyWindowHandle, Entity<Workspace>) = match opened {
+        Ok((handle, Some(view))) => {
+            info!(
+                elapsed_ms = started.elapsed().as_millis(),
+                %workspace,
+                "window opened"
+            );
+            (handle, view)
+        }
+        Ok((_, None)) => {
+            error!("the window opened without a workspace");
+            return;
+        }
+        Err(err) => {
+            error!(?err, "failed to open window");
+            return;
+        }
+    };
+    corvene_ui::windows::register(handle, workspace, view.clone(), cx);
+
+    // System theme follows macOS light/dark switches (`supportsSystemThemeChanges`)
+    // and, back in Corvene, the "Increase contrast" display option.
+    handle
+        .update(cx, |_, window, cx| {
+            view.update(cx, |_, cx| {
+                cx.observe_window_activation(window, |_, window, cx| {
+                    if window.is_window_active() {
+                        sync_reduce_motion(cx);
+                    }
+                    let theme = APPLIED_THEME.with(|t| t.get());
+                    if window.is_window_active()
+                        && theme == ThemeSetting::System
+                        && resolve_theme(theme, cx).name
+                            != corvene_ui::theme::ActiveGhdTheme::ghd(&**cx).name
+                    {
+                        apply_theme(theme, cx);
+                    }
+                })
+                .detach();
+            });
+            // the red close button hides the last window like ⌘W (GHD
+            // `window.on('close')` → `hide()` unless quitting); another
+            // window closes for good (`429-multiple-windows`)
+            window.on_window_should_close(cx, |window, cx| {
+                if corvene_ui::windows::count(cx) > 1 {
+                    return true;
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    corvene_ui::native_window::hide_window(window, cx);
+                    false
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let _ = (window, cx);
+                    true
+                }
+            });
+            window
+                .observe_window_appearance(|_, cx| {
+                    let theme = APPLIED_THEME.with(|t| t.get());
+                    if theme == ThemeSetting::System {
+                        apply_theme(theme, cx);
+                    }
+                })
+                .detach();
+            // a window opened after launch comes forward
+            if !first {
+                window.activate_window();
+            }
+        })
+        .ok();
+}
+
 /// A parity harness run (`CORVENE_CONTROL`, `tools/parity`): the harness
 /// injects input and renders offscreen, so Corvene never activates itself
 /// and parks its window out of sight, leaving the keyboard with whatever
@@ -1567,25 +1659,38 @@ fn resolve_theme_with(
 /// went to, and a menu item's does too (`Window::dispatch_action`): the
 /// window is out of the app until the dispatch returns, so updating it
 /// from the handler fails and the shortcut did nothing.
-fn defer_in_workspace(
-    workspace: &Entity<Workspace>,
+fn defer_in_focused_workspace(
     cx: &mut App,
     f: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
 ) {
-    let workspace = workspace.clone();
     cx.defer(move |cx| {
+        // `429-multiple-windows`: the key window's workspace
+        let Some(entry) = corvene_ui::windows::focused(cx) else {
+            return;
+        };
+        let workspace = entry.view;
         cx.with_window(workspace.entity_id(), |window, cx| {
             workspace.update(cx, |w, cx| f(w, window, cx))
         });
     });
 }
 
+/// Update the key window's workspace view (no window needed, so no
+/// deferral: the entity is free while its window is on the update stack).
+fn with_focused_workspace(cx: &mut App, f: impl FnOnce(&mut Workspace, &mut Context<Workspace>)) {
+    if let Some(entry) = corvene_ui::windows::focused(cx) {
+        entry.view.update(cx, f);
+    }
+}
+
 /// [`defer_in_workspace`] for the window commands (Close Window, Minimize,
 /// Zoom, Toggle Full Screen), which act on whichever window is active.
 fn defer_in_active_window(cx: &mut App, f: impl FnOnce(&mut Window, &mut App) + 'static) {
     cx.defer(move |cx| {
-        if let Some(window) = cx.active_window() {
-            window.update(cx, |_, window, cx| f(window, cx)).ok();
+        // the active window, else the focused workspace's (the parity
+        // harness's windows are never active)
+        if let Some(entry) = corvene_ui::windows::focused(cx) {
+            entry.window.update(cx, |_, window, cx| f(window, cx)).ok();
         }
     });
 }
@@ -1639,6 +1744,13 @@ fn focus_main_window(cx: &mut App) {
             .update(cx, |_, window, cx| {
                 corvene_ui::native_window::show_window(window, cx)
             })
+            .ok();
+    }
+    // `429-multiple-windows`: the focused window on top
+    if let Some(entry) = corvene_ui::windows::focused(cx) {
+        entry
+            .window
+            .update(cx, |_, window, _| window.activate_window())
             .ok();
     }
 }

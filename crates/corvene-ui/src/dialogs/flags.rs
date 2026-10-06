@@ -270,7 +270,7 @@ impl FlagsDialog {
             inputs.insert(id, input);
             synced.insert(id, value);
         }
-        cx.observe_in(&state, window, |this, _, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, _, window, cx| {
             this.resync(window, cx);
             cx.notify();
         })

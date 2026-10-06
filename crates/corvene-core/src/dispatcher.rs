@@ -144,6 +144,9 @@ impl Dispatcher {
         // `1306-utf16-diffs`
         corvene_git::utf16::set_decode_utf16(flags.bool(crate::flags::ids::UTF16_DIFFS));
         let hosts = crate::hosts::HostsState::load(&store);
+        let (workspaces, next_workspace_id) =
+            crate::workspace::restored_workspaces(&store, &flags, &repositories, selected, popups);
+        let first_workspace = workspaces[0].id;
         cx.install_state(AppState {
             store,
             settings,
@@ -156,19 +159,19 @@ impl Dispatcher {
             repositories,
             recent,
             recent_worktrees,
-            navigation: Default::default(),
+            workspaces,
+            current: first_workspace,
+            focused: first_workspace,
+            next_workspace_id,
             keymap_overrides: Default::default(),
             keymap_load_errors: Vec::new(),
             settings_overlay: Default::default(),
             settings_file_flags: Default::default(),
-            selected,
             repo_states: Default::default(),
             accounts,
-            foldout: None,
-            popups,
             cloning: Default::default(),
             ahead_behind: Default::default(),
-            branch_pruner_generation: 0,
+            pruner_generations: std::collections::HashMap::new(),
             shared_storage_move: None,
             pending_aliases: Vec::new(),
             sign_in_store: SignInStore::new(sign_in_accounts.clone()),
@@ -176,22 +179,17 @@ impl Dispatcher {
             authentication: None,
             extra_oauth_scopes: Vec::new(),
             ssh_key: Default::default(),
-            watcher: None,
-            watched_repo: None,
-            banner: None,
-            banner_nonce: 0,
+            watchers: std::collections::HashMap::new(),
+            watcher_generation: 0,
             indicators,
             generic_logins,
             enterprise_oauth_apps,
             avatars: std::collections::HashMap::new(),
-            drag_target: None,
             api_repositories: std::collections::HashMap::new(),
             api_repositories_loading: std::collections::HashSet::new(),
             pull_requests: std::collections::HashMap::new(),
-            branches_tab: crate::pull_requests::BranchesTab::Branches,
             tutorial_announced: false,
             tutorial_step_override: None,
-            show_ci_status_popover: false,
             commit_statuses: crate::commit_status::CommitStatusStore::default(),
             job_logs: crate::job_log::JobLogStore::default(),
             menu_bar_statuses: Default::default(),
@@ -221,7 +219,7 @@ impl Dispatcher {
         Self::detect_integrations(cx);
         Self::refresh_hook_env(cx);
 
-        if let Some(id) = state.read(cx).selected {
+        for id in state.read(cx).visible_repositories() {
             Self::refresh_repository(id, cx);
             Self::start_background_pruner(id, cx);
             Self::start_watching(id, cx);
@@ -243,7 +241,7 @@ impl Dispatcher {
         crate::repository_list_file::set_enabled(
             s.flags.bool(crate::flags::ids::CLI_LIST_REPOSITORIES),
             dir,
-            Some((&s.repositories, s.selected)),
+            Some((&s.repositories, s.workspaces[0].selected)),
         );
     }
 
@@ -254,7 +252,7 @@ impl Dispatcher {
         let state = Self::state(cx);
         let (path, debounce, leading) = {
             let s = state.read(cx);
-            if s.watched_repo == Some(id) || !s.flags.bool(crate::flags::ids::FS_WATCHER) {
+            if s.watchers.contains_key(&id) || !s.flags.bool(crate::flags::ids::FS_WATCHER) {
                 return;
             }
             let Some(repo) = s.repository(id) else {
@@ -269,15 +267,16 @@ impl Dispatcher {
         };
         match crate::watcher::watch(path.clone(), debounce, leading) {
             Ok((watcher, rx)) => {
-                state.update(cx, |s, _| {
-                    s.watcher = Some(watcher);
-                    s.watched_repo = Some(id);
+                let generation = state.update(cx, |s, _| {
+                    s.watcher_generation += 1;
+                    s.watchers.insert(id, (s.watcher_generation, watcher));
+                    s.watcher_generation
                 });
                 cx.spawn(async move |cx: &mut AsyncCtx| {
                     while let Ok(changed_at) = rx.recv().await {
                         let (still_watched, seen) = state.read_with(cx, |s, _| {
                             (
-                                s.watched_repo == Some(id),
+                                s.watchers.get(&id).is_some_and(|(g, _)| *g == generation),
                                 // a refresh that started after the change
                                 // (the one after Corvene's own git command)
                                 // already saw it
@@ -299,6 +298,14 @@ impl Dispatcher {
             }
             Err(err) => warn!(?err, path = %path.display(), "could not watch repository"),
         }
+    }
+
+    /// Drop the watchers of repositories no window shows any more.
+    pub(crate) fn stop_unwatched(cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, _| {
+            let visible = s.visible_repositories();
+            s.watchers.retain(|id, _| visible.contains(id));
+        });
     }
 
     /// Start looking for git on a thread; the first thing `main` does
@@ -765,10 +772,7 @@ impl Dispatcher {
                         rs.unsafe_path = None;
                         rs.worktrees.clear();
                         // force the file watcher onto the new directory
-                        if s.watched_repo == Some(id) {
-                            s.watched_repo = None;
-                            s.watcher = None;
-                        }
+                        s.watchers.remove(&id);
                         cx.notify();
                         true
                     });
@@ -939,7 +943,12 @@ impl Dispatcher {
             if s.selected != Some(id) {
                 s.record_navigation();
             }
-            s.selected = Some(id);
+            // `430-repository-tabs`: the tab strip follows
+            if s.flags.bool(crate::flags::ids::REPOSITORY_TABS) {
+                s.select_tab(id);
+            } else {
+                s.selected = Some(id);
+            }
             s.recent.retain(|r| *r != id);
             s.recent.insert(0, id);
             // `209-recent-repositories-count` shows up to that many; at
@@ -976,12 +985,13 @@ impl Dispatcher {
                     s.popups.remove_popup_by_id(popup_id);
                 }
             }
-            let _ = s.store.save_selected_repository(Some(id));
+            crate::workspace::persist_workspaces(s);
             let _ = s.store.save_recent_repositories(&s.recent);
             cx.notify();
             true
         });
         if changed {
+            Self::stop_unwatched(cx);
             Self::refresh_repository(id, cx);
             Self::start_background_pruner(id, cx);
             Self::start_watching(id, cx);
@@ -1026,36 +1036,44 @@ impl Dispatcher {
 
     pub fn remove_repository(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
-        let (next, moved) = state.update(cx, |s, cx| {
+        let moved_to = state.update(cx, |s, cx| {
             s.repositories.retain(|r| r.id != id);
             s.recent.retain(|r| *r != id);
-            s.navigation.forget(id);
             s.forget_recent_worktrees(id, None);
             s.remove_repo_state(id);
-            let moved = s.selected == Some(id);
-            let next = if moved {
-                s.recent
-                    .first()
-                    .copied()
-                    .or_else(|| s.repositories.first().map(|r| r.id))
-            } else {
-                s.selected
-            };
-            s.selected = next;
+            s.watchers.remove(&id);
+            let fallback = s
+                .recent
+                .first()
+                .copied()
+                .or_else(|| s.repositories.first().map(|r| r.id));
+            // every window showing it moves on (GHD
+            // `updateRepositorySelectionAfterRepositoriesChanged`)
+            let mut moved_to = Vec::new();
+            for w in &mut s.workspaces {
+                w.forget_repository(id);
+                if w.selected == Some(id) {
+                    w.selected = fallback;
+                    if let Some(next) = fallback {
+                        if !w.tabs.is_empty() && !w.tabs.contains(&next) {
+                            w.tabs.push(next);
+                        }
+                        moved_to.push(next);
+                    }
+                }
+            }
             persist_repositories(s);
             let _ = s.store.save_recent_repositories(&s.recent);
-            let _ = s.store.save_selected_repository(next);
+            crate::workspace::persist_workspaces(s);
             cx.notify();
-            (next, moved)
+            moved_to
         });
-        if let Some(next) = next {
+        for next in moved_to {
             Self::refresh_repository(next, cx);
-            // GHD `updateRepositorySelectionAfterRepositoriesChanged` selects
-            // the next repository through `_selectRepository`, which starts
-            // its branch pruner
-            if moved {
-                Self::start_background_pruner(next, cx);
-            }
+            // selecting the next repository through `_selectRepository`
+            // starts its branch pruner
+            Self::start_background_pruner(next, cx);
+            Self::start_watching(next, cx);
         }
         Self::restart_pull_request_updater(cx);
     }
@@ -1065,11 +1083,12 @@ impl Dispatcher {
     /// branches (`crate::branch_pruner`) once the refresh selecting it
     /// started has finished, then every `BACKGROUND_PRUNE_MINIMUM_INTERVAL`
     /// while it stays selected.
-    fn start_background_pruner(id: u64, cx: &mut dyn Host) {
+    pub(crate) fn start_background_pruner(id: u64, cx: &mut dyn Host) {
         let state = Self::state(cx);
         let (generation, loading) = state.update(cx, |s, _| {
-            s.branch_pruner_generation += 1;
-            let generation = s.branch_pruner_generation;
+            let generation = s.pruner_generations.entry(id).or_insert(0);
+            *generation += 1;
+            let generation = *generation;
             let rs = s.repo_state_mut(id);
             rs.prune_after_refresh = rs.loading;
             (generation, rs.loading)
@@ -1083,7 +1102,8 @@ impl Dispatcher {
                     .timer(crate::branch_pruner::BACKGROUND_PRUNE_MINIMUM_INTERVAL)
                     .await;
                 let current = state.read_with(cx, |s, _| {
-                    s.branch_pruner_generation == generation && s.selected == Some(id)
+                    s.pruner_generations.get(&id) == Some(&generation)
+                        && s.visible_repositories().contains(&id)
                 });
                 if !current {
                     break;
@@ -2413,9 +2433,8 @@ impl Dispatcher {
     /// selected repository's list.
     pub fn set_history_all_branches(on: bool, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.history_all_branches = on);
-        let selected = Self::state(cx).read(cx).selected;
         if on {
-            if let Some(id) = selected {
+            for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_all_branches(id, false, cx);
             }
         } else {
@@ -6734,7 +6753,7 @@ impl Dispatcher {
                 s.hide_whitespace_in_changes_diff = hide;
             }
         });
-        if let Some(id) = Self::state(cx).read(cx).selected {
+        for id in Self::state(cx).read(cx).visible_repositories() {
             if history {
                 // `793-hide-whitespace-only-files`: the list depends on it
                 if Self::state(cx)
@@ -7287,7 +7306,7 @@ impl Dispatcher {
                     }
                 }
                 // `refreshSelectedRepositoryAfterAccountChange`
-                if let Some(id) = Self::state(cx).read(cx).selected {
+                for id in Self::state(cx).read(cx).visible_repositories() {
                     Self::refresh_github_repository(id, cx);
                 }
             });
@@ -7574,8 +7593,25 @@ pub(crate) fn show_popup_in(s: &mut AppState, popup: Popup) {
     add_popup_in(s, popup);
 }
 
-/// [`show_popup_in`] without its side effects.
+/// [`show_popup_in`] without its side effects. A popup bound to a
+/// repository another window shows (a push error, a conflicts dialog that
+/// finished after the user moved on) opens in that window
+/// (`429-multiple-windows`).
 fn add_popup_in(s: &mut AppState, popup: Popup) {
+    let elsewhere = popup
+        .repository()
+        .filter(|repo| s.selected != Some(*repo))
+        .and_then(|repo| s.workspace_showing(repo));
+    if let Some(workspace) = elsewhere {
+        let before = std::mem::replace(&mut s.current, workspace);
+        add_popup_here(s, popup);
+        s.current = before;
+    } else {
+        add_popup_here(s, popup);
+    }
+}
+
+fn add_popup_here(s: &mut AppState, popup: Popup) {
     if !popup.is_error()
         && let Some(existing) = s
             .popups

@@ -61,9 +61,12 @@ extern "C" fn status_action(_this: &Object, _sel: Sel, item: id) {
     };
     app.spawn(async move |cx: &mut AsyncApp| {
         cx.update(|cx| {
-            // the first window is the main one (hidden or not)
-            if let Some(handle) = cx.windows().into_iter().next() {
-                handle.update(cx, |_, window, cx| action(window, cx)).ok();
+            // the focused window (`429-multiple-windows`), hidden or not
+            if let Some(entry) = crate::windows::focused(cx) {
+                entry
+                    .window
+                    .update(cx, |_, window, cx| action(window, cx))
+                    .ok();
             }
         });
     })

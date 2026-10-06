@@ -284,7 +284,7 @@ impl RepositorySettingsDialog {
             cx.notify();
         })
         .detach();
-        cx.observe_in(&state, window, |this, state, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             this.fill(&state, window, cx);
             cx.notify();
         })

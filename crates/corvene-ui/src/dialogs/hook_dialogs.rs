@@ -116,7 +116,8 @@ impl CommitProgressDialog {
         let (written, offset) = output.tail();
         // `<Terminal hideCursor cols={80} rows={20} />`
         let terminal = cx.new(|_| Terminal::new(80, 20, &written));
-        let _observe = cx.observe(&state, |this: &mut Self, _, cx| this.catch_up(cx));
+        let _observe =
+            crate::windows::observe_state(&state, cx, |this: &mut Self, _, cx| this.catch_up(cx));
         Self {
             state,
             output,

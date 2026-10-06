@@ -274,7 +274,7 @@ pub fn toolbar_models(
         },
         title: repo
             .map(|r| r.name().into())
-            .unwrap_or_else(|| SharedString::from("Select a repository")),
+            .unwrap_or_else(|| mac_or("Select a Repository", "Select a repository").into()),
         width: Some(sidebar_width),
         foldout: Some(Foldout::Repository),
         open: state.foldout == Some(Foldout::Repository),

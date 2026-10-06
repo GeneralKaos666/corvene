@@ -138,6 +138,10 @@ pub struct MenuExtras {
     pub show_view_upstream: bool,
     /// Flag `405-window-menu-main-window`.
     pub show_main_window: bool,
+    /// Flag `429-multiple-windows`: File › New Window.
+    pub show_new_window: bool,
+    /// Flag `430-repository-tabs`: Window › Show Next / Previous Tab.
+    pub tabs: bool,
     /// Flag `221-add-license`.
     pub show_add_license: bool,
     /// Flag `247-fetch-all-repositories`.
@@ -213,6 +217,8 @@ impl MenuExtras {
                 && flags.bool(ids::IMPORT_FROM_GITHUB_DESKTOP),
             show_view_upstream: flags.bool(ids::VIEW_UPSTREAM_ON_GITHUB),
             show_main_window: flags.bool(ids::WINDOW_MENU_MAIN_WINDOW),
+            show_new_window: flags.bool(ids::MULTIPLE_WINDOWS),
+            tabs: flags.bool(ids::REPOSITORY_TABS),
             show_add_license: flags.bool(ids::ADD_LICENSE),
             fetch_all: flags.bool(ids::FETCH_ALL_REPOSITORIES),
             pull_all: flags.bool(ids::PULL_ALL_REPOSITORIES),
@@ -521,7 +527,13 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
         ));
     }
 
-    let mut file_items = vec![
+    let mut file_items = Vec::new();
+    // Corvene (`429-multiple-windows`): the old native GitHub Desktop's
+    // File › New Window (desktop/desktop#3606)
+    if extras.show_new_window {
+        file_items.extend([item(l("New Window", "New &window"), NewWindow), separator()]);
+    }
+    file_items.extend([
         item(l("New Repository…", "New &repository…"), NewRepository),
         separator(),
         item(
@@ -532,7 +544,7 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             l("Clone Repository…", "Clo&ne repository…"),
             CloneRepository,
         ),
-    ];
+    ]);
     if extras.show_import {
         file_items.push(item(
             l(
@@ -689,6 +701,15 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             ContractActiveResizable,
         ),
     ]);
+    // Corvene (`430-repository-tabs`): off macOS the Window menu does not
+    // exist, so the tab items go here
+    if extras.tabs && !cfg!(target_os = "macos") {
+        view.extend([
+            separator(),
+            item("Show next &tab", NextTab),
+            item("Show previo&us tab", PreviousTab),
+        ]);
+    }
     template.push(submenu(l("View", "&View"), view));
 
     let mut repository = vec![
@@ -1011,7 +1032,10 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     template.push(submenu(l("Branch", "&Branch"), branch));
 
     if cfg!(target_os = "macos") {
-        template.push(submenu("Window", window_items(extras.show_main_window)));
+        template.push(submenu(
+            "Window",
+            window_items(extras.show_main_window, extras.tabs),
+        ));
     }
     template.push(submenu(
         l("Help", "&Help"),
@@ -1081,14 +1105,21 @@ fn remote_items(
 
 /// Window menu; flag `405-window-menu-main-window` appends "Corvene", which
 /// shows the main window again after ⌘W or the red close button.
-fn window_items(show_main_window: bool) -> Vec<MenuItemConstructorOptions> {
+fn window_items(show_main_window: bool, tabs: bool) -> Vec<MenuItemConstructorOptions> {
     let mut items = vec![
         item("Minimize", Minimize),
         item("Zoom", Zoom),
         item("Close Window", CloseWindow),
-        separator(),
-        item("Bring All to Front", BringAllToFront),
     ];
+    // Corvene (`430-repository-tabs`): Safari's tab items
+    if tabs {
+        items.extend([
+            separator(),
+            item("Show Next Tab", NextTab),
+            item("Show Previous Tab", PreviousTab),
+        ]);
+    }
+    items.extend([separator(), item("Bring All to Front", BringAllToFront)]);
     if show_main_window {
         items.extend([separator(), item("Corvene", ShowMainWindow)]);
     }
@@ -1239,6 +1270,8 @@ mod tests {
                     show_import: true,
                     show_view_upstream: true,
                     show_main_window: true,
+                    show_new_window: true,
+                    tabs: true,
                     show_add_license: true,
                     fetch_all: true,
                     pull_all: true,
@@ -1266,6 +1299,8 @@ mod tests {
                         navigation_shortcuts: true,
                         history_review_mode: true,
                         back_forward: true,
+                        multiple_windows: true,
+                        repository_tabs: true,
                         ..KeymapFlags::default()
                     },
                 },

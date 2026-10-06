@@ -851,5 +851,15 @@ class Corvene:
     def dismiss_menu(self):
         pass
 
-    def snap(self, path: Path):
-        self.cmd("snap", path=str(path))
+    def snap(self, path: Path, window: int | None = None):
+        if window is None:
+            self.cmd("snap", path=str(path))
+        else:
+            self.cmd("snap", path=str(path), window=window)
+
+    # `429-multiple-windows`: the open windows and which one later commands target
+    def windows(self) -> list[dict]:
+        return self.cmd("windows").get("windows", [])
+
+    def activate_window(self, index: int):
+        self.cmd("activate-window", window=index)

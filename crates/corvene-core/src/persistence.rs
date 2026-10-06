@@ -675,6 +675,10 @@ pub trait StoreExt {
     ) -> Result<()>;
     fn selected_repository(&self) -> Result<Option<u64>>;
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()>;
+    /// `429-multiple-windows` / `430-repository-tabs`: the windows' selected
+    /// repositories and tabs (`crate::workspace`), the main window first.
+    fn workspaces(&self) -> Result<Vec<crate::workspace::SavedWorkspace>>;
+    fn save_workspaces(&self, workspaces: &[crate::workspace::SavedWorkspace]) -> Result<()>;
     /// Unfinished commit messages by repository id (flag
     /// `766-persist-commit-drafts`).
     fn commit_drafts(&self) -> Result<std::collections::HashMap<u64, crate::drafts::CommitDraft>>;
@@ -873,6 +877,14 @@ impl StoreExt for Store {
 
     fn selected_repository(&self) -> Result<Option<u64>> {
         self.get("ui.selected_repository")
+    }
+
+    fn workspaces(&self) -> Result<Vec<crate::workspace::SavedWorkspace>> {
+        Ok(self.get("ui.workspaces")?.unwrap_or_default())
+    }
+
+    fn save_workspaces(&self, workspaces: &[crate::workspace::SavedWorkspace]) -> Result<()> {
+        self.set("ui.workspaces", &workspaces)
     }
 
     fn commit_drafts(&self) -> Result<std::collections::HashMap<u64, crate::drafts::CommitDraft>> {

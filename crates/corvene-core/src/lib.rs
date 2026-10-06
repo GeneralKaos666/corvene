@@ -100,6 +100,7 @@ pub mod tutorial;
 pub mod updater;
 pub mod watcher;
 pub mod web_flow;
+pub mod workspace;
 pub mod worktrees;
 
 pub use alive::{AliveEventData, AliveState};
@@ -149,3 +150,4 @@ pub use state::{
     SharedStorageMoveState, SigningConfig, UnreachableCommitsTab,
 };
 pub use updater::{AvailableUpdate, PackageManager, UpdateState, UpdateStatus};
+pub use workspace::{SavedWorkspace, WorkspaceId, WorkspaceState};

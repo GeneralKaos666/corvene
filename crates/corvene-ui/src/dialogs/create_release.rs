@@ -62,7 +62,7 @@ impl CreateReleaseDialog {
             cx.observe(input, |_, _, cx| cx.notify()).detach();
         }
         cx.observe(&body, |_, _, cx| cx.notify()).detach();
-        cx.observe_in(&state, window, |this, state, window, cx| {
+        crate::windows::observe_state_in(&state, window, cx, |this, state, window, cx| {
             // the generated notes arrive through the state
             let waiting = this.generating;
             let done = state

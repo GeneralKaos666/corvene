@@ -46,6 +46,10 @@
 //!   foldout
 //! - `focus` → `{contexts}`: the focused element's key contexts, outermost
 //!   first (which bindings a key reaches)
+//! - `windows` → `{windows: [{index, workspace, selected, focused}]}`: the
+//!   open windows (`429-multiple-windows`); every window command above takes
+//!   an optional `window: <index>` (default: the focused window), and
+//!   `activate-window {window}` makes one the focused window
 //! - `quit`
 
 use std::io::{BufRead, BufReader, Write};
@@ -154,16 +158,55 @@ fn handle(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, Stri
         "quit" => return Ok(json!({})),
         "hook" => return hook(request, popup, cx),
         "state" => return Ok(state_summary(cx)),
+        "windows" => return Ok(windows_summary(cx)),
+        "activate-window" => {
+            let entry = target_window(request, cx)?;
+            Dispatcher::activate_workspace(entry.workspace, cx);
+            return Ok(json!({}));
+        }
         _ => {}
     }
-    let handle = cx
-        .windows()
-        .first()
-        .copied()
-        .ok_or_else(|| "no window".to_string())?;
-    handle
+    // `429-multiple-windows`: the command runs for the window's workspace
+    let entry = target_window(request, cx)?;
+    Dispatcher::enter_workspace(entry.workspace, cx);
+    let result = entry
+        .window
         .update(cx, |_, window, cx| window_command(cmd, request, window, cx))
-        .map_err(|err| err.to_string())?
+        .map_err(|err| err.to_string());
+    Dispatcher::leave_workspace(cx);
+    result?
+}
+
+/// The window a command names (`window: <index>` into [`windows_summary`]),
+/// else the focused one.
+fn target_window(request: &Value, cx: &App) -> Result<corvene_ui::windows::WindowEntry, String> {
+    match request["window"].as_u64() {
+        Some(index) => corvene_ui::windows::entries(cx)
+            .get(index as usize)
+            .cloned()
+            .ok_or_else(|| format!("no window {index}")),
+        None => corvene_ui::windows::focused(cx).ok_or_else(|| "no window".to_string()),
+    }
+}
+
+/// `windows`: the open windows in creation order.
+fn windows_summary(cx: &App) -> Value {
+    let state = corvene_core::AppState::global(cx).read(cx);
+    let windows: Vec<Value> = corvene_ui::windows::entries(cx)
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let ws = state.workspace(entry.workspace);
+            json!({
+                "index": index,
+                "workspace": entry.workspace.0,
+                "selected": ws.and_then(|w| w.selected),
+                "tabs": ws.map(|w| w.tabs.clone()).unwrap_or_default(),
+                "focused": state.focused == entry.workspace,
+            })
+        })
+        .collect();
+    json!({"windows": windows})
 }
 
 fn window_command(
@@ -496,10 +539,12 @@ fn thread_cpu_ms() -> f64 {
     ts.tv_sec as f64 * 1000.0 + ts.tv_nsec as f64 / 1_000_000.0
 }
 
-/// Draw one fresh frame of the first window; its duration in ms (wall
+/// Draw one fresh frame of the focused window; its duration in ms (wall
 /// clock, main-thread CPU) and its main-thread instructions (millions).
 fn draw_frame(cx: &mut App) -> Result<(f64, f64, f64), String> {
-    let handle = cx.windows().first().copied().ok_or("no window")?;
+    let handle = corvene_ui::windows::focused(cx)
+        .map(|e| e.window)
+        .ok_or("no window")?;
     handle
         .update(cx, |_, window, cx| {
             let (started, cpu, instr) =
@@ -590,9 +635,13 @@ fn predicate(until: &str, cx: &mut App) -> Result<bool, String> {
 fn state_summary(cx: &mut App) -> Value {
     let state = corvene_core::AppState::global(cx).read(cx);
     let Some(rs) = state.selected.and_then(|id| state.repo_states.get(&id)) else {
-        return json!({});
+        return json!({"windows": state.workspaces.len(), "workspace": state.current.0});
     };
     json!({
+        // `429-multiple-windows`
+        "windows": state.workspaces.len(),
+        "workspace": state.current.0,
+        "tabs": state.tabs,
         "selected_file": rs.selected_file,
         "selected_commit": rs.selected_commit,
         "commits": rs.commits.iter().take(200).map(|c| c.sha.clone()).collect::<Vec<_>>(),

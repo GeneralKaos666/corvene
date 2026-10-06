@@ -211,6 +211,12 @@ gpui_kit::actions!(
         CloseWindow,
         BringAllToFront,
         ShowMainWindow,
+        // File › New Window (`429-multiple-windows`)
+        NewWindow,
+        // `430-repository-tabs`
+        NextTab,
+        PreviousTab,
+        CloseTab,
         // Help
         ReportIssue,
         ContactSupport,

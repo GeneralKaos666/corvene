@@ -72,6 +72,7 @@ pub mod stash_view;
 #[cfg(target_os = "macos")]
 pub mod status_item;
 pub mod tab_bar;
+pub mod tab_strip;
 pub mod tags_list;
 pub mod terminal;
 pub mod theme;
@@ -84,6 +85,7 @@ pub mod tutorial_panel;
 pub mod views_menu;
 pub mod welcome;
 pub mod widgets;
+pub mod windows;
 pub mod workspace;
 pub mod worktree_list;
 

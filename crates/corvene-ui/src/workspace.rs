@@ -15,7 +15,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use corvene_core::{AppState, Dispatcher, Section};
+use corvene_core::{AppState, Dispatcher, Section, WorkspaceId};
 use corvene_platform::editors::SETTINGS_LABEL;
 use gpui_kit::component::resizable::{
     ResizablePanelEvent, ResizableState, h_resizable, resizable_panel,
@@ -39,9 +39,10 @@ use crate::repository_list::RepositoryFoldout;
 use crate::selected_commit::SelectedCommitView;
 use crate::stash_view::StashDiffViewer;
 use crate::tab_bar::{TabModel, tab_bar};
+use crate::tab_strip::tab_strip;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
-use crate::title_bar::{light_title_bar, title_bar};
+use crate::title_bar::{light_title_bar, title_bar, title_bar_with};
 use crate::toolbar::{
     ToolbarResize, toolbar, toolbar_models, toolbar_widths, worktree_button_visible,
 };
@@ -68,6 +69,9 @@ enum MissingRepository {
 pub struct Workspace {
     focus_handle: FocusHandle,
     state: Entity<AppState>,
+    /// The workspace this window shows (`crate::windows`,
+    /// `corvene_core::workspace`).
+    workspace_id: WorkspaceId,
     section: Section,
     sidebar_width: Pixels,
     resizable: Entity<ResizableState>,
@@ -158,6 +162,7 @@ fn sidebar_min_width(state: &AppState) -> Pixels {
 impl Workspace {
     pub fn new(
         state: Entity<AppState>,
+        workspace_id: WorkspaceId,
         sidebar_width: Pixels,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -166,8 +171,13 @@ impl Workspace {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         // GHD: `ipcRenderer.on('focus')` → refreshRepository.
         // `_setAppFocusState` pauses the pull request updater while blurred.
-        cx.observe_window_activation(window, |_, window, cx| {
+        // `429-multiple-windows`: the active window's workspace is the one
+        // window-level work (URLs, the menu bar) is for.
+        cx.observe_window_activation(window, |this, window, cx| {
             let active = window.is_window_active();
+            if active {
+                Dispatcher::activate_workspace(this.workspace_id, cx);
+            }
             Dispatcher::set_app_focus_state(active, cx);
             if active {
                 Dispatcher::refresh_selected(cx);
@@ -178,14 +188,21 @@ impl Workspace {
         // menu actions stay available (GPUI disables items whose action has no handler
         // in the focus path).
         cx.observe_in(&state, window, |this, state, window, cx| {
-            let s = state.read(cx);
-            let overlay_open = s.popup().is_some() || s.foldout.is_some();
-            let foldout = s.foldout;
-            let popup_closed = this.popup_was_open && s.popup().is_none();
-            if !this.popup_was_open && s.popup().is_some() {
+            // this window's workspace, not the focused one's
+            let (popup_open, foldout) = {
+                let s = state.read(cx);
+                let ws = s.workspace(this.workspace_id);
+                (
+                    ws.is_some_and(|w| w.popups.current_popup().is_some()),
+                    ws.and_then(|w| w.foldout),
+                )
+            };
+            let overlay_open = popup_open || foldout.is_some();
+            let popup_closed = this.popup_was_open && !popup_open;
+            if !this.popup_was_open && popup_open {
                 this.focus_before_popup = window.focused(cx);
             }
-            this.popup_was_open = s.popup().is_some();
+            this.popup_was_open = popup_open;
             let restore = if popup_closed {
                 this.focus_before_popup.take()
             } else {
@@ -291,6 +308,7 @@ impl Workspace {
         Self {
             focus_handle,
             state,
+            workspace_id,
             section: Section::Changes,
             sidebar_width: sidebar_width.max(sidebar_min),
             resizable,
@@ -1199,6 +1217,30 @@ impl Workspace {
     }
 }
 
+/// GHD `NoRepositorySelected` (`app.tsx`): `.panel.blankslate` with "No
+/// repository selected" when `selectedState` is null, which GHD reaches
+/// only in passing; Corvene's File › New Window (`429-multiple-windows`)
+/// shows it until a repository is picked.
+fn no_repository_selected(cx: &App) -> AnyElement {
+    let t = cx.ghd();
+    div()
+        .id("no-repository-selected")
+        .flex_1()
+        .min_h_0()
+        .w_full()
+        .border_t_1()
+        .border_color(t.box_border)
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(SPACING())
+        .bg(t.box_alt_background)
+        .text_color(t.text_secondary)
+        .text_align(TextAlign::Center)
+        .child("No repository selected")
+        .into_any_element()
+}
+
 thread_local! {
     /// Trackpad pixels scrolled with ⌘ / Ctrl held since the last zoom step.
     static WHEEL_ZOOM_PIXELS: Cell<f32> = const { Cell::new(0.) };
@@ -1315,6 +1357,11 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // `429-multiple-windows`: this frame reads this window's workspace
+        // (`s.selected`, `s.foldout`, `s.popup()` in every child); the
+        // focused one is current again once the frame is drawn
+        Dispatcher::enter_workspace(self.workspace_id, cx);
+        cx.defer(|cx| Dispatcher::leave_workspace(cx));
         // The section is per repository (`repositoryState.selectedSection`), so
         // dispatcher-driven switches (Amend Commit…, undo) and repository
         // changes land here.
@@ -1438,7 +1485,7 @@ impl Render for Workspace {
             mut buttons,
             foldout,
             popup,
-            has_repos,
+            (has_repos, no_selection, tabs),
             cloning,
             banner,
             worktree_button,
@@ -1456,7 +1503,14 @@ impl Render for Workspace {
                 toolbar_models(state, self.sidebar_width, widths, &self.pr_badge_bounds),
                 state.foldout,
                 state.popup().is_some(),
-                !state.repositories.is_empty(),
+                (
+                    !state.repositories.is_empty(),
+                    // `429-multiple-windows`: a new window before a
+                    // repository is picked (GHD `NoRepositorySelected`)
+                    state.selected.is_none(),
+                    // `430-repository-tabs`
+                    state.flags.bool(corvene_core::flags::ids::REPOSITORY_TABS),
+                ),
                 state.cloning.latest().cloned(),
                 state.banner.clone(),
                 worktree_button_visible(state),
@@ -1529,8 +1583,14 @@ impl Render for Workspace {
             .text_color(t.text)
             .text_size(FONT_SIZE())
             .font_family(crate::theme::ui_font())
-            .when(!bare && cfg!(target_os = "macos"), |d| {
-                d.child(title_bar(cx))
+            // `430-repository-tabs`: the tab strip takes the title bar's
+            // place (and adds one off macOS)
+            .when(!bare && (cfg!(target_os = "macos") || tabs), |d| {
+                if tabs {
+                    d.child(title_bar_with(tab_strip(self.state.read(cx), cx), cx))
+                } else {
+                    d.child(title_bar(cx))
+                }
             })
             .when_some(self.welcome.clone(), |d, welcome| {
                 d.child(div().flex_1().min_h_0().w_full().child(welcome))
@@ -1599,6 +1659,8 @@ impl Render for Workspace {
                             .into_any_element(),
                         })
                         .into_any_element()
+                } else if has_repos && !tutorial_paused && no_selection {
+                    no_repository_selected(cx)
                 } else if has_repos && !tutorial_paused {
                     self.repository_view_with_tutorial(cx)
                 } else {

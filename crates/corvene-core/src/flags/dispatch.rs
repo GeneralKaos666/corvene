@@ -222,7 +222,7 @@ impl Dispatcher {
             corvene_git::text_encoding::set_decode_legacy_text(now.bool(ids::NON_UTF8_DIFFS));
             corvene_git::utf16::set_decode_utf16(now.bool(ids::UTF16_DIFFS));
             crate::diff_cache::clear_diffs();
-            if let Some(id) = Self::state(cx).read(cx).selected {
+            for id in Self::state(cx).read(cx).visible_repositories() {
                 Self::load_diff(id, cx);
                 Self::load_commit_diff(id, cx);
             }
@@ -249,15 +249,14 @@ impl Dispatcher {
         }
     }
 
-    /// Drop the watcher and start it again for the selected repository (or
-    /// not, when `202-fs-watcher` is off).
+    /// Drop the watchers and start them again for the visible repositories
+    /// (or not, when `202-fs-watcher` is off).
     pub fn restart_watcher(cx: &mut dyn Host) {
-        let selected = Self::state(cx).update(cx, |s, _| {
-            s.watcher = None;
-            s.watched_repo = None;
-            s.selected
+        let visible = Self::state(cx).update(cx, |s, _| {
+            s.watchers.clear();
+            s.visible_repositories()
         });
-        if let Some(id) = selected {
+        for id in visible {
             Self::start_watching(id, cx);
         }
     }

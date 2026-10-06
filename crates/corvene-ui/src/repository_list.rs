@@ -1321,6 +1321,39 @@ fn repository_menu_items(repo: &Repository, cx: &App) -> Vec<crate::context_menu
             .enabled(!missing),
         );
     }
+    // Corvene (`429-multiple-windows`, `430-repository-tabs`): the
+    // repository next to this one (desktop/desktop#22427)
+    let (new_window, new_tab) = (
+        state.flags.bool(corvene_core::flags::ids::MULTIPLE_WINDOWS),
+        state.flags.bool(corvene_core::flags::ids::REPOSITORY_TABS),
+    );
+    if new_window || new_tab {
+        items.push(MenuItem::separator());
+    }
+    if new_tab {
+        items.push(
+            MenuItem::new(
+                mac_or("Open in New Tab", "Open in new tab"),
+                move |_, cx| {
+                    Dispatcher::close_foldout(cx);
+                    Dispatcher::open_tab(id, cx);
+                },
+            )
+            .enabled(!missing),
+        );
+    }
+    if new_window {
+        items.push(
+            MenuItem::new(
+                mac_or("Open in New Window", "Open in new window"),
+                move |_, cx| {
+                    Dispatcher::close_foldout(cx);
+                    crate::windows::open_repository_in_new_window(id, cx);
+                },
+            )
+            .enabled(!missing),
+        );
+    }
     items.extend([
         MenuItem::separator(),
         MenuItem::new(

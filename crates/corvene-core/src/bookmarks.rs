@@ -164,10 +164,7 @@ impl Dispatcher {
                     rs.unsafe_path = None;
                     rs.error = None;
                     rs.worktrees.clear();
-                    if s.watched_repo == Some(id) {
-                        s.watched_repo = None;
-                        s.watcher = None;
-                    }
+                    s.watchers.remove(&id);
                     cx.notify();
                     Some(repo.name())
                 });

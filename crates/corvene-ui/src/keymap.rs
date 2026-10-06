@@ -42,6 +42,10 @@ pub struct KeymapFlags {
     pub history_review_mode: bool,
     /// `419-extra-zoom-inputs`: ⌘+ / ⇧⌘= (and the keypad's +) zoom in too.
     pub extra_zoom_inputs: bool,
+    /// `429-multiple-windows`: ⌥⌘N opens a new window.
+    pub multiple_windows: bool,
+    /// `430-repository-tabs`: ⌥⌘→ / ⌥⌘← step through the tabs.
+    pub repository_tabs: bool,
     /// `427-back-forward-navigation`: ⌃- / ⌃⇧- (Alt+← / Alt+→ off macOS)
     /// go back / forward.
     pub back_forward: bool,
@@ -64,6 +68,8 @@ impl KeymapFlags {
             history_review_mode: flags.bool(ids::HISTORY_REVIEW_MODE),
             extra_zoom_inputs: flags.bool(ids::EXTRA_ZOOM_INPUTS),
             back_forward: flags.bool(ids::BACK_FORWARD_NAVIGATION),
+            multiple_windows: flags.bool(ids::MULTIPLE_WINDOWS),
+            repository_tabs: flags.bool(ids::REPOSITORY_TABS),
             arrow_keys_between_panes: flags.bool(ids::ARROW_KEYS_BETWEEN_PANES),
         }
     }
@@ -443,6 +449,16 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
                 KeyBinding::new("alt-right", NavigateForward, MENU),
             ]);
         }
+    }
+    if flags.multiple_windows {
+        // ⇧⌘N is Branch › New Branch, so New Window takes ⌥⌘N
+        bindings.push(KeyBinding::new("alt-secondary-n", NewWindow, MENU));
+    }
+    if flags.repository_tabs {
+        bindings.extend([
+            KeyBinding::new("alt-secondary-right", NextTab, MENU),
+            KeyBinding::new("alt-secondary-left", PreviousTab, MENU),
+        ]);
     }
     if flags.extra_zoom_inputs {
         // macOS delivers ⇧⌘= as `cmd-+`; the keypad's + and - arrive as the

@@ -1131,7 +1131,14 @@ impl Dispatcher {
             let github_hosts: Vec<String> = std::iter::once("github.com".to_string())
                 .chain(s.accounts.iter().map(|a| a.host()))
                 .collect();
-            (git, repos, busy, use_helper, github_hosts, s.selected)
+            (
+                git,
+                repos,
+                busy,
+                use_helper,
+                github_hosts,
+                s.visible_repositories(),
+            )
         };
         if RUNNING.swap(true, Ordering::SeqCst) {
             return;
@@ -1228,7 +1235,7 @@ impl Dispatcher {
                         cx,
                     );
                 }
-                if let Some(id) = selected {
+                for id in selected {
                     Self::refresh_repository(id, cx);
                 }
                 Self::refresh_indicators(cx);
@@ -2615,9 +2622,15 @@ impl Dispatcher {
     /// its last fetch is older than the interval (`shouldBackgroundFetch`).
     /// One background fetch round (the hourly timer, WorkManager on Android).
     pub fn background_fetch_tick(cx: &mut dyn Host) {
+        for id in Self::state(cx).read(cx).visible_repositories() {
+            Self::background_fetch_repository(id, cx);
+        }
+    }
+
+    /// [`Self::background_fetch_tick`] for one visible repository.
+    fn background_fetch_repository(id: u64, cx: &mut dyn Host) {
         let (id, last_fetched, busy, known_push, skip_unchanged) = {
             let s = Self::state(cx).read(cx);
-            let Some(id) = s.selected else { return };
             let Some(repo) = s.repository(id) else { return };
             // `278-fetch-on-known-push`: between the hourly fetches, ask the
             // API whether the repository was pushed to since the last one
@@ -2717,11 +2730,11 @@ impl Dispatcher {
                         None
                     }
                 };
-                // still selected, not fetched meanwhile, and nothing running
+                // still shown, not fetched meanwhile, and nothing running
                 let still_stale = {
                     let s = Self::state(cx).read(cx);
                     let rs = s.repo_states.get(&id);
-                    s.selected == Some(id)
+                    s.visible_repositories().contains(&id)
                         && rs.and_then(|r| r.last_fetched) == Some(last_fetched)
                         && !rs.is_some_and(|r| r.push_pull_in_progress || r.mco.is_some())
                 };

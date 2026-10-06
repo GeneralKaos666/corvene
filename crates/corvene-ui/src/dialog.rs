@@ -21,29 +21,10 @@ pub type ClickHandler = Box<dyn Fn(&mut Window, &mut App) + 'static>;
 /// The window title when no dialog is open.
 pub const APP_WINDOW_TITLE: &str = "Corvene";
 
-thread_local! {
-    /// The title last handed to `set_window_title`, so it is set only on change.
-    static WINDOW_TITLE: std::cell::RefCell<SharedString> =
-        const { std::cell::RefCell::new(SharedString::new_static(APP_WINDOW_TITLE)) };
-}
-
-/// Set the window title unless it already is `title` (macOS only).
+/// Set the window title unless it already is `title` (macOS only); one
+/// cache per window (`crate::windows`).
 pub fn sync_window_title(title: &SharedString, window: &mut Window) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let changed = WINDOW_TITLE.with(|current| {
-        let mut current = current.borrow_mut();
-        if *current == *title {
-            false
-        } else {
-            *current = title.clone();
-            true
-        }
-    });
-    if changed {
-        window.set_window_title(title);
-    }
+    crate::windows::sync_window_title(title, window);
 }
 
 /// A zero-size element that makes `title` the window title while it renders

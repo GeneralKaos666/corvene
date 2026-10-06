@@ -1,0 +1,31 @@
+# Corvene's windows and tabs (flags 429-multiple-windows and
+# 430-repository-tabs, both off in the GitHub Desktop preset the harness
+# runs with). Run with
+#   PARITY_CORVENE_FLAGS=preset=github-desktop,429-multiple-windows=on,430-repository-tabs=on
+# GHD has one window and no tabs, so the snaps are recorded, not compared
+# (`corvene_only`; .docs/multiple-windows.md, deviations.md › Window / menus).
+name: windows
+description: Tab strip, File › New Window's empty window, Open in New Window (Corvene only)
+setup: repo
+steps:
+  - snap: {name: tab-strip, corvene_only: true, note: "GHD has no tabs (430-repository-tabs)"}
+  # File › New Window: an empty second window with the repository list open
+  - ghd: {skip: true}
+    corvene: {action: "corvene::NewWindow"}
+    wait: 1500
+  - snap: {name: new-window, corvene_only: true, window: 1, note: "GHD has one window (429-multiple-windows)"}
+  # the first window is unchanged
+  - snap: {name: first-window-unchanged, corvene_only: true, window: 0}
+  # the repository list's context menu in the first window (GHD opens its
+  # list too so the row resolves; its own menu is not compared)
+  - ghd: {skip: true}
+    corvene: {window: 0}
+  - click: [125, 56]
+    wait: 500
+  - rclick: {text: "parity-fixture", within: ".foldout"}
+    wait: 500
+  - corvene_menu: repository
+  - corvene_menu_pick: "Open in New Window"
+    wait: 1500
+  # the repository is shown already, so its window (the first) comes forward
+  - snap: {name: after-open-in-new-window, corvene_only: true, window: 0}
