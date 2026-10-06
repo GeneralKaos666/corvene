@@ -66,6 +66,7 @@ mod submodules;
 mod test_notifications;
 mod tutorial_dialogs;
 mod unknown_authors;
+mod warn_stacked_branches;
 mod worktree_dialogs;
 
 use corvene_core::{AppState, Popup};
@@ -135,6 +136,7 @@ pub use simple::{CliInstalledAction, CliInstalledContent, SimpleDialog, cli_inst
 pub use start_bisect::StartBisectDialog;
 pub use submit_pull_request_review::SubmitPullRequestReviewDialog;
 pub use unknown_authors::UnknownAuthorsDialog;
+pub use warn_stacked_branches::WarnStackedBranchesDialog;
 pub use worktree_dialogs::{
     AddWorktreeDialog, DeleteWorktreeDialog, DeleteWorktreeFailedDialog, RenameWorktreeDialog,
 };
@@ -767,6 +769,22 @@ impl DialogHost {
                 })
                 .into()
             }
+            // `1221-stacked-branch-refs`
+            Popup::WarnStackedBranches {
+                repo,
+                branches,
+                update_refs,
+                op,
+            } => cx
+                .new(|_| {
+                    WarnStackedBranchesDialog::new(
+                        *repo,
+                        branches.clone(),
+                        update_refs.clone(),
+                        op.clone(),
+                    )
+                })
+                .into(),
             Popup::Preferences { tab } => cx
                 .new(|cx| PreferencesDialog::new(state, *tab, window, cx))
                 .into(),

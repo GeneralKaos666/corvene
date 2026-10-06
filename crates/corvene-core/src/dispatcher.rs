@@ -1180,7 +1180,7 @@ impl Dispatcher {
             read_implicit_upstream,
             read_signing,
             (read_sparse, read_lfs),
-            read_push_target,
+            (read_push_target, read_stacked),
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -1230,7 +1230,10 @@ impl Dispatcher {
                     s.flags.bool(crate::flags::ids::SPARSE_CHECKOUT),
                     s.flags.bool(crate::flags::ids::LFS_LOCKS),
                 ),
-                s.flags.bool(crate::flags::ids::REMOTE_MANAGER),
+                (
+                    s.flags.bool(crate::flags::ids::REMOTE_MANAGER),
+                    s.flags.bool(crate::flags::ids::STACKED_BRANCH_REFS),
+                ),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -1527,6 +1530,17 @@ impl Dispatcher {
                         &configured,
                     )
                     .map(|b| b.name.clone());
+                    // `1221-stacked-branch-refs`: History's marks
+                    let stacked_refs = read_stacked
+                        .then(|| {
+                            crate::stacked_refs::read(
+                                &info.workdir,
+                                &info,
+                                default_branch.as_deref(),
+                            )
+                        })
+                        .flatten()
+                        .map(Arc::new);
                     let (mut stashes, stash_count) = join(stashes);
                     let current = info.current_branch().map(|b| b.name.clone());
                     let stashed_branches =
@@ -1558,6 +1572,7 @@ impl Dispatcher {
                         incoming_commits,
                         recent_branches: join(recent),
                         default_branch,
+                        stacked_refs,
                         stash,
                         stash_count,
                         stashed_branches,
@@ -1699,6 +1714,7 @@ impl Dispatcher {
                                     set(&mut repo_state.recent_branches, extras.recent_branches);
                                 changed |=
                                     set(&mut repo_state.default_branch, extras.default_branch);
+                                changed |= set(&mut repo_state.stacked_refs, extras.stacked_refs);
                                 changed |= set(&mut repo_state.stash, extras.stash);
                                 changed |= set(&mut repo_state.stash_count, extras.stash_count);
                                 changed |=
@@ -7774,6 +7790,8 @@ struct RefreshExtras {
     branch_tracking: std::collections::HashMap<String, corvene_git::BranchTracking>,
     recent_branches: Vec<String>,
     default_branch: Option<String>,
+    /// `1221-stacked-branch-refs`
+    stacked_refs: Option<Arc<crate::stacked_refs::StackedRefs>>,
     stash: Option<corvene_models::StashEntry>,
     stash_count: usize,
     stashed_branches: Vec<String>,

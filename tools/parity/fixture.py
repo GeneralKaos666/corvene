@@ -369,10 +369,31 @@ def _utf16(repo: Path) -> None:
     p.write_bytes(_utf16_bytes(edited))
 
 
+# `repo-stacked`: two branches stacked on main, `stack/top` (checked out) on
+# `stack/base`, two commits each (`1221-stacked-branch-refs`)
+_STACKED_COMMITS = [
+    ("stack/base", "2026-09-26T09:00:00+00:00", "Lay the groundwork"),
+    ("stack/base", "2026-09-26T10:00:00+00:00", "Add the parser"),
+    ("stack/top", "2026-09-26T11:00:00+00:00", "Use the parser"),
+    ("stack/top", "2026-09-26T12:00:00+00:00", "Polish the output"),
+]
+
+
+def _stacked(repo: Path) -> None:
+    for i, (branch, date, summary) in enumerate(_STACKED_COMMITS):
+        if i == 0 or branch != _STACKED_COMMITS[i - 1][0]:
+            _git(repo, "checkout", "-q", "-b", branch)
+        p = repo / "stack" / f"{i + 1}.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"{summary}\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", summary, date=date)
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
-          pull_request: bool = False, utf16: bool = False) -> Path:
+          pull_request: bool = False, utf16: bool = False, stacked: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -391,7 +412,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     `pull_request` (and `remote`), `main` is pushed whole and `feature/login`
     is checked out with `_PULL_REQUEST_COMMITS` pushed
     (`348-pull-request-review`). With `utf16`, see `_utf16`
-    (`1306-utf16-diffs`)."""
+    (`1306-utf16-diffs`). With `stacked`, see `_stacked`, and no working
+    changes, so commits can be squashed."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -496,6 +518,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "push", "-q", "-u", "origin", "feature/login")
     if utf16:
         _utf16(repo)
+    if stacked:
+        _stacked(repo)
+        return repo
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)

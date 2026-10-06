@@ -8007,6 +8007,28 @@ registry! {
         code: &["crates/corvene-core/src/history_filter.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs"],
     },
 
+    /// Stacked branches marked in History and moved by squash / reorder.
+    STACKED_BRANCH_REFS = 1221 "stacked-branch-refs" {
+        title: "Stacked branches",
+        summary: "History marks the current branch's commits the default branch does not have: \
+                  a commit another local branch points at gets an accent line above it and the \
+                  branch's label, and a line with the default branch's name shows where that \
+                  branch begins. Squashing, reordering or editing a message over such commits \
+                  first names those branches and offers to move them with their rewritten \
+                  commits (git's update-ref, as rebase --update-refs does; a branch on a \
+                  squashed commit lands on the combined one), which Undo puts back. With \
+                  rebase.updateRefs set in git's config they move without asking.",
+        ghd_behaviour: "Nothing marks other branches among the current branch's commits, and a \
+                        squash or reorder leaves them on the old commits (even with \
+                        rebase.updateRefs set).",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21256)],
+        code: &["crates/corvene-core/src/stacked_refs.rs", "crates/corvene-git/src/rebase_ops.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/dialogs/warn_stacked_branches.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.

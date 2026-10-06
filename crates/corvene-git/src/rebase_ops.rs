@@ -17,6 +17,12 @@
 //! Corvene addition (`799-fixup-commits`): [`autosquash`] folds `fixup!`
 //! commits into their targets with a [`fixup_todo`] list (GHD has no fixup
 //! commits).
+//!
+//! Corvene addition (`1221-stacked-branch-refs`): [`RebaseOptions::update_refs`]
+//! adds `update-ref` lines to the todo lists ([`with_update_refs`]), so other
+//! local branches in the rewritten range follow their commits as with
+//! `rebase --update-refs` (GHD's `lib/git/rebase.ts` todo lists have none, and
+//! replacing git's own todo drops those `rebase.updateRefs` adds).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -842,13 +848,103 @@ pub fn continue_squash_rebase(
 }
 
 /// Options for the interactive rebases behind squash and reorder.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RebaseOptions {
     /// See [`cleanup_config`] (flag `834`).
     pub keep_messages: bool,
     /// `--autostash`: local changes are stashed first and reapplied after
     /// (flag `829`).
     pub autostash: bool,
+    /// Corvene `1221-stacked-branch-refs`: the branches to move with the
+    /// commits they point at ([`with_update_refs`]); empty leaves every
+    /// other branch where it is.
+    pub update_refs: UpdateRefs,
+}
+
+/// Corvene `1221-stacked-branch-refs`: full branch refs
+/// (`refs/heads/<name>`) by the commit they point at, for the todo's
+/// `update-ref` lines.
+pub type UpdateRefs = BTreeMap<String, Vec<String>>;
+
+/// Corvene `1221-stacked-branch-refs`: `todo` with an `update-ref <ref>`
+/// line for each of `refs` whose commit is picked, the way
+/// `rebase --update-refs` writes them: after the commit's line, or after the
+/// whole `squash` / `fixup` group it is part of, so a branch on a squashed
+/// commit (or on the commit squashed onto) lands on the combined commit and
+/// not on an intermediate one that ends up in no history. Refs of commits
+/// the todo does not pick are left out; each ref is written once.
+pub fn with_update_refs(todo: &str, refs: &UpdateRefs) -> String {
+    if refs.is_empty() {
+        return todo.to_string();
+    }
+    let mut out = String::new();
+    let mut written: HashSet<&str> = HashSet::new();
+    // the refs of the current pick and the squashes / fixups after it
+    let mut pending: Vec<&str> = Vec::new();
+    let flush = |out: &mut String, pending: &mut Vec<&str>| {
+        for r in pending.drain(..) {
+            out.push_str("update-ref ");
+            out.push_str(r);
+            out.push('\n');
+        }
+    };
+    for line in todo.lines() {
+        let mut words = line.split_whitespace();
+        let action = words.next().unwrap_or_default();
+        let folds = matches!(action, "squash" | "s" | "fixup" | "f");
+        if !folds {
+            flush(&mut out, &mut pending);
+        }
+        out.push_str(line);
+        out.push('\n');
+        if matches!(
+            action,
+            "pick" | "p" | "reword" | "r" | "edit" | "e" | "squash" | "s" | "fixup" | "f"
+        ) && let Some(sha) = words.next()
+            && let Some(names) = refs.get(sha)
+        {
+            for r in names {
+                if written.insert(r.as_str()) {
+                    pending.push(r.as_str());
+                }
+            }
+        }
+    }
+    flush(&mut out, &mut pending);
+    out
+}
+
+/// Corvene `1221-stacked-branch-refs`: Undo of a rewrite that moved other
+/// branches puts each `(full ref, sha)` of `tips` back, in one
+/// `update-ref --stdin` transaction.
+pub fn restore_branch_tips(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    tips: &[(String, String)],
+) -> Result<()> {
+    if tips.is_empty() {
+        return Ok(());
+    }
+    let input: String = tips
+        .iter()
+        .map(|(r, sha)| format!("update {r} {sha}\n"))
+        .collect();
+    GitCommand::new(git)
+        .args([
+            "update-ref",
+            "-m",
+            "undo: move stacked branches back",
+            "--stdin",
+        ])
+        .stdin(input.into_bytes())
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
+/// [`temp_file`] for a todo list, with `options`' `update-ref` lines.
+fn todo_file(prefix: &str, todo: &str, options: &RebaseOptions) -> Result<PathBuf> {
+    temp_file(prefix, &with_update_refs(todo, &options.update_refs))
 }
 
 /// GHD `rebaseInteractive`: replay `todo` with `sequence.editor=cat todo >`.
@@ -1106,7 +1202,7 @@ pub fn autosquash(
             0,
         );
     };
-    let todo_path = match temp_file("autosquash-todo", &todo) {
+    let todo_path = match todo_file("autosquash-todo", &todo, &options) {
         Ok(p) => p,
         Err(err) => return (RebaseResult::Error(err.to_string()), 0),
     };
@@ -1166,6 +1262,7 @@ pub fn reword(
     last_retained_ref: Option<&str>,
     message: &str,
     keep_messages: bool,
+    update_refs: &UpdateRefs,
 ) -> Result<()> {
     // an interactive rebase would flatten them
     if merge_commits_exist_after(git.clone(), workdir, last_retained_ref)? {
@@ -1176,7 +1273,7 @@ pub fn reword(
     let commits = commits_to_replay(git.clone(), workdir, last_retained_ref)?;
     let todo = reword_todo(&commits, sha)
         .ok_or_else(|| GitError::Gix("the commit is not on the current branch".into()))?;
-    let todo_path = temp_file("reword-todo", &todo)?;
+    let todo_path = temp_file("reword-todo", &with_update_refs(&todo, update_refs))?;
     let message_path = temp_file("reword-message", message)?;
     let message_arg = message_path.to_string_lossy().to_string();
     let result = if message_arg.contains('"') {
@@ -1192,6 +1289,7 @@ pub fn reword(
             RebaseOptions {
                 keep_messages,
                 autostash: true,
+                update_refs: UpdateRefs::new(),
             },
             |_| {},
         )
@@ -1253,7 +1351,7 @@ pub fn squash(
             "the commit to squash onto is not in the log; continuing would drop commits".into(),
         );
     };
-    let todo_path = match temp_file("squash-todo", &todo) {
+    let todo_path = match todo_file("squash-todo", &todo, &options) {
         Ok(p) => p,
         Err(err) => return RebaseResult::Error(err.to_string()),
     };
@@ -1322,7 +1420,7 @@ pub fn reorder(
             "the base commit is not in the log; continuing would drop commits".into(),
         );
     };
-    let todo_path = match temp_file("reorder-todo", &todo) {
+    let todo_path = match todo_file("reorder-todo", &todo, &options) {
         Ok(p) => p,
         Err(err) => return RebaseResult::Error(err.to_string()),
     };
@@ -1619,6 +1717,78 @@ mod tests {
             Some("pick a1 First\nreword b2 Second\npick c3 Third\n")
         );
         assert_eq!(reword_todo(&commits, "zz"), None);
+    }
+
+    fn refs(pairs: &[(&str, &[&str])]) -> UpdateRefs {
+        pairs
+            .iter()
+            .map(|(sha, names)| {
+                (
+                    sha.to_string(),
+                    names.iter().map(|n| n.to_string()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn update_refs_follow_picks_and_rewords() {
+        let todo = "pick a1 A\nreword b2 B\npick c3 C\n";
+        assert_eq!(with_update_refs(todo, &UpdateRefs::new()), todo);
+        assert_eq!(
+            with_update_refs(
+                todo,
+                &refs(&[
+                    ("a1", &["refs/heads/a"]),
+                    ("b2", &["refs/heads/b", "refs/heads/b2"]),
+                    ("zz", &["refs/heads/gone"]),
+                ])
+            ),
+            "pick a1 A\nupdate-ref refs/heads/a\nreword b2 B\nupdate-ref refs/heads/b\n\
+             update-ref refs/heads/b2\npick c3 C\n"
+        );
+    }
+
+    #[test]
+    fn update_refs_go_after_the_whole_squash_group() {
+        // squash "C" onto "A" (`squash_todo` moves it up), branches on all three
+        let commits = vec![c("o0", "O"), c("a1", "A"), c("b2", "B"), c("c3", "C")];
+        let to_squash: HashSet<String> = ["c3".to_string()].into();
+        let todo = squash_todo(&commits, &to_squash, "a1").unwrap();
+        assert_eq!(todo, "pick o0 O\npick a1 A\nsquash c3 C\npick b2 B\n");
+        assert_eq!(
+            with_update_refs(
+                &todo,
+                &refs(&[
+                    ("a1", &["refs/heads/a"]),
+                    ("b2", &["refs/heads/b"]),
+                    ("c3", &["refs/heads/c"]),
+                ])
+            ),
+            "pick o0 O\npick a1 A\nsquash c3 C\nupdate-ref refs/heads/a\n\
+             update-ref refs/heads/c\npick b2 B\nupdate-ref refs/heads/b\n"
+        );
+        // a fixup group at the end of the list
+        let pairs = vec![("c3".to_string(), "b2".to_string())];
+        let todo = fixup_todo(&commits, &pairs).unwrap();
+        assert_eq!(
+            with_update_refs(&todo, &refs(&[("c3", &["refs/heads/c"])])),
+            "pick o0 O\npick a1 A\npick b2 B\nfixup c3 C\nupdate-ref refs/heads/c\n"
+        );
+    }
+
+    #[test]
+    fn update_refs_follow_reordered_commits() {
+        let commits = vec![c("a1", "A"), c("b2", "B"), c("c3", "C")];
+        let to_move: HashSet<String> = ["a1".to_string()].into();
+        let todo = reorder_todo(&commits, &to_move, None).unwrap();
+        assert_eq!(
+            with_update_refs(
+                &todo,
+                &refs(&[("a1", &["refs/heads/a"]), ("b2", &["refs/heads/b"])])
+            ),
+            "pick b2 B\nupdate-ref refs/heads/b\npick c3 C\npick a1 A\nupdate-ref refs/heads/a\n"
+        );
     }
 
     #[test]
@@ -2010,6 +2180,69 @@ mod tests {
         let after = commits_in_range(git, path, "HEAD").unwrap().unwrap();
         let summaries: Vec<&str> = after.iter().map(|c| c.summary.as_str()).collect();
         assert_eq!(summaries, ["first", "fourth", "combined"]);
+    }
+
+    #[test]
+    fn squash_moves_stacked_branches_with_update_refs() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        // main → A (branch a) → B (branch b, checked out)
+        run(path, &["checkout", "-q", "-b", "a"]);
+        commit_file(path, "b.txt", "b\n", "A");
+        run(path, &["checkout", "-q", "-b", "b"]);
+        commit_file(path, "c.txt", "c\n", "B");
+        let all = commits_in_range(git.clone(), path, "main..b")
+            .unwrap()
+            .unwrap();
+        let identity = corvene_models::CommitIdentity {
+            name: "T".into(),
+            email: "t@example.com".into(),
+            seconds: 0,
+            offset: 0,
+        };
+        let full = |one: &CommitOneLine| Commit {
+            sha: one.sha.clone(),
+            summary: one.summary.clone(),
+            body: String::new(),
+            author: identity.clone(),
+            committer: identity.clone(),
+            parents: Vec::new(),
+            trailers: Vec::new(),
+            tags: Vec::new(),
+            signature: None,
+        };
+        let rev = |r: &str| {
+            GitCommand::new(git.clone())
+                .args(["rev-parse", r])
+                .current_dir(path)
+                .run()
+                .unwrap()
+                .stdout_string()
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        let old_a = rev("a");
+        // squash B onto A, moving `a`
+        let result = squash(
+            git.clone(),
+            path,
+            &[full(&all[1])],
+            &full(&all[0]),
+            Some("main"),
+            "A and B",
+            RebaseOptions {
+                update_refs: refs(&[(&all[0].sha, &["refs/heads/a"])]),
+                ..RebaseOptions::default()
+            },
+            |_| {},
+        );
+        assert_eq!(result, RebaseResult::CompletedWithoutError);
+        assert_eq!(rev("a"), rev("b"));
+        assert_eq!(rev("b~1"), rev("main"));
+        // Undo puts it back
+        restore_branch_tips(git.clone(), path, &[("refs/heads/a".into(), old_a.clone())]).unwrap();
+        assert_eq!(rev("a"), old_a);
     }
 
     #[test]

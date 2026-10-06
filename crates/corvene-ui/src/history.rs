@@ -2269,6 +2269,17 @@ impl HistorySidebar {
         );
         // `1212-bisect`: marked commits and the range still in question
         let bisect = rs.and_then(|r| crate::bisect_bar::BisectRows::of(s, r));
+        // `1221-stacked-branch-refs`: in the plain list, other branches'
+        // tips among the commits the default branch lacks, and where it begins
+        let stacked = rs
+            .filter(|_| {
+                s.flags.bool(corvene_core::flags::ids::STACKED_BRANCH_REFS)
+                    && !comparing
+                    && !filtering
+                    && all_branches.is_none()
+                    && bisect.is_none()
+            })
+            .and_then(|r| r.stacked_refs.clone());
         // `1218-compare-refs`: `base...head` marks each row with its side
         let sides: Option<(
             SharedString,
@@ -2447,8 +2458,17 @@ impl HistorySidebar {
                                 (None, Some(DropHint::InsertAt(at))) => Some(at),
                                 _ => None,
                             };
+                            let labelled = labels
+                                .get(&commit.sha)
+                                .map(Vec::as_slice)
+                                .unwrap_or_default();
+                            let stack = stacked
+                                .as_deref()
+                                .and_then(|st| stack_mark(st, &commit.sha, labelled));
                             let row_hint = RowHint {
                                 squash_target: drop_hint == Some(DropHint::Squash(ix)),
+                                // `1221`: not over the drop's insertion line
+                                stack_line: stack.is_some() && ix > 0 && insertion_here != Some(ix),
                                 line_above: insertion_here == Some(ix),
                                 line_below: insertion_here == Some(ix + 1) && ix + 1 == count,
                                 keyboard_selected: in_reorder && is_selected,
@@ -2473,10 +2493,16 @@ impl HistorySidebar {
                                 focused && !in_reorder,
                                 draggable,
                                 droppable,
-                                labels
-                                    .get(&commit.sha)
-                                    .map(Vec::as_slice)
-                                    .unwrap_or_default(),
+                                match &stack {
+                                    Some((names, tooltip)) => RowBranches {
+                                        names,
+                                        tooltip: tooltip.as_ref(),
+                                    },
+                                    None => RowBranches {
+                                        names: labelled,
+                                        tooltip: None,
+                                    },
+                                },
                                 unpushed_indicator(commit, &local, &tags_to_push),
                                 selected.clone(),
                                 row_hint,
@@ -2638,6 +2664,9 @@ pub(crate) fn request_commit_avatars(commit: &Commit, cx: &mut App) {
 #[derive(Clone, Default)]
 struct RowHint {
     squash_target: bool,
+    /// `1221-stacked-branch-refs`: the separator above a stacked branch's
+    /// tip, or above the row where the default branch begins.
+    stack_line: bool,
     line_above: bool,
     line_below: bool,
     keyboard_selected: bool,
@@ -2665,7 +2694,15 @@ pub(crate) fn commit_row_contents(
     badge: Option<(Hsla, Hsla)>,
     cx: &App,
 ) -> Div {
-    commit_row_contents_with(commit, text, secondary, badge, &[], None, cx)
+    commit_row_contents_with(
+        commit,
+        text,
+        secondary,
+        badge,
+        RowBranches::default(),
+        None,
+        cx,
+    )
 }
 
 /// GHD `showUnpushedIndicator` / `getUnpushedIndicatorTitle`: the commit is
@@ -2723,6 +2760,44 @@ fn branch_labels(
     labels
 }
 
+/// `890` / `1221`: the branch names labelling a row, and the label's
+/// tooltip when it says more than the names.
+#[derive(Clone, Copy, Default)]
+struct RowBranches<'a> {
+    names: &'a [String],
+    tooltip: Option<&'a SharedString>,
+}
+
+/// `1221-stacked-branch-refs`: a row's branch names (the stacked branches
+/// whose tip it is, or the default branch where it begins, then the
+/// `890` labels it has besides) and the label's tooltip, when the row is
+/// marked.
+fn stack_mark(
+    st: &corvene_core::stacked_refs::StackedRefs,
+    sha: &str,
+    labelled: &[String],
+) -> Option<(Vec<String>, Option<SharedString>)> {
+    let (mut names, tooltip) = match st.tips.get(sha) {
+        Some(tips) => (tips.clone(), None),
+        None if st.boundary.as_deref() == Some(sha) => {
+            // the default branch moved on since this branch left it
+            let tooltip = (!st.base_at_boundary).then(|| {
+                let mut lines = vec![format!("{} begins here (it has moved on since)", st.base)];
+                lines.extend(labelled.iter().filter(|l| **l != st.base).cloned());
+                SharedString::from(lines.join("\n"))
+            });
+            (vec![st.base.clone()], tooltip)
+        }
+        None => return None,
+    };
+    for label in labelled {
+        if !names.contains(label) {
+            names.push(label.clone());
+        }
+    }
+    Some((names, tooltip))
+}
+
 /// [`commit_row_contents`] with `890-history-branch-labels`' branch names
 /// and the unpushed indicator's tooltip.
 fn commit_row_contents_with(
@@ -2730,11 +2805,12 @@ fn commit_row_contents_with(
     text: Hsla,
     secondary: Hsla,
     badge: Option<(Hsla, Hsla)>,
-    branches: &[String],
+    branches: RowBranches<'_>,
     unpushed: Option<SharedString>,
     cx: &App,
 ) -> Div {
     let t = cx.ghd();
+    let (branches, branches_tooltip) = (branches.names, branches.tooltip);
     let (badge_bg, badge_text) =
         badge.unwrap_or((t.list_item_badge_background, t.list_item_badge_text));
     let summary = if commit.summary.is_empty() {
@@ -2824,7 +2900,11 @@ fn commit_row_contents_with(
             d.child(
                 div()
                     .id(SharedString::from(format!("branches-{}", commit.sha)))
-                    .ghd_tooltip(branches.join("\n"))
+                    .ghd_tooltip(
+                        branches_tooltip
+                            .cloned()
+                            .unwrap_or_else(|| branches.join("\n").into()),
+                    )
                     .ml(SPACING())
                     .h(zpx(16.))
                     .max_w(gpui_kit::relative(0.5))
@@ -3049,7 +3129,7 @@ fn commit_row(
     list_focused: bool,
     draggable: bool,
     droppable: bool,
-    branches: &[String],
+    branches: RowBranches<'_>,
     unpushed: Option<SharedString>,
     selection: Rc<Vec<String>>,
     hint: RowHint,
@@ -3111,7 +3191,7 @@ fn commit_row(
         .id(SharedString::from(format!("commit-{}", commit.sha)))
         .a11y_row(
             format!(
-                "{}, {}, {}",
+                "{}, {}, {}{}",
                 if commit.summary.is_empty() {
                     "Empty commit message"
                 } else {
@@ -3119,7 +3199,13 @@ fn commit_row(
                 },
                 // the byline's `CommitAttribution`
                 commit_attribution_for(commit, cx).text,
-                relative(commit.author.date())
+                relative(commit.author.date()),
+                // `1221-stacked-branch-refs`: the branches starting here
+                if hint.stack_line && !branches.names.is_empty() {
+                    format!(", {}", branches.names.join(", "))
+                } else {
+                    String::new()
+                }
             ),
             is_selected,
         )
@@ -3299,6 +3385,24 @@ fn commit_row(
                     .left_0()
                     .w(zpx(3.))
                     .bg(t.color_modified),
+            )
+        })
+        // `1221-stacked-branch-refs`: a thick accent line between a stacked
+        // branch (or the default branch) and the newer commits above it
+        .when(hint.stack_line, |d| {
+            let color = if is_selected && list_focused && !hint.keyboard_selected {
+                text
+            } else {
+                t.box_border_accent
+            };
+            d.child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(zpx(3.))
+                    .bg(color),
             )
         })
         .when(hint.line_above, |d| {

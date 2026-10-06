@@ -45,6 +45,7 @@ use corvene_models::{
 use tracing::{info, warn};
 
 use crate::dispatcher::Dispatcher;
+use crate::stacked_refs::{StackedBranches, StackedOp};
 use crate::state::{Popup, RepositoryState, RetryAction};
 
 /// `MultiCommitOperationStepKind`
@@ -81,11 +82,16 @@ pub enum McoDetail {
         target_commit: Commit,
         last_retained_ref: Option<String>,
         message: String,
+        /// Corvene `1221-stacked-branch-refs`: the other branches moved
+        /// with their commits.
+        update_refs: corvene_git::UpdateRefs,
     },
     Reorder {
         commits: Vec<Commit>,
         before_commit: Option<Commit>,
         last_retained_ref: Option<String>,
+        /// Corvene `1221-stacked-branch-refs`
+        update_refs: corvene_git::UpdateRefs,
     },
     /// Corvene `799-fixup-commits`: fold the branch's `fixup!` commits
     /// (`commits`) into the commits they fix. A squash to the user (its
@@ -94,6 +100,8 @@ pub enum McoDetail {
         commits: Vec<Commit>,
         last_retained_ref: Option<String>,
         count: usize,
+        /// Corvene `1221-stacked-branch-refs`
+        update_refs: corvene_git::UpdateRefs,
     },
     Merge {
         squash: bool,
@@ -223,6 +231,9 @@ pub struct McoUndo {
     pub count: usize,
     pub source_branch: Option<String>,
     pub branch_created: bool,
+    /// Corvene `1221-stacked-branch-refs`: other branches the operation
+    /// moved, as (full ref, the commit to put back).
+    pub moved_branches: Vec<(String, String)>,
 }
 
 /// `ConflictState` kinds derived from the repository (`MERGE_HEAD`,
@@ -1480,31 +1491,38 @@ impl Dispatcher {
                 let target = mco.target_branch.clone().unwrap_or_default();
                 Self::run_rebase(id, base, target, commits, cx);
             }
+            // `1221-stacked-branch-refs`: the branches were asked about
             McoDetail::Squash {
                 commits,
                 target_commit,
                 message,
+                update_refs,
                 ..
-            } => Self::squash(
+            } => Self::squash_with(
                 id,
                 commits.iter().map(|c| c.sha.clone()).collect(),
                 target_commit.sha,
                 message,
                 true,
+                StackedBranches::Decided(update_refs),
                 cx,
             ),
             McoDetail::Reorder {
                 commits,
                 before_commit,
+                update_refs,
                 ..
-            } => Self::reorder_commits(
+            } => Self::reorder_commits_with(
                 id,
                 commits.iter().map(|c| c.sha.clone()).collect(),
                 before_commit.map(|c| c.sha),
                 true,
+                StackedBranches::Decided(update_refs),
                 cx,
             ),
-            McoDetail::Autosquash { .. } => Self::autosquash(id, true, cx),
+            McoDetail::Autosquash { update_refs, .. } => {
+                Self::autosquash_with(id, true, StackedBranches::Decided(update_refs), cx)
+            }
             _ => Self::end_mco(id, cx),
         }
     }
@@ -2382,6 +2400,7 @@ impl Dispatcher {
                             count,
                             source_branch: source_branch.clone(),
                             branch_created,
+                            moved_branches: Vec::new(),
                         });
                     });
                 }
@@ -2557,6 +2576,28 @@ impl Dispatcher {
         force_push_checked: bool,
         cx: &mut dyn Host,
     ) {
+        Self::squash_with(
+            id,
+            to_squash,
+            onto,
+            message,
+            force_push_checked,
+            StackedBranches::Ask,
+            cx,
+        );
+    }
+
+    /// [`Self::squash`] once `1221-stacked-branch-refs` knows what to do
+    /// with other branches among the commits (else it asks first).
+    pub(crate) fn squash_with(
+        id: u64,
+        to_squash: Vec<String>,
+        onto: String,
+        message: String,
+        force_push_checked: bool,
+        stacked: StackedBranches,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2604,6 +2645,20 @@ impl Dispatcher {
             };
             (commits, target, last_retained)
         };
+        let Some(update_refs) = Self::stacked_update_refs(
+            id,
+            StackedOp::Squash {
+                to_squash: to_squash.clone(),
+                onto: onto.clone(),
+                message: message.clone(),
+                force_push_checked,
+            },
+            stacked,
+            last_retained.as_deref(),
+            cx,
+        ) else {
+            return;
+        };
         Self::init_mco(
             id,
             McoDetail::Squash {
@@ -2611,6 +2666,7 @@ impl Dispatcher {
                 target_commit: target_commit.clone(),
                 last_retained_ref: last_retained.clone(),
                 message: message.clone(),
+                update_refs: update_refs.clone(),
             },
             Some(branch.clone()),
             tip.clone(),
@@ -2627,6 +2683,7 @@ impl Dispatcher {
                     count: commits.len() + 1,
                     source_branch: None,
                     branch_created: false,
+                    moved_branches: crate::stacked_refs::moved_branches(&update_refs),
                 });
             });
         }
@@ -2634,6 +2691,7 @@ impl Dispatcher {
         let options = corvene_git::RebaseOptions {
             keep_messages: Self::rebase_keeps_messages(cx),
             autostash,
+            update_refs,
         };
         let run = move |cx: &mut dyn Host| {
             let (git, workdir) = (git.clone(), workdir.clone());
@@ -2745,6 +2803,26 @@ impl Dispatcher {
         force_push_checked: bool,
         cx: &mut dyn Host,
     ) {
+        Self::reorder_commits_with(
+            id,
+            to_move,
+            before,
+            force_push_checked,
+            StackedBranches::Ask,
+            cx,
+        );
+    }
+
+    /// [`Self::reorder_commits`] once `1221-stacked-branch-refs` knows what
+    /// to do with other branches among the commits (else it asks first).
+    pub(crate) fn reorder_commits_with(
+        id: u64,
+        to_move: Vec<String>,
+        before: Option<String>,
+        force_push_checked: bool,
+        stacked: StackedBranches,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2786,12 +2864,26 @@ impl Dispatcher {
             };
             (commits, before_commit, last_retained)
         };
+        let Some(update_refs) = Self::stacked_update_refs(
+            id,
+            StackedOp::Reorder {
+                to_move: to_move.clone(),
+                before: before.clone(),
+                force_push_checked,
+            },
+            stacked,
+            last_retained.as_deref(),
+            cx,
+        ) else {
+            return;
+        };
         Self::init_mco(
             id,
             McoDetail::Reorder {
                 commits: commits.clone(),
                 before_commit: before_commit.clone(),
                 last_retained_ref: last_retained.clone(),
+                update_refs: update_refs.clone(),
             },
             Some(branch.clone()),
             tip.clone(),
@@ -2808,6 +2900,7 @@ impl Dispatcher {
                     count: commits.len(),
                     source_branch: None,
                     branch_created: false,
+                    moved_branches: crate::stacked_refs::moved_branches(&update_refs),
                 });
             });
         }
@@ -2835,6 +2928,7 @@ impl Dispatcher {
                         corvene_git::RebaseOptions {
                             keep_messages,
                             autostash: false,
+                            update_refs,
                         },
                         on_progress,
                     );
@@ -2876,6 +2970,17 @@ impl Dispatcher {
     /// banner's Squash Now): fold every unpushed `fixup!` commit into the
     /// commit it fixes, run like a squash.
     pub fn autosquash(id: u64, force_push_checked: bool, cx: &mut dyn Host) {
+        Self::autosquash_with(id, force_push_checked, StackedBranches::Ask, cx);
+    }
+
+    /// [`Self::autosquash`] once `1221-stacked-branch-refs` knows what to
+    /// do with other branches among the commits (else it asks first).
+    pub(crate) fn autosquash_with(
+        id: u64,
+        force_push_checked: bool,
+        stacked: StackedBranches,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -2919,12 +3024,22 @@ impl Dispatcher {
             };
             (fixups, involved.len(), last_retained)
         };
+        let Some(update_refs) = Self::stacked_update_refs(
+            id,
+            StackedOp::Autosquash { force_push_checked },
+            stacked,
+            last_retained.as_deref(),
+            cx,
+        ) else {
+            return;
+        };
         Self::init_mco(
             id,
             McoDetail::Autosquash {
                 commits: fixups,
                 last_retained_ref: last_retained.clone(),
                 count,
+                update_refs: update_refs.clone(),
             },
             Some(branch.clone()),
             tip.clone(),
@@ -2941,12 +3056,14 @@ impl Dispatcher {
                     count,
                     source_branch: None,
                     branch_created: false,
+                    moved_branches: crate::stacked_refs::moved_branches(&update_refs),
                 });
             });
         }
         let options = corvene_git::RebaseOptions {
             keep_messages: Self::rebase_keeps_messages(cx),
             autostash,
+            update_refs,
         };
         let last_retained_for_run = last_retained.clone();
         let run = move |cx: &mut dyn Host| {
@@ -3036,6 +3153,8 @@ impl Dispatcher {
                     return corvene_git::delete_local_branch(git, &workdir, &u.branch);
                 }
                 corvene_git::reset_to(git.clone(), &workdir, corvene_git::ResetMode::Hard, &u.sha)?;
+                // `1221-stacked-branch-refs`: and the branches it moved
+                corvene_git::restore_branch_tips(git.clone(), &workdir, &u.moved_branches)?;
                 if u.kind == MultiCommitOperationKind::CherryPick
                     && let Some(source) = &source
                 {
@@ -3168,6 +3287,7 @@ impl Dispatcher {
                             count: snapshot.commits.len(),
                             source_branch: None,
                             branch_created: false,
+                            moved_branches: Vec::new(),
                         });
                     });
                     (
@@ -3290,6 +3410,19 @@ impl Dispatcher {
     /// HEAD's message, else a `reword` interactive rebase; the rewritten
     /// commit stays selected.
     pub fn edit_commit_message(id: u64, sha: String, message: String, cx: &mut dyn Host) {
+        Self::edit_commit_message_with(id, sha, message, StackedBranches::Ask, cx);
+    }
+
+    /// [`Self::edit_commit_message`] once `1221-stacked-branch-refs` knows
+    /// what to do with other branches among the replayed commits (else it
+    /// asks first). An amend of HEAD replays nothing.
+    pub(crate) fn edit_commit_message_with(
+        id: u64,
+        sha: String,
+        message: String,
+        stacked: StackedBranches,
+        cx: &mut dyn Host,
+    ) {
         let (commit, is_head) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
@@ -3306,12 +3439,24 @@ impl Dispatcher {
             )
         };
         let Some(commit) = commit else { return };
+        let parent = commit.parents.first().cloned();
+        let update_refs = if is_head {
+            corvene_git::UpdateRefs::new()
+        } else {
+            let op = StackedOp::Reword {
+                sha: sha.clone(),
+                message: message.clone(),
+            };
+            match Self::stacked_update_refs(id, op, stacked, parent.as_deref(), cx) {
+                Some(refs) => refs,
+                None => return,
+            }
+        };
         let keep_messages = Self::rebase_keeps_messages(cx);
         let summary = split_message(&message).0;
         Self::state(cx).update(cx, |s, _| {
             s.repo_state_mut(id).rewritten_selection = vec![(summary, Some(commit.author.seconds))];
         });
-        let parent = commit.parents.first().cloned();
         Self::run_history_op(
             id,
             "Could not edit the commit message",
@@ -3326,6 +3471,7 @@ impl Dispatcher {
                         parent.as_deref(),
                         &message,
                         keep_messages,
+                        &update_refs,
                     )
                 }
             },

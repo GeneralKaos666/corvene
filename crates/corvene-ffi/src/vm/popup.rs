@@ -580,6 +580,16 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
                 .put("count", count)
                 .list("to_squash", to_squash);
         }
+        // `1221-stacked-branch-refs`
+        Popup::WarnStackedBranches {
+            repo: r,
+            branches,
+            update_refs: _,
+            op,
+        } => {
+            repo = Some(*r);
+            f.put("op", format!("{op:?}")).list("branches", branches);
+        }
         Popup::Preferences { tab } => {
             f.put("tab", format!("{tab:?}"));
         }

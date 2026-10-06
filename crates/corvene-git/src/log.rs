@@ -770,6 +770,70 @@ pub fn get_commits_in_range(
     Ok(out)
 }
 
+/// Corvene `1221-stacked-branch-refs`: the commits `git log <base>..HEAD`
+/// lists and where `base` begins below them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StackRange {
+    /// Newest first by commit date, as History lists them.
+    pub shas: Vec<String>,
+    /// The newest commit (by commit date) of HEAD's history that `base`
+    /// has: the first History row after the range's commits begin to give
+    /// way to `base`'s, its merge base with HEAD in a linear history.
+    pub boundary: Option<String>,
+}
+
+/// Corvene `1221-stacked-branch-refs`: [`StackRange`] of `base..HEAD`.
+/// `None` when either does not resolve or more than `limit` commits are in
+/// the range (a branch that far from `base` is not a stack worth marking).
+pub fn stack_range(workdir: &Path, base: &str, limit: usize) -> Result<Option<StackRange>> {
+    let repo = crate::handle::open(workdir)?;
+    let (Ok(head), Ok(base)) = (repo.rev_parse_single("HEAD"), repo.rev_parse_single(base)) else {
+        return Ok(None);
+    };
+    let walk = repo
+        .rev_walk([head.detach()])
+        .with_hidden([base.detach()])
+        .sorting(gix::revision::walk::Sorting::ByCommitTime(
+            gix::traverse::commit::simple::CommitTimeOrder::NewestFirst,
+        ))
+        .all()
+        .map_err(|e| GitError::Gix(e.to_string()))?;
+    let mut in_range = std::collections::HashSet::new();
+    let mut parents = Vec::new();
+    let mut shas = Vec::new();
+    for info in walk {
+        let info = info.map_err(|e| GitError::Gix(e.to_string()))?;
+        if shas.len() == limit {
+            return Ok(None);
+        }
+        in_range.insert(info.id);
+        parents.extend(info.parent_ids.iter().copied());
+        shas.push(info.id.to_string());
+    }
+    let mut boundary: Option<(i64, gix::ObjectId)> = None;
+    for parent in parents {
+        if in_range.contains(&parent) || boundary.is_some_and(|(_, id)| id == parent) {
+            continue;
+        }
+        let Ok(commit) = repo.find_commit(parent) else {
+            continue;
+        };
+        let time = commit
+            .committer()
+            .ok()
+            .and_then(|c| c.time().ok())
+            .map(|t| t.seconds)
+            .unwrap_or_default();
+        if boundary.is_none_or(|(newest, _)| time > newest) {
+            boundary = Some((time, parent));
+        }
+    }
+    Ok(Some(StackRange {
+        shas,
+        boundary: boundary.map(|(_, id)| id.to_string()),
+    }))
+}
+
 /// `getChangedFiles`: `log <sha> -C -M -m -1 --first-parent --raw --numstat -z`.
 ///
 /// `in_process` reads them with gitoxide (`log_gix.rs`), git only when that
@@ -1447,6 +1511,49 @@ mod tests {
 
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn stack_range_lists_the_commits_after_base() {
+        let (dir, _) = repo();
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(path)
+                    .env("GIT_AUTHOR_NAME", "Ada")
+                    .env("GIT_AUTHOR_EMAIL", "ada@example.com")
+                    .env("GIT_COMMITTER_NAME", "Ada")
+                    .env("GIT_COMMITTER_EMAIL", "ada@example.com")
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        let main_tip = get_commits(path, "main", 0, 1).unwrap()[0].sha.clone();
+        run(&["checkout", "-q", "-b", "a"]);
+        run(&["commit", "-q", "--allow-empty", "-m", "A"]);
+        run(&["checkout", "-q", "-b", "b"]);
+        run(&["commit", "-q", "--allow-empty", "-m", "B"]);
+        let a = get_commits(path, "a", 0, 1).unwrap()[0].sha.clone();
+        let b = get_commits(path, "b", 0, 1).unwrap()[0].sha.clone();
+        let range = stack_range(path, "main", 10).unwrap().unwrap();
+        let mut shas = range.shas.clone();
+        shas.sort();
+        let mut expected = vec![a.clone(), b];
+        expected.sort();
+        assert_eq!(shas, expected);
+        assert_eq!(range.boundary.as_deref(), Some(main_tip.as_str()));
+        // too long a range, or no such base: nothing
+        assert_eq!(stack_range(path, "main", 1).unwrap(), None);
+        assert_eq!(stack_range(path, "nope", 10).unwrap(), None);
+        // HEAD on the base: an empty range
+        run(&["checkout", "-q", "main"]);
+        assert_eq!(
+            stack_range(path, "a", 10).unwrap().unwrap().shas,
+            Vec::<String>::new()
+        );
+    }
 
     #[test]
     fn local_only_commits_exclude_remote_ones() {

@@ -1,0 +1,38 @@
+# Stacked branches (Corvene only, flag 1221-stacked-branch-refs, off in the
+# GitHub Desktop preset the harness runs with). `repo-stacked` checks out
+# `stack/top` on `stack/base` on main: History draws an accent line and a
+# label above stack/base's tip and above the row where main begins, which
+# GHD's History does not, so the snaps are recorded, not compared
+# (deviations.md › History). Squashing "Use the parser" into stack/base's tip
+# asks whether to move stack/base; moving it leaves its line above the
+# combined commit. GHD gets the History click only.
+name: stacked-branches
+description: Stacked branch tips and where main begins marked in History, the warning a squash across a branch shows, and the branch moved onto the combined commit (Corvene only)
+setup: repo-stacked
+corvene_flags: 1221-stacked-branch-refs=on
+steps:
+  - click: [187, 97]
+    wait: 1500
+  - snap: {name: history, corvene_only: true, note: "GHD marks no branch in History (deviations.md, 1221-stacked-branch-refs)"}
+  # "Use the parser", then shift-click stack/base's tip "Add the parser"
+  - ghd: {skip: true}
+    corvene: {click: [102, 223]}
+  - ghd: {skip: true}
+    corvene: {click: [102, 273], mods: shift}
+    wait: 400
+  - snap: {name: selected, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {rclick: [102, 273]}
+  - corvene_menu: commits
+  - corvene_menu_pick: "Squash 2 Commits…"
+    wait: 800
+  # the squash message dialog's Squash 2 Commits
+  - ghd: {skip: true}
+    corvene: {click: [844, 487]}
+    wait: 1500
+  - snap: {name: warning, corvene_only: true, note: "GHD squashes without a word and leaves stack/base on the old commit"}
+  # Begin Squash, Move this branch too ticked
+  - ghd: {skip: true}
+    corvene: {click: [902, 498]}
+    wait: 3000
+  - snap: {name: squashed, corvene_only: true}

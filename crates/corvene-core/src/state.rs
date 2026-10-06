@@ -688,6 +688,14 @@ pub enum Popup {
         description: String,
         count: usize,
     },
+    /// Corvene `1221-stacked-branch-refs`: a rewrite replays commits other
+    /// local branches point at; move them along (`update_refs`) or not.
+    WarnStackedBranches {
+        repo: u64,
+        branches: Vec<String>,
+        update_refs: corvene_git::UpdateRefs,
+        op: crate::stacked_refs::StackedOp,
+    },
     /// `Preferences` (Settings…), opened on a tab.
     Preferences {
         tab: PreferencesTab,
@@ -820,6 +828,7 @@ impl Popup {
             | Self::ConfirmForcePush { repo, .. }
             | Self::GenericGitAuthentication { repo, .. }
             | Self::SquashCommitMessage { repo, .. }
+            | Self::WarnStackedBranches { repo, .. }
             | Self::RepositorySettings { repo, .. }
             | Self::ConfirmRemoveRepository { repo, .. }
             | Self::MoveToSharedStorage { repo, .. }
@@ -1348,6 +1357,9 @@ pub struct RepositoryState {
     pub worktrees: Vec<corvene_models::WorktreeEntry>,
     /// `defaultBranch` name (`findDefaultBranch`).
     pub default_branch: Option<String>,
+    /// Corvene `1221-stacked-branch-refs`: History's marks for the commits
+    /// the default branch does not have (read with the refresh).
+    pub stacked_refs: Option<std::sync::Arc<crate::stacked_refs::StackedRefs>>,
     /// Branch a checkout is switching to (`checkoutProgress.target`).
     pub checkout_target: Option<String>,
     /// Corvene/GHD stash entry for the current branch (`changesState.stashEntry`);
