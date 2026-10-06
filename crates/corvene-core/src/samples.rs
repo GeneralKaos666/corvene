@@ -54,7 +54,7 @@ fn octocat() -> ApiIdentity {
 }
 
 /// A GitHub repository for repositories that have none.
-fn stand_in_github_repository() -> GitHubRepository {
+pub fn stand_in_github_repository() -> GitHubRepository {
     GitHubRepository {
         endpoint: "https://api.github.com".into(),
         owner: "wasi-master".into(),

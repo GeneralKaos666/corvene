@@ -110,6 +110,11 @@ pub enum Octicon {
     Zap,
     LightBulb,
     Stack,
+    /// `351-actions`
+    Play,
+    Workflow,
+    Clock,
+    Stopwatch,
 }
 
 impl Octicon {
@@ -195,6 +200,10 @@ impl Octicon {
             Octicon::MortarBoard => "octicons/mortar-board-16.svg",
             Octicon::LightBulb => "octicons/light-bulb-16.svg",
             Octicon::Stack => "octicons/stack-16.svg",
+            Octicon::Play => "octicons/play-16.svg",
+            Octicon::Workflow => "octicons/workflow-16.svg",
+            Octicon::Clock => "octicons/clock-16.svg",
+            Octicon::Stopwatch => "octicons/stopwatch-16.svg",
             Octicon::Telescope => "octicons/telescope-16.svg",
             Octicon::Zap => "octicons/zap-16.svg",
             Octicon::Terminal => "octicons/terminal-16.svg",

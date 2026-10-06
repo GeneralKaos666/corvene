@@ -179,6 +179,9 @@ pub struct MenuExtras {
     /// Flag `346-releases`: Repository › Releases… and Create Release…,
     /// enabled for a GitHub repository (set by [`MenuLabelsEvent::of`]).
     pub releases: Option<bool>,
+    /// Flag `351-actions`: Repository › Actions…, enabled for a GitHub
+    /// repository (set by [`MenuLabelsEvent::of`]).
+    pub actions: Option<bool>,
     /// Flag `336-request-reviewers`: Branch › Request Reviewers… (while the
     /// branch has a pull request).
     pub request_reviewers: bool,
@@ -234,6 +237,7 @@ impl MenuExtras {
             sparse_checkout: flags.bool(ids::SPARSE_CHECKOUT),
             issues: flags.bool(ids::ISSUES).then_some(false),
             releases: flags.bool(ids::RELEASES).then_some(false),
+            actions: flags.bool(ids::ACTIONS).then_some(false),
             request_reviewers: flags.bool(ids::REQUEST_REVIEWERS),
             review_pull_request: flags.bool(ids::PULL_REQUEST_REVIEW),
             move_changes_to_worktree: flags.bool(ids::MOVE_CHANGES_TO_WORKTREE).then_some(false),
@@ -279,6 +283,10 @@ impl MenuLabelsEvent {
         }
         if extras.releases.is_some() {
             extras.releases = Some(github.is_some());
+        }
+        // `351-actions`: the repository's own Actions (a fork's too)
+        if extras.actions.is_some() {
+            extras.actions = Some(s.selected_repository().is_some_and(|r| r.github.is_some()));
         }
         // `1304-diff-no-wrap`: checked while lines wrap
         if extras.diff_wrap_lines.is_some() {
@@ -861,6 +869,16 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             separator(),
         ]);
     }
+    // Corvene (`351-actions`)
+    if let Some(enabled) = extras.actions {
+        repository.extend([
+            MenuItemConstructorOptions {
+                enabled: Some(enabled),
+                ..item(l("Actions…", "Actions…"), ShowActions)
+            },
+            separator(),
+        ]);
+    }
     // Corvene (`1216-recent-activity`, `1110-repository-insights`)
     if extras.recent_activity {
         repository.push(item(
@@ -1287,6 +1305,7 @@ mod tests {
                     sparse_checkout: true,
                     issues: Some(true),
                     releases: Some(true),
+                    actions: Some(true),
                     request_reviewers: true,
                     review_pull_request: true,
                     move_changes_to_worktree: Some(true),

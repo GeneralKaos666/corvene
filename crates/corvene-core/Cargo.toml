@@ -28,6 +28,7 @@ regex.workspace = true
 similar.workspace = true
 pulldown-cmark.workspace = true
 async-channel = "2"
+yaml-rust = "0.4"
 
 [features]
 # The GPUI host (`host::gpui`): `App`/`Context<V>` implement `host::Host` so the

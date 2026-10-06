@@ -690,8 +690,13 @@ fn dialog_impl(
         focus_close,
     } = frame;
     let viewport = crate::theme::page_size(window);
-    let large_width = (LARGER_DIALOGS.contains(&id) && larger_dialogs(cx))
-        .then(|| larger_dialog_width(viewport).max(zpx(400.)));
+    let large_width = if id == "dialog-actions" {
+        // Corvene `351-actions`: three panes, most of the window
+        Some(crate::dialogs::actions_view::dialog_width(viewport))
+    } else {
+        (LARGER_DIALOGS.contains(&id) && larger_dialogs(cx))
+            .then(|| larger_dialog_width(viewport).max(zpx(400.)))
+    };
     // a phone: no dialog is wider than the window
     let widest = if crate::theme::compact(window) {
         viewport.width - zpx(16.)

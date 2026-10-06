@@ -305,10 +305,24 @@ pub enum Popup {
     /// check-run popover; `step` is the step to scroll to (the API's name),
     /// `None` the failure.
     ActionsJobLog {
-        repo: u64,
+        /// `None` for a repository that is not cloned (`351-actions`).
+        repo: Option<u64>,
         github: GitHubRepository,
         check: corvene_models::RefCheck,
         step: Option<String>,
+    },
+    /// Corvene (`351-actions`): the GitHub repository's Actions (workflows,
+    /// runs, jobs); `repo` is the local clone, when there is one. The view's
+    /// state is `AppState::actions`.
+    Actions {
+        github: GitHubRepository,
+        repo: Option<u64>,
+    },
+    /// Corvene (`351-actions`): Run workflow for a `workflow_dispatch`
+    /// workflow of the open Actions view.
+    RunWorkflow {
+        github: GitHubRepository,
+        workflow: u64,
     },
     /// `PullRequestReview`: a review on one of the user's pull requests
     /// (GHD shows it from a notification). `should_*` pick the OK button:
@@ -782,7 +796,6 @@ impl Popup {
             | Self::SAMLReauthRequired { repo, .. }
             | Self::TestNotifications { repo, .. }
             | Self::CICheckRunRerun { repo, .. }
-            | Self::ActionsJobLog { repo, .. }
             | Self::PullRequestReview { repo, .. }
             | Self::PullRequestComment { repo, .. }
             | Self::PullRequestChecksFailed { repo, .. }
@@ -843,6 +856,7 @@ impl Popup {
             | Self::UnreachableCommits { repo, .. }
             | Self::ConfirmDeleteUntrashable { repo, .. }
             | Self::IgnoreWithPattern { repo, .. } => Some(*repo),
+            Self::ActionsJobLog { repo, .. } | Self::Actions { repo, .. } => *repo,
             _ => None,
         }
     }
@@ -1838,6 +1852,11 @@ pub struct AppState {
     pub commit_statuses: crate::commit_status::CommitStatusStore,
     /// Corvene (`347-actions-job-logs`): Actions job logs fetched this session.
     pub job_logs: crate::job_log::JobLogStore,
+    /// Corvene (`351-actions`): the open Actions view.
+    pub actions: Option<crate::github_actions::ActionsViewState>,
+    /// Corvene (`351-actions`): runs started from the view, watched until
+    /// they finish.
+    pub actions_watch: crate::github_actions::ActionsWatch,
     /// Corvene (`428-menu-bar-status-item`): what the indicator pass recorded
     /// for the watched repositories.
     pub menu_bar_statuses: crate::menu_bar_status::MenuBarStatuses,

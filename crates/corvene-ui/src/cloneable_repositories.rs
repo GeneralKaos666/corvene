@@ -440,6 +440,9 @@ pub fn repository_list(
                 .flags
                 .bool(corvene_core::flags::ids::CONSISTENT_FILTER_HIGHLIGHT)
         });
+        // `351-actions`: a row's menu opens its Actions without cloning
+        let actions = corvene_core::AppState::try_global(cx)
+            .is_some_and(|s| s.read(cx).flags.bool(corvene_core::flags::ids::ACTIONS));
         with_zoom(style.zoom, || {
             let t = cx.ghd();
             range
@@ -497,6 +500,13 @@ pub fn repository_list(
                             .on_click(move |ev: &ClickEvent, window, cx| {
                                 on_select(&repo_for_click, ev.modifiers(), window, cx)
                             })
+                            .when(actions, |d| {
+                                let repo = repo.clone();
+                                d.on_mouse_down(MouseButton::Right, move |ev, window, cx| {
+                                    cx.stop_propagation();
+                                    row_menu(&repo, ev.position, window, cx);
+                                })
+                            })
                             .child(octicon(
                                 icon,
                                 if is_selected { selected_fg } else { t.text },
@@ -530,6 +540,24 @@ pub fn repository_list(
     .size_full()
     .with_scrollbar()
     .into_any_element()
+}
+
+/// Corvene (`351-actions`): a repository row's context menu, View
+/// Actions… (the repository need not be cloned) and View on GitHub. GHD's
+/// clone list has no row menu.
+fn row_menu(repo: &GitHubRepository, position: Point<Pixels>, window: &mut Window, cx: &mut App) {
+    use crate::context_menu::{MenuItem, mac_or};
+    let (actions, url) = (repo.clone(), repo.html_url.clone());
+    let items = vec![
+        MenuItem::new(
+            mac_or("View Actions…", "View actions…"),
+            move |_, cx| Dispatcher::show_actions(actions.clone(), None, None, cx),
+        ),
+        MenuItem::new(mac_or("View on GitHub", "View on GitHub"), move |_, cx| {
+            Dispatcher::open_url(&url, cx)
+        }),
+    ];
+    crate::native_menu::show_context_menu(items, position, window, cx);
 }
 
 /// `renderPostFilter`: the refresh button beside the filter box, dimmed

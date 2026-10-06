@@ -498,7 +498,8 @@ pub struct ApiCheckSuite {
     pub created_at: String,
 }
 
-/// `IAPIWorkflowRun`
+/// `IAPIWorkflowRun`, with what the Actions view (Corvene `351-actions`)
+/// reads besides GHD's fields.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApiWorkflowRun {
     pub id: u64,
@@ -510,6 +511,35 @@ pub struct ApiWorkflowRun {
     pub check_suite_id: Option<u64>,
     #[serde(default)]
     pub event: String,
+    /// `queued`, `in_progress`, `completed`, `waiting`, `requested`, `pending`.
+    #[serde(default)]
+    pub status: Option<CheckStatus>,
+    #[serde(default)]
+    pub conclusion: Option<CheckConclusion>,
+    #[serde(default)]
+    pub head_branch: Option<String>,
+    #[serde(default)]
+    pub head_sha: String,
+    #[serde(default)]
+    pub actor: Option<ApiIssueUser>,
+    #[serde(default)]
+    pub triggering_actor: Option<ApiIssueUser>,
+    #[serde(default)]
+    pub run_number: u64,
+    #[serde(default)]
+    pub run_attempt: u64,
+    #[serde(default)]
+    pub html_url: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub run_started_at: Option<String>,
+    /// The commit's or pull request's title GitHub lists the run under.
+    #[serde(default)]
+    pub display_title: Option<String>,
+    /// The workflow file, `.github/workflows/ci.yml`.
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -546,6 +576,10 @@ pub struct ApiWorkflowJob {
     pub steps: Vec<ApiWorkflowJobStep>,
     #[serde(default)]
     pub html_url: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -717,7 +751,7 @@ pub struct ApiBranch {
 }
 
 /// `headers.get(name)`: the first value of `name`, any case.
-fn header<'a>(headers: &'a ResponseHeaders, name: &str) -> Option<&'a str> {
+pub(crate) fn header<'a>(headers: &'a ResponseHeaders, name: &str) -> Option<&'a str> {
     headers
         .iter()
         .find(|(n, _)| n.eq_ignore_ascii_case(name))
@@ -725,7 +759,7 @@ fn header<'a>(headers: &'a ResponseHeaders, name: &str) -> Option<&'a str> {
 }
 
 /// The headers of a response as [`ResponseHeaders`] pairs.
-fn header_pairs(headers: &ureq::http::HeaderMap) -> Vec<(String, String)> {
+pub(crate) fn header_pairs(headers: &ureq::http::HeaderMap) -> Vec<(String, String)> {
     headers
         .iter()
         .filter_map(|(name, value)| Some((name.to_string(), value.to_str().ok()?.to_string())))
@@ -876,7 +910,7 @@ impl Client {
         &self.endpoint
     }
 
-    fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
+    pub(crate) fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
         self.get_json_accept(path, "application/vnd.github+json")
     }
 
@@ -887,7 +921,11 @@ impl Client {
     ///
     /// With `sso_hint` (flag `327-api-saml-sso-hint`) a 403's message names
     /// the SSO authorization its `X-GitHub-SSO` header asks for.
-    fn api_error(&self, url: &str, mut response: ureq::http::Response<ureq::Body>) -> GitHubError {
+    pub(crate) fn api_error(
+        &self,
+        url: &str,
+        mut response: ureq::http::Response<ureq::Body>,
+    ) -> GitHubError {
         let status = response.status();
         let headers = response.headers();
         let token_invalidated = status == ureq::http::StatusCode::UNAUTHORIZED
@@ -927,7 +965,11 @@ impl Client {
 
     /// `GET` with a specific `Accept` header (the preview APIs); an error
     /// status is an `Err`.
-    fn get_response(&self, path: &str, accept: &str) -> Result<ureq::http::Response<ureq::Body>> {
+    pub(crate) fn get_response(
+        &self,
+        path: &str,
+        accept: &str,
+    ) -> Result<ureq::http::Response<ureq::Body>> {
         let url = self.endpoint.api(path);
         debug!(%url, "GET");
         let mut request = self
@@ -1094,6 +1136,79 @@ impl Client {
             return Err(self.api_error(&url, response));
         }
         Ok(response.body_mut().read_json()?)
+    }
+
+    /// Corvene (`351-actions`): a conditional `GET` (`If-None-Match:
+    /// <etag>`). `Ok(None)` when GitHub answers 304 Not Modified (which does
+    /// not count against the rate limit), else the value and its `ETag`.
+    pub(crate) fn get_json_if_none_match<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        etag: Option<&str>,
+    ) -> Result<Option<(T, Option<String>)>> {
+        let url = self.endpoint.api(path);
+        debug!(%url, etag, "GET");
+        let mut request = self
+            .agent
+            .get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28");
+        if !self.token.is_empty() {
+            request = request.header("Authorization", &format!("Bearer {}", self.token));
+        }
+        if let Some(etag) = etag {
+            request = request.header("If-None-Match", etag);
+        }
+        let mut response = request.call()?;
+        if response.status() == ureq::http::StatusCode::NOT_MODIFIED {
+            return Ok(None);
+        }
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
+        }
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        Ok(Some((response.body_mut().read_json()?, etag)))
+    }
+
+    /// Corvene (`351-actions`): a `POST` (with `body`, else empty) or a
+    /// `DELETE` whose success has no content to read (204, 201, 202). Unlike
+    /// [`Self::post_empty`], every error status is an `Err`.
+    pub(crate) fn send_no_content(
+        &self,
+        delete: bool,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<()> {
+        let url = self.endpoint.api(path);
+        debug!(%url, delete, "send");
+        let auth = format!("Bearer {}", self.token);
+        let response = if delete {
+            self.agent
+                .delete(&url)
+                .header("Accept", "application/vnd.github+json")
+                .header("Authorization", &auth)
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .call()?
+        } else {
+            let request = self
+                .agent
+                .post(&url)
+                .header("Accept", "application/vnd.github+json")
+                .header("Authorization", &auth)
+                .header("X-GitHub-Api-Version", "2022-11-28");
+            match body {
+                Some(body) => request.send_json(body)?,
+                None => request.send_empty()?,
+            }
+        };
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
+        }
+        Ok(())
     }
 
     /// `POST /graphql`: the query's `data`. A 200 answer whose `errors`

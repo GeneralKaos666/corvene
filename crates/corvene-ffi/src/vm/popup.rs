@@ -664,7 +664,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             step,
             ..
         } => {
-            repo = Some(*r);
+            repo = *r;
             f.put("check", &check.name);
             f.opt("step", step.as_deref());
         }
@@ -696,6 +696,14 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         }
         Popup::ConfirmQuit { busy } => {
             f.put("busy", busy);
+        }
+        Popup::Actions { github, repo: r } => {
+            repo = *r;
+            f.put("repository", github.full_name());
+        }
+        Popup::RunWorkflow { github, workflow } => {
+            f.put("repository", github.full_name());
+            f.put("workflow", workflow);
         }
     }
     Some(PopupVm {

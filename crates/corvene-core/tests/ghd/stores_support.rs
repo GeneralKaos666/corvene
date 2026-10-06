@@ -99,6 +99,8 @@ pub fn app_state() -> TestAppState {
         tutorial_step_override: None,
         commit_statuses: Default::default(),
         job_logs: Default::default(),
+        actions: None,
+        actions_watch: Default::default(),
         menu_bar_statuses: Default::default(),
         repo_rulesets: HashMap::new(),
         editors: Vec::new(),

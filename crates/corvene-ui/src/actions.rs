@@ -137,6 +137,8 @@ gpui_kit::actions!(
         // Repository › Releases… / Create Release… (`346-releases`)
         ShowReleases,
         CreateRelease,
+        // Repository › Actions… (`351-actions`)
+        ShowActions,
         // Repository › Start Bisect / Stop Bisecting (`1212-bisect`)
         StartBisect,
         StopBisect,

@@ -603,6 +603,8 @@ pub(crate) fn main() {
         //   issues | new-issue (Repository › Issues… with sample issues, New
         //   Issue…; flag 345), releases | create-release[:<tag>] (Repository ›
         //   Releases… with sample releases, Create Release…; flag 346)
+        //   actions | run-workflow (Repository › Actions… with sample workflows,
+        //   runs and jobs, and Run workflow's form; flag 351)
         //   blame:<path>[@<rev>] (the Blame view of a file, in the working tree
         //   or at a revision; flag 798)
         //   clean-untracked[:ignored] (Repository › Clean Untracked Files…, flag 1105)
@@ -1278,6 +1280,12 @@ pub(crate) fn main() {
         on_menu_action(cx, move |_: &CreateRelease, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::show_create_release(id, None, None, cx);
+            }
+        });
+        // `351-actions`
+        on_menu_action(cx, move |_: &ShowActions, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_repository_actions(id, cx);
             }
         });
         // `1212-bisect`
@@ -2169,6 +2177,28 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
             corvene_core::issues::install_samples(id, cx);
             Dispatcher::show_popup(Popup::NewIssue { repo: id }, cx);
         }
+        // `351-actions`: the view with sample workflows, runs and jobs (no
+        // API), and Run workflow for the sample Release workflow
+        ("actions", repo) | ("run-workflow", repo) => {
+            let github = corvene_core::github_actions::install_samples(repo, cx);
+            Dispatcher::show_popup(
+                Popup::Actions {
+                    github: github.clone(),
+                    repo,
+                },
+                cx,
+            );
+            if popup == "run-workflow" {
+                Dispatcher::select_actions_workflow(Some(4), cx);
+                Dispatcher::show_popup(
+                    Popup::RunWorkflow {
+                        github,
+                        workflow: 4,
+                    },
+                    cx,
+                );
+            }
+        }
         // `346-releases`: the view with sample releases, Create Release…
         ("releases", Some(id)) => {
             corvene_core::releases::install_samples(id, cx);
@@ -2218,7 +2248,7 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 .find(|c| c.job_steps.is_some())
                 .unwrap_or_else(|| dev_samples::failed_checks().remove(0));
             Dispatcher::install_job_log(&github, check.id, &corvene_core::samples::job_log(), cx);
-            Dispatcher::show_job_log(id, github, check, None, cx);
+            Dispatcher::show_job_log(Some(id), github, check, None, cx);
         }
         ("pr-checks-failed", Some(id)) => Dispatcher::show_popup(
             Popup::PullRequestChecksFailed {

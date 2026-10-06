@@ -195,6 +195,8 @@ impl Dispatcher {
             tutorial_step_override: None,
             commit_statuses: crate::commit_status::CommitStatusStore::default(),
             job_logs: crate::job_log::JobLogStore::default(),
+            actions: None,
+            actions_watch: Default::default(),
             menu_bar_statuses: Default::default(),
             repo_rulesets: std::collections::HashMap::new(),
             issues: std::collections::HashMap::new(),

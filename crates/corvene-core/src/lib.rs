@@ -40,6 +40,7 @@ pub mod forks;
 pub mod ghd_import;
 pub mod git_config_import;
 pub mod git_store;
+pub mod github_actions;
 #[cfg(any(target_os = "android", test))]
 pub mod headless;
 pub mod history_filter;

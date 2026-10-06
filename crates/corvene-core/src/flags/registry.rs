@@ -2987,6 +2987,30 @@ registry! {
         code: &["crates/corvene-platform/src/ssh_key.rs", "crates/corvene-core/src/ssh_keys.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/dialogs/create_ssh_key.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// The GitHub repository's Actions: workflows, runs, jobs and logs,
+    /// re-run, cancel and Run workflow, for cloned repositories and those
+    /// in the clone list.
+    ACTIONS = 351 "actions" {
+        title: "GitHub Actions",
+        summary: "Repository › Actions… (and View Actions… on a repository in the clone \
+                  dialog's lists, so it works without cloning) shows the repository's \
+                  workflows, their runs filtered by branch, status and event, and a run's \
+                  jobs and steps, whose logs open in the app. Runs can be re-run (all or failed \
+                  jobs), cancelled or have their logs deleted, a job re-run alone, and Run \
+                  workflow starts a workflow_dispatch workflow on a branch or tag with a form \
+                  built from the workflow file's inputs. The open view refreshes every 12 s \
+                  while a run is queued or running, and a run started here posts a \
+                  notification when it finishes.",
+        ghd_behaviour: "Actions are only read to re-run a pull request's failed checks; \
+                        everything else happens on github.com.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17498)],
+        code: &["crates/corvene-core/src/github_actions.rs", "crates/corvene-github/src/actions.rs", "crates/corvene-ui/src/dialogs/actions_view.rs", "crates/corvene-ui/src/dialogs/run_workflow.rs", "crates/corvene-ui/src/cloneable_repositories.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

@@ -6,6 +6,7 @@
 
 mod acknowledgements;
 mod actions_job_log;
+pub mod actions_view;
 mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
@@ -55,6 +56,7 @@ mod remove_repositories;
 mod repository_settings;
 mod request_reviewers;
 mod reset_to_reflog_entry;
+mod run_workflow;
 mod sign_in;
 pub mod sign_in_host;
 mod simple;
@@ -75,6 +77,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 pub use actions_job_log::ActionsJobLogDialog;
+pub use actions_view::ActionsDialog;
 pub use add_embedded_repositories::AddEmbeddedRepositoriesDialog;
 pub use add_existing::AddExistingRepositoryDialog;
 pub use app_dialogs::{AboutDialog, ConfirmRemoveRepositoryDialog, IntegrationErrorDialog};
@@ -130,6 +133,7 @@ pub use repository_settings::{
     NoRemoteAction, NoRemoteContent, RepositorySettingsDialog, no_remote,
 };
 pub use request_reviewers::RequestReviewersDialog;
+pub use run_workflow::RunWorkflowDialog;
 pub use sign_in::{
     ExistingAccountWarning, SignInAction, SignInContent, SignInDialog, sign_in_content,
 };
@@ -303,6 +307,10 @@ impl DialogHost {
                         cx,
                     )
                 })
+                .into(),
+            Popup::Actions { .. } => cx.new(|cx| ActionsDialog::new(state, window, cx)).into(),
+            Popup::RunWorkflow { github, workflow } => cx
+                .new(|cx| RunWorkflowDialog::new(state, github.clone(), *workflow, window, cx))
                 .into(),
             Popup::PullRequestReview {
                 repo,

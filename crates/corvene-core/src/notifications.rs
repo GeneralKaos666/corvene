@@ -240,6 +240,10 @@ impl Dispatcher {
     /// A click on a notification whose `userInfo` carried `payload` (GHD
     /// `onNotificationEventReceived` for notifications of earlier sessions).
     pub fn notification_payload_clicked(payload: &str, cx: &mut dyn Host) {
+        // `351-actions`: a finished run's notification
+        if Self::actions_notification_clicked(payload, cx) {
+            return;
+        }
         match serde_json::from_str::<PullRequestNotification>(payload) {
             Ok(notification) => Self::notification_clicked(notification, cx),
             Err(err) => warn!(%err, "unreadable notification payload"),

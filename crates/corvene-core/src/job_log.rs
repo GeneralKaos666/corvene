@@ -274,7 +274,7 @@ impl Dispatcher {
     /// and the fetch unless the log is already there. `step` scrolls to that
     /// step (the API's step name); `None` jumps to the failure.
     pub fn show_job_log(
-        repo: u64,
+        repo: Option<u64>,
         github: GitHubRepository,
         check: RefCheck,
         step: Option<String>,

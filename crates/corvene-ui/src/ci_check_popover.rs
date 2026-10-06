@@ -68,7 +68,7 @@ pub(crate) fn open_log_for(
     Some(Rc::new(move |step, cx: &mut App| {
         // the dialog takes the popover's place
         Dispatcher::set_show_ci_status_popover(false, cx);
-        Dispatcher::show_job_log(repo, github.clone(), check.clone(), step, cx)
+        Dispatcher::show_job_log(Some(repo), github.clone(), check.clone(), step, cx)
     }))
 }
 
