@@ -48,6 +48,7 @@ pub mod sparse;
 #[cfg(any(target_os = "android", all(test, unix)))]
 mod spawn;
 pub mod ssh;
+pub mod stash_file_discard;
 pub mod stash_ops;
 pub mod stats;
 pub mod status;
@@ -207,6 +208,7 @@ pub use sparse::{
     sparse_checkout_set, tree_directories,
 };
 pub use ssh::{AddSshHostInfo, parse_add_ssh_host_prompt};
+pub use stash_file_discard::{DiscardFromStash, discard_files_from_stash, put_back_stash_entry};
 pub use stash_ops::{
     ADD_TO_STASH_MIN_VERSION, AddToStash, StashPop, StashPopOptions, add_to_desktop_stash,
     apply_stash_entry_with, create_branch_from_stash, create_desktop_stash_of_files,

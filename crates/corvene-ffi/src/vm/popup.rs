@@ -883,6 +883,21 @@ pub fn banner(s: &AppState) -> Option<BannerVm> {
             f.put("sha", sha).put("message", message);
         }
         Banner::StashRestored => {}
+        Banner::StashFileDiscarded {
+            repo: r,
+            path,
+            sha,
+            message,
+            position,
+            replacing,
+        } => {
+            repo = Some(*r);
+            f.put("path", path)
+                .put("sha", sha)
+                .put("message", message)
+                .put("position", position.to_string())
+                .put("replacing", replacing.as_deref().unwrap_or(""));
+        }
         Banner::PatchApplied {
             files,
             commits,

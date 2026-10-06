@@ -8561,6 +8561,22 @@ registry! {
         upstream: &[Upstream::issue(20909)],
         code: &["crates/corvene-core/src/codeowners.rs", "crates/corvene-ui/src/code_owners.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/dialogs/open_pull_request.rs"],
     },
+    /// Discard one file of a stash.
+    DISCARD_STASH_FILE = 1315 "discard-stash-file" {
+        title: "Discard a file from a stash",
+        summary: "A file in the stash viewer has a menu with Discard from Stash (and Copy \
+                  File Path), which takes the file out of the stash and leaves the rest of it \
+                  where it was in the list. \
+                  A Discarded banner offers Undo for 15 seconds. Discarding the stash's last \
+                  file discards the stash.",
+        ghd_behaviour: "A stash can only be restored or discarded whole.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/stash_file_discard.rs", "crates/corvene-core/src/stash_list.rs", "crates/corvene-ui/src/stash_view.rs", "crates/corvene-ui/src/banner.rs"],
+    },
 
 }
 

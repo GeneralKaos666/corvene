@@ -204,6 +204,126 @@ impl Dispatcher {
         );
     }
 
+    /// `1315-discard-stash-file`: take file `path` (both paths of a rename)
+    /// out of the stash the viewer shows, then a banner whose Undo puts the
+    /// entry back as it was ([`Self::undo_discard_stash_file`]). The last
+    /// file drops the entry.
+    pub fn discard_stash_file(id: u64, path: String, cx: &mut dyn Host) {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::DISCARD_STASH_FILE) {
+            return;
+        }
+        let Some(rs) = s.repo_states.get(&id) else {
+            return;
+        };
+        let Some(stash) = rs.shown_stash().cloned() else {
+            return;
+        };
+        let mut paths = vec![path.clone()];
+        paths.extend(
+            rs.stash_files
+                .iter()
+                .flatten()
+                .find(|f| f.path == path)
+                .and_then(|f| f.old_path.clone()),
+        );
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let sha = stash.sha.clone();
+        spawn_bg(
+            cx,
+            move || corvene_git::discard_files_from_stash(git, &workdir, &sha, &paths),
+            move |result, cx| {
+                let (replacing, position) = match result {
+                    Ok(corvene_git::DiscardFromStash::Rewritten { old, new, position }) => {
+                        Self::state(cx).update(cx, |s, cx| {
+                            let rs = s.repo_state_mut(id);
+                            // the viewer stays on the entry
+                            if rs.viewed_stash.as_ref() == Some(&old) {
+                                rs.viewed_stash = Some(new.clone());
+                            }
+                            cx.notify();
+                        });
+                        Self::rekey_changelist_stash(id, &old, &new, cx);
+                        (Some(new), position)
+                    }
+                    Ok(corvene_git::DiscardFromStash::Dropped { position, .. }) => (None, position),
+                    Ok(corvene_git::DiscardFromStash::Missing) => {
+                        Self::refresh_repository(id, cx);
+                        return;
+                    }
+                    Err(err) => {
+                        Self::show_error("Could not discard the file from the stash", &err, cx);
+                        Self::refresh_repository(id, cx);
+                        return;
+                    }
+                };
+                Self::refresh_repository(id, cx);
+                Self::set_banner(
+                    Banner::StashFileDiscarded {
+                        repo: id,
+                        path,
+                        sha: stash.sha,
+                        message: stash.message,
+                        position,
+                        replacing,
+                    },
+                    cx,
+                );
+            },
+        );
+    }
+
+    /// The "Discarded <file> from the stash" banner's Undo: the old commit
+    /// `sha` goes back at `position`, in place of `replacing` (the rewritten
+    /// entry) or as an entry of its own when the discard dropped it.
+    pub fn undo_discard_stash_file(
+        id: u64,
+        sha: String,
+        message: String,
+        position: usize,
+        replacing: Option<String>,
+        cx: &mut dyn Host,
+    ) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let (old, current) = (sha.clone(), replacing.clone());
+        spawn_bg(
+            cx,
+            move || {
+                corvene_git::put_back_stash_entry(
+                    git,
+                    &workdir,
+                    replacing.as_deref(),
+                    position,
+                    &sha,
+                    &message,
+                )
+            },
+            move |result, cx| {
+                match result {
+                    Ok(()) => {
+                        if let Some(current) = &current {
+                            Self::state(cx).update(cx, |s, cx| {
+                                let rs = s.repo_state_mut(id);
+                                if rs.viewed_stash.as_ref() == Some(current) {
+                                    rs.viewed_stash = Some(old.clone());
+                                }
+                                cx.notify();
+                            });
+                            Self::rekey_changelist_stash(id, current, &old, cx);
+                        }
+                        Self::set_banner(Banner::StashRestored, cx);
+                    }
+                    Err(err) => Self::show_error("Could not restore stash", &err, cx),
+                }
+                Self::refresh_repository(id, cx);
+            },
+        );
+    }
+
     /// Stash All Changes with Message…
     pub fn request_stash_with_message(id: u64, cx: &mut dyn Host) {
         Self::show_popup(Popup::StashWithMessage { repo: id }, cx);

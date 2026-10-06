@@ -8,6 +8,9 @@
 //!
 //! Deviation (`1310-file-list-tree`): the file list can show the stash's
 //! files as a folder tree (GHD `stash-diff-viewer.tsx` lists them flat).
+//!
+//! Deviation (`1315-discard-stash-file`): a file's context menu can take it
+//! out of the stash (GHD's `FileList` here has no context menu).
 
 use corvene_core::{AppState, CommittedFileChange, Dispatcher};
 use gpui_kit::component::resizable::{
@@ -429,8 +432,15 @@ fn stash_file_row(
     });
     let has_icon = file_icon.is_some();
     let path = file.path.clone();
+    // `1315-discard-stash-file`
+    let menu = corvene_core::AppState::global(cx)
+        .read(cx)
+        .flags
+        .bool(corvene_core::flags::ids::DISCARD_STASH_FILE);
+    let menu_path = file.path.clone();
     div()
         .id(SharedString::from(format!("stash-file-{}", file.path)))
+        .group("stash-file-row")
         .a11y_row(
             format!(
                 "{}, {}",
@@ -467,6 +477,18 @@ fn stash_file_row(
                 view.update(cx, |this, _| this.tree.clear_cursor()).ok();
             }
             Dispatcher::select_stash_file(id, path.clone(), cx)
+        })
+        .when(menu, |d| {
+            d.on_mouse_down(
+                MouseButton::Right,
+                move |ev: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    if !is_selected {
+                        Dispatcher::select_stash_file(id, menu_path.clone(), cx);
+                    }
+                    open_stash_file_menu(id, &menu_path, ev.position, window, cx);
+                },
+            )
         })
         .children(file_icon)
         .child({
@@ -506,7 +528,55 @@ fn stash_file_row(
             .text_size(FONT_SIZE())
         })
         .child(octicon(icon, color))
+        // `621-context-menu-buttons`
+        .when(menu && crate::context_menu::row_menu_buttons(cx), |d| {
+            d.child(
+                crate::context_menu::row_menu_button(
+                    "row-menu",
+                    "stash-file-row",
+                    is_selected,
+                    color,
+                )
+                .ml(SPACING_HALF()),
+            )
+        })
         .into_any_element()
+}
+
+/// `1315-discard-stash-file`: a stash file's context menu.
+fn open_stash_file_menu(
+    id: u64,
+    path: &str,
+    position: Point<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::context_menu::{MenuItem, mac_or};
+    let Some(repo) = AppState::global(cx)
+        .read(cx)
+        .repository(id)
+        .map(|r| r.path.clone())
+    else {
+        return;
+    };
+    let full = repo.join(path).to_string_lossy().into_owned();
+    let relative = path.to_string();
+    let discard = path.to_string();
+    let items = vec![
+        MenuItem::new(
+            mac_or("Discard from Stash", "Discard from stash"),
+            move |_, cx| Dispatcher::discard_stash_file(id, discard.clone(), cx),
+        ),
+        MenuItem::separator(),
+        MenuItem::new(mac_or("Copy File Path", "Copy file path"), move |_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(full.clone()))
+        }),
+        MenuItem::new(
+            mac_or("Copy Relative File Path", "Copy relative file path"),
+            move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(relative.clone())),
+        ),
+    ];
+    crate::native_menu::show_context_menu(items, position, window, cx);
 }
 
 impl Render for StashDiffViewer {

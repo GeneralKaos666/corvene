@@ -504,6 +504,18 @@ pub enum Banner {
     },
     /// Corvene (`797-stash-list`): after that Undo.
     StashRestored,
+    /// Corvene (`1315-discard-stash-file`): "Discarded <path> from the
+    /// stash" + Undo, which puts stash commit `sha` back with `message` at
+    /// `position`, in place of `replacing` (the rewritten entry; `None`
+    /// when the discard dropped the entry).
+    StashFileDiscarded {
+        repo: u64,
+        path: String,
+        sha: String,
+        message: String,
+        position: usize,
+        replacing: Option<String>,
+    },
     /// Corvene (`1106-apply-patch`): "Committed N patches", "Applied the
     /// patch to N files", or with `conflicts` "… Resolve the conflicts in N
     /// files."
@@ -577,7 +589,8 @@ impl Banner {
             | Banner::IssueCreated { .. }
             | Banner::ReviewSubmitted { .. }
             | Banner::ReleaseCreated { .. }
-            | Banner::StashDropped { .. } => Some(Duration::from_secs(15)),
+            | Banner::StashDropped { .. }
+            | Banner::StashFileDiscarded { .. } => Some(Duration::from_secs(15)),
             Banner::ConflictsFound { .. }
             | Banner::GitEmailMismatch { .. }
             | Banner::RepositoriesUnreadable { .. }

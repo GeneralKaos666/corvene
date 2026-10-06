@@ -180,6 +180,12 @@ pub fn parts(banner: &Banner) -> Vec<(String, bool)> {
                 .unwrap_or_else(|| "stash".to_string())),
         ],
         Banner::StashRestored => vec![t("Restored stash")],
+        // `1315-discard-stash-file`
+        Banner::StashFileDiscarded { path, .. } => vec![
+            t("Discarded\u{a0}"),
+            (path.rsplit('/').next().unwrap_or(path).to_string(), true),
+            t("\u{a0}from the stash"),
+        ],
         // `1106-apply-patch`
         Banner::PatchApplied {
             files,
@@ -536,6 +542,39 @@ pub fn banner_bar(
                     .on_click(move |_, _, cx| {
                         Dispatcher::clear_banner(cx);
                         Dispatcher::restore_discarded_stash(repo, sha.clone(), message.clone(), cx);
+                    })
+                    .into_any_element(),
+            )
+        }
+        Banner::StashFileDiscarded {
+            repo,
+            sha,
+            message,
+            position,
+            replacing,
+            ..
+        } => {
+            let (repo, sha, message, position, replacing) = (
+                *repo,
+                sha.clone(),
+                message.clone(),
+                *position,
+                replacing.clone(),
+            );
+            Some(
+                link_button("banner-undo", "Undo", cx)
+                    .when_some(first, |d, first| d.track_focus(first))
+                    .ml(SPACING_HALF())
+                    .on_click(move |_, _, cx| {
+                        Dispatcher::clear_banner(cx);
+                        Dispatcher::undo_discard_stash_file(
+                            repo,
+                            sha.clone(),
+                            message.clone(),
+                            position,
+                            replacing.clone(),
+                            cx,
+                        );
                     })
                     .into_any_element(),
             )

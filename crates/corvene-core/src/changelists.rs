@@ -281,6 +281,15 @@ impl Changelists {
     }
 
     /// Stash `sha` is gone (restored or dropped): forget its lists.
+    /// `1315-discard-stash-file`: stash `old` was rewritten as `new`.
+    pub fn rekey_stashed(&mut self, old: &str, new: &str) -> bool {
+        let Some(lists) = self.stashed.remove(old) else {
+            return false;
+        };
+        self.stashed.insert(new.to_string(), lists);
+        true
+    }
+
     pub fn forget_stashed(&mut self, sha: &str) -> bool {
         self.stashed.remove(sha).is_some()
     }
@@ -631,6 +640,22 @@ impl Dispatcher {
         }
         Self::state(cx).update(cx, |s, cx| {
             edit(s, id, cx, |lists| lists.note_fate(sha, fate));
+        });
+    }
+
+    /// `1315-discard-stash-file`: the lists recorded with stash `old` move
+    /// to its rewritten commit `new`.
+    pub(crate) fn rekey_changelist_stash(id: u64, old: &str, new: &str, cx: &mut dyn Host) {
+        let known = Self::state(cx)
+            .read(cx)
+            .changelists
+            .get(&id)
+            .is_some_and(|l| l.stashed.contains_key(old));
+        if !known {
+            return;
+        }
+        Self::state(cx).update(cx, |s, cx| {
+            edit(s, id, cx, |lists| lists.rekey_stashed(old, new));
         });
     }
 

@@ -1,0 +1,19 @@
+# Discard one file from a stash (1315-discard-stash-file, off in the GitHub
+# Desktop preset): the stash viewer's file menu and the banner it leaves.
+# Recorded, not compared (GHD's stash file list has no context menu).
+name: discard-stash-file
+description: A stash file's context menu, Discard from Stash and its Undo banner (Corvene only)
+setup: repo
+corvene_flags: 1315-discard-stash-file=on
+steps:
+  - menu: stash-all-changes
+    wait: 1500
+  - menu: show-stashed-changes
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {rclick: {css: "#stash-diff-viewer .file-list .list-item"}}
+    wait: 600
+  - corvene_menu: stash-file
+  - corvene_menu_pick: "Discard from Stash"
+    wait: 1500
+  - snap: {name: file-discarded, corvene_only: true, note: "GHD can only discard the whole stash (deviations.md, 1315-discard-stash-file)"}
