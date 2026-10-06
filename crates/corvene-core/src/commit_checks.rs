@@ -73,7 +73,7 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let (paths, untracked, committing) = {
+        let (paths, deleted, untracked, committing) = {
             let s = Self::state(cx).read(cx);
             let rs = s.repo_states.get(&id);
             let included: Vec<&corvene_models::WorkingDirectoryFileChange> = rs
@@ -87,6 +87,11 @@ impl Dispatcher {
                 .unwrap_or_default();
             (
                 included.iter().map(|f| f.path.clone()).collect::<Vec<_>>(),
+                included
+                    .iter()
+                    .filter(|f| f.status.kind == corvene_models::FileStatusKind::Deleted)
+                    .map(|f| f.path.clone())
+                    .collect::<Vec<_>>(),
                 included
                     .iter()
                     .filter(|f| f.status.kind == corvene_models::FileStatusKind::Untracked)
@@ -123,8 +128,15 @@ impl Dispatcher {
                     embedded: Vec::new(),
                 };
                 if check_size {
+                    // `1308-ignore-oversized-files`: a file Ignore and
+                    // Untrack removed from the index is still on disk, but
+                    // the commit deletes it (GHD sizes every included file)
+                    let sized: Vec<&String> = paths
+                        .iter()
+                        .filter(|p| !(suggest_ignore && deleted.contains(p)))
+                        .collect();
                     let large =
-                        corvene_git::large_file_paths(&workdir, &paths, corvene_git::RECEIVE_LIMIT);
+                        corvene_git::large_file_paths(&workdir, &sized, corvene_git::RECEIVE_LIMIT);
                     if !large.is_empty() {
                         found.oversized =
                             corvene_git::files_not_tracked_by_lfs(git.clone(), &workdir, &large)
