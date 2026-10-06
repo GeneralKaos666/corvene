@@ -143,6 +143,14 @@ makes the fixture repository the stub's `octocat/parity-fixture`. The real
 API client then talks to the stub. GHD has neither view, so those snaps are
 `corvene_only`.
 
+The stub also answers the CI calls (`commits/<ref>/status` and
+`check-runs`, `actions/runs`, `actions/runs/7/jobs`, `actions/jobs/101/logs`:
+one workflow run with a failed `test (macos-15)` job, its steps and its log).
+`github: stub-ci` signs in as `github: stub` does and also points `origin` at
+the stub repository (`fake-github` with `remote`), so with `334-branch-ci-status`
+the toolbar shows the pushed tip's checks and the popover can open the
+failed job's log (`347-actions-job-logs`, `41-ci-checks.yaml`).
+
 ## Linux
 
 GitHub Desktop 3.6.6 has no official Linux build; build it from source

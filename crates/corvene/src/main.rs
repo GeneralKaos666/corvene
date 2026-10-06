@@ -533,6 +533,7 @@ pub(crate) fn main() {
         //   push-needs-pull | initialize-lfs (for the selected repository)
         //   pr-review[:approved|:commented] (changes requested by default)
         //   pr-comment | pr-checks-failed
+        //   job-log (the sample failed job's Actions log, flag 347)
         //   pr-list (sample pull requests in the branch foldout's Pull Requests tab)
         //   tutorial:<step> (the repository becomes the tutorial repository, shown at
         //   <step>: pick-editor, create-branch, edit-file, make-commit, push-branch,
@@ -1978,6 +1979,16 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
             },
             cx,
         ),
+        // `347-actions-job-logs`: the sample failed job's log, no API
+        ("job-log", Some(id)) => {
+            let github = corvene_core::samples::github_repository(id, cx);
+            let check = dev_samples::failed_checks()
+                .into_iter()
+                .find(|c| c.job_steps.is_some())
+                .unwrap_or_else(|| dev_samples::failed_checks().remove(0));
+            Dispatcher::install_job_log(&github, check.id, &corvene_core::samples::job_log(), cx);
+            Dispatcher::show_job_log(id, github, check, None, cx);
+        }
         ("pr-checks-failed", Some(id)) => Dispatcher::show_popup(
             Popup::PullRequestChecksFailed {
                 repo: id,

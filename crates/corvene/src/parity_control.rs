@@ -710,18 +710,35 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
         allow_forking: Some(true),
         node_id: Some("R_stub".to_string()),
     };
-    corvene_core::AppState::global(cx).update(cx, |s, cx| {
+    // `remote`: `origin` becomes the stub repository's clone URL, so the
+    // current branch's pushed tip is a ref on it (`334-branch-ci-status`,
+    // `41-ci-checks.yaml`)
+    let point_origin = fake["remote"].as_bool().unwrap_or(false);
+    let clone_url = github.clone_url.clone();
+    let (selected, retarget) = corvene_core::AppState::global(cx).update(cx, |s, cx| {
         s.accounts.retain(|a| a.endpoint != endpoint);
         if with_account {
             s.accounts.push(account);
         }
+        let mut retarget = None;
         if let Some(id) = s.selected
             && let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
         {
             repo.github = Some(github);
+            if point_origin && let Some(git) = s.git.clone() {
+                retarget = Some((git, repo.path.clone()));
+            }
         }
         cx.notify();
+        (s.selected, retarget)
     });
+    if let Some((git, path)) = retarget {
+        corvene_git::remote_ops::set_remote_url(git, &path, "origin", &clone_url)
+            .map_err(|e| format!("fake-github: set-url: {e}"))?;
+        if let Some(id) = selected {
+            Dispatcher::refresh_repository(id, cx);
+        }
+    }
     Ok(())
 }
 

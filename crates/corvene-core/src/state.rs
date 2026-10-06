@@ -289,6 +289,15 @@ pub enum Popup {
         git_ref: String,
         failed_only: bool,
     },
+    /// Corvene (`347-actions-job-logs`): the log of an Actions job from the
+    /// check-run popover; `step` is the step to scroll to (the API's name),
+    /// `None` the failure.
+    ActionsJobLog {
+        repo: u64,
+        github: GitHubRepository,
+        check: corvene_models::RefCheck,
+        step: Option<String>,
+    },
     /// `PullRequestReview`: a review on one of the user's pull requests
     /// (GHD shows it from a notification). `should_*` pick the OK button:
     /// switch repository and/or check out the PR branch.
@@ -715,6 +724,7 @@ impl Popup {
             | Self::SAMLReauthRequired { repo, .. }
             | Self::TestNotifications { repo, .. }
             | Self::CICheckRunRerun { repo, .. }
+            | Self::ActionsJobLog { repo, .. }
             | Self::PullRequestReview { repo, .. }
             | Self::PullRequestComment { repo, .. }
             | Self::PullRequestChecksFailed { repo, .. }
@@ -1709,6 +1719,8 @@ pub struct AppState {
     pub show_ci_status_popover: bool,
     /// `CommitStatusStore`: CI statuses of refs.
     pub commit_statuses: crate::commit_status::CommitStatusStore,
+    /// Corvene (`347-actions-job-logs`): Actions job logs fetched this session.
+    pub job_logs: crate::job_log::JobLogStore,
     /// `cachedRepoRulesets`: ruleset id → the ruleset (how it applies to the user).
     pub repo_rulesets: HashMap<u64, corvene_github::ApiRepoRuleset>,
     /// Installed editors / shells (`getAvailableEditors` / `getAvailableShells`).

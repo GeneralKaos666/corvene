@@ -107,6 +107,9 @@ pub use forks::UPSTREAM_REMOTE_NAME;
 pub use host::{AsyncCtx, Ctx, Host, HostServices, StateCx, StateHandle};
 pub use hosts::{HostSignIn, HostsState};
 pub use integrations::{EditorChoice, PreferencesSave, RepositorySettingsSave};
+pub use job_log::{
+    JobLog, JobLogLine, JobLogState, JobLogStore, LineKind, job_log_key, parse_job_log,
+};
 pub use mco::{
     Banner, ConflictKind, ConflictState, McoConflicts, McoDetail, McoStep, McoUndo, MergePreview,
     MultiCommitOperation, RebasePreview, conflicted_files, get_unique_coauthors_as_authors,

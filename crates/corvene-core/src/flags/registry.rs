@@ -2898,6 +2898,22 @@ registry! {
         code: &["crates/corvene-core/src/releases.rs", "crates/corvene-ui/src/releases_list.rs", "crates/corvene-ui/src/release_view.rs", "crates/corvene-ui/src/dialogs/create_release.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// The check-run popover opens an Actions job's log in the app.
+    ACTIONS_JOB_LOGS = 347 "actions-job-logs" {
+        title: "Actions job logs",
+        summary: "In the check-run popover a GitHub Actions job's steps open the job's log in a \
+                  dialog (View log, or a click on a step): the log's text with its timestamps \
+                  and colour codes removed, errors and groups marked, a search box, Jump to \
+                  failure, Copy, and Open on GitHub for the job's page.",
+        ghd_behaviour: "Every step links to its page on GitHub; logs are read in the browser.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-core/src/job_log.rs", "crates/corvene-ui/src/dialogs/actions_job_log.rs", "crates/corvene-ui/src/ci_check_popover.rs", "crates/corvene-github/src/api.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

@@ -36,7 +36,8 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::ci_check_popover::{
-    RerunChecks, RerunJob, check_run_group_header, check_run_row, check_run_steps, rerun_button,
+    RerunChecks, RerunJob, check_run_group_header, check_run_row, check_run_steps, open_log_for,
+    rerun_button,
 };
 use crate::context_menu::mac_or;
 use crate::icons::{Octicon, octicon};
@@ -810,7 +811,10 @@ impl Render for PullRequestChecksFailedDialog {
                     let check = check.clone();
                     Rc::new(move |cx: &mut App| rerun(vec![check.clone()], false, cx)) as RerunJob
                 });
-                check_run_steps(check, external, rerun_job, cx)
+                let open_log = github
+                    .as_ref()
+                    .and_then(|github| open_log_for(self.repo, github, check, cx));
+                check_run_steps(check, external, rerun_job, open_log, cx)
             }))
             .with_scrollbar();
         let content = div()

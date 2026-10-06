@@ -5,6 +5,7 @@
 //! view is recreated only when its popup's value changes.
 
 mod acknowledgements;
+mod actions_job_log;
 mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
@@ -65,6 +66,7 @@ use corvene_core::{AppState, Popup};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+pub use actions_job_log::ActionsJobLogDialog;
 pub use add_embedded_repositories::AddEmbeddedRepositoriesDialog;
 pub use add_existing::AddExistingRepositoryDialog;
 pub use app_dialogs::{AboutDialog, ConfirmRemoveRepositoryDialog, IntegrationErrorDialog};
@@ -271,6 +273,23 @@ impl DialogHost {
                         checks.clone(),
                         git_ref.clone(),
                         *failed_only,
+                        cx,
+                    )
+                })
+                .into(),
+            Popup::ActionsJobLog {
+                github,
+                check,
+                step,
+                ..
+            } => cx
+                .new(|cx| {
+                    ActionsJobLogDialog::new(
+                        state,
+                        github.clone(),
+                        check.clone(),
+                        step.clone(),
+                        window,
                         cx,
                     )
                 })
