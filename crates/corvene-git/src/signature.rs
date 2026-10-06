@@ -121,11 +121,12 @@ pub fn parse(stdout: &[u8], stderr: &str, kind: Option<SignatureKind>) -> LocalS
 }
 
 /// The verifier git could not start (`fatal: cannot exec '…'` /
-/// `cannot run gpg`), named for the signature's kind.
+/// `cannot run gpg`; `error: cannot spawn …` on Windows), named for the
+/// signature's kind.
 fn missing_tool(stderr: &str, kind: Option<SignatureKind>) -> Option<String> {
-    let failed = stderr
-        .lines()
-        .any(|l| l.contains("cannot exec") || l.contains("cannot run"));
+    let failed = stderr.lines().any(|l| {
+        l.contains("cannot exec") || l.contains("cannot run") || l.contains("cannot spawn")
+    });
     failed.then(|| {
         match kind {
             Some(SignatureKind::Ssh) => "ssh-keygen",
