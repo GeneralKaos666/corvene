@@ -11,7 +11,7 @@ steps:
     wait: 800
   - snap: {name: grouped, corvene_only: true, note: "GHD lists changed files flat (deviations.md, 1313-changelists)"}
   - ghd: {skip: true}
-    corvene: {click: [125, 213]}
+    corvene: {click: [125, 185]}
     wait: 400
   - snap: {name: header-selected, corvene_only: true, note: "a header row selects the list's files"}
   - ghd: {skip: true}

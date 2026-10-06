@@ -7188,7 +7188,8 @@ impl Render for ChangesSidebar {
                     .id("changes-list-container")
                     .track_focus(&self.list_focus)
                     // `1310-file-list-tree`: ← / → fold the tree's folders
-                    .key_context(if crate::file_tree_rows::tree_mode(cx) {
+                    // (`1313-changelists`: group headers fold with ← / → too)
+                    .key_context(if self.layout(cx).structured() {
                         "ChangesList FileTree"
                     } else {
                         "ChangesList"
