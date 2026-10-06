@@ -27,6 +27,7 @@
 //! Settings choice "Open on GitHub" always does the latter.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use corvene_github::api::{ApiPullRequest, ApiPullRequestReview, ApiPullRequestReviewState};
@@ -57,6 +58,10 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(300);
 /// How far back each poll looks again before the previous one (events are
 /// keyed, so the overlap never shows one twice).
 const OVERLAP: Duration = Duration::from_secs(120);
+/// The same for the search fallback, whose index lags behind.
+const SEARCH_OVERLAP: Duration = Duration::from_secs(15 * 60);
+/// The most event keys remembered before the oldest are forgotten.
+const MAX_SEEN: usize = 10_000;
 /// The posted notifications kept for the control hook.
 const RECENT: usize = 20;
 
@@ -78,6 +83,8 @@ struct AccountPoll {
     watermark: SystemTime,
     next_poll: Instant,
     in_flight: bool,
+    /// The user's teams (`@org/slug`, lower case), once asked.
+    teams: Option<Arc<HashSet<String>>>,
 }
 
 /// A notification shown (newest last), for the control hook.
@@ -101,6 +108,16 @@ pub struct PullRequestEventsState {
 }
 
 impl PullRequestEventsState {
+    /// Note `key` as shown; `false` when it was already. The set is
+    /// emptied past [`MAX_SEEN`] keys (only events after the watermark come
+    /// back, so little is shown twice).
+    pub fn remember(&mut self, key: String) -> bool {
+        if self.seen.len() >= MAX_SEEN && !self.seen.contains(&key) {
+            self.seen.clear();
+        }
+        self.seen.insert(key)
+    }
+
     /// `(account key, source)` of each polled account (control hook).
     pub fn sources(&self) -> Vec<(String, EventSource)> {
         let mut out: Vec<_> = self
@@ -118,7 +135,13 @@ impl PullRequestEventsState {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum PullRequestEvent {
     /// A review was asked of you, or of `team` (`org/slug`).
-    ReviewRequested { team: Option<String> },
+    ReviewRequested {
+        team: Option<String>,
+        /// Your latest review before the request, if any: a request
+        /// after it (Re-request review) is a new event.
+        #[serde(default)]
+        after_review: Option<u64>,
+    },
     /// Your pull request was approved or got changes requested.
     Reviewed { review: ApiPullRequestReview },
     /// `by` merged your pull request.
@@ -157,9 +180,11 @@ impl PullRequestEventNotification {
             self.pull_request.number
         );
         match &self.event {
-            PullRequestEvent::ReviewRequested { .. } => {
-                format!("review-requested:{}:{pr}", self.account)
-            }
+            PullRequestEvent::ReviewRequested { after_review, .. } => format!(
+                "review-requested:{}:{pr}:{}",
+                self.account,
+                after_review.unwrap_or(0)
+            ),
             PullRequestEvent::Reviewed { review } => review_key(review.id),
             PullRequestEvent::Merged { .. } => format!("merged:{pr}"),
             PullRequestEvent::Mentioned { comment, .. } => match comment {
@@ -171,8 +196,12 @@ impl PullRequestEventNotification {
 
     pub fn title(&self) -> String {
         match &self.event {
-            PullRequestEvent::ReviewRequested { team: None } => "Your review was requested".into(),
-            PullRequestEvent::ReviewRequested { team: Some(team) } => {
+            PullRequestEvent::ReviewRequested { team: None, .. } => {
+                "Your review was requested".into()
+            }
+            PullRequestEvent::ReviewRequested {
+                team: Some(team), ..
+            } => {
                 format!("A review was requested from @{team}")
             }
             // GHD's review notification title
@@ -232,6 +261,7 @@ struct PollOutcome {
     wait: Duration,
     /// The token was revoked.
     token_invalidated: bool,
+    teams: Option<Arc<HashSet<String>>>,
 }
 
 /// The inputs of one background poll.
@@ -242,6 +272,7 @@ struct PollRequest {
     last_modified: Option<String>,
     watermark: SystemTime,
     settings: PullRequestEventNotifications,
+    teams: Option<Arc<HashSet<String>>>,
 }
 
 impl Dispatcher {
@@ -308,6 +339,7 @@ impl Dispatcher {
                     watermark: SystemTime::now(),
                     next_poll: now,
                     in_flight: false,
+                    teams: None,
                 });
                 if poll.in_flight || (!force && poll.next_poll > now) {
                     continue;
@@ -322,6 +354,7 @@ impl Dispatcher {
                         last_modified: poll.last_modified.clone(),
                         watermark: poll.watermark,
                         settings,
+                        teams: poll.teams.clone(),
                     },
                 ));
             }
@@ -363,6 +396,9 @@ impl Dispatcher {
                 p.last_modified = outcome.last_modified.clone();
                 p.watermark = outcome.watermark;
                 p.next_poll = Instant::now() + outcome.wait;
+                if outcome.teams.is_some() {
+                    p.teams = outcome.teams.clone();
+                }
             }
         });
         if outcome.token_invalidated {
@@ -386,7 +422,7 @@ impl Dispatcher {
         let state = Self::state(cx);
         let wanted = notification.wanted(&state.read(cx).settings.pull_request_event_notifications);
         let key = notification.key();
-        let fresh = state.update(cx, |s, _| s.alive.pull_request_events.seen.insert(key));
+        let fresh = state.update(cx, |s, _| s.alive.pull_request_events.remember(key));
         if !wanted || !fresh {
             return;
         }
@@ -520,7 +556,10 @@ impl Dispatcher {
                 body: crate::samples::comment().body,
                 comment: Some(crate::samples::comment().id),
             },
-            _ => PullRequestEvent::ReviewRequested { team: None },
+            _ => PullRequestEvent::ReviewRequested {
+                team: None,
+                after_review: None,
+            },
         };
         let notification = PullRequestEventNotification {
             account,
@@ -567,8 +606,15 @@ fn listed_repository(s: &crate::state::AppState, n: &PullRequestEventNotificatio
 }
 
 /// The blocking poll of one account.
-fn poll_account(client: &Client, request: PollRequest) -> PollOutcome {
+fn poll_account(client: &Client, mut request: PollRequest) -> PollOutcome {
     let started = SystemTime::now();
+    // the teams name the user's team in a team review request
+    if request.teams.is_none() && request.settings.review_requested {
+        request.teams = client
+            .user_teams()
+            .ok()
+            .map(|teams| Arc::new(teams.into_iter().map(|t| t.to_lowercase()).collect()));
+    }
     let mut outcome = PollOutcome {
         events: Vec::new(),
         source: request.source,
@@ -576,6 +622,7 @@ fn poll_account(client: &Client, request: PollRequest) -> PollOutcome {
         watermark: request.watermark,
         wait: RETRY_INTERVAL,
         token_invalidated: false,
+        teams: request.teams.clone(),
     };
     let result = match request.source {
         EventSource::NotificationsApi => match poll_notifications_api(client, &request) {
@@ -585,11 +632,12 @@ fn poll_account(client: &Client, request: PollRequest) -> PollOutcome {
                 Ok((events, server_now.unwrap_or(started)))
             }
             // the token or the server does not allow the notifications API
+            // (a rate limit's 403 is only a pause)
             Err(GitHubError::Api {
-                status: 403 | 404,
+                status: status @ (403 | 404),
                 ref message,
                 ..
-            }) => {
+            }) if status == 404 || !is_rate_limit(message) => {
                 info!(login = %request.login, %message, "notifications API refused; searching instead");
                 outcome.source = EventSource::Search;
                 outcome.last_modified = None;
@@ -608,8 +656,13 @@ fn poll_account(client: &Client, request: PollRequest) -> PollOutcome {
     match result {
         Ok((events, now)) => {
             outcome.events = events;
+            // the search index can lag behind by minutes
+            let overlap = match outcome.source {
+                EventSource::NotificationsApi => OVERLAP,
+                EventSource::Search => SEARCH_OVERLAP,
+            };
             outcome.watermark = now
-                .checked_sub(OVERLAP)
+                .checked_sub(overlap)
                 .unwrap_or(now)
                 .max(request.watermark);
         }
@@ -619,6 +672,11 @@ fn poll_account(client: &Client, request: PollRequest) -> PollOutcome {
         }
     }
     outcome
+}
+
+/// A 403 that is GitHub's primary or secondary rate limit.
+fn is_rate_limit(message: &str) -> bool {
+    message.to_lowercase().contains("rate limit")
 }
 
 /// The notifications API half: `(events, Last-Modified, the server's
@@ -690,32 +748,43 @@ fn thread_events(
                 return Ok(Vec::new());
             }
             let pr = client.pull_request(owner, name, number)?;
-            let comment = match thread.subject.latest_comment_url.as_deref() {
-                Some(url) => client.comment_at(url)?,
-                None => None,
-            };
-            let mention = match comment {
-                Some(c) => mention_in(
-                    &c.body,
-                    &c.user.login,
-                    &c.created_at,
-                    Some(c.id),
-                    request,
-                    thread.reason == "team_mention",
-                ),
-                // the description of a pull request that was just opened
-                None => mention_in(
-                    pr.body.as_deref().unwrap_or_default(),
-                    &pr.user.login,
-                    &pr.created_at,
-                    None,
-                    request,
-                    thread.reason == "team_mention",
-                ),
-            };
-            Ok(mention
-                .map(|event| notification_for(client, request, owner, name, pr, event))
+            let team = thread.reason == "team_mention";
+            // every conversation comment since the watermark (not only the
+            // latest: the mention may have been followed by another), the
+            // latest comment (a review comment), and the description of a
+            // pull request that was just opened
+            let since = crate::samples::iso_at(request.watermark);
+            let mut comments = client.issue_comments_since(owner, name, number, &since)?;
+            if let Some(url) = thread.subject.latest_comment_url.as_deref()
+                && let Some(latest) = client.comment_at(url)?
+                && !comments.iter().any(|c| c.id == latest.id)
+            {
+                comments.push(latest);
+            }
+            let mut mentions: Vec<PullRequestEvent> = comments
+                .iter()
+                .filter_map(|c| {
+                    mention_in(
+                        &c.body,
+                        &c.user.login,
+                        &c.created_at,
+                        Some(c.id),
+                        request,
+                        team,
+                    )
+                })
+                .collect();
+            mentions.extend(mention_in(
+                pr.body.as_deref().unwrap_or_default(),
+                &pr.user.login,
+                &pr.created_at,
+                None,
+                request,
+                team,
+            ));
+            Ok(mentions
                 .into_iter()
+                .map(|event| notification_for(client, request, owner, name, pr.clone(), event))
                 .collect())
         }
         // the user's own pull requests: merged, reviewed (threads the user
@@ -746,16 +815,34 @@ fn review_request_event(
     let team = if you {
         None
     } else {
-        // the notification says one of the user's teams was asked
-        Some(format!("{owner}/{}", pr.requested_teams.first()?.slug))
+        // the notification says one of the user's teams was asked: the
+        // first requested one the user is on, else the first
+        let named = |slug: &str| format!("{owner}/{slug}");
+        let mine = request.teams.as_ref().and_then(|teams| {
+            pr.requested_teams
+                .iter()
+                .find(|t| teams.contains(&format!("@{}", named(&t.slug)).to_lowercase()))
+        });
+        Some(named(&mine.or(pr.requested_teams.first())?.slug))
     };
+    // a request after the user's last review is a new one
+    let after_review = client
+        .pull_request_reviews(owner, name, pr.number)
+        .ok()
+        .and_then(|reviews| {
+            reviews
+                .into_iter()
+                .filter(|r| r.user.login.eq_ignore_ascii_case(&request.login))
+                .map(|r| r.id)
+                .max()
+        });
     Some(notification_for(
         client,
         request,
         owner,
         name,
         pr,
-        PullRequestEvent::ReviewRequested { team },
+        PullRequestEvent::ReviewRequested { team, after_review },
     ))
 }
 
@@ -1022,6 +1109,7 @@ mod tests {
             last_modified: None,
             watermark: parse_iso8601("2026-10-06T10:00:00Z").unwrap(),
             settings: PullRequestEventNotifications::default(),
+            teams: None,
         }
     }
 
@@ -1092,15 +1180,19 @@ mod tests {
             html_url: String::new(),
             event,
         };
-        let rr = n(PullRequestEvent::ReviewRequested { team: None });
+        let rr = n(PullRequestEvent::ReviewRequested {
+            team: None,
+            after_review: None,
+        });
         assert_eq!(rr.title(), "Your review was requested");
         assert_eq!(
             rr.body(),
             "Render pull request bodies as Markdown #42\nOcto/Hello by @wasi-master"
         );
-        assert_eq!(rr.key(), "review-requested:a|me:octo/hello#42");
+        assert_eq!(rr.key(), "review-requested:a|me:octo/hello#42:0");
         let team = n(PullRequestEvent::ReviewRequested {
             team: Some("octo/core".into()),
+            after_review: None,
         });
         assert_eq!(team.title(), "A review was requested from @octo/core");
         let merged = n(PullRequestEvent::Merged { by: "hubot".into() });

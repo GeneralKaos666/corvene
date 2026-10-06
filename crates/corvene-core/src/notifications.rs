@@ -286,7 +286,7 @@ impl Dispatcher {
                     return;
                 }
                 let key = crate::pull_request_events::review_key(review.id);
-                if !state.update(cx, |s, _| s.alive.pull_request_events.seen.insert(key)) {
+                if state.read(cx).alive.pull_request_events.seen.contains(&key) {
                     debug!(review = review.id, "review notification shown already");
                     return;
                 }
@@ -329,6 +329,12 @@ impl Dispatcher {
             && !is_valid_notification_review(review)
         {
             return;
+        }
+        // `354-pull-request-event-notifications`: the poller does not show
+        // this review again
+        if let NotificationKind::PullRequestReview { review } = &notification.kind {
+            let key = crate::pull_request_events::review_key(review.id);
+            Self::state(cx).update(cx, |s, _| s.alive.pull_request_events.remember(key));
         }
         let (title, body) = (notification.title(), notification.body());
         let Some(payload) = Self::notification_payload(&notification) else {

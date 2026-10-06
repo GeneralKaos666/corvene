@@ -42,17 +42,24 @@ struct Rule {
     regex: Regex,
     /// The pattern also owns what is under a directory it matches.
     owns_subtree: bool,
+    /// A trailing `/`: only directories match.
+    dir_only: bool,
     owners: Vec<String>,
 }
 
+/// The most paths whose owners are remembered.
+const MAX_CACHED_PATHS: usize = 20_000;
+
 /// A parsed CODEOWNERS file.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct CodeOwners {
     /// Where the file is (`.github/CODEOWNERS`…).
     pub location: String,
     /// The file's text (a reload that reads the same text changes nothing).
     text: String,
     rules: Vec<Rule>,
+    /// Path → its owners: the file lists ask on every render.
+    cache: std::sync::Mutex<HashMap<String, Option<Ownership>>>,
 }
 
 impl PartialEq for CodeOwners {
@@ -82,6 +89,7 @@ impl CodeOwners {
             location: location.to_string(),
             text: text.to_string(),
             rules,
+            cache: Default::default(),
         }
     }
 
@@ -93,6 +101,22 @@ impl CodeOwners {
     /// matches or the last matching one names no owners.
     pub fn owners_of(&self, path: &str) -> Option<Ownership> {
         let path = path.trim_start_matches('/');
+        if let Ok(cache) = self.cache.lock()
+            && let Some(hit) = cache.get(path)
+        {
+            return hit.clone();
+        }
+        let found = self.match_path(path);
+        if let Ok(mut cache) = self.cache.lock() {
+            if cache.len() >= MAX_CACHED_PATHS {
+                cache.clear();
+            }
+            cache.insert(path.to_string(), found.clone());
+        }
+        found
+    }
+
+    fn match_path(&self, path: &str) -> Option<Ownership> {
         let rule = self.rules.iter().rev().find(|r| r.matches(path))?;
         (!rule.owners.is_empty()).then(|| Ownership {
             owners: rule.owners.clone(),
@@ -104,7 +128,7 @@ impl CodeOwners {
 
 impl Rule {
     fn matches(&self, path: &str) -> bool {
-        if self.regex.is_match(path) {
+        if !self.dir_only && self.regex.is_match(path) {
             return true;
         }
         if !self.owns_subtree {
@@ -140,6 +164,7 @@ fn parse_line(line: &str, number: usize) -> Option<Rule> {
     let (regex, owns_subtree) = compile(&pattern)?;
     Some(Rule {
         line: number,
+        dir_only: pattern.ends_with('/') && pattern != "/",
         pattern,
         regex,
         owns_subtree,
@@ -380,7 +405,8 @@ impl Dispatcher {
     }
 
     /// `1314-code-owners`: read the CODEOWNERS file of `rev` (a commit:
-    /// once; a branch, `reload`: again, its tip may have moved).
+    /// once; a branch, `reload`: again, its tip may have moved, and its
+    /// upstream's file first, as GitHub reads the remote base branch).
     pub fn load_code_owners_at(id: u64, rev: String, reload: bool, cx: &mut dyn Host) {
         let go = {
             let s = Self::state(cx).read(cx);
@@ -402,7 +428,12 @@ impl Dispatcher {
         let key = rev.clone();
         spawn_bg(
             cx,
-            move || load_at(&workdir, &rev).map(Arc::new),
+            move || {
+                let upstream = reload
+                    .then(|| load_at(&workdir, &format!("{rev}@{{upstream}}")))
+                    .flatten();
+                upstream.or_else(|| load_at(&workdir, &rev)).map(Arc::new)
+            },
             move |file, cx| {
                 let has = file.is_some();
                 Self::state(cx).update(cx, |s, cx| {
@@ -542,6 +573,9 @@ mod tests {
         assert!(!one("docs/**", "src/docs/a.md"));
         assert!(one("/scripts", "scripts/x/y.sh"));
         assert!(one("README.md", "pkg/README.md"));
+        // a trailing slash matches directories only
+        assert!(!one("build/", "build"));
+        assert!(one("build/", "build/a.o"));
         assert!(!one("Readme.md", "README.md"));
     }
 
