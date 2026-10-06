@@ -60,9 +60,15 @@ steps:
     corvene: {click: [123, 791]}
     wait: 1200
   - snap: {name: review-changes, corvene_only: true}
+  # Approve, Submit review: the stub flips the pending comments to
+  # submitted, the banner names the verdict
   - ghd: {skip: true}
-    corvene: {key: escape}
-    wait: 600
+    corvene: {click: [470, 429]}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {click: [718, 570]}
+    wait: 3000
+  - snap: {name: submitted, corvene_only: true}
   # Escape in the list closes the review: History as it was
   - ghd: {skip: true}
     corvene: {click: [103, 162]}
