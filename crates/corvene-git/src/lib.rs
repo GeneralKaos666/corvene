@@ -52,11 +52,11 @@ pub mod stash_file_discard;
 pub mod stash_ops;
 pub mod stats;
 pub mod status;
-pub mod trivial_change;
 mod status_gix;
 pub mod submodule;
 pub mod terminal;
 pub mod text_encoding;
+pub mod trivial_change;
 pub mod utf16;
 pub mod worktree;
 

@@ -119,10 +119,10 @@ pub use new_issue::NewIssueDialog;
 pub use open_pull_request::OpenPullRequestDialog;
 pub use oversized_files::OversizedFilesDialog;
 pub use preferences::PreferencesDialog;
+pub use proxy_authentication::ProxyAuthenticationDialog;
 pub use pull_request_notifications::{
     PullRequestChecksFailedDialog, PullRequestCommentDialog, PullRequestReviewDialog,
 };
-pub use proxy_authentication::ProxyAuthenticationDialog;
 pub use push_branch_commits::PushBranchCommitsDialog;
 pub use push_protection::{BypassPushProtectionDialog, PushProtectionErrorDialog};
 pub use reauth_dialogs::{

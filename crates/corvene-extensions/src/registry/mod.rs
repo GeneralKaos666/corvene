@@ -49,10 +49,7 @@ impl Registry {
 
     /// `117-file-icons`: extensions with file icon themes matching `query`
     /// (Pulsar has none it could read).
-    pub fn search_icon_themes(
-        self,
-        query: &str,
-    ) -> Result<Vec<Candidate>, crate::ExtensionError> {
+    pub fn search_icon_themes(self, query: &str) -> Result<Vec<Candidate>, crate::ExtensionError> {
         match self {
             Registry::OpenVsx => openvsx::search_icon_themes(query),
             Registry::Zed => zed::search_icon_themes(query),
