@@ -11,6 +11,10 @@
 //! renamed or type-changed file that has any line selected goes into the
 //! stash whole: half of a new file would come back as an untracked file
 //! `git stash apply` refuses to overwrite. GHD stashes all changes or none.
+//!
+//! A UTF-16 file's lines (`1306-utf16-diffs`) are no patch: its stashed
+//! version goes into the temporary index as a blob and its working copy is
+//! rewritten ([`crate::utf16`]).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -30,6 +34,13 @@ enum Part<'a> {
     /// Some lines of a modified file: the patch that adds them to `HEAD`'s
     /// version and the one that takes them out of the working copy.
     Lines { stash: Vec<u8>, discard: Vec<u8> },
+    /// Some lines of a modified UTF-16 file (`1306-utf16-diffs`): `HEAD`'s
+    /// version with them and the working copy without them, encoded.
+    Utf16 {
+        path: &'a str,
+        stash: Vec<u8>,
+        discard: Vec<u8>,
+    },
 }
 
 /// Removes the temporary index whatever happens.
@@ -81,7 +92,7 @@ pub fn create_partial_stash(
         .iter()
         .filter_map(|p| match p {
             Part::Whole(f) => Some(*f),
-            Part::Lines { .. } => None,
+            Part::Lines { .. } | Part::Utf16 { .. } => None,
         })
         .collect();
     let whole_paths: Vec<String> = whole
@@ -159,6 +170,11 @@ pub fn create_partial_stash(
             Some(nul_separated(&whole_paths)),
         )?;
     }
+    for part in &parts {
+        if let Part::Utf16 { path, stash, .. } = part {
+            crate::utf16::add_to_index(git.clone(), workdir, path, stash.clone(), Some(&index.0))?;
+        }
+    }
     if !stash_patch.is_empty() {
         in_temp(
             &[
@@ -230,7 +246,22 @@ pub fn create_partial_stash(
         .run()?;
 
     // 3. take the stashed changes out of the working copy
-    remove_from_working_copy(git, workdir, &head, &whole_paths, &discard_patch).map_err(|err| {
+    let rewritten: Vec<(&str, &[u8])> = parts
+        .iter()
+        .filter_map(|part| match part {
+            Part::Utf16 { path, discard, .. } => Some((*path, discard.as_slice())),
+            _ => None,
+        })
+        .collect();
+    remove_from_working_copy(
+        git,
+        workdir,
+        &head,
+        &whole_paths,
+        &discard_patch,
+        &rewritten,
+    )
+    .map_err(|err| {
         GitError::Gix(format!(
             "The changes were stashed, but not all of them could be taken out of your files; \
              the stash list has them. {err}"
@@ -273,12 +304,24 @@ fn part_of<'a>(
         DiffSelectionType::Partial => {}
     }
     // the diff the line selection was made in (`stage_partial_files_with`)
-    let diff = crate::diff::working_directory_diff(git, workdir, file, false, false, false, None)?;
-    let hunks = match &diff {
-        Diff::Text { hunks, .. } | Diff::LargeText { hunks, .. } => hunks,
+    let diff =
+        crate::diff::working_directory_diff(git.clone(), workdir, file, false, false, false, None)?;
+    let (hunks, utf16) = match &diff {
+        Diff::Text { hunks, warnings } | Diff::LargeText { hunks, warnings } => {
+            (hunks, warnings.utf16.as_ref())
+        }
         Diff::Empty => return Ok(None),
         _ => return Ok(Some(Part::Whole(file))),
     };
+    if let Some(utf16) = utf16 {
+        let selected =
+            crate::utf16::apply_selection(git, workdir, &file.path, hunks, &file.selection, utf16)?;
+        return Ok(selected.map(|selected| Part::Utf16 {
+            path: &file.path,
+            stash: selected.with,
+            discard: selected.without,
+        }));
+    }
     let stash = format_patch_with(file, hunks, options);
     let discard = format_patch_to_discard_changes_with(&file.path, hunks, &file.selection, options);
     Ok(match (stash, discard) {
@@ -287,18 +330,22 @@ fn part_of<'a>(
     })
 }
 
-/// After the store: the selected lines out of their files (`discard`), the
-/// whole files back to `HEAD` (index and working copy), and those `HEAD`
-/// lacks deleted.
+/// After the store: the selected lines out of their files (`discard`, and
+/// the UTF-16 files `rewritten` with what is left), the whole files back to
+/// `HEAD` (index and working copy), and those `HEAD` lacks deleted.
 fn remove_from_working_copy(
     git: Arc<GitBinary>,
     workdir: &Path,
     head: &str,
     whole_paths: &[String],
     discard: &[u8],
+    rewritten: &[(&str, &[u8])],
 ) -> Result<()> {
     if !discard.is_empty() {
         crate::patch::discard_changes_from_selection(git.clone(), workdir, discard)?;
+    }
+    for (path, bytes) in rewritten {
+        std::fs::write(workdir.join(path), bytes)?;
     }
     if whole_paths.is_empty() {
         return Ok(());
@@ -415,6 +462,51 @@ mod tests {
 
     fn changes(dir: &Path) -> Vec<WorkingDirectoryFileChange> {
         crate::get_status(git(), dir).expect("status").files
+    }
+
+    #[test]
+    fn stashes_lines_of_a_utf16_file() {
+        crate::utf16::set_decode_utf16(true);
+        let dir = repo();
+        let p = dir.path();
+        let format = corvene_models::Utf16Format {
+            big_endian: false,
+            bom: true,
+        };
+        let encode = |text: &str| crate::utf16::encode(text, format);
+        let head = "1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8\r\n9\r\n10\r\n";
+        std::fs::write(p.join("ea.mq5"), encode(head)).expect("write");
+        run(p, &["add", "-A"]);
+        run(p, &["commit", "-q", "-m", "utf16"]);
+        let edited = head
+            .replace("1\r\n2", "ONE\r\n2")
+            .replace("10\r\n", "TEN\r\n");
+        std::fs::write(p.join("ea.mq5"), encode(&edited)).expect("write");
+        let mut files = changes(p);
+        // lines: 0 @@ 1 -1 2 +ONE ...; the first change only
+        files[0].selection = DiffSelection::none().with_range(1, 2, true);
+        assert!(
+            create_partial_stash(
+                git(),
+                p,
+                "main",
+                "utf16 lines",
+                &files,
+                PatchOptions::default(),
+                true,
+            )
+            .expect("stash")
+        );
+        assert_eq!(
+            std::fs::read(p.join("ea.mq5")).expect("read"),
+            encode(&head.replace("10\r\n", "TEN\r\n"))
+        );
+        let stashed = Command::new("git")
+            .args(["show", "stash@{0}:ea.mq5"])
+            .current_dir(p)
+            .output()
+            .expect("git");
+        assert_eq!(stashed.stdout, encode(&head.replace("1\r\n2", "ONE\r\n2")));
     }
 
     #[test]

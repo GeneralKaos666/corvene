@@ -1914,6 +1914,29 @@ pub struct DiffWarnings {
     /// its lines cannot be selected.
     #[serde(default)]
     pub lfs_contents: bool,
+    /// Corvene `1306-utf16-diffs`: the file is saved as UTF-16, which git
+    /// takes for binary; the diff compares its decoded text.
+    #[serde(default)]
+    pub utf16: Option<Utf16Diff>,
+}
+
+/// Corvene `1306-utf16-diffs`: how a UTF-16 text file is stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Utf16Format {
+    /// UTF-16BE (else UTF-16LE).
+    pub big_endian: bool,
+    /// The file starts with a byte order mark.
+    pub bom: bool,
+}
+
+/// Corvene `1306-utf16-diffs`: a text diff of a UTF-16 file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Utf16Diff {
+    pub format: Utf16Format,
+    /// The blob the old side was read from (`HEAD:<path>`, `:<path>` for
+    /// the index), so a line selection can be written back; `None` for a
+    /// new file.
+    pub old_source: Option<String>,
 }
 
 /// GHD `IDiff` (`DiffType`).

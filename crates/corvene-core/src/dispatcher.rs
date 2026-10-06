@@ -141,6 +141,8 @@ impl Dispatcher {
         corvene_git::text_encoding::set_decode_legacy_text(
             flags.bool(crate::flags::ids::NON_UTF8_DIFFS),
         );
+        // `1306-utf16-diffs`
+        corvene_git::utf16::set_decode_utf16(flags.bool(crate::flags::ids::UTF16_DIFFS));
         let hosts = crate::hosts::HostsState::load(&store);
         cx.install_state(AppState {
             store,
@@ -6613,7 +6615,8 @@ impl Dispatcher {
     }
 
     /// `discardChangesFromSelection`: reverse-apply the selected lines of the
-    /// current (unexpanded) diff to the working copy.
+    /// current (unexpanded) diff to the working copy. A UTF-16 file's
+    /// (`1306-utf16-diffs`) is rewritten without them instead.
     pub fn discard_selection(
         id: u64,
         path: String,
@@ -6623,7 +6626,11 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let patch = {
+        enum Discard {
+            Patch(Vec<u8>),
+            Utf16(Arc<corvene_models::Diff>),
+        }
+        let discard = {
             let s = Self::state(cx).read(cx);
             let Some(rs) = s.repo_states.get(&id) else {
                 return;
@@ -6631,22 +6638,37 @@ impl Dispatcher {
             if rs.selected_file.as_deref() != Some(path.as_str()) {
                 return;
             }
-            let Some(hunks) = rs.diff.as_ref().and_then(|d| d.hunks()) else {
+            let Some(diff) = rs.diff.as_ref() else {
                 return;
             };
-            corvene_git::format_patch_to_discard_changes_with(
-                &path,
-                hunks,
-                &selection,
-                Self::patch_options_of(&s.flags),
-            )
+            let Some(hunks) = diff.hunks() else {
+                return;
+            };
+            if diff.warnings().is_some_and(|w| w.utf16.is_some()) {
+                Some(Discard::Utf16(diff.clone()))
+            } else {
+                corvene_git::format_patch_to_discard_changes_with(
+                    &path,
+                    hunks,
+                    &selection,
+                    Self::patch_options_of(&s.flags),
+                )
+                .map(Discard::Patch)
+            }
         };
-        let Some(patch) = patch else { return };
+        let Some(discard) = discard else { return };
         crate::remote::spawn_bg(
             cx,
             move || {
-                corvene_git::discard_changes_from_selection(git, &workdir, &patch)
-                    .map_err(|e| e.to_string())
+                match discard {
+                    Discard::Patch(patch) => {
+                        corvene_git::discard_changes_from_selection(git, &workdir, &patch)
+                    }
+                    Discard::Utf16(diff) => corvene_git::utf16::discard_selection(
+                        git, &workdir, &path, &diff, &selection,
+                    ),
+                }
+                .map_err(|e| e.to_string())
             },
             move |result, cx| {
                 if let Err(err) = result {

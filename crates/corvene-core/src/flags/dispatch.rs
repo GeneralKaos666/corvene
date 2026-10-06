@@ -214,11 +214,13 @@ impl Dispatcher {
                 ids::NON_UTF8_DIFFS,
                 ids::LFS_IMAGE_PREVIEWS,
                 ids::LFS_TEXT_DIFF,
+                ids::UTF16_DIFFS,
             ]
             .map(|id| flags.bool(id))
         };
         if reads_diffs(&now) != reads_diffs(previous) {
             corvene_git::text_encoding::set_decode_legacy_text(now.bool(ids::NON_UTF8_DIFFS));
+            corvene_git::utf16::set_decode_utf16(now.bool(ids::UTF16_DIFFS));
             crate::diff_cache::clear_diffs();
             if let Some(id) = Self::state(cx).read(cx).selected {
                 Self::load_diff(id, cx);

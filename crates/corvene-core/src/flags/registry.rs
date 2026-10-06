@@ -8059,6 +8059,27 @@ registry! {
         upstream: &[],
         code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
     },
+
+    /// UTF-16 text files get a text diff, with line selection.
+    UTF16_DIFFS = 1306 "utf16-diffs" {
+        title: "Text diffs of UTF-16 files",
+        summary: "Text files saved as UTF-16 (MetaEditor's .mq5 and .mqh files, Windows .reg \
+                  and .rc files, some PowerShell scripts) show a highlighted text diff in \
+                  Changes, History and comparisons instead of \"This binary file has \
+                  changed.\" Lines can be selected for the commit, discarded, stashed and \
+                  expanded as in any text file; what is written back stays UTF-16 with the \
+                  file's byte order mark and line endings. Files with a byte order mark are \
+                  recognized, and those without one when their bytes are clearly UTF-16.",
+        ghd_behaviour: "git sees the zero bytes of UTF-16 text and calls the file binary, so \
+                        only \"This binary file has changed.\" is shown and the file can only \
+                        be committed or discarded whole.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20861)],
+        code: &["crates/corvene-git/src/utf16.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-git/src/log.rs", "crates/corvene-git/src/patch.rs", "crates/corvene-git/src/partial_stash.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

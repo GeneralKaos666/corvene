@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use corvene_models::{
     ChangesetData, Commit, CommitIdentity, CommittedFileChange, Diff, FileStatus, FileStatusKind,
-    GitStatusEntry, SignatureKind,
+    GitStatusEntry, SignatureKind, image_media_type,
 };
 
 use crate::detect::GitBinary;
@@ -1029,11 +1029,17 @@ pub fn commit_range_file_diff(
         newest,
         &format!("{oldest}^"),
         &out.stdout,
+        hide_whitespace,
+        true,
     ))
 }
 
 /// Shared tail of the committed-diff loaders: submodule and image diffs need
-/// the blobs on both sides (`getImageDiff`, `buildSubmoduleDiff`).
+/// the blobs on both sides (`getImageDiff`, `buildSubmoduleDiff`), and so
+/// does a UTF-16 text file git took for binary (Corvene `1306-utf16-diffs`,
+/// [`crate::utf16`]; `utf16` false where `base` is not the patch's old
+/// side, and `hide_whitespace` as the patch was made).
+#[allow(clippy::too_many_arguments)]
 fn finish_committed_diff(
     git: Arc<GitBinary>,
     workdir: &Path,
@@ -1041,6 +1047,8 @@ fn finish_committed_diff(
     newest: &str,
     base: &str,
     patch: &[u8],
+    hide_whitespace: bool,
+    utf16: bool,
 ) -> Diff {
     if file.status.submodule {
         return crate::diff::submodule_diff(
@@ -1052,16 +1060,31 @@ fn finish_committed_diff(
             patch,
         );
     }
+    let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
     match crate::diff::parse_raw_diff(patch) {
-        Diff::Binary => {
-            let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
-            crate::diff::image_diff(
-                &file.path,
-                file.status.kind,
-                || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok(),
-                || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok(),
-            )
+        Diff::Binary
+            if utf16 && image_media_type(&file.path).is_none() && crate::utf16::decode_utf16() =>
+        {
+            use crate::utf16::Side;
+            let new = if file.status.kind == FileStatusKind::Deleted {
+                Side::Missing
+            } else {
+                Side::Blob(newest, &file.path)
+            };
+            let old = if file.status.kind.is_new_or_untracked() {
+                Side::Missing
+            } else {
+                Side::Blob(base, previous_path)
+            };
+            crate::utf16::text_diff(git.clone(), workdir, new, old, hide_whitespace, patch, None)
+                .unwrap_or(Diff::Binary)
         }
+        Diff::Binary => crate::diff::image_diff(
+            &file.path,
+            file.status.kind,
+            || crate::diff::blob_bytes(git.clone(), workdir, newest, &file.path).ok(),
+            || crate::diff::blob_bytes(git.clone(), workdir, base, previous_path).ok(),
+        ),
         other => other,
     }
 }
@@ -1103,6 +1126,8 @@ pub fn commit_file_diff(
         &file.commitish,
         &format!("{}^", file.commitish),
         &out.stdout,
+        hide_whitespace,
+        true,
     ))
 }
 
@@ -1168,6 +1193,8 @@ pub fn remerge_file_diff(
         &file.commitish,
         &format!("{}^", file.commitish),
         &out.stdout,
+        hide_whitespace,
+        false,
     ))
 }
 
@@ -1304,6 +1331,8 @@ pub fn range_file_diff(
         newest,
         &old,
         &out.stdout,
+        hide_whitespace,
+        true,
     ))
 }
 

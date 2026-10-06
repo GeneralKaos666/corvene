@@ -55,6 +55,7 @@ mod status_gix;
 pub mod submodule;
 pub mod terminal;
 pub mod text_encoding;
+pub mod utf16;
 pub mod worktree;
 
 pub use bisect::{

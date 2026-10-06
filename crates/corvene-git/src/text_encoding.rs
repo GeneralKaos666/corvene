@@ -45,10 +45,14 @@ pub fn decode_with(bytes: &[u8], encoding: &'static Encoding) -> String {
     encoding.decode_without_bom_handling(bytes).0.into_owned()
 }
 
-/// A whole file's bytes as text: UTF-8 as it is; otherwise decoded in its
-/// guessed encoding while the flag is on, else with replacement characters
-/// (GHD).
+/// A whole file's bytes as text: UTF-16 text decoded while flag
+/// `1306-utf16-diffs` is on ([`crate::utf16`]); UTF-8 as it is; otherwise
+/// decoded in its guessed encoding while `789-non-utf8-diffs` is on, else
+/// with replacement characters (GHD).
 pub(crate) fn file_text(bytes: &[u8]) -> Cow<'_, str> {
+    if let Some(text) = crate::utf16::file_text(bytes) {
+        return Cow::Owned(text);
+    }
     match std::str::from_utf8(bytes) {
         Ok(text) => Cow::Borrowed(text),
         Err(_) if decode_legacy() => Cow::Owned(decode_with(bytes, guess_encoding([bytes]))),

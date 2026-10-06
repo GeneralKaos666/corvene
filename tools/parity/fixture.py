@@ -305,10 +305,74 @@ def _remotes(parent: Path, repo: Path) -> None:
     _git(repo, "tag", "nightly", "HEAD")
 
 
+# `repo-utf16`: an MQL5 expert saved the way MetaEditor saves it, UTF-16LE
+# with a byte order mark and CRLF line endings (git calls it binary;
+# `1306-utf16-diffs` diffs its text), committed and then edited
+_UTF16_PATH = "Experts/Greeter.mq5"
+_UTF16_COMMITTED = """//+------------------------------------------------------------------+
+//|                                                      Greeter.mq5 |
+//+------------------------------------------------------------------+
+#property copyright "Parity Bot"
+#property version   "1.00"
+#property strict
+
+input int    InpPeriod = 14;     // Period
+input double InpLots   = 0.10;   // Lots
+
+int handle = INVALID_HANDLE;
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+   handle = iMA(_Symbol, _Period, InpPeriod, 0, MODE_SMA, PRICE_CLOSE);
+   if(handle == INVALID_HANDLE)
+      return(INIT_FAILED);
+   return(INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+  {
+   double ma[];
+   if(CopyBuffer(handle, 0, 0, 1, ma) != 1)
+      return;
+   Print("MA: ", ma[0]);
+  }
+"""
+_UTF16_EDITS = [
+    ('#property version   "1.00"', '#property version   "1.01"'),
+    ("input int    InpPeriod = 14;     // Period",
+     "input int    InpPeriod = 21;     // Period\ninput int    InpShift  = 0;      // Shift"),
+    ('   Print("MA: ", ma[0]);', '   Comment("MA: ", DoubleToString(ma[0], _Digits));'),
+]
+
+
+def _utf16_bytes(text: str) -> bytes:
+    return b"\xff\xfe" + text.replace("\n", "\r\n").encode("utf-16-le")
+
+
+def _utf16(repo: Path) -> None:
+    """Commit `_UTF16_PATH` and leave it edited in the working copy."""
+    date = "2026-09-24T09:00:00+00:00"
+    p = repo / _UTF16_PATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(_utf16_bytes(_UTF16_COMMITTED))
+    _git(repo, "add", _UTF16_PATH, date=date)
+    _git(repo, "commit", "-q", "-m", "Add the greeter expert", date=date)
+    edited = _UTF16_COMMITTED
+    for old, new in _UTF16_EDITS:
+        edited = edited.replace(old, new)
+    p.write_bytes(_utf16_bytes(edited))
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
-          pull_request: bool = False) -> Path:
+          pull_request: bool = False, utf16: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -326,7 +390,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     Settings' remotes and Branch › Tags…, flags 1109 and 1219). With
     `pull_request` (and `remote`), `main` is pushed whole and `feature/login`
     is checked out with `_PULL_REQUEST_COMMITS` pushed
-    (`348-pull-request-review`)."""
+    (`348-pull-request-review`). With `utf16`, see `_utf16`
+    (`1306-utf16-diffs`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -429,6 +494,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
             _git(repo, "add", "-A")
             _git(repo, "commit", "-q", "-m", summary, date=date)
         _git(repo, "push", "-q", "-u", "origin", "feature/login")
+    if utf16:
+        _utf16(repo)
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)

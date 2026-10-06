@@ -7,7 +7,8 @@
 //! (`742-file-mode-change-message`); a symbolic link's working copy is its
 //! target path (`745-symlink-contents`); text that is not UTF-8 can be
 //! decoded in its legacy encoding (`789-non-utf8-diffs`,
-//! [`crate::text_encoding`]).
+//! [`crate::text_encoding`]); a UTF-16 file git takes for binary is diffed
+//! as text (`1306-utf16-diffs`, [`crate::utf16`]).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -78,6 +79,8 @@ pub fn working_directory_diff(
     let mut cmd = base();
     let is_submodule = file.status.submodule;
     let mut rename_out = None;
+    // the blob the old side comes from (`1306-utf16-diffs`): revision, path
+    let mut old_side: Option<(String, String)> = None;
     if !is_submodule && file.status.kind.is_new_or_untracked() {
         // `--no-index` exits 1 when files differ, which is the normal case.
         cmd = cmd
@@ -102,7 +105,7 @@ pub fn working_directory_diff(
             .trim()
             .to_string();
         let in_head = format!("HEAD:{old_path}");
-        let old_blob = if GitCommand::new(git.clone())
+        let old_rev = if GitCommand::new(git.clone())
             .args(["rev-parse", "--verify", "-q"])
             .arg(&in_head)
             .current_dir(workdir)
@@ -111,11 +114,12 @@ pub fn working_directory_diff(
             .status
             .success()
         {
-            in_head
+            "HEAD"
         } else {
-            format!(":{old_path}")
+            ""
         };
-        cmd = cmd.arg(old_blob).arg(new_blob);
+        cmd = cmd.arg(format!("{old_rev}:{old_path}")).arg(new_blob);
+        old_side = Some((old_rev.to_string(), old_path.clone()));
     } else if file.status.kind == FileStatusKind::Renamed {
         if renamed_against_head && let Some(old_path) = &file.old_path {
             let out = base()
@@ -130,17 +134,23 @@ pub fn working_directory_diff(
                 == 1
             {
                 rename_out = Some(out);
+                old_side = Some(("HEAD".to_string(), old_path.clone()));
             }
         }
         cmd = cmd.args(["--"]).arg(&file.path);
+        if old_side.is_none() {
+            old_side = Some((String::new(), file.path.clone()));
+        }
     } else if file.status.index == GitStatusEntry::Unchanged && !is_submodule {
         // nothing staged: the index holds HEAD's blob, so index → working
         // tree prints what GHD's `HEAD -- path` prints, and git answers it
         // without `diff-index` walking the whole index (that walk took 2.2 s
         // on a 50,000-file index in git 2.54, `unpack_trees`)
         cmd = cmd.args(["--"]).arg(&file.path);
+        old_side = Some((String::new(), file.path.clone()));
     } else {
         cmd = cmd.args(["HEAD", "--"]).arg(&file.path);
+        old_side = Some(("HEAD".to_string(), file.path.clone()));
     }
     let out = match rename_out {
         Some(out) => out,
@@ -158,6 +168,31 @@ pub fn working_directory_diff(
     }
     let diff = parse_raw_diff_with_warnings(&out.stdout, &out.stderr);
     Ok(match diff {
+        // `1306-utf16-diffs`: a UTF-16 text file (images stay images)
+        Diff::Binary if image_media_type(&file.path).is_none() && crate::utf16::decode_utf16() => {
+            use crate::utf16::Side;
+            let working = workdir.join(&file.path);
+            let new = if file.status.kind == FileStatusKind::Deleted {
+                Side::Missing
+            } else {
+                Side::File(&working)
+            };
+            let old = match &old_side {
+                Some((rev, path)) => Side::Blob(rev, path),
+                None => Side::Missing,
+            };
+            let old_source = old_side.as_ref().map(|(rev, path)| format!("{rev}:{path}"));
+            crate::utf16::text_diff(
+                git,
+                workdir,
+                new,
+                old,
+                hide_whitespace,
+                &out.stdout,
+                old_source,
+            )
+            .unwrap_or(Diff::Binary)
+        }
         Diff::Binary => {
             let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
             image_diff(
@@ -829,6 +864,7 @@ fn parse_unified_with_raw(patch: &str, raw: Option<&[u8]>, decode_legacy: bool) 
         type_change,
         lfs_not_downloaded: false,
         lfs_contents: false,
+        utf16: None,
     };
     if truncated {
         Diff::LargeText { hunks, warnings }

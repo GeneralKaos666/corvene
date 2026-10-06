@@ -1,0 +1,24 @@
+# UTF-16 text diffs (Corvene only, flag 1306-utf16-diffs, off in the GitHub
+# Desktop preset the harness runs with). `repo-utf16` adds an edited MQL5
+# expert saved as MetaEditor saves it (UTF-16LE with a byte order mark, CRLF
+# lines), which git calls binary: GHD shows "This binary file has changed.",
+# Corvene a highlighted text diff whose lines can be selected, so the snaps
+# are recorded, not compared (deviations.md › Diff viewer).
+name: utf16-diffs
+description: An edited UTF-16 file's text diff in Changes, one line deselected, and the commit that added it in History (Corvene only)
+setup: repo-utf16
+corvene_flags: 1306-utf16-diffs=on
+steps:
+  # Experts/Greeter.mq5
+  - click: [125, 214]
+    wait: 1200
+  - snap: {name: diff, corvene_only: true, note: "GHD shows This binary file has changed. (deviations.md, 1306-utf16-diffs)"}
+  # the added InpShift line's gutter
+  - ghd: {skip: true}
+    corvene: {click: [276, 326]}
+    wait: 400
+  - snap: {name: line-deselected, corvene_only: true}
+  # History: the newest commit added the file
+  - click: [187, 97]
+    wait: 1500
+  - snap: {name: history, corvene_only: true}

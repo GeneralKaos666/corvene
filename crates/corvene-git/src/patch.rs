@@ -5,6 +5,10 @@
 //! a hunk's start on the produced side counts only the hunks the patch
 //! writes, not the changes left out of it; with `789-non-utf8-diffs` a
 //! line that is not UTF-8 is written as its original bytes.
+//!
+//! A UTF-16 file's selection (`1306-utf16-diffs`, a diff marked
+//! `DiffWarnings::utf16`) is not a patch: [`crate::utf16`] writes the
+//! index blob.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -327,7 +331,12 @@ fn apply_hunks_to_index(
     options: PatchOptions,
 ) -> Result<()> {
     let hunks = match diff {
-        Diff::Text { hunks, .. } | Diff::LargeText { hunks, .. } => hunks,
+        Diff::Text { hunks, warnings } | Diff::LargeText { hunks, warnings } => {
+            if let Some(utf16) = &warnings.utf16 {
+                return crate::utf16::stage_selection(git, workdir, file, hunks, utf16);
+            }
+            hunks
+        }
         Diff::Binary | Diff::Image { .. } | Diff::Submodule(_) => {
             return Err(GitError::Gix(format!(
                 "Can't create partial commit in binary file: {}",
