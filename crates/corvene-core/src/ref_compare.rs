@@ -61,7 +61,7 @@ fn merge_sides(head_side: Vec<Commit>, base_side: Vec<Commit>) -> (Vec<Commit>, 
     let mut commits = head_side;
     commits.extend(base_side);
     // stable: each side keeps its own order between equal dates
-    commits.sort_by(|a, b| b.committer.seconds.cmp(&a.committer.seconds));
+    commits.sort_by_key(|c| std::cmp::Reverse(c.committer.seconds));
     (commits, base_only)
 }
 
