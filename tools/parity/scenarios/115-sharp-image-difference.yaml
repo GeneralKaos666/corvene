@@ -1,0 +1,19 @@
+# The image Difference view at a fractional scale (zoomed in to 110 %, 2.2
+# device pixels per image pixel on a 2x display): drawn at its device pixels
+# it stays sharp (1320-sharp-image-difference, off in the GitHub Desktop
+# preset; deviations.md › Image diffs).
+name: sharp-image-difference
+description: The Difference view of an edited image zoomed to 110 %, drawn at its device pixels (Corvene only)
+setup: repo-diff-marks
+corvene_flags: 1320-sharp-image-difference=on
+steps:
+  - click: [125, 185]
+    wait: 1000
+  - ghd: {skip: true}
+    corvene: {key: cmd-=}
+    wait: 800
+  - snap: {name: two-up-zoomed, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [968, 162]}
+    wait: 2500
+  - snap: {name: difference-zoomed, corvene_only: true, note: "1320-sharp-image-difference: the blend drawn at its device pixels"}

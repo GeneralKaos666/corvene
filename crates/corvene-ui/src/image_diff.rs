@@ -24,6 +24,14 @@
 //! Deviation (`761-pixelated-small-images`): images under 64 px are enlarged
 //! by a whole factor with nearest-neighbour sampling, so pixel art and icons
 //! show their pixels (GHD draws them at their natural size, tiny).
+//!
+//! Fix (`1320-sharp-image-difference`, desktop/desktop#19804): the
+//! Difference blend is resampled to the device pixels it covers (area
+//! average down, nearest neighbour up) after blending and drawn 1:1, so a
+//! fractional scale (zoom, a 1.5x display) neither blurs it nor turns
+//! unchanged edges grey. GHD blends two `<img>` layers the browser already
+//! scaled (`difference-blend.tsx`, `.image-container` composited by
+//! `translate3d`), which shows edges as differences at 1.5x.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -226,6 +234,9 @@ pub struct ImageDiff {
     difference_scales: Option<(f32, f32)>,
     /// Whether that blend aligned the images top-left.
     difference_top_left: bool,
+    /// `1320-sharp-image-difference`: the device-pixel size that blend was
+    /// resampled to.
+    difference_target: Option<(u32, u32)>,
     difference_pending: bool,
     /// `752-image-diff-border-outside`: the 1 px border is drawn around the
     /// fitted image instead of inside it (`box-sizing: content-box`).
@@ -277,6 +288,7 @@ impl ImageDiff {
             difference: None,
             difference_scales: None,
             difference_top_left: false,
+            difference_target: None,
             difference_pending: false,
             border_outside: corvene_core::AppState::try_global(cx).is_some_and(|s| {
                 s.read(cx)
@@ -698,7 +710,7 @@ impl ImageDiff {
     /// `DifferenceBlend`: the current image drawn over the previous one with
     /// `mix-blend-mode: difference`, both centered at their display scale; no
     /// borders, no checkerboard.
-    fn difference(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn difference(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let box_size = self.overlay_box(cx);
         let scales = match (&self.previous, &self.current) {
             (Some(p), Some(c)) => (
@@ -708,7 +720,22 @@ impl ImageDiff {
             _ => (1., 1.),
         };
         let top_left = Self::top_left(cx);
+        // `1320-sharp-image-difference`: the blend's size on screen in
+        // device pixels (the larger fitted image, as the box is)
+        let scale_factor = window.scale_factor();
+        let target = corvene_core::AppState::try_global(cx)
+            .is_some_and(|s| {
+                s.read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::SHARP_IMAGE_DIFFERENCE)
+            })
+            .then(|| {
+                let w = (f32::from(box_size.width) * scale_factor).round() as u32;
+                let h = (f32::from(box_size.height) * scale_factor).round() as u32;
+                (w.max(1), h.max(1))
+            });
         let stale = top_left != self.difference_top_left
+            || target != self.difference_target
             || self.difference_scales.is_none_or(|(p, c)| {
                 (p / c - scales.0 / scales.1).abs() > 0.005 * (scales.0 / scales.1)
             });
@@ -718,7 +745,7 @@ impl ImageDiff {
             let b = self.current.as_ref().map(|s| s.image.clone());
             let task = cx.background_executor().spawn(async move {
                 let (a, b) = (a?, b?);
-                difference_image(&a.bytes, &b.bytes, scales.0, scales.1, top_left)
+                difference_image(&a.bytes, &b.bytes, scales.0, scales.1, top_left, target)
             });
             cx.spawn(async move |this, cx| {
                 let result = task.await;
@@ -726,6 +753,7 @@ impl ImageDiff {
                     this.difference_pending = false;
                     this.difference_scales = Some(scales);
                     this.difference_top_left = top_left;
+                    this.difference_target = target;
                     this.difference = result.map(Arc::new);
                     cx.notify();
                 })
@@ -743,11 +771,16 @@ impl ImageDiff {
             .min_h_0()
             .child(self.measure(cx))
             .when_some(self.difference.clone(), |d, image| {
+                // drawn at exactly the device pixels it was made for
+                let (w, h) = match self.difference_target {
+                    Some((w, h)) => (px(w as f32 / scale_factor), px(h as f32 / scale_factor)),
+                    None => (box_size.width, box_size.height),
+                };
                 d.child(
                     img(image)
                         .flex_none()
-                        .w(box_size.width)
-                        .h(box_size.height)
+                        .w(w)
+                        .h(h)
                         .object_fit(ObjectFit::Contain),
                 )
             })
@@ -785,7 +818,7 @@ impl ImageDiff {
 }
 
 impl Render for ImageDiff {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.ghd().clone();
         let kind = corvene_core::AppState::try_global(cx)
             .map(|s| s.read(cx).settings.image_diff_type)
@@ -847,7 +880,7 @@ impl Render for ImageDiff {
                     ImageDiffType::Difference => {
                         // the borrow of `previous`/`current` ends before the mutable call
                         let _ = (previous, current);
-                        self.difference(cx)
+                        self.difference(window, cx)
                     }
                 };
                 div()
@@ -927,6 +960,7 @@ fn difference_image(
     scale_a: f32,
     scale_b: f32,
     top_left: bool,
+    target: Option<(u32, u32)>,
 ) -> Option<Image> {
     use image::imageops::FilterType;
     let a = image::load_from_memory(a).ok()?.to_rgba8();
@@ -966,6 +1000,21 @@ fn difference_image(
             sample(&a, ax, ay, x, y),
             sample(&b, bx, by, x, y),
         ));
+    }
+    // `1320-sharp-image-difference`: resample the blend (never the inputs)
+    // to its device pixels, keeping its aspect inside the target
+    if let Some((tw, th)) = target {
+        let fit = (tw as f32 / width as f32).min(th as f32 / height as f32);
+        let w = ((width as f32 * fit).round() as u32).max(1);
+        let h = ((height as f32 * fit).round() as u32).max(1);
+        if (w, h) != (width, height) {
+            let filter = if w < width {
+                FilterType::Triangle
+            } else {
+                FilterType::Nearest
+            };
+            out = image::imageops::resize(&out, w, h, filter);
+        }
     }
     let mut bytes = Vec::new();
     out.write_to(

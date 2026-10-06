@@ -8643,6 +8643,22 @@ registry! {
         upstream: &[Upstream::issue(17573)],
         code: &["crates/corvene-git/src/trivial_change.rs", "crates/corvene-ui/src/trivial_change.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
+    /// The image Difference view stays sharp at fractional scales.
+    SHARP_IMAGE_DIFFERENCE = 1320 "sharp-image-difference" {
+        title: "Sharp image Difference at any scale",
+        summary: "The Difference view of a changed image is drawn at the exact device pixels \
+                  it covers (shrunk by averaging, enlarged by repeating pixels, after the two \
+                  images are blended), so a zoom level or a 1.5x display does not blur it or \
+                  show unchanged edges as faint differences.",
+        ghd_behaviour: "At a fractional device pixel ratio the Difference view is blurry and \
+                        unchanged edges look changed.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19804)],
+        code: &["crates/corvene-ui/src/image_diff.rs"],
+    },
 
 }
 
