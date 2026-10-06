@@ -184,6 +184,8 @@ impl OpenPullRequestDialog {
         if has_pr {
             Dispatcher::show_pull_request(self.repo, cx);
         } else {
+            // `352-remember-pr-base`
+            Dispatcher::remember_pull_request_base(self.repo, preview.base_branch.as_deref(), cx);
             Dispatcher::create_pull_request_with_base(self.repo, preview.base_branch.clone(), cx);
         }
     }

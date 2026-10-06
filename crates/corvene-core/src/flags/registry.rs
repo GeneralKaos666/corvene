@@ -3011,6 +3011,23 @@ registry! {
         code: &["crates/corvene-core/src/github_actions.rs", "crates/corvene-github/src/actions.rs", "crates/corvene-ui/src/dialogs/actions_view.rs", "crates/corvene-ui/src/dialogs/run_workflow.rs", "crates/corvene-ui/src/cloneable_repositories.rs"],
     },
 
+    /// Preview Pull Request's base remembered per repository.
+    REMEMBER_PR_BASE = 352 "remember-pr-base" {
+        title: "Remember the pull request base",
+        summary: "The base branch picked in Preview Pull Request is remembered for the \
+                  repository. Create Pull Request and Preview Pull Request then propose it again \
+                  (after the branch the current branch was created from, when that is known) \
+                  while it still exists on the remote. Picking the default branch forgets it.",
+        ghd_behaviour: "The default branch is proposed every time, so pull requests against a \
+                        long-lived development branch need the base changed by hand each time.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15806)],
+        code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-ui/src/dialogs/open_pull_request.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

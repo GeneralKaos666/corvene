@@ -21,6 +21,10 @@
 //! with `mdls`) is only revealed after a native confirmation. GHD makes
 //! Cancel the confirmation's default button; GPUI's alert makes the first
 //! button (Reveal in Finder) the Return default, Escape cancels.
+//!
+//! Deviation (`352-remember-pr-base`; GHD `app-store.ts#_startPullRequest`
+//! always proposes the default branch): the base picked in Preview Pull
+//! Request is remembered per repository and proposed again.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -1186,8 +1190,74 @@ impl Dispatcher {
             Self::show_pull_request(id, cx);
             return;
         }
-        let base = Self::pull_request_base_from_origin(id, cx);
+        let base = Self::proposed_pull_request_base(id, cx);
         Self::create_pull_request_with_base(id, base, cx);
+    }
+
+    /// The base Create Pull Request and Preview Pull Request propose before
+    /// falling back to the default branch: where the branch started
+    /// (`333-pr-base-from-branch-origin`), else the base last picked in this
+    /// repository (`352-remember-pr-base`).
+    pub fn proposed_pull_request_base(id: u64, cx: &dyn Host) -> Option<String> {
+        Self::pull_request_base_from_origin(id, cx)
+            .or_else(|| Self::remembered_pull_request_base(id, cx))
+    }
+
+    /// Deviation (`352-remember-pr-base`; GHD `_startPullRequest` always
+    /// proposes the default branch): the base last picked in Preview Pull
+    /// Request for this repository, as a remote branch of the current
+    /// branch's remote, when it still exists there and is neither the
+    /// current nor the default branch.
+    pub fn remembered_pull_request_base(id: u64, cx: &dyn Host) -> Option<String> {
+        let s = Self::state(cx).read(cx);
+        if !s.flags.bool(crate::flags::ids::REMEMBER_PR_BASE) {
+            return None;
+        }
+        let saved = s.repository(id)?.pull_request_base.as_deref()?;
+        let rs = s.repo_states.get(&id)?;
+        let info = rs.info.as_ref()?;
+        let current = info.current_branch()?;
+        let remote = current
+            .upstream_remote_name()
+            .or_else(|| crate::git_store::default_remote_name(info))?;
+        pull_request_base_candidate(
+            saved,
+            &current.name,
+            rs.default_branch.as_deref(),
+            remote,
+            &info.branches,
+        )
+    }
+
+    /// `352-remember-pr-base`: remember `base` (a branch name from Preview
+    /// Pull Request's base picker) for the repository's next pull request;
+    /// the default branch forgets the remembered one.
+    pub fn remember_pull_request_base(id: u64, base: Option<&str>, cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, _| {
+            if !s.flags.bool(crate::flags::ids::REMEMBER_PR_BASE) {
+                return;
+            }
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            let bare = |name: &str| -> String {
+                rs.info
+                    .as_ref()
+                    .and_then(|i| i.branches.iter().find(|b| b.name == name))
+                    .map(|b| b.name_without_remote().to_string())
+                    .unwrap_or_else(|| name.to_string())
+            };
+            let default_branch = rs.default_branch.as_deref().map(bare);
+            let base = base
+                .map(bare)
+                .filter(|b| Some(b) != default_branch.as_ref());
+            if let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
+                && repo.pull_request_base != base
+            {
+                repo.pull_request_base = base;
+                crate::dispatcher::persist_repositories(s);
+            }
+        });
     }
 
     /// Deviation (`333-pr-base-from-branch-origin`; GHD `_createPullRequest`

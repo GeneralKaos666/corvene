@@ -77,6 +77,11 @@ pub struct Repository {
     /// sign-in, API calls); `None` = the host's first account, as in GHD.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// Corvene (flag `352-remember-pr-base`): the base branch (without its
+    /// remote) last picked in Preview Pull Request when it was not the
+    /// default branch, proposed again for the next pull request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request_base: Option<String>,
 }
 
 /// Corvene (flag `341-custom-autolinks`): a GitHub autolink reference
@@ -134,6 +139,7 @@ impl Repository {
             use_credential_helper: false,
             autolinks: Vec::new(),
             account: None,
+            pull_request_base: None,
         }
     }
 
