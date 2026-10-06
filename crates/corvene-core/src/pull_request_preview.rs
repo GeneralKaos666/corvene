@@ -7,6 +7,10 @@
 //! Deviation (`1203-compare-branch-files`): the compare view opens the same
 //! dialog against the compared branch, without the pull request button
 //! ("Compare Branches"), for any repository.
+//!
+//! Corvene `1218-compare-refs`: the same loaders fill the Compare view's
+//! combined diff ([`PreviewSlot::RefCompare`]), between any two refs, from
+//! their merge base or straight from one to the other.
 
 use std::sync::Arc;
 
@@ -16,7 +20,32 @@ use tracing::warn;
 
 use crate::dispatcher::Dispatcher;
 use crate::remote::spawn_bg;
-use crate::state::Popup;
+use crate::state::{Popup, RepositoryState};
+
+/// Where a [`PullRequestPreview`] lives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewSlot {
+    /// The Preview Pull Request (or `1203` Compare Branches) dialog.
+    PullRequest,
+    /// `1218-compare-refs`: the Compare view's combined diff.
+    RefCompare,
+}
+
+impl PreviewSlot {
+    pub fn get(self, rs: &RepositoryState) -> Option<&PullRequestPreview> {
+        match self {
+            Self::PullRequest => rs.pull_request_preview.as_ref(),
+            Self::RefCompare => rs.ref_compare_changes.as_ref(),
+        }
+    }
+
+    fn slot(self, rs: &mut RepositoryState) -> &mut Option<PullRequestPreview> {
+        match self {
+            Self::PullRequest => &mut rs.pull_request_preview,
+            Self::RefCompare => &mut rs.ref_compare_changes,
+        }
+    }
+}
 
 /// `MergeTreeResult` as the dialog footer shows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +78,9 @@ pub struct PullRequestPreview {
     /// `1203-compare-branch-files`: opened from the compare view to show the
     /// changed files only (no pull request button).
     pub compare_only: bool,
+    /// `1218-compare-refs`: the files changed straight from the base to the
+    /// compared ref (`git diff base..head`), not since their merge base.
+    pub direct: bool,
 }
 
 impl PullRequestPreview {
@@ -131,37 +163,80 @@ impl Dispatcher {
         compare_only: bool,
         cx: &mut dyn Host,
     ) {
-        let generation = Self::state(cx).update(cx, |s, cx| {
-            let rs = s.repo_state_mut(id);
-            let generation = rs
-                .pull_request_preview
-                .as_ref()
-                .map(|p| p.generation + 1)
-                .unwrap_or(1);
-            rs.pull_request_preview = Some(PullRequestPreview {
-                base_branch: base.clone(),
-                current_branch: current.clone(),
-                generation,
+        Self::load_range_preview(
+            id,
+            PreviewSlot::PullRequest,
+            PullRequestPreview {
+                base_branch: base,
+                current_branch: current,
                 compare_only,
                 ..PullRequestPreview::default()
-            });
+            },
+            cx,
+        );
+    }
+
+    /// Put `preview` (its refs and options) in `slot` and load its files:
+    /// for the pull request, the commits between the branches, the files
+    /// changed since they diverged and the mergeability; for the Compare
+    /// view (`1217`) the files changed between the two refs. Then the first
+    /// file's diff.
+    pub(crate) fn load_range_preview(
+        id: u64,
+        slot: PreviewSlot,
+        mut preview: PullRequestPreview,
+        cx: &mut dyn Host,
+    ) {
+        let generation = Self::state(cx).update(cx, |s, cx| {
+            let target = slot.slot(s.repo_state_mut(id));
+            let generation = target.as_ref().map(|p| p.generation + 1).unwrap_or(1);
+            preview.generation = generation;
+            *target = Some(preview.clone());
             cx.notify();
             generation
         });
-        if Self::state(cx).read(cx).popup() != Some(&Popup::StartPullRequest { repo: id }) {
+        if slot == PreviewSlot::PullRequest
+            && Self::state(cx).read(cx).popup() != Some(&Popup::StartPullRequest { repo: id })
+        {
             Self::show_popup(Popup::StartPullRequest { repo: id }, cx);
         }
-        let Some(base) = base else {
+        let Some(base) = preview.base_branch.clone() else {
             // `showPullRequestPopupNoBaseBranch`
             return;
         };
+        let current = preview.current_branch.clone();
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
         let (base_for_load, current_for_load) = (base.clone(), current.clone());
+        let merge_base = !preview.direct;
+        // a reload keeps the selected file while it is still there
+        let wanted = preview.file.clone();
         spawn_bg(
             cx,
             move || {
+                if slot == PreviewSlot::RefCompare {
+                    // the compared ref's commit is the files' commitish
+                    let Some(newest) = corvene_git::resolve_commit(&workdir, &current_for_load)
+                        .ok()
+                        .flatten()
+                    else {
+                        return (Vec::new(), Some(ChangesetData::default()));
+                    };
+                    let changeset = corvene_git::range_changed_files(
+                        git,
+                        &workdir,
+                        &base_for_load,
+                        &newest,
+                        merge_base,
+                        &newest,
+                    )
+                    .unwrap_or_else(|err| {
+                        warn!(%err, "could not list the compared files");
+                        Some(ChangesetData::default())
+                    });
+                    return (vec![newest], changeset);
+                }
                 let commits = corvene_git::commits_between(
                     git.clone(),
                     &workdir,
@@ -191,15 +266,17 @@ impl Dispatcher {
             },
             move |(shas, changeset), cx| {
                 let has_merge_base = changeset.is_some();
-                let first_file = changeset
-                    .as_ref()
-                    .and_then(|c| c.files.first())
-                    .map(|f| f.path.clone());
+                let first_file = changeset.as_ref().and_then(|c| {
+                    wanted
+                        .as_ref()
+                        .filter(|w| c.files.iter().any(|f| &f.path == *w))
+                        .or(c.files.first().map(|f| &f.path))
+                        .cloned()
+                });
                 let applied = Self::state(cx).update(cx, |s, cx| {
-                    let Some(preview) = s
-                        .repo_states
-                        .get_mut(&id)
-                        .and_then(|rs| rs.pull_request_preview.as_mut())
+                    let Some(preview) = slot
+                        .slot(s.repo_state_mut(id))
+                        .as_mut()
                         .filter(|p| p.generation == generation)
                     else {
                         return false;
@@ -210,12 +287,10 @@ impl Dispatcher {
                         Vec::new()
                     });
                     preview.changeset = Some(changeset.unwrap_or_default());
-                    preview.merge_status = if !shas.is_empty() || !has_merge_base {
-                        Some(if has_merge_base {
-                            MergeStatus::Loading
-                        } else {
-                            MergeStatus::Invalid
-                        })
+                    preview.merge_status = if !has_merge_base {
+                        Some(MergeStatus::Invalid)
+                    } else if !shas.is_empty() && slot == PreviewSlot::PullRequest {
+                        Some(MergeStatus::Loading)
                     } else {
                         None
                     };
@@ -225,11 +300,11 @@ impl Dispatcher {
                 if !applied {
                     return;
                 }
-                if has_merge_base && !shas.is_empty() {
+                if slot == PreviewSlot::PullRequest && has_merge_base && !shas.is_empty() {
                     Self::load_pull_request_mergeability(id, generation, base, current, cx);
                 }
                 if let Some(path) = first_file {
-                    Self::select_pull_request_file(id, path, cx);
+                    Self::select_preview_file(id, slot, path, cx);
                 }
             },
         );
@@ -277,6 +352,11 @@ impl Dispatcher {
     /// `_changePullRequestFileSelection`: select a file and load its
     /// merge-base diff.
     pub fn select_pull_request_file(id: u64, path: String, cx: &mut dyn Host) {
+        Self::select_preview_file(id, PreviewSlot::PullRequest, path, cx);
+    }
+
+    /// Select a file of `slot`'s files and load its diff.
+    pub fn select_preview_file(id: u64, slot: PreviewSlot, path: String, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -284,12 +364,9 @@ impl Dispatcher {
             .read(cx)
             .settings
             .hide_whitespace_in_pull_request_diff;
-        let Some((generation, base, current, newest, file)) =
+        let Some((generation, base, current, newest, file, direct)) =
             Self::state(cx).update(cx, |s, cx| {
-                let preview = s
-                    .repo_states
-                    .get_mut(&id)
-                    .and_then(|rs| rs.pull_request_preview.as_mut())?;
+                let preview = slot.slot(s.repo_states.get_mut(&id)?).as_mut()?;
                 preview.file = Some(path.clone());
                 preview.diff = None;
                 cx.notify();
@@ -308,6 +385,7 @@ impl Dispatcher {
                     preview.current_branch.clone(),
                     newest,
                     file,
+                    preview.direct,
                 ))
             })
         else {
@@ -316,12 +394,13 @@ impl Dispatcher {
         spawn_bg(
             cx,
             move || {
-                let diff = corvene_git::merge_base_file_diff(
+                let diff = corvene_git::range_file_diff(
                     git.clone(),
                     &workdir,
                     &file,
                     &base,
                     &current,
+                    !direct,
                     hide_whitespace,
                     &newest,
                 );
@@ -335,7 +414,7 @@ impl Dispatcher {
                     let Some(preview) = s
                         .repo_states
                         .get_mut(&id)
-                        .and_then(|rs| rs.pull_request_preview.as_mut())
+                        .and_then(|rs| slot.slot(rs).as_mut())
                         .filter(|p| p.generation == generation)
                     else {
                         return;
@@ -367,14 +446,17 @@ impl Dispatcher {
         let Some(id) = Self::state(cx).read(cx).selected else {
             return;
         };
-        let file = Self::state(cx)
-            .read(cx)
-            .repo_states
-            .get(&id)
-            .and_then(|rs| rs.pull_request_preview.as_ref())
-            .and_then(|p| p.file.clone());
-        if let Some(file) = file {
-            Self::select_pull_request_file(id, file, cx);
+        // `1218-compare-refs`: the Compare view's diff follows the setting
+        for slot in [PreviewSlot::PullRequest, PreviewSlot::RefCompare] {
+            let file = Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .and_then(|rs| slot.get(rs))
+                .and_then(|p| p.file.clone());
+            if let Some(file) = file {
+                Self::select_preview_file(id, slot, file, cx);
+            }
         }
     }
 }

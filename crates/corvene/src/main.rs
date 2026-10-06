@@ -580,6 +580,8 @@ pub(crate) fn main() {
         //   failure GHD describes, a push a protected branch rejected, or an error
         //   git did not produce)
         //   recent-activity (Repository › Recent Activity…, flag 1216),
+        //   compare-refs[:<base>[:<head>[:...]]] (Branch › Compare…, or with
+        //   both refs the comparison itself, `...` for base...head; flag 1218)
         //   issues | new-issue (Repository › Issues… with sample issues, New
         //   Issue…; flag 345), releases | create-release[:<tag>] (Repository ›
         //   Releases… with sample releases, Create Release…; flag 346)
@@ -1269,6 +1271,13 @@ pub(crate) fn main() {
                 Dispatcher::show_recent_activity(id, cx);
             }
         });
+        // `1218-compare-refs`: the current branch as the second ref
+        on_menu_action(cx, move |_: &CompareRefs, cx| {
+            if let Some(id) = selected(cx) {
+                let head = corvene_ui::history::current_ref(id, cx);
+                Dispatcher::show_compare_refs(id, None, head, cx);
+            }
+        });
         // `1105-clean-untracked-files`
         on_menu_action(cx, move |_: &CleanUntrackedFiles, cx| {
             if let Some(id) = selected(cx) {
@@ -1928,6 +1937,25 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         // `1216-recent-activity`
         ("recent-activity", Some(id)) => Dispatcher::show_recent_activity(id, cx),
+        // `1218-compare-refs`: `compare-refs[:<base>[:<head>[:...]]]`
+        (other, Some(id)) if other == "compare-refs" || other.starts_with("compare-refs:") => {
+            let mut parts = other.split(':').skip(1).map(str::to_string);
+            let (base, head, dots) = (parts.next(), parts.next(), parts.next());
+            match (base, head) {
+                (Some(base), Some(head)) => {
+                    let range = if dots.as_deref() == Some("...") {
+                        corvene_core::ref_compare::RefRange::Symmetric
+                    } else {
+                        corvene_core::ref_compare::RefRange::Range
+                    };
+                    Dispatcher::compare_refs(id, base, head, range, false, cx);
+                }
+                (base, _) => {
+                    let head = corvene_ui::history::current_ref(id, cx);
+                    Dispatcher::show_compare_refs(id, base, head, cx);
+                }
+            }
+        }
         // `1105-clean-untracked-files`: `clean-untracked[:ignored]`
         ("clean-untracked", Some(id)) => Dispatcher::show_clean_untracked_files(id, cx),
         ("clean-untracked:ignored", Some(id)) => {

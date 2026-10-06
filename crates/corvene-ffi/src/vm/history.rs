@@ -91,7 +91,9 @@ pub fn history(s: &AppState, repo: u64, start: u32, count: u32) -> Option<Histor
                 merge_conflicts,
             })
         }
-        corvene_core::compare::CompareForm::History => None,
+        // `1218-compare-refs` is not offered on Android
+        corvene_core::compare::CompareForm::History
+        | corvene_core::compare::CompareForm::Refs { .. } => None,
     };
     Some(HistoryVm {
         repo,

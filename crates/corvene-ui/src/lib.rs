@@ -53,6 +53,7 @@ pub mod path_label;
 pub mod path_text;
 pub mod popover;
 pub mod pull_request_list;
+pub mod ref_compare_view;
 pub mod reflog_list;
 pub mod relative_time;
 pub mod release_view;

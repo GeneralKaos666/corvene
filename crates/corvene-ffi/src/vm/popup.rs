@@ -621,6 +621,15 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         Popup::NewIssue { repo: r } => {
             repo = Some(*r);
         }
+        Popup::CompareRefs {
+            repo: r,
+            base,
+            head,
+        } => {
+            repo = Some(*r);
+            f.opt("base", base.as_deref());
+            f.opt("head", head.as_deref());
+        }
         Popup::CreateRelease { repo: r, tag, sha } => {
             repo = Some(*r);
             f.opt("tag", tag.as_deref());

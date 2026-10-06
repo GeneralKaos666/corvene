@@ -428,6 +428,13 @@ pub enum Popup {
     NewIssue {
         repo: u64,
     },
+    /// Corvene `1218-compare-refs`: Compare…, its pickers filled with
+    /// `base` and `head`.
+    CompareRefs {
+        repo: u64,
+        base: Option<String>,
+        head: Option<String>,
+    },
     /// Corvene `346-releases`: Create Release… for `tag` (none: a new tag)
     /// at `sha` (none: the current branch's tip).
     CreateRelease {
@@ -740,6 +747,7 @@ impl Popup {
             | Self::CreateTag { repo, .. }
             | Self::NewIssue { repo, .. }
             | Self::CreateRelease { repo, .. }
+            | Self::CompareRefs { repo, .. }
             | Self::StartBisect { repo, .. }
             | Self::WarnLocalChangesBeforeUndo { repo, .. }
             | Self::CreateBranch { repo, .. }
@@ -1457,6 +1465,10 @@ pub struct RepositoryState {
 
     /// `1214-commit-signatures`: verified signatures by commit.
     pub signatures: crate::signatures::SignatureStore,
+
+    // ---- `1218-compare-refs` ----
+    /// The combined diff of the two compared refs.
+    pub ref_compare_changes: Option<crate::pull_request_preview::PullRequestPreview>,
 
     // ---- `1216-recent-activity` ----
     /// Repository › Recent Activity…: History lists the reflog instead.

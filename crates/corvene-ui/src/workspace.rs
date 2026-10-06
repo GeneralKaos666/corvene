@@ -94,6 +94,8 @@ pub struct Workspace {
     /// while those lists are open.
     issue_view: Entity<crate::issue_view::IssueView>,
     release_view: Entity<crate::release_view::ReleaseView>,
+    /// `1218-compare-refs`: the combined diff of two compared refs.
+    ref_compare_view: Entity<crate::ref_compare_view::RefCompareView>,
     /// The onboarding tutorial's right-hand panel.
     tutorial_panel: Entity<crate::tutorial_panel::TutorialPanel>,
     repository_foldout: Entity<RepositoryFoldout>,
@@ -241,6 +243,8 @@ impl Workspace {
         let blame_view = cx.new(|cx| crate::blame_view::BlameView::new(state.clone(), cx));
         let issue_view = cx.new(|cx| crate::issue_view::IssueView::new(state.clone(), cx));
         let release_view = cx.new(|cx| crate::release_view::ReleaseView::new(state.clone(), cx));
+        let ref_compare_view =
+            cx.new(|cx| crate::ref_compare_view::RefCompareView::new(state.clone(), cx));
         let tutorial_panel =
             cx.new(|cx| crate::tutorial_panel::TutorialPanel::new(state.clone(), cx));
         let repository_foldout = cx.new(|cx| RepositoryFoldout::new(state.clone(), window, cx));
@@ -281,6 +285,7 @@ impl Workspace {
             blame_view,
             issue_view,
             release_view,
+            ref_compare_view,
             tutorial_panel,
             repository_foldout,
             branch_foldout,
@@ -621,6 +626,13 @@ impl Workspace {
             .is_some_and(|b| b.section == self.section)
         {
             return self.blame_view.clone().into_any_element();
+        }
+        // `1218-compare-refs`: the combined diff of two compared refs
+        if self.section == Section::History
+            && rs.is_some_and(corvene_core::ref_compare::showing_changes)
+            && corvene_core::ref_compare::enabled(state)
+        {
+            return self.ref_compare_view.clone().into_any_element();
         }
         // `345-issues` / `346-releases`: the selected issue / release
         // replaces History's commit view

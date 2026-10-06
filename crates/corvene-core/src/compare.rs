@@ -7,9 +7,12 @@
 //! Deviation (`889-compare-shows-conflicts`): both tabs also list the files
 //! a merge of the compared branch would leave conflicted (GHD only counts
 //! them in the Behind tab's merge call to action).
+//!
+//! Corvene `1218-compare-refs` adds [`CompareForm::Refs`]: any two refs,
+//! picked in the Compare… dialog (`crate::ref_compare`).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::host::{AsyncCtx, Host};
@@ -36,6 +39,16 @@ pub enum CompareForm {
         branch: String,
         mode: ComparisonMode,
         ahead_behind: AheadBehind,
+    },
+    /// Corvene `1218-compare-refs`: the commits between two refs of any
+    /// kind (branch, tag, commit).
+    Refs {
+        base: String,
+        head: String,
+        range: crate::ref_compare::RefRange,
+        /// Commits only `base` has / only `head` has.
+        base_only: u32,
+        head_only: u32,
     },
 }
 
@@ -66,6 +79,9 @@ pub struct CompareState {
     /// Flag `825`: the repository's tags, loaded with the counts, offered
     /// in the list while filtering.
     pub tags: Vec<String>,
+    /// `1218-compare-refs` with [`crate::ref_compare::RefRange::Symmetric`]:
+    /// the listed commits only the base has (the others are the head's).
+    pub base_only_shas: HashSet<String>,
 }
 
 impl Default for CompareState {
@@ -82,19 +98,35 @@ impl Default for CompareState {
             counts_loaded: false,
             counts_requests: Vec::new(),
             tags: Vec::new(),
+            base_only_shas: HashSet::new(),
         }
     }
 }
 
 impl CompareState {
     pub fn is_comparing(&self) -> bool {
-        matches!(self.form, CompareForm::Branch { .. })
+        matches!(
+            self.form,
+            CompareForm::Branch { .. } | CompareForm::Refs { .. }
+        )
     }
 
+    /// The branch compared to the current one (not while `1217` compares
+    /// two refs).
     pub fn branch(&self) -> Option<&str> {
         match &self.form {
             CompareForm::Branch { branch, .. } => Some(branch),
-            CompareForm::History => None,
+            CompareForm::History | CompareForm::Refs { .. } => None,
+        }
+    }
+
+    /// `1218-compare-refs`: the two refs and the range.
+    pub fn refs(&self) -> Option<(&str, &str, crate::ref_compare::RefRange)> {
+        match &self.form {
+            CompareForm::Refs {
+                base, head, range, ..
+            } => Some((base, head, *range)),
+            _ => None,
         }
     }
 }
@@ -309,6 +341,9 @@ impl Dispatcher {
                                 mode,
                                 ahead_behind,
                             };
+                            // `1218-compare-refs`: a branch replaces two refs
+                            rs.compare.base_only_shas.clear();
+                            rs.ref_compare_changes = None;
                             rs.compare.filter_text = branch.clone();
                             rs.compare.commits = commits;
                             rs.compare.merge_status = merge_status;
@@ -367,6 +402,9 @@ impl Dispatcher {
             rs.compare.merge_status = None;
             rs.compare.conflicted_files.clear();
             rs.compare.show_branch_list = false;
+            rs.compare.base_only_shas.clear();
+            // `1218-compare-refs`: the combined diff goes with it
+            rs.ref_compare_changes = None;
             cx.notify();
             was
         });
@@ -386,12 +424,17 @@ impl Dispatcher {
             let rs = s.repo_state_mut(id);
             rs.compare.counts_loaded = false;
             match &rs.compare.form {
-                CompareForm::Branch { branch, mode, .. } => Some((branch.clone(), *mode)),
+                CompareForm::Branch { branch, mode, .. } => Some(Ok((branch.clone(), *mode))),
+                CompareForm::Refs {
+                    base, head, range, ..
+                } => Some(Err((base.clone(), head.clone(), *range))),
                 CompareForm::History => None,
             }
         });
-        if let Some((branch, mode)) = active {
-            Self::compare_to_branch(id, branch, mode, cx);
+        match active {
+            Some(Ok((branch, mode))) => Self::compare_to_branch(id, branch, mode, cx),
+            Some(Err((base, head, range))) => Self::compare_refs(id, base, head, range, true, cx),
+            None => {}
         }
     }
 

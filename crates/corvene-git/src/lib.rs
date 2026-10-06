@@ -128,8 +128,8 @@ pub use log::{
     get_commit_range_changed_files, get_commits, get_commits_from, get_commits_in_range,
     get_commits_with, local_commit_shas, local_only_commits, merge_base, merge_base_changed_files,
     merge_base_file_diff, most_recent_local_commit, parse_filtered_history,
-    parse_raw_log_with_numstat, parse_recent_authors, recent_authors, remerge_changed_files,
-    remerge_file_diff, resolve_commit, tag_names,
+    parse_raw_log_with_numstat, parse_recent_authors, range_changed_files, range_file_diff,
+    recent_authors, remerge_changed_files, remerge_file_diff, resolve_commit, tag_names,
 };
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,

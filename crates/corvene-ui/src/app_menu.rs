@@ -28,7 +28,8 @@
 //! from GitHub Desktop…, Repository › Fetch All Repositories, Repository ›
 //! Pull All Repositories (flag `299-pull-all-repositories`), Repository ›
 //! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Recent
-//! Activity… (flag `1216-recent-activity`), Repository › Clean Untracked
+//! Activity… (flag `1216-recent-activity`), Branch › Compare… (flag
+//! `1218-compare-refs`), Repository › Clean Untracked
 //! Files… (flag `1105-clean-untracked-files`), Repository › Apply Patch ▸
 //! (flag `1106-apply-patch`), Repository › Start
 //! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
@@ -142,6 +143,8 @@ pub struct MenuExtras {
     pub bisect: Option<bool>,
     /// Flag `1216-recent-activity`: Repository › Recent Activity….
     pub recent_activity: bool,
+    /// Flag `1218-compare-refs`: Branch › Compare….
+    pub compare_refs: bool,
     /// Flag `1105-clean-untracked-files`: Repository › Clean Untracked
     /// Files….
     pub clean_untracked: bool,
@@ -193,6 +196,7 @@ impl MenuExtras {
             fetch_tags: flags.bool(ids::TAGS_IN_BRANCH_LIST),
             bisect: flags.bool(ids::BISECT).then_some(false),
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
+            compare_refs: flags.bool(ids::COMPARE_REFS),
             clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
             apply_patch: flags.bool(ids::APPLY_PATCH),
             issues: flags.bool(ids::ISSUES).then_some(false),
@@ -856,6 +860,12 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             l("Compare to Branch", "&Compare to branch"),
             CompareToBranch,
         ),
+    ]);
+    // Corvene (`1218-compare-refs`)
+    if extras.compare_refs {
+        branch.push(item(l("Compare…", "Comp&are…"), CompareRefs));
+    }
+    branch.extend([
         item(
             l("Merge into Current Branch…", "&Merge into current branch…"),
             MergeIntoCurrentBranch,
@@ -1150,6 +1160,7 @@ mod tests {
                     fetch_tags: true,
                     bisect: Some(bits & 1 != 0),
                     recent_activity: true,
+                    compare_refs: true,
                     clean_untracked: true,
                     apply_patch: true,
                     issues: Some(true),

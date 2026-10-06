@@ -7486,6 +7486,7 @@ registry! {
         code: &["crates/corvene-core/src/apply_patch.rs", "crates/corvene-git/src/patch_import.rs", "crates/corvene-ui/src/dialogs/apply_patch.rs"],
     },
 
+
     // ---- 1200 History & branches (overflow) ----
 
     /// Branch list rows name the author of the branch's newest commit.
@@ -7765,6 +7766,26 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(20750)],
         code: &["crates/corvene-git/src/reflog.rs", "crates/corvene-core/src/reflog.rs", "crates/corvene-ui/src/reflog_list.rs", "crates/corvene-ui/src/dialogs/reset_to_reflog_entry.rs"],
+    },
+
+    /// Branch › Compare…: any two refs, their commits and combined diff.
+    COMPARE_REFS = 1218 "compare-refs" {
+        title: "Compare any two refs",
+        summary: "Branch › Compare… (and Compare with… in the menus of History commits and of \
+                  the branch list) picks two branches, tags or commits. History then lists the \
+                  commits of base..head, or with the ... toggle those only one side has, each \
+                  marked with its side, and a Changed Files row shows the combined diff with \
+                  its file list: straight from base to head for .., from their merge base for \
+                  ..., as git diff reads the same range. Selecting a commit shows it as usual.",
+        ghd_behaviour: "History compares the current branch with one other branch, commits only; \
+                        the files changed between two branches show only in Preview Pull \
+                        Request.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19253)],
+        code: &["crates/corvene-core/src/ref_compare.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-ui/src/dialogs/compare_refs.rs", "crates/corvene-ui/src/ref_compare_view.rs"],
     },
 
     // ---- 1300 Changes & diffs (overflow) ----

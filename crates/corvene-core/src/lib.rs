@@ -67,6 +67,7 @@ pub mod portable_paths;
 pub mod pull_request_preview;
 pub mod pull_requests;
 pub mod push_errors;
+pub mod ref_compare;
 pub mod reflog;
 pub mod release_notes;
 pub mod releases;
@@ -123,7 +124,7 @@ pub use persistence::{
     StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
 };
 pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
-pub use pull_request_preview::{MergeStatus, PullRequestPreview};
+pub use pull_request_preview::{MergeStatus, PreviewSlot, PullRequestPreview};
 pub use pull_requests::{
     BranchesTab, FORKED_REMOTE_PREFIX, PullRequestCache, PullRequestCaches, cache_key,
     find_associated_pull_request, fork_pull_request_remote_name,
