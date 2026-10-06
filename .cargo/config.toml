@@ -1,9 +1,13 @@
 # MSVC reads C sources in the system code page unless told they are UTF-8;
-# grammar parsers name nodes like "⇒" in string literals. cl.exe reads extra
-# options from `CL`, which clang ignores: ring builds with clang on Windows
-# ARM and rejects `/utf-8` in CFLAGS.
+# grammar parsers name nodes like "⇒" in string literals (cc reads these
+# variables for every C file it builds for the target). On Windows ARM ring
+# insists on clang, which rejects `/utf-8`, so all C and C++ is built with
+# clang there (UTF-8 by default).
 [env]
-CL = "/utf-8"
+CFLAGS_x86_64_pc_windows_msvc = "/utf-8"
+CFLAGS_i686_pc_windows_msvc = "/utf-8"
+CC_aarch64_pc_windows_msvc = "clang"
+CXX_aarch64_pc_windows_msvc = "clang++"
 
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
