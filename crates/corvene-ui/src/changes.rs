@@ -103,12 +103,17 @@
 //! - a protected branch that takes the user's pushes gets a note above the
 //!   commit button (`339-protected-branch-bypass-note`; GHD `commit-warning`
 //!   shows the protected warning only for unpushable branches).
+//! - a commit that takes a while counts its staged files on the button
+//!   ("Committing 1,234 of 5,000 files", then "Writing commit to main") over
+//!   a thin bar (`1307-commit-progress`, `corvene_core::commit_progress`;
+//!   GHD says "Committing 5000 files to main" until git is done).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use corvene_core::commit_progress::{CommitPhase, CommitProgress};
 use corvene_core::filter::{no_results_message, option_count};
 use corvene_core::{
     AppState, Author, DiffSelectionType, Dispatcher, FileListFilter, FileStatusKind, FilterOption,
@@ -5609,12 +5614,18 @@ impl ChangesSidebar {
                             .is_some_and(|r| r.commit_options.push_after_commit)
                 };
                 let included = self.visible(cx).data.included;
-                let (amending, committing) = self
+                let (amending, committing, progress) = self
                     .state
                     .read(cx)
                     .selected_state()
-                    .map(|r| (r.commit_to_amend.is_some(), r.committing))
-                    .unwrap_or((false, false));
+                    .map(|r| {
+                        (
+                            r.commit_to_amend.is_some(),
+                            r.committing,
+                            r.commit_progress.filter(|_| r.committing),
+                        )
+                    })
+                    .unwrap_or((false, false, None));
                 // GHD `getFilesToBeCommittedButtonText`: "Commit 4 files to main"
                 let files = match included {
                     0 => String::new(),
@@ -5626,7 +5637,26 @@ impl ChangesSidebar {
                 } else {
                     files
                 };
-                let label = if amending {
+                // Corvene (`1307-commit-progress`): the staged files counted,
+                // then git writing the commit
+                let staging = progress
+                    .filter(|p| p.phase == CommitPhase::Staging && p.total > 0)
+                    .map(|p| committed_files_count(&p));
+                let counting = staging.is_some();
+                let writing = progress.is_some_and(|p| p.phase == CommitPhase::Writing);
+                let label = if let Some(count) = staging {
+                    // the count takes the place of "to <branch>" (as
+                    // desktop/desktop#19679 suggests), which would not fit;
+                    // a narrow sidebar cuts it short with an ellipsis
+                    let verb = if amending { "Amending" } else { "Committing" };
+                    div().flex().flex_row().min_w_0().child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(format!("{verb} {count}")),
+                    )
+                } else if amending {
                     div().flex().flex_row().child(if committing {
                         "Amending last commit"
                     } else {
@@ -5637,7 +5667,9 @@ impl ChangesSidebar {
                         .flex()
                         .flex_row()
                         .gap(zpx(4.))
-                        .child(if committing {
+                        .child(if writing {
+                            "Writing commit to".to_string()
+                        } else if committing {
                             format!("Committing {files}to")
                         } else {
                             format!("Commit {files}to")
@@ -5649,19 +5681,21 @@ impl ChangesSidebar {
                         )
                 };
                 let disabled = self.commit_disabled(cx);
+                let label_color = if disabled {
+                    crate::widgets::faded(cx.ghd().button_text, cx.ghd().box_alt_background)
+                } else {
+                    cx.ghd().button_text
+                };
                 // GHD `<Loading />` before the text while committing
                 let label = div()
                     .flex()
                     .flex_row()
                     .items_center()
+                    .when(counting, |d| d.min_w_0())
                     .when(committing, |d| {
-                        let color = if disabled {
-                            crate::widgets::faded(cx.ghd().button_text, cx.ghd().box_alt_background)
-                        } else {
-                            cx.ghd().button_text
-                        };
                         d.child(
                             div()
+                                .when(counting, |d| d.flex_none())
                                 .w(zpx(16.))
                                 .h(zpx(12.))
                                 .mr(zpx(5.))
@@ -5669,7 +5703,7 @@ impl ChangesSidebar {
                                 .items_center()
                                 .justify_center()
                                 .child(crate::icons::spin(
-                                    octicon(Octicon::SyncClockwise, color).size(zpx(12.)),
+                                    octicon(Octicon::SyncClockwise, label_color).size(zpx(12.)),
                                     "commit-spinner",
                                 )),
                         )
@@ -5697,6 +5731,11 @@ impl ChangesSidebar {
                             .text_color(crate::widgets::faded(t.button_text, t.box_alt_background))
                     })
                     .w_full()
+                    // `1307-commit-progress`: a thin bar along the bottom
+                    .when_some(progress, |d, progress| {
+                        d.relative()
+                            .child(commit_progress_bar(progress.fraction(), label_color))
+                    })
                     // a `<button>` takes focus on mouse down, enabled or not
                     .on_mouse_down(
                         MouseButton::Left,
@@ -6473,6 +6512,37 @@ pub(crate) fn whitespace_hidden_note(count: usize, cx: &App) -> Div {
         .text_size(FONT_SIZE_SM())
         .text_color(t.text_secondary)
         .child(text)
+}
+
+/// `1307-commit-progress`: "1,234 of 5,000 files" staged so far.
+fn committed_files_count(progress: &CommitProgress) -> String {
+    format!(
+        "{} of {} {}",
+        crate::format::format_count(progress.staged as u64),
+        crate::format::format_count(progress.total as u64),
+        if progress.total == 1 { "file" } else { "files" }
+    )
+}
+
+/// `1307-commit-progress`: the bar along the bottom of the commit button,
+/// `fraction` of it filled in the label's colour over a fainter track; it
+/// stays clear of the rounded corners and the text's descenders.
+fn commit_progress_bar(fraction: f32, color: Hsla) -> Div {
+    div()
+        .absolute()
+        .left(BORDER_RADIUS())
+        .right(BORDER_RADIUS())
+        .bottom(zpx(1.))
+        .h(zpx(2.))
+        .rounded(zpx(1.))
+        .bg(color.opacity(0.3))
+        .child(
+            div()
+                .h_full()
+                .w(gpui_kit::relative(fraction.clamp(0., 1.)))
+                .rounded(zpx(1.))
+                .bg(color),
+        )
 }
 
 /// "N changed files", or GHD's "3 of 10 changed files" while a filter hides

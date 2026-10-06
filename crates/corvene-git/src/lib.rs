@@ -83,8 +83,8 @@ pub use commit::{
     CommitAuthor, CommitOptions, RECEIVE_LIMIT, add_paths, assume_unchanged_paths, commit,
     commit_with_terminal_output, delete_worktree_paths, discard_changes, format_message, head_sha,
     hook_exists, large_file_paths, merge_trailers, parse_commit_author, parse_commit_sha,
-    restore_mode_changes, set_assume_unchanged, stage_files, staged_mode_changes, undo_last_commit,
-    unstage_all,
+    restore_mode_changes, set_assume_unchanged, stage_files, stage_files_with_progress,
+    staged_mode_changes, undo_last_commit, unstage_all,
 };
 pub use config::{
     IssueTracker, add_safe_directory, boolean_config_value, branch_merge_base,
@@ -148,7 +148,7 @@ pub use partial_stash::create_partial_stash;
 pub use patch::{
     PatchOptions, apply_patch_to_index, discard_changes_from_selection, format_patch,
     format_patch_to_discard_changes, format_patch_to_discard_changes_with, format_patch_with,
-    stage_partial_files, stage_partial_files_with,
+    stage_partial_files, stage_partial_files_with, stage_partial_files_with_progress,
 };
 pub use patch_import::{
     PatchApply, PatchFile, PatchFileChange, PatchPreview, apply_mailbox, apply_patch,

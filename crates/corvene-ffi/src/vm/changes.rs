@@ -57,6 +57,17 @@ pub struct ChangedFileVm {
     pub lines_deleted: Option<u32>,
 }
 
+/// Flag `1307-commit-progress`: how far a commit that takes a while got.
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct CommitProgressVm {
+    /// Git writes the commit (and runs its hooks); every file is staged.
+    pub writing: bool,
+    /// Files in the index so far.
+    pub staged: u32,
+    /// Files going into the commit.
+    pub total: u32,
+}
+
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct CommitFormVm {
     /// The author shown next to the form, "Name <email>" when known.
@@ -68,6 +79,9 @@ pub struct CommitFormVm {
     /// GHD "Undo" bar: the last commit of this session.
     pub last_commit_sha: Option<String>,
     pub last_commit_summary: Option<String>,
+    /// Flag `1307-commit-progress`: set once a commit has run for a moment.
+    #[uniffi(default)]
+    pub progress: Option<CommitProgressVm>,
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
@@ -156,6 +170,14 @@ pub fn changes(s: &AppState, repo: u64) -> Option<ChangesVm> {
             co_authors: rs.co_authors.iter().map(|a| a.display_text()).collect(),
             last_commit_sha: rs.last_commit.as_ref().map(|c| c.sha.clone()),
             last_commit_summary: rs.last_commit.as_ref().map(|c| c.summary.clone()),
+            progress: rs
+                .commit_progress
+                .filter(|_| rs.committing)
+                .map(|p| CommitProgressVm {
+                    writing: p.phase == corvene_core::commit_progress::CommitPhase::Writing,
+                    staged: u32::try_from(p.staged).unwrap_or(u32::MAX),
+                    total: u32::try_from(p.total).unwrap_or(u32::MAX),
+                }),
         },
         conflicts: u32::try_from(conflicts).unwrap_or(u32::MAX),
         stash_count: u32::try_from(rs.stash_count).unwrap_or(u32::MAX),

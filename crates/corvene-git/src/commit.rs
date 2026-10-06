@@ -6,7 +6,9 @@
 //! also works on an unborn branch, and moves the files to the Trash in
 //! batches instead of one call per file. Corvene can put executable bits staged
 //! with `update-index --chmod` back after the restage
-//! ([`staged_mode_changes`], `781-keep-staged-mode-changes`).
+//! ([`staged_mode_changes`], `781-keep-staged-mode-changes`), and count the
+//! files a commit stages as it goes ([`stage_files_with_progress`],
+//! `1307-commit-progress`).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -105,13 +107,29 @@ pub fn stage_files(
     workdir: &Path,
     files: &[WorkingDirectoryFileChange],
 ) -> Result<()> {
-    stage_whole_files(
-        git,
-        workdir,
-        files
-            .iter()
-            .filter(|f| f.selection.kind() == DiffSelectionType::All),
-    )
+    stage_whole_files_with(git, workdir, whole_files(files), None)
+}
+
+/// Corvene `1307-commit-progress`: [`stage_files`], telling `on_staged`
+/// how many of the fully-included files are in the index so far. The
+/// `update-index` that adds them runs with `--verbose`, which prints a line
+/// per path as git hashes it; the count never passes the number of files.
+pub fn stage_files_with_progress(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    files: &[WorkingDirectoryFileChange],
+    on_staged: &mut dyn FnMut(usize),
+) -> Result<()> {
+    stage_whole_files_with(git, workdir, whole_files(files), Some(on_staged))
+}
+
+/// The files [`stage_files`] stages: the fully-included ones.
+fn whole_files(
+    files: &[WorkingDirectoryFileChange],
+) -> impl Iterator<Item = &WorkingDirectoryFileChange> {
+    files
+        .iter()
+        .filter(|f| f.selection.kind() == DiffSelectionType::All)
 }
 
 /// The `update-index` steps of [`stage_files`] for `files`, whatever their
@@ -120,6 +138,15 @@ pub(crate) fn stage_whole_files<'a>(
     git: Arc<GitBinary>,
     workdir: &Path,
     files: impl IntoIterator<Item = &'a WorkingDirectoryFileChange>,
+) -> Result<()> {
+    stage_whole_files_with(git, workdir, files, None)
+}
+
+fn stage_whole_files_with<'a>(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    files: impl IntoIterator<Item = &'a WorkingDirectoryFileChange>,
+    on_staged: Option<&mut dyn FnMut(usize)>,
 ) -> Result<()> {
     let mut normal: Vec<&str> = Vec::new();
     let mut old_renamed: Vec<&str> = Vec::new();
@@ -132,18 +159,21 @@ pub(crate) fn stage_whole_files<'a>(
             _ => {}
         }
     }
-    update_index(git.clone(), workdir, &old_renamed, true)?;
-    update_index(git.clone(), workdir, &normal, false)?;
-    update_index(git, workdir, &deleted, true)
+    update_index(git.clone(), workdir, &old_renamed, true, None)?;
+    update_index(git.clone(), workdir, &normal, false, on_staged)?;
+    update_index(git, workdir, &deleted, true, None)
 }
 
 /// GHD `updateIndex`: `update-index --add --remove [--force-remove]
-/// --replace -z --stdin` for `paths`; nothing without paths.
+/// --replace -z --stdin` for `paths`; nothing without paths. With
+/// `on_staged` (`1307-commit-progress`), `--verbose` as well, its lines
+/// counted as git writes them.
 fn update_index(
     git: Arc<GitBinary>,
     workdir: &Path,
     paths: &[&str],
     force_remove: bool,
+    on_staged: Option<&mut dyn FnMut(usize)>,
 ) -> Result<()> {
     if paths.is_empty() {
         return Ok(());
@@ -152,12 +182,30 @@ fn update_index(
     if force_remove {
         args.push("--force-remove");
     }
-    args.extend(["--replace", "-z", "--stdin"]);
-    GitCommand::new(git)
+    args.extend(["--replace", "-z"]);
+    if on_staged.is_some() {
+        // `--stdin` must come last
+        args.push("--verbose");
+    }
+    args.push("--stdin");
+    let cmd = GitCommand::new(git)
         .args(args)
         .current_dir(workdir)
-        .stdin(nul_separated(paths))
-        .run()?;
+        .stdin(nul_separated(paths));
+    match on_staged {
+        // one `add '<path>'` or `remove '<path>'` line per path (a path
+        // with a line break in it counts twice, hence the cap)
+        Some(on_staged) => {
+            let mut staged = 0;
+            cmd.forget_streamed().run_streaming_stdout(|_| {
+                staged = (staged + 1).min(paths.len());
+                on_staged(staged);
+            })?;
+        }
+        None => {
+            cmd.run()?;
+        }
+    }
     Ok(())
 }
 
@@ -937,6 +985,37 @@ mod tests {
         let info = crate::open_repository(path).unwrap();
         assert!(matches!(info.tip, corvene_models::Tip::Unborn { .. }));
         assert!(path.join("a.txt").exists());
+    }
+
+    #[test]
+    fn staging_reports_progress_for_every_file() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        // far more paths and verbose output than a pipe holds (~600 KB
+        // each way): stdin and stdout must not wait on each other
+        let folder = format!("many-{}", "x".repeat(180));
+        std::fs::create_dir(path.join(&folder)).unwrap();
+        for i in 0..2500 {
+            let name = format!("{folder}/{}-{i:05}.txt", "y".repeat(60));
+            std::fs::write(path.join(name), format!("{i}\n")).unwrap();
+        }
+        let status = crate::get_status(git.clone(), path).unwrap();
+        assert_eq!(status.files.len(), 2500);
+        let mut reports = Vec::new();
+        stage_files_with_progress(git.clone(), path, &status.files, &mut |n| reports.push(n))
+            .unwrap();
+        assert_eq!(reports.len(), 2500);
+        assert!(reports.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!(reports.last(), Some(&2500));
+        let staged = Command::new("git")
+            .args(["ls-files", "--cached"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&staged.stdout).lines().count(),
+            2500
+        );
     }
 
     #[test]

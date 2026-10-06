@@ -735,10 +735,19 @@ impl GitCommand {
         if let Some(token) = &cancel {
             token.attach(child.id(), group);
         }
-        if let (Some(bytes), Some(mut stdin)) = (&self.stdin, child.stdin.take()) {
-            use std::io::Write;
-            let _ = stdin.write_all(bytes);
-        }
+        // stdin on a thread of its own: git may fill the streamed pipe
+        // before it has read everything (`update-index --verbose --stdin`)
+        let stdin_thread = match (&self.stdin, child.stdin.take()) {
+            (Some(bytes), Some(mut stdin)) => {
+                let bytes = bytes.clone();
+                Some(std::thread::spawn(move || {
+                    use std::io::Write;
+                    // git may exit early; a broken pipe shows in the exit code
+                    let _ = stdin.write_all(&bytes);
+                }))
+            }
+            _ => None,
+        };
 
         // the pipe that is not streamed is drained on a thread so git never blocks
         let (Some(stdout_pipe), Some(stderr_pipe)) = (child.stdout.take(), child.stderr.take())
@@ -791,6 +800,9 @@ impl GitCommand {
         }
         let status = status.map_err(GitError::Spawn)?;
         let drained = drain_thread.join().unwrap_or_default();
+        if let Some(thread) = stdin_thread {
+            let _ = thread.join();
+        }
         if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
             debug!(git = %args, "git cancelled");
             return Err(GitError::Cancelled(args));

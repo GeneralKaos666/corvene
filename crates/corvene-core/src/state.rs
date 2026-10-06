@@ -1304,6 +1304,9 @@ pub struct RepositoryState {
     pub hook_progress: Option<corvene_git::hooks::HookProgress>,
     /// GHD `subscribeToCommitOutput`: the output of the commit in progress.
     pub commit_output: Option<crate::hooks::CommitOutput>,
+    /// Corvene `1307-commit-progress`: how far the commit in progress got,
+    /// once it has run for a moment.
+    pub commit_progress: Option<crate::commit_progress::CommitProgress>,
     /// Discard Changes is running (`708-changes-busy-indicator`).
     pub discarding: bool,
     /// A refresh was requested while one was running; run again when done.

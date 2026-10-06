@@ -385,9 +385,23 @@ pub fn stage_partial_files_with(
     files: &[WorkingDirectoryFileChange],
     options: PatchOptions,
 ) -> Result<()> {
-    for file in files
+    stage_partial_files_with_progress(git, workdir, files, options, &mut |_| {})
+}
+
+/// Corvene `1307-commit-progress`: [`stage_partial_files_with`], telling
+/// `on_staged` how many of the partially-included files are in the index
+/// after each one.
+pub fn stage_partial_files_with_progress(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    files: &[WorkingDirectoryFileChange],
+    options: PatchOptions,
+    on_staged: &mut dyn FnMut(usize),
+) -> Result<()> {
+    for (index, file) in files
         .iter()
         .filter(|f| f.selection.kind() == DiffSelectionType::Partial)
+        .enumerate()
     {
         // GHD `applyPatchToIndex`: the rename goes back into the index before
         // the diff is taken, so a renamed file diffs HEAD's old blob (now at
@@ -404,6 +418,7 @@ pub fn stage_partial_files_with(
             None,
         )?;
         apply_hunks_to_index(git.clone(), workdir, file, &diff, options)?;
+        on_staged(index + 1);
     }
     Ok(())
 }

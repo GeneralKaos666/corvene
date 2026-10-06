@@ -1,0 +1,20 @@
+# Commit progress on the commit button (Corvene only, flag 1307-commit-progress,
+# off in the GitHub Desktop preset the harness runs with). A pre-commit hook
+# that sleeps keeps `git commit` running, so 300 ms in the button reads
+# "Writing commit to main" over a full bar. The fixture's two files stage
+# within a moment, so their count never shows ("Committing 1,234 of 5,000
+# files" needs thousands of files). GHD keeps "Committing 2 files to
+# main" (deviations.md › Editor / commit form), so the snap is recorded, not
+# compared; with the flag off 14-commit-hooks compares the running commit.
+name: commit-progress
+description: A commit kept running by a slow pre-commit hook. The commit button reads Writing commit to main over a full progress bar (Corvene only)
+setup: repo
+corvene_flags: 1307-commit-progress=on
+steps:
+  - hooks:
+      pre-commit: "#!/bin/sh\nsleep 30\n"
+  - click: [139, 583]
+  - type: "Update the README"
+  - click: [124, 747]
+    wait: 1500
+  - snap: {name: writing, corvene_only: true, note: "GHD keeps Committing 2 files to main (deviations.md, 1307-commit-progress)"}

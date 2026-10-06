@@ -8178,6 +8178,24 @@ registry! {
         upstream: &[Upstream::issue(20861)],
         code: &["crates/corvene-git/src/utf16.rs", "crates/corvene-git/src/diff.rs", "crates/corvene-git/src/log.rs", "crates/corvene-git/src/patch.rs", "crates/corvene-git/src/partial_stash.rs", "crates/corvene-core/src/dispatcher.rs"],
     },
+
+    /// The commit button counts the files a commit stages.
+    COMMIT_PROGRESS = 1307 "commit-progress" {
+        title: "Commit progress on the commit button",
+        summary: "A commit that takes more than a moment shows how far it got: the button \
+                  reads \"Committing 1,234 of 5,000 files\" while git adds the files \
+                  to the index, then \"Writing commit to main\" while git writes the commit \
+                  and runs its hooks, with a thin bar along the bottom of the button. A \
+                  commit that is done within 300 ms keeps the usual label.",
+        ghd_behaviour: "The button says \"Committing 5000 files to main\" until git is done, \
+                        however long that takes.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19679)],
+        code: &["crates/corvene-core/src/commit_progress.rs", "crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/changes.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

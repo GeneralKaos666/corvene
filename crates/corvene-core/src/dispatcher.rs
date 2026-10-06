@@ -6094,10 +6094,22 @@ impl Dispatcher {
             rs.committing = true;
             rs.hook_progress = None;
             rs.commit_output = None;
+            rs.commit_progress = None;
             cx.notify();
         });
         // GHD `onHookProgress` / `onHookFailure` / `onTerminalOutputAvailable`
         let hooks = crate::hooks::hook_ui(id, true, cx);
+        // Corvene (`1307-commit-progress`): the staged files counted on the
+        // commit button, the fully-included ones first
+        let mut progress = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::COMMIT_PROGRESS)
+            .then(|| crate::commit_progress::commit_progress_ui(id, files.len(), cx));
+        let whole_files = files
+            .iter()
+            .filter(|f| f.selection.kind() == DiffSelectionType::All)
+            .count();
         let hook_callbacks = hooks.callbacks.clone();
         let output_sink = crate::hooks::CommitOutputSink::new();
         let output_tx = output_sink.sender();
@@ -6183,14 +6195,41 @@ impl Dispatcher {
             } else {
                 Vec::new()
             };
+            if let Some(progress) = progress.as_mut() {
+                progress.staged(0);
+            }
             if !restages_everything {
                 corvene_git::unstage_all(git.clone(), &workdir)?;
             }
             // Corvene (`785-embedded-repo-commit`): the nested repositories
             // as submodules or pointers (`update-index` skips their `Sub/`)
             corvene_git::add_embedded_repositories(git.clone(), &workdir, &embedded)?;
-            corvene_git::stage_files(git.clone(), &workdir, &files)?;
-            corvene_git::stage_partial_files_with(git.clone(), &workdir, &files, patch_options)?;
+            match progress.as_mut() {
+                Some(progress) => {
+                    corvene_git::stage_files_with_progress(
+                        git.clone(),
+                        &workdir,
+                        &files,
+                        &mut |staged| progress.staged(staged),
+                    )?;
+                    corvene_git::stage_partial_files_with_progress(
+                        git.clone(),
+                        &workdir,
+                        &files,
+                        patch_options,
+                        &mut |staged| progress.staged(whole_files + staged),
+                    )?;
+                }
+                None => {
+                    corvene_git::stage_files(git.clone(), &workdir, &files)?;
+                    corvene_git::stage_partial_files_with(
+                        git.clone(),
+                        &workdir,
+                        &files,
+                        patch_options,
+                    )?;
+                }
+            }
             if !modes.is_empty() {
                 // the files going into the commit (a deleted one has no mode)
                 let staged: std::collections::HashSet<&str> = files
@@ -6203,6 +6242,9 @@ impl Dispatcher {
                     .filter(|(path, _)| staged.contains(path.as_str()))
                     .collect();
                 corvene_git::restore_mode_changes(git.clone(), &workdir, &modes)?;
+            }
+            if let Some(progress) = progress.as_mut() {
+                progress.writing();
             }
             let on_output = crate::hooks::commit_output_callback(output_tx);
             corvene_git::hooks::with_hook_callbacks(&hook_callbacks, || {
@@ -6236,6 +6278,7 @@ impl Dispatcher {
                     rs.committing = false;
                     rs.hook_progress = None;
                     rs.commit_output = None;
+                    rs.commit_progress = None;
                     if let Ok((sha, rewrites_pushed)) = &result {
                         // GHD `_addBranchToForcePushList`: an amended tip
                         // makes "Force push" the recommended action.
