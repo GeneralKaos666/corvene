@@ -376,6 +376,17 @@ mod tests {
         let Some(gix) = gix else {
             return false;
         };
+        let mut cli = cli;
+        // gitoxide's diff is the minimal one; git's default Myers keeps a
+        // heuristic that can cost a line pair more (seen on
+        // tools/parity/parity.py in 1b4263b3), which git's own
+        // `diff.algorithm=minimal` does not: then the totals are git's too
+        if (gix.lines_added, gix.lines_deleted) != (cli.lines_added, cli.lines_deleted)
+            && minimal_numstat(dir, shas) == Some((gix.lines_added, gix.lines_deleted))
+        {
+            cli.lines_added = gix.lines_added;
+            cli.lines_deleted = gix.lines_deleted;
+        }
         assert_eq!(
             summary(&gix),
             summary(&cli),
@@ -385,6 +396,57 @@ mod tests {
         // and everything else: kinds, scores, submodule states, commitish
         assert_eq!(gix, cli, "{shas:?} in {}", dir.display());
         true
+    }
+
+    /// The line totals git reports for the same commit or range with
+    /// `diff.algorithm=minimal` (binary files left out, as in `--numstat`).
+    fn minimal_numstat(dir: &Path, shas: &[String]) -> Option<(u64, u64)> {
+        let out = if shas.len() == 1 {
+            run(
+                dir,
+                &[
+                    "-c",
+                    "diff.algorithm=minimal",
+                    "log",
+                    &shas[0],
+                    "-C",
+                    "-M",
+                    "-m",
+                    "-1",
+                    "--first-parent",
+                    "--format=format:",
+                    "--numstat",
+                    "--",
+                ],
+            )
+        } else {
+            let base = format!("{}^", shas[0]);
+            run(
+                dir,
+                &[
+                    "-c",
+                    "diff.algorithm=minimal",
+                    "diff",
+                    &base,
+                    shas.last()?,
+                    "-C",
+                    "-M",
+                    "--numstat",
+                    "--",
+                ],
+            )
+        };
+        let (mut added, mut deleted) = (0u64, 0u64);
+        for line in out.lines() {
+            let mut cols = line.split('\t');
+            let (a, d) = (cols.next()?, cols.next()?);
+            if a == "-" || d == "-" {
+                continue;
+            }
+            added += a.parse::<u64>().ok()?;
+            deleted += d.parse::<u64>().ok()?;
+        }
+        Some((added, deleted))
     }
 
     fn head(dir: &Path) -> String {
