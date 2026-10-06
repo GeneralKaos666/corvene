@@ -1456,6 +1456,10 @@ pub struct RepositoryState {
     pub branch_name_rule_error: Option<crate::repo_rules::BranchNameRuleError>,
     /// The name the last of those checks asked about.
     pub branch_name_rule_requested: String,
+    /// `353-fork-tracks-upstream`: the `upstream` remote was just added to
+    /// a fork contributing to its parent; the next refresh sets up its
+    /// default branch.
+    pub track_parent_after_refresh: bool,
     /// Rebase dialog preview.
     pub rebase_preview: Option<crate::mco::RebasePreview>,
 

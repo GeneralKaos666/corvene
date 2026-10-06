@@ -3028,6 +3028,28 @@ registry! {
         code: &["crates/corvene-core/src/integrations.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-ui/src/dialogs/open_pull_request.rs"],
     },
 
+    /// A fork contributing to its parent follows the parent's default branch.
+    FORK_TRACKS_UPSTREAM = 353 "fork-tracks-upstream" {
+        title: "Fork's default branch follows the parent",
+        summary: "When a fork is set up to contribute to its parent (Choose Fork Settings, \
+                  Repository Settings, or a cloned fork getting its upstream remote), the parent \
+                  is fetched and the local default branch tracks the parent's default branch, \
+                  so Pull brings the parent's new commits without syncing the fork first. Its \
+                  pushes still go to the fork (branch.<name>.pushRemote), and in such a fork a \
+                  force push also goes to a branch's push remote. Only a default branch with no \
+                  commits the parent lacks is switched; \"For my own purposes\" switches it \
+                  back. Needs the remote manager.",
+        ghd_behaviour: "The default branch keeps tracking the fork, which has to be updated from \
+                        the parent and pushed before new branches start from the parent's latest \
+                        commits.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(19457)],
+        code: &["crates/corvene-core/src/forks.rs", "crates/corvene-core/src/remote.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

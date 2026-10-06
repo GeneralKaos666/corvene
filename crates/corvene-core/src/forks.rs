@@ -28,11 +28,23 @@
 //! access), the stored GitHub association is dropped and the repository is
 //! handled as a plain git repository (re-adding it matches it again); GHD's
 //! `repositoryWithRefreshedGitHubRepository` keeps the stale record forever.
+//!
+//! Deviation (flag `353-fork-tracks-upstream`, desktop#19457): a fork set up
+//! to contribute to its parent (Choose Fork Settings, Repository Settings, or
+//! a cloned fork getting its `upstream` remote) has its local default branch
+//! track the parent's (`upstream/<default>`), so Pull brings the parent's
+//! commits without syncing the fork first. `branch.<default>.pushRemote`
+//! keeps its pushes, force pushes included, on the fork; that needs
+//! `1109-remote-manager`, without which nothing changes. Only a default
+//! branch tracking the fork's same-named branch with no commits the parent
+//! lacks is switched, and choosing "For my own purposes" switches it back.
+//! GHD leaves the default branch tracking the fork.
 
 use crate::host::Host;
 use corvene_github::Client;
 use corvene_models::{
-    ForkContributionTarget, GitHubRepository, Remote, clone_url_like_remote, url_matches_remote,
+    BranchKind, ForkContributionTarget, GitHubRepository, Remote, clone_url_like_remote,
+    url_matches_remote,
 };
 use tracing::{debug, info, warn};
 
@@ -362,6 +374,141 @@ impl Dispatcher {
         });
         // the pull request / issue target changed with it
         Self::ensure_pull_requests(id, cx);
+        // `353-fork-tracks-upstream`
+        Self::track_parent_default_branch(id, target == ForkContributionTarget::Parent, cx);
+    }
+
+    /// `353-fork-tracks-upstream`: point the fork's local default branch at
+    /// the parent's (`to_parent`, after fetching the parent) or back at the
+    /// fork's. See the module docs.
+    pub(crate) fn track_parent_default_branch(id: u64, to_parent: bool, cx: &mut dyn Host) {
+        let plan = {
+            let s = Self::state(cx).read(cx);
+            if !s.flags.bool(crate::flags::ids::FORK_TRACKS_UPSTREAM)
+                || !s.flags.bool(crate::flags::ids::REMOTE_MANAGER)
+            {
+                return;
+            }
+            let Some(gh) = s.repository(id).and_then(|r| r.github.as_ref()) else {
+                return;
+            };
+            let Some(parent) = gh.parent.as_deref() else {
+                return;
+            };
+            let Some(info) = s.repo_states.get(&id).and_then(|rs| rs.info.as_ref()) else {
+                return;
+            };
+            let Some(default_branch) = parent.default_branch.clone() else {
+                return;
+            };
+            let Some(upstream) = find_upstream_remote(parent, &info.remotes) else {
+                return;
+            };
+            let Some(origin) = crate::git_store::default_remote_name(info) else {
+                return;
+            };
+            if origin == upstream.name {
+                return;
+            }
+            let Some(local) = info
+                .branches
+                .iter()
+                .find(|b| b.kind == BranchKind::Local && b.name == default_branch)
+            else {
+                return;
+            };
+            let (from, to) = (
+                format!("{origin}/{default_branch}"),
+                format!("{}/{default_branch}", upstream.name),
+            );
+            let (from, to) = if to_parent { (from, to) } else { (to, from) };
+            if local.upstream_short() != Some(from.as_str()) {
+                return;
+            }
+            (
+                default_branch,
+                origin.to_string(),
+                upstream.name.clone(),
+                to,
+            )
+        };
+        let (branch, origin, upstream, to) = plan;
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let push_remote_key = format!("branch.{branch}.pushRemote");
+        if !to_parent {
+            spawn_bg(
+                cx,
+                move || -> Result<(), corvene_git::GitError> {
+                    // only the configuration this feature wrote is undone
+                    let ours =
+                        corvene_git::local_config_value(git.clone(), &workdir, &push_remote_key)
+                            .is_some_and(|remote| remote == origin);
+                    if !ours {
+                        return Ok(());
+                    }
+                    corvene_git::set_upstream(git.clone(), &workdir, &branch, &to)?;
+                    corvene_git::remove_local_config_value(git, &workdir, &push_remote_key)
+                },
+                move |result, cx| {
+                    if let Err(err) = result {
+                        warn!(id, %err, "could not track the fork's default branch again");
+                    }
+                    Self::refresh_repository(id, cx);
+                },
+            );
+            return;
+        }
+        Self::fetch_remote_then(
+            id,
+            Some(&upstream),
+            false,
+            move |fetched, cx| {
+                if !fetched {
+                    return;
+                }
+                let Some((git, workdir)) = Self::repo_context(id, cx) else {
+                    return;
+                };
+                spawn_bg(
+                    cx,
+                    move || -> Result<bool, corvene_git::GitError> {
+                        let local = format!("refs/heads/{branch}");
+                        let tip = corvene_git::merge_base(git.clone(), &workdir, &local, &local)?;
+                        let base = corvene_git::merge_base(
+                            git.clone(),
+                            &workdir,
+                            &local,
+                            &format!("refs/remotes/{to}"),
+                        )?;
+                        // commits the parent lacks stay with the fork
+                        if tip.is_none() || base != tip {
+                            return Ok(false);
+                        }
+                        corvene_git::set_local_config_value(
+                            git.clone(),
+                            &workdir,
+                            &push_remote_key,
+                            &origin,
+                        )?;
+                        corvene_git::set_upstream(git, &workdir, &branch, &to)?;
+                        Ok(true)
+                    },
+                    move |result, cx| {
+                        match result {
+                            Ok(true) => info!(id, "default branch tracks the parent"),
+                            Ok(false) => {}
+                            Err(err) => {
+                                warn!(id, %err, "could not track the parent's default branch")
+                            }
+                        }
+                        Self::refresh_repository(id, cx);
+                    },
+                );
+            },
+            cx,
+        );
     }
 
     /// `addUpstreamRemoteIfNeeded`: a fork gets an `upstream` remote for its
@@ -432,7 +579,19 @@ impl Dispatcher {
             cx,
             move || corvene_git::add_remote(git, &workdir, UPSTREAM_REMOTE_NAME, &parent_url),
             move |result, cx| match result {
-                Ok(()) => Self::refresh_repository(id, cx),
+                Ok(()) => {
+                    // `353-fork-tracks-upstream`: a cloned fork set up here
+                    let to_parent = Self::state(cx)
+                        .read(cx)
+                        .repository(id)
+                        .is_some_and(|r| r.is_fork_contributing_to_parent());
+                    if to_parent {
+                        Self::state(cx).update(cx, |s, _| {
+                            s.repo_state_mut(id).track_parent_after_refresh = true;
+                        });
+                    }
+                    Self::refresh_repository(id, cx);
+                }
                 Err(err) => warn!(id, %err, "could not add the upstream remote"),
             },
         );

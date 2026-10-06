@@ -750,6 +750,10 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
 /// in more accounts on the stub (token `stub-token-<login>`,
 /// `527-multiple-accounts`) and leaves the repository's account to be
 /// looked up, as for a repository added with several accounts.
+/// `{"parent": {"owner", "name", "clone_url"}}` makes it a fork of that
+/// repository (its `default_branch` is `main`), and `{"fork_target":
+/// "parent" | "self"}` then picks its Fork Behavior as Choose Fork Settings
+/// does (`353-fork-tracks-upstream`).
 fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
     let fake: Value = serde_json::from_str(arg).map_err(|e| e.to_string())?;
     let owner = fake["owner"].as_str().unwrap_or("octocat").to_string();
@@ -794,8 +798,31 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
         clone_url: format!("{web}/{owner}/{name}.git"),
         default_branch: Some("main".to_string()),
         private: false,
-        fork: false,
-        parent: None,
+        fork: fake["parent"].is_object(),
+        parent: fake["parent"].as_object().map(|p| {
+            let (owner, name) = (
+                p["owner"].as_str().unwrap_or("upstream").to_string(),
+                p["name"].as_str().unwrap_or(&name).to_string(),
+            );
+            Box::new(corvene_core::GitHubRepository {
+                endpoint: endpoint.clone(),
+                html_url: format!("{web}/{owner}/{name}"),
+                clone_url: p["clone_url"]
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{web}/{owner}/{name}.git")),
+                owner,
+                name,
+                default_branch: Some("main".to_string()),
+                private: false,
+                fork: false,
+                parent: None,
+                archived: false,
+                permissions: Some(corvene_core::RepositoryPermission::Read),
+                allow_forking: Some(true),
+                node_id: None,
+            })
+        }),
         archived: false,
         // `{"permission": "admin"}`: `1113-lfs-locks`' Force Unlock
         permissions: Some(match fake["permission"].as_str() {
@@ -861,6 +888,14 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
         if let Some(id) = selected {
             Dispatcher::refresh_repository(id, cx);
         }
+    }
+    let fork_target = match fake["fork_target"].as_str() {
+        Some("parent") => Some(corvene_core::ForkContributionTarget::Parent),
+        Some("self") => Some(corvene_core::ForkContributionTarget::Own),
+        _ => None,
+    };
+    if let (Some(target), Some(id)) = (fork_target, selected) {
+        Dispatcher::set_fork_contribution_target(id, target, cx);
     }
     // `348-pull-request-review`: the stub's pull requests fill the cache
     // (Branch › Review Pull Request… needs the branch's pull request)

@@ -1906,6 +1906,20 @@ impl Dispatcher {
                 // (both throttled)
                 Self::hosted_repository_changed(id, cx);
                 Self::add_upstream_remote_if_needed(id, cx);
+                // `353-fork-tracks-upstream`
+                let track_parent = Self::state(cx).update(cx, |s, _| {
+                    let rs = s.repo_state_mut(id);
+                    // a refresh started before the remote was added waits
+                    let has_upstream = rs.info.as_ref().is_some_and(|i| {
+                        i.remotes
+                            .iter()
+                            .any(|r| r.name == crate::forks::UPSTREAM_REMOTE_NAME)
+                    });
+                    has_upstream && std::mem::take(&mut rs.track_parent_after_refresh)
+                });
+                if track_parent {
+                    Self::track_parent_default_branch(id, true, cx);
+                }
                 Self::refresh_branch_protection(id, cx);
                 // `1113-lfs-locks` (throttled)
                 Self::refresh_lfs_locks(id, false, cx);

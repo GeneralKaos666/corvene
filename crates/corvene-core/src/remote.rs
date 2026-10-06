@@ -1684,9 +1684,14 @@ impl Dispatcher {
         // Corvene (`1109-remote-manager`): the current branch goes to its push
         // remote when that is not the upstream's (GHD always pushes to the
         // upstream's remote, desktop#18154); a partial push and a force push
-        // (of a branch rewritten against its upstream) stay upstream
+        // (of a branch rewritten against its upstream) stay upstream, except
+        // with `353-fork-tracks-upstream`, whose fork default branch follows
+        // the parent and must never be force pushed there
         let push_target = {
             let s = Self::state(cx).read(cx);
+            let force_follows = s.flags.bool(crate::flags::ids::FORK_TRACKS_UPSTREAM)
+                && s.repository(id)
+                    .is_some_and(|r| r.is_fork_contributing_to_parent());
             let current = s
                 .repo_states
                 .get(&id)
@@ -1695,7 +1700,9 @@ impl Dispatcher {
                 .map(|b| b.name.clone());
             Self::push_target_in(s, id)
                 .filter(|_| {
-                    up_to.is_none() && !force_with_lease && (branch.is_none() || branch == current)
+                    up_to.is_none()
+                        && (!force_with_lease || force_follows)
+                        && (branch.is_none() || branch == current)
                 })
                 .and_then(|t| {
                     s.repo_states
