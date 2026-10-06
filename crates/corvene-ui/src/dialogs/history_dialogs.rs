@@ -655,21 +655,25 @@ impl Render for WarnTaggedCommitBeforeUndoDialog {
 
 /// Flag `826`: delete a tag Corvene did not create-and-hold (not in
 /// `tagsToPush`), optionally from the remote too (Corvene addition; GHD only
-/// deletes unpushed tags). The remote box starts unticked.
+/// deletes unpushed tags). The remote box starts unticked. With
+/// `remote_only` (`1219-tag-manager`'s Delete from Remote…) the tag goes
+/// from the remote alone and stays here.
 pub struct ConfirmDeletePushedTagDialog {
     repo: u64,
     tag: String,
     remote: Option<corvene_core::Remote>,
     from_remote: bool,
+    remote_only: bool,
 }
 
 impl ConfirmDeletePushedTagDialog {
-    pub fn new(repo: u64, tag: String, cx: &App) -> Self {
+    pub fn new(repo: u64, tag: String, remote_only: bool, cx: &App) -> Self {
         Self {
             repo,
             tag,
             remote: Dispatcher::current_remote(repo, cx),
             from_remote: false,
+            remote_only,
         }
     }
 }
@@ -678,15 +682,23 @@ impl Render for ConfirmDeletePushedTagDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let close = |_: &mut Window, cx: &mut App| Dispatcher::close_popup(cx);
         let (repo, tag) = (self.repo, self.tag.clone());
-        let remote = self.remote.clone().filter(|_| self.from_remote);
+        let remote_only = self.remote_only;
+        let remote = self
+            .remote
+            .clone()
+            .filter(|_| self.from_remote || remote_only);
+        let question = match (&self.remote, remote_only) {
+            (Some(r), true) => format!(
+                "Are you sure you want to delete the tag {} from {}? It stays in this repository.",
+                self.tag, r.name
+            ),
+            _ => format!("Are you sure you want to delete the tag {}?", self.tag),
+        };
         let content = div()
             .flex()
             .flex_col()
-            .child(div().mb(SPACING()).child(format!(
-                "Are you sure you want to delete the tag {}?",
-                self.tag
-            )))
-            .when_some(self.remote.clone(), |d, r| {
+            .child(div().mb(SPACING()).child(question))
+            .when_some(self.remote.clone().filter(|_| !remote_only), |d, r| {
                 d.child(
                     div()
                         .id("delete-tag-remote")
@@ -724,10 +736,17 @@ impl Render for ConfirmDeletePushedTagDialog {
                 ok: GroupButtonSpec {
                     id: "delete-tag-confirm",
                     label: crate::dialog::confirm_label("Delete", "Delete Tag", "Delete tag", cx),
-                    disabled: false,
+                    disabled: remote_only && remote.is_none(),
                     on_click: Box::new(move |_, cx| {
                         Dispatcher::close_popup(cx);
-                        Dispatcher::delete_pushed_tag(repo, tag.clone(), remote.clone(), cx);
+                        match (remote.clone(), remote_only) {
+                            (Some(remote), true) => {
+                                Dispatcher::delete_remote_tag_only(repo, tag.clone(), remote, cx)
+                            }
+                            (remote, _) => {
+                                Dispatcher::delete_pushed_tag(repo, tag.clone(), remote, cx)
+                            }
+                        }
                     }),
                 },
             }

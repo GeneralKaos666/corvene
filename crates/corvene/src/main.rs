@@ -583,6 +583,9 @@ pub(crate) fn main() {
         //   insights[:all] (Repository › Insights…, :all over all time; flag 1110),
         //   compare-refs[:<base>[:<head>[:...]]] (Branch › Compare…, or with
         //   both refs the comparison itself, `...` for base...head; flag 1218)
+        //   tags (Branch › Tags…, flag 1219),
+        //   create-ssh-key | ssh-key-needs-scope (Settings › Integrations' SSH
+        //   key dialogs, flag 350),
         //   issues | new-issue (Repository › Issues… with sample issues, New
         //   Issue…; flag 345), releases | create-release[:<tag>] (Repository ›
         //   Releases… with sample releases, Create Release…; flag 346)
@@ -1270,6 +1273,12 @@ pub(crate) fn main() {
             }
         });
         // `1216-recent-activity`
+        // `1219-tag-manager`
+        on_menu_action(cx, move |_: &ShowTags, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_tags(id, cx);
+            }
+        });
         on_menu_action(cx, move |_: &ShowRecentActivity, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::show_recent_activity(id, cx);
@@ -1984,6 +1993,18 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 }
             }
         }
+        // `1219-tag-manager`
+        ("tags", Some(id)) => Dispatcher::show_tags(id, cx),
+        // `350-ssh-key-helper`
+        ("create-ssh-key", _) => Dispatcher::show_popup(Popup::CreateSshKey, cx),
+        ("ssh-key-needs-scope", _) => Dispatcher::show_popup(
+            Popup::SshKeyNeedsScope {
+                endpoint: "https://api.github.com".into(),
+                login: "octocat".into(),
+                title: "Corvene".into(),
+            },
+            cx,
+        ),
         // `1105-clean-untracked-files`: `clean-untracked[:ignored]`
         ("clean-untracked", Some(id)) => Dispatcher::show_clean_untracked_files(id, cx),
         ("clean-untracked:ignored", Some(id)) => {

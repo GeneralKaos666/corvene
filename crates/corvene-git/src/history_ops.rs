@@ -271,10 +271,111 @@ pub fn delete_tag(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()>
     Ok(())
 }
 
+/// Corvene (`1219-tag-manager`): one tag of [`list_tags`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TagInfo {
+    /// The short name (`refs/tags/` stripped).
+    pub name: String,
+    /// The commit the tag points at (an annotated tag peeled once).
+    pub sha: String,
+    /// An annotated tag (a tag object with a tagger and a message).
+    pub annotated: bool,
+    /// The tagger's date for an annotated tag, else the commit's date.
+    pub seconds: i64,
+    /// An annotated tag's message subject (empty for GHD's empty-message
+    /// tags and for lightweight ones).
+    pub message: String,
+    /// The tagged commit's summary.
+    pub summary: String,
+}
+
+/// The `for-each-ref` format [`parse_tag_list`] reads: NUL-separated
+/// fields, one tag a line.
+const TAG_LIST_FORMAT: &str = "%(refname:strip=2)%00%(objecttype)%00%(objectname)%00\
+                               %(*objecttype)%00%(*objectname)%00%(creatordate:unix)%00\
+                               %(subject)%00%(*subject)";
+
+/// Corvene (`1219-tag-manager`): every tag pointing at a commit, newest
+/// first (by [`TagInfo::seconds`], then name), `git for-each-ref
+/// refs/tags`. Tags of trees or blobs are left out.
+pub fn list_tags(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<TagInfo>> {
+    let out = GitCommand::new(git)
+        .args([
+            "for-each-ref",
+            &format!("--format={TAG_LIST_FORMAT}"),
+            "refs/tags",
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(parse_tag_list(&out.stdout_string()?))
+}
+
+fn parse_tag_list(text: &str) -> Vec<TagInfo> {
+    let mut tags: Vec<TagInfo> = text
+        .lines()
+        .filter_map(|line| {
+            let f: Vec<&str> = line.split('\0').collect();
+            let [
+                name,
+                kind,
+                sha,
+                peeled_kind,
+                peeled_sha,
+                date,
+                subject,
+                peeled_subject,
+            ] = f.as_slice()
+            else {
+                return None;
+            };
+            let seconds = date.trim().parse().unwrap_or(0);
+            match *kind {
+                "commit" => Some(TagInfo {
+                    name: name.to_string(),
+                    sha: sha.to_string(),
+                    annotated: false,
+                    seconds,
+                    message: String::new(),
+                    summary: subject.to_string(),
+                }),
+                "tag" if *peeled_kind == "commit" => Some(TagInfo {
+                    name: name.to_string(),
+                    sha: peeled_sha.to_string(),
+                    annotated: true,
+                    seconds,
+                    message: subject.to_string(),
+                    summary: peeled_subject.to_string(),
+                }),
+                _ => None,
+            }
+        })
+        .collect();
+    tags.sort_by(|a, b| b.seconds.cmp(&a.seconds).then_with(|| a.name.cmp(&b.name)));
+    tags
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn parses_tag_lists() {
+        let text = "v1\0commit\0aaa\0\0\0100\0Fix it\0\n\
+                    v2\0tag\0ttt\0commit\0bbb\0200\0Release two\0Bump\n\
+                    tree-tag\0tree\0ccc\0\0\0300\0\0\n";
+        let tags = parse_tag_list(text);
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].name, "v2");
+        assert_eq!(tags[0].sha, "bbb");
+        assert!(tags[0].annotated);
+        assert_eq!(tags[0].message, "Release two");
+        assert_eq!(tags[0].summary, "Bump");
+        assert_eq!(tags[1].name, "v1");
+        assert_eq!(tags[1].sha, "aaa");
+        assert!(!tags[1].annotated);
+        assert_eq!(tags[1].summary, "Fix it");
+    }
 
     fn repo() -> (tempfile::TempDir, Arc<GitBinary>) {
         let dir = tempfile::tempdir().unwrap();

@@ -172,6 +172,8 @@ impl Dispatcher {
             sign_in_store: SignInStore::new(sign_in_accounts.clone()),
             sign_in_accounts,
             authentication: None,
+            extra_oauth_scopes: Vec::new(),
+            ssh_key: Default::default(),
             watcher: None,
             watched_repo: None,
             banner: None,
@@ -1156,6 +1158,7 @@ impl Dispatcher {
             read_implicit_upstream,
             read_signing,
             (read_sparse, read_lfs),
+            read_push_target,
         ) = {
             let s = state.read(cx);
             let Some(repo) = s.repository(id) else {
@@ -1205,6 +1208,7 @@ impl Dispatcher {
                     s.flags.bool(crate::flags::ids::SPARSE_CHECKOUT),
                     s.flags.bool(crate::flags::ids::LFS_LOCKS),
                 ),
+                s.flags.bool(crate::flags::ids::REMOTE_MANAGER),
             )
         };
         // GHD `_refreshRepository`: a path that is gone may be a deleted
@@ -1468,6 +1472,21 @@ impl Dispatcher {
                             .flatten()?;
                             Some((format!("{remote}/{}", b.name), ab))
                         });
+                    // `1109-remote-manager`: a push remote other than the
+                    // upstream's
+                    let push_target =
+                        info.current_branch()
+                            .filter(|_| read_push_target)
+                            .and_then(|b| {
+                                crate::remote_manager::read_push_target(
+                                    git.clone(),
+                                    &info.workdir,
+                                    b,
+                                    &info.remotes,
+                                    &info.branches,
+                                    remote.as_deref(),
+                                )
+                            });
                     // `1202-update-from-parent-branch`
                     let update_parent = info
                         .current_branch()
@@ -1541,6 +1560,7 @@ impl Dispatcher {
                         sparse_checkout: sparse.and_then(join),
                         uses_lfs: uses_lfs.is_some_and(join),
                         implicit_upstream,
+                        push_target,
                         worktrees,
                         upstream_rewritten,
                         update_parent,
@@ -1677,6 +1697,7 @@ impl Dispatcher {
                                     &mut repo_state.implicit_upstream,
                                     extras.implicit_upstream,
                                 );
+                                changed |= set(&mut repo_state.push_target, extras.push_target);
                                 changed |= set(&mut repo_state.worktrees, extras.worktrees);
                                 changed |= set(
                                     &mut repo_state.upstream_rewritten,
@@ -2534,6 +2555,16 @@ impl Dispatcher {
                 .is_some_and(|rs| rs.reflog.is_some())
         {
             Self::load_reflog(id, cx);
+        }
+        // `1219-tag-manager`: and the tags
+        if !more
+            && Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .is_some_and(|rs| rs.tags_view.is_some())
+        {
+            Self::load_tags(id, cx);
         }
         let state = Self::state(cx);
         // `885-history-load-race`: a reload asked for while a page loads
@@ -6940,6 +6971,8 @@ impl Dispatcher {
     pub fn sign_in_device_flow(endpoint: corvene_github::Endpoint, cx: &mut dyn Host) {
         Self::start_authentication(cx);
         let client_id = Self::oauth_client_id(&endpoint, cx);
+        // `350-ssh-key-helper` may ask for more
+        let scopes = corvene_github::scopes_with(&Self::state(cx).read(cx).extra_oauth_scopes);
         let cancel = Arc::new(AtomicBool::new(false));
         Self::state(cx).update(cx, |s, cx| {
             if let Some(existing) = s.authentication.as_ref() {
@@ -6971,14 +7004,17 @@ impl Dispatcher {
                     )));
                     return;
                 };
-                let code =
-                    match corvene_github::auth::request_device_code(&worker_endpoint, &client_id) {
-                        Ok(code) => code,
-                        Err(err) => {
-                            let _ = tx.send(Msg::Failed(err.to_string()));
-                            return;
-                        }
-                    };
+                let code = match corvene_github::auth::request_device_code(
+                    &worker_endpoint,
+                    &client_id,
+                    &scopes,
+                ) {
+                    Ok(code) => code,
+                    Err(err) => {
+                        let _ = tx.send(Msg::Failed(err.to_string()));
+                        return;
+                    }
+                };
                 let mut interval = code.poll_interval();
                 let deadline = std::time::Instant::now()
                     + std::time::Duration::from_secs(code.expires_in.max(60));
@@ -7535,6 +7571,7 @@ fn closed_popup(s: &mut AppState, popup: &Popup) {
     if matches!(popup, Popup::SignIn { .. }) {
         cancel_authentication(s);
         sign_in_store(s).reset();
+        s.extra_oauth_scopes.clear();
     }
     // GHD `HookFailed.onDismissed`: `resolve('abort')` (a no-op once the
     // dialog answered)
@@ -7694,6 +7731,8 @@ struct RefreshExtras {
     uses_lfs: bool,
     /// `1103-implicit-upstream-push-default`
     implicit_upstream: Option<(String, corvene_models::AheadBehind)>,
+    /// `1109-remote-manager`
+    push_target: Option<crate::remote_manager::PushTarget>,
     worktrees: Vec<corvene_models::WorktreeEntry>,
     upstream_rewritten: bool,
     /// `1202-update-from-parent-branch`: the branch the current one was

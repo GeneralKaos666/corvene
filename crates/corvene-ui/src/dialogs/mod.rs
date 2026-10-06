@@ -24,6 +24,7 @@ mod confirm_quit;
 mod crash_report_found;
 mod create_release;
 mod create_repository;
+mod create_ssh_key;
 mod delete_branches;
 mod discard_changes;
 mod discard_selection;
@@ -487,8 +488,12 @@ impl DialogHost {
             Popup::WarnLocalChangesBeforeUndo { repo } => cx
                 .new(|_| WarnLocalChangesBeforeUndoDialog::new(*repo))
                 .into(),
-            Popup::ConfirmDeletePushedTag { repo, tag } => cx
-                .new(|cx| ConfirmDeletePushedTagDialog::new(*repo, tag.clone(), cx))
+            Popup::ConfirmDeletePushedTag {
+                repo,
+                tag,
+                remote_only,
+            } => cx
+                .new(|cx| ConfirmDeletePushedTagDialog::new(*repo, tag.clone(), *remote_only, cx))
                 .into(),
             Popup::WarnTaggedCommitBeforeUndo {
                 repo,
@@ -836,6 +841,22 @@ impl DialogHost {
                         *wrong,
                         window,
                         cx,
+                    )
+                })
+                .into(),
+            Popup::CreateSshKey => cx
+                .new(|cx| create_ssh_key::CreateSshKeyDialog::new(window, cx))
+                .into(),
+            Popup::SshKeyNeedsScope {
+                endpoint,
+                login,
+                title,
+            } => cx
+                .new(|_| {
+                    create_ssh_key::SshKeyNeedsScopeDialog::new(
+                        endpoint.clone(),
+                        login.clone(),
+                        title.clone(),
                     )
                 })
                 .into(),

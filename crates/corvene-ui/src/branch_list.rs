@@ -364,17 +364,7 @@ fn tag_row_menu(
     let deleted = tag.clone();
     items.push(
         MenuItem::new(mac_or("Delete Tag…", "Delete tag…"), move |_, cx| {
-            if unpushed {
-                Dispatcher::delete_tag(id, deleted.clone(), cx)
-            } else {
-                Dispatcher::show_popup(
-                    Popup::ConfirmDeletePushedTag {
-                        repo: id,
-                        tag: deleted.clone(),
-                    },
-                    cx,
-                )
-            }
+            Dispatcher::request_delete_tag(id, deleted.clone(), cx)
         })
         .enabled(unpushed || delete_pushed),
     );

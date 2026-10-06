@@ -276,6 +276,17 @@ pub enum Popup {
         path: std::path::PathBuf,
         wrong: bool,
     },
+    /// Corvene `350-ssh-key-helper`: Settings › Integrations' Create SSH
+    /// Key… on the desktop (passphrase, ssh-agent, upload).
+    CreateSshKey,
+    /// Corvene `350-ssh-key-helper`: the account `login` at `endpoint` may
+    /// not add SSH keys (no `write:public_key`); sign in again to allow it
+    /// and add the key as `title`.
+    SshKeyNeedsScope {
+        endpoint: String,
+        login: String,
+        title: String,
+    },
     /// `TestNotifications`: post sample pull request notifications for
     /// `repo` (debug builds).
     TestNotifications {
@@ -453,10 +464,13 @@ pub enum Popup {
     WarnLocalChangesBeforeUndo {
         repo: u64,
     },
-    /// Flag `826`: delete a tag that is not in `tagsToPush`.
+    /// Flag `826`: delete a tag that is not in `tagsToPush`. With
+    /// `remote_only` (`1219-tag-manager`), delete it from the remote and
+    /// keep it here.
     ConfirmDeletePushedTag {
         repo: u64,
         tag: String,
+        remote_only: bool,
     },
     /// Flag `819`: the commit being undone carries tags.
     WarnTaggedCommitBeforeUndo {
@@ -924,6 +938,9 @@ pub struct RepositorySettingsData {
     /// `526-commit-signing`: the signing settings in effect in the
     /// repository (its own config over the global one).
     pub local_signing: SigningConfig,
+    /// `1109-remote-manager`: every remote, and where pushes go.
+    pub remotes: Vec<Remote>,
+    pub push_config: crate::remote_manager::PushTargetConfig,
 }
 
 /// GHD `RetryAction` (the subset behind `LocalChangesOverwritten`).
@@ -1453,6 +1470,10 @@ pub struct RepositoryState {
     /// no upstream, but `push.default=current` pushes it to this
     /// remote-tracking branch (`origin/feature`); its ahead/behind counts.
     pub implicit_upstream: Option<(String, AheadBehind)>,
+    /// Corvene `1109-remote-manager`: the current branch's push remote
+    /// (`branch.<name>.pushRemote` or `remote.pushDefault`) while it is not
+    /// the upstream's remote.
+    pub push_target: Option<crate::remote_manager::PushTarget>,
     pub publishing: bool,
     /// The LFS initialisation prompt was already considered for this repository.
     pub lfs_checked: bool,
@@ -1498,6 +1519,9 @@ pub struct RepositoryState {
     // ---- `1216-recent-activity` ----
     /// Repository › Recent Activity…: History lists the reflog instead.
     pub reflog: Option<crate::reflog::ReflogState>,
+    /// Corvene `1219-tag-manager`: Branch › Tags…, History lists the tags
+    /// instead.
+    pub tags_view: Option<crate::tag_manager::TagsViewState>,
 
     /// `1105-clean-untracked-files`: the dry run Clean Untracked Files shows.
     pub clean_preview: Option<crate::clean_untracked::CleanPreview>,
@@ -1619,6 +1643,9 @@ impl RepositoryState {
         if let Some(reflog) = &self.reflog {
             // `1216-recent-activity`: the commits its entries point at
             &reflog.commits
+        } else if let Some(tags) = &self.tags_view {
+            // `1219-tag-manager`: the tagged commits
+            &tags.commits
         } else if self.compare.is_comparing() {
             &self.compare.commits
         } else if self.history_filter.is_active() {
@@ -1646,6 +1673,7 @@ impl RepositoryState {
     /// A bisect's range (`1212-bisect`) comes first.
     pub fn showing_all_branches(&self) -> bool {
         self.reflog.is_none()
+            && self.tags_view.is_none()
             && !self.compare.is_comparing()
             && !self.history_filter.is_active()
             && !self.status.as_ref().is_some_and(|s| s.bisect.is_some())
@@ -1730,6 +1758,11 @@ pub struct AppState {
     pub sign_in_accounts: std::rc::Rc<std::cell::RefCell<Vec<Account>>>,
     /// The authentication flow in progress.
     pub authentication: Option<AuthenticationFlow>,
+    /// Corvene `350-ssh-key-helper`: scopes the next sign-in asks for
+    /// besides `corvene_github::SCOPES` (cleared when the dialog closes).
+    pub extra_oauth_scopes: Vec<String>,
+    /// Corvene `350-ssh-key-helper`: Settings › Integrations' SSH key work.
+    pub ssh_key: crate::ssh_keys::SshKeyState,
     /// Watcher for the selected repository's worktree.
     pub watcher: Option<crate::watcher::RepoWatcher>,
     pub watched_repo: Option<u64>,

@@ -29,6 +29,39 @@ pub const CLIENT_ID: &str = match option_env!("CORVENE_GITHUB_CLIENT_ID") {
 /// Scopes GitHub Desktop requests, plus `read:user`/`user:email` for the account card.
 pub const SCOPES: &str = "repo workflow read:user user:email";
 
+/// Corvene (`350-ssh-key-helper`): the scope `POST /user/keys` needs, asked
+/// for only when adding an SSH key.
+pub const PUBLIC_KEY_SCOPE: &str = "write:public_key";
+
+/// [`SCOPES`] and `extra` (a sign-in that asks for more), each once.
+pub fn scopes_with(extra: &[String]) -> String {
+    let mut scopes: Vec<&str> = SCOPES.split(' ').collect();
+    for scope in extra {
+        if !scopes.contains(&scope.as_str()) {
+            scopes.push(scope);
+        }
+    }
+    scopes.join(" ")
+}
+
+/// A scope list as GitHub writes it (`X-OAuth-Scopes`, the token answer's
+/// `scope`): separated by commas or spaces.
+pub fn parse_scopes(text: &str) -> Vec<String> {
+    text.split([',', ' '])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Whether `scopes` allow adding an SSH key (`admin:public_key` includes
+/// `write:public_key`).
+pub fn allows_adding_ssh_keys(scopes: &[String]) -> bool {
+    scopes
+        .iter()
+        .any(|s| s == PUBLIC_KEY_SCOPE || s == "admin:public_key")
+}
+
 /// The OAuth app's client secret for the browser flow's token exchange
 /// (GHD `ClientSecret`); `None` when the build has none - the exchange then
 /// relies on PKCE alone. Set with `CORVENE_GITHUB_CLIENT_SECRET` at build time.
@@ -132,6 +165,23 @@ pub fn public_emojis(endpoint: &Endpoint) -> Result<std::collections::HashMap<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adds_scopes_once() {
+        assert_eq!(scopes_with(&[]), SCOPES);
+        assert_eq!(
+            scopes_with(&["write:public_key".into(), "repo".into()]),
+            "repo workflow read:user user:email write:public_key"
+        );
+    }
+
+    #[test]
+    fn reads_scope_lists() {
+        let scopes = parse_scopes("repo, workflow,admin:public_key");
+        assert_eq!(scopes, ["repo", "workflow", "admin:public_key"]);
+        assert!(allows_adding_ssh_keys(&scopes));
+        assert!(!allows_adding_ssh_keys(&parse_scopes("repo workflow")));
+    }
 
     #[test]
     fn enterprise_oauth_spec() {

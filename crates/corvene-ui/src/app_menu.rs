@@ -30,14 +30,15 @@
 //! Fetch All Tags (flag `899-tags-in-branch-list`), Repository › Recent
 //! Activity… (flag `1216-recent-activity`), Repository › Insights… (flag
 //! `1110-repository-insights`), Branch › Compare… (flag `1218-compare-refs`),
-//! Repository › Clean Untracked
+//! Branch › Tags… (flag `1219-tag-manager`), Repository › Clean Untracked
 //! Files… (flag `1105-clean-untracked-files`), Repository › Apply Patch ▸
 //! (flag `1106-apply-patch`), Repository › Submodules… (flag
 //! `1111-submodules`), Repository › Sparse Checkout… (flag
 //! `1112-sparse-checkout`), Repository › Start
 //! Bisect / Stop Bisecting (flag `1212-bisect`), Branch › Push To ▸ and
 //! Fetch From ▸ with a repository's remotes when it has several (flag
-//! `1210-push-to-other-remote`), Branch › Request
+//! `1210-push-to-other-remote`; the remote Push goes to is checked with
+//! `1109-remote-manager`), Branch › Request
 //! Reviewers… (flag `336-request-reviewers`), Repository ›
 //! View Upstream on GitHub, Repository › Add License… ("A&dd license…" off
 //! macOS: `Pu&ll` has the `l`), View › Show Pull Requests List and Toggle
@@ -83,6 +84,9 @@ pub struct MenuLabelsEvent {
     /// Corvene (`1210-push-to-other-remote`): the remotes of Branch › Push
     /// To ▸ and Fetch From ▸ (`Dispatcher::menu_remotes`; empty: no menus).
     pub remotes: Vec<String>,
+    /// Corvene (`1109-remote-manager`): the remote Push sends the current
+    /// branch to, checked in Push To ▸ (`None` while the flag is off).
+    pub push_remote: Option<String>,
     /// Corvene (`524-open-repository-with-editor`): the editors of
     /// Repository › Open in Editor ▸ (`Dispatcher::menu_editors`; empty: no
     /// menu).
@@ -112,6 +116,7 @@ impl Default for MenuLabelsEvent {
             ask_for_confirmation_when_stashing_all_changes: true,
             is_changes_filter_visible: true,
             remotes: Vec::new(),
+            push_remote: None,
             editors: Vec::new(),
             navigation: (false, false),
             extras: MenuExtras::default(),
@@ -150,6 +155,8 @@ pub struct MenuExtras {
     pub insights: bool,
     /// Flag `1218-compare-refs`: Branch › Compare….
     pub compare_refs: bool,
+    /// Flag `1219-tag-manager`: Branch › Tags….
+    pub tags: bool,
     /// Flag `1105-clean-untracked-files`: Repository › Clean Untracked
     /// Files….
     pub clean_untracked: bool,
@@ -207,6 +214,7 @@ impl MenuExtras {
             recent_activity: flags.bool(ids::RECENT_ACTIVITY),
             insights: flags.bool(ids::REPOSITORY_INSIGHTS),
             compare_refs: flags.bool(ids::COMPARE_REFS),
+            tags: flags.bool(ids::TAG_MANAGER),
             clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
             apply_patch: flags.bool(ids::APPLY_PATCH),
             submodules: flags.bool(ids::SUBMODULES),
@@ -324,6 +332,11 @@ impl MenuLabelsEvent {
             // `changesState.stashEntry !== null`
             ask_for_confirmation_when_stashing_all_changes: rs.desktop_stash().is_some(),
             remotes: corvene_core::Dispatcher::menu_remotes(s, repository.id),
+            push_remote: s
+                .flags
+                .bool(ids::REMOTE_MANAGER)
+                .then(|| corvene_core::Dispatcher::push_remote_name_in(s, repository.id))
+                .flatten(),
             editors: corvene_core::Dispatcher::menu_editors(s)
                 .into_iter()
                 .map(|(label, _)| label)
@@ -351,6 +364,8 @@ pub struct MenuItemConstructorOptions {
     pub system_menu: Option<SystemMenuType>,
     /// `enabled` (`None` is enabled)
     pub enabled: Option<bool>,
+    /// `type: 'checkbox'`, `checked`
+    pub checked: bool,
 }
 
 /// GHD's label for this platform: `__DARWIN__ ? mac : other`. Off macOS
@@ -910,12 +925,24 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
             RebaseCurrentBranch,
         ),
     ]);
+    // Corvene (`1219-tag-manager`)
+    if extras.tags {
+        branch.push(item(l("Tags…", "T&ags…"), ShowTags));
+    }
     // Corvene (`1210-push-to-other-remote`)
     if !labels.remotes.is_empty() {
         branch.extend([
             submenu(
                 l("Push To", "Push &to"),
-                remote_items(&labels.remotes, &PUSH_TO_REMOTE),
+                remote_items(&labels.remotes, &PUSH_TO_REMOTE)
+                    .into_iter()
+                    .zip(&labels.remotes)
+                    .map(|(item, name)| MenuItemConstructorOptions {
+                        // `1109-remote-manager`: where Push goes
+                        checked: labels.push_remote.as_ref() == Some(name),
+                        ..item
+                    })
+                    .collect(),
             ),
             submenu(
                 l("Fetch From", "Fetch &from"),
@@ -1116,7 +1143,7 @@ fn gpui_items(items: Vec<MenuItemConstructorOptions>) -> Vec<MenuItem> {
                     name: label.into(),
                     action,
                     os_action: i.os_action,
-                    checked: false,
+                    checked: i.checked,
                     disabled: i.enabled == Some(false),
                 })
             }
@@ -1190,6 +1217,7 @@ mod tests {
                     recent_activity: true,
                     insights: true,
                     compare_refs: true,
+                    tags: true,
                     clean_untracked: true,
                     apply_patch: true,
                     submodules: true,
@@ -1215,6 +1243,29 @@ mod tests {
             duplicates(&build_default_menu_template(&labels), "root", &mut out);
             assert_eq!(out, Vec::<String>::new());
         }
+    }
+
+    /// `1109-remote-manager`: Push To ▸ checks the remote Push goes to.
+    #[test]
+    fn push_to_checks_the_push_remote() {
+        let labels = MenuLabelsEvent {
+            remotes: vec!["fork".into(), "origin".into()],
+            push_remote: Some("fork".into()),
+            ..MenuLabelsEvent::default()
+        };
+        let template = build_default_menu_template(&labels);
+        let push_to = template
+            .iter()
+            .filter_map(|m| m.submenu.as_ref())
+            .flatten()
+            .find(|i| i.label.as_deref() == Some(l("Push To", "Push &to")))
+            .and_then(|i| i.submenu.as_ref())
+            .expect("Push To");
+        let checked: Vec<(Option<&str>, bool)> = push_to
+            .iter()
+            .map(|i| (i.label.as_deref(), i.checked))
+            .collect();
+        assert_eq!(checked, [(Some("fork"), true), (Some("origin"), false)]);
     }
 
     #[test]

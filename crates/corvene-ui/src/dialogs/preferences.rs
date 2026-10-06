@@ -21,6 +21,9 @@
 //! folder, `ui/lib/default-dir.ts`).
 //! With flag `522-settings-file` Advanced names the settings file, the
 //! settings it set, and has "Export Settings…" (`corvene_core::settings_file`).
+//! With flag `350-ssh-key-helper` Integrations ends in the SSH key section
+//! Android always has: the key in `~/.ssh`, Create SSH Key…, Add to
+//! ssh-agent and Add to GitHub (`corvene_core::ssh_keys`; GHD has none).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -151,6 +154,8 @@ impl PreferencesDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // `350-ssh-key-helper`: a key made outside Corvene since
+        corvene_platform::ssh_key::forget_public_key();
         let mut draft = state.read(cx).settings.clone();
         // `Integrations.componentDidMount`: with no editor (shell) found the
         // select shows the custom entry, and its form, from the start
@@ -1169,8 +1174,12 @@ impl PreferencesDialog {
             })
             .when(android, |d| {
                 d.child(android_shell_note(shells.is_empty(), cx))
-                    .child(android_ssh_key(cx))
             })
+            // `350-ssh-key-helper` (always on Android, for its bundled ssh)
+            .when(
+                android || s.flags.bool(corvene_core::flags::ids::SSH_KEY_HELPER),
+                |d| d.child(ssh_key_section(cx)),
+            )
             .into_any_element()
     }
 
@@ -2999,84 +3008,176 @@ fn pick_ssh_key(window: &mut Window, cx: &mut App) {
         .detach();
 }
 
-/// Android, Options › Integrations: the SSH key of the bundled ssh client.
-/// Other platforms use the system's ssh and whatever keys it has.
-fn android_ssh_key(cx: &App) -> AnyElement {
-    #[cfg(target_os = "android")]
-    {
-        const ADD_KEY_URL: &str = "https://github.com/settings/ssh/new";
-        let t = cx.ghd();
-        let section = div()
-            .flex()
-            .flex_col()
-            .gap(SPACING_HALF())
-            .mt(SPACING())
-            .child(div().font_weight(FontWeight::SEMIBOLD).child("SSH key"));
-        match corvene_platform::android::ssh_public_key() {
-            Some(key) => {
-                let copy = key.clone();
-                section
-                    .child(
-                        div()
-                            .p(SPACING_HALF())
-                            .rounded(zpx(4.))
-                            .border_1()
-                            .border_color(t.box_border)
-                            .font_family(crate::theme::mono_font())
-                            .text_size(FONT_SIZE_SM())
-                            .child(key),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(SPACING())
-                            .child(button("prefs-ssh-copy", "Copy public key", cx).on_click(
-                                move |_, _, cx| {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
-                                },
-                            ))
-                            .child(
-                                link_button("prefs-ssh-add", "Add it to your GitHub account", cx)
-                                    .on_click(|_, _, cx| Dispatcher::open_url(ADD_KEY_URL, cx)),
-                            )
-                            .child(
-                                link_button("prefs-ssh-replace", "Use another key…", cx)
-                                    .on_click(|_, window, cx| pick_ssh_key(window, cx)),
-                            ),
-                    )
-                    .into_any_element()
+/// Options › Integrations' SSH key: on Android the bundled ssh client's
+/// (always), on the desktop the one in `~/.ssh` (`350-ssh-key-helper`).
+fn ssh_key_section(cx: &App) -> AnyElement {
+    const ADD_KEY_URL: &str = "https://github.com/settings/ssh/new";
+    let android = cfg!(target_os = "android");
+    let t = cx.ghd();
+    let s = AppState::global(cx).read(cx);
+    let helper = s.flags.bool(corvene_core::flags::ids::SSH_KEY_HELPER);
+    // the accounts a key can be added to through the API, GitHub.com first
+    let mut accounts: Vec<(String, String, String)> = s
+        .accounts
+        .iter()
+        .filter(|_| helper)
+        .map(|a| (a.endpoint.clone(), a.login.clone(), a.friendly_endpoint()))
+        .collect();
+    accounts.sort_by_key(|(endpoint, _, _)| {
+        !corvene_github::Endpoint::from_api_base(endpoint).is_dotcom()
+    });
+    let busy = s.ssh_key.busy.clone();
+    let status = s.ssh_key.status.clone();
+    let section = div()
+        .flex()
+        .flex_col()
+        .gap(SPACING_HALF())
+        .mt(SPACING())
+        .child(div().font_weight(FontWeight::SEMIBOLD).child("SSH key"));
+    let note = match (&busy, &status) {
+        (Some(text), _) => Some((text.clone(), t.text_secondary)),
+        (None, Some((true, text))) => Some((text.clone(), t.text_secondary)),
+        (None, Some((false, text))) => Some((text.clone(), t.dialog_error)),
+        (None, None) => None,
+    };
+    let note = note.map(|(text, color)| {
+        div()
+            .text_size(FONT_SIZE_SM())
+            .text_color(color)
+            .child(text)
+    });
+    let waiting = busy.is_some();
+    let element = match corvene_platform::ssh_key::ssh_public_key() {
+        Some(key) => {
+            let copy = key.clone();
+            let mut buttons = div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap(SPACING())
+                .child(button("prefs-ssh-copy", "Copy public key", cx).on_click(
+                    move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())),
+                ));
+            if !android {
+                buttons = buttons.child(
+                    button("prefs-ssh-agent", "Add to ssh-agent", cx)
+                        .when(waiting, |b| b.opacity(0.6))
+                        .on_click(move |_, _, cx| {
+                            if !waiting {
+                                Dispatcher::add_ssh_key_to_agent(cx)
+                            }
+                        }),
+                );
             }
-            None => section
+            if accounts.is_empty() {
+                buttons = buttons.child(
+                    link_button("prefs-ssh-add", "Add it to your GitHub account", cx)
+                        .on_click(|_, _, cx| Dispatcher::open_url(ADD_KEY_URL, cx)),
+                );
+            } else {
+                buttons = buttons.child(
+                    button("prefs-ssh-upload", "Add to GitHub", cx)
+                        .when(waiting, |b| b.opacity(0.6))
+                        .on_click(move |ev, window, cx| {
+                            if waiting {
+                                return;
+                            }
+                            upload_ssh_key_to(&accounts, ev.position(), window, cx)
+                        }),
+                );
+            }
+            #[cfg(target_os = "android")]
+            {
+                buttons = buttons.child(
+                    link_button("prefs-ssh-replace", "Use another key…", cx)
+                        .on_click(|_, window, cx| pick_ssh_key(window, cx)),
+                );
+            }
+            section
                 .child(
                     div()
-                        .text_color(t.text_secondary)
-                        .child("Remotes with an SSH address (git@…) need a key on this device."),
+                        .id("prefs-ssh-key")
+                        .p(SPACING_HALF())
+                        .rounded(zpx(4.))
+                        .border_1()
+                        .border_color(t.box_border)
+                        .font_family(crate::theme::mono_font())
+                        .text_size(FONT_SIZE_SM())
+                        .child(key),
                 )
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .gap(SPACING())
-                        .child(
-                            button("prefs-ssh-create", "Create SSH key", cx)
-                                .on_click(|_, _, cx| Dispatcher::create_ssh_key(cx)),
-                        )
-                        .child(
-                            button("prefs-ssh-import", "Import a key…", cx)
-                                .on_click(|_, window, cx| pick_ssh_key(window, cx)),
-                        ),
-                )
-                .into_any_element(),
+                .child(buttons)
+                .children(note)
+                .into_any_element()
         }
-    }
+        None => {
+            let buttons = div().flex().flex_row().flex_wrap().gap(SPACING()).child(
+                button(
+                    "prefs-ssh-create",
+                    if android {
+                        "Create SSH key"
+                    } else {
+                        mac_or("Create SSH Key…", "Create SSH key…")
+                    },
+                    cx,
+                )
+                .when(waiting, |b| b.opacity(0.6))
+                .on_click(move |_, _, cx| {
+                    if !waiting {
+                        create_ssh_key_clicked(cx)
+                    }
+                }),
+            );
+            #[cfg(target_os = "android")]
+            let buttons = buttons.child(
+                button("prefs-ssh-import", "Import a key…", cx)
+                    .on_click(|_, window, cx| pick_ssh_key(window, cx)),
+            );
+            section
+                .child(div().text_color(t.text_secondary).child(if android {
+                    "Remotes with an SSH address (git@…) need a key on this device."
+                } else {
+                    "Remotes with an SSH address (git@…) need a key. There is none in ~/.ssh yet."
+                }))
+                .child(buttons)
+                .children(note)
+                .into_any_element()
+        }
+    };
+    element
+}
+
+/// Create SSH key: Android makes one at once (no passphrase, no agent);
+/// the desktop asks first (`Popup::CreateSshKey`).
+fn create_ssh_key_clicked(cx: &mut App) {
+    #[cfg(target_os = "android")]
+    Dispatcher::create_ssh_key(cx);
     #[cfg(not(target_os = "android"))]
-    {
-        let _ = cx;
-        div().into_any_element()
+    Dispatcher::show_popup(Popup::CreateSshKey, cx);
+}
+
+/// Add to GitHub: the one account straight away, else a menu of them.
+fn upload_ssh_key_to(
+    accounts: &[(String, String, String)],
+    position: Point<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let title = corvene_core::ssh_keys::default_key_title();
+    if let [(endpoint, _, _)] = accounts {
+        Dispatcher::upload_ssh_key(endpoint.clone(), title, cx);
+        return;
     }
+    let items = accounts
+        .iter()
+        .map(|(endpoint, login, host)| {
+            let (endpoint, title) = (endpoint.clone(), title.clone());
+            crate::context_menu::MenuItem::new(format!("{login} on {host}"), move |_, cx| {
+                Dispatcher::upload_ssh_key(endpoint.clone(), title.clone(), cx)
+            })
+        })
+        .collect();
+    crate::native_menu::show_context_menu(items, position, window, cx);
 }
 
 /// Select options with the icon of the application each one stands for

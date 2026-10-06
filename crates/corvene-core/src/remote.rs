@@ -74,6 +74,16 @@ use crate::dispatcher::Dispatcher;
 use crate::persistence::StoreExt;
 use crate::state::{ErrorMessage, Popup, RetryAction};
 
+/// What [`Dispatcher::tag_on_remote`] does with a tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TagOnRemote {
+    Push,
+    /// From the remote, then locally (flag `826`).
+    Delete,
+    /// From the remote only (`1219-tag-manager`).
+    DeleteRemoteOnly,
+}
+
 /// GHD `app-store.ts` progress title after a fetch/pull/push
 /// (`Refreshing ${__DARWIN__ ? 'Repository' : 'repository'}`).
 const REFRESHING_REPOSITORY: &str = if cfg!(target_os = "macos") {
@@ -300,9 +310,32 @@ impl Dispatcher {
     /// first (`push --delete`, so a failure keeps the local tag), then
     /// locally; with `remote` `None` only locally.
     pub fn delete_pushed_tag(id: u64, tag: String, remote: Option<Remote>, cx: &mut dyn Host) {
-        let Some(remote) = remote else {
-            return Self::delete_tag(id, tag, cx);
+        match remote {
+            Some(remote) => Self::tag_on_remote(id, tag, remote, TagOnRemote::Delete, cx),
+            None => Self::delete_tag(id, tag, cx),
+        }
+    }
+
+    /// Corvene (`1219-tag-manager`): delete `tag` from `remote` only (the
+    /// local tag stays), as [`Self::delete_pushed_tag`] does first.
+    pub fn delete_remote_tag_only(id: u64, tag: String, remote: Remote, cx: &mut dyn Host) {
+        Self::tag_on_remote(id, tag, remote, TagOnRemote::DeleteRemoteOnly, cx)
+    }
+
+    /// Corvene (`1219-tag-manager`): push `tag` alone to the current
+    /// remote (`git push <remote> refs/tags/<tag>`); it leaves the tags to
+    /// push.
+    pub fn push_single_tag(id: u64, tag: String, cx: &mut dyn Host) {
+        let Some(remote) = Self::current_remote(id, cx) else {
+            Self::show_popup(Popup::PublishRepository { repo: id }, cx);
+            return;
         };
+        Self::tag_on_remote(id, tag, remote, TagOnRemote::Push, cx)
+    }
+
+    /// One tag pushed to or deleted from `remote`, with the push/pull
+    /// button's progress.
+    fn tag_on_remote(id: u64, tag: String, remote: Remote, op: TagOnRemote, cx: &mut dyn Host) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
@@ -311,11 +344,15 @@ impl Dispatcher {
         }
         Self::arm_credential_helper_for(id, &remote.url, cx);
         let askpass = Self::askpass_env_for(id, &remote.url, cx);
+        let title = match op {
+            TagOnRemote::Push => format!("Pushing tag {tag} to {}", remote.name),
+            _ => format!("Deleting tag {tag} from {}", remote.name),
+        };
         Self::set_progress(
             id,
             Some(PushPullProgress {
                 kind: PushPullKind::Push,
-                title: format!("Deleting tag {tag} from {}", remote.name),
+                title,
                 description: None,
                 value: 0.,
             }),
@@ -325,18 +362,31 @@ impl Dispatcher {
         Self::run_network(
             id,
             cx,
-            move |_| {
-                corvene_git::delete_remote_tag(
+            move |_| match op {
+                TagOnRemote::Push => corvene_git::push_tag(
                     git,
                     &workdir,
                     &remote.name,
                     &tag_for_task,
                     askpass.as_ref(),
-                )
+                ),
+                _ => corvene_git::delete_remote_tag(
+                    git,
+                    &workdir,
+                    &remote.name,
+                    &tag_for_task,
+                    askpass.as_ref(),
+                ),
             },
-            move |result, cx| match result {
-                Ok(()) => Self::delete_tag(id, tag, cx),
-                Err(err) => Self::show_error("Could not delete tag", &err, cx),
+            move |result, cx| match (result, op) {
+                (Ok(()), TagOnRemote::Delete) => Self::delete_tag(id, tag, cx),
+                (Ok(()), TagOnRemote::Push) => {
+                    Self::update_tags_to_push(id, cx, |tags| tags.retain(|t| *t != tag));
+                    Self::tags_changed(id, cx);
+                }
+                (Ok(()), TagOnRemote::DeleteRemoteOnly) => Self::tags_changed(id, cx),
+                (Err(err), TagOnRemote::Push) => Self::show_error("Could not push tag", &err, cx),
+                (Err(err), _) => Self::show_error("Could not delete tag", &err, cx),
             },
         );
     }
@@ -1567,6 +1617,34 @@ impl Dispatcher {
             Self::show_popup(Popup::PublishRepository { repo: id }, cx);
             return then(PushOutcome::NotAttempted, cx);
         };
+        // Corvene (`1109-remote-manager`): the current branch goes to its push
+        // remote when that is not the upstream's (GHD always pushes to the
+        // upstream's remote, desktop#18154); a partial push and a force push
+        // (of a branch rewritten against its upstream) stay upstream
+        let push_target = {
+            let s = Self::state(cx).read(cx);
+            let current = s
+                .repo_states
+                .get(&id)
+                .and_then(|r| r.info.as_ref())
+                .and_then(|i| i.current_branch())
+                .map(|b| b.name.clone());
+            Self::push_target_in(s, id)
+                .filter(|_| {
+                    up_to.is_none() && !force_with_lease && (branch.is_none() || branch == current)
+                })
+                .and_then(|t| {
+                    s.repo_states
+                        .get(&id)?
+                        .info
+                        .as_ref()?
+                        .remotes
+                        .iter()
+                        .find(|r| r.name == t.remote)
+                        .cloned()
+                })
+        };
+        let remote = push_target.clone().unwrap_or(remote);
         // no write access: suggest a fork before git runs (GHD pushes and
         // offers it after the auth failure, `insufficientGitHubRepoPermissions`;
         // `303-fork-before-push` off takes that path)
@@ -1646,6 +1724,7 @@ impl Dispatcher {
             .bool(crate::flags::ids::FAST_FORWARD_SKIPS_WORKTREE_BRANCHES);
         let remote_name = branch
             .upstream_remote_name()
+            .filter(|_| push_target.is_none())
             .map(str::to_string)
             .unwrap_or_else(|| remote.name.clone());
         let title = format!("Pushing to {remote_name}");
@@ -1671,13 +1750,23 @@ impl Dispatcher {
             false => branch.name.clone(),
         });
         let pushed_branch = up_to.is_none().then(|| branch.name.clone());
-        let remote_branch = branch
-            .upstream_short()
-            .and_then(|u| u.split_once('/').map(|(_, b)| b.to_string()))
-            .map(|b| match up_to.is_some() || qualified {
-                true => format!("refs/heads/{b}"),
-                false => b,
-            });
+        // `1109-remote-manager`: to the push remote, the same-named branch
+        // (git's `push.default=simple` / `current`); without an upstream it
+        // is published there
+        let remote_branch = match &push_target {
+            Some(_) if branch.upstream.is_some() => Some(match qualified {
+                true => format!("refs/heads/{}", branch.name),
+                false => branch.name.clone(),
+            }),
+            Some(_) => None,
+            None => branch
+                .upstream_short()
+                .and_then(|u| u.split_once('/').map(|(_, b)| b.to_string()))
+                .map(|b| match up_to.is_some() || qualified {
+                    true => format!("refs/heads/{b}"),
+                    false => b,
+                }),
+        };
         let remote_url = remote.url.clone();
         // GHD `pushRepo(…, gitStore.tagsToPush)`: unpushed tags ride along
         // (not on a partial push: they may point past its commit)
@@ -1843,6 +1932,28 @@ impl Dispatcher {
             .bool(crate::flags::ids::IMPLICIT_UPSTREAM_PUSH_DEFAULT)
             .then(|| s.repo_states.get(&id)?.implicit_upstream.clone())
             .flatten()
+    }
+
+    /// Corvene (`1109-remote-manager`): the current branch's push remote
+    /// while it is not the upstream's (or, without an upstream, the
+    /// default remote), while the flag is on.
+    pub fn push_target_in(
+        s: &crate::state::AppState,
+        id: u64,
+    ) -> Option<&crate::remote_manager::PushTarget> {
+        s.flags
+            .bool(crate::flags::ids::REMOTE_MANAGER)
+            .then(|| s.repo_states.get(&id)?.push_target.as_ref())
+            .flatten()
+    }
+
+    /// The remote a push of the current branch goes to: its push remote
+    /// (`1109-remote-manager`), else the upstream's ([`Self::current_remote`]).
+    /// Branch › Push To ▸ checks it.
+    pub fn push_remote_name_in(s: &crate::state::AppState, id: u64) -> Option<String> {
+        Self::push_target_in(s, id)
+            .map(|t| t.remote.clone())
+            .or_else(|| Self::current_remote_in(s, id).map(|r| r.name))
     }
 
     // ---- push to / fetch from another remote (`1210-push-to-other-remote`) ----
@@ -2032,14 +2143,18 @@ impl Dispatcher {
             // plain `git push` updates counts as the upstream (a push still
             // records it with `--set-upstream`)
             let implicit = Self::implicit_upstream_in(s, id);
+            let upstream = info
+                .and_then(|i| i.current_branch())
+                .and_then(|b| b.upstream.clone())
+                .or_else(|| implicit.as_ref().map(|(name, _)| name.clone()));
+            let ab = rs
+                .and_then(|r| r.ahead_behind)
+                .or_else(|| implicit.map(|(_, ab)| ab));
             (
                 info.is_some_and(|i| !i.remotes.is_empty()),
                 info.map(|i| i.tip.clone()),
-                info.and_then(|i| i.current_branch())
-                    .and_then(|b| b.upstream.clone())
-                    .or_else(|| implicit.as_ref().map(|(name, _)| name.clone())),
-                rs.and_then(|r| r.ahead_behind)
-                    .or_else(|| implicit.map(|(_, ab)| ab)),
+                upstream.clone(),
+                Self::with_push_target(s, id, upstream.is_some(), ab),
             )
         };
         if !has_remote {
@@ -2056,11 +2171,33 @@ impl Dispatcher {
         }
         match ab {
             Some(ab) if ab.ahead == 0 && ab.behind == 0 => Self::fetch(id, false, cx),
-            _ if Self::force_push_state(id, cx) == ForcePushState::Recommended => {
+            // a rewritten branch is force-pushed to its upstream, not to
+            // another push remote (`1109-remote-manager`)
+            _ if Self::force_push_state(id, cx) == ForcePushState::Recommended
+                && Self::push_target_in(Self::state(cx).read(cx), id).is_none() =>
+            {
                 Self::confirm_or_force_push(id, cx)
             }
             Some(ab) if ab.behind > 0 => Self::pull(id, cx),
             _ => Self::push(id, false, None, cx),
+        }
+    }
+
+    /// Corvene (`1109-remote-manager`): the toolbar's counts with a push
+    /// remote other than the upstream's: ahead of the push remote's branch,
+    /// behind the upstream.
+    pub fn with_push_target(
+        s: &crate::state::AppState,
+        id: u64,
+        has_upstream: bool,
+        ab: Option<AheadBehind>,
+    ) -> Option<AheadBehind> {
+        match (Self::push_target_in(s, id), ab) {
+            (Some(target), Some(ab)) if has_upstream => Some(AheadBehind {
+                ahead: target.ahead,
+                behind: ab.behind,
+            }),
+            (_, ab) => ab,
         }
     }
 

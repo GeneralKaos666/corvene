@@ -301,6 +301,8 @@ pub struct HistorySidebar {
     /// `345-issues` / `346-releases`: shown instead while those are open.
     issues: Entity<crate::issues_list::IssuesList>,
     releases: Entity<crate::releases_list::ReleasesList>,
+    /// `1219-tag-manager`: shown instead while Branch › Tags… is open.
+    tags: Entity<crate::tags_list::TagsList>,
 }
 
 impl HistorySidebar {
@@ -387,6 +389,8 @@ impl HistorySidebar {
             releases: cx.new(|cx| {
                 crate::releases_list::ReleasesList::new(state_for_reflog.clone(), window, cx)
             }),
+            tags: cx
+                .new(|cx| crate::tags_list::TagsList::new(state_for_reflog.clone(), window, cx)),
             reflog: cx.new(|cx| crate::reflog_list::ReflogList::new(state_for_reflog, cx)),
         }
     }
@@ -1836,17 +1840,7 @@ impl HistorySidebar {
                 (
                     is_unpushed || delete_pushed,
                     move |_: &mut Window, cx: &mut App| {
-                        if is_unpushed {
-                            Dispatcher::delete_tag(id, tag.clone(), cx)
-                        } else {
-                            Dispatcher::show_popup(
-                                Popup::ConfirmDeletePushedTag {
-                                    repo: id,
-                                    tag: tag.clone(),
-                                },
-                                cx,
-                            )
-                        }
+                        Dispatcher::request_delete_tag(id, tag.clone(), cx)
                     },
                 )
             };
@@ -3334,6 +3328,15 @@ impl Render for HistorySidebar {
         };
         if reflog_open {
             return self.reflog.clone().into_any_element();
+        }
+        // `1219-tag-manager`: so do the tags
+        let tags_open = {
+            let s = self.state.read(cx);
+            s.selected_state()
+                .is_some_and(|rs| corvene_core::tag_manager::tags_of(s, rs).is_some())
+        };
+        if tags_open {
+            return self.tags.clone().into_any_element();
         }
         // `345-issues` / `346-releases`: so do the issues and the releases
         let (issues_open, releases_open) = {

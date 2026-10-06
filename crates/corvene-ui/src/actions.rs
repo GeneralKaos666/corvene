@@ -118,6 +118,8 @@ gpui_kit::actions!(
         ShowInsights,
         // Branch › Compare… (`1218-compare-refs`)
         CompareRefs,
+        // Branch › Tags… (`1219-tag-manager`)
+        ShowTags,
         // Repository › Clean Untracked Files… (`1105-clean-untracked-files`)
         CleanUntrackedFiles,
         // Repository › Apply Patch from File… / from Clipboard (`1106-apply-patch`)

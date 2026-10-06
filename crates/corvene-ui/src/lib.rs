@@ -46,8 +46,6 @@ pub mod native_menu;
 mod native_menu_common;
 #[cfg(target_os = "macos")]
 pub mod native_window;
-#[cfg(target_os = "macos")]
-pub mod status_item;
 pub mod no_changes;
 pub mod no_repositories;
 pub mod path_label;
@@ -67,7 +65,10 @@ pub mod signature_badge;
 pub mod stash_conflicts;
 pub mod stash_list;
 pub mod stash_view;
+#[cfg(target_os = "macos")]
+pub mod status_item;
 pub mod tab_bar;
+pub mod tags_list;
 pub mod terminal;
 pub mod theme;
 pub mod title_bar;

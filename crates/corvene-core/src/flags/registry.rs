@@ -2924,6 +2924,25 @@ registry! {
         code: &["crates/corvene-core/src/job_log.rs", "crates/corvene-ui/src/dialogs/actions_job_log.rs", "crates/corvene-ui/src/ci_check_popover.rs", "crates/corvene-github/src/api.rs"],
     },
 
+    /// Settings › Integrations creates an SSH key and adds it to GitHub.
+    SSH_KEY_HELPER = 350 "ssh-key-helper" {
+        title: "SSH key helper",
+        summary: "Settings › Integrations shows the SSH key in ~/.ssh, or creates one (ed25519 \
+                  with ssh-keygen, an optional passphrase), adds it to ssh-agent (on macOS with \
+                  --apple-use-keychain, which keeps the passphrase in the keychain) and adds \
+                  it to the GitHub account through the API. A sign-in that does not allow \
+                  adding keys asks to sign in again for the write:public_key permission. An \
+                  existing key is never replaced.",
+        ghd_behaviour: "No help with SSH keys: they are made in a terminal and added on \
+                        github.com.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(2579)],
+        code: &["crates/corvene-platform/src/ssh_key.rs", "crates/corvene-core/src/ssh_keys.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/dialogs/create_ssh_key.rs", "crates/corvene-github/src/api.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.
@@ -7485,6 +7504,26 @@ registry! {
         upstream: &[Upstream::issue(8703)],
         code: &["crates/corvene-core/src/apply_patch.rs", "crates/corvene-git/src/patch_import.rs", "crates/corvene-ui/src/dialogs/apply_patch.rs"],
     },
+    /// Repository Settings › Remote manages every remote and the push target.
+    REMOTE_MANAGER = 1109 "remote-manager" {
+        title: "Manage remotes",
+        summary: "Repository Settings › Remote lists every remote: add one, rename it (git \
+                  remote rename), remove it or change its URL, all applied on Save. It also \
+                  picks where pushes go: the repository's push remote (remote.pushDefault) \
+                  and the current branch's own (branch.<name>.pushRemote). With a push remote \
+                  other than the upstream's, Push sends the branch to the same-named branch \
+                  there and counts the commits it does not have yet, while Pull still follows \
+                  the upstream, and a branch without an upstream is published there. Branch › \
+                  Push To ▸ marks that remote.",
+        ghd_behaviour: "Only the primary remote's URL can be changed, and pushes always go to the \
+                        upstream's remote whatever git's push settings say.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3512), Upstream::issue(18154)],
+        code: &["crates/corvene-core/src/remote_manager.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-git/src/remote_ops.rs", "crates/corvene-core/src/remote.rs"],
+    },
 
     /// Repository › Insights…: contributors, commits per week, file churn.
     REPOSITORY_INSIGHTS = 1110 "repository-insights" {
@@ -7855,6 +7894,24 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(19253)],
         code: &["crates/corvene-core/src/ref_compare.rs", "crates/corvene-core/src/pull_request_preview.rs", "crates/corvene-ui/src/dialogs/compare_refs.rs", "crates/corvene-ui/src/ref_compare_view.rs"],
+    },
+
+    /// Branch › Tags…: every tag, with checkout, push and delete.
+    TAG_MANAGER = 1219 "tag-manager" {
+        title: "Tag manager",
+        summary: "Branch › Tags… lists every tag in place of History, newest first, with its \
+                  date, its commit and the annotation's message, filtered as you type. \
+                  Selecting a tag shows its commit. Each tag can be checked out (detached \
+                  HEAD), pushed, deleted here, deleted from the remote, or its name copied; \
+                  tags not pushed yet are marked.",
+        ghd_behaviour: "Tags only show as labels on History's commits; the ones created in the \
+                        app can be deleted until they are pushed.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4829)],
+        code: &["crates/corvene-git/src/history_ops.rs", "crates/corvene-core/src/tag_manager.rs", "crates/corvene-ui/src/tags_list.rs"],
     },
 
     // ---- 1300 Changes & diffs (overflow) ----

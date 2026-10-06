@@ -11,9 +11,9 @@ use std::time::Duration;
 use serde::Deserialize;
 use tracing::{debug, info};
 
+use crate::USER_AGENT;
 use crate::endpoint::Endpoint;
 use crate::error::{GitHubError, Result};
-use crate::{SCOPES, USER_AGENT};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeviceCode {
@@ -59,14 +59,19 @@ fn agent() -> ureq::Agent {
         .new_agent()
 }
 
-/// POST `/login/device/code`.
-pub fn request_device_code(endpoint: &Endpoint, client_id: &str) -> Result<DeviceCode> {
+/// POST `/login/device/code` asking for `scopes` (space-separated; GHD's
+/// are [`crate::SCOPES`]).
+pub fn request_device_code(
+    endpoint: &Endpoint,
+    client_id: &str,
+    scopes: &str,
+) -> Result<DeviceCode> {
     let url = endpoint.web("login/device/code");
     debug!(%url, "requesting device code");
     let mut response = agent()
         .post(&url)
         .header("Accept", "application/json")
-        .send_form([("client_id", client_id), ("scope", SCOPES)])?;
+        .send_form([("client_id", client_id), ("scope", scopes)])?;
     let status = response.status().as_u16();
     if status != 200 {
         let body = response.body_mut().read_to_string().unwrap_or_default();
@@ -187,13 +192,14 @@ impl WebFlow {
         })
     }
 
-    /// `getOAuthAuthorizationURL` + PKCE: where the browser goes.
-    pub fn authorize_url(&self, endpoint: &Endpoint, client_id: &str) -> String {
+    /// `getOAuthAuthorizationURL` + PKCE: where the browser goes, asking
+    /// for `scopes` (GHD's are [`crate::SCOPES`]).
+    pub fn authorize_url(&self, endpoint: &Endpoint, client_id: &str, scopes: &str) -> String {
         format!(
             "{}?client_id={}&scope={}&state={}&redirect_uri={}&code_challenge={}&code_challenge_method=S256",
             endpoint.web("login/oauth/authorize"),
             url_encode(client_id),
-            url_encode(SCOPES),
+            url_encode(scopes),
             url_encode(&self.state),
             url_encode(&self.redirect_uri),
             code_challenge(&self.code_verifier)
@@ -510,7 +516,7 @@ mod web_flow_tests {
             code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk".into(),
             redirect_uri: SCHEME_REDIRECT_URI.into(),
         };
-        let url = flow.authorize_url(&Endpoint::github_com(), "abc");
+        let url = flow.authorize_url(&Endpoint::github_com(), "abc", crate::SCOPES);
         assert_eq!(
             url,
             "https://github.com/login/oauth/authorize?client_id=abc&scope=repo%20workflow%20read%3Auser%20user%3Aemail&state=st%20ate&redirect_uri=x-corvene-auth%3A%2F%2Foauth&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"

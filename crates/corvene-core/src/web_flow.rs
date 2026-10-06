@@ -127,7 +127,9 @@ impl Dispatcher {
                 }
             }
         };
-        let authorize_url = flow.authorize_url(&endpoint, &client_id);
+        // `350-ssh-key-helper` may ask for more
+        let scopes = corvene_github::scopes_with(&Self::state(cx).read(cx).extra_oauth_scopes);
+        let authorize_url = flow.authorize_url(&endpoint, &client_id, &scopes);
         info!(redirect = %flow.redirect_uri, "starting the browser sign-in");
         state.update(cx, |s, cx| {
             if let Some(sign_in) = s.authentication.as_mut() {

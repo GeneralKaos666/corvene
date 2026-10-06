@@ -203,6 +203,11 @@ pub struct RepositorySettingsSave {
     /// differs from the ones in effect is stored `--local` (`None`: leave
     /// them).
     pub signing: Option<crate::state::SigningConfig>,
+    /// `1109-remote-manager`: the remote changes, in the order they run
+    /// (`remote_manager::remote_edits`).
+    pub remote_edits: Vec<crate::remote_manager::RemoteEdit>,
+    /// `1109-remote-manager`: where pushes go (`None`: leave it).
+    pub push_config: Option<crate::remote_manager::PushTargetConfig>,
 }
 
 /// Corvene (`526-commit-signing`): write what differs between `before` and
@@ -1533,17 +1538,27 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let remotes = Self::state(cx)
+        let (remotes, branch) = Self::state(cx)
             .read(cx)
             .repo_states
             .get(&id)
             .and_then(|rs| rs.info.as_ref())
-            .map(|info| info.remotes.clone())
+            .map(|info| {
+                (
+                    info.remotes.clone(),
+                    info.current_branch().map(|b| b.name.clone()),
+                )
+            })
             .unwrap_or_default();
         spawn_bg(
             cx,
             move || {
                 let remote = corvene_git::find_default_remote(&remotes).cloned();
+                let push_config = crate::remote_manager::read_push_config(
+                    git.clone(),
+                    &workdir,
+                    branch.as_deref(),
+                );
                 let gitignore = corvene_git::read_gitignore(&workdir)
                     .map_err(|err| warn!(%err, "could not read .gitignore"))
                     .ok()
@@ -1571,6 +1586,8 @@ impl Dispatcher {
                     local_signing: read_signing(|key| {
                         corvene_git::config_value(git.clone(), &workdir, key)
                     }),
+                    remotes,
+                    push_config,
                 }
             },
             |data, cx| {
@@ -1588,16 +1605,34 @@ impl Dispatcher {
             Self::close_popup(cx);
             return;
         };
-        let autocrlf = Self::state(cx)
+        let (autocrlf, push_config_before) = Self::state(cx)
             .read(cx)
             .repo_settings
             .as_ref()
-            .is_some_and(|d| d.autocrlf);
+            .map(|d| (d.autocrlf, d.push_config.clone()))
+            .unwrap_or_default();
         Self::close_popup(cx);
         spawn_bg(
             cx,
             move || {
                 let mut errors: Vec<String> = Vec::new();
+                // `1109-remote-manager`: the remotes, then where pushes go
+                // (which may name a remote just added or renamed)
+                errors.extend(crate::remote_manager::apply_remote_edits(
+                    git.clone(),
+                    &workdir,
+                    &save.remote_edits,
+                ));
+                if let Some(after) = &save.push_config
+                    && let Err(err) = crate::remote_manager::write_push_config(
+                        git.clone(),
+                        &workdir,
+                        &push_config_before,
+                        after,
+                    )
+                {
+                    errors.push(format!("Failed saving where pushes go: {err}"));
+                }
                 if let Some((name, url)) = save.remote_url
                     && let Err(err) =
                         corvene_git::set_remote_url(git.clone(), &workdir, &name, &url)
