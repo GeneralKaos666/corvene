@@ -284,6 +284,12 @@ jobs:
             echo "TARGET=${{ matrix.target }}"
             echo "PKG_CONFIG_ALLOW_CROSS=1"
             echo "PKG_CONFIG_LIBDIR=/usr/lib/${{ matrix.triplet }}/pkgconfig:/usr/share/pkgconfig"
+            # Thumb-2 conditional branches reach 1 MiB, too short for the
+            # biggest grammar parsers: build the C code in ARM mode
+            if [[ "${{ matrix.arch }}" == armhf ]]; then
+              echo "CFLAGS_armv7_unknown_linux_gnueabihf=-marm"
+              echo "CXXFLAGS_armv7_unknown_linux_gnueabihf=-marm"
+            fi
           } >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
