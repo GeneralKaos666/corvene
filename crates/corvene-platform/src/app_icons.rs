@@ -523,7 +523,7 @@ mod freedesktop {
 #[cfg(test)]
 mod tests {
     use super::freedesktop::*;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn exec_program_skips_env_and_quotes() {
@@ -575,6 +575,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn data_dirs_defaults_and_dedupes() {
+        use std::path::PathBuf;
         let dirs = data_dirs(Some(Path::new("/home/u")), None, Some(""));
         assert_eq!(dirs[0], PathBuf::from("/home/u/.local/share"));
         assert_eq!(dirs[1], PathBuf::from("/usr/local/share"));
