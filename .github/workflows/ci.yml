@@ -297,6 +297,11 @@ jobs:
           key: android-compose
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
+      # the host-side uniffi-bindgen links with mold (.cargo/config.toml)
+      - name: mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
