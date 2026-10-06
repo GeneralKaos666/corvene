@@ -4155,6 +4155,24 @@ impl ChangesSidebar {
                     // `1310-file-list-tree`
                     .when(crate::file_tree_rows::tree_available(cx), |d| {
                         d.child(crate::file_tree_rows::view_toggle_button(cx))
+                    })
+                    // `1311-stacked-diff`: the stack button at the very end,
+                    // beside the tree button when there is one
+                    .when(crate::stacked_diff_view::enabled(cx), |d| {
+                        let on = self.state.read(cx).settings.stacked_diff_changes;
+                        let beside_tree = crate::file_tree_rows::tree_available(cx);
+                        d.child(
+                            crate::stacked_diff_view::stack_toggle(false, on, cx)
+                                .size(zpx(18.))
+                                .rounded(zpx(3.))
+                                .map(|d| {
+                                    if beside_tree {
+                                        d.ml(zpx(6.))
+                                    } else {
+                                        d.ml_auto()
+                                    }
+                                }),
+                        )
                     }),
             )
     }

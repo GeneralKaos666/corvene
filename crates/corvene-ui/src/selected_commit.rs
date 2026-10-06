@@ -41,12 +41,13 @@ use crate::widgets::ListRowA11y;
 
 use crate::actions::{
     CopySelectedFilePaths, CopySelectedRelativeFilePaths, ExtendSelectionDown, ExtendSelectionUp,
-    OpenSelectedFileInEditor, OpenSelectedFileWithDefaultProgram, SelectFirstFile, SelectLastFile,
-    SelectNextFile, SelectPreviousFile,
+    OpenSelectedFileInEditor, OpenSelectedFileWithDefaultProgram, SelectAllFiles, SelectFirstFile,
+    SelectLastFile, SelectNextFile, SelectPreviousFile,
 };
 use crate::diff_view::{DiffSource, DiffView, diff_header, status_icon};
 use crate::icons::{Octicon, octicon};
 use crate::scrollbar::ScrollbarExt;
+use crate::stacked_diff_view::StackedDiffView;
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, mono_font};
 use crate::widgets::{avatar_stack, link_button};
@@ -64,6 +65,8 @@ fn FILE_LIST_MAX() -> Pixels {
 pub struct SelectedCommitView {
     state: Entity<AppState>,
     diff: Entity<DiffView>,
+    /// `1311-stacked-diff`: every file (or the ⌘/⇧-selected ones) in one list.
+    stacked: Entity<StackedDiffView>,
     resizable: Entity<ResizableState>,
     file_list_width: Pixels,
     /// The file list takes focus on click so ⌘9 / ⌘8 resize it.
@@ -103,6 +106,7 @@ impl SelectedCommitView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         let diff = cx.new(|cx| DiffView::new(state.clone(), DiffSource::Commit, cx));
+        let stacked = cx.new(|cx| StackedDiffView::new(state.clone(), DiffSource::Commit, cx));
         let file_list_width = zpx(state.read(cx).settings.commit_summary_width);
         let resizable = cx.new(|_| ResizableState::default());
         cx.subscribe(&resizable, |this, state, _: &ResizablePanelEvent, cx| {
@@ -119,6 +123,7 @@ impl SelectedCommitView {
         Self {
             state,
             diff,
+            stacked,
             resizable,
             file_list_width,
             file_list_focus: cx.focus_handle().tab_stop(true),
@@ -427,6 +432,39 @@ impl SelectedCommitView {
         self.multi_end = None;
         Dispatcher::select_commit_file(id, order[ix].clone(), cx);
         self.file_scroll.scroll_to_item(ix, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    /// ⌘A (flag `810`, `1311-stacked-diff`): every file of the commit; the
+    /// diff shows them stacked.
+    fn select_all_files(&mut self, cx: &mut Context<Self>) {
+        let (id, order, commits, anchor) = {
+            let s = self.state.read(cx);
+            if !s
+                .flags
+                .bool(corvene_core::flags::ids::COMMIT_FILES_MULTI_SELECT)
+            {
+                return;
+            }
+            let Some(id) = s.selected else { return };
+            let Some(rs) = s.repo_states.get(&id) else {
+                return;
+            };
+            (
+                id,
+                self.file_order(id, cx),
+                rs.selected_commits.clone(),
+                rs.commit_selected_file.clone(),
+            )
+        };
+        if order.len() < 2 {
+            return;
+        }
+        if !anchor.is_some_and(|a| order.contains(&a)) {
+            Dispatcher::select_commit_file(id, order[0].clone(), cx);
+        }
+        self.multi_files = Some((commits, order));
+        self.multi_end = None;
         cx.notify();
     }
 
@@ -1137,6 +1175,8 @@ impl SelectedCommitView {
         cx: &Context<Self>,
     ) -> Div {
         let t = cx.ghd();
+        // `1311-stacked-diff`: the stack button takes the end of the row
+        let stacked = crate::stacked_diff_view::enabled(cx);
         div()
             .relative()
             .h(zpx(30.))
@@ -1150,6 +1190,15 @@ impl SelectedCommitView {
             .border_color(t.box_border)
             .text_size(FONT_SIZE())
             .child(label)
+            .when(stacked, |d| {
+                let on = self.state.read(cx).settings.stacked_diff_history;
+                d.child(
+                    crate::stacked_diff_view::stack_toggle(true, on, cx)
+                        .absolute()
+                        .right(SPACING_HALF())
+                        .top(zpx(4.)),
+                )
+            })
             .when_some(remerge, |d, on| {
                 let tooltip = if on {
                     "Showing the conflict resolutions only: what differs from git's \
@@ -1168,7 +1217,7 @@ impl SelectedCommitView {
                         })
                         .ghd_tooltip(tooltip)
                         .absolute()
-                        .right(SPACING_HALF())
+                        .right(if stacked { zpx(31.) } else { SPACING_HALF() })
                         .top(zpx(4.))
                         .size(zpx(22.))
                         .flex()
@@ -1900,7 +1949,8 @@ impl Render for SelectedCommitView {
                 );
             }
         }
-        let t = cx.ghd();
+        // copied: the stacked view is updated below while `t` is in use
+        let t = cx.ghd().clone();
         let (id, has_commit, selected_file, non_contiguous) = {
             let s = self.state.read(cx);
             let id = s.selected;
@@ -1964,22 +2014,34 @@ impl Render for SelectedCommitView {
                 .child("No commit selected")
                 .into_any_element();
         };
-        let diff_pane = div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .min_h_0()
-            .when_some(selected_file, |d, (path, kind, old_path)| {
-                d.child(diff_header(
-                    &path,
-                    kind,
-                    old_path.as_deref(),
-                    None,
-                    &self.diff,
-                    cx,
-                ))
-            })
-            .child(DiffView::embed(&self.diff));
+        // `1311-stacked-diff`: every file (or the selected ones) in one list
+        let multi = self.multi_selected(id, cx);
+        self.stacked
+            .update(cx, |view, cx| view.set_multi(multi.clone(), cx));
+        let stacked = {
+            let s = self.state.read(cx);
+            s.repo_states
+                .get(&id)
+                .and_then(|rs| corvene_core::stacked_diff::commit_stack(s, rs, &multi))
+                .is_some()
+        };
+        let diff_pane = div().size_full().flex().flex_col().min_h_0();
+        let diff_pane = if stacked {
+            diff_pane.child(StackedDiffView::embed(&self.stacked))
+        } else {
+            diff_pane
+                .when_some(selected_file, |d, (path, kind, old_path)| {
+                    d.child(diff_header(
+                        &path,
+                        kind,
+                        old_path.as_deref(),
+                        None,
+                        &self.diff,
+                        cx,
+                    ))
+                })
+                .child(DiffView::embed(&self.diff))
+        };
         // Corvene (`801-history-review-mode`): the diff alone, full width
         if self.file_list_hidden {
             return div()
@@ -2064,6 +2126,9 @@ impl Render for SelectedCommitView {
                             }))
                             .on_action(cx.listener(|this, _: &ExtendSelectionUp, _, cx| {
                                 this.extend_selection(-1, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &SelectAllFiles, _, cx| {
+                                this.select_all_files(cx)
                             }))
                             .on_action(cx.listener(|this, _: &CopySelectedFilePaths, _, cx| {
                                 this.copy_selected_path(true, cx)

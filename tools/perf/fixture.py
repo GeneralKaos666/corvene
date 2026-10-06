@@ -86,6 +86,20 @@ def big(root: Path, files: int = 50_000, commits: int = 20_000, branches: int = 
             stream.extend(b"M 100644 :%d %s\n" % (b, path.encode()))
         stream.extend(b"\n")
         commit_marks.append(commit_mark)
+    # the newest commit touches many files (`1311-stacked-diff`: scrolling a
+    # stack of 300 diffs)
+    touched = [(paths[i], blob(source_file(rng, rng.randrange(5, 60)))) for i in sorted(rng.sample(range(1, files), 300))]
+    mark += 1
+    stamp += 600
+    msg = b"Touch 300 files\n"
+    stream.extend(b"commit refs/heads/main\nmark :%d\n" % mark)
+    stream.extend(b"author %s %d +0000\ncommitter %s %d +0000\n" % (AUTHOR.encode(), stamp, AUTHOR.encode(), stamp))
+    stream.extend(b"data %d\n%s" % (len(msg), msg))
+    stream.extend(b"from :%d\n" % commit_marks[-1])
+    for path, b in touched:
+        stream.extend(b"M 100644 :%d %s\n" % (b, path.encode()))
+    stream.extend(b"\n")
+    commit_marks.append(mark)
     for b in range(branches):
         at = commit_marks[rng.randrange(len(commit_marks) // 2, len(commit_marks))]
         stream.extend(b"reset refs/heads/feature/topic-%03d\nfrom :%d\n\n" % (b, at))

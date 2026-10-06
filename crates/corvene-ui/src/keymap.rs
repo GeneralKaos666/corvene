@@ -234,6 +234,8 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         KeyBinding::new("down", SelectNextFile, Some("ChangesList")),
         KeyBinding::new("up", SelectPreviousFile, Some("ChangesList")),
         KeyBinding::new("secondary-a", SelectAllFiles, Some("ChangesList")),
+        // flag `810` + `1311-stacked-diff`: every file of the commit, stacked
+        KeyBinding::new("secondary-a", SelectAllFiles, Some("CommitFileList")),
         // the diff's text selection (GHD `select-all` / the browser's copy)
         KeyBinding::new("secondary-a", SelectAll, Some("Diff")),
         KeyBinding::new("secondary-c", Copy, Some("Diff")),

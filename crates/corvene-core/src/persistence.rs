@@ -158,6 +158,14 @@ pub struct Settings {
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
     pub file_list_tree: bool,
+    /// Corvene `1311-stacked-diff`: the Changes tab shows the included
+    /// files' diffs stacked in one list.
+    #[serde(default)]
+    pub stacked_diff_changes: bool,
+    /// Corvene `1311-stacked-diff`: History shows every file of the
+    /// selected commit stacked in one list.
+    #[serde(default)]
+    pub stacked_diff_history: bool,
     /// Last chosen tab of a modified-image diff (`imageDiffType`).
     pub image_diff_type: corvene_models::ImageDiffType,
     /// GHD `tabSize` for diffs (Appearance › Diff).
@@ -429,6 +437,8 @@ impl Default for Settings {
             show_side_by_side_diff: false,
             diff_wrap_lines: true,
             file_list_tree: false,
+            stacked_diff_changes: false,
+            stacked_diff_history: false,
             image_diff_type: corvene_models::ImageDiffType::TwoUp,
             tab_size: TAB_SIZE_DEFAULT,
             syntax_highlighter: SyntaxHighlighter::GitHubDesktop,

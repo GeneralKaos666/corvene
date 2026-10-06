@@ -2424,11 +2424,9 @@ impl PreferencesDialog {
                             .text_size(FONT_SIZE())
                             .child(format!("{user} at {proxy}")),
                     )
-                    .child(
-                        button(id, "Forget", cx).on_click(move |_, _, cx| {
-                            Dispatcher::forget_proxy_credentials(forget.clone(), cx)
-                        }),
-                    )
+                    .child(button(id, "Forget", cx).on_click(move |_, _, cx| {
+                        Dispatcher::forget_proxy_credentials(forget.clone(), cx)
+                    }))
             }))
             .when(empty, |d| {
                 d.child(
@@ -2442,7 +2440,7 @@ impl PreferencesDialog {
 
     fn advanced_tab(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
-        let (crash_reports, offered_packs, clone_location, settings_file, menu_bar, proxy) = {
+        let (crash_reports, offered_packs, clone_location, settings_file, menu_bar, proxy, stacked) = {
             use corvene_core::flags::ids;
             let flags = &self.state.read(cx).flags;
             (
@@ -2452,11 +2450,37 @@ impl PreferencesDialog {
                 flags.bool(ids::SETTINGS_FILE),
                 cfg!(target_os = "macos") && flags.bool(ids::MENU_BAR_STATUS_ITEM),
                 flags.bool(ids::PROXY_CREDENTIALS),
+                flags.bool(ids::STACKED_DIFF),
             )
         };
         div()
             .flex()
             .flex_col()
+            // Corvene (`1311-stacked-diff`): the tabs' stack buttons, as settings
+            .when(stacked, |d| {
+                d.child(section_heading("Diffs", cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(SPACING_HALF())
+                            .child(checkbox_row(
+                                "prefs-stacked-changes",
+                                self.draft.stacked_diff_changes,
+                                "Show the changes to be committed in one list (Changes)",
+                                self.edit(cx, |s, v| s.stacked_diff_changes = v),
+                                cx,
+                            ))
+                            .child(checkbox_row(
+                                "prefs-stacked-history",
+                                self.draft.stacked_diff_history,
+                                "Show every file of a commit in one list (History)",
+                                self.edit(cx, |s, v| s.stacked_diff_history = v),
+                                cx,
+                            )),
+                    )
+                    .child(div().mt(SPACING()))
+            })
             .child(section_heading("Background updates", cx))
             .child(checkbox_row(
                 "prefs-indicators",

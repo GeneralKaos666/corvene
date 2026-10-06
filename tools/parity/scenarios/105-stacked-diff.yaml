@@ -1,0 +1,79 @@
+# Every changed file's diff in one list (flag 1311-stacked-diff, off in the
+# GitHub Desktop preset the harness runs with; deviations.md › Diff viewer).
+# GHD shows one file at a time, so every snap but the first is Corvene only.
+# The first snap compares the untouched Changes tab (the stack button is the
+# only difference and sits in the header). The fixture has 4 working files
+# (one deleted) and commits with 2 files each.
+name: stacked-diff
+description: The Changes tab's included files stacked, a file folded, a line excluded in the stack, ⌘-click stacking two files, and History's files stacked (Corvene only)
+setup: repo
+corvene_flags: 1311-stacked-diff=on,810-commit-files-multi-select=on
+steps:
+  - click: [125, 300]
+    wait: 600
+  - snap: single-file
+  # the stack button at the end of "N changed files"
+  - ghd: {skip: true}
+    corvene: {click: [227, 156]}
+    wait: 1200
+  - snap: {name: changes-stacked, corvene_only: true, note: "GHD shows one file's diff at a time (1311-stacked-diff)"}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 500], dy: 300}}
+    wait: 400
+  - snap: {name: changes-scrolled, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 500], dy: -1000}}
+    wait: 300
+  # fold the first file by its chevron
+  - ghd: {skip: true}
+    corvene: {click: [262, 98]}
+    wait: 400
+  - snap: {name: changes-folded, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [262, 98]}
+    wait: 400
+  # exclude a line of the second file's diff from the next commit
+  - ghd: {skip: true}
+    corvene: {click: [276, 349]}
+    wait: 400
+  - snap: {name: changes-line-excluded, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [276, 349]}
+    wait: 300
+  # back to one file at a time, then ⌘-click a second file
+  - ghd: {skip: true}
+    corvene: {click: [227, 156]}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {click: [125, 329], mods: cmd}
+    wait: 1200
+  - snap: {name: changes-two-selected, corvene_only: true}
+  - click: [125, 300]
+    wait: 400
+---
+name: stacked-diff-history
+description: History's selected commit with every file stacked, scrolled, and two files ⌘-selected (Corvene only)
+setup: repo
+corvene_flags: 1311-stacked-diff=on,810-commit-files-multi-select=on
+steps:
+  - click: [187, 97]
+    wait: 600
+  # "Add the command line entry point": two files
+  - click: [124, 372]
+    wait: 800
+  - snap: history-single-file
+  - ghd: {skip: true}
+    corvene: {click: [484, 186]}
+    wait: 1200
+  - snap: {name: history-stacked, corvene_only: true, note: "GHD shows one file's diff at a time (1311-stacked-diff)"}
+  - ghd: {skip: true}
+    corvene: {scroll: {at: [900, 500], dy: 200}}
+    wait: 400
+  - snap: {name: history-scrolled, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [484, 186]}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {key: cmd-a}
+    wait: 1200
+  - snap: {name: history-select-all, corvene_only: true}

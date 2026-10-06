@@ -29,6 +29,8 @@ gpui_kit::actions!(
         ToggleDiffDisplayMode,
         // View › Wrap Diff Lines (`1304-diff-no-wrap`)
         ToggleDiffWordWrap,
+        // The tab's stack button (`1311-stacked-diff`): every file's diff in one list
+        ToggleStackedDiff,
         // ⌥⌘C / ⇧⌥⌘C in a file list (`611-copy-path-shortcuts`)
         CopySelectedFilePaths,
         CopySelectedRelativeFilePaths,

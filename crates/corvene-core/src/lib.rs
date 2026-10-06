@@ -95,6 +95,7 @@ pub mod sign_in;
 pub mod signatures;
 pub mod sparse_checkout;
 pub mod ssh_keys;
+pub mod stacked_diff;
 pub mod stacked_refs;
 pub mod stash_flows;
 pub mod stash_list;

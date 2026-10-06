@@ -72,6 +72,7 @@ pub mod selected_commit;
 pub mod signature_badge;
 pub mod stash_conflicts;
 pub mod stash_list;
+pub mod stacked_diff_view;
 pub mod stash_view;
 #[cfg(target_os = "macos")]
 pub mod status_item;

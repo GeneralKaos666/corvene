@@ -37,6 +37,7 @@ use crate::no_changes::{SuggestedAction, no_changes};
 use crate::no_repositories::NoRepositoriesView;
 use crate::repository_list::RepositoryFoldout;
 use crate::selected_commit::SelectedCommitView;
+use crate::stacked_diff_view::StackedDiffView;
 use crate::stash_view::StashDiffViewer;
 use crate::tab_bar::{TabModel, tab_bar};
 use crate::tab_strip::tab_strip;
@@ -115,6 +116,8 @@ pub struct Workspace {
     worktree_foldout: Entity<WorktreeFoldout>,
     dialogs: Entity<DialogHost>,
     diff_view: Entity<DiffView>,
+    /// `1311-stacked-diff`: the included or selected files' diffs in one list.
+    stacked_view: Entity<StackedDiffView>,
     welcome: Option<Entity<WelcomeView>>,
     /// GHD `Banner`: the app's banner, its focus and dismissal.
     banner_view: Entity<BannerView>,
@@ -298,6 +301,8 @@ impl Workspace {
         let branch_foldout = cx.new(|cx| BranchFoldout::new(state.clone(), window, cx));
         let worktree_foldout = cx.new(|cx| WorktreeFoldout::new(state.clone(), window, cx));
         let diff_view = cx.new(|cx| DiffView::new(state.clone(), DiffSource::WorkingDirectory, cx));
+        let stacked_view =
+            cx.new(|cx| StackedDiffView::new(state.clone(), DiffSource::WorkingDirectory, cx));
         let dialogs = cx.new(|cx| DialogHost::new(state.clone(), cx));
         let pr_badge_bounds: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
         let ci_popover =
@@ -356,6 +361,7 @@ impl Workspace {
             sidebar_on_right,
             dialogs,
             diff_view,
+            stacked_view,
             welcome,
             banner_view,
             no_repositories,
@@ -716,6 +722,14 @@ impl Workspace {
         }
         match self.section {
             Section::Changes if showing_stash => self.stash_view.clone().into_any_element(),
+            // `1311-stacked-diff`: the included or selected files in one list
+            Section::Changes
+                if rs.is_some_and(|r| {
+                    corvene_core::stacked_diff::working_stack(state, r).is_some()
+                }) =>
+            {
+                StackedDiffView::embed(&self.stacked_view).into_any_element()
+            }
             Section::Changes if multi_selected > 1 => {
                 crate::no_changes::multiple_selection(multi_selected, cx).into_any_element()
             }

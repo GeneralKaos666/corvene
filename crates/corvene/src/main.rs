@@ -674,6 +674,26 @@ pub(crate) fn main() {
                 .file_list_tree;
             Dispatcher::set_file_list_tree(!tree, cx);
         });
+        // Corvene (`1311-stacked-diff`): the tab's stack button, by action
+        on_menu_action(cx, |_: &ToggleStackedDiff, cx| {
+            let toggle = {
+                let s = corvene_core::AppState::global(cx).read(cx);
+                corvene_core::stacked_diff::enabled(s).then(|| {
+                    let history = s
+                        .selected_state()
+                        .is_some_and(|rs| rs.section == Section::History);
+                    let on = if history {
+                        s.settings.stacked_diff_history
+                    } else {
+                        s.settings.stacked_diff_changes
+                    };
+                    (history, on)
+                })
+            };
+            if let Some((history, on)) = toggle {
+                Dispatcher::set_stacked_diff(history, !on, cx);
+            }
+        });
         on_menu_action(cx, |_: &OpenSettings, cx| {
             Dispatcher::open_preferences(corvene_core::PreferencesTab::Accounts, cx)
         });

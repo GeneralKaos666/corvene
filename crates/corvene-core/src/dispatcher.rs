@@ -1894,6 +1894,8 @@ impl Dispatcher {
                 if selected_file.is_some() {
                     Self::load_diff(id, cx);
                 }
+                // `1311-stacked-diff`: the stacked files' diffs too
+                Self::refresh_stacked_working(id, cx);
                 // GHD `GitStore.loadFilesForCurrentStashEntry`, run with every
                 // stash entry load (the no-changes "View stash" card counts them)
                 Self::load_stash_files(id, cx);
@@ -2122,14 +2124,34 @@ impl Dispatcher {
         if commit {
             Self::load_commit_diff(id, cx);
         }
+        // `1311-stacked-diff`: the file's entry in a stack
+        Self::reload_stacked_diff(id, &path, cx);
     }
 
     pub fn show_binary_diff_as_text(id: u64, cx: &mut dyn Host) {
-        Self::state(cx).update(cx, |s, _| {
+        let path = Self::state(cx).update(cx, |s, _| {
             let rs = s.repo_state_mut(id);
             rs.diff_as_text = rs.selected_file.clone();
+            rs.diff_as_text.clone()
         });
         Self::load_diff(id, cx);
+        if let Some(path) = path {
+            Self::reload_stacked_diff(id, &path, cx);
+        }
+    }
+
+    /// `749-binary-diff-as-text` for a file of a stack (`1311-stacked-diff`):
+    /// the file need not be the selected one.
+    pub fn show_binary_diff_as_text_for(id: u64, path: String, cx: &mut dyn Host) {
+        let selected = Self::state(cx).update(cx, |s, _| {
+            let rs = s.repo_state_mut(id);
+            rs.diff_as_text = Some(path.clone());
+            rs.selected_file.as_deref() == Some(path.as_str())
+        });
+        if selected {
+            Self::load_diff(id, cx);
+        }
+        Self::reload_stacked_diff(id, &path, cx);
     }
 
     pub fn load_diff(id: u64, cx: &mut dyn Host) {
@@ -3207,18 +3229,7 @@ impl Dispatcher {
         if remerge {
             let key = (ordered, file.path.clone());
             let task = cx.background_executor().spawn(async move {
-                let diff =
-                    corvene_git::remerge_file_diff(git.clone(), &workdir, &file, hide_whitespace)
-                        .unwrap_or_else(|err| {
-                            warn!(%err, "remerge diff failed");
-                            corvene_models::Diff::Empty
-                        });
-                // the new side for expansion and highlighting; the re-merge
-                // with its conflict markers is no blob
-                let contents = (file.status.kind != corvene_models::FileStatusKind::Deleted)
-                    .then(|| corvene_git::blob_lines(git, &workdir, &file.commitish, &file.path))
-                    .flatten();
-                (Arc::new(diff), contents.map(Arc::new), None)
+                crate::stacked_diff::remerge_diff(git, &workdir, &file, hide_whitespace)
             });
             cx.spawn(async move |cx: &mut AsyncCtx| {
                 let loaded = task.await;
@@ -3236,31 +3247,8 @@ impl Dispatcher {
         };
         if svg_image {
             let key = (ordered.clone(), file.path.clone());
-            let newest = match &ordered[..] {
-                [_, .., newest] => newest.clone(),
-                _ => file.commitish.clone(),
-            };
-            let oldest = ordered
-                .first()
-                .cloned()
-                .unwrap_or_else(|| file.commitish.clone());
             let task = cx.background_executor().spawn(async move {
-                let previous_path = file.old_path.as_deref().unwrap_or(&file.path);
-                let diff = corvene_git::image_diff_as(
-                    corvene_git::SVG_MEDIA_TYPE,
-                    file.status.kind,
-                    || corvene_git::blob_bytes(git.clone(), &workdir, &newest, &file.path).ok(),
-                    || {
-                        corvene_git::blob_bytes(
-                            git.clone(),
-                            &workdir,
-                            &format!("{oldest}^"),
-                            previous_path,
-                        )
-                        .ok()
-                    },
-                );
-                (Arc::new(diff), None, None)
+                crate::stacked_diff::svg_image_diff(git, &workdir, &ordered, &file)
             });
             cx.spawn(async move |cx: &mut AsyncCtx| {
                 let loaded = task.await;
@@ -6954,11 +6942,14 @@ impl Dispatcher {
                 }
                 Self::load_commit_diff(id, cx);
                 Self::load_stash_diff(id, cx);
+                // `1311-stacked-diff`: the stacked diffs read the setting too
+                Self::clear_stacked_diffs(id, cx);
             } else {
                 Self::state(cx).update(cx, |s, _| {
                     s.repo_state_mut(id).clear_partial_state = true;
                 });
                 Self::load_diff(id, cx);
+                Self::clear_stacked_diffs(id, cx);
                 Self::refresh_repository(id, cx);
             }
         }
@@ -8054,7 +8045,7 @@ pub(crate) fn forget_remote_names(info: &mut corvene_models::RepositoryInfo) {
 
 /// The options a working-directory diff depends on.
 #[derive(Clone, Copy, Debug)]
-struct WorkingDiffOptions {
+pub(crate) struct WorkingDiffOptions {
     hide_whitespace: bool,
     renamed_against_head: bool,
     symlinks_as_links: bool,
@@ -8068,7 +8059,7 @@ struct WorkingDiffOptions {
 }
 
 impl WorkingDiffOptions {
-    fn of(s: &AppState, rs: &RepositoryState, path: &str) -> Self {
+    pub(crate) fn of(s: &AppState, rs: &RepositoryState, path: &str) -> Self {
         Self {
             hide_whitespace: s.settings.hide_whitespace_in_changes_diff,
             renamed_against_head: s.flags.bool(crate::flags::ids::RENAMED_DIFF_AGAINST_HEAD),
@@ -8081,7 +8072,7 @@ impl WorkingDiffOptions {
         }
     }
 
-    fn key(self) -> [bool; 7] {
+    pub(crate) fn key(self) -> [bool; 7] {
         [
             self.hide_whitespace,
             self.renamed_against_head,
@@ -8142,7 +8133,7 @@ fn restored_selections(
 
 /// `file`'s diff against `HEAD` with the working copy and the committed
 /// contents (hunk expansion, highlighting). Blocking.
-fn compute_working_diff(
+pub(crate) fn compute_working_diff(
     git: Arc<corvene_git::GitBinary>,
     workdir: &Path,
     file: &WorkingDirectoryFileChange,
@@ -8284,7 +8275,7 @@ fn compute_changeset(
 
 /// What a committed file's diff depends on besides the commits.
 #[derive(Clone, Copy, Debug)]
-struct CommitDiffOptions {
+pub(crate) struct CommitDiffOptions {
     hide_whitespace: bool,
     /// `795-lfs-image-previews`
     lfs_images: bool,
@@ -8293,7 +8284,7 @@ struct CommitDiffOptions {
 }
 
 impl CommitDiffOptions {
-    fn of(s: &AppState) -> Self {
+    pub(crate) fn of(s: &AppState) -> Self {
         Self {
             hide_whitespace: s.settings.hide_whitespace_in_history_diff,
             lfs_images: s.flags.bool(crate::flags::ids::LFS_IMAGE_PREVIEWS),
@@ -8304,7 +8295,7 @@ impl CommitDiffOptions {
 
 /// `file`'s diff in `ordered` (one commit or a range, oldest first) with its
 /// new and old contents; the three parts are read in parallel. Blocking.
-fn compute_commit_diff(
+pub(crate) fn compute_commit_diff(
     git: Arc<corvene_git::GitBinary>,
     workdir: &Path,
     ordered: &[String],

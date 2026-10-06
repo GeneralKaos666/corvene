@@ -1602,6 +1602,10 @@ pub struct RepositoryState {
     /// `1214-commit-signatures`: verified signatures by commit.
     pub signatures: crate::signatures::SignatureStore,
 
+    // ---- `1311-stacked-diff` ----
+    /// The diffs of the files shown stacked in one list.
+    pub stacked: crate::stacked_diff::StackedDiffs,
+
     // ---- `1218-compare-refs` ----
     /// The combined diff of the two compared refs.
     pub ref_compare_changes: Option<crate::pull_request_preview::PullRequestPreview>,

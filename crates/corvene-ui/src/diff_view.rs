@@ -53,6 +53,12 @@
 //! Deviation (`747-intra-line-max-length`): the line length beyond which no
 //! intra-line range is computed can be changed (GHD: 1024, fixed).
 //!
+//! Deviation (`1311-stacked-diff`): a view made with `new_stacked` is one
+//! file of `stacked_diff_view`'s list (GHD `renderDiff` shows one file):
+//! it reads that file's entry of `RepositoryState::stacked` and lends its
+//! rows, panels and popovers to the list (`stacked_prepare`,
+//! `stacked_body`, `stacked_overlays`) instead of rendering itself.
+//!
 //! Deviation (`792-whitespace-hidden-highlight`): a context row takes the
 //! syntax spans of the file whose line it shows (git prints a context line
 //! from one file; with Hide Whitespace the other's can differ in
@@ -493,6 +499,14 @@ impl TextSelection {
 pub struct DiffView {
     state: Entity<AppState>,
     source: DiffSource,
+    /// `1311-stacked-diff`: this view is one file of a stacked list and
+    /// reads that file's entry of `RepositoryState::stacked` instead of
+    /// the tab's selected file.
+    stacked_path: Option<String>,
+    /// `1311-stacked-diff`: whose diffs the stack reads, set by the
+    /// stacked list each frame (computing it per file would repeat the
+    /// commit selection's ordering).
+    stacked_kind: Option<Rc<corvene_core::stacked_diff::StackKind>>,
     temp: Option<TempSelection>,
     hovered_group: Option<u32>,
     /// Text selection over the rows (see `TextSelection`).
@@ -612,6 +626,8 @@ impl DiffView {
         Self {
             state,
             source,
+            stacked_path: None,
+            stacked_kind: None,
             temp: None,
             hovered_group: None,
             text_selection: None,
@@ -653,6 +669,24 @@ impl DiffView {
             loading_since: None,
             review: ReviewLocal::default(),
         }
+    }
+
+    /// `1311-stacked-diff`: the view for one file of a stacked list
+    /// (`source` is the tab's: `WorkingDirectory` or `Commit`).
+    pub fn new_stacked(
+        state: Entity<AppState>,
+        source: DiffSource,
+        path: String,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut view = Self::new(state, source, cx);
+        view.stacked_path = Some(path);
+        view
+    }
+
+    /// The rows' font size as last rendered (`751-diff-font-size`).
+    pub(crate) fn text_size(&self) -> Pixels {
+        self.text_size
     }
 
     /// `740-diff-loading-indicator`: a spinner over the pane once the
@@ -701,6 +735,9 @@ impl DiffView {
         let id = s.selected?;
         let rs = s.repo_states.get(&id)?;
         let repo_path = s.repository(id)?.path.clone();
+        if let Some(path) = self.stacked_path.as_ref() {
+            return self.stacked_snapshot(s, id, rs, repo_path, path);
+        }
         let (
             path,
             (kind, rename_includes_modifications),
@@ -833,6 +870,71 @@ impl DiffView {
             diff,
             contents,
             old_contents,
+            hide_whitespace,
+            confirm_discard: s.settings.confirm_discard_changes,
+            as_text,
+        })
+    }
+
+    /// `1311-stacked-diff`: the snapshot of one file of a stack, from its
+    /// entry in `RepositoryState::stacked` (none until it has loaded).
+    fn stacked_snapshot(
+        &self,
+        s: &AppState,
+        id: u64,
+        rs: &corvene_core::RepositoryState,
+        repo_path: std::path::PathBuf,
+        path: &str,
+    ) -> Option<Snapshot> {
+        let stack = self.stacked_kind.clone()?;
+        // the entry first: most files of a big stack have none yet, and
+        // the file lookups below walk the status / changeset
+        let entry = rs.stacked.entry(&stack, path)?;
+        let ((kind, rename_includes_modifications), selection, hide_whitespace) = match self.source
+        {
+            DiffSource::WorkingDirectory => {
+                let file = rs
+                    .status
+                    .as_deref()
+                    .and_then(|st| st.files.iter().find(|f| f.path == path))?;
+                (
+                    (
+                        file.status.kind,
+                        file.status.rename_includes_modifications(),
+                    ),
+                    file.selection.clone(),
+                    s.settings.hide_whitespace_in_changes_diff,
+                )
+            }
+            DiffSource::Commit => {
+                let file = rs
+                    .changeset
+                    .as_ref()
+                    .and_then(|c| c.files.iter().find(|f| f.path == path))?;
+                (
+                    (
+                        file.status.kind,
+                        file.status.rename_includes_modifications(),
+                    ),
+                    DiffSelection::all(),
+                    s.settings.hide_whitespace_in_history_diff,
+                )
+            }
+            _ => return None,
+        };
+        let as_text =
+            self.source == DiffSource::WorkingDirectory && rs.diff_as_text.as_deref() == Some(path);
+        Some(Snapshot {
+            repo: id,
+            repo_path,
+            key: (id, path.to_string(), entry.generation),
+            path: path.to_string(),
+            kind,
+            rename_includes_modifications,
+            selection,
+            diff: entry.diff.clone(),
+            contents: entry.contents.clone(),
+            old_contents: entry.old_contents.clone(),
             hide_whitespace,
             confirm_discard: s.settings.confirm_discard_changes,
             as_text,
@@ -1153,14 +1255,16 @@ impl DiffView {
     }
 
     /// `onEndSelection`: commit the dragged range.
-    fn end_selection(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn end_selection(&mut self, cx: &mut Context<Self>) {
         let Some(t) = self.temp.take() else { return };
         let target = {
             let s = self.state.read(cx);
+            // `1311-stacked-diff`: this view's file, not the selected one
+            let stacked = self.stacked_path.clone();
             s.selected.and_then(|id| {
                 s.repo_states
                     .get(&id)
-                    .and_then(|r| r.selected_file.clone())
+                    .and_then(|r| stacked.or_else(|| r.selected_file.clone()))
                     .map(|p| (id, p))
             })
         };
@@ -1251,7 +1355,7 @@ impl DiffView {
     /// The pointer moved while a text selection is being dragged: the head
     /// follows the row under it; past the visible rows it clamps to the first
     /// or last one and scrolls the list a line (`list.scrollToRow`).
-    fn drag_text_selection(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(crate) fn drag_text_selection(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let Some(sel) = self.text_selection else {
             return;
         };
@@ -1313,7 +1417,7 @@ impl DiffView {
     }
 
     /// Mouse up: the drag is over; a click without a drag leaves no selection.
-    fn end_text_selection(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn end_text_selection(&mut self, cx: &mut Context<Self>) {
         if let Some(sel) = self.text_selection.as_mut()
             && sel.dragging
         {
@@ -1326,7 +1430,7 @@ impl DiffView {
     }
 
     /// A left click outside any row's text drops the selection.
-    fn clear_text_selection_unless_on_text(
+    pub(crate) fn clear_text_selection_unless_on_text(
         &mut self,
         position: Point<Pixels>,
         cx: &mut Context<Self>,
@@ -2343,10 +2447,13 @@ impl DiffView {
                 .flags
                 .bool(corvene_core::flags::ids::BINARY_DIFF_AS_TEXT))
         .then(|| {
-            let repo = snap.repo;
+            let (repo, path) = (snap.repo, snap.path.clone());
             div().py(SPACING_HALF()).child(
-                link_button("binary-as-text", "Show the diff as text anyway.", cx)
-                    .on_click(move |_, _, cx| Dispatcher::show_binary_diff_as_text(repo, cx)),
+                link_button("binary-as-text", "Show the diff as text anyway.", cx).on_click(
+                    move |_, _, cx| {
+                        Dispatcher::show_binary_diff_as_text_for(repo, path.clone(), cx)
+                    },
+                ),
             )
         });
         div()
@@ -3078,8 +3185,14 @@ pub(crate) fn highlight_engine(s: &AppState) -> (corvene_highlight::Engine, u64)
     (engine, corvene_highlight::generation())
 }
 
-impl Render for DiffView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+impl DiffView {
+    /// What every render does first: the row metrics (zoom, font size and
+    /// line height), the find controls, and the snapshot, loading or
+    /// re-highlighting when it changed, then the display mode. `None`
+    /// while there is no diff to show.
+    fn prepare(&mut self, cx: &mut Context<Self>) -> Option<Snapshot> {
+        // first: a stacked file whose diff has not arrived costs nothing more
+        let snap = self.snapshot(cx)?;
         // View › Zoom changed the row heights the list has cached
         let zoom = crate::theme::sizes::zoom_factor();
         // … and so does `751-diff-font-size`
@@ -3109,15 +3222,6 @@ impl Render for DiffView {
             .read(cx)
             .flags
             .bool(corvene_core::flags::ids::DIFF_FIND_CONTROLS);
-        let loading = self.loading_overlay(cx);
-        self.sync_review_composer(window, cx);
-        let Some(snap) = self.snapshot(cx) else {
-            return div()
-                .relative()
-                .size_full()
-                .children(loading)
-                .into_any_element();
-        };
         if self.rows_key.as_ref() != Some(&snap.key) {
             self.load(&snap, cx);
         } else if self.highlighted_with != Some(highlight_engine(self.state.read(cx))) {
@@ -3148,21 +3252,22 @@ impl Render for DiffView {
             self.h_scroll.reset();
             self.list_state.remeasure();
         }
-        let background = cx.ghd().background;
-        let options = self
-            .options_open
-            .then(|| self.options_popover(&snap, window, cx));
+        Some(snap)
+    }
 
-        let body: AnyElement = match &*snap.diff {
+    /// GHD `ui/diff/index.tsx` routing for everything but text rows:
+    /// `None` when the diff is text to render as rows.
+    fn non_text_panel(&mut self, snap: &Snapshot, cx: &mut Context<Self>) -> Option<AnyElement> {
+        Some(match &*snap.diff {
             Diff::Text { .. } | Diff::LargeText { .. } if snap.diff.line_count() > 0 => {
                 if matches!(*snap.diff, Diff::LargeText { .. }) && !self.show_large {
                     self.large_diff_panel(cx)
                 } else {
-                    self.text_diff(&snap, window, cx)
+                    return None;
                 }
             }
-            Diff::Text { .. } | Diff::LargeText { .. } | Diff::Empty => self.empty_panel(&snap, cx),
-            Diff::Binary => self.binary_panel(&snap, cx),
+            Diff::Text { .. } | Diff::LargeText { .. } | Diff::Empty => self.empty_panel(snap, cx),
+            Diff::Binary => self.binary_panel(snap, cx),
             // `755-tga-image-diff` off: GHD does not know TGA images
             Diff::Image { previous, current }
                 if [previous, current]
@@ -3175,14 +3280,142 @@ impl Render for DiffView {
                         .flags
                         .bool(corvene_core::flags::ids::TGA_IMAGE_DIFF) =>
             {
-                self.binary_panel(&snap, cx)
+                self.binary_panel(snap, cx)
             }
             Diff::Image { .. } => match self.image.clone() {
                 Some(image) => image.into_any_element(),
                 None => self.panel("This binary file has changed.", cx),
             },
-            Diff::TooLarge => self.too_large_panel(&snap, cx),
+            Diff::TooLarge => self.too_large_panel(snap, cx),
             Diff::Submodule(sub) => self.submodule_panel(sub, cx),
+        })
+    }
+
+    /// `1311-stacked-diff`: how many list items this file's body takes,
+    /// after the same preparation as a render.
+    pub(crate) fn stacked_prepare(
+        &mut self,
+        kind: Rc<corvene_core::stacked_diff::StackKind>,
+        cx: &mut Context<Self>,
+    ) -> StackedShape {
+        self.stacked_kind = Some(kind);
+        let Some(snap) = self.prepare(cx) else {
+            return StackedShape::Loading;
+        };
+        match &*snap.diff {
+            Diff::Text { .. } | Diff::LargeText { .. } if snap.diff.line_count() > 0 => {
+                if matches!(*snap.diff, Diff::LargeText { .. }) && !self.show_large {
+                    StackedShape::Panel
+                } else {
+                    StackedShape::Rows(self.row_count())
+                }
+            }
+            _ => StackedShape::Panel,
+        }
+    }
+
+    /// `1311-stacked-diff`: this file's body for the stacked list, after
+    /// [`Self::stacked_prepare`] in the same frame.
+    pub(crate) fn stacked_body(&mut self, window: &Window, cx: &mut Context<Self>) -> StackedBody {
+        let Some(snap) = self.snapshot(cx) else {
+            return StackedBody::Loading;
+        };
+        if let Some(panel) = self.non_text_panel(&snap, cx) {
+            return StackedBody::Panel(panel);
+        }
+        StackedBody::Rows {
+            ctx: self.row_context(&snap, None, window, cx),
+            rows: self.rows.clone(),
+            split_rows: self.split_rows.clone(),
+            split_mode: self.split_mode,
+            warnings: self.warnings(&snap, cx),
+            hint: self.highlighting_hint(&snap, cx),
+        }
+    }
+}
+
+impl DiffView {
+    /// `1311-stacked-diff`: the popovers and menu this file's rows opened
+    /// (Diff Settings, the whitespace hint, a context menu), drawn by the
+    /// stacked list since this view is not rendered there; they float over
+    /// the window.
+    pub(crate) fn stacked_overlays(
+        &mut self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut out = Vec::new();
+        if self.options_open
+            && let Some(snap) = self.snapshot(cx)
+        {
+            out.push(self.options_popover(&snap, window, cx));
+        }
+        if let Some(anchor) = self.whitespace_hint {
+            out.push(self.whitespace_hint_popover(anchor, cx));
+        }
+        if let Some(menu) = self.context_menu.clone() {
+            out.push(menu.into_any_element());
+        }
+        out
+    }
+
+    pub(crate) fn options_open(&self) -> bool {
+        self.options_open
+    }
+
+    pub(crate) fn close_options(&mut self, cx: &mut Context<Self>) {
+        if self.options_open {
+            self.options_open = false;
+            cx.notify();
+        }
+    }
+}
+
+/// `1311-stacked-diff`: what one file's body takes in the stacked list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StackedShape {
+    /// The diff has not arrived: one placeholder item.
+    Loading,
+    /// Text rows, one item each.
+    Rows(usize),
+    /// A panel (binary, image, empty, too large, submodule): one item.
+    Panel,
+}
+
+/// `1311-stacked-diff`: one file's body, rendered item by item.
+pub(crate) enum StackedBody {
+    Loading,
+    Rows {
+        ctx: Rc<RowContext>,
+        rows: Rc<Vec<Row>>,
+        split_rows: Rc<Vec<SplitRow>>,
+        split_mode: bool,
+        /// `DiffContentsWarning`, shown under the file's header.
+        warnings: Option<AnyElement>,
+        /// The "highlighting…" hint, shown under the header too.
+        hint: Option<AnyElement>,
+    },
+    Panel(AnyElement),
+}
+
+impl Render for DiffView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let loading = self.loading_overlay(cx);
+        self.sync_review_composer(window, cx);
+        let Some(snap) = self.prepare(cx) else {
+            return div()
+                .relative()
+                .size_full()
+                .children(loading)
+                .into_any_element();
+        };
+        let background = cx.ghd().background;
+        let options = self
+            .options_open
+            .then(|| self.options_popover(&snap, window, cx));
+        let body: AnyElement = match self.non_text_panel(&snap, cx) {
+            Some(panel) => panel,
+            None => self.text_diff(&snap, window, cx),
         };
         let hint = self.highlighting_hint(&snap, cx);
         div()
@@ -3437,17 +3670,14 @@ impl DiffView {
         .inset_0()
     }
 
-    /// The virtualized rows plus the search box (`DiffSearchInput`).
-    fn text_diff(
+    /// Everything the rows need from the view this frame (`RowContext`).
+    fn row_context(
         &mut self,
         snap: &Snapshot,
+        review: Option<Rc<crate::review_threads::ReviewUi>>,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        // `348-pull-request-review`: the threads' row map (borrows `cx`
-        // mutably, so before the theme is borrowed)
-        let review = self.review_ui(snap, cx);
-        let t = cx.ghd();
+    ) -> Rc<RowContext> {
         // `canSelect`: working-directory files that are not conflicted.
         // a binary file shown as text cannot be committed line by line
         // (`749-binary-diff-as-text`: the partial patch is taken without `--text`)
@@ -3463,7 +3693,7 @@ impl DiffView {
                     .or_insert_with(|| snap.selection.range_kind(start, len));
             }
         }
-        let ctx = Rc::new(RowContext {
+        Rc::new(RowContext {
             repo: snap.repo,
             path: snap.path.clone(),
             selection: snap.selection.clone(),
@@ -3495,9 +3725,23 @@ impl DiffView {
                     .flags
                     .bool(corvene_core::flags::ids::WIDE_HUNK_HANDLE)
             }),
-            review: review.clone(),
+            review,
             h_scroll: self.no_wrap.then(|| self.h_scroll_frame(window)),
-        });
+        })
+    }
+
+    /// The virtualized rows plus the search box (`DiffSearchInput`).
+    fn text_diff(
+        &mut self,
+        snap: &Snapshot,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // `348-pull-request-review`: the threads' row map (borrows `cx`
+        // mutably, so before the theme is borrowed)
+        let review = self.review_ui(snap, cx);
+        let ctx = self.row_context(snap, review.clone(), window, cx);
+        let t = cx.ghd();
         let rows = self.rows.clone();
         let split_rows = self.split_rows.clone();
         let split_mode = self.split_mode;

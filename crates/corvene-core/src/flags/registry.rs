@@ -8435,6 +8435,29 @@ registry! {
         upstream: &[Upstream::issue(20624), Upstream::issue(20529)],
         code: &["crates/corvene-core/src/file_tree.rs", "crates/corvene-ui/src/file_tree_rows.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/stash_view.rs"],
     },
+
+    /// Every changed file's diff in one scrolling list.
+    STACKED_DIFF = 1311 "stacked-diff" {
+        title: "All files' diffs in one list",
+        summary: "A stack button at the end of the \"N changed files\" header (Changes and \
+                  History) shows every file's diff one under the other in one scrolling list, \
+                  each under its own header, and remembers the choice per tab (also in \
+                  Settings › Advanced). In Changes the stack holds the files included in the \
+                  next commit, as a last look before committing; ⌘-click, ⇧-click or ⌘A in a \
+                  file list stacks just the selected files. Clicking a file in the list \
+                  scrolls to it, a header click folds that file, and the rows work as in the \
+                  single-file diff (lines can still be included or excluded in Changes). \
+                  Each file's diff loads as it scrolls into reach.",
+        ghd_behaviour: "One file's diff at a time; several selected files show \"N files \
+                        selected\".",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(5218), Upstream::issue(18184)],
+        code: &["crates/corvene-ui/src/stacked_diff_view.rs", "crates/corvene-core/src/stacked_diff.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.
