@@ -551,10 +551,7 @@ impl crate::Dispatcher {
             repo_state.info = Some(moved.info);
             repo_state.unsafe_path = None;
             repo_state.error = None;
-            if s.watched_repo == Some(repo) {
-                s.watcher = None;
-                s.watched_repo = None;
-            }
+            s.watchers.remove(&repo);
             s.shared_storage_move = None;
             let finished: Vec<crate::popup_manager::StackedPopup> = s
                 .popups
