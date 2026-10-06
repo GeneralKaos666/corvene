@@ -69,9 +69,19 @@ pub fn open_repository(path: &Path) -> Result<RepositoryInfo> {
 
 fn identity(repo: &gix::Repository) -> Identity {
     let cfg = repo.config_snapshot();
+    let local = cfg
+        .plumbing()
+        .sections_by_name("user")
+        .into_iter()
+        .flatten()
+        .any(|section| {
+            section.meta().source == gix::config::Source::Local
+                && (section.value("name").is_some() || section.value("email").is_some())
+        });
     Identity {
         name: cfg.string("user.name").map(|v| v.to_string()),
         email: cfg.string("user.email").map(|v| v.to_string()),
+        local,
     }
 }
 

@@ -599,6 +599,10 @@ pub struct GhdTheme {
     pub co_author_tag_border: Hsla,
     pub input_icon_warning: Hsla,
     pub input_icon_error: Hsla,
+    /// `--commit-warning-badge-background-color` / `-border-color`: the
+    /// commit form avatar's warning badge.
+    pub commit_warning_badge_background: Hsla,
+    pub commit_warning_badge_border: Hsla,
     pub input_icon_hover_background: Hsla,
 
     // Dialogs + status

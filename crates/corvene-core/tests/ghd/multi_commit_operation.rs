@@ -95,6 +95,7 @@ fn repository_state(
             identity: Identity {
                 name: None,
                 email: None,
+                local: false,
             },
             ahead_behind: None,
             commit_template: None,

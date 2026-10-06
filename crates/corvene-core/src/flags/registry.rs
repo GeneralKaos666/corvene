@@ -8215,6 +8215,23 @@ registry! {
         code: &["crates/corvene-ui/src/dialogs/oversized_files.rs", "crates/corvene-core/src/commit_checks.rs", "crates/corvene-git/src/ignore.rs"],
     },
 
+    /// The commit avatar's misattribution warning edits the name too.
+    COMMIT_IDENTITY_UPDATE = 1309 "commit-identity-update" {
+        title: "Fix your name and email from the commit warning",
+        summary: "When the commit form's avatar warns that the commit will be misattributed, \
+                  its popover has a Name box next to the account's emails, filled with the \
+                  account's name. Update sets both. They go to the repository's own Git \
+                  config when it already has a name or email there, else to the global one, \
+                  and the warning says which config the email is in.",
+        ghd_behaviour: "The popover changes only the email, always in the global Git config, \
+                        so a repository with its own email keeps the warning.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(11760)],
+        code: &["crates/corvene-ui/src/commit_message_avatar.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-git/src/repo.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

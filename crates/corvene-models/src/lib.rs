@@ -482,6 +482,11 @@ impl Account {
 pub struct Identity {
     pub name: Option<String>,
     pub email: Option<String>,
+    /// The repository's own config sets `user.name` or `user.email` (GHD
+    /// `isGitConfigLocal` in `ui/changes/commit-message-avatar.tsx`); false
+    /// for the global identity.
+    #[serde(default)]
+    pub local: bool,
 }
 
 /// What Corvene knows about an opened repository (subset of GHD's

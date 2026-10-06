@@ -371,6 +371,7 @@ pub fn global_identity(git: Arc<GitBinary>) -> corvene_models::Identity {
     corvene_models::Identity {
         name: get("user.name"),
         email: get("user.email"),
+        local: false,
     }
 }
 

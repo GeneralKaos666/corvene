@@ -148,8 +148,7 @@ use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
-    InputMenuBuilder, avatar_image, avatar_lookup, button, checkbox, checkbox_tristate,
-    primary_button, text_box_with_menu,
+    InputMenuBuilder, button, checkbox, checkbox_tristate, primary_button, text_box_with_menu,
 };
 
 /// `712-open-multiple-files`: the most files one "Open …" item launches.
@@ -290,6 +289,8 @@ pub struct ChangesSidebar {
     pending_author: Option<(Range<usize>, Author)>,
     /// `isRuleFailurePopoverOpen`: the commit-message rule failures popover.
     rule_failure_popover_open: bool,
+    /// GHD `CommitMessageAvatar`: the avatar button and its popovers.
+    avatar: Entity<crate::commit_message_avatar::CommitMessageAvatar>,
     rule_hint_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// `731-recall-commit-messages`: index into the recent messages the form
     /// shows; `None` once the user edits it.
@@ -816,6 +817,10 @@ impl ChangesSidebar {
         })
         .detach();
         let list_scroll = UniformListScrollHandle::new();
+        let avatar = {
+            let state = state.clone();
+            cx.new(|cx| crate::commit_message_avatar::CommitMessageAvatar::new(state, window, cx))
+        };
         Self {
             filter,
             summary,
@@ -850,6 +855,7 @@ impl ChangesSidebar {
             pending_spell: None,
             pending_author: None,
             rule_failure_popover_open: false,
+            avatar,
             rule_hint_bounds: Rc::new(Cell::new(Bounds::default())),
             recalled: None,
             co_author_hint: None,
@@ -5281,13 +5287,6 @@ impl ChangesSidebar {
             .is_some_and(|rs| rs.committing);
         let description_box_focused = self.description_focus.is_focused(window)
             || self.commit_options_focus.is_focused(window);
-        let avatar = self
-            .state
-            .read(cx)
-            .selected_state()
-            .and_then(|rs| rs.info.as_ref())
-            .and_then(|i| i.identity.email.as_deref())
-            .and_then(|email| avatar_lookup(email, cx));
         let (is_github, co_authors_visible) = {
             let s = self.state.read(cx);
             let is_github = s
@@ -5416,7 +5415,7 @@ impl ChangesSidebar {
                     .items_center()
                     .gap(SPACING_HALF())
                     .mb(SPACING())
-                    .child(avatar_image(avatar, AVATAR_SIZE(), cx))
+                    .child(self.avatar.clone())
                     .children(self.conventional_type_button(cx))
                     .child(
                         // the icon sits over the field's border box, outside

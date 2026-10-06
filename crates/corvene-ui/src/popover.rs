@@ -3,8 +3,9 @@
 //! its anchor by floating-ui (`computePosition` with `offset(TipSize)` and
 //! `shift({ padding: 10 })`) and a tip pointing at the anchor's centre.
 //!
-//! Only the bottom placements are ported (the ones the balloons use here);
-//! floating-ui's `flip` never applies to them in the main window.
+//! Only the bottom placements and `RightBottom` (the commit form avatar's)
+//! are ported (the ones the balloons use here); floating-ui's `flip` never
+//! applies to them in the main window.
 
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -93,6 +94,64 @@ pub fn balloon_popover_zoomed(
                 t.background,
             ))),
     )
+}
+
+/// GHD `PopoverAnchorPosition.RightBottom` (`right-end`): `component` to
+/// the right of `anchor` with their bottom edges aligned and the tip on its
+/// left edge pointing at the anchor's centre.
+pub fn balloon_popover_right_bottom(
+    anchor: Bounds<Pixels>,
+    component: impl IntoElement,
+    cx: &App,
+) -> Deferred {
+    let t = cx.ghd();
+    let anchor_center = anchor.center().y;
+    // floating-ui keeps the arrow `TipCornerPadding` inside the bottom
+    // border, which can push the popover below the anchor's bottom edge
+    let bottom = anchor
+        .bottom()
+        .max(anchor_center + zpx(TIP_SIZE + TIP_CORNER_PADDING + 1.));
+    deferred(
+        anchored()
+            .anchor(Anchor::BottomLeft)
+            .position(point(anchor.right() + zpx(TIP_SIZE), bottom))
+            .child(div().relative().child(component).child(side_tip(
+                anchor_center,
+                t.box_border,
+                t.background,
+            ))),
+    )
+}
+
+/// [`tip`] on the popover's left edge, pointing left at `anchor_center`.
+fn side_tip(anchor_center: Pixels, border: Hsla, background: Hsla) -> AnyElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let unit = zpx(1.);
+            let page = |v: Pixels| f32::from(v) / f32::from(unit);
+            let height = page(bounds.size.height);
+            let tip_box = TIP_SIZE * 2.;
+            let arrow_y = (page(anchor_center) - page(bounds.top()) - TIP_SIZE)
+                .min(height - tip_box - TIP_CORNER_PADDING)
+                .max(TIP_CORNER_PADDING);
+            let at = |x: f32, y: f32| {
+                point(bounds.left() + zpx(x), bounds.top() + zpx(1. + arrow_y + y))
+            };
+            let tri = |apex: f32, base: f32| {
+                let mut path = Path::new(at(apex, TIP_SIZE));
+                path.line_to(at(base, tip_box));
+                path.line_to(at(base, 0.));
+                path.line_to(at(apex, TIP_SIZE));
+                path
+            };
+            window.paint_path(tri(-7., 0.), border);
+            window.paint_path(tri(-6., 1.), background);
+        },
+    )
+    .absolute()
+    .inset_0()
+    .into_any_element()
 }
 
 /// `.popover-tip` above the popover: floating-ui's `arrow` puts its 16 px

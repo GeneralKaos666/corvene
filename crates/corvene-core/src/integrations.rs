@@ -1423,6 +1423,51 @@ impl Dispatcher {
         );
     }
 
+    /// GHD `onUpdateUserEmail` (`ui/changes/commit-message.tsx`): the commit
+    /// form avatar's Update Email sets the global `user.email`. Corvene
+    /// `1309-commit-identity-update` passes `name` too, and with `local`
+    /// (the repository already has its own identity) writes both to the
+    /// repository's config. Empty values are skipped.
+    pub fn update_commit_identity(
+        id: u64,
+        name: Option<String>,
+        email: String,
+        local: bool,
+        cx: &mut dyn Host,
+    ) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        let email = email.trim().to_string();
+        spawn_bg(
+            cx,
+            move || {
+                let set = |key: &str, value: &str| {
+                    if local {
+                        corvene_git::set_local_config_value(git.clone(), &workdir, key, value)
+                    } else {
+                        corvene_git::set_global_config_value(git.clone(), key, value)
+                    }
+                };
+                if let Some(name) = &name {
+                    set("user.name", name)?;
+                }
+                if !email.is_empty() {
+                    set("user.email", &email)?;
+                }
+                Ok::<_, corvene_git::GitError>(())
+            },
+            move |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not update your Git identity", &err, cx);
+                }
+                Self::refresh_repository(id, cx);
+                Self::load_global_git_config(cx);
+            },
+        );
+    }
+
     /// Settings › Git › Default branch name, written on its own
     /// (`init.defaultBranch`), then re-read.
     pub fn set_global_default_branch(name: String, cx: &mut dyn Host) {
@@ -1729,6 +1774,7 @@ impl Dispatcher {
                 .local_email
                 .clone()
                 .or_else(|| data.global.email.clone()),
+            local: data.local_name.is_some() || data.local_email.is_some(),
         }
     }
 

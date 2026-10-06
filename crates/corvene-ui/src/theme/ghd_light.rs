@@ -98,6 +98,8 @@ pub fn theme() -> GhdTheme {
         co_author_tag_border: c(BLUE_200),
         input_icon_warning: c(YELLOW_800),
         input_icon_error: c(RED_600),
+        commit_warning_badge_background: c(GRAY_000),
+        commit_warning_badge_border: c(GRAY_300),
         input_icon_hover_background: c(GRAY_100),
 
         error: c(RED),

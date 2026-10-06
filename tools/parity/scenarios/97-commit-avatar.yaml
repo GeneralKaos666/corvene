@@ -1,0 +1,47 @@
+# The commit form's avatar button (GHD `CommitMessageAvatar`,
+# `ui/changes/commit-message-avatar.tsx`): its popover without a warning,
+# then (Corvene only, stub GitHub API) the misattribution warning of a
+# repository whose `user.email` is not the account's, in GHD's form and
+# with 1309-commit-identity-update's Name box (desktop/desktop#11760).
+name: commit-avatar
+description: Commit form avatar popover (Committing as, Open Git Settings)
+setup: repo
+steps:
+  - click: [23, 583]
+    wait: 600
+  - dump: {name: open, root: ".popover-component"}
+  - snap: open
+---
+name: commit-avatar-misattributed
+description: Commit form avatar misattribution warning, GHD's email-only form (Corvene only, stub API)
+setup: repo-remote
+github_stub: true
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 1500
+  - snap: {name: badge, corvene_only: true, note: "GHD needs a GitHub repository for the warning (the stub API is Corvene's)"}
+  - ghd: {skip: true}
+    corvene: {click: [23, 583]}
+    wait: 600
+  - snap: {name: warning, corvene_only: true}
+---
+name: commit-avatar-identity
+description: Commit form avatar misattribution warning with the Name box (Corvene only, stub API)
+setup: repo-remote
+github_stub: true
+corvene_flags: 1309-commit-identity-update=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 1500
+  - ghd: {skip: true}
+    corvene: {click: [23, 583]}
+    wait: 600
+  - snap: {name: warning-name, corvene_only: true, note: "GHD changes the email only (deviations.md, 1309-commit-identity-update)"}
+  # Update writes the name and email to the fixture's own config (it has a
+  # local identity), so the warning goes away
+  - ghd: {skip: true}
+    corvene: {click: [241, 556]}
+    wait: 2500
+  - snap: {name: updated, corvene_only: true}
