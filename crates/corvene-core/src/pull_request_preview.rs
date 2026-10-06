@@ -187,6 +187,12 @@ impl Dispatcher {
         mut preview: PullRequestPreview,
         cx: &mut dyn Host,
     ) {
+        // `1314-code-owners`: a pull request follows its base branch's file
+        if slot == PreviewSlot::PullRequest
+            && let Some(base) = preview.base_branch.clone()
+        {
+            Self::load_code_owners_at(id, base, true, cx);
+        }
         let generation = Self::state(cx).update(cx, |s, cx| {
             let target = slot.slot(s.repo_state_mut(id));
             let generation = target.as_ref().map(|p| p.generation + 1).unwrap_or(1);

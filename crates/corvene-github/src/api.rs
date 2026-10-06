@@ -1785,6 +1785,26 @@ impl Client {
         Ok(users.into_iter().map(|u| u.login).collect())
     }
 
+    /// Corvene (`1314-code-owners`): `GET /user/teams`, the user's teams as
+    /// CODEOWNERS names them (`@org/slug`; at most 10 pages of 100).
+    pub fn user_teams(&self) -> Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Team {
+            slug: String,
+            organization: ApiOwner,
+        }
+        let teams: Vec<Team> = self.fetch_all(
+            "user/teams?per_page=100",
+            10,
+            get_next_page_path_from_link,
+            |_| true,
+        )?;
+        Ok(teams
+            .into_iter()
+            .map(|t| format!("@{}/{}", t.organization.login, t.slug))
+            .collect())
+    }
+
     /// Corvene (`336-request-reviewers`): ask `add` for a review of pull
     /// request `number` (`POST …/pulls/{number}/requested_reviewers`) and
     /// withdraw the request from `remove` (`DELETE`, same path). A refusal

@@ -1931,6 +1931,60 @@ impl PreferencesDialog {
                     .bool(corvene_core::flags::ids::FILE_ICONS),
                 |d| d.child(self.file_icons_field(language_extensions, cx)),
             )
+            // Corvene addition: `1314-code-owners`
+            .when(
+                self.state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::CODE_OWNERS),
+                |d| d.child(self.code_owners_field(cx)),
+            )
+            .into_any_element()
+    }
+
+    /// Appearance › Code owners (`1314-code-owners`): a file row's owners
+    /// as a name or a shield icon.
+    fn code_owners_field(&self, cx: &Context<Self>) -> AnyElement {
+        use corvene_core::CodeOwnersDisplay;
+        let choices = [CodeOwnersDisplay::Label, CodeOwnersDisplay::Icon];
+        let options: Vec<SharedString> = vec!["Owner names".into(), "Shield icon".into()];
+        let selected_ix = choices
+            .iter()
+            .position(|c| *c == self.draft.code_owners_display);
+        let value = selected_ix
+            .and_then(|ix| options.get(ix).cloned())
+            .unwrap_or_else(|| options[0].clone());
+        let weak = cx.weak_entity();
+        let on_select: SelectHandler = Rc::new(move |ix, _, cx| {
+            if let Some(choice) = choices.get(ix).copied() {
+                weak.update(cx, |this, cx| {
+                    this.draft.code_owners_display = choice;
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
+        div()
+            .flex()
+            .flex_col()
+            .mt(SPACING())
+            .child(labeled(
+                mac_or("Code Owners", "Code owners"),
+                select_button(
+                    "prefs-code-owners",
+                    value,
+                    options,
+                    selected_ix,
+                    false,
+                    on_select,
+                    cx,
+                ),
+                cx,
+            ))
+            .child(settings_description(cx).mt(zpx(2.)).child(
+                "How files show their owners from the repository's CODEOWNERS file. Owners \
+                 that are you or one of your teams are highlighted.",
+            ))
             .into_any_element()
     }
 

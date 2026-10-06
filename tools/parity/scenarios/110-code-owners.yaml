@@ -1,0 +1,26 @@
+# CODEOWNERS owners in the file lists (1314-code-owners, off in the GitHub
+# Desktop preset): the Changes list (work tree file), History's selected
+# commit (that commit's file) and Settings › Appearance › Code owners.
+# Recorded, not compared: GHD shows no owners.
+name: 110-code-owners
+description: "Corvene-only: CODEOWNERS owners in Changes, History and Settings (1314)"
+setup: repo-codeowners
+github_stub: true
+corvene_flags: 1314-code-owners=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 2000
+  - snap: {name: changes, corvene_only: true, note: "owner names before the status icons; @octocat's own files in the link colour (deviations.md, 1314-code-owners)"}
+  - ghd: {skip: true}
+    corvene: {click: [187, 97]}
+    wait: 1200
+  - snap: {name: history, corvene_only: true, note: "the newest commit adds CODEOWNERS; its file row shows the catch-all owner"}
+  - ghd: {skip: true}
+    corvene: {click: [124, 275]}
+    wait: 1200
+  - snap: {name: history-older, corvene_only: true, note: "a commit before CODEOWNERS existed: no owners"}
+  - ghd: {skip: true}
+    corvene: {popup: "preferences:appearance"}
+    wait: 800
+  - snap: {name: appearance, corvene_only: true, note: "Settings › Appearance › Code owners"}

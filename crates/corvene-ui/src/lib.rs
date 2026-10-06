@@ -16,6 +16,7 @@ pub mod changes;
 pub mod ci_check_popover;
 pub mod ci_status;
 pub mod cloneable_repositories;
+pub mod code_owners;
 pub mod cloning_view;
 pub mod commit_graph;
 pub mod commit_message_avatar;

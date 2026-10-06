@@ -545,6 +545,10 @@ class _Handler(BaseHTTPRequestHandler):
                               {"X-OAuth-Scopes": ", ".join(self.server.scopes)})
         if path == "/api/v3/user/orgs":
             return self._send(200, [])
+        # `1314-code-owners`: octocat is on octo-org's rust team
+        if path == "/api/v3/user/teams":
+            teams = [{"slug": "rust", "name": "Rust", "organization": _user("octo-org")}]
+            return self._send(200, teams if login == "octocat" else [])
         if self.server.pr_events.get(self, path, params, login):
             return
         if path == repo:

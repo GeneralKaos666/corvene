@@ -1969,6 +1969,8 @@ impl Dispatcher {
                 Self::refresh_branch_protection(id, cx);
                 // `1113-lfs-locks` (throttled)
                 Self::refresh_lfs_locks(id, false, cx);
+                // `1314-code-owners`
+                Self::refresh_code_owners(id, cx);
                 let (rerun, prune) = Self::state(cx).update(cx, |s, _| {
                     let rs = s.repo_state_mut(id);
                     (
@@ -3044,6 +3046,15 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
+        // `1314-code-owners`: the owners as of the (first) selected commit
+        if let Some(sha) = Self::state(cx)
+            .read(cx)
+            .repo_states
+            .get(&id)
+            .and_then(|rs| rs.selected_commit.clone())
+        {
+            Self::load_code_owners_at(id, sha, false, cx);
+        }
         let (ordered, contiguous) = {
             let s = Self::state(cx).read(cx);
             let Some(rs) = s.repo_states.get(&id) else {

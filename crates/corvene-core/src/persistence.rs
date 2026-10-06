@@ -135,6 +135,10 @@ pub struct Settings {
     /// Corvene (`354`): what a click on one of those notifications opens.
     #[serde(default)]
     pub pull_request_notification_click: NotificationClickAction,
+    /// Corvene (`1314-code-owners`): how a file row shows its owners
+    /// (Settings › Appearance › Code owners).
+    #[serde(default)]
+    pub code_owners_display: CodeOwnersDisplay,
     /// GHD `useExternalCredentialHelper` (Git Credential Manager).
     #[serde(default)]
     pub use_external_credential_helper: bool,
@@ -436,6 +440,16 @@ pub enum NotificationClickAction {
     OpenOnGitHub,
 }
 
+/// Corvene (`1314-code-owners`): a file row's owners as text or an icon.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CodeOwnersDisplay {
+    /// The first owner and "+N" for more.
+    #[default]
+    Label,
+    /// A shield icon; the owners are in its tooltip.
+    Icon,
+}
+
 /// GHD `UncommittedChangesStrategy`
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UncommittedChangesStrategy {
@@ -488,6 +502,7 @@ impl Default for Settings {
             menu_bar_repositories: Vec::new(),
             pull_request_event_notifications: PullRequestEventNotifications::default(),
             pull_request_notification_click: NotificationClickAction::default(),
+            code_owners_display: CodeOwnersDisplay::default(),
             use_external_credential_helper: false,
             underline_links: true,
             show_diff_check_marks: true,

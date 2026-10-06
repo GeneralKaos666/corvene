@@ -942,6 +942,8 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
     // (Branch › Review Pull Request… needs the branch's pull request)
     if with_account && let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
         Dispatcher::refresh_pull_requests(id, true, cx);
+        // `1314-code-owners`: the owners that are the new account's
+        Dispatcher::refresh_code_owners(id, cx);
         if lookup {
             Dispatcher::resolve_repository_account(id, cx);
         }

@@ -8542,6 +8542,26 @@ registry! {
         code: &["crates/corvene-core/src/changelists.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/dialogs/changelist_dialogs.rs", "crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/stash_list.rs"],
     },
 
+    /// The CODEOWNERS owners of each changed file.
+    CODE_OWNERS = 1314 "code-owners" {
+        title: "Code owners",
+        summary: "In a repository with a CODEOWNERS file (.github/, the root or docs/, read as \
+                  GitHub does) each file in the Changes list, the selected commit's files and \
+                  Preview Pull Request shows its owners: the first one and \"+N\", or a shield \
+                  icon (Settings › Appearance), with every owner and the CODEOWNERS line in the \
+                  tooltip. Owners that are you or one of your teams are highlighted. Changes \
+                  follow the work tree's file, a commit its own, a pull request its base \
+                  branch's, which also lists each owner and their file count above the files, \
+                  other teams first.",
+        ghd_behaviour: "Code owners only show on GitHub.com.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20909)],
+        code: &["crates/corvene-core/src/codeowners.rs", "crates/corvene-ui/src/code_owners.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs", "crates/corvene-ui/src/dialogs/open_pull_request.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

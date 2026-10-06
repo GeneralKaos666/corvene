@@ -640,6 +640,33 @@ impl Render for OpenPullRequestDialog {
                         .child(div().flex_1().child("Showing changes from all commits"))
                         .child(diff_options_button(&self.diff, cx)),
                 )
+                // `1314-code-owners`: who owns the changed files, as the
+                // base branch's CODEOWNERS says
+                .children(
+                    preview
+                        .base_branch
+                        .as_deref()
+                        .filter(|_| !preview.compare_only)
+                        .and_then(|base| {
+                            crate::code_owners::summary(
+                                self.repo,
+                                base,
+                                preview
+                                    .changeset
+                                    .iter()
+                                    .flat_map(|c| c.files.iter().map(|f| f.path.as_str())),
+                                cx,
+                            )
+                        })
+                        .map(|row| {
+                            row.flex_none()
+                                .px(SPACING())
+                                .py(SPACING_HALF())
+                                .border_1()
+                                .border_t_0()
+                                .border_color(t.box_border)
+                        }),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -989,6 +1016,10 @@ pub(crate) fn range_file_list(
         .unwrap_or_default();
     let selected = preview.file.clone();
     let hover_bg = t.list_item_hover_background;
+    // `1314-code-owners`: a pull request follows its base branch's file
+    let owners_base = (slot == PreviewSlot::PullRequest && !preview.compare_only)
+        .then(|| preview.base_branch.clone())
+        .flatten();
     div()
         .size_full()
         .flex()
@@ -1016,6 +1047,14 @@ pub(crate) fn range_file_list(
                         color
                     };
                     let path = file.path.clone();
+                    let code_owners = owners_base.as_deref().and_then(|base| {
+                        crate::code_owners::row_owners(
+                            Some(repo),
+                            corvene_core::codeowners::CodeOwnersSource::Rev(base),
+                            &file.path,
+                            cx,
+                        )
+                    });
                     div()
                         .id(SharedString::from(format!("{id}-{}", file.path)))
                         .a11y_row(
@@ -1074,6 +1113,15 @@ pub(crate) fn range_file_list(
                                         .child(file.file_name().to_string()),
                                 ),
                         )
+                        .when_some(code_owners, |d, (owners, location)| {
+                            d.child(crate::code_owners::badge(
+                                format!("{id}-{}", file.path),
+                                &owners,
+                                &location,
+                                (is_selected && focused).then_some(t.box_selected_active_text),
+                                cx,
+                            ))
+                        })
                         .child(octicon(icon, color))
                 }))
                 .with_scrollbar_handle(scroll),

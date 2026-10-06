@@ -1645,6 +1645,8 @@ pub struct RepositoryState {
     pub uses_lfs: bool,
     /// `1113-lfs-locks`: the LFS server's locks, once asked.
     pub lfs_locks: Option<crate::lfs_locks::LfsLockState>,
+    /// `1314-code-owners`: the CODEOWNERS files the file lists follow.
+    pub code_owners: crate::codeowners::CodeOwnersState,
     // ---- `345-issues` ----
     /// Repository › Issues…: History lists the issues instead (also holds
     /// the New Issue… labels and assignees while the list is closed).

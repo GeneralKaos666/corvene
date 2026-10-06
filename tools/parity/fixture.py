@@ -48,6 +48,16 @@ _WORKING_CHANGES = {
 }
 _DELETED = ["docs/old.md"]
 
+# `repo-codeowners` (`1314-code-owners`): owners for every file, the
+# sources (one of them the stub's signed-in octocat), the docs and README
+_CODEOWNERS = """# Owners of the parity fixture
+*            @octo-org/maintainers
+/src/        @octocat @octo-org/rust
+docs/        @mona
+README.md    @hubot docs@example.com
+notes.txt
+"""
+
 # `repo-coauthors`: commits by several people (`AvatarStack`), the newest
 # first in History: six people (the stack's "more" sliver), four, three
 # (a different committer), two
@@ -423,7 +433,7 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
-          forks: bool = False, mismatch: bool = False) -> Path:
+          forks: bool = False, mismatch: bool = False, codeowners: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -446,7 +456,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     changes, so commits can be squashed. With `forks` (and `remote`), see
     `_forks` (`1223-checkout-from-fork`). With `mismatch` (and `remote`),
     `issue-134` is checked out off main, tracking `origin/main`
-    (`1222-push-target-guard`)."""
+    (`1222-push-target-guard`). With `codeowners`, a commit adds
+    `_CODEOWNERS` as `.github/CODEOWNERS` (`1314-code-owners`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -466,6 +477,12 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
             _git(repo, "branch", "feature/login")
             _git(repo, "branch", "bugfix/typo-in-guide")
     _git(repo, "tag", "v0.1.0", "HEAD~1")
+    if codeowners:
+        p = repo / ".github" / "CODEOWNERS"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(_CODEOWNERS)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "Add code owners", date="2026-09-20T09:00:00+00:00")
     if coauthors:
         for i, (date, summary, count, committer) in enumerate(_CO_AUTHORED):
             (repo / "TEAM.md").write_text("".join(f"- {n}\n" for n, _ in _PEOPLE[: i + 1]))

@@ -7421,6 +7421,13 @@ fn file_row(
         .map(|(_, hits)| hits)
         .unwrap_or_default();
     let lfs_lock = file_lfs_lock(repo_id, &file.path, cx);
+    // `1314-code-owners`: the work tree's CODEOWNERS
+    let code_owners = crate::code_owners::row_owners(
+        repo_id,
+        corvene_core::codeowners::CodeOwnersSource::WorkTree,
+        &file.path,
+        cx,
+    );
     // `117-file-icons`
     let file_icon = crate::file_icons::file_icons(cx).map(|icons| {
         let color = match (is_selected, list_focused) {
@@ -7644,6 +7651,16 @@ fn file_row(
                 } else {
                     t.text_secondary
                 },
+            ))
+        })
+        // `1314-code-owners`
+        .when_some(code_owners, |d, (owners, location)| {
+            d.child(crate::code_owners::badge(
+                file.path.clone(),
+                &owners,
+                &location,
+                (is_selected && list_focused).then_some(t.box_selected_active_text),
+                cx,
             ))
         })
         .child(octicon(icon, color))

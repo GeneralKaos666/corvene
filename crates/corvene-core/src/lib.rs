@@ -22,6 +22,7 @@ pub mod changelists;
 pub mod changes_state;
 pub mod clean_untracked;
 pub mod clone_info;
+pub mod codeowners;
 pub mod cloning_repositories_store;
 pub mod commit_checks;
 pub mod commit_graph;
@@ -142,7 +143,7 @@ pub use mco::{
 };
 pub use packs::{OFFERED_PACKS, PackProgress, PacksState, offered_packs};
 pub use persistence::{
-    CustomIntegration, DEFAULT_DATE_FORMAT, DEFAULT_NUMBER_FORMAT, DEFAULT_TIME_FORMAT,
+    CodeOwnersDisplay, CustomIntegration, DEFAULT_DATE_FORMAT, DEFAULT_NUMBER_FORMAT, DEFAULT_TIME_FORMAT,
     NotificationClickAction, PullRequestEventNotifications, Settings, StoreExt, TAB_SIZE_DEFAULT,
     UncommittedChangesStrategy,
 };

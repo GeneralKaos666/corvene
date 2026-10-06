@@ -1824,6 +1824,19 @@ fn commit_file_row(
                 ))
             },
         )
+        // `1314-code-owners`: the selected commit's CODEOWNERS
+        .when_some(
+            commit_code_owners(id, &file.path, cx),
+            |d, (owners, location)| {
+                d.child(crate::code_owners::badge(
+                    file.path.clone(),
+                    &owners,
+                    &location,
+                    (is_selected && list_focused).then_some(t.box_selected_active_text),
+                    cx,
+                ))
+            },
+        )
         .child(octicon(icon, color))
         // `621-context-menu-buttons`
         .when(crate::context_menu::row_menu_buttons(cx), |d| {
@@ -2174,4 +2187,24 @@ impl Render for SelectedCommitView {
             )
             .into_any_element()
     }
+}
+
+/// `1314-code-owners`: `path`'s owners in the selected commit's CODEOWNERS.
+fn commit_code_owners(
+    id: u64,
+    path: &str,
+    cx: &App,
+) -> Option<(corvene_core::codeowners::RowOwners, String)> {
+    let sha = AppState::try_global(cx)?
+        .read(cx)
+        .repo_states
+        .get(&id)?
+        .selected_commit
+        .clone()?;
+    crate::code_owners::row_owners(
+        Some(id),
+        corvene_core::codeowners::CodeOwnersSource::Rev(&sha),
+        path,
+        cx,
+    )
 }
