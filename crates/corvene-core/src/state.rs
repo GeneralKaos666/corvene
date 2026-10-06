@@ -1020,9 +1020,11 @@ pub enum RetryAction {
     },
     Pull,
     Fetch,
-    /// Rebase the current branch onto `base` (flag `833`).
+    /// Rebase the current branch (or `target`, Corvene
+    /// `1224-rebase-branch-onto-current`) onto `base` (flag `833`).
     Rebase {
         base: String,
+        target: Option<String>,
     },
     /// Branch › Push To ▸ `remote` (flag `1210-push-to-other-remote`).
     PushToRemote {

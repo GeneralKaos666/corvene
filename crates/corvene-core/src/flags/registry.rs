@@ -8093,6 +8093,23 @@ registry! {
         code: &["crates/corvene-core/src/fork_checkout.rs", "crates/corvene-ui/src/dialogs/checkout_from_fork.rs", "crates/corvene-git/src/remote_ops.rs"],
     },
 
+    /// Rebase another branch onto the current one from the branch list.
+    REBASE_BRANCH_ONTO_CURRENT = 1224 "rebase-branch-onto-current" {
+        title: "Rebase a branch onto the current one",
+        summary: "A local branch's menu in the branch list has \"Rebase <branch> onto Current \
+                  Branch\", which replays that branch's commits on top of the branch you are on \
+                  (git rebase <current> <branch>) with the usual progress, conflict handling, \
+                  force push warning and Undo, and leaves the rebased branch checked out.",
+        ghd_behaviour: "Only the current branch can be rebased, so bringing another branch up \
+                        to date means switching to it first and rebasing it onto this one.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(15282)],
+        code: &["crates/corvene-ui/src/branch_list.rs", "crates/corvene-core/src/mco.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.

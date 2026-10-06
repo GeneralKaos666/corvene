@@ -1,0 +1,28 @@
+# Branch list › "Rebase feature/login onto Current Branch"
+# (1224-rebase-branch-onto-current, off in the GitHub Desktop preset;
+# desktop/desktop#15282): the fixture's feature/login is two commits behind
+# main, so it is rebased (fast-forwarded) onto it and stays checked out;
+# the fixture's changes are stashed first (833-rebase-stash-and-continue).
+# GHD has no such item, so nothing is compared.
+name: rebase-branch-onto-current
+description: Rebase another branch onto the current one from the branch list (Corvene only)
+setup: repo
+corvene_flags: 1224-rebase-branch-onto-current=on,833-rebase-stash-and-continue=on
+steps:
+  - ghd: {skip: true}
+    corvene: {key: cmd-b}
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {type: login}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {rclick: [315, 171]}
+    wait: 500
+  - corvene_menu: branch
+  - corvene_menu_pick: "Rebase feature/login onto Current Branch"
+    wait: 1500
+  - snap: {name: stash, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [869, 538]}
+    wait: 3000
+  - snap: {name: rebased, corvene_only: true, note: "GHD rebases only the current branch (deviations.md, 1224-rebase-branch-onto-current)"}

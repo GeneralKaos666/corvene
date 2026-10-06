@@ -617,6 +617,9 @@ pub struct MergePreview {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RebasePreview {
     pub base_branch: String,
+    /// The branch rebased onto `base_branch`; `None` for the current one
+    /// (Corvene `1224-rebase-branch-onto-current` names another).
+    pub target: Option<String>,
     /// Commits on the current branch that will be replayed (`commitsAhead`).
     pub commits_ahead: Vec<CommitOneLine>,
     /// Commits on the base branch missing from the current one (`commitsBehind`).
@@ -992,7 +995,9 @@ impl Dispatcher {
             } => Self::push(id, force_with_lease, branch, cx),
             RetryAction::Pull => Self::pull(id, cx),
             RetryAction::Fetch => Self::fetch(id, false, cx),
-            RetryAction::Rebase { base } => Self::start_rebase(id, base, false, cx),
+            RetryAction::Rebase { base, target } => {
+                Self::start_rebase_of(id, base, target, false, cx)
+            }
             RetryAction::PushToRemote { remote } => Self::push_to_remote(id, remote, cx),
         }
     }
@@ -1249,7 +1254,7 @@ impl Dispatcher {
 
     /// `updateRebasePreview`
     pub fn preview_rebase(id: u64, base_branch: String, cx: &mut dyn Host) {
-        Self::preview_rebase_then(id, base_branch, |_, _| {}, cx);
+        Self::preview_rebase_then(id, base_branch, None, |_, _| {}, cx);
     }
 
     /// Update from Default Branch with `pull.rebase` set
@@ -1262,6 +1267,7 @@ impl Dispatcher {
         Self::preview_rebase_then(
             id,
             base_branch.clone(),
+            None,
             move |preview, cx| {
                 if !preview.valid {
                     Self::show_error(
@@ -1285,10 +1291,12 @@ impl Dispatcher {
         );
     }
 
-    /// [`Self::preview_rebase`], then `then(preview)` once it is stored.
+    /// [`Self::preview_rebase`] of `target` (`None`: the current branch),
+    /// then `then(preview)` once it is stored.
     fn preview_rebase_then(
         id: u64,
         base_branch: String,
+        target: Option<String>,
         then: impl FnOnce(RebasePreview, &mut dyn Host) + 'static,
         cx: &mut dyn Host,
     ) {
@@ -1296,23 +1304,26 @@ impl Dispatcher {
             return;
         };
         let base = base_branch.clone();
+        let tip = target.clone().unwrap_or_else(|| "HEAD".to_string());
         spawn_bg(
             cx,
             move || {
-                let ahead = corvene_git::commits_between(git.clone(), &workdir, &base, "HEAD");
-                let behind = corvene_git::commits_between(git, &workdir, "HEAD", &base);
+                let ahead = corvene_git::commits_between(git.clone(), &workdir, &base, &tip);
+                let behind = corvene_git::commits_between(git, &workdir, &tip, &base);
                 (ahead, behind)
             },
             move |(ahead, behind), cx| {
                 let preview = match (ahead, behind) {
                     (Ok(Some(ahead)), Ok(Some(behind))) => RebasePreview {
                         base_branch: base_branch.clone(),
+                        target,
                         commits_ahead: ahead,
                         behind: behind.len(),
                         valid: true,
                     },
                     _ => RebasePreview {
                         base_branch: base_branch.clone(),
+                        target,
                         commits_ahead: Vec::new(),
                         behind: 0,
                         valid: false,
@@ -1329,10 +1340,74 @@ impl Dispatcher {
 
     /// `startRebase`: warn about a force push when needed, then rebase.
     pub fn start_rebase(id: u64, base_branch: String, force_push_checked: bool, cx: &mut dyn Host) {
+        Self::start_rebase_of(id, base_branch, None, force_push_checked, cx);
+    }
+
+    /// Corvene `1224-rebase-branch-onto-current`: the branch list's "Rebase
+    /// <branch> onto <current>": `git rebase <current> <branch>`, which
+    /// leaves `branch` checked out (GHD only rebases the current branch).
+    pub fn rebase_branch_onto_current(id: u64, branch: String, cx: &mut dyn Host) {
+        let Some((current, _)) = Self::current_branch_and_tip(id, cx) else {
+            return;
+        };
+        if current == branch {
+            return;
+        }
+        Self::preview_rebase_then(
+            id,
+            current.clone(),
+            Some(branch.clone()),
+            move |preview, cx| {
+                if !preview.valid {
+                    Self::show_error(
+                        "Could not rebase",
+                        format!("Unable to rebase {branch} onto {current}."),
+                        cx,
+                    );
+                } else if preview.behind == 0 {
+                    Self::set_banner(
+                        Banner::BranchAlreadyUpToDate {
+                            our_branch: branch,
+                            their_branch: Some(current),
+                        },
+                        cx,
+                    );
+                } else {
+                    Self::start_rebase_of(id, current, Some(branch), false, cx);
+                }
+            },
+            cx,
+        );
+    }
+
+    /// [`Self::start_rebase`] of `target`, the current branch when `None`.
+    fn start_rebase_of(
+        id: u64,
+        base_branch: String,
+        target: Option<String>,
+        force_push_checked: bool,
+        cx: &mut dyn Host,
+    ) {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let Some((target, tip)) = Self::current_branch_and_tip(id, cx) else {
+        let retry_target = target.clone();
+        let Some((target, tip)) = (match target {
+            Some(name) => {
+                let found = Self::branch_by_name(id, &name, cx)
+                    .filter(|b| b.kind == corvene_models::BranchKind::Local)
+                    .map(|b| (name.clone(), b.tip));
+                if found.is_none() {
+                    Self::show_error(
+                        "Could not rebase",
+                        format!("The branch {name} no longer exists."),
+                        cx,
+                    );
+                }
+                found
+            }
+            None => Self::current_branch_and_tip(id, cx),
+        }) else {
             return;
         };
         // flag `833`: git refuses to rebase over local changes; offer the
@@ -1345,6 +1420,7 @@ impl Dispatcher {
                 id,
                 RetryAction::Rebase {
                     base: base_branch.clone(),
+                    target: retry_target.clone(),
                 },
                 cx,
             )
@@ -1356,7 +1432,7 @@ impl Dispatcher {
             .repo_states
             .get(&id)
             .and_then(|r| r.rebase_preview.as_ref())
-            .filter(|p| p.base_branch == base_branch)
+            .filter(|p| p.base_branch == base_branch && p.target == retry_target)
             .map(|p| p.commits_ahead.clone())
             .unwrap_or_default();
         Self::init_mco(

@@ -1633,6 +1633,13 @@ impl BranchFoldout {
                         .flags
                         .bool(corvene_core::flags::ids::BRANCH_MENU_REBASE_ONTO)
                         .then(|| branch.name.clone());
+                    // `1224-rebase-branch-onto-current`
+                    let rebase_this = (local
+                        && AppState::global(cx)
+                            .read(cx)
+                            .flags
+                            .bool(corvene_core::flags::ids::REBASE_BRANCH_ONTO_CURRENT))
+                    .then(|| branch.name.clone());
                     let can_rebase = !current && {
                         let s = AppState::global(cx).read(cx);
                         s.repo_states.get(&id).is_some_and(|r| {
@@ -1749,7 +1756,7 @@ impl BranchFoldout {
                         }));
                         items.push(MenuItem::separator());
                     }
-                    if let Some(base) = rebase_onto {
+                    if let Some(base) = rebase_onto.clone() {
                         items.push(
                             MenuItem::new(
                                 if IS_MAC {
@@ -1764,6 +1771,24 @@ impl BranchFoldout {
                             )
                             .enabled(can_rebase),
                         );
+                    }
+                    if let Some(name) = rebase_this.clone() {
+                        items.push(
+                            MenuItem::new(
+                                if IS_MAC {
+                                    format!("Rebase {name} onto Current Branch")
+                                } else {
+                                    format!("Rebase {name} onto current branch")
+                                },
+                                move |_, cx| {
+                                    Dispatcher::close_foldout(cx);
+                                    Dispatcher::rebase_branch_onto_current(id, name.clone(), cx);
+                                },
+                            )
+                            .enabled(can_rebase),
+                        );
+                    }
+                    if rebase_onto.is_some() || rebase_this.is_some() {
                         items.push(MenuItem::separator());
                     }
                     items.extend([MenuItem::new("Delete…", move |_, cx| {
