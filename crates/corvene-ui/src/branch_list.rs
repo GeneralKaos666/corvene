@@ -248,6 +248,22 @@ pub fn no_branches(
     }
 }
 
+/// Flag `1223-checkout-from-fork`: the owner (or `owner/name`) and branch
+/// of an `owner:branch` filter (GitHub's copy-branch-name format).
+fn fork_branch_query(query: &str, cx: &App) -> Option<(String, String)> {
+    let parsed = corvene_core::fork_checkout::parse_fork_input(query)?;
+    let branch = parsed.branch.filter(|_| parsed.url.is_none())?;
+    let repo = match parsed.name {
+        Some(name) => format!("{}/{name}", parsed.owner),
+        None => parsed.owner,
+    };
+    AppState::global(cx)
+        .read(cx)
+        .flags
+        .bool(corvene_core::flags::ids::CHECKOUT_FROM_FORK)
+        .then_some((repo, branch))
+}
+
 /// Flag `849-branch-filter-strips-owner`: `owner:branch` (GitHub's
 /// copy-branch-name format) filters by `branch`. `:` can't appear in a ref
 /// name, so nothing that could match is lost.
@@ -2033,6 +2049,35 @@ impl BranchFoldout {
                             cx,
                         )
                     }),
+            )
+            // Corvene (`1223-checkout-from-fork`): `owner:branch` that no
+            // branch matches checks it out from that owner's fork
+            .when_some(
+                fork_branch_query(&self.filter.read(cx).value(), cx),
+                |d, (owner, branch)| {
+                    d.child(
+                        crate::widgets::button(
+                            "no-branches-checkout-from-fork",
+                            if crate::context_menu::IS_MAC {
+                                format!("Check Out {owner}:{branch} from Fork…")
+                            } else {
+                                format!("Check out {owner}:{branch} from fork…")
+                            },
+                            cx,
+                        )
+                        .mx(SPACING_DOUBLE())
+                        .mb(SPACING_DOUBLE())
+                        .self_stretch()
+                        .on_click(move |_, _, cx| {
+                            Dispatcher::show_checkout_from_fork(
+                                id,
+                                Some(owner.clone()),
+                                Some(branch.clone()),
+                                cx,
+                            )
+                        }),
+                    )
+                },
             )
             .child(
                 // `.protip` with a `KeyboardShortcut` (⌘⇧N) in the sentence

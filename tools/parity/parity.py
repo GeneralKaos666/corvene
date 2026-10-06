@@ -149,11 +149,14 @@ class Run:
         # `repo-utf16`: with an edited UTF-16 MQL5 file (`1306-utf16-diffs`)
         # `repo-stacked`: `stack/top` checked out on `stack/base` on main, no
         # working changes (`1221-stacked-branch-refs`)
+        # `repo-forks`: `repo-remote` plus alice's and bob's forks beside it,
+        # served by the stub API (`1223-checkout-from-fork`)
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
                              "repo-reflog", "repo-tools", "repo-structure", "repo-remotes",
-                             "repo-pull-request", "repo-utf16", "repo-stacked")
+                             "repo-pull-request", "repo-utf16", "repo-stacked", "repo-forks")
         pull_request = setup == "repo-pull-request"
-        remote = setup in ("repo-remote", "repo-remotes") or pull_request
+        forks = setup == "repo-forks"
+        remote = setup in ("repo-remote", "repo-remotes") or pull_request or forks
         remotes = setup == "repo-remotes"
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
@@ -168,15 +171,16 @@ class Run:
         self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
         lfs_url = self.lfs_stub.url() if self.lfs_stub else None
         repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, structure,
-                               lfs_url, remotes, pull_request, utf16, stacked) if with_repo else None
+                               lfs_url, remotes, pull_request, utf16, stacked, forks) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
-                               lfs_url, remotes, pull_request, utf16, stacked) if with_repo else None
+                               lfs_url, remotes, pull_request, utf16, stacked, forks) if with_repo else None
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues, Releases
         # and pull request review views (`github_stub.py`), reached by the
         # `github: stub` step; with the pull request fixture it serves the
         # fixture branch as pull request #7
-        self.stub = github_stub.start(repo_c if pull_request else None) if sc.get("github_stub") else None
+        self.stub = github_stub.start(repo_c if pull_request else None,
+                                      repo_c.parent if forks else None) if sc.get("github_stub") else None
         ghd = Ghd(work / "ghd-profile", work / "logs" / "ghd.log", sc.get("ghd_env"))
         cv = Absent() if self.args.ghd_only else Corvene(self.binary, work / "corvene-data", work / "logs" / "corvene.log", theme,
                                                          sc.get("corvene_flags"))

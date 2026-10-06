@@ -162,6 +162,8 @@ pub struct MenuExtras {
     pub compare_refs: bool,
     /// Flag `1219-tag-manager`: Branch › Tags….
     pub tags: bool,
+    /// Flag `1223-checkout-from-fork`: Branch › Check Out from Fork….
+    pub checkout_from_fork: bool,
     /// Flag `1105-clean-untracked-files`: Repository › Clean Untracked
     /// Files….
     pub clean_untracked: bool,
@@ -231,6 +233,7 @@ impl MenuExtras {
             insights: flags.bool(ids::REPOSITORY_INSIGHTS),
             compare_refs: flags.bool(ids::COMPARE_REFS),
             tags: flags.bool(ids::TAG_MANAGER),
+            checkout_from_fork: flags.bool(ids::CHECKOUT_FROM_FORK),
             clean_untracked: flags.bool(ids::CLEAN_UNTRACKED_FILES),
             apply_patch: flags.bool(ids::APPLY_PATCH),
             submodules: flags.bool(ids::SUBMODULES),
@@ -991,6 +994,13 @@ pub fn build_default_menu_template(labels: &MenuLabelsEvent) -> Vec<MenuItemCons
     if extras.tags {
         branch.push(item(l("Tags…", "T&ags…"), ShowTags));
     }
+    // Corvene (`1223-checkout-from-fork`)
+    if extras.checkout_from_fork {
+        branch.push(item(
+            l("Check Out from Fork…", "Check out from fo&rk…"),
+            CheckoutFromFork,
+        ));
+    }
     // Corvene (`1210-push-to-other-remote`)
     if !labels.remotes.is_empty() {
         branch.extend([
@@ -1299,6 +1309,7 @@ mod tests {
                     insights: true,
                     compare_refs: true,
                     tags: true,
+                    checkout_from_fork: true,
                     clean_untracked: true,
                     apply_patch: true,
                     submodules: true,

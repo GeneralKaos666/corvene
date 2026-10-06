@@ -877,6 +877,50 @@ pub fn fetch_refspec(
     Ok(())
 }
 
+/// Corvene (`1223-checkout-from-fork`): the branches of the repository at
+/// `url` (a URL or a remote's name), `git ls-remote --heads <url>`, sorted.
+pub fn ls_remote_heads(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    url: &str,
+    askpass: Option<&AskpassEnv>,
+) -> Result<Vec<String>> {
+    let out = remote_operation(git, workdir, url, askpass)
+        .args(["ls-remote", "--heads", url])
+        .run()?;
+    let mut heads: Vec<String> = out
+        .stdout_string()?
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter_map(|(_, name)| name.strip_prefix("refs/heads/"))
+        .map(str::to_string)
+        .collect();
+    heads.sort_by_key(|h| h.to_lowercase());
+    Ok(heads)
+}
+
+/// Corvene (`1223-checkout-from-fork`): fetch only `remote`'s `branch` into
+/// its remote-tracking branch (`fetch <remote>
+/// +refs/heads/<branch>:refs/remotes/<remote>/<branch>`), failing like a
+/// fetch does (unlike [`fetch_refspec`]).
+pub fn fetch_remote_branch(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    remote: &str,
+    branch: &str,
+    askpass: Option<&AskpassEnv>,
+) -> Result<()> {
+    remote_operation(git, workdir, remote, askpass)
+        .args([
+            "fetch".to_string(),
+            "--no-tags".to_string(),
+            remote.to_string(),
+            format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}"),
+        ])
+        .run()?;
+    Ok(())
+}
+
 /// Fast-forward the local branch `local`, which must not be checked out, to
 /// `remote`'s `remote_branch` without switching to it:
 /// `fetch <remote> refs/heads/<remote_branch>:refs/heads/<local>` (git refuses

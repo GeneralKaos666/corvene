@@ -277,6 +277,12 @@ pub enum Popup {
         path: std::path::PathBuf,
         wrong: bool,
     },
+    /// Corvene `1223-checkout-from-fork`: Branch › Check Out from Fork…
+    /// for `repo`, the owner field starting as `input`.
+    CheckoutFromFork {
+        repo: u64,
+        input: String,
+    },
     /// Corvene `350-ssh-key-helper`: Settings › Integrations' Create SSH
     /// Key… on the desktop (passphrase, ssh-agent, upload).
     CreateSshKey,
@@ -1570,6 +1576,8 @@ pub struct RepositoryState {
     /// Corvene `1219-tag-manager`: Branch › Tags…, History lists the tags
     /// instead.
     pub tags_view: Option<crate::tag_manager::TagsViewState>,
+    /// Corvene `1223-checkout-from-fork`: Branch › Check Out from Fork….
+    pub fork_checkout: Option<crate::fork_checkout::ForkCheckoutState>,
 
     /// `1105-clean-untracked-files`: the dry run Clean Untracked Files shows.
     pub clean_preview: Option<crate::clean_untracked::CleanPreview>,

@@ -216,6 +216,37 @@ pub fn pull_request_row(
                         Dispatcher::review_pull_request(id, pr.clone(), cx);
                     })
                 });
+            // Corvene (`1223-checkout-from-fork`): another branch of the
+            // pull request's fork
+            let fork_owner = pr
+                .head
+                .repository
+                .as_ref()
+                .filter(|head| {
+                    pr.base
+                        .repository
+                        .as_ref()
+                        .is_some_and(|base| !base.owner.eq_ignore_ascii_case(&head.owner))
+                })
+                .map(|head| head.owner.clone())
+                .filter(|_| {
+                    AppState::global(cx)
+                        .read(cx)
+                        .flags
+                        .bool(corvene_core::flags::ids::CHECKOUT_FROM_FORK)
+                });
+            let other_fork_branch = fork_owner.map(|owner| {
+                MenuItem::new(
+                    if crate::context_menu::IS_MAC {
+                        format!("Check Out Another Branch from {owner}'s Fork…")
+                    } else {
+                        format!("Check out another branch from {owner}'s fork…")
+                    },
+                    move |_, cx| {
+                        Dispatcher::show_checkout_from_fork(id, Some(owner.clone()), None, cx)
+                    },
+                )
+            });
             crate::native_menu::show_context_menu(
                 review
                     .into_iter()
@@ -238,6 +269,7 @@ pub fn pull_request_row(
                             },
                         ),
                     ])
+                    .chain(other_fork_branch)
                     .collect(),
                 ev.position,
                 window,

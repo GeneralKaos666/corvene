@@ -122,6 +122,8 @@ gpui_kit::actions!(
         CompareRefs,
         // Branch › Tags… (`1219-tag-manager`)
         ShowTags,
+        // Branch › Check Out from Fork… (`1223-checkout-from-fork`)
+        CheckoutFromFork,
         // Repository › Clean Untracked Files… (`1105-clean-untracked-files`)
         CleanUntrackedFiles,
         // Repository › Apply Patch from File… / from Clipboard (`1106-apply-patch`)

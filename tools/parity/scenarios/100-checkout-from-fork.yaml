@@ -1,0 +1,63 @@
+# Branch › Check Out from Fork… (flag 1223-checkout-from-fork, off in the
+# GitHub Desktop preset the harness runs with; desktop/desktop#17939). GHD
+# only checks out fork branches through their pull requests, so the snaps
+# are recorded, not compared (`corvene_only`; deviations.md › Branches).
+# The `repo-forks` fixture has alice's and bob's forks beside it,
+# which the stub API lists as the network's forks.
+name: checkout-from-fork
+description: Branch › Check Out from Fork… (suggested forks, alice's branches, one picked and checked out as alice/fix/typo) and the branch list's owner:branch offer (Corvene only, stub API)
+setup: repo-forks
+github_stub: true
+corvene_flags: 1223-checkout-from-fork=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: checkout-from-fork}}
+    wait: 2000
+  - snap: {name: suggestions, corvene_only: true, note: "GHD has no Check Out from Fork (deviations.md, 1223-checkout-from-fork)"}
+  # alice's fork: its branches
+  - ghd: {skip: true}
+    corvene: {click: [532, 377]}
+    wait: 2000
+  - snap: {name: branches, corvene_only: true}
+  # fix/typo picked: what it checks out as
+  - ghd: {skip: true}
+    corvene: {click: [501, 421]}
+    wait: 400
+  - snap: {name: branch-picked, corvene_only: true}
+  # Check Out Branch: remote alice added, fix/typo fetched and alice/fix/typo
+  # created tracking it; the working changes ask where to go
+  - ghd: {skip: true}
+    corvene: {click: [861, 646]}
+    wait: 3000
+  - snap: {name: switch-branch, corvene_only: true}
+  # Bring my changes to alice/fix/typo, Switch Branch
+  - ghd: {skip: true}
+    corvene: {click: [502, 442]}
+  - ghd: {skip: true}
+    corvene: {click: [826, 532]}
+    wait: 2500
+  - snap: {name: checked-out, corvene_only: true}
+  # the branch list: bob:experiment matches no branch
+  - ghd: {skip: true}
+    corvene: {click: [355, 56]}
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {type: "bob:experiment"}
+    wait: 800
+  - snap: {name: filter-offer, corvene_only: true}
+  # its offer: the dialog opens on bob's fork with experiment picked
+  - ghd: {skip: true}
+    corvene: {click: [431, 402]}
+    wait: 2500
+  - snap: {name: offer-dialog, corvene_only: true}
+  # Check Out Branch, then Switch Branch leaving the changes stashed
+  - ghd: {skip: true}
+    corvene: {click: [861, 646]}
+    wait: 3000
+  - ghd: {skip: true}
+    corvene: {click: [826, 532]}
+    wait: 2500
+  - snap: {name: offer-checked-out, corvene_only: true}

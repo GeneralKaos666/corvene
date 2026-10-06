@@ -305,6 +305,35 @@ def _remotes(parent: Path, repo: Path) -> None:
     _git(repo, "tag", "nightly", "HEAD")
 
 
+# `repo-forks` (`1223-checkout-from-fork`): two forks of the fixture beside
+# it, not added as remotes. The stub API serves them as alice's and bob's.
+FORKS = {"alice": ("fix/typo", "feature/dark-mode"), "bob": ("experiment",)}
+
+
+def fork_path(parent: Path, owner: str) -> Path:
+    return parent / f"{NAME}-{owner}.git"
+
+
+def _forks(parent: Path, repo: Path) -> None:
+    """`FORKS`: bare repositories with all of `main` and each owner's
+    branches, one commit each on top of `main`."""
+    for owner, branches in FORKS.items():
+        bare = fork_path(parent, owner)
+        if bare.exists():
+            remove_tree(bare)
+        _git(repo, "init", "-q", "--bare", str(bare))
+        _git(repo, "push", "-q", str(bare), "main:refs/heads/main")
+        for branch in branches:
+            _git(repo, "checkout", "-q", "-b", f"tmp-{owner}", "main")
+            (repo / "FORK.md").write_text(f"{owner}'s {branch}\n")
+            _git(repo, "add", "FORK.md")
+            _git(repo, "commit", "-q", "-m", f"Work on {branch}", date="2026-09-27T12:00:00+00:00",
+                 committer=(owner.title(), f"{owner}@example.com"))
+            _git(repo, "push", "-q", str(bare), f"HEAD:refs/heads/{branch}")
+            _git(repo, "checkout", "-q", "main")
+            _git(repo, "branch", "-q", "-D", f"tmp-{owner}")
+
+
 # `repo-utf16`: an MQL5 expert saved the way MetaEditor saves it, UTF-16LE
 # with a byte order mark and CRLF line endings (git calls it binary;
 # `1306-utf16-diffs` diffs its text), committed and then edited
@@ -393,7 +422,8 @@ def _stacked(repo: Path) -> None:
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
-          pull_request: bool = False, utf16: bool = False, stacked: bool = False) -> Path:
+          pull_request: bool = False, utf16: bool = False, stacked: bool = False,
+          forks: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -413,7 +443,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     is checked out with `_PULL_REQUEST_COMMITS` pushed
     (`348-pull-request-review`). With `utf16`, see `_utf16`
     (`1306-utf16-diffs`). With `stacked`, see `_stacked`, and no working
-    changes, so commits can be squashed."""
+    changes, so commits can be squashed. With `forks` (and `remote`), see
+    `_forks` (`1223-checkout-from-fork`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -500,6 +531,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "main")
     if remote and remotes:
         _remotes(parent, repo)
+    if remote and forks:
+        _forks(parent, repo)
     if tools:
         _tools(parent, repo)
     if structure:

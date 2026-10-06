@@ -51,6 +51,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 OWNER, NAME = "octocat", "parity-fixture"
+# `1223-checkout-from-fork`: the forks `fixture.FORKS` builds
+FORK_OWNERS = ("alice", "bob")
 
 
 def _user(login: str) -> dict:
@@ -368,6 +370,12 @@ class _Handler(BaseHTTPRequestHandler):
         token = (self.headers.get("Authorization") or "").split(" ")[-1]
         return token[len("stub-token-"):] if token.startswith("stub-token-") else "octocat"
 
+    def _fork(self, owner: str) -> dict:
+        path = str(self.server.forks_dir / f"{NAME}-{owner}.git")
+        return {"name": NAME, "owner": _user(owner), "html_url": f"http://127.0.0.1/{owner}/{NAME}",
+                "clone_url": path, "ssh_url": path, "default_branch": "main", "private": False,
+                "fork": True, "parent": None, "node_id": f"R_stub_{owner}"}
+
     def do_GET(self):  # noqa: N802
         path, _, query = self.path.partition("?")
         repo = f"/api/v3/repos/{OWNER}/{NAME}"
@@ -465,6 +473,14 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return None
+        # `1223-checkout-from-fork`: alice's and bob's forks of the fixture
+        if self.server.forks_dir is not None:
+            forks = [self._fork(owner) for owner in FORK_OWNERS]
+            if path == f"{repo}/forks":
+                return self._send(200, forks)
+            fork = next((f for f in forks if path == f"/api/v3/repos/{f['owner']['login']}/{NAME}"), None)
+            if fork is not None:
+                return self._send(200, fork)
         if path == f"{repo}/branches":
             return self._send(200, [{"name": "main", "protected": True}, {"name": "feature/login", "protected": False}])
         if path == f"{repo}/tags":
@@ -732,8 +748,10 @@ JOB_LOG = "".join(f"2024-05-01T10:{s // 60:02}:{s % 60:02}.0000000Z {text}\n" fo
 
 
 class Stub(HTTPServer):
-    def __init__(self, repo: Path | None = None):
+    def __init__(self, repo: Path | None = None, forks_dir: Path | None = None):
         super().__init__(("127.0.0.1", 0), _Handler)
+        # `1223-checkout-from-fork`: where alice's and bob's forks are
+        self.forks_dir = forks_dir
         self.created_issues: list[dict] = []
         self.created_releases: list[dict] = []
         self.posts: list[tuple[str, dict]] = []
@@ -774,8 +792,8 @@ class Stub(HTTPServer):
         self.server_close()
 
 
-def start(repo: Path | None = None) -> Stub:
-    return Stub(repo).start()
+def start(repo: Path | None = None, forks_dir: Path | None = None) -> Stub:
+    return Stub(repo, forks_dir).start()
 
 
 if __name__ == "__main__":

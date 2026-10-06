@@ -158,6 +158,10 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.put("all", all).list("paths", paths);
         }
+        Popup::CheckoutFromFork { repo: r, input } => {
+            repo = Some(*r);
+            f.put("input", input);
+        }
         Popup::InvalidatedToken { account } => {
             f.put("login", &account.login).put("host", account.host());
         }

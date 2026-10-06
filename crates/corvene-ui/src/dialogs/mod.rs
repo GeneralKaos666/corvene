@@ -14,6 +14,7 @@ mod app_dialogs;
 mod apply_patch;
 pub(crate) mod branch_dialogs;
 mod change_repository_alias;
+mod checkout_from_fork;
 mod choose_repository_account;
 mod ci_check_run_rerun;
 mod clean_untracked_files;
@@ -882,6 +883,17 @@ impl DialogHost {
                     ssh_key_passphrase::SshKeyPassphraseDialog::new(
                         path.clone(),
                         *wrong,
+                        window,
+                        cx,
+                    )
+                })
+                .into(),
+            Popup::CheckoutFromFork { repo, input } => cx
+                .new(|cx| {
+                    checkout_from_fork::CheckoutFromForkDialog::new(
+                        state,
+                        *repo,
+                        input.clone(),
                         window,
                         cx,
                     )

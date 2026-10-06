@@ -37,6 +37,7 @@ pub mod emoji;
 pub mod extensions;
 pub mod filter;
 pub mod flags;
+pub mod fork_checkout;
 pub mod forks;
 pub mod ghd_import;
 pub mod git_config_import;

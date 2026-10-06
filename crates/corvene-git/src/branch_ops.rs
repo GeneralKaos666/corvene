@@ -89,6 +89,29 @@ pub fn create_branch(
     Ok(())
 }
 
+/// Corvene (`1223-checkout-from-fork`): `git branch --track <name>
+/// refs/remotes/<remote>/<branch>`, a branch tracking that remote branch
+/// whatever `branch.autoSetupMerge` says. The full ref keeps a local
+/// `<remote>/<branch>` branch from shadowing the start point.
+pub fn create_tracking_branch(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    name: &str,
+    remote: &str,
+    branch: &str,
+) -> Result<()> {
+    GitCommand::new(git)
+        .args([
+            "branch".to_string(),
+            "--track".to_string(),
+            name.to_string(),
+            format!("refs/remotes/{remote}/{branch}"),
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
 /// Text git prints when a checkout would clobber local changes
 /// (`isLocalChangesOverwrittenError`).
 pub fn is_local_changes_overwritten(err: &GitError) -> bool {

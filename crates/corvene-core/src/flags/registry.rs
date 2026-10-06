@@ -8072,6 +8072,27 @@ registry! {
         code: &["crates/corvene-core/src/stacked_refs.rs", "crates/corvene-git/src/rebase_ops.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/dialogs/warn_stacked_branches.rs"],
     },
 
+    /// Branch › Check Out from Fork…: a branch of any fork by its owner.
+    CHECKOUT_FROM_FORK = 1223 "checkout-from-fork" {
+        title: "Check out from a fork",
+        summary: "Branch › Check Out from Fork… checks out a branch of another fork of the \
+                  repository. Type its owner (alice), owner/name, owner:branch or paste its \
+                  URL, or pick one of the suggested owners (open pull requests from forks and \
+                  the newest forks on GitHub); its branches are listed to pick from. The fork \
+                  gets a remote named after its owner (one already pointing at it is reused), \
+                  only that branch is fetched, and it is checked out as owner/branch tracking \
+                  it. The branch list offers it when an owner:branch filter matches nothing, \
+                  and a fork's pull request offers its other branches from the context menu.",
+        ghd_behaviour: "Branches of other forks are only reachable through their pull \
+                        requests; anything else needs adding the remote on the command line.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17939)],
+        code: &["crates/corvene-core/src/fork_checkout.rs", "crates/corvene-ui/src/dialogs/checkout_from_fork.rs", "crates/corvene-git/src/remote_ops.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.

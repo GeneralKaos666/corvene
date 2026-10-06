@@ -1203,6 +1203,12 @@ pub(crate) fn main() {
                 Dispatcher::show_tags(id, cx);
             }
         });
+        // `1223-checkout-from-fork`
+        on_menu_action(cx, move |_: &CheckoutFromFork, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_checkout_from_fork(id, None, None, cx);
+            }
+        });
         on_menu_action(cx, move |_: &ShowRecentActivity, cx| {
             if let Some(id) = selected(cx) {
                 Dispatcher::show_recent_activity(id, cx);
@@ -2151,6 +2157,14 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         // `1219-tag-manager`
         ("tags", Some(id)) => Dispatcher::show_tags(id, cx),
+        // `1223-checkout-from-fork`: `checkout-from-fork[:<owner>[:<branch>]]`
+        (other, Some(id))
+            if other == "checkout-from-fork" || other.starts_with("checkout-from-fork:") =>
+        {
+            let mut parts = other.splitn(3, ':').skip(1).map(str::to_string);
+            let (owner, branch) = (parts.next(), parts.next());
+            Dispatcher::show_checkout_from_fork(id, owner, branch, cx)
+        }
         // `350-ssh-key-helper`
         ("create-ssh-key", _) => Dispatcher::show_popup(Popup::CreateSshKey, cx),
         ("ssh-key-needs-scope", _) => Dispatcher::show_popup(

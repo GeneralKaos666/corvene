@@ -1384,6 +1384,20 @@ impl Client {
         }
     }
 
+    /// Corvene (`1223-checkout-from-fork`): the newest forks of
+    /// `owner/name` (`GET /repos/{owner}/{name}/forks`, at most `pages` pages
+    /// of 100).
+    pub fn forks(&self, owner: &str, name: &str, pages: usize) -> Result<Vec<GitHubRepository>> {
+        let path = format!(
+            "repos/{}/{}/forks?sort=newest&per_page=100",
+            encode_path_component(owner),
+            encode_path_component(name)
+        );
+        let repos: Vec<ApiRepository> =
+            self.fetch_all(&path, pages, get_next_page_path_from_link, |_| true)?;
+        Ok(repos.into_iter().map(|r| self.convert(r)).collect())
+    }
+
     /// `fetchPullRequestReview`: `GET /repos/{owner}/{name}/pulls/{number}/reviews/{id}`.
     pub fn pull_request_review(
         &self,
