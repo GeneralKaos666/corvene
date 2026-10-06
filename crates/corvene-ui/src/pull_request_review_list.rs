@@ -134,7 +134,6 @@ impl PullRequestReviewList {
         let t = cx.ghd();
         let busy = review.busy_loading;
         let refresh = header_button("review-refresh", "Refresh the pull request", cx)
-            .ghd_tooltip("Refresh")
             .child(if busy {
                 spin(
                     octicon(Octicon::SyncClockwise, t.text),
@@ -147,12 +146,10 @@ impl PullRequestReviewList {
             .on_click(move |_, _, cx| Dispatcher::refresh_pull_request_review(id, cx))
             .into_any_element();
         let open = header_button("review-open-github", "View on GitHub", cx)
-            .ghd_tooltip("View on GitHub")
             .child(octicon(Octicon::LinkExternal, t.text))
             .on_click(move |_, _, cx| Dispatcher::open_pull_request_review_on_github(id, cx))
             .into_any_element();
         let close = header_button("review-close", "Close the review", cx)
-            .ghd_tooltip("Close")
             .child(octicon(Octicon::X, t.text))
             .on_click(move |_, _, cx| Dispatcher::close_pull_request_review(id, cx))
             .into_any_element();
