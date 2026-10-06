@@ -1,0 +1,51 @@
+# ⌘F over the stacked diffs (flag 1312-stacked-diff-search with
+# 1311-stacked-diff and 1305-diff-find-controls, all off in the GitHub
+# Desktop preset the harness runs with). GHD searches one file's diff, so
+# every snap is Corvene only (deviations.md › Diff viewer). "the" appears in
+# docs/old.md, README.md and src/main.rs of the working changes.
+name: stacked-diff-search
+description: The Changes stack with ⌘F, "N of M" across the files, Enter stepping into the next file, Previous Match, Aa and Escape (Corvene only)
+setup: repo
+corvene_flags: 1311-stacked-diff=on,1312-stacked-diff-search=on,1305-diff-find-controls=on
+steps:
+  - click: [125, 300]
+    wait: 600
+  # the stack button at the end of "N changed files"
+  - ghd: {skip: true}
+    corvene: {click: [227, 156]}
+    wait: 1500
+  # into the stack, then ⌘F
+  - ghd: {skip: true}
+    corvene: {click: [900, 700]}
+  - ghd: {skip: true}
+    corvene: {key: cmd-f}
+    wait: 300
+  - snap: {name: open, corvene_only: true, note: "GHD searches one file's diff (deviations.md, 1312-stacked-diff-search)"}
+  - ghd: {skip: true}
+    corvene: {type: "the"}
+  - ghd: {skip: true}
+    corvene: {key: enter}
+    wait: 400
+  - snap: {name: first-match, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: enter}
+    wait: 400
+  - snap: {name: second-match, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: enter}
+    wait: 400
+  - snap: {name: third-match, corvene_only: true}
+  # Previous Match
+  - ghd: {skip: true}
+    corvene: {click: [1316, 130]}
+    wait: 400
+  - snap: {name: previous, corvene_only: true}
+  # Match Case: "The" differs from "the"
+  - ghd: {skip: true}
+    corvene: {click: [1292, 130]}
+    wait: 400
+  - snap: {name: match-case, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 300
+  - snap: {name: closed, corvene_only: true}

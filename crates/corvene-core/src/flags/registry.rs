@@ -8476,6 +8476,24 @@ registry! {
         code: &["crates/corvene-ui/src/stacked_diff_view.rs", "crates/corvene-core/src/stacked_diff.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// ⌘F in the stacked list searches every file's diff.
+    STACKED_DIFF_SEARCH = 1312 "stacked-diff-search" {
+        title: "Search across the stacked diffs",
+        summary: "With the files' diffs stacked in one list (1311-stacked-diff), ⌘F opens the \
+                  diff's search box over the whole stack: Enter and ⇧Enter step through the \
+                  matches of every file in order, wrapping, and the list scrolls to each one. \
+                  Files whose diff has not loaded yet are loaded for the search, and with \
+                  1305-diff-find-controls the count reads \"3 of 12\" across the files, with \
+                  how many files are still loading; Aa matches case.",
+        ghd_behaviour: "One file's diff at a time, so ⌘F searches one file.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20297)],
+        code: &["crates/corvene-ui/src/stacked_diff_view.rs", "crates/corvene-ui/src/diff_view.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

@@ -564,6 +564,10 @@ pub struct DiffView {
     /// `1305-diff-find-controls` as last rendered, and its Aa toggle.
     find_controls: bool,
     search_case_sensitive: bool,
+    /// `1312-stacked-diff-search`: the rows (`Rc` address) `hits` were
+    /// searched for the stack's query; `None` when the stack is not
+    /// searching.
+    stacked_search_rows: Option<usize>,
     // Diff Settings popover (`DiffOptions`)
     options_open: bool,
     pub(crate) gear_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -660,6 +664,7 @@ impl DiffView {
             selected_hit: None,
             find_controls: false,
             search_case_sensitive: false,
+            stacked_search_rows: None,
             options_open: false,
             gear_bounds: Rc::new(Cell::new(Bounds::default())),
             whitespace_hint: None,
@@ -2083,77 +2088,72 @@ impl DiffView {
     /// `1305-diff-find-controls`: count, Aa, previous and next after the
     /// box. The buttons keep focus in the box (a blur closes the search).
     fn find_controls_row(&self, typed: &str, cx: &Context<Self>) -> AnyElement {
-        let t = cx.ghd();
-        let status = self.search_status(typed);
-        // a new text is searched by the arrows as by Enter
-        let can_step = !typed.is_empty();
-        let case = self.search_case_sensitive;
-        let button = |id: &'static str, label: &'static str, on: bool, enabled: bool| {
-            div()
-                .id(id)
-                .icon_button_label(label)
-                .flex_none()
-                .size(zpx(22.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(BORDER_RADIUS())
-                .border_1()
-                .border_color(if on {
-                    t.box_border
-                } else {
-                    transparent_black()
-                })
-                .when(on, |d| d.bg(t.box_selected_background))
-                .when(enabled, |d| {
-                    d.cursor_pointer().hover(|d| d.bg(t.box_hover_background))
-                })
-                .when(!enabled, |d| d.opacity(0.5))
-                // keep the focus (and the search) in the text box
-                .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                })
-        };
-        div()
-            .flex_none()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(zpx(2.))
-            .font_family(crate::theme::ui_font())
-            .text_size(FONT_SIZE_SM())
-            .child(
-                div()
-                    .id("diff-search-count")
-                    .flex_none()
-                    .min_w(zpx(58.))
-                    .text_color(t.text_secondary)
-                    .whitespace_nowrap()
-                    .children(status),
-            )
-            .child(
-                button("diff-search-case", "Match Case", case, true)
-                    .aria_toggled(if case { Toggled::True } else { Toggled::False })
-                    .text_color(t.text)
-                    .child("Aa")
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_search_case(cx))),
-            )
-            .child(
-                button("diff-search-previous", "Previous Match", false, can_step)
-                    .child(octicon(Octicon::ChevronUp, t.text))
-                    .when(can_step, |d| {
-                        d.on_click(cx.listener(|this, _, _, cx| this.search(false, cx)))
-                    }),
-            )
-            .child(
-                button("diff-search-next", "Next Match", false, can_step)
-                    .child(octicon(Octicon::ChevronDown, t.text))
-                    .when(can_step, |d| {
-                        d.on_click(cx.listener(|this, _, _, cx| this.search(true, cx)))
-                    }),
-            )
-            .into_any_element()
+        find_controls_row(
+            FindControls {
+                status: self.search_status(typed),
+                // a new text is searched by the arrows as by Enter
+                can_step: !typed.is_empty(),
+                case: self.search_case_sensitive,
+            },
+            cx.listener(|this, _, _, cx| this.toggle_search_case(cx)),
+            cx.listener(|this, _, _, cx| this.search(false, cx)),
+            cx.listener(|this, _, _, cx| this.search(true, cx)),
+            cx,
+        )
+    }
+
+    /// `1312-stacked-diff-search`: search this file's rows for the stack's
+    /// query (hits are recomputed only when the query, the case or the
+    /// rows changed) and mark `selected` (an index into this file's hits)
+    /// as the selected one; how many hits the file has.
+    pub(crate) fn stacked_apply_search(
+        &mut self,
+        query: &str,
+        case: bool,
+        selected: Option<usize>,
+    ) -> usize {
+        let rows_at = Rc::as_ptr(&self.rows) as usize;
+        if self.search_query != query
+            || self.search_case_sensitive != case
+            || self.stacked_search_rows != Some(rows_at)
+        {
+            self.search_query = query.to_string();
+            self.search_case_sensitive = case;
+            self.stacked_search_rows = Some(rows_at);
+            self.hits = search_rows(&self.rows, query, self.case_sensitive());
+        }
+        self.selected_hit = selected.filter(|ix| *ix < self.hits.len());
+        self.hits.len()
+    }
+
+    /// `1312-stacked-diff-search`: the stack's search closed.
+    pub(crate) fn stacked_clear_search(&mut self) {
+        if self.stacked_search_rows.take().is_some() {
+            self.search_query.clear();
+            self.hits.clear();
+            self.selected_hit = None;
+        }
+    }
+
+    /// `1312-stacked-diff-search`: the list row (unified or split) of this
+    /// file's hit `local`, revealed sideways too when lines do not wrap.
+    pub(crate) fn stacked_hit_row(&self, local: usize) -> Option<usize> {
+        let hit = self.hits.get(local)?;
+        if self.no_wrap
+            && let Some(text) = self.rows.get(hit.row).map(|r| r.text.as_str())
+        {
+            let column = |byte: usize| text.get(..byte).map_or(0, |t| t.chars().count());
+            self.h_scroll
+                .reveal_columns(column(hit.range.start), column(hit.range.end));
+        }
+        Some(if self.split_mode {
+            self.unified_to_split
+                .get(hit.row)
+                .copied()
+                .unwrap_or(hit.row)
+        } else {
+            hit.row
+        })
     }
 
     /// Recompute the hits for the same query after the rows changed.
@@ -3371,6 +3371,139 @@ impl DiffView {
     }
 }
 
+/// `1305-diff-find-controls`: what the controls after the search box show.
+pub(crate) struct FindControls {
+    /// "3 of 12" / "No results", once the typed text has been searched.
+    pub status: Option<String>,
+    /// The arrows search (a text is typed).
+    pub can_step: bool,
+    /// Aa is on.
+    pub case: bool,
+}
+
+type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+/// `1305-diff-find-controls`: count, Aa, previous and next after the box,
+/// shared by the single-file diff and the stacked list. The buttons keep
+/// focus in the box (a blur closes the search).
+pub(crate) fn find_controls_row(
+    ui: FindControls,
+    on_case: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_previous: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_next: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> AnyElement {
+    let t = cx.ghd();
+    let FindControls {
+        status,
+        can_step,
+        case,
+    } = ui;
+    let (on_case, on_previous, on_next): (ClickHandler, ClickHandler, ClickHandler) =
+        (Box::new(on_case), Box::new(on_previous), Box::new(on_next));
+    let button = |id: &'static str, label: &'static str, on: bool, enabled: bool| {
+        div()
+            .id(id)
+            .icon_button_label(label)
+            .flex_none()
+            .size(zpx(22.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(BORDER_RADIUS())
+            .border_1()
+            .border_color(if on {
+                t.box_border
+            } else {
+                transparent_black()
+            })
+            .when(on, |d| d.bg(t.box_selected_background))
+            .when(enabled, |d| {
+                d.cursor_pointer().hover(|d| d.bg(t.box_hover_background))
+            })
+            .when(!enabled, |d| d.opacity(0.5))
+            // keep the focus (and the search) in the text box
+            .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+            })
+    };
+    div()
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(zpx(2.))
+        .font_family(crate::theme::ui_font())
+        .text_size(FONT_SIZE_SM())
+        .child(
+            div()
+                .id("diff-search-count")
+                .flex_none()
+                .min_w(zpx(58.))
+                .text_color(t.text_secondary)
+                .whitespace_nowrap()
+                .children(status),
+        )
+        .child(
+            button("diff-search-case", "Match Case", case, true)
+                .aria_toggled(if case { Toggled::True } else { Toggled::False })
+                .text_color(t.text)
+                .child("Aa")
+                .on_click(move |ev, window, cx| on_case(ev, window, cx)),
+        )
+        .child(
+            button("diff-search-previous", "Previous Match", false, can_step)
+                .child(octicon(Octicon::ChevronUp, t.text))
+                .when(can_step, |d| {
+                    d.on_click(move |ev, window, cx| on_previous(ev, window, cx))
+                }),
+        )
+        .child(
+            button("diff-search-next", "Next Match", false, can_step)
+                .child(octicon(Octicon::ChevronDown, t.text))
+                .when(can_step, |d| {
+                    d.on_click(move |ev, window, cx| on_next(ev, window, cx))
+                }),
+        )
+        .into_any_element()
+}
+
+/// The ⌘F box (`DiffSearchInput`, `.diff-search`): top right, hanging from
+/// the header; with `controls` (`1305-diff-find-controls`) wider, the
+/// controls after the box. Shared by the single-file diff and the stacked
+/// list.
+pub(crate) fn search_bar(
+    input: &Entity<InputState>,
+    controls: Option<AnyElement>,
+    window: &Window,
+    cx: &App,
+) -> Div {
+    let t = cx.ghd();
+    let text_box = crate::widgets::filter_text_box("diff-search", input, None, window, cx);
+    let bar = div()
+        .absolute()
+        .top_0()
+        .right(SPACING())
+        .p(SPACING_HALF())
+        .bg(t.background)
+        .border_1()
+        .border_t_0()
+        .border_color(t.box_border)
+        .rounded_b(BORDER_RADIUS());
+    match controls {
+        None => bar.w(zpx(250.)).child(text_box),
+        Some(controls) => bar
+            .w(zpx(340.))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(SPACING_HALF())
+            .child(div().flex_1().min_w_0().child(text_box))
+            .child(controls),
+    }
+}
+
 /// `1311-stacked-diff`: what one file's body takes in the stacked list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StackedShape {
@@ -3757,30 +3890,11 @@ impl DiffView {
             .clone()
             .filter(|_| self.searching)
             .map(|input| {
-                let text_box =
-                    crate::widgets::filter_text_box("diff-search", &input, None, window, cx);
-                // `.diff-search`: top right, hanging from the header
-                let bar = div()
-                    .absolute()
-                    .top_0()
-                    .right(SPACING())
-                    .p(SPACING_HALF())
-                    .bg(t.background)
-                    .border_1()
-                    .border_t_0()
-                    .border_color(t.box_border)
-                    .rounded_b(BORDER_RADIUS());
-                if !self.find_controls {
-                    return bar.w(zpx(250.)).child(text_box);
-                }
-                let typed = input.read(cx).value().to_string();
-                bar.w(zpx(340.))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(SPACING_HALF())
-                    .child(div().flex_1().min_w_0().child(text_box))
-                    .child(self.find_controls_row(&typed, cx))
+                let controls = self.find_controls.then(|| {
+                    let typed = input.read(cx).value().to_string();
+                    self.find_controls_row(&typed, cx)
+                });
+                search_bar(&input, controls, window, cx)
             });
         div()
             .id("diff")

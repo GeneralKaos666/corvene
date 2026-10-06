@@ -17,6 +17,13 @@
 //! single-file diff (hunk handles, check marks, context menus, ⌥-click).
 //! A file's diff is requested when its header is first rendered (plus the
 //! next two files), so a big commit loads as it scrolls.
+//!
+//! Deviation (`1312-stacked-diff-search`, desktop/desktop#20297): ⌘F here
+//! searches every file (GHD `DiffSearchInput` searches the one file
+//! shown). The stack owns the query and the selected hit as (file, hit);
+//! each file's `DiffView` searches its own rows (`stacked_apply_search`)
+//! and paints them, Enter / ⇧Enter step across the files in order, and the
+//! files still to load are requested so the count covers the whole stack.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -27,9 +34,12 @@ use corvene_core::{AppState, Diff, Dispatcher};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::actions::Copy;
+use gpui_kit::component::input::{Escape, InputEvent, InputState};
+
+use crate::actions::{Copy, Find};
 use crate::diff_view::{
-    DIFF_LINE_HEIGHT, DiffSource, DiffView, StackedBody, StackedShape, diff_header,
+    DIFF_LINE_HEIGHT, DiffSource, DiffView, FindControls, StackedBody, StackedShape, diff_header,
+    find_controls_row, search_bar,
 };
 use crate::diff_view_rows::{render_row, render_split_row};
 use crate::icons::{Octicon, octicon};
@@ -71,6 +81,23 @@ pub struct StackedDiffView {
     /// The tab's selected file as last seen; a change scrolls to it.
     revealed: Option<String>,
     reveal_pending: Option<String>,
+    // `1312-stacked-diff-search`: ⌘F over every file's rows
+    searching: bool,
+    search_input: Option<Entity<InputState>>,
+    /// The text searched for (the box may hold a newer one).
+    search_query: String,
+    /// Aa (`1305-diff-find-controls`).
+    search_case: bool,
+    /// The selected hit: (file index, index into that file's hits).
+    selected_hit: Option<(usize, usize)>,
+    /// Hits per file as of the last frame.
+    hit_counts: Vec<usize>,
+    /// Scroll to the selected hit at the next frame.
+    reveal_hit: bool,
+    /// The files hold a search to clear once it closes.
+    children_searched: bool,
+    /// `1305-diff-find-controls` as last rendered.
+    find_controls: bool,
 }
 
 impl StackedDiffView {
@@ -86,7 +113,173 @@ impl StackedDiffView {
             focus_handle: cx.focus_handle().tab_stop(true),
             revealed: None,
             reveal_pending: None,
+            searching: false,
+            search_input: None,
+            search_query: String::new(),
+            search_case: false,
+            selected_hit: None,
+            hit_counts: Vec::new(),
+            reveal_hit: false,
+            children_searched: false,
+            find_controls: false,
         }
+    }
+
+    // ---- `1312-stacked-diff-search` ----
+
+    /// ⌘F: open the box (made on first use) and focus it; the query starts
+    /// empty.
+    fn show_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let input = match self.search_input.clone() {
+            Some(input) => input,
+            None => {
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search…"));
+                cx.subscribe(&input, |this, _, ev: &InputEvent, cx| match ev {
+                    InputEvent::PressEnter { shift, .. } => this.search(!*shift, cx),
+                    InputEvent::Blur => this.close_search(cx),
+                    // the count only describes the text it was searched for
+                    InputEvent::Change if this.find_controls => cx.notify(),
+                    _ => {}
+                })
+                .detach();
+                self.search_input = Some(input.clone());
+                input
+            }
+        };
+        if !self.searching {
+            self.searching = true;
+            self.search_query.clear();
+            self.selected_hit = None;
+            input.update(cx, |s, cx| s.set_value("", window, cx));
+        }
+        let handle = input.read(cx).focus_handle(cx);
+        window.focus(&handle, cx);
+        cx.notify();
+    }
+
+    fn close_search(&mut self, cx: &mut Context<Self>) {
+        if !self.searching {
+            return;
+        }
+        self.searching = false;
+        self.search_query.clear();
+        self.selected_hit = None;
+        cx.notify();
+    }
+
+    /// Enter / the arrows: a new text is searched in every file and starts
+    /// at its first hit; the same text moves to the next / previous hit
+    /// across the files (wrapping).
+    fn search(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let query = self
+            .search_input
+            .as_ref()
+            .map(|i| i.read(cx).value().to_string())
+            .unwrap_or_default();
+        if query.is_empty() {
+            self.search_query.clear();
+            self.selected_hit = None;
+            cx.notify();
+            return;
+        }
+        let fresh = query != self.search_query;
+        self.search_query = query;
+        // the files search now, so the step below sees current counts
+        self.apply_search(cx);
+        let total: usize = self.hit_counts.iter().sum();
+        self.selected_hit = if total == 0 {
+            None
+        } else if fresh || self.selected_hit.is_none() {
+            self.first_hit()
+        } else {
+            self.selected_hit.and_then(|at| self.step_hit(at, forward))
+        };
+        self.reveal_hit = true;
+        cx.notify();
+    }
+
+    /// Aa: match case, and search the same text again from its first hit.
+    fn toggle_search_case(&mut self, cx: &mut Context<Self>) {
+        self.search_case = !self.search_case;
+        if !self.search_query.is_empty() {
+            self.apply_search(cx);
+            self.selected_hit = self.first_hit();
+            self.reveal_hit = true;
+        }
+        cx.notify();
+    }
+
+    /// Every file searches the query (cached per file) and marks its
+    /// selected hit; `hit_counts` follows.
+    fn apply_search(&mut self, cx: &mut Context<Self>) {
+        let (query, case) = (
+            self.search_query.clone(),
+            self.search_case && self.find_controls,
+        );
+        let selected = self.selected_hit;
+        self.hit_counts = self
+            .files
+            .iter()
+            .enumerate()
+            .map(|(i, slot)| {
+                let local = selected.filter(|(f, _)| *f == i).map(|(_, l)| l);
+                slot.view
+                    .update(cx, |view, _| view.stacked_apply_search(&query, case, local))
+            })
+            .collect();
+        self.children_searched = true;
+        // a hit that vanished (its file reloaded shorter) falls back to the first
+        if let Some((f, l)) = self.selected_hit
+            && self.hit_counts.get(f).is_none_or(|n| l >= *n)
+        {
+            self.selected_hit = self.first_hit();
+        }
+    }
+
+    fn first_hit(&self) -> Option<(usize, usize)> {
+        self.hit_counts.iter().position(|n| *n > 0).map(|f| (f, 0))
+    }
+
+    /// The hit after (or before) `at`, across files, wrapping.
+    fn step_hit(&self, (file, local): (usize, usize), forward: bool) -> Option<(usize, usize)> {
+        let n = self.hit_counts.len();
+        if forward {
+            if local + 1 < self.hit_counts.get(file).copied().unwrap_or(0) {
+                return Some((file, local + 1));
+            }
+            (1..=n)
+                .map(|k| (file + k) % n)
+                .find(|f| self.hit_counts[*f] > 0)
+                .map(|f| (f, 0))
+        } else {
+            if local > 0 {
+                return Some((file, local - 1));
+            }
+            (1..=n)
+                .map(|k| (file + n - k) % n)
+                .find(|f| self.hit_counts[*f] > 0)
+                .map(|f| (f, self.hit_counts[f] - 1))
+        }
+    }
+
+    /// "3 of 12" / "No results" once the typed text has been searched,
+    /// with how many files are still loading.
+    fn search_status(&self, typed: &str, loading: usize) -> Option<String> {
+        if self.search_query.is_empty() || typed != self.search_query {
+            return None;
+        }
+        let total: usize = self.hit_counts.iter().sum();
+        let mut status = match self.selected_hit {
+            Some((f, l)) => {
+                let before: usize = self.hit_counts.iter().take(f).sum();
+                format!("{} of {}", before + l + 1, total)
+            }
+            None => "No results".to_string(),
+        };
+        if loading > 0 {
+            status.push_str(&format!(" ({loading} loading)"));
+        }
+        Some(status)
     }
 
     /// Like `DiffView::embed`: a cached element filling the column.
@@ -274,6 +467,18 @@ impl Render for StackedDiffView {
                 self.reveal_pending = Some(path);
             }
         }
+        // `1312-stacked-diff-search` and its `1305` controls
+        let (search_enabled, find_controls) = {
+            let flags = &self.state.read(cx).flags;
+            (
+                flags.bool(corvene_core::flags::ids::STACKED_DIFF_SEARCH),
+                flags.bool(corvene_core::flags::ids::DIFF_FIND_CONTROLS),
+            )
+        };
+        self.find_controls = find_controls;
+        if !search_enabled && self.searching {
+            self.close_search(cx);
+        }
         // prepare every file and lay the items out
         let kind = Rc::new(kind);
         let mut start = 0usize;
@@ -314,6 +519,74 @@ impl Render for StackedDiffView {
                     .update(cx, |view, cx| view.stacked_overlays(window, cx)),
             );
         }
+        // the search covers every file: ask for the diffs still to load
+        let loading = self
+            .files
+            .iter()
+            .filter(|s| s.shape == StackedShape::Loading)
+            .count();
+        if self.searching && loading > 0 {
+            let wanted: Vec<String> = {
+                let s = self.state.read(cx);
+                s.repo_states
+                    .get(&repo)
+                    .map(|rs| {
+                        self.files
+                            .iter()
+                            .filter(|slot| slot.shape == StackedShape::Loading)
+                            .filter(|slot| !rs.stacked.requested(&kind, &slot.file.path))
+                            .map(|slot| slot.file.path.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            for path in wanted {
+                let kind = (*kind).clone();
+                cx.defer(move |cx| Dispatcher::load_stacked_diff(repo, kind, path, false, cx));
+            }
+        }
+        if self.searching && !self.search_query.is_empty() {
+            self.apply_search(cx);
+        } else if self.children_searched {
+            self.children_searched = false;
+            self.hit_counts.clear();
+            for slot in &self.files {
+                slot.view.update(cx, |view, _| view.stacked_clear_search());
+            }
+        }
+        if std::mem::take(&mut self.reveal_hit)
+            && let Some((f, local)) = self.selected_hit
+            && let Some(slot) = self.files.get(f)
+        {
+            // a folded file unfolds (its rows come back next frame)
+            if self.folded.remove(&slot.file.path) {
+                self.reveal_hit = true;
+                cx.notify();
+            } else if let Some(row) = slot.view.read(cx).stacked_hit_row(local) {
+                self.list_state.scroll_to_reveal_item(spans[f].0 + 1 + row);
+            }
+        }
+        let search = self
+            .search_input
+            .clone()
+            .filter(|_| self.searching)
+            .map(|input| {
+                let controls = find_controls.then(|| {
+                    let typed = input.read(cx).value().to_string();
+                    find_controls_row(
+                        FindControls {
+                            status: self.search_status(&typed, loading),
+                            can_step: !typed.is_empty(),
+                            case: self.search_case,
+                        },
+                        cx.listener(|this, _, _, cx| this.toggle_search_case(cx)),
+                        cx.listener(|this, _, _, cx| this.search(false, cx)),
+                        cx.listener(|this, _, _, cx| this.search(true, cx)),
+                        cx,
+                    )
+                });
+                search_bar(&input, controls, window, cx)
+            });
         if let Some(path) = self.reveal_pending.take()
             && let Some(ix) = self.files.iter().position(|s| s.file.path == path)
         {
@@ -583,6 +856,19 @@ impl Render for StackedDiffView {
                     }
                 }
             }))
+            // `1312-stacked-diff-search`
+            .when(search_enabled, |d| {
+                d.on_action(cx.listener(|this, _: &Find, window, cx| {
+                    this.show_search(window, cx);
+                    cx.stop_propagation();
+                }))
+                .capture_action(cx.listener(|this, _: &Escape, _, cx| {
+                    if this.searching {
+                        this.close_search(cx);
+                        cx.stop_propagation();
+                    }
+                }))
+            })
             .relative()
             .size_full()
             .min_h_0()
@@ -637,6 +923,7 @@ impl Render for StackedDiffView {
                     .pr(gutter(&self.list_state)),
             )
             .child(scrollbar("stacked-scrollbar", self.list_state.clone()))
+            .children(search)
             .children(overlays)
             .into_any_element()
     }
