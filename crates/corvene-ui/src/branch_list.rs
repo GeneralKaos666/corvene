@@ -774,7 +774,7 @@ impl BranchFoldout {
             quick_view_hovered: false,
             selected_row: None,
             shown_selected: None,
-            list_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle().tab_stop(true),
             list_focused: false,
             remote_only: false,
             multi_selected: Vec::new(),
@@ -1250,7 +1250,12 @@ impl BranchFoldout {
                 )
                 // the keyboard row (GHD's focused-list selection)
                 .when(highlighted == Some(ix), |d| {
-                    d.bg(highlight_bg).text_color(highlight_text)
+                    d.bg(highlight_bg)
+                        .text_color(highlight_text)
+                        // `623-contrast-focus-ring`
+                        .when_some(crate::keyboard_nav::contrast_row_outline(cx), |d, ring| {
+                            d.shadow(ring)
+                        })
                 })
                 .relative()
                 .on_hover(move |hovered, _, cx| {
@@ -1534,6 +1539,9 @@ impl BranchFoldout {
             .when(selected && focused, |d| {
                 d.bg(t.box_selected_active_background)
                     .text_color(t.box_selected_active_text)
+                    .when_some(crate::keyboard_nav::contrast_row_outline(cx), |d, ring| {
+                        d.shadow(ring)
+                    })
             })
             .when(selected && !focused, |d| {
                 d.bg(t.box_selected_background)

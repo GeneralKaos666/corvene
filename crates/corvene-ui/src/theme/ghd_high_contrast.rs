@@ -33,9 +33,12 @@ const RED_3: u32 = 0xff9492;
 const PURPLE_2: u32 = 0xdbb7ff;
 const ORANGE_2: u32 = 0xffb757;
 
+/// The theme's `GhdTheme::name`.
+pub const NAME: &str = "High Contrast";
+
 pub fn theme() -> GhdTheme {
     let mut t = super::ghd_dark::theme();
-    t.name = "High Contrast";
+    t.name = NAME;
     t.appearance = Appearance::Dark;
 
     // text + surfaces

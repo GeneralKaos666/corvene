@@ -112,7 +112,7 @@ impl SelectedCommitView {
             diff,
             resizable,
             file_list_width,
-            file_list_focus: cx.focus_handle(),
+            file_list_focus: cx.focus_handle().tab_stop(true),
             file_list_focused: false,
             copy_sha: None,
             multi_files: None,

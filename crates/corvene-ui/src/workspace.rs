@@ -23,7 +23,7 @@ use gpui_kit::component::resizable::{
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::actions::{FocusPaneLeft, FocusPaneRight};
+use crate::actions::{FocusNext, FocusPaneLeft, FocusPaneRight, FocusPrevious};
 use crate::banner::{BannerView, banner_toast_frame, update_banner};
 use crate::branch_list::BranchFoldout;
 use crate::changes::ChangesSidebar;
@@ -1374,6 +1374,8 @@ impl Render for Workspace {
         // focused one is current again once the frame is drawn
         Dispatcher::enter_workspace(self.workspace_id, cx);
         cx.defer(|cx| Dispatcher::leave_workspace(cx));
+        // the dialog drawn this frame registers itself again
+        crate::keyboard_nav::clear_dialog_trap(window);
         // The section is per repository (`repositoryState.selectedSection`), so
         // dispatcher-driven switches (Amend Commit…, undo) and repository
         // changes land here.
@@ -1584,6 +1586,14 @@ impl Render for Workspace {
             .on_action(
                 cx.listener(|this, _: &FocusPaneRight, window, cx| this.focus_pane(1, window, cx)),
             )
+            .on_action(cx.listener(|this, _: &FocusNext, window, cx| {
+                let modal = this.state.read(cx).popup().is_some();
+                crate::keyboard_nav::move_focus(true, modal, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &FocusPrevious, window, cx| {
+                let modal = this.state.read(cx).popup().is_some();
+                crate::keyboard_nav::move_focus(false, modal, window, cx);
+            }))
             .relative()
             .when(wheel_zoom, |d| {
                 d.child(wheel_zoom_listener(cx.entity().downgrade()))

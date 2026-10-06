@@ -367,6 +367,10 @@ fn bindings(flags: KeymapFlags) -> Vec<KeyBinding> {
         // In-app
         KeyBinding::new("secondary-enter", Commit, Some("CommitMessage")),
         KeyBinding::new("escape", CloseFoldout, None),
+        // context-free, so a text field's own Tab (indent) does not win;
+        // the commit form's autocompletion takes it first
+        KeyBinding::new("tab", FocusNext, None),
+        KeyBinding::new("shift-tab", FocusPrevious, None),
     ];
     // Corvene flags. Added last: at equal depth a later binding wins, and a
     // context-free binding counts as the deepest context.

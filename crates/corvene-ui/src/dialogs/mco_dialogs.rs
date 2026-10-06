@@ -118,7 +118,7 @@ impl McoDialog {
             state,
             repo,
             filter,
-            list_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle().tab_stop(true),
             selected_branch,
             dont_ask_force_push: false,
             create_branch: None,

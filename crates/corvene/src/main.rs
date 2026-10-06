@@ -288,6 +288,7 @@ pub(crate) fn main() {
         corvene_ui::status_item::sync(state.read(cx).menu_bar_model().as_ref(), cx);
         let mut last_watched = state.read(cx).watched_repositories();
         let mut last_reduce_motion_flag = sync_reduce_motion(cx);
+        let mut last_keyboard_nav_flag = sync_keyboard_navigation(cx);
         let mut last_preferences_open = false;
         let mut last_keymap_file_flag = state
             .read(cx)
@@ -311,6 +312,13 @@ pub(crate) fn main() {
                 .bool(corvene_core::flags::ids::SYSTEM_REDUCE_MOTION);
             if reduce_motion_flag != last_reduce_motion_flag {
                 last_reduce_motion_flag = sync_reduce_motion(cx);
+            }
+            let keyboard_nav_flag = state
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::SYSTEM_KEYBOARD_NAVIGATION);
+            if keyboard_nav_flag != last_keyboard_nav_flag {
+                last_keyboard_nav_flag = sync_keyboard_navigation(cx);
             }
             Dispatcher::sync_crash_reports_setting(cx);
             // accounts or Settings › Notifications changed: (un)subscribe
@@ -1556,6 +1564,7 @@ fn open_workspace_window(
                 cx.observe_window_activation(window, |_, window, cx| {
                     if window.is_window_active() {
                         sync_reduce_motion(cx);
+                        sync_keyboard_navigation(cx);
                     }
                     let theme = APPLIED_THEME.with(|t| t.get());
                     if window.is_window_active()
@@ -1645,6 +1654,25 @@ fn sync_reduce_motion(cx: &mut App) -> bool {
             .bool(corvene_core::flags::ids::SYSTEM_REDUCE_MOTION)
     });
     cx.set_reduce_motion(on && corvene_platform::accessibility::reduce_motion());
+    on
+}
+
+/// `622-system-keyboard-navigation`: Tab reaches buttons, checkboxes and
+/// the like only with macOS's Keyboard navigation on (GHD: always). Read
+/// again when a window becomes active, as macOS posts no change.
+fn sync_keyboard_navigation(cx: &mut App) -> bool {
+    let on = corvene_core::AppState::try_global(cx).is_some_and(|s| {
+        s.read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::SYSTEM_KEYBOARD_NAVIGATION)
+    });
+    // CORVENE_KEYBOARD_NAVIGATION=0|1 stands in for the macOS setting
+    let system = match std::env::var("CORVENE_KEYBOARD_NAVIGATION").as_deref() {
+        Ok("0") => false,
+        Ok("1") => true,
+        _ => corvene_platform::accessibility::full_keyboard_access(),
+    };
+    corvene_ui::keyboard_nav::set_controls_reachable(!on || system, cx);
     on
 }
 

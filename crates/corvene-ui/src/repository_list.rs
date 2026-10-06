@@ -883,6 +883,10 @@ impl RepositoryFoldout {
             .when(highlighted, |d| {
                 d.bg(t.box_selected_active_background)
                     .text_color(t.box_selected_active_text)
+                    // `623-contrast-focus-ring`
+                    .when_some(crate::keyboard_nav::contrast_row_outline(cx), |d, ring| {
+                        d.shadow(ring)
+                    })
             })
             // `.list-item:hover` outranks `.list-item.selected` (flag 104 keeps it)
             .when(

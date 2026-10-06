@@ -91,7 +91,7 @@ impl PullRequestReviewList {
         Self {
             state,
             scroll: UniformListScrollHandle::new(),
-            focus: cx.focus_handle(),
+            focus: cx.focus_handle().tab_stop(true),
             focused: false,
         }
     }

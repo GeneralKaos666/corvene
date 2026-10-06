@@ -328,6 +328,13 @@ impl Render for AddWorktreeDialog {
                                 cx.stop_propagation();
                             }
                         }))
+                        .capture_action(cx.listener(
+                            |this, _: &crate::actions::FocusNext, window, cx| {
+                                if this.autocomplete_accept(window, cx) {
+                                    cx.stop_propagation();
+                                }
+                            },
+                        ))
                         .capture_action(cx.listener(|this, _: &Escape, _, cx| {
                             if this.autocomplete.take().is_some() {
                                 cx.notify();

@@ -38,6 +38,7 @@ pub mod image_diff;
 pub mod insights_view;
 pub mod issue_view;
 pub mod issues_list;
+pub mod keyboard_nav;
 pub mod keymap;
 pub mod markdown;
 #[cfg(not(target_os = "macos"))]

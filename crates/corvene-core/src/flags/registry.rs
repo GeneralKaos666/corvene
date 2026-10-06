@@ -4282,6 +4282,40 @@ registry! {
         code: &["crates/corvene-ui/src/context_menu.rs"],
     },
 
+    /// Tab follows macOS's Keyboard navigation setting.
+    SYSTEM_KEYBOARD_NAVIGATION = 622 "system-keyboard-navigation" {
+        title: "Follow the system's keyboard navigation setting",
+        summary: "On macOS, Tab moves between text fields and lists only, unless System \
+                  Settings › Keyboard › Keyboard navigation is on: then it also reaches \
+                  buttons, links, checkboxes and selects, as in other Mac apps. The setting is \
+                  read again whenever a window becomes active. Windows and Linux always tab \
+                  through every control.",
+        ghd_behaviour: "Tab reaches every button and link whatever the macOS setting says.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(4623)],
+        code: &["crates/corvene-ui/src/keyboard_nav.rs", "crates/corvene-platform/src/accessibility.rs", "crates/corvene/src/main.rs"],
+    },
+
+    /// Focus rings stay visible in the high contrast theme.
+    CONTRAST_FOCUS_RING = 623 "contrast-focus-ring" {
+        title: "Visible keyboard focus in the high contrast theme",
+        summary: "In the high contrast theme the keyboard focus ring and the row the arrow \
+                  keys reach in the repository and branch lists (and the other dropdowns) are \
+                  outlined in the text colour, so the focus shows without relying on the \
+                  highlight's background. Applies on every platform.",
+        ghd_behaviour: "Dropdown rows show focus only by a background colour, which a contrast \
+                        theme can make invisible.",
+        nature: Nature::BugFix,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22949)],
+        code: &["crates/corvene-ui/src/keyboard_nav.rs", "crates/corvene-ui/src/branch_list.rs", "crates/corvene-ui/src/repository_list.rs"],
+    },
+
     // ---- 700 Changes & diffs ----
 
     /// Changes list: lines added / deleted per file and in total.

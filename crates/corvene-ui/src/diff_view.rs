@@ -649,7 +649,7 @@ impl DiffView {
             whitespace_hint: None,
             image: None,
             context_menu: None,
-            focus_handle: cx.focus_handle(),
+            focus_handle: cx.focus_handle().tab_stop(true),
             loading_since: None,
             review: ReviewLocal::default(),
         }

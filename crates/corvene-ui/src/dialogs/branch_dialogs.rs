@@ -1927,7 +1927,7 @@ impl MergeBranchDialog {
             repo,
             squash,
             filter,
-            list_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle().tab_stop(true),
             selected: None,
             summary,
             description,

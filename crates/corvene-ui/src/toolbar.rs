@@ -30,6 +30,7 @@ use corvene_core::{AheadBehind, AppState, Dispatcher, Foldout, Tip};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+use crate::keyboard_nav::ControlFocus;
 use crate::widgets::IconButtonA11y;
 
 use crate::context_menu::mac_or;
@@ -854,18 +855,23 @@ pub fn toolbar_button(
                 .hover(move |s| s.bg(hover_bg).text_color(hover_text))
         })
         .when(!disabled, move |d| {
-            d.on_click(move |_, _, cx| {
-                if push_pull {
-                    if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
-                        Dispatcher::close_foldout(cx);
-                        Dispatcher::push_pull_action(id, cx);
+            // Tab reaches it (`keyboard_nav`): GHD's focus background and
+            // a ring inside
+            let ring = crate::keyboard_nav::inset_ring_shadows(cx);
+            d.control_focus_styled(cx, move |s| s.bg(hover_bg).shadow(ring))
+                .on_click(move |_, _, cx| {
+                    if push_pull {
+                        if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                            Dispatcher::close_foldout(cx);
+                            Dispatcher::push_pull_action(id, cx);
+                        }
+                    } else if let Some(foldout) = foldout {
+                        Dispatcher::toggle_foldout(foldout, cx);
+                        let open =
+                            corvene_core::AppState::global(cx).read(cx).foldout == Some(foldout);
+                        cx.set_global(OpenedByButton(open.then_some(foldout)));
                     }
-                } else if let Some(foldout) = foldout {
-                    Dispatcher::toggle_foldout(foldout, cx);
-                    let open = corvene_core::AppState::global(cx).read(cx).foldout == Some(foldout);
-                    cx.set_global(OpenedByButton(open.then_some(foldout)));
-                }
-            })
+                })
         })
         .when_some(progress, |d, value| {
             // `.progress`: fills the button from the left while an operation runs

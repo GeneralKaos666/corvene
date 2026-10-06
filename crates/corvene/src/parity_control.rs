@@ -334,7 +334,10 @@ fn window_command(
                 .split_whitespace()
             {
                 let keystroke = Keystroke::parse(key).map_err(|err| err.to_string())?;
-                window.dispatch_keystroke(keystroke, cx);
+                window.dispatch_keystroke(keystroke.clone(), cx);
+                // the release too: a focused control's Space / Enter click
+                // fires on key up
+                window.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke }), cx);
             }
         }
         "type" => {

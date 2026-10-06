@@ -27,6 +27,7 @@ use gpui_kit::*;
 use crate::changes::{repo_ruleset_link, repo_rulesets_for_branch_link};
 use crate::context_menu::mac_or;
 use crate::icons::{Octicon, octicon};
+use crate::keyboard_nav::ControlFocus;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::{
@@ -643,6 +644,7 @@ impl Render for CommitMessageAvatar {
                     .rounded_full()
                     .cursor_pointer()
                     .icon_button_label(label)
+                    .control_focus(cx)
                     .on_click(cx.listener(|this, _, window, cx| this.toggle(window, cx)))
                     .child(
                         canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {})

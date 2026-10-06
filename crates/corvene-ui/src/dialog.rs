@@ -705,10 +705,17 @@ fn dialog_impl(
     } else {
         Pixels::MAX
     };
+    // Tab stays inside the dialog (`keyboard_nav`); once it moved focus to
+    // one of the dialog's fields or buttons, the primary button's opening
+    // ring goes
+    let trap = crate::keyboard_nav::dialog_trap(id, window, cx);
+    let focus_primary =
+        focus_primary && !(trap.contains_focused(window, cx) && !trap.is_focused(window));
     deferred(
         anchored().position(crate::theme::page_origin()).child(
             div()
                 .id(id)
+                .track_focus(&trap)
                 // modal: the views underneath get no hover, clicks or wheel
                 // (GHD's `<dialog>` makes the rest of the page inert)
                 .occlude()

@@ -837,7 +837,7 @@ impl ChangesSidebar {
             context_menu: None,
             filter_popover_open: false,
             filter_button_bounds: Rc::new(Cell::new(Bounds::default())),
-            list_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle().tab_stop(true),
             check_all_focus: cx.focus_handle(),
             menu_anchor: crate::context_menu::RowMenuAnchor::for_uniform_list(&list_scroll),
             list_scroll,
@@ -5360,6 +5360,14 @@ impl ChangesSidebar {
                     cx.stop_propagation();
                 }
             }))
+            // Tab is bound to focus traversal before the field's indent
+            .capture_action(
+                cx.listener(|this, _: &crate::actions::FocusNext, window, cx| {
+                    if this.autocomplete_accept(window, cx) {
+                        cx.stop_propagation();
+                    }
+                }),
+            )
             .capture_action(cx.listener(|this, _: &Escape, _, cx| {
                 if this.autocomplete.take().is_some() {
                     cx.notify();
@@ -5712,7 +5720,12 @@ impl ChangesSidebar {
                 // background, also while `aria-disabled` keeps it focusable
                 let focused = self.commit_button_focus.is_focused(window);
                 let button = primary_button("commit", label, disabled, cx)
-                    .track_focus(&self.commit_button_focus)
+                    .track_focus(
+                        &self
+                            .commit_button_focus
+                            .clone()
+                            .tab_stop(crate::keyboard_nav::controls_reachable(cx)),
+                    )
                     .when(focused, |d| d.bg(cx.ghd().button_hover_background))
                     // `opacity: 0.6` shows the commit form's box-alt
                     // background through, not the page's

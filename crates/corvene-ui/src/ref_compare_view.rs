@@ -64,7 +64,7 @@ impl RefCompareView {
             diff,
             resizable,
             file_list_width,
-            file_list_focus: cx.focus_handle(),
+            file_list_focus: cx.focus_handle().tab_stop(true),
             file_scroll: ScrollHandle::new(),
         }
     }

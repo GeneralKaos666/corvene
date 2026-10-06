@@ -1,0 +1,62 @@
+# Tab / Shift+Tab focus traversal (`keyboard_nav`; GHD gets it from
+# Chromium). The GitHub Desktop preset turns 622-system-keyboard-navigation
+# off, so Tab reaches the toolbar buttons and tabs as in GHD.
+name: tab-focus
+description: Tab moves keyboard focus through the toolbar, the tabs and the changes list
+setup: repo
+steps:
+  - key: tab
+    wait: 400
+  - snap: first
+  - key: tab
+    wait: 400
+  - snap: second
+  - key: tab tab
+    wait: 400
+  - snap: fourth
+  - key: shift-tab
+    wait: 400
+  - snap: back
+---
+name: tab-focus-dialog
+description: Tab stays inside Create a Branch
+setup: repo
+steps:
+  - menu: create-branch
+    corvene: {key: cmd-shift-n}
+    wait: 800
+  - key: tab
+    wait: 400
+  - snap: link
+  - key: tab
+    wait: 400
+  - snap: cancel
+  - key: tab
+    wait: 400
+  - snap: wrapped
+---
+# 623-contrast-focus-ring: the high contrast theme outlines the keyboard
+# row of the branch list and draws the ring in the text colour (Corvene
+# only: GHD has no high contrast theme of its own; desktop/desktop#22949)
+name: contrast-focus-ring
+description: High contrast keyboard row and focus ring (Corvene only)
+setup: repo
+corvene_flags: 623-contrast-focus-ring=on
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: theme, arg: high-contrast}}
+    wait: 600
+  - ghd: {skip: true}
+    corvene: {key: cmd-b}
+    wait: 600
+  - ghd: {skip: true}
+    corvene: {key: down}
+    wait: 400
+  - snap: {name: branch-row, corvene_only: true, note: "deviations.md, 623-contrast-focus-ring"}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {key: tab}
+    wait: 400
+  - snap: {name: toolbar-ring, corvene_only: true}

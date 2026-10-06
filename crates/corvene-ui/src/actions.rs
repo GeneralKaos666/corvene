@@ -41,6 +41,9 @@ gpui_kit::actions!(
         // ← / → between the lists and the diff (`619-arrow-keys-between-panes`)
         FocusPaneLeft,
         FocusPaneRight,
+        // Tab / Shift+Tab (`keyboard_nav`)
+        FocusNext,
+        FocusPrevious,
         // View › Back / Forward (`427-back-forward-navigation`)
         NavigateBack,
         NavigateForward,

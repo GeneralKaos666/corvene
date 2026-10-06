@@ -6,6 +6,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 
 use crate::icons::{Octicon, octicon};
+use crate::keyboard_nav::ControlFocus;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
 use crate::widgets::counter_text;
@@ -87,6 +88,8 @@ pub fn vertical_tab_bar_sized(
                 })
                 .cursor_pointer()
                 .when(!is_selected, move |d| d.hover(move |s| s.bg(hover_bg)))
+                // the selected tab is the bar's tab stop (`keyboard_nav`)
+                .when(is_selected, |d| d.control_focus(cx))
                 .on_click(move |_, window, cx| on_select(ix, window, cx))
                 .child(octicon(tab.icon, icon).when(!icons_only, |d| d.mr(SPACING())))
                 .when(!icons_only, |d| d.child(tab.label))
@@ -152,6 +155,10 @@ pub fn tab_bar_focus(
                 .text_size(FONT_SIZE())
                 .cursor_pointer()
                 .hover(move |s| s.bg(hover_bg))
+                .when(is_selected, |d| {
+                    let ring = crate::keyboard_nav::inset_ring_shadows(cx);
+                    d.control_focus_styled(cx, move |s| s.shadow(ring))
+                })
                 .on_click(move |_, window, cx| on_select(ix, window, cx))
                 .child(
                     div()

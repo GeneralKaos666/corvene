@@ -6,6 +6,8 @@
 
 mod ghd_dark;
 mod ghd_high_contrast;
+/// The high contrast theme's `GhdTheme::name`.
+pub const HIGH_CONTRAST_NAME: &str = ghd_high_contrast::NAME;
 mod ghd_light;
 pub mod primer;
 

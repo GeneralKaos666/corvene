@@ -10,6 +10,7 @@ use gpui_kit::component::native_menu::NativeMenu;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+use crate::keyboard_nav::ControlFocus;
 use crate::theme::sizes::*;
 use crate::theme::{ActiveGhdTheme, GhdTheme};
 
@@ -24,6 +25,7 @@ pub fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App
         .text_color(t.secondary_button_text)
         .hover(move |s| s.bg(hover_bg).border_color(hover_border))
         .child(label.into())
+        .control_focus(cx)
 }
 
 /// `.button-component.small-button` - the secondary button at 21 px, 11 px
@@ -71,6 +73,8 @@ pub fn primary_button(
         .text_color(text)
         .when(disabled, |d| d.cursor_default())
         .when(!disabled, move |d| d.hover(move |s| s.bg(hover_bg)))
+        // GHD's `aria-disabled` buttons stay focusable
+        .control_focus(cx)
         .child(label)
 }
 
@@ -87,6 +91,7 @@ pub fn button_disabled(
         .text_color(faded(t.secondary_button_text, t.background))
         .cursor_default()
         .child(label.into())
+        .control_focus(cx)
 }
 
 fn base_button(id: impl Into<ElementId>, _t: &GhdTheme) -> Stateful<Div> {
@@ -128,6 +133,7 @@ pub fn link_button(
         .when(underline, |d| d.underline())
         .hover(move |s| s.text_color(hover).underline())
         .child(label)
+        .control_focus(cx)
 }
 
 /// Shared handler for `select_button` choices (index of the picked option).
@@ -509,6 +515,7 @@ pub fn checkbox_row_focus(
         .gap(SPACING_HALF())
         .cursor_pointer()
         .on_click(move |_, window, cx| on_toggle(!checked, window, cx))
+        .control_focus(cx)
         .child(
             div()
                 .relative()
@@ -583,6 +590,7 @@ pub fn radio_row(
         .gap(SPACING_HALF())
         .cursor_pointer()
         .on_click(move |_, window, cx| on_select(window, cx))
+        .control_focus(cx)
         .child(radio(
             ElementId::from(SharedString::from(format!("{id}-radio"))),
             selected,
@@ -713,6 +721,7 @@ pub fn select_button_items(
         .text_color(if disabled { t.text_secondary } else { t.text })
         .when(!disabled, |d| {
             d.cursor_pointer()
+                .control_focus(cx)
                 .on_click(move |ev: &ClickEvent, window, cx| {
                     let mut option_ix = 0;
                     let menu_items: Vec<crate::context_menu::MenuItem> = items
@@ -996,6 +1005,7 @@ pub fn switch(
         .when(!disabled, |d| {
             d.cursor_pointer()
                 .on_click(move |_, window, cx| on_toggle(!checked, window, cx))
+                .control_focus(cx)
         })
         .child(
             div()

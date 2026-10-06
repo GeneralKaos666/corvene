@@ -372,7 +372,7 @@ impl HistorySidebar {
             state,
             compare,
             filter,
-            list_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle().tab_stop(true),
             context_menu: None,
             drop_hint: None,
             reorder: None,

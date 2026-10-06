@@ -251,7 +251,7 @@ impl NoRepositoriesView {
             selected: None,
             picked: None,
             picker,
-            list_focus: cx.focus_handle(),
+            list_focus: cx.focus_handle().tab_stop(true),
             autofocus: true,
             ghd_installed: corvene_core::ghd_import::github_desktop_installed(),
             requested: Default::default(),

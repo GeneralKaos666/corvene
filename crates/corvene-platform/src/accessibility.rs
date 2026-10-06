@@ -7,6 +7,10 @@
 //! [`reduce_motion`] (`614-system-reduce-motion`) reads the system's Reduce
 //! Motion / animation setting; Electron leaves it to the page's
 //! `prefers-reduced-motion`, which GHD's stylesheets don't use.
+//!
+//! [`full_keyboard_access`] (`622-system-keyboard-navigation`) reads
+//! macOS's Keyboard › Keyboard navigation, which Electron ignores
+//! (desktop/desktop#4623).
 #![allow(unexpected_cfgs)] // `objc` macros probe a `cargo-clippy` feature
 
 /// `NSWorkspace.accessibilityDisplayShouldIncreaseContrast`
@@ -46,6 +50,32 @@ pub fn reduce_motion() -> bool {
         let reduce: BOOL = msg_send![workspace, accessibilityDisplayShouldReduceMotion];
         reduce != NO
     }
+}
+
+/// `NSApplication.isFullKeyboardAccessEnabled`: System Settings ›
+/// Keyboard › "Keyboard navigation" (Tab moves focus to every control, not
+/// only text fields and lists). AppKit reads `AppleKeyboardUIMode` and
+/// keeps the value current.
+#[cfg(target_os = "macos")]
+pub fn full_keyboard_access() -> bool {
+    use objc::runtime::{BOOL, NO, Object};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    // SAFETY: as in `increase_contrast`, on the shared application
+    unsafe {
+        let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+        if app.is_null() {
+            return true;
+        }
+        let enabled: BOOL = msg_send![app, isFullKeyboardAccessEnabled];
+        enabled != NO
+    }
+}
+
+/// Windows and Linux have no such setting: Tab reaches every control.
+#[cfg(not(target_os = "macos"))]
+pub fn full_keyboard_access() -> bool {
+    true
 }
 
 /// Windows: Settings › Accessibility › Visual effects › Animation effects
