@@ -55,6 +55,7 @@ pub fn app_state() -> TestAppState {
         flags_at_launch: flags,
         git: None,
         git_error: None,
+        git_redetecting: false,
         repositories: Vec::new(),
         recent: Vec::new(),
         recent_worktrees: Vec::new(),

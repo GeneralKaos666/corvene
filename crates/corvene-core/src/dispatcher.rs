@@ -175,6 +175,7 @@ impl Dispatcher {
             flags_at_launch: flags,
             git,
             git_error,
+            git_redetecting: false,
             repositories,
             recent,
             recent_worktrees,
@@ -396,6 +397,77 @@ impl Dispatcher {
             });
         })
         .detach();
+    }
+
+    /// Corvene: Apple's `/usr/bin/git` turns into the install stub when the
+    /// Command Line Tools are removed while Corvene runs (a macOS update does
+    /// it), failing every git command from then on. When the git in use is
+    /// that stub ([`corvene_git::still_usable`]), look for git again and
+    /// refresh; `failed` is the error that gave it away, shown again saying
+    /// which git Corvene uses now. Returns whether it looked.
+    pub fn replace_stale_git(failed: Option<(String, ErrorMessage)>, cx: &mut dyn Host) -> bool {
+        let stale = {
+            let s = Self::state(cx).read(cx);
+            !s.git_redetecting
+                && s.git
+                    .as_ref()
+                    .is_some_and(|git| !corvene_git::still_usable(git))
+        };
+        if !stale {
+            return false;
+        }
+        Self::state(cx).update(cx, |s, _| s.git_redetecting = true);
+        warn!("the Command Line Tools are gone; looking for git again");
+        let task = cx.background_executor().spawn(async move { find_git() });
+        cx.spawn(async move |cx: &mut AsyncCtx| {
+            let result = task.await;
+            cx.update(|cx| {
+                let state = Self::state(cx);
+                state.update(cx, |s, cx| {
+                    s.git_redetecting = false;
+                    match result {
+                        Ok(bin) => {
+                            info!(path = %bin.path.display(), "switched git");
+                            if let Some((title, failed)) = failed {
+                                show_popup_in(
+                                    s,
+                                    Popup::Error {
+                                        title,
+                                        message: format!(
+                                            "Apple's Command Line Tools were removed while \
+                                             Corvene was running, which broke the Git at \
+                                             /usr/bin/git. Corvene now uses the Git at {}; \
+                                             try again.",
+                                            bin.path.display()
+                                        ),
+                                        git: failed.git,
+                                    },
+                                );
+                            }
+                            s.git = Some(Arc::new(bin));
+                            s.git_error = None;
+                        }
+                        Err(err) => {
+                            warn!(%err, "git not usable");
+                            s.git = None;
+                            s.git_error = Some(err.to_string());
+                            show_popup_in(
+                                s,
+                                Popup::InstallGit {
+                                    reason: err.to_string(),
+                                },
+                            );
+                        }
+                    }
+                    cx.notify();
+                });
+                if let Some(id) = state.read(cx).selected {
+                    Self::refresh_repository(id, cx);
+                }
+            });
+        })
+        .detach();
+        true
     }
 
     // ---- foldouts / popups ----
@@ -644,8 +716,20 @@ impl Dispatcher {
         message: impl Into<ErrorMessage>,
         cx: &mut dyn Host,
     ) {
+        let title = title.into();
         let message = message.into();
         let full = message.full_text();
+        // Apple's git broke under us: switch git, then say so instead
+        if matches!(
+            corvene_git::environment_error(&full),
+            Some(
+                corvene_git::EnvironmentError::MissingCommandLineTools
+                    | corvene_git::EnvironmentError::InvalidDeveloperPath
+            )
+        ) && Self::replace_stale_git(Some((title.clone(), message.clone())), cx)
+        {
+            return;
+        }
         // any git call refused for an unsafe repository switches that
         // repository to the "Trust Repository" view instead
         if let Some(path) = corvene_git::dubious_ownership_path(&full)
@@ -1203,6 +1287,10 @@ impl Dispatcher {
     /// GHD `_refreshRepository`: re-read tip/branches/remotes, ahead/behind
     /// and working-directory status; then reload the selected diff.
     pub fn refresh_repository(id: u64, cx: &mut dyn Host) {
+        // the refresh runs again once a working git is found
+        if Self::replace_stale_git(None, cx) {
+            return;
+        }
         let state = Self::state(cx);
         let (
             path,

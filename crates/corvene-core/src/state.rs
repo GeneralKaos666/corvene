@@ -1846,6 +1846,8 @@ pub struct AppState {
     pub flags_at_launch: crate::flags::Flags,
     pub git: Option<Arc<GitBinary>>,
     pub git_error: Option<String>,
+    /// `Dispatcher::replace_stale_git` is looking for git again.
+    pub git_redetecting: bool,
     pub repositories: Vec<Repository>,
     /// Most recent first, max 3 (GHD `RecentRepositoriesLength`).
     pub recent: Vec<u64>,

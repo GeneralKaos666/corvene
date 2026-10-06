@@ -100,7 +100,7 @@ pub use credential::{CredentialError, format_credential, parse_credential};
 pub use description::{DEFAULT_GIT_DESCRIPTION, get_git_description, write_git_description};
 pub use detect::{
     GitBinary, GitVersion, find_git, find_git_prefetched, find_git_prefetched_preferring,
-    prefetch_git,
+    prefetch_git, still_usable,
 };
 pub use diff::{
     COMMIT_LINES_MAX_FILES, CommitLines, SVG_MEDIA_TYPE, blob_bytes, blob_lines, file_lines,
@@ -111,9 +111,10 @@ pub use diff::{
 };
 pub use error::{GitError, bad_config_line, dubious_ownership_path, explain_bad_config};
 pub use git_errors::{
-    GitErrorDetails, GitFailure, KnownGitError, display_command, files_that_would_be_overwritten,
-    git_error_details, is_lfs_auth_failure, is_signing_failure, known_git_error,
-    lfs_auth_failure_url, merge_abort_blocked_paths, parse_config_lock_file_path_from_error,
+    EnvironmentError, GitErrorDetails, GitFailure, KnownGitError, display_command,
+    environment_error, files_that_would_be_overwritten, git_error_details, is_lfs_auth_failure,
+    is_signing_failure, known_git_error, lfs_auth_failure_url, merge_abort_blocked_paths,
+    parse_config_lock_file_path_from_error,
 };
 pub use history_ops::{
     ResetMode, TagInfo, checkout_commit, cherry_pick_no_commit, create_tag, delete_tag,

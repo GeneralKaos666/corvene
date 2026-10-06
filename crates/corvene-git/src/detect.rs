@@ -109,6 +109,12 @@ pub fn find_git_prefetched_preferring(preferred: Option<&Path>) -> Result<GitBin
 /// Find git: `$CORVENE_GIT`, then `$PATH`, then well-known locations.
 /// `/usr/bin/git` is only tried when the Xcode Command Line Tools are present,
 /// because Apple's shim otherwise pops an install dialog.
+///
+/// macOS: `/usr/bin/git` comes last, after Homebrew's, wherever it sits on
+/// `$PATH`. An app opened from Finder gets `/usr/bin:/bin:/usr/sbin:/sbin`,
+/// so `$PATH` order would pick Apple's git where a terminal (Homebrew's
+/// prefix first on its `$PATH`) runs Homebrew's, and Apple's breaks when a
+/// macOS update removes the Command Line Tools ([`still_usable`]).
 pub fn find_git() -> Result<GitBinary> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(p) = std::env::var("CORVENE_GIT") {
@@ -121,7 +127,9 @@ pub fn find_git() -> Result<GitBinary> {
         if let Some(path) = std::env::var_os("PATH") {
             for dir in std::env::split_paths(&path) {
                 let candidate = dir.join("git");
-                if candidate == Path::new("/usr/bin/git") && !command_line_tools_present() {
+                if candidate == Path::new("/usr/bin/git")
+                    && (cfg!(target_os = "macos") || !command_line_tools_present())
+                {
                     continue;
                 }
                 candidates.push(candidate);
@@ -168,6 +176,20 @@ pub fn find_git() -> Result<GitBinary> {
         }),
         None => Err(GitError::GitNotFound),
     }
+}
+
+/// `false` once `git` has stopped working without being touched: macOS's
+/// `/usr/bin/git` after the Command Line Tools were removed (a macOS update
+/// can do it while Corvene runs), when it becomes the stub. A file check, so
+/// cheap enough to make before every refresh.
+#[cfg(target_os = "macos")]
+pub fn still_usable(git: &GitBinary) -> bool {
+    git.path != Path::new("/usr/bin/git") || command_line_tools_present()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn still_usable(_git: &GitBinary) -> bool {
+    true
 }
 
 /// macOS: `/usr/bin/git` is a stub that asks to install the Command Line

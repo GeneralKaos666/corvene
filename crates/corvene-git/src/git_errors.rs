@@ -856,6 +856,151 @@ pub fn git_error_details(output: &str) -> GitErrorDetails {
     d
 }
 
+/// Corvene (`415-git-error-dialog`): failures that come from the machine
+/// rather than from git or the repository (a missing tool, the network, a
+/// full disk), which dugite does not recognise. Their output often has no
+/// `fatal:` line to lead with, or one that names the wrong cause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EnvironmentError {
+    /// Apple's `/usr/bin/<tool>` stubs, run by something git started (a
+    /// hook, a credential helper), without the Command Line Tools.
+    MissingCommandLineTools,
+    /// `xcrun: error: invalid active developer path`: the Command Line
+    /// Tools went missing, usually after a macOS update.
+    InvalidDeveloperPath,
+    DiskFull,
+    MissingGitLfs,
+    /// A shell (usually a hook's) could not find this command.
+    CommandNotFound(String),
+    HostKeyVerificationFailed,
+    CertificateProblem,
+    /// No address for this host name.
+    CouldNotResolveHost(String),
+    /// The host, when git named it, did not answer.
+    ConnectionFailed(Option<String>),
+    /// The connection broke partway through a transfer.
+    ConnectionDropped,
+}
+
+/// The [`EnvironmentError`] git's output shows, most specific first.
+pub fn environment_error(output: &str) -> Option<EnvironmentError> {
+    use EnvironmentError::*;
+    let has = |marker: &str| output.contains(marker);
+    if has("No developer tools were found") || has("requires the command line developer tools") {
+        return Some(MissingCommandLineTools);
+    }
+    if has("xcrun: error: invalid active developer path") {
+        return Some(InvalidDeveloperPath);
+    }
+    if has("No space left on device") {
+        return Some(DiskFull);
+    }
+    if has("git-lfs: command not found")
+        || has("git: 'lfs' is not a git command")
+        || has("'git-lfs' was not found on your path")
+    {
+        return Some(MissingGitLfs);
+    }
+    if let Some(command) = command_not_found(output) {
+        return Some(CommandNotFound(command));
+    }
+    if has("Host key verification failed") {
+        return Some(HostKeyVerificationFailed);
+    }
+    if has("SSL certificate problem") || has("server certificate verification failed") {
+        return Some(CertificateProblem);
+    }
+    if let Some(host) = word_after(output, "Could not resolve host: ")
+        .or_else(|| word_after(output, "Could not resolve hostname "))
+    {
+        return Some(CouldNotResolveHost(host));
+    }
+    if let Some(host) = word_after(output, "Failed to connect to ") {
+        return Some(ConnectionFailed(Some(host)));
+    }
+    if has("Connection timed out") || has("Operation timed out") || has("Connection refused") {
+        return Some(ConnectionFailed(None));
+    }
+    if has("error: RPC failed") || has("early EOF") || has("Connection reset by peer") {
+        return Some(ConnectionDropped);
+    }
+    None
+}
+
+impl EnvironmentError {
+    /// The sentence the error dialog leads with.
+    pub fn lead(&self) -> String {
+        use EnvironmentError::*;
+        match self {
+            MissingCommandLineTools => "Something Git ran, usually a hook or a credential \
+                 helper, needs Apple's Command Line Tools, which are not installed on this \
+                 Mac. Finish the install macOS offered (or run xcode-select --install in \
+                 Terminal), then try again."
+                .to_string(),
+            InvalidDeveloperPath => "Apple's Command Line Tools are missing, which often \
+                 happens after a macOS update. Run xcode-select --install in Terminal to \
+                 reinstall them, then try again."
+                .to_string(),
+            DiskFull => "The disk is full. Free up some space, then try again.".to_string(),
+            MissingGitLfs => "This repository uses Git LFS, which is not installed. Install \
+                 Git LFS, then try again."
+                .to_string(),
+            CommandNotFound(command) => format!(
+                "Git ran \"{command}\", usually from a hook, but it is not installed or not \
+                 on the PATH Git was given. Install it, or turn on \"Load Git hook \
+                 environment variables from shell\" in Settings, then try again."
+            ),
+            HostKeyVerificationFailed => "SSH could not verify the server: its host key is \
+                 not in your known_hosts file, or it has changed. Connect once with ssh in \
+                 Terminal to check and accept the key, then try again."
+                .to_string(),
+            CertificateProblem => "The server's security certificate could not be verified. \
+                 A proxy, VPN or antivirus that inspects traffic is a common cause; make sure \
+                 Git trusts its certificate."
+                .to_string(),
+            CouldNotResolveHost(host) => format!(
+                "Could not find {host}. Check your Internet connection and that the remote's \
+                 address is right, then try again."
+            ),
+            ConnectionFailed(Some(host)) => format!(
+                "Could not connect to {host}. Check your Internet connection, proxy and \
+                 firewall, then try again."
+            ),
+            ConnectionFailed(None) => "Could not connect to the server. Check your Internet \
+                 connection, proxy and firewall, then try again."
+                .to_string(),
+            ConnectionDropped => "The connection to the server dropped partway through. Check \
+                 your Internet connection and try again."
+                .to_string(),
+        }
+    }
+}
+
+/// The command of a shell's "not found" line: sh/bash's `<script>: line N:
+/// <command>: command not found` or zsh's `command not found: <command>`.
+fn command_not_found(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let line = line.trim();
+        let command = if let Some(head) = line.strip_suffix(": command not found") {
+            head.rsplit(": ").next()?
+        } else {
+            line.split("command not found: ").nth(1)?
+        };
+        let command = command.trim();
+        (!command.is_empty() && !command.contains(char::is_whitespace)).then(|| command.to_string())
+    })
+}
+
+/// The word after `marker` (up to whitespace, a quote, a colon or the end).
+fn word_after(output: &str, marker: &str) -> Option<String> {
+    let rest = &output[output.find(marker)? + marker.len()..];
+    let word: String = rest
+        .chars()
+        .take_while(|c| !c.is_whitespace() && !matches!(c, '\'' | '"' | ':'))
+        .collect();
+    (!word.is_empty()).then_some(word)
+}
+
 /// A failed git command as the error dialog shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GitFailure {
@@ -902,10 +1047,14 @@ impl GitFailure {
         self.known.and_then(|k| k.description(settings_menu))
     }
 
-    /// The lead sentence of the structured dialog: GHD's description or
+    /// The lead sentence of the structured dialog: Corvene's for a
+    /// failure of the machine ([`environment_error`]), GHD's description or
     /// Corvene's for a recognised error, Corvene's for a branch another
     /// worktree has checked out, else git's first error line.
     pub fn lead(&self, settings_menu: &str) -> Option<String> {
+        if let Some(environment) = environment_error(&self.output) {
+            return Some(environment.lead());
+        }
         if let Some(lead) = self.known.and_then(|k| k.lead(settings_menu)) {
             return Some(lead);
         }
@@ -1262,5 +1411,87 @@ mod tests {
             Some("Invalid reference: x.")
         );
         assert_eq!(display_command("-c a=b"), "git");
+    }
+
+    #[test]
+    fn recognises_environment_failures() {
+        use super::EnvironmentError::*;
+        use super::environment_error;
+        let shim = "xcode-select: note: No developer tools were found, requesting install.\n\
+                    If developer tools are located at a non-default location on disk, use \
+                    `sudo xcode-select --switch path/to/Xcode.app` to specify the Xcode that \
+                    you wish to use for command line developer tools, and cancel the \
+                    installation dialog.\nSee `man xcode-select` for more details.\n";
+        assert_eq!(environment_error(shim), Some(MissingCommandLineTools));
+        let push = GitFailure::new(
+            "push origin refs/heads/main:refs/heads/main --progress",
+            Some(1),
+            shim,
+        );
+        assert!(
+            push.lead("x")
+                .is_some_and(|l| l.contains("Command Line Tools")),
+            "{:?}",
+            push.lead("x")
+        );
+        assert_eq!(
+            environment_error(
+                "xcrun: error: invalid active developer path (/Library/Developer/CommandLineTools), missing xcrun at: /Library/Developer/CommandLineTools/usr/bin/xcrun"
+            ),
+            Some(InvalidDeveloperPath)
+        );
+        assert_eq!(
+            environment_error(".husky/pre-push: line 4: npx: command not found\n"),
+            Some(CommandNotFound("npx".into()))
+        );
+        assert_eq!(
+            environment_error("zsh:1: command not found: pnpm\n"),
+            Some(CommandNotFound("pnpm".into()))
+        );
+        assert_eq!(
+            environment_error("git-lfs filter-process: git-lfs: command not found\n"),
+            Some(MissingGitLfs)
+        );
+        assert_eq!(
+            environment_error(
+                "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com\n"
+            ),
+            Some(CouldNotResolveHost("github.com".into()))
+        );
+        assert_eq!(
+            environment_error(
+                "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known\nfatal: Could not read from remote repository.\n"
+            ),
+            Some(CouldNotResolveHost("github.com".into()))
+        );
+        assert_eq!(
+            environment_error(
+                "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443 after 75001 ms: Couldn't connect to server\n"
+            ),
+            Some(ConnectionFailed(Some("github.com".into())))
+        );
+        assert_eq!(
+            environment_error(
+                "Host key verification failed.\nfatal: Could not read from remote repository.\n"
+            ),
+            Some(HostKeyVerificationFailed)
+        );
+        assert_eq!(
+            environment_error(
+                "fatal: unable to access 'https://x/': SSL certificate problem: unable to get local issuer certificate\n"
+            ),
+            Some(CertificateProblem)
+        );
+        assert_eq!(
+            environment_error(
+                "error: RPC failed; HTTP 400 curl 22 The requested URL returned error: 400\nsend-pack: unexpected disconnect while reading sideband packet\n"
+            ),
+            Some(ConnectionDropped)
+        );
+        assert_eq!(
+            environment_error("error: unable to write file x: No space left on device\n"),
+            Some(DiskFull)
+        );
+        assert_eq!(environment_error("fatal: invalid reference: x"), None);
     }
 }
