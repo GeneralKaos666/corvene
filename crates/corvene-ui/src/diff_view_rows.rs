@@ -1199,19 +1199,22 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         .child(number(row.new));
 
     // `348-pull-request-review`: the composer's range and the `+` on hover
-    if ctx.review.is_some() {
-        let group = review_group(abs, None);
+    // (added after the gutter and the text, so it paints over them)
+    let review_group_name = ctx.review.as_ref().map(|_| review_group(abs, None));
+    if let Some(group) = &review_group_name {
         if review_in_range(ctx, row.kind, row.old, row.new) {
             el = el
                 .bg(t.diff_selected_background)
                 .text_color(t.diff_selected_text);
         }
         el = el.relative().group(group.clone());
+    }
+    el = el.child(gutter).child(content);
+    if let Some(group) = review_group_name {
         el = el.children(review_add_button(
             ctx, row.kind, row.old, row.new, group, cx,
         ));
     }
-    el = el.child(gutter).child(content);
     if selectable && changed && !hide_whitespace {
         // extend the drag as the pointer crosses changed rows
         let view = ctx.view.clone();
@@ -1667,7 +1670,6 @@ fn split_line_number(
         .flex_row()
         .items_stretch()
         .relative()
-        .children(review_button)
         .bg(bg)
         .when(column == Column::Before, |d| d.border_l_1())
         .when(column == Column::After, |d| d.border_r_1())
@@ -1731,6 +1733,8 @@ fn split_line_number(
                 .px(SPACING_HALF())
                 .child(number.map(|n| n.to_string()).unwrap_or_default()),
         )
+        // the `+` last, so it paints over the number
+        .children(review_button)
         .into_any_element()
 }
 

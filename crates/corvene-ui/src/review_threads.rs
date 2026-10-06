@@ -764,10 +764,12 @@ pub fn add_comment_button(
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .invisible()
-        .group_hover(group, |s| s.visible())
+        // opacity, not visibility: a hidden element registers no click
+        // listeners, and nothing guarantees a frame between the hover
+        // that would show it and the press
+        .opacity(0.)
+        .group_hover(group, |s| s.opacity(1.))
         .child(octicon(Octicon::Plus, c(primer::WHITE)).size(zpx(12.)))
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(move |ev, _, cx| {
             cx.stop_propagation();
             let target = match &current {

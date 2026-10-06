@@ -20,10 +20,12 @@ steps:
     corvene: {action: "corvene::ReviewPullRequest"}
     wait: 3000
   - snap: {name: overview, corvene_only: true, note: "GHD has no review surface (deviations.md, 348-pull-request-review)"}
-  # the third file row: src/main.rs, its threads under the lines
+  # the third file row: src/main.rs, its threads under the lines (one
+  # carried over to the local commit, one resolved and folded, the outdated
+  # one placed again)
   - ghd: {skip: true}
-    corvene: {click: [103, 220]}
-    wait: 2000
+    corvene: {click: [103, 249]}
+    wait: 2500
   - snap: {name: threads, corvene_only: true}
   # split view (⌥⌘S, flag 610) and back
   - ghd: {skip: true}
@@ -33,13 +35,29 @@ steps:
   - ghd: {skip: true}
     corvene: {key: "alt-cmd-s"}
     wait: 1200
-  # README.md: the pending comment, then the overview's Review changes…
+  # the + of the second row opens the composer; ⌘⏎ adds the comment to the
+  # pending review (the stub lists it on the next reload)
+  - ghd: {skip: true}
+    corvene: {hover: [262, 166]}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {click: [262, 166]}
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {type: "Name the greeter."}
+    wait: 400
+  - snap: {name: composer, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: "cmd-enter"}
+    wait: 2500
+  - snap: {name: comment-added, corvene_only: true}
+  # README.md: the pending comment, then Review changes…
   - ghd: {skip: true}
     corvene: {click: [103, 191]}
     wait: 2000
   - snap: {name: pending-thread, corvene_only: true}
   - ghd: {skip: true}
-    corvene: {click: [128, 777]}
+    corvene: {click: [123, 791]}
     wait: 1200
   - snap: {name: review-changes, corvene_only: true}
   - ghd: {skip: true}
