@@ -171,6 +171,22 @@ enum CommitField {
     CoAuthors,
 }
 
+/// The commit button's focus handle, for GHD `App.onPopupDismissed`: closing
+/// the Committing changes dialog after the commit moves focus back to the
+/// button (see [`focus_commit_button`]).
+struct CommitButtonFocus(FocusHandle);
+
+impl Global for CommitButtonFocus {}
+
+/// GHD `App.onPopupDismissed`: the Committing changes dialog closed once the
+/// commit is done hands focus back to the commit button (its button under
+/// the commit button is gone by then).
+pub fn focus_commit_button(window: &mut Window, cx: &mut App) {
+    if let Some(focus) = cx.try_global::<CommitButtonFocus>().map(|f| f.0.clone()) {
+        window.focus(&focus, cx);
+    }
+}
+
 /// Window-space rectangles of a field's misspellings (see `summary_rects`).
 type RectCache = Rc<RefCell<Vec<Option<Bounds<Pixels>>>>>;
 
@@ -254,6 +270,9 @@ pub struct ChangesSidebar {
     /// lights the box's `:focus-within` border like in GHD.
     commit_options_focus: FocusHandle,
     co_authors_focus: FocusHandle,
+    /// The commit button: a click focuses it (`<button>`), and it keeps the
+    /// `:focus` background while disabled during and after the commit.
+    commit_button_focus: FocusHandle,
     pending_spell: Option<PendingSpell>,
     /// A handle typed with a trailing space, turned into a token on the next
     /// render (needs a window).
@@ -724,6 +743,8 @@ impl ChangesSidebar {
         let summary_focus = summary.read(cx).focus_handle(cx);
         let description_focus = description.read(cx).focus_handle(cx);
         let co_authors_focus = co_authors.read(cx).focus_handle(cx);
+        let commit_button_focus = cx.focus_handle();
+        cx.set_global(CommitButtonFocus(commit_button_focus.clone()));
         cx.subscribe(&summary, |this, _, ev: &InputEvent, cx| {
             this.on_input_event(CommitField::Summary, ev, cx)
         })
@@ -808,6 +829,7 @@ impl ChangesSidebar {
             description_focus,
             commit_options_focus: cx.focus_handle(),
             co_authors_focus,
+            commit_button_focus,
             pending_spell: None,
             pending_author: None,
             rule_failure_popover_open: false,
@@ -5644,24 +5666,52 @@ impl ChangesSidebar {
                         )
                     })
                     .child(label);
+                // `.button-component[type='submit']:focus`: the hover
+                // background, also while `aria-disabled` keeps it focusable
+                let focused = self.commit_button_focus.is_focused(window);
                 let button = primary_button("commit", label, disabled, cx)
+                    .track_focus(&self.commit_button_focus)
+                    .when(focused, |d| d.bg(cx.ghd().button_hover_background))
                     // `opacity: 0.6` shows the commit form's box-alt
                     // background through, not the page's
                     .when(disabled, |d| {
                         let t = cx.ghd();
-                        let bg = crate::widgets::faded(t.button_background, t.box_alt_background);
-                        d.bg(bg)
-                            .border_color(bg)
+                        let fill = if focused {
+                            t.button_hover_background
+                        } else {
+                            t.button_background
+                        };
+                        let border =
+                            crate::widgets::faded(t.button_background, t.box_alt_background);
+                        d.bg(crate::widgets::faded(fill, t.box_alt_background))
+                            .border_color(border)
                             .text_color(crate::widgets::faded(t.button_text, t.box_alt_background))
                     })
                     .w_full()
+                    // a `<button>` takes focus on mouse down, enabled or not
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            window.focus(&this.commit_button_focus, cx);
+                        }),
+                    )
+                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                        let k = &ev.keystroke;
+                        if (k.key == "enter" || k.key == "space")
+                            && !k.modifiers.modified()
+                            && !this.commit_disabled(cx)
+                        {
+                            cx.stop_propagation();
+                            this.do_commit(cx)
+                        }
+                    }))
                     .on_click(cx.listener(|this, _, _, cx| {
                         if !this.commit_disabled(cx) {
                             this.do_commit(cx)
                         }
                     }));
                 // `Button tooltip`: north of the button, at once while disabled
-                match disabled.then(|| self.commit_disabled_tooltip(cx)).flatten() {
+                let button = match disabled.then(|| self.commit_disabled_tooltip(cx)).flatten() {
                     Some(tip) => crate::widgets::with_directed_tooltip_delay(
                         button,
                         tip,
@@ -5669,7 +5719,15 @@ impl ChangesSidebar {
                         std::time::Duration::ZERO,
                     ),
                     None => button,
-                }
+                };
+                // `:focus-visible`: the ring only after keyboard input
+                div()
+                    .relative()
+                    .w_full()
+                    .when(focused && window.last_input_was_keyboard(), |d| {
+                        d.child(crate::widgets::focus_ring(cx))
+                    })
+                    .child(button)
             })
             .children(self.commit_progress(cx))
             .children(self.upstream_gone_note(cx))

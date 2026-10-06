@@ -122,6 +122,10 @@ pub struct Workspace {
     /// Whether a popup was open at the last state change, to refocus the
     /// root when it closes.
     popup_was_open: bool,
+    /// What had focus as the first popup opened: a closing `<dialog>` hands
+    /// focus back to it (Chromium's "previously focused element"), so a
+    /// clicked commit button keeps its `:focus` look after a hook dialog.
+    focus_before_popup: Option<FocusHandle>,
     /// A tab click or View › Show Changes / History asked for the section's
     /// list to take focus at the next render (`603-focus-list-on-section-switch`).
     focus_section_list: bool,
@@ -178,7 +182,15 @@ impl Workspace {
             let overlay_open = s.popup().is_some() || s.foldout.is_some();
             let foldout = s.foldout;
             let popup_closed = this.popup_was_open && s.popup().is_none();
+            if !this.popup_was_open && s.popup().is_some() {
+                this.focus_before_popup = window.focused(cx);
+            }
             this.popup_was_open = s.popup().is_some();
+            let restore = if popup_closed {
+                this.focus_before_popup.take()
+            } else {
+                None
+            };
             // A closing dialog's focused field is still in the last frame;
             // once it is gone nothing would have focus and no shortcut would
             // match (`keymap::MENU` needs the `Workspace` context). A
@@ -186,8 +198,10 @@ impl Workspace {
             // below. Not `!contains_focused`: that is also true of a field
             // focused but not drawn yet (History's compare box after ⇧⌘B
             // from Changes), and the focus would be taken from it.
+            // A handle whose element is gone by then loses focus again and
+            // the focus-lost listener below takes it to the root.
             if !overlay_open && (popup_closed || window.focused(cx).is_none()) {
-                window.focus(&this.focus_handle, cx);
+                window.focus(restore.as_ref().unwrap_or(&this.focus_handle), cx);
             }
             // GHD foldouts put the caret in their filter box when they open,
             // however they were opened (`FilterList` autoFocus)
@@ -305,6 +319,7 @@ impl Workspace {
             ci_popover,
             last_foldout: None,
             popup_was_open: false,
+            focus_before_popup: None,
             focus_section_list: false,
             launch_focus_pending: true,
             review_mode: false,

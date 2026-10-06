@@ -40,7 +40,7 @@ steps:
   - snap: {name: failed-ignore-hover, mask: [[668, 350, 82, 14]], note: "the hook's run time (GHD's includes loading the shell environment, .docs/deviations.md)"}
   - click: {text: "Ignore and Continue", within: "dialog"}
     wait: 3000
-  - snap: {name: ignored, region: [0, 32, 249, 665], note: "the commit went through: no changes left and the form cleared (below: the undo bar time differs, and GHD keeps focus on the commit button)"}
+  - snap: {name: ignored, region: [0, 32, 249, 735], note: "the commit went through: no changes left, the form cleared and the disabled commit button keeps focus (below: the undo bar time differs)"}
 ---
 name: commit-hook-aborted
 description: A failing commit-msg hook, then Abort. No commit and no error, the message stays in the form

@@ -102,6 +102,7 @@ impl Render for HookFailedDialog {
 /// GHD `CommitProgress`: subscribed to the commit's output while it is
 /// open; what came in stays once the commit is done.
 pub struct CommitProgressDialog {
+    state: Entity<AppState>,
     output: CommitOutput,
     /// How much of `output` the terminal has.
     offset: usize,
@@ -117,6 +118,7 @@ impl CommitProgressDialog {
         let terminal = cx.new(|_| Terminal::new(80, 20, &written));
         let _observe = cx.observe(&state, |this: &mut Self, _, cx| this.catch_up(cx));
         Self {
+            state,
             output,
             offset,
             terminal,
@@ -136,12 +138,23 @@ impl CommitProgressDialog {
 impl Render for CommitProgressDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let output = self.output.clone();
-        let close = move |_: &mut Window, cx: &mut App| {
+        let state = self.state.clone();
+        let close = move |window: &mut Window, cx: &mut App| {
             let output = output.clone();
             Dispatcher::close_popups_where(
                 move |p| matches!(p, Popup::CommitProgress { output: o } if *o == output),
                 cx,
             );
+            // `App.onPopupDismissed`: once the commit is done, focus goes
+            // back to the commit button (deferred past the workspace's
+            // focus restore on popup close)
+            let committing = state
+                .read(cx)
+                .selected_state()
+                .is_some_and(|r| r.committing);
+            if !committing {
+                window.defer(cx, crate::changes::focus_commit_button);
+            }
         };
         dialog(
             "commit-progress-dialog",
