@@ -76,7 +76,7 @@ pub use branch_ops::{
     get_stashes, is_local_changes_overwritten, last_desktop_stash_entry_index, merge_branch,
     merge_branch_with_message, modified_assume_unchanged, move_branch_back, parse_recent_branches,
     pop_stash_entry, pop_stash_on_branch, recent_branches, remote_head, rename_branch,
-    set_upstream, stashed_files, update_submodules_after_checkout,
+    set_upstream, stashed_files, unset_upstream, update_submodules_after_checkout,
 };
 pub use clean::{clean_dry_run, clean_paths, parse_clean_dry_run, unquote_c_path};
 pub use commit::{

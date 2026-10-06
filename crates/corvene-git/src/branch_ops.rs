@@ -174,6 +174,11 @@ pub fn checkout_branch_with(
             .arg(&branch.name)
             .arg("--"),
     };
+    // Corvene (`1114-hook-results`): GHD never intercepts a checkout's
+    // hooks; post-checkout's outcome is shown when the caller asks for it
+    if crate::hooks::scoped_reports_results() {
+        cmd = cmd.intercept_hooks(&["post-checkout"]);
+    }
     cmd.run()?;
     update_submodules_after_checkout(git, workdir, options)
 }
@@ -229,6 +234,17 @@ pub fn set_upstream(git: Arc<GitBinary>, workdir: &Path, name: &str, upstream: &
             format!("--set-upstream-to={upstream}"),
             name.to_string(),
         ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
+/// `git branch --unset-upstream <name>` (Corvene, `1222-push-target-guard`:
+/// a branch that tracked a differently named branch is published under its
+/// own name).
+pub fn unset_upstream(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<()> {
+    GitCommand::new(git)
+        .args(["branch", "--unset-upstream", name])
         .current_dir(workdir)
         .run()?;
     Ok(())

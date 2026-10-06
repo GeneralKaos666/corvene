@@ -693,6 +693,19 @@ pub enum Popup {
     PushNeedsPull {
         repo: u64,
     },
+    /// Corvene `1222-push-target-guard`: Push would send `branch` to its
+    /// differently named upstream, the remote's default branch.
+    ConfirmPushToUpstream {
+        repo: u64,
+        branch: String,
+        /// `origin/main`
+        upstream: String,
+        /// `main`
+        remote_branch: String,
+        /// The held-back push's own arguments, for Push to main.
+        force_with_lease: bool,
+        up_to: Option<String>,
+    },
     /// `ConfirmForcePush`
     ConfirmForcePush {
         repo: u64,
@@ -857,6 +870,7 @@ impl Popup {
             | Self::PublishRepository { repo, .. }
             | Self::PushNeedsPull { repo, .. }
             | Self::ConfirmForcePush { repo, .. }
+            | Self::ConfirmPushToUpstream { repo, .. }
             | Self::GenericGitAuthentication { repo, .. }
             | Self::SquashCommitMessage { repo, .. }
             | Self::WarnStackedBranches { repo, .. }
@@ -1316,6 +1330,12 @@ pub struct RepositoryState {
     pub hook_progress: Option<corvene_git::hooks::HookProgress>,
     /// GHD `subscribeToCommitOutput`: the output of the commit in progress.
     pub commit_output: Option<crate::hooks::CommitOutput>,
+    /// Corvene `1114-hook-results`: the last operation's non-blocking hooks
+    /// (the sidebar's hook list) until dismissed.
+    pub hook_report: Option<crate::hooks::HookReport>,
+    /// Corvene `1222-push-target-guard`: the upstream the next push may go
+    /// to without asking (Confirm Push › Push to main).
+    pub push_target_confirmed: Option<String>,
     /// Corvene `1307-commit-progress`: how far the commit in progress got,
     /// once it has run for a moment.
     pub commit_progress: Option<crate::commit_progress::CommitProgress>,

@@ -1,0 +1,42 @@
+# The outcome of the hooks that cannot stop an operation (flag
+# 1114-hook-results, off in the GitHub Desktop preset the harness runs with,
+# desktop/desktop#22476). GHD drops a failed post-commit or post-checkout
+# silently (`ignoredOnFailureHooks`), so the list is recorded, not compared.
+name: hook-results-commit
+description: A failing post-commit hook after a commit. The hook list under the tabs names the commit and the hook, and opens its output (Corvene only)
+setup: repo
+corvene_flags: 1114-hook-results=on
+ghd_local_storage: {git-hooks-env-enabled: "1"}
+steps:
+  - hooks:
+      post-commit: "#!/bin/sh\necho 'Syncing the workspace'\necho 'config/app.env: two people changed it'\necho 'run sync --merge to see both'\nexit 1\n"
+  - ghd: {skip: true}
+    corvene: {hook: {name: hooks-env, arg: "on"}}
+  - click: [139, 583]
+  - type: "Update the README"
+  - click: [124, 747]
+    wait: 4000
+  - snap: {name: listed, corvene_only: true, note: "GHD shows nothing for a failed post-commit (1114-hook-results)"}
+  - ghd: {skip: true}
+    corvene: {click: [90, 155]}
+    wait: 600
+  - snap: {name: output, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [234, 127]}
+    wait: 600
+  - snap: {name: dismissed, corvene_only: true}
+---
+name: hook-results-checkout
+description: A post-checkout hook that prints a line and a failing one after a branch switch. The switch goes through without an error dialog and both hooks show in the list (Corvene only)
+setup: repo
+corvene_flags: 1114-hook-results=on
+ghd_local_storage: {git-hooks-env-enabled: "1"}
+steps:
+  - hooks:
+      post-checkout: "#!/bin/sh\necho \"Installing dependencies for $3\"\nexit 2\n"
+  - ghd: {skip: true}
+    corvene: {hook: {name: hooks-env, arg: "on"}}
+  - ghd: {skip: true}
+    corvene: {hook: {name: checkout, arg: "feature/login"}}
+    wait: 4000
+  - snap: {name: switched, corvene_only: true, note: "GHD shows the switch's error dialog instead (1114-hook-results)"}

@@ -423,7 +423,7 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
-          forks: bool = False) -> Path:
+          forks: bool = False, mismatch: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -444,7 +444,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     (`348-pull-request-review`). With `utf16`, see `_utf16`
     (`1306-utf16-diffs`). With `stacked`, see `_stacked`, and no working
     changes, so commits can be squashed. With `forks` (and `remote`), see
-    `_forks` (`1223-checkout-from-fork`)."""
+    `_forks` (`1223-checkout-from-fork`). With `mismatch` (and `remote`),
+    `issue-134` is checked out off main, tracking `origin/main`
+    (`1222-push-target-guard`)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -551,6 +553,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "push", "-q", "-u", "origin", "feature/login")
     if utf16:
         _utf16(repo)
+    if mismatch and remote:
+        _git(repo, "checkout", "-q", "-b", "issue-134")
+        _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "issue-134")
     if stacked:
         _stacked(repo)
         return repo

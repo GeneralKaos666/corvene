@@ -4230,6 +4230,11 @@ impl Dispatcher {
                 .filter(|sp| branches.iter().any(|b| b.name == *sp))
                 .filter(|sp| Some(sp.as_str()) != default && Some(sp.as_str()) != default_upstream)
         };
+        // `1222-push-target-guard`: not tracking a remote branch of another
+        // name, which Push would then push to
+        let no_track = Self::create_branch_no_track(id, &name, start_point.as_deref(), cx);
+        // `1114-hook-results`: post-checkout's outcome goes to the hook list
+        let hooks = crate::hooks::hook_ui(id, false, Some(format!("Switch to {name}")), cx);
         let task = cx.background_executor().spawn(async move {
             if unborn {
                 return corvene_git::checkout_new_branch(git, &workdir, &name);
@@ -4239,7 +4244,7 @@ impl Dispatcher {
                 &workdir,
                 &name,
                 start_point.as_deref(),
-                false,
+                no_track,
             )?;
             if let Some(parent) = &parent
                 && let Err(err) =
@@ -4257,7 +4262,9 @@ impl Dispatcher {
                 tip_author: None,
                 remote_name: None,
             };
-            corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
+            corvene_git::hooks::with_hook_callbacks(&hooks.callbacks, || {
+                corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
+            })
         });
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).checkout_target = Some(branch_name);
@@ -4395,76 +4402,91 @@ impl Dispatcher {
         // `774-stash-conflict-flow`: a conflicted pop keeps the entry
         let pop_options = Self::stash_pop_options(cx);
         let kept_workdir = workdir.clone();
+        // `1114-hook-results`: post-checkout's outcome goes to the hook list
+        let hooks = crate::hooks::hook_ui(
+            id,
+            false,
+            Some(format!("Switch to {}", branch.name_without_remote())),
+            cx,
+        );
         let task = cx.background_executor().spawn(async move {
             let mut kept: Option<(corvene_models::StashEntry, Vec<String>)> = None;
-            let result = (|| match strategy {
-                UncommittedChangesStrategy::StashOnCurrentBranch => {
-                    if let Some(current) = current.as_deref()
-                        && has_changes
-                    {
-                        if guard {
-                            corvene_git::ensure_no_modified_assume_unchanged(
-                                git.clone(),
-                                &workdir,
-                            )?;
-                        }
-                        // `createStashAndDropPreviousEntry`: the old entry
-                        // goes once the new one is made
-                        if corvene_git::create_desktop_stash(git.clone(), &workdir, current, false)?
-                            && let Some(old) = previous_stash
+            let result =
+                corvene_git::hooks::with_hook_callbacks(&hooks.callbacks, || match strategy {
+                    UncommittedChangesStrategy::StashOnCurrentBranch => {
+                        if let Some(current) = current.as_deref()
+                            && has_changes
                         {
-                            let _ =
-                                corvene_git::drop_desktop_stash_entry(git.clone(), &workdir, &old);
-                        }
-                    }
-                    corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
-                }
-                _ => {
-                    // `checkoutAndBringChanges`: plain checkout, else stash → checkout → pop
-                    match corvene_git::checkout_branch_with(
-                        git.clone(),
-                        &workdir,
-                        &branch,
-                        &checkout_options,
-                    ) {
-                        Ok(()) => Ok(()),
-                        Err(err) if corvene_git::is_local_changes_overwritten(&err) => {
-                            let target = branch.name_without_remote().to_string();
-                            if !corvene_git::create_desktop_stash(
-                                git.clone(),
-                                &workdir,
-                                &target,
-                                guard,
-                            )? {
-                                return Err(err);
+                            if guard {
+                                corvene_git::ensure_no_modified_assume_unchanged(
+                                    git.clone(),
+                                    &workdir,
+                                )?;
                             }
-                            corvene_git::checkout_branch_with(
+                            // `createStashAndDropPreviousEntry`: the old entry
+                            // goes once the new one is made
+                            if corvene_git::create_desktop_stash(
                                 git.clone(),
                                 &workdir,
-                                &branch,
-                                &checkout_options,
-                            )?;
-                            if let Some(entry) =
-                                corvene_git::get_last_desktop_stash_entry_for_branch(
+                                current,
+                                false,
+                            )? && let Some(old) = previous_stash
+                            {
+                                let _ = corvene_git::drop_desktop_stash_entry(
+                                    git.clone(),
+                                    &workdir,
+                                    &old,
+                                );
+                            }
+                        }
+                        corvene_git::checkout_branch_with(git, &workdir, &branch, &checkout_options)
+                    }
+                    _ => {
+                        // `checkoutAndBringChanges`: plain checkout, else stash → checkout → pop
+                        match corvene_git::checkout_branch_with(
+                            git.clone(),
+                            &workdir,
+                            &branch,
+                            &checkout_options,
+                        ) {
+                            Ok(()) => Ok(()),
+                            Err(err) if corvene_git::is_local_changes_overwritten(&err) => {
+                                let target = branch.name_without_remote().to_string();
+                                if !corvene_git::create_desktop_stash(
                                     git.clone(),
                                     &workdir,
                                     &target,
-                                )?
-                            {
-                                let pop = corvene_git::pop_stash_entry_with(
+                                    guard,
+                                )? {
+                                    return Err(err);
+                                }
+                                corvene_git::checkout_branch_with(
                                     git.clone(),
                                     &workdir,
-                                    &entry.sha,
-                                    pop_options,
+                                    &branch,
+                                    &checkout_options,
                                 )?;
-                                kept = Self::kept_after_pop(git.clone(), &workdir, &entry, pop);
+                                if let Some(entry) =
+                                    corvene_git::get_last_desktop_stash_entry_for_branch(
+                                        git.clone(),
+                                        &workdir,
+                                        &target,
+                                    )?
+                                {
+                                    let pop = corvene_git::pop_stash_entry_with(
+                                        git.clone(),
+                                        &workdir,
+                                        &entry.sha,
+                                        pop_options,
+                                    )?;
+                                    kept = Self::kept_after_pop(git.clone(), &workdir, &entry, pop);
+                                }
+                                Ok(())
                             }
-                            Ok(())
+                            Err(err) => Err(err),
                         }
-                        Err(err) => Err(err),
                     }
-                }
-            })();
+                });
             let submodule_error = result.as_ref().ok().and_then(|()| {
                 corvene_git::update_submodules_after_checkout(
                     git_for_submodules,
@@ -6112,7 +6134,14 @@ impl Dispatcher {
             cx.notify();
         });
         // GHD `onHookProgress` / `onHookFailure` / `onTerminalOutputAvailable`
-        let hooks = crate::hooks::hook_ui(id, true, cx);
+        // `1114-hook-results` names it "Commit to main" in the hook list
+        let operation = if amend {
+            "Amend last commit".to_string()
+        } else {
+            crate::hooks::current_branch_name(id, cx)
+                .map_or_else(|| "Commit".to_string(), |b| format!("Commit to {b}"))
+        };
+        let hooks = crate::hooks::hook_ui(id, true, Some(operation), cx);
         // Corvene (`1307-commit-progress`): the staged files counted on the
         // commit button, the fully-included ones first
         let mut progress = Self::state(cx)

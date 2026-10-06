@@ -13,6 +13,14 @@
 //! ignore the failure ([`HookCallbacks::on_hook_failure`], GHD's HookFailed
 //! dialog).
 //!
+//! Corvene (flag `1114-hook-results`, desktop/desktop#22476): GHD drops the
+//! outcome of the hooks that cannot stop an operation
+//! (`ignoredOnFailureHooks`), so a failed post-merge after a pull goes
+//! unseen. With [`HookCallbacks::on_hook_result`] set, the proxy reports
+//! their exit and output ([`HookResult`]) and, the app having taken it in,
+//! ends with 0: git ignores those exit codes except post-checkout's, which
+//! would otherwise fail a checkout that went through.
+//!
 //! Deviations: the hooks directory comes from `git rev-parse --git-path
 //! hooks`, which expands `~` in `core.hooksPath` the way git does (GHD reads
 //! `core.hooksPath` itself and resolves it against the repository without
@@ -99,6 +107,17 @@ const KNOWN_HOOKS: &[&str] = &[
     "post-index-change",
 ];
 
+/// The hooks whose outcome [`HookCallbacks::on_hook_result`] hears:
+/// [`IGNORED_ON_FAILURE_HOOKS`] but `pre-auto-gc`, whose non-zero exit only
+/// means "no gc now".
+pub const REPORTED_HOOKS: &[&str] = &[
+    "post-applypatch",
+    "post-commit",
+    "post-checkout",
+    "post-merge",
+    "post-rewrite",
+];
+
 /// GHD `createCommit`'s `interceptHooks`; `post-rewrite` only for an amend.
 pub const COMMIT_HOOKS: &[&str] = &[
     "pre-commit",
@@ -138,7 +157,29 @@ pub enum HookFailureResolution {
     Ignore,
 }
 
+/// How a [`REPORTED_HOOKS`] hook ended (`1114-hook-results`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookResult {
+    pub hook_name: String,
+    /// The hook's exit code; `None` when a signal ended it.
+    pub code: Option<i32>,
+    pub duration: std::time::Duration,
+    /// What the hook printed (git runs it with stdout on stderr).
+    pub output: Vec<u8>,
+    /// The proxy's closing line ("post-merge hook failed with code 1 after
+    /// 0.20s").
+    pub termination: String,
+}
+
+impl HookResult {
+    pub fn failed(&self) -> bool {
+        self.code != Some(0)
+    }
+}
+
 pub type HookProgressFn = Arc<dyn Fn(HookProgress) + Send + Sync>;
+/// Called on the proxy's connection thread; must not block for long.
+pub type HookResultFn = Arc<dyn Fn(HookResult) + Send + Sync>;
 /// Called on a thread of its own and blocks until the user decides; gets
 /// the hook's name and its terminal output.
 pub type HookFailureFn = Arc<dyn Fn(&str, Vec<u8>) -> HookFailureResolution + Send + Sync>;
@@ -149,6 +190,9 @@ pub type HookFailureFn = Arc<dyn Fn(&str, Vec<u8>) -> HookFailureResolution + Se
 pub struct HookCallbacks {
     pub on_hook_progress: Option<HookProgressFn>,
     pub on_hook_failure: Option<HookFailureFn>,
+    /// Corvene (`1114-hook-results`): the outcome of every
+    /// [`REPORTED_HOOKS`] hook.
+    pub on_hook_result: Option<HookResultFn>,
 }
 
 impl std::fmt::Debug for HookCallbacks {
@@ -156,6 +200,7 @@ impl std::fmt::Debug for HookCallbacks {
         f.debug_struct("HookCallbacks")
             .field("on_hook_progress", &self.on_hook_progress.is_some())
             .field("on_hook_failure", &self.on_hook_failure.is_some())
+            .field("on_hook_result", &self.on_hook_result.is_some())
             .finish()
     }
 }
@@ -205,6 +250,18 @@ pub fn with_hook_callbacks<R>(callbacks: &HookCallbacks, f: impl FnOnce() -> R) 
     }
     let _restore = Restore(SCOPED.with(|scoped| scoped.replace(Some(callbacks.clone()))));
     f()
+}
+
+/// Whether the callbacks of [`with_hook_callbacks`] on this thread take
+/// hook results: commands GHD never intercepts (checkout) intercept only
+/// then.
+pub(crate) fn scoped_reports_results() -> bool {
+    SCOPED.with(|scoped| {
+        scoped
+            .borrow()
+            .as_ref()
+            .is_some_and(|c| c.on_hook_result.is_some())
+    })
 }
 
 /// What a command intercepts: GHD's `interceptHooks` and the callbacks.
@@ -445,7 +502,9 @@ impl Drop for Session {
 
 /// The app's side of one proxy (`createHooksProxy`): `<token> <hook>` →
 /// started, `failed <n>` + n bytes of output → the failure callback's
-/// answer, `exit <code>` → finished or failed.
+/// answer, `result <code|signal> <ms> <n>` + n bytes (output, then the
+/// closing line) → `shown` when the result callback took it, else `ok`,
+/// `exit <code>` → finished or failed.
 fn handle_connection(conn: TcpStream, shared: &Shared) {
     let Ok(write) = conn.try_clone() else { return };
     let mut write = write;
@@ -471,6 +530,8 @@ fn handle_connection(conn: TcpStream, shared: &Shared) {
         }
     };
     progress(HookStatus::Started);
+    // a reported hook that failed ends with 0 once shown: still a failure
+    let mut reported_failure = false;
     if write.write_all(b"run\n").is_err() {
         return;
     }
@@ -498,8 +559,37 @@ fn handle_connection(conn: TcpStream, shared: &Shared) {
             if write.write_all(answer).is_err() {
                 return;
             }
+        } else if let Some(rest) = line.strip_prefix("result ") {
+            let mut parts = rest.split(' ');
+            let code = parts.next().and_then(|c| c.parse::<i32>().ok());
+            let millis = parts.next().and_then(|m| m.parse().ok()).unwrap_or(0);
+            let len = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+            let mut bytes = vec![0; len];
+            if reader.read_exact(&mut bytes).is_err() {
+                return;
+            }
+            reported_failure = code != Some(0);
+            let answer: &[u8] = match &shared.callbacks.on_hook_result {
+                Some(on_result) => {
+                    // the closing line is the last one
+                    let body = bytes.strip_suffix(b"\n").unwrap_or(&bytes);
+                    let split = body.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+                    on_result(HookResult {
+                        hook_name: hook_name.clone(),
+                        code,
+                        duration: std::time::Duration::from_millis(millis),
+                        termination: String::from_utf8_lossy(&body[split..]).into_owned(),
+                        output: bytes[..split].to_vec(),
+                    });
+                    b"shown\n"
+                }
+                None => b"ok\n",
+            };
+            if write.write_all(answer).is_err() {
+                return;
+            }
         } else if let Some(code) = line.strip_prefix("exit ") {
-            progress(if code == "0" {
+            progress(if code == "0" && !reported_failure {
                 HookStatus::Finished
             } else {
                 HookStatus::Failed
@@ -688,8 +778,28 @@ pub fn run_proxy(hook_path: &OsStr, args: &[OsString]) -> i32 {
             ignore = c.read_line().as_deref() == Some("ignore");
         }
     }
+    // `1114-hook-results`: the app shows the outcome of a hook that cannot
+    // stop the operation; once it has, the hook ends as a success
+    if REPORTED_HOOKS.contains(&hook_name.as_str())
+        && let Some(c) = conn.as_mut()
+    {
+        let mut body = terminal_output.clone();
+        body.extend_from_slice(format!("{termination}\n").as_bytes());
+        let code_field = match code {
+            Some(code) if signal.is_none() => code.to_string(),
+            _ => "signal".to_string(),
+        };
+        let header = format!(
+            "result {code_field} {} {}\n",
+            started.elapsed().as_millis(),
+            body.len()
+        );
+        if c.write.write_all(header.as_bytes()).is_ok() && c.write.write_all(&body).is_ok() {
+            ignore = c.read_line().as_deref() == Some("shown");
+        }
+    }
     let _ = writeln!(stderr, "{termination}");
-    if ignore {
+    if ignore && !REPORTED_HOOKS.contains(&hook_name.as_str()) {
         let _ = writeln!(stderr, "{hook_name} hook failure ignored by user");
     }
     let exit_code = if ignore { 0 } else { code.unwrap_or(1) };
@@ -771,6 +881,7 @@ mod tests {
                     HookFailureResolution::Ignore
                 })
             }),
+            on_hook_result: None,
         };
         let dir = std::env::temp_dir().join(format!("corvene-hooks-test-{}", random_hex(8)));
         std::fs::create_dir(&dir).unwrap();
@@ -799,6 +910,52 @@ mod tests {
                 "HookProgress { hook_name: \"pre-commit\", status: Finished }".to_string(),
             ]
         );
+    }
+
+    /// `1114-hook-results`: a post-merge outcome reaches the result callback
+    /// split into output and closing line.
+    #[test]
+    fn the_server_takes_hook_results() {
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let callbacks = HookCallbacks {
+            on_hook_result: Some({
+                let results = results.clone();
+                Arc::new(move |r: HookResult| results.lock().unwrap().push(r))
+            }),
+            ..Default::default()
+        };
+        let dir = std::env::temp_dir().join(format!("corvene-hooks-test-{}", random_hex(8)));
+        std::fs::create_dir(&dir).unwrap();
+        let session = Session::serve(dir, callbacks, PathBuf::from("git")).unwrap();
+        let mut conn = TcpStream::connect((Ipv4Addr::LOCALHOST, session.port)).unwrap();
+        let mut reader = BufReader::new(conn.try_clone().unwrap());
+        let mut line = String::new();
+        conn.write_all(format!("{} post-merge\n", session.shared.token).as_bytes())
+            .unwrap();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(line, "run\n");
+        let body = "Bad data\nmore\npost-merge hook failed with code 1 after 0.20s\n";
+        conn.write_all(format!("result 1 200 {}\n{body}", body.len()).as_bytes())
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert_eq!(line, "shown\n");
+        conn.write_all(b"exit 0\n").unwrap();
+        line.clear();
+        let _ = reader.read_line(&mut line);
+        drop(session);
+        let results = results.lock().unwrap();
+        assert_eq!(
+            *results,
+            vec![HookResult {
+                hook_name: "post-merge".into(),
+                code: Some(1),
+                duration: std::time::Duration::from_millis(200),
+                output: b"Bad data\nmore\n".to_vec(),
+                termination: "post-merge hook failed with code 1 after 0.20s".into(),
+            }]
+        );
+        assert!(results[0].failed());
     }
 
     #[test]

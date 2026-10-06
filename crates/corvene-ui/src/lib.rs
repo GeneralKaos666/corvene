@@ -32,6 +32,7 @@ pub mod format;
 pub mod git_email_not_found_warning;
 pub mod github_list;
 pub mod history;
+pub mod hook_results;
 pub mod icons;
 pub mod image_diff;
 pub mod insights_view;

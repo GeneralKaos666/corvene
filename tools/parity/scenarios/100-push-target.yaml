@@ -1,0 +1,29 @@
+# A branch tracking a differently named branch (desktop/desktop#21021): the
+# `repo-mismatch` fixture has `issue-134` tracking `origin/main`, two
+# commits ahead. GHD names the upstream on the push button ("Push
+# origin/main"), which the GitHub Desktop preset matches.
+name: push-target-ghd
+description: issue-134 tracking origin/main. The toolbar's Push origin/main, as in GitHub Desktop
+setup: repo-mismatch
+steps:
+  - snap: {name: toolbar, region: [0, 0, 1367, 82]}
+---
+# With 1222-push-target-guard (off in the preset): the push button and the
+# branch list show the target, and Push asks first (Corvene only).
+name: push-target-guard
+description: "With 1222-push-target-guard: To origin/main on the push button, the branch list's arrow and the Push to main? dialog (Corvene only)"
+setup: repo-mismatch
+corvene_flags: 1222-push-target-guard=on
+steps:
+  - snap: {name: toolbar, corvene_only: true, region: [0, 0, 1367, 82]}
+  - ghd: {skip: true}
+    corvene: {key: cmd-b}
+    wait: 800
+  - snap: {name: branch-list, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {key: cmd-p}
+    wait: 1500
+  - snap: {name: confirm, corvene_only: true}

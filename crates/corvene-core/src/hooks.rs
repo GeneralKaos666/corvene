@@ -3,12 +3,17 @@
 //! `AppStore.onHookFailure` (the HookFailed dialog, whose Abort makes the
 //! operation end without an error) and the commit's
 //! `subscribeToCommitOutput` (the Committing changes dialog).
+//!
+//! Corvene (flag `1114-hook-results`, desktop/desktop#22476): the outcome of
+//! the hooks that cannot stop an operation (post-merge, post-checkout, …),
+//! which GHD drops, becomes the repository's [`HookReport`]: the sidebar's
+//! hook list.
 
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use corvene_git::hooks::{HookCallbacks, HookFailureResolution, HookProgress};
+use corvene_git::hooks::{HookCallbacks, HookFailureResolution, HookProgress, HookResult};
 use corvene_git::{TerminalOutput, TerminalOutputCallback};
 
 use crate::dispatcher::Dispatcher;
@@ -86,8 +91,46 @@ impl std::fmt::Debug for CommitOutput {
     }
 }
 
+/// `1114-hook-results`: the hooks one operation ran that could not stop
+/// it, in the order they ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HookReport {
+    /// Tells one operation's report from the next one's.
+    pub run: u64,
+    /// "Pull origin", "Switch to feature", …
+    pub operation: String,
+    pub hooks: Vec<HookResult>,
+}
+
+impl HookReport {
+    /// The list shows only when a hook failed or printed something.
+    pub fn worth_showing(&self) -> bool {
+        self.hooks
+            .iter()
+            .any(|h| h.failed() || !h.output.iter().all(u8::is_ascii_whitespace))
+    }
+
+    pub fn failed(&self) -> usize {
+        self.hooks.iter().filter(|h| h.failed()).count()
+    }
+}
+
+/// The checked-out branch of repository `id`, for an operation's name.
+pub fn current_branch_name(id: u64, cx: &mut dyn Host) -> Option<String> {
+    Dispatcher::state(cx)
+        .read(cx)
+        .repo_states
+        .get(&id)
+        .and_then(|r| r.info.as_ref())
+        .and_then(|i| i.current_branch())
+        .map(|b| b.name.clone())
+}
+
+static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
+
 enum HookEvent {
     Progress(HookProgress),
+    Result(HookResult),
     Failure {
         hook_name: String,
         output: Vec<u8>,
@@ -110,8 +153,24 @@ impl HookUi {
 
 /// GHD `onHookFailure(() => (aborted = true))`, with `onHookProgress` for
 /// the repository `id` when `progress` (only the commit reports progress).
-pub fn hook_ui(id: u64, progress: bool, cx: &mut dyn Host) -> HookUi {
+/// `operation` names it in the hook list (`1114-hook-results`), which the
+/// outcome of its non-blocking hooks goes to while that flag is on.
+pub fn hook_ui(id: u64, progress: bool, operation: Option<String>, cx: &mut dyn Host) -> HookUi {
     let (tx, rx) = async_channel::unbounded::<HookEvent>();
+    let operation = operation.filter(|_| {
+        Dispatcher::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::HOOK_RESULTS)
+    });
+    let run = NEXT_RUN.fetch_add(1, Ordering::Relaxed);
+    let on_hook_result: Option<corvene_git::hooks::HookResultFn> = operation.is_some().then(|| {
+        let tx = tx.clone();
+        Arc::new(move |r: HookResult| {
+            let _ = tx.send_blocking(HookEvent::Result(r));
+        }) as corvene_git::hooks::HookResultFn
+    });
+    let operation = operation.unwrap_or_default();
     let aborted = Arc::new(AtomicBool::new(false));
     let on_hook_progress: Option<corvene_git::hooks::HookProgressFn> = progress.then(|| {
         let tx = tx.clone();
@@ -150,6 +209,22 @@ pub fn hook_ui(id: u64, progress: bool, cx: &mut dyn Host) -> HookUi {
                         cx.notify();
                     });
                 }
+                HookEvent::Result(r) => {
+                    Dispatcher::state(cx).update(cx, |s, cx| {
+                        let rs = s.repo_state_mut(id);
+                        match &mut rs.hook_report {
+                            Some(report) if report.run == run => report.hooks.push(r),
+                            report => {
+                                *report = Some(HookReport {
+                                    run,
+                                    operation: operation.clone(),
+                                    hooks: vec![r],
+                                })
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
                 HookEvent::Failure {
                     hook_name,
                     output,
@@ -170,6 +245,7 @@ pub fn hook_ui(id: u64, progress: bool, cx: &mut dyn Host) -> HookUi {
         callbacks: HookCallbacks {
             on_hook_progress,
             on_hook_failure: Some(on_hook_failure),
+            on_hook_result,
         },
         aborted,
     }
@@ -245,4 +321,16 @@ pub fn commit_output_callback(
             let _ = tx.send_blocking(Some(bytes));
         }));
     })
+}
+
+impl Dispatcher {
+    /// `1114-hook-results`: the hook list's close button.
+    pub fn dismiss_hook_report(id: u64, cx: &mut dyn Host) {
+        Self::state(cx).update(cx, |s, cx| {
+            if let Some(rs) = s.repo_states.get_mut(&id) {
+                rs.hook_report = None;
+                cx.notify();
+            }
+        });
+    }
 }

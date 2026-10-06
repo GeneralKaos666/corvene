@@ -106,6 +106,10 @@ pub struct Workspace {
     insights_view: Entity<crate::insights_view::InsightsView>,
     /// The onboarding tutorial's right-hand panel.
     tutorial_panel: Entity<crate::tutorial_panel::TutorialPanel>,
+    /// `1114-hook-results`: under the sidebar's tabs; sized by
+    /// `hook_results_width`, which the sidebar keeps current.
+    hook_results: Entity<crate::hook_results::HookResults>,
+    hook_results_width: Rc<Cell<Pixels>>,
     repository_foldout: Entity<RepositoryFoldout>,
     branch_foldout: Entity<BranchFoldout>,
     worktree_foldout: Entity<WorktreeFoldout>,
@@ -286,6 +290,10 @@ impl Workspace {
         let insights_view = cx.new(|cx| crate::insights_view::InsightsView::new(state.clone(), cx));
         let tutorial_panel =
             cx.new(|cx| crate::tutorial_panel::TutorialPanel::new(state.clone(), cx));
+        let hook_results_width = Rc::new(Cell::new(px(250.)));
+        let hook_results = cx.new(|cx| {
+            crate::hook_results::HookResults::new(state.clone(), hook_results_width.clone(), cx)
+        });
         let repository_foldout = cx.new(|cx| RepositoryFoldout::new(state.clone(), window, cx));
         let branch_foldout = cx.new(|cx| BranchFoldout::new(state.clone(), window, cx));
         let worktree_foldout = cx.new(|cx| WorktreeFoldout::new(state.clone(), window, cx));
@@ -329,6 +337,8 @@ impl Workspace {
             ref_compare_view,
             insights_view,
             tutorial_panel,
+            hook_results,
+            hook_results_width,
             repository_foldout,
             branch_foldout,
             worktree_foldout,
@@ -561,6 +571,7 @@ impl Workspace {
             Section::History => 1,
         };
         let this = cx.entity();
+        self.hook_results_width.set(self.sidebar_width);
         div()
             .id("repository-sidebar")
             .size_full()
@@ -625,6 +636,7 @@ impl Workspace {
                 },
                 cx,
             ))
+            .child(self.hook_results.clone())
             .child(
                 div().flex_1().min_h_0().child(match self.section {
                     // cached views (like the diffs): a sidebar re-renders when

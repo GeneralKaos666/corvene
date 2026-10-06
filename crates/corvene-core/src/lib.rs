@@ -73,6 +73,7 @@ pub mod pull_request_preview;
 pub mod pull_request_review;
 pub mod pull_requests;
 pub mod push_errors;
+pub mod push_target;
 pub mod ref_compare;
 pub mod reflog;
 pub mod release_notes;

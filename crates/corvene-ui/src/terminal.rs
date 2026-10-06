@@ -520,6 +520,9 @@ pub struct Terminal {
     top: Option<usize>,
     /// Wheel movement short of a whole line.
     wheel_rest: f32,
+    /// Extra width on the right, so the scrollbar clears the last column
+    /// (`1114-hook-results`; GHD's dialogs have none).
+    right_gutter: f32,
 }
 
 impl Terminal {
@@ -531,6 +534,25 @@ impl Terminal {
             buffer,
             top: None,
             wheel_rest: 0.,
+            right_gutter: 0.,
+        }
+    }
+
+    /// `1114-hook-results`: as many columns as fit `width` (unzoomed px),
+    /// at least 20.
+    pub fn cols_for_width(width: f32) -> usize {
+        (((width - SPACING_PX - SCROLLBAR_WIDTH) / CELL_WIDTH).floor() as usize).max(20)
+    }
+
+    /// `output` in `cols` columns, as high as it needs up to `max_rows`
+    /// (with the cursor's line after a closing line feed).
+    pub fn fitted(cols: usize, max_rows: usize, output: &[u8]) -> Self {
+        let mut probe = TerminalBuffer::new(cols, max_rows.max(1));
+        probe.write(output);
+        let used = probe.text().lines().count() + usize::from(output.ends_with(b"\n"));
+        Self {
+            right_gutter: SCROLLBAR_WIDTH - SPACING_PX,
+            ..Self::new(cols, used.clamp(1, max_rows.max(1)), output)
         }
     }
 
@@ -611,7 +633,9 @@ impl Render for Terminal {
             .relative()
             .flex_none()
             .p(zpx(SPACING_PX))
-            .w(zpx(CELL_WIDTH * cols as f32 + 2. * SPACING_PX))
+            .w(zpx(CELL_WIDTH * cols as f32
+                + 2. * SPACING_PX
+                + self.right_gutter))
             .bg(rgb(BACKGROUND))
             .text_color(rgb(FOREGROUND))
             .font_family(mono_font())

@@ -553,6 +553,21 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.put("upstream_branch", upstream_branch);
         }
+        Popup::ConfirmPushToUpstream {
+            repo: r,
+            branch,
+            upstream,
+            remote_branch,
+            force_with_lease,
+            up_to,
+        } => {
+            repo = Some(*r);
+            f.put("branch", branch)
+                .put("upstream", upstream)
+                .put("remote_branch", remote_branch)
+                .put("force_with_lease", force_with_lease.to_string())
+                .opt("up_to", up_to.as_ref());
+        }
         Popup::GenericGitAuthentication {
             repo: r,
             remote_url,

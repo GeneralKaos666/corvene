@@ -2038,7 +2038,8 @@ impl Dispatcher {
         let name = branch.clone();
         let submodules = Self::submodule_update_plan(id, cx);
         // GHD `gitStore.merge(…, { onHookFailure })`
-        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let operation = format!("Merge {branch} into {current}");
+        let hooks = crate::hooks::hook_ui(id, false, Some(operation), cx);
         let hook_callbacks = hooks.callbacks.clone();
         spawn_bg(
             cx,
@@ -2222,10 +2223,12 @@ impl Dispatcher {
         }
         Self::set_mco_step(id, McoStep::ShowProgress, cx);
         let branch = name.clone();
+        // `1222-push-target-guard`
+        let no_track = Self::create_branch_no_track(id, &name, start_point.as_deref(), cx);
         spawn_bg(
             cx,
             move || {
-                corvene_git::create_branch(git, &workdir, &branch, start_point.as_deref(), false)
+                corvene_git::create_branch(git, &workdir, &branch, start_point.as_deref(), no_track)
             },
             move |result, cx| match result {
                 Ok(()) => {

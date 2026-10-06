@@ -151,12 +151,16 @@ class Run:
         # working changes (`1221-stacked-branch-refs`)
         # `repo-forks`: `repo-remote` plus alice's and bob's forks beside it,
         # served by the stub API (`1223-checkout-from-fork`)
+        # `repo-mismatch`: `repo-remote` with `issue-134` checked out off
+        # main, tracking `origin/main` (`1222-push-target-guard`)
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
                              "repo-reflog", "repo-tools", "repo-structure", "repo-remotes",
-                             "repo-pull-request", "repo-utf16", "repo-stacked", "repo-forks")
+                             "repo-pull-request", "repo-utf16", "repo-stacked", "repo-forks",
+                             "repo-mismatch")
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
-        remote = setup in ("repo-remote", "repo-remotes") or pull_request or forks
+        mismatch = setup == "repo-mismatch"
+        remote = setup in ("repo-remote", "repo-remotes") or pull_request or forks or mismatch
         remotes = setup == "repo-remotes"
         coauthors = setup == "repo-coauthors"
         graph = setup == "repo-graph"
@@ -171,9 +175,9 @@ class Run:
         self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
         lfs_url = self.lfs_stub.url() if self.lfs_stub else None
         repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, structure,
-                               lfs_url, remotes, pull_request, utf16, stacked, forks) if with_repo else None
+                               lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
-                               lfs_url, remotes, pull_request, utf16, stacked, forks) if with_repo else None
+                               lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch) if with_repo else None
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues, Releases
         # and pull request review views (`github_stub.py`), reached by the

@@ -1447,6 +1447,18 @@ impl BranchFoldout {
                 _ => None,
             })
             .flatten();
+        // `1222-push-target-guard`: a differently named upstream, shown
+        let push_target = {
+            let s = self.state.read(cx);
+            Dispatcher::push_target_guard(s)
+                .then(|| {
+                    corvene_core::push_target::mismatch_of(
+                        branch,
+                        Dispatcher::default_upstream_in(s, id).as_deref(),
+                    )
+                })
+                .flatten()
+        };
         let t = cx.ghd();
         let name = branch.name.clone();
         let is_tag = tag_commit(branch).is_some();
@@ -1866,6 +1878,23 @@ impl BranchFoldout {
                     .text_size(FONT_SIZE())
                     .child(item.name),
             )
+            .when_some(push_target, |d, m| {
+                d.child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "branch-push-target-{}",
+                            branch.full_name
+                        )))
+                        .flex_shrink(1.)
+                        .min_w_0()
+                        .mr(SPACING_HALF())
+                        .truncate()
+                        .text_size(FONT_SIZE_SM())
+                        .when(!selected, |d| d.text_color(t.text_secondary))
+                        .child(format!("→ {}", m.upstream))
+                        .ghd_tooltip(m.describe()),
+                )
+            })
             .when_some(sync_state, |d, (tooltip, counts)| {
                 let content = match counts {
                     None => div()

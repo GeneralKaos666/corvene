@@ -1416,7 +1416,7 @@ impl Dispatcher {
         };
         let cancel = Self::network_cancel_token(id, PushPullKind::Pull, false, cx);
         // GHD `pullRepo(…, { onHookFailure })`
-        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let hooks = crate::hooks::hook_ui(id, false, Some(format!("Pull {}", remote.name)), cx);
         let hook_callbacks = hooks.callbacks.clone();
         Self::run_network(
             id,
@@ -1768,6 +1768,19 @@ impl Dispatcher {
             );
             return then(PushOutcome::NotAttempted, cx);
         }
+        // Corvene (`1222-push-target-guard`): to a differently named
+        // upstream that is the remote's default branch only once confirmed
+        if push_target.is_none()
+            && Self::push_needs_target_confirmation(
+                id,
+                &branch,
+                force_with_lease,
+                up_to.clone(),
+                cx,
+            )
+        {
+            return then(PushOutcome::NotAttempted, cx);
+        }
         if !Self::begin_network(id, cx) {
             return then(PushOutcome::NotAttempted, cx);
         }
@@ -1860,7 +1873,7 @@ impl Dispatcher {
         };
         let cancel = Self::network_cancel_token(id, PushPullKind::Push, false, cx);
         // GHD `onHookFailure: this.onHookFailure(() => (aborted = true))`
-        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let hooks = crate::hooks::hook_ui(id, false, None, cx);
         let hook_callbacks = hooks.callbacks.clone();
         Self::run_network(
             id,
@@ -2136,7 +2149,7 @@ impl Dispatcher {
         let retry = RetryAction::PushToRemote {
             remote: remote_name.clone(),
         };
-        let hooks = crate::hooks::hook_ui(id, false, cx);
+        let hooks = crate::hooks::hook_ui(id, false, None, cx);
         let hook_callbacks = hooks.callbacks.clone();
         Self::run_network(
             id,

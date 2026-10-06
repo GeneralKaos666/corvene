@@ -467,6 +467,18 @@ pub fn toolbar_models(
         .and_then(|r| Dispatcher::current_remote_in(state, r.id))
         .map(|r| r.name)
         .unwrap_or_else(|| "origin".to_string());
+    // GHD `app.tsx`: a branch tracking a differently named branch names its
+    // upstream ("Push origin/main"); `1222-push-target-guard` says it in the
+    // description and tooltip instead
+    let mismatch = repo.and_then(|r| Dispatcher::upstream_mismatch_in(state, r.id));
+    let guard = Dispatcher::push_target_guard(state);
+    let remote_name = match &mismatch {
+        Some(m) if !guard => m.upstream.clone(),
+        _ => remote_name,
+    };
+    let mismatch = mismatch.filter(|_| guard);
+    let mismatch_tooltip =
+        |m: &corvene_core::push_target::UpstreamMismatch| -> SharedString { m.describe().into() };
     // Corvene (`1103-implicit-upstream-push-default`): the same-named branch
     // `push.default=current` pushes to stands in for a missing upstream
     let implicit = repo.and_then(|r| Dispatcher::implicit_upstream_in(state, r.id));
@@ -619,11 +631,18 @@ pub fn toolbar_models(
             },
             Some(Tip::Valid { .. }) => {
                 let ab = ab.unwrap_or_default();
+                // `1222-push-target-guard`: where a push of this branch goes
+                let target = mismatch.as_ref().filter(|_| push_target.is_none());
+                let push_description: SharedString = match target {
+                    Some(m) => format!("To {}", m.upstream).into(),
+                    None => last_fetched.clone(),
+                };
                 if ab.ahead == 0 && ab.behind == 0 {
                     ToolbarButtonModel {
                         icon: Octicon::SyncClockwise,
                         description: last_fetched,
                         title: format!("Fetch {remote_name}").into(),
+                        tooltip: target.map(mismatch_tooltip),
                         ..base
                     }
                 } else if force_push == corvene_core::ForcePushState::Recommended
@@ -631,7 +650,8 @@ pub fn toolbar_models(
                 {
                     ToolbarButtonModel {
                         icon: Octicon::ArrowUp,
-                        description: last_fetched,
+                        tooltip: target.map(mismatch_tooltip),
+                        description: push_description,
                         title: format!("Force push {remote_name}").into(),
                         badge: Some(ab),
                         arrow: true,
@@ -656,12 +676,15 @@ pub fn toolbar_models(
                     let push_size = repo.and_then(|r| Dispatcher::push_size_for(state, r.id));
                     ToolbarButtonModel {
                         icon: Octicon::ArrowUp,
-                        description: last_fetched,
+                        description: push_description,
                         title: format!("Push {push_remote_name}").into(),
                         badge: Some(ab),
                         arrow: true,
-                        load_push_size: push_size.is_some(),
-                        tooltip: push_size.map(push_size_tooltip),
+                        load_push_size: push_size.is_some() && target.is_none(),
+                        tooltip: match target {
+                            Some(m) => Some(mismatch_tooltip(m)),
+                            None => push_size.map(push_size_tooltip),
+                        },
                         ..base
                     }
                 }

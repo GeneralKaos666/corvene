@@ -7752,6 +7752,26 @@ registry! {
         upstream: &[Upstream::issue(8419), Upstream::issue(22494)],
         code: &["crates/corvene-core/src/lfs_locks.rs", "crates/corvene-git/src/lfs_locks.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/selected_commit.rs"],
     },
+    /// The outcome of hooks that cannot stop an operation, in the sidebar.
+    HOOK_RESULTS = 1114 "hook-results" {
+        title: "Hook results after pull, merge, commit and switch",
+        summary: "With Settings › Git › Hooks on, the hooks that run after an operation \
+                  (post-merge, post-rewrite, post-commit, post-checkout) report back: when one \
+                  failed or printed something, a list under the Changes and History tabs names \
+                  the operation and each hook with a check or an alert and how long it took. \
+                  Clicking a hook shows its output. The list stays until it is closed or the \
+                  next operation runs hooks. A failed post-checkout no longer fails the switch \
+                  with an error.",
+        ghd_behaviour: "A failed post-merge or post-rewrite after a pull or merge, and a failed \
+                        post-commit, go unseen; whatever these hooks print is dropped. A failed \
+                        post-checkout shows as an error although the branch was switched.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22476)],
+        code: &["crates/corvene-git/src/hooks.rs", "crates/corvene-core/src/hooks.rs", "crates/corvene-ui/src/hook_results.rs"],
+    },
 
 
     // ---- 1200 History & branches (overflow) ----
@@ -8109,6 +8129,26 @@ registry! {
         restart: false, visible: true, availability: available,
         upstream: &[Upstream::issue(21256)],
         code: &["crates/corvene-core/src/stacked_refs.rs", "crates/corvene-git/src/rebase_ops.rs", "crates/corvene-ui/src/history.rs", "crates/corvene-ui/src/dialogs/warn_stacked_branches.rs"],
+    },
+    /// A branch that pushes to a differently named branch says so.
+    PUSH_TARGET_GUARD = 1222 "push-target-guard" {
+        title: "Pushes to a differently named branch",
+        summary: "A branch whose upstream has another name (issue-134 tracking origin/main) \
+                  shows where Push goes: the Push button reads \"To origin/main\" and the \
+                  branch list shows \"→ origin/main\" on it. When that upstream is the \
+                  remote's default branch, Push first asks whether to push to it or publish the \
+                  branch under its own name. A new branch started from a remote branch no \
+                  longer tracks it unless it has the same name.",
+        ghd_behaviour: "Such a branch looks published and Push sends its commits to the \
+                        upstream (git push origin issue-134:main) without asking; only the \
+                        button's \"Push origin/main\" hints at it. A branch created from the \
+                        default branch while only origin/main exists starts out tracking it.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21021)],
+        code: &["crates/corvene-core/src/push_target.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/toolbar.rs", "crates/corvene-ui/src/branch_list.rs", "crates/corvene-ui/src/dialogs/confirm_push_to_upstream.rs"],
     },
 
     /// Branch › Check Out from Fork…: a branch of any fork by its owner.

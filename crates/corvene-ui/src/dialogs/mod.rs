@@ -23,6 +23,7 @@ mod compare_refs;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
 mod confirm_force_unlock;
+mod confirm_push_to_upstream;
 mod confirm_quit;
 mod crash_report_found;
 mod create_release;
@@ -721,6 +722,25 @@ impl DialogHost {
                 upstream_branch,
             } => cx
                 .new(|_| ConfirmForcePushDialog::new(*repo, upstream_branch.clone()))
+                .into(),
+            Popup::ConfirmPushToUpstream {
+                repo,
+                branch,
+                upstream,
+                remote_branch,
+                force_with_lease,
+                up_to,
+            } => cx
+                .new(|_| {
+                    confirm_push_to_upstream::ConfirmPushToUpstreamDialog::new(
+                        *repo,
+                        branch.clone(),
+                        upstream.clone(),
+                        remote_branch.clone(),
+                        *force_with_lease,
+                        up_to.clone(),
+                    )
+                })
                 .into(),
             Popup::GenericGitAuthentication {
                 repo,

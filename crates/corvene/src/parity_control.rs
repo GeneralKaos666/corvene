@@ -709,6 +709,19 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
             Dispatcher::refresh_hook_env(cx);
         }
         "fake-github" => fake_github(arg, cx)?,
+        // switches the selected repository to branch `arg`
+        // (`1114-hook-results`' post-checkout)
+        "checkout" => {
+            if let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
+                // the changes come along (Switch's "Bring my changes")
+                Dispatcher::checkout_branch(
+                    id,
+                    arg.to_string(),
+                    Some(corvene_core::UncommittedChangesStrategy::MoveToNewBranch),
+                    cx,
+                );
+            }
+        }
         // `428-menu-bar-status-item`: what the status item shows (the model)
         // and whether the NSStatusItem is in the menu bar
         "menu-bar-model" => {
