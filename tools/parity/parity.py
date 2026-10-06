@@ -352,16 +352,22 @@ class Run:
             # `github: stub`: sign Corvene in to the scenario's stub GitHub API
             # (`github_stub.py`); GHD has no such surface
             # `github: no-account`: a GitHub.com repository without an account
+            # `github: stub-ci`: the same, and `origin` is pointed at the stub
+            # repository, so the branch's pushed tip gets the stub's checks
             if action["github"] == "no-account":
                 drv.hook("fake-github", json.dumps({"account": False}))
             # `github: admin`: the same, the user an admin of the repository
             # (`1113-lfs-locks`' Force Unlock)
             elif action["github"] == "admin":
                 drv.hook("fake-github", json.dumps({"account": False, "permission": "admin"}))
-            elif action["github"] != "stub":
+            elif action["github"] not in ("stub", "stub-ci"):
                 raise ValueError(f"unknown github step {action['github']!r}")
             elif not self.stub:
-                raise RuntimeError("`github: stub` needs `github_stub: true` on the scenario")
+                raise RuntimeError(f"`github: {action['github']}` needs `github_stub: true` on the scenario")
+            elif action["github"] == "stub-ci":
+                arg = json.loads(self.stub.hook_arg())
+                arg["remote"] = True
+                drv.hook("fake-github", json.dumps(arg))
             else:
                 drv.hook("fake-github", self.stub.hook_arg())
         if "accounts" in action:

@@ -1,0 +1,31 @@
+# Corvene's ref comparison (flag 1218-compare-refs, off in the GitHub
+# Desktop preset the harness runs with). GHD compares the current branch
+# with one other branch and lists commits only, so the snaps are recorded,
+# not compared (`corvene_only`; deviations.md › History). In the
+# `repo-graph` fixture `topic/one` and `topic/two` each have a commit the
+# other lacks, and `v0.1.0` is older than everything the graph adds.
+name: compare-refs
+description: Branch › Compare… dialog, base..head with the combined diff, base...head with sides, a compared commit selected (Corvene only)
+setup: repo-graph
+corvene_flags: 1218-compare-refs=on
+steps:
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "compare-refs:topic/one"}}
+    wait: 800
+  - snap: {name: dialog, corvene_only: true, note: "GHD compares to one branch only (deviations.md, 1218-compare-refs)"}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "compare-refs:v0.1.0:main"}}
+    wait: 1500
+  - snap: {name: range-changed-files, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {hook: {name: popup, arg: "compare-refs:topic/one:topic/two:..."}}
+    wait: 1500
+  - snap: {name: symmetric, corvene_only: true}
+  # the first commit row, under the tabs and the Changed Files row
+  - ghd: {skip: true}
+    corvene: {click: [150, 228]}
+    wait: 800
+  - snap: {name: commit-selected, corvene_only: true}

@@ -137,6 +137,27 @@ class _Handler(BaseHTTPRequestHandler):
                 if r["tag_name"] == tag:
                     return self._send(200, r)
             return self._send(404, {"message": "Not Found"})
+        # CI (`334-branch-ci-status`, `347-actions-job-logs`): every ref has the
+        # same three check runs of one Actions workflow run; job 101 failed
+        if path.startswith(f"{repo}/commits/") and path.endswith("/status"):
+            return self._send(200, {"state": "pending", "total_count": 0, "statuses": []})
+        if path.startswith(f"{repo}/commits/") and path.endswith("/check-runs"):
+            return self._send(200, {"total_count": len(CHECK_RUNS), "check_runs": CHECK_RUNS})
+        if path == f"{repo}/actions/runs":
+            return self._send(200, {"total_count": 1, "workflow_runs": [WORKFLOW_RUN]})
+        if path == f"{repo}/actions/runs/{WORKFLOW_RUN['id']}/jobs":
+            return self._send(200, {"total_count": len(JOBS), "jobs": JOBS})
+        if path.startswith(f"{repo}/actions/jobs/") and path.endswith("/logs"):
+            job_id = int(path.rsplit("/", 2)[1])
+            if job_id != 101:
+                return self._send(404, {"message": "Not Found"})
+            data = JOB_LOG.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return None
         return self._send(404, {"message": f"stub: no GET {path}"})
 
     def do_POST(self):  # noqa: N802
@@ -169,6 +190,77 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/graphql":
             return self._send(200, {"data": {"createLinkedBranch": {"linkedBranch": {"id": "LB_stub"}}}})
         return self._send(404, {"message": f"stub: no POST {path}"})
+
+
+def _check_run(run_id: int, name: str, conclusion: str, started: str, completed: str) -> dict:
+    return {"id": run_id, "name": name, "status": "completed", "conclusion": conclusion,
+            "check_suite": {"id": 11}, "app": {"name": "GitHub Actions", "slug": "github-actions"},
+            "started_at": started, "completed_at": completed,
+            "html_url": f"http://127.0.0.1/{OWNER}/{NAME}/actions/runs/7/job/{run_id}", "pull_requests": []}
+
+
+CHECK_RUNS = [
+    _check_run(101, "test (macos-15)", "failure", "2024-05-01T10:00:00Z", "2024-05-01T10:05:10Z"),
+    _check_run(102, "lint", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:01:34Z"),
+    _check_run(103, "build (ubuntu-latest)", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:03:02Z"),
+]
+
+WORKFLOW_RUN = {"id": 7, "workflow_id": 3, "name": "CI", "created_at": "2024-05-01T09:59:50Z",
+                "check_suite_id": 11, "event": "pull_request"}
+
+
+def _step(number: int, name: str, conclusion: str, started: str, completed: str) -> dict:
+    return {"name": name, "number": number, "status": "completed", "conclusion": conclusion,
+            "started_at": started, "completed_at": completed}
+
+
+JOBS = [
+    {"id": 101, "name": "test (macos-15)", "status": "completed", "conclusion": "failure",
+     "html_url": CHECK_RUNS[0]["html_url"], "steps": [
+         _step(1, "Set up job", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:00:02Z"),
+         _step(2, "Checkout", "success", "2024-05-01T10:00:02Z", "2024-05-01T10:00:05Z"),
+         _step(3, "cargo clippy", "success", "2024-05-01T10:00:05Z", "2024-05-01T10:01:39Z"),
+         _step(4, "cargo test --workspace", "failure", "2024-05-01T10:01:39Z", "2024-05-01T10:05:10Z"),
+         _step(5, "Post Checkout", "skipped", "2024-05-01T10:05:10Z", "2024-05-01T10:05:10Z")]},
+    {"id": 102, "name": "lint", "status": "completed", "conclusion": "success",
+     "html_url": CHECK_RUNS[1]["html_url"], "steps": [
+         _step(1, "Set up job", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:00:02Z"),
+         _step(2, "cargo fmt --check", "success", "2024-05-01T10:00:02Z", "2024-05-01T10:01:34Z")]},
+    {"id": 103, "name": "build (ubuntu-latest)", "status": "completed", "conclusion": "success",
+     "html_url": CHECK_RUNS[2]["html_url"], "steps": [
+         _step(1, "Set up job", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:00:02Z"),
+         _step(2, "cargo build", "success", "2024-05-01T10:00:02Z", "2024-05-01T10:03:02Z")]},
+]
+
+# the failed job's log, as `GET /actions/jobs/101/logs` serves it (timestamps,
+# `##[group]` / `##[error]` commands and ANSI colours)
+_LOG_LINES = [
+    (0, "Current runner version: '2.317.0'"),
+    (0, "##[group]Operating System"), (0, "macOS"), (0, "15.0"), (0, "##[endgroup]"),
+    (1, "##[group]Run actions/checkout@v4"), (1, "with:"), (1, "  fetch-depth: 0"), (1, "##[endgroup]"),
+    (2, "Syncing repository: octocat/parity-fixture"),
+    (3, "##[group]Run cargo clippy --all-targets -- -D warnings"),
+    (3, "\x1b[36;1mcargo clippy --all-targets -- -D warnings\x1b[0m"), (3, "shell: /bin/bash -e {0}"),
+    (3, "##[endgroup]"),
+    (10, "\x1b[1m\x1b[32m    Checking\x1b[0m corvene-core v0.1.0"),
+    (97, "\x1b[1m\x1b[32m    Finished\x1b[0m `dev` profile [unoptimized + debuginfo] target(s) in 1m 34s"),
+    (98, "##[group]Run cargo test --workspace"), (98, "\x1b[36;1mcargo test --workspace\x1b[0m"),
+    (98, "shell: /bin/bash -e {0}"), (98, "##[endgroup]"),
+    (140, "\x1b[1m\x1b[32m     Running\x1b[0m unittests src/lib.rs (target/debug/deps/corvene_core-8f2a1c)"),
+    (141, "running 412 tests"),
+    (300, "test job_log::tests::searches_case_insensitively ... \x1b[32mok\x1b[0m"),
+    (301, "test remote::tests::fetch_skips_unchanged ... \x1b[31mFAILED\x1b[0m"),
+    (302, "failures:"), (302, "---- remote::tests::fetch_skips_unchanged stdout ----"),
+    (302, "thread 'remote::tests::fetch_skips_unchanged' panicked at crates/corvene-core/src/remote.rs:2710:9:"),
+    (302, "assertion `left == right` failed"), (302, "  left: 2"), (302, " right: 1"),
+    (302, "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace"),
+    (303, "test result: \x1b[31mFAILED\x1b[0m. 411 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 162.03s"),
+    (309, "\x1b[1m\x1b[31merror\x1b[0m: test failed, to rerun pass `-p corvene-core --lib`"),
+    (309, "##[error]Process completed with exit code 101."),
+    (310, "Post job cleanup."), (310, "##[group]Run actions/checkout@v4"), (310, "##[endgroup]"),
+    (310, "Cleaning up orphan processes"),
+]
+JOB_LOG = "".join(f"2024-05-01T10:{s // 60:02}:{s % 60:02}.0000000Z {text}\n" for s, text in _LOG_LINES)
 
 
 class Stub(HTTPServer):

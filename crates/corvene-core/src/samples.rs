@@ -225,6 +225,86 @@ pub fn failed_checks() -> Vec<RefCheck> {
     ]
 }
 
+/// A sample Actions job log for the failed `test (macos-15)` job of
+/// [`failed_checks`] (`CORVENE_POPUP=job-log`, flag `347-actions-job-logs`).
+pub fn job_log() -> String {
+    let stamp = |s: u64| format!("2024-05-01T10:{:02}:{:02}.0000000Z", s / 60, s % 60);
+    let lines: Vec<(u64, &str)> = vec![
+        (0, "Current runner version: '2.317.0'"),
+        (0, "##[group]Operating System"),
+        (0, "macOS"),
+        (0, "15.0"),
+        (0, "##[endgroup]"),
+        (1, "##[group]Run actions/checkout@v4"),
+        (1, "with:"),
+        (1, "  fetch-depth: 0"),
+        (1, "##[endgroup]"),
+        (2, "Syncing repository: wasi-master/corvene-demo"),
+        (3, "##[group]Run cargo clippy --all-targets -- -D warnings"),
+        (
+            3,
+            "\u{1b}[36;1mcargo clippy --all-targets -- -D warnings\u{1b}[0m",
+        ),
+        (3, "shell: /bin/bash -e {0}"),
+        (3, "##[endgroup]"),
+        (
+            10,
+            "\u{1b}[1m\u{1b}[32m    Checking\u{1b}[0m corvene-core v0.1.0",
+        ),
+        (
+            97,
+            "\u{1b}[1m\u{1b}[32m    Finished\u{1b}[0m `dev` profile [unoptimized + debuginfo] target(s) in 1m 34s",
+        ),
+        (98, "##[group]Run cargo test --workspace"),
+        (98, "\u{1b}[36;1mcargo test --workspace\u{1b}[0m"),
+        (98, "shell: /bin/bash -e {0}"),
+        (98, "##[endgroup]"),
+        (
+            140,
+            "\u{1b}[1m\u{1b}[32m     Running\u{1b}[0m unittests src/lib.rs (target/debug/deps/corvene_core-8f2a1c)",
+        ),
+        (141, "running 412 tests"),
+        (
+            300,
+            "test job_log::tests::searches_case_insensitively ... \u{1b}[32mok\u{1b}[0m",
+        ),
+        (
+            301,
+            "test remote::tests::fetch_skips_unchanged ... \u{1b}[31mFAILED\u{1b}[0m",
+        ),
+        (302, "failures:"),
+        (302, "---- remote::tests::fetch_skips_unchanged stdout ----"),
+        (
+            302,
+            "thread 'remote::tests::fetch_skips_unchanged' panicked at crates/corvene-core/src/remote.rs:2710:9:",
+        ),
+        (302, "assertion `left == right` failed"),
+        (302, "  left: 2"),
+        (302, " right: 1"),
+        (
+            302,
+            "note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+        ),
+        (
+            303,
+            "test result: \u{1b}[31mFAILED\u{1b}[0m. 411 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 162.03s",
+        ),
+        (
+            309,
+            "\u{1b}[1m\u{1b}[31merror\u{1b}[0m: test failed, to rerun pass `-p corvene-core --lib`",
+        ),
+        (309, "##[error]Process completed with exit code 101."),
+        (310, "Post job cleanup."),
+        (310, "##[group]Run actions/checkout@v4"),
+        (310, "##[endgroup]"),
+        (310, "Cleaning up orphan processes"),
+    ];
+    lines
+        .into_iter()
+        .map(|(s, text)| format!("{} {text}\n", stamp(s)))
+        .collect()
+}
+
 /// GHD `TestNotificationType`: the sample notification of each kind for
 /// `repo` (the Test Notifications dialog).
 pub fn notification(

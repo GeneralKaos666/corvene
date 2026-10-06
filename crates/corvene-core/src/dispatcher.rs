@@ -189,6 +189,8 @@ impl Dispatcher {
             tutorial_step_override: None,
             show_ci_status_popover: false,
             commit_statuses: crate::commit_status::CommitStatusStore::default(),
+            job_logs: crate::job_log::JobLogStore::default(),
+            menu_bar_statuses: Default::default(),
             repo_rulesets: std::collections::HashMap::new(),
             issues: std::collections::HashMap::new(),
             mentionables: std::collections::HashMap::new(),
@@ -1870,6 +1872,8 @@ impl Dispatcher {
         if changed {
             // `798-blame`: another file was picked
             Self::close_blame(id, cx);
+            // `1110-repository-insights`: so does Insights
+            Self::close_insights(id, cx);
             Self::load_diff(id, cx);
         }
     }
@@ -2517,6 +2521,10 @@ impl Dispatcher {
         if !more && Self::history_all_branches(Self::state(cx).read(cx)) {
             Self::load_all_branches(id, false, cx);
         }
+        // `1110-repository-insights`: the numbers may be out of date now
+        if !more {
+            Self::check_insights_stale(id, cx);
+        }
         // `1216-recent-activity`: and the reflog while it is listed
         if !more
             && Self::state(cx)
@@ -2771,6 +2779,8 @@ impl Dispatcher {
         if changed {
             // `798-blame`: another commit was picked
             Self::close_blame(id, cx);
+            // `1110-repository-insights`: so does Insights
+            Self::close_insights(id, cx);
             Self::load_changeset(id, cx);
         }
     }
@@ -4048,6 +4058,8 @@ impl Dispatcher {
     pub fn show_section(id: u64, section: Section, cx: &mut dyn Host) {
         // `798-blame`: the view belongs to the tab it was opened in
         Self::close_blame_unless(id, |b| b.section == section, cx);
+        // `1110-repository-insights`: so does Insights
+        Self::close_insights_unless(id, |i| i.section == section, cx);
         Self::state(cx).update(cx, |s, cx| {
             if s.selected == Some(id) && s.repo_state_mut(id).section != section {
                 s.record_navigation();

@@ -46,14 +46,17 @@ pub mod history_filter;
 pub mod hooks;
 pub mod host;
 pub mod hosts;
+pub mod insights;
 pub mod integrations;
 pub mod issues;
+pub mod job_log;
 pub mod keymap_file;
 pub mod lfs_locks;
 pub mod line_selection;
 pub mod list_selection;
 pub mod markdown;
 pub mod mco;
+pub mod menu_bar_status;
 pub mod menu_state;
 pub mod navigation;
 pub mod new_branch_flows;
@@ -66,6 +69,7 @@ pub mod portable_paths;
 pub mod pull_request_preview;
 pub mod pull_requests;
 pub mod push_errors;
+pub mod ref_compare;
 pub mod reflog;
 pub mod release_notes;
 pub mod releases;
@@ -110,6 +114,9 @@ pub use forks::UPSTREAM_REMOTE_NAME;
 pub use host::{AsyncCtx, Ctx, Host, HostServices, StateCx, StateHandle};
 pub use hosts::{HostSignIn, HostsState};
 pub use integrations::{EditorChoice, PreferencesSave, RepositorySettingsSave};
+pub use job_log::{
+    JobLog, JobLogLine, JobLogState, JobLogStore, LineKind, job_log_key, parse_job_log,
+};
 pub use mco::{
     Banner, ConflictKind, ConflictState, McoConflicts, McoDetail, McoStep, McoUndo, MergePreview,
     MultiCommitOperation, RebasePreview, conflicted_files, get_unique_coauthors_as_authors,
@@ -121,7 +128,7 @@ pub use persistence::{
     StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
 };
 pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
-pub use pull_request_preview::{MergeStatus, PullRequestPreview};
+pub use pull_request_preview::{MergeStatus, PreviewSlot, PullRequestPreview};
 pub use pull_requests::{
     BranchesTab, FORKED_REMOTE_PREFIX, PullRequestCache, PullRequestCaches, cache_key,
     find_associated_pull_request, fork_pull_request_remote_name,

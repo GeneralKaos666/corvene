@@ -1190,25 +1190,7 @@ pub fn merge_base_changed_files(
     compare: &str,
     newest: &str,
 ) -> Result<Option<ChangesetData>> {
-    if merge_base(git.clone(), workdir, base, compare)?.is_none() {
-        return Ok(None);
-    }
-    let out = GitCommand::new(git)
-        .args([
-            "diff",
-            "--merge-base",
-            base,
-            compare,
-            "-C",
-            "-M",
-            "-z",
-            "--raw",
-            "--numstat",
-            "--",
-        ])
-        .current_dir(workdir)
-        .run()?;
-    Ok(Some(parse_raw_log_with_numstat(&out.stdout, newest)))
+    range_changed_files(git, workdir, base, compare, true, newest)
 }
 
 /// `getBranchMergeBaseDiff`: one file's patch between the merge base of
@@ -1222,7 +1204,62 @@ pub fn merge_base_file_diff(
     hide_whitespace: bool,
     newest: &str,
 ) -> Result<Diff> {
-    let mut args = vec!["diff", "--merge-base", base, compare];
+    range_file_diff(
+        git,
+        workdir,
+        file,
+        base,
+        compare,
+        true,
+        hide_whitespace,
+        newest,
+    )
+}
+
+/// The files that changed between two commits: from their merge base to
+/// `to` with `merge_base` (`git diff from...to`, `None` when the two have
+/// no merge base), else straight from `from` to `to` (`git diff from to`).
+/// `newest` is `to`'s commit, recorded as the files' commitish. Corvene
+/// `1218-compare-refs` compares any two refs both ways; Preview Pull
+/// Request always from the merge base.
+pub fn range_changed_files(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    from: &str,
+    to: &str,
+    merge_base: bool,
+    newest: &str,
+) -> Result<Option<ChangesetData>> {
+    if merge_base && self::merge_base(git.clone(), workdir, from, to)?.is_none() {
+        return Ok(None);
+    }
+    let mut args = vec!["diff"];
+    if merge_base {
+        args.push("--merge-base");
+    }
+    args.extend([from, to, "-C", "-M", "-z", "--raw", "--numstat", "--"]);
+    let out = GitCommand::new(git).args(args).current_dir(workdir).run()?;
+    Ok(Some(parse_raw_log_with_numstat(&out.stdout, newest)))
+}
+
+/// One file's patch of [`range_changed_files`]: from the merge base of
+/// `from` and `to` with `merge_base`, else from `from`, to `to`.
+#[allow(clippy::too_many_arguments)]
+pub fn range_file_diff(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &CommittedFileChange,
+    from: &str,
+    to: &str,
+    merge_base: bool,
+    hide_whitespace: bool,
+    newest: &str,
+) -> Result<Diff> {
+    let mut args = vec!["diff"];
+    if merge_base {
+        args.push("--merge-base");
+    }
+    args.extend([from, to]);
     if hide_whitespace {
         args.push("-w");
     }
@@ -1235,14 +1272,17 @@ pub fn merge_base_file_diff(
         cmd = cmd.arg(old);
     }
     let out = cmd.run()?;
-    let merge_base =
-        merge_base(git.clone(), workdir, base, compare)?.unwrap_or_else(|| newest.to_string());
+    let old = if merge_base {
+        self::merge_base(git.clone(), workdir, from, to)?.unwrap_or_else(|| newest.to_string())
+    } else {
+        from.to_string()
+    };
     Ok(finish_committed_diff(
         git,
         workdir,
         file,
         newest,
-        &merge_base,
+        &old,
         &out.stdout,
     ))
 }

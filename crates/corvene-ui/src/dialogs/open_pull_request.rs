@@ -21,7 +21,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use corvene_core::{
-    AppState, Branch, BranchKind, CommittedFileChange, Dispatcher, MergeStatus, PullRequestPreview,
+    AppState, Branch, BranchKind, CommittedFileChange, Dispatcher, MergeStatus, PreviewSlot,
+    PullRequestPreview,
 };
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::resizable::{
@@ -381,17 +382,7 @@ impl OpenPullRequestDialog {
     /// `FileList` of the changed files (250 px, resizable).
     /// The preview's files in list order and the selected file's index.
     fn file_order(&self, cx: &App) -> Option<(Vec<String>, Option<usize>)> {
-        let preview = self.preview(cx)?;
-        let order: Vec<String> = preview
-            .changeset
-            .as_ref()
-            .map(|c| c.files.iter().map(|f| f.path.clone()).collect())
-            .unwrap_or_default();
-        let current = preview
-            .file
-            .as_ref()
-            .and_then(|p| order.iter().position(|o| o == p));
-        Some((order, current))
+        Some(range_file_order(&self.preview(cx)?))
     }
 
     /// GHD `List.moveSelection` on `PullRequestFilesChanged`'s `FileList`
@@ -423,106 +414,15 @@ impl OpenPullRequestDialog {
     }
 
     fn file_list(&self, preview: &PullRequestPreview, cx: &Context<Self>) -> AnyElement {
-        let t = cx.ghd();
-        let files: Vec<CommittedFileChange> = preview
-            .changeset
-            .as_ref()
-            .map(|c| c.files.clone())
-            .unwrap_or_default();
-        let selected = preview.file.clone();
-        let repo = self.repo;
-        let hover_bg = t.list_item_hover_background;
-        let focused = self.file_list_focused;
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .border_r_1()
-            .border_color(t.box_border)
-            .child(
-                div()
-                    .id("pr-file-rows")
-                    .role(Role::List)
-                    .aria_label("Changed files")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .children(files.into_iter().map(|file| {
-                        let is_selected = selected.as_deref() == Some(file.path.as_str());
-                        let (icon, color) = status_icon(file.status.kind, t);
-                        // `.focus-within .list-item.selected`: the icon
-                        // takes the row's colour
-                        let color = if is_selected && focused {
-                            t.box_selected_active_text
-                        } else {
-                            color
-                        };
-                        let path = file.path.clone();
-                        div()
-                            .id(SharedString::from(format!("pr-file-{}", file.path)))
-                            .a11y_row(
-                                format!(
-                                    "{}, {}",
-                                    file.path,
-                                    crate::widgets::status_label(&file.status)
-                                ),
-                                is_selected,
-                            )
-                            .w_full()
-                            .h(ROW_HEIGHT())
-                            .flex_none()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(SPACING_HALF())
-                            .px(SPACING())
-                            .cursor_pointer()
-                            .when(is_selected, |d| {
-                                if focused {
-                                    d.bg(t.box_selected_active_background)
-                                        .text_color(t.box_selected_active_text)
-                                } else {
-                                    d.bg(t.box_selected_background)
-                                        .text_color(t.box_selected_text)
-                                }
-                            })
-                            .when(!is_selected, move |d| d.hover(move |s| s.bg(hover_bg)))
-                            .on_click(move |_, _, cx| {
-                                Dispatcher::select_pull_request_file(repo, path.clone(), cx)
-                            })
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_row()
-                                    .text_size(FONT_SIZE())
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .truncate()
-                                            .text_color(match (is_selected, focused) {
-                                                (true, true) => t.box_selected_active_text,
-                                                (true, false) => t.box_selected_text,
-                                                _ => t.text_secondary,
-                                            })
-                                            .child(crate::format::display_path(file.directory())),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .max_w_full()
-                                            .truncate()
-                                            .child(file.file_name().to_string()),
-                                    ),
-                            )
-                            .child(octicon(icon, color))
-                    }))
-                    .with_scrollbar_handle(&self.file_scroll),
-            )
-            .into_any_element()
+        range_file_list(
+            "pr-file",
+            self.repo,
+            PreviewSlot::PullRequest,
+            preview,
+            self.file_list_focused,
+            &self.file_scroll,
+            cx,
+        )
     }
 
     /// `PullRequestMergeStatus`
@@ -1065,4 +965,130 @@ impl Render for OpenPullRequestDialog {
         let popover = self.base_select_open.then(|| self.base_popover(window, cx));
         div().child(dialog).children(popover).into_any_element()
     }
+}
+
+/// The `1203` / `1217` file list of a [`PullRequestPreview`] in `slot`
+/// (`PullRequestFilesChanged`'s `FileList`); rows select through
+/// [`Dispatcher::select_preview_file`]. `id` prefixes the element ids.
+pub(crate) fn range_file_list(
+    id: &'static str,
+    repo: u64,
+    slot: PreviewSlot,
+    preview: &PullRequestPreview,
+    focused: bool,
+    scroll: &ScrollHandle,
+    cx: &App,
+) -> AnyElement {
+    let t = cx.ghd();
+    let files: Vec<CommittedFileChange> = preview
+        .changeset
+        .as_ref()
+        .map(|c| c.files.clone())
+        .unwrap_or_default();
+    let selected = preview.file.clone();
+    let hover_bg = t.list_item_hover_background;
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .border_r_1()
+        .border_color(t.box_border)
+        .child(
+            div()
+                .id(SharedString::from(format!("{id}-rows")))
+                .role(Role::List)
+                .aria_label("Changed files")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .children(files.into_iter().map(|file| {
+                    let is_selected = selected.as_deref() == Some(file.path.as_str());
+                    let (icon, color) = status_icon(file.status.kind, t);
+                    // `.focus-within .list-item.selected`: the icon
+                    // takes the row's colour
+                    let color = if is_selected && focused {
+                        t.box_selected_active_text
+                    } else {
+                        color
+                    };
+                    let path = file.path.clone();
+                    div()
+                        .id(SharedString::from(format!("{id}-{}", file.path)))
+                        .a11y_row(
+                            format!(
+                                "{}, {}",
+                                file.path,
+                                crate::widgets::status_label(&file.status)
+                            ),
+                            is_selected,
+                        )
+                        .w_full()
+                        .h(ROW_HEIGHT())
+                        .flex_none()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(SPACING_HALF())
+                        .px(SPACING())
+                        .cursor_pointer()
+                        .when(is_selected, |d| {
+                            if focused {
+                                d.bg(t.box_selected_active_background)
+                                    .text_color(t.box_selected_active_text)
+                            } else {
+                                d.bg(t.box_selected_background)
+                                    .text_color(t.box_selected_text)
+                            }
+                        })
+                        .when(!is_selected, move |d| d.hover(move |s| s.bg(hover_bg)))
+                        .on_click(move |_, _, cx| {
+                            Dispatcher::select_preview_file(repo, slot, path.clone(), cx)
+                        })
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_row()
+                                .text_size(FONT_SIZE())
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(match (is_selected, focused) {
+                                            (true, true) => t.box_selected_active_text,
+                                            (true, false) => t.box_selected_text,
+                                            _ => t.text_secondary,
+                                        })
+                                        .child(crate::format::display_path(file.directory())),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .max_w_full()
+                                        .truncate()
+                                        .child(file.file_name().to_string()),
+                                ),
+                        )
+                        .child(octicon(icon, color))
+                }))
+                .with_scrollbar_handle(scroll),
+        )
+        .into_any_element()
+}
+
+/// The files of a [`PullRequestPreview`] in order, and the selected one's index.
+pub(crate) fn range_file_order(preview: &PullRequestPreview) -> (Vec<String>, Option<usize>) {
+    let order: Vec<String> = preview
+        .changeset
+        .as_ref()
+        .map(|c| c.files.iter().map(|f| f.path.clone()).collect())
+        .unwrap_or_default();
+    let current = preview
+        .file
+        .as_ref()
+        .and_then(|p| order.iter().position(|o| o == p));
+    (order, current)
 }

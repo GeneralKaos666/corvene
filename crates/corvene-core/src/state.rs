@@ -289,6 +289,15 @@ pub enum Popup {
         git_ref: String,
         failed_only: bool,
     },
+    /// Corvene (`347-actions-job-logs`): the log of an Actions job from the
+    /// check-run popover; `step` is the step to scroll to (the API's name),
+    /// `None` the failure.
+    ActionsJobLog {
+        repo: u64,
+        github: GitHubRepository,
+        check: corvene_models::RefCheck,
+        step: Option<String>,
+    },
     /// `PullRequestReview`: a review on one of the user's pull requests
     /// (GHD shows it from a notification). `should_*` pick the OK button:
     /// switch repository and/or check out the PR branch.
@@ -418,6 +427,13 @@ pub enum Popup {
     /// Corvene `345-issues`: New Issue….
     NewIssue {
         repo: u64,
+    },
+    /// Corvene `1218-compare-refs`: Compare…, its pickers filled with
+    /// `base` and `head`.
+    CompareRefs {
+        repo: u64,
+        base: Option<String>,
+        head: Option<String>,
     },
     /// Corvene `346-releases`: Create Release… for `tag` (none: a new tag)
     /// at `sha` (none: the current branch's tip).
@@ -731,6 +747,7 @@ impl Popup {
             | Self::SAMLReauthRequired { repo, .. }
             | Self::TestNotifications { repo, .. }
             | Self::CICheckRunRerun { repo, .. }
+            | Self::ActionsJobLog { repo, .. }
             | Self::PullRequestReview { repo, .. }
             | Self::PullRequestComment { repo, .. }
             | Self::PullRequestChecksFailed { repo, .. }
@@ -746,6 +763,7 @@ impl Popup {
             | Self::CreateTag { repo, .. }
             | Self::NewIssue { repo, .. }
             | Self::CreateRelease { repo, .. }
+            | Self::CompareRefs { repo, .. }
             | Self::StartBisect { repo, .. }
             | Self::WarnLocalChangesBeforeUndo { repo, .. }
             | Self::CreateBranch { repo, .. }
@@ -1467,6 +1485,16 @@ pub struct RepositoryState {
     /// `1214-commit-signatures`: verified signatures by commit.
     pub signatures: crate::signatures::SignatureStore,
 
+    // ---- `1218-compare-refs` ----
+    /// The combined diff of the two compared refs.
+    pub ref_compare_changes: Option<crate::pull_request_preview::PullRequestPreview>,
+
+    // ---- `1110-repository-insights` ----
+    /// Repository › Insights…, shown in place of the tab's content.
+    pub insights: Option<crate::insights::InsightsState>,
+    /// Finished statistics by scope, range and tips (newest last).
+    pub insights_cache: Vec<(crate::insights::InsightsKey, Arc<corvene_git::RepoStats>)>,
+
     // ---- `1216-recent-activity` ----
     /// Repository › Recent Activity…: History lists the reflog instead.
     pub reflog: Option<crate::reflog::ReflogState>,
@@ -1738,6 +1766,11 @@ pub struct AppState {
     pub show_ci_status_popover: bool,
     /// `CommitStatusStore`: CI statuses of refs.
     pub commit_statuses: crate::commit_status::CommitStatusStore,
+    /// Corvene (`347-actions-job-logs`): Actions job logs fetched this session.
+    pub job_logs: crate::job_log::JobLogStore,
+    /// Corvene (`428-menu-bar-status-item`): what the indicator pass recorded
+    /// for the watched repositories.
+    pub menu_bar_statuses: crate::menu_bar_status::MenuBarStatuses,
     /// `cachedRepoRulesets`: ruleset id → the ruleset (how it applies to the user).
     pub repo_rulesets: HashMap<u64, corvene_github::ApiRepoRuleset>,
     /// Installed editors / shells (`getAvailableEditors` / `getAvailableShells`).

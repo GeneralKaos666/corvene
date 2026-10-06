@@ -347,6 +347,14 @@ fn tag_row_menu(
         ));
         items.push(MenuItem::separator());
     }
+    // Corvene (`1218-compare-refs`): this tag against the current branch
+    if corvene_core::ref_compare::enabled(AppState::global(cx).read(cx)) {
+        let (base, head) = (tag.clone(), crate::history::current_ref(id, cx));
+        items.push(MenuItem::new("Compare with…", move |_, cx| {
+            Dispatcher::show_compare_refs(id, Some(base.clone()), head.clone(), cx)
+        }));
+        items.push(MenuItem::separator());
+    }
     let copied = tag.clone();
     items.push(MenuItem::new(
         mac_or("Copy Tag Name", "Copy tag name"),
@@ -1725,6 +1733,16 @@ impl BranchFoldout {
                         ),
                         MenuItem::separator(),
                     ];
+                    // Corvene (`1218-compare-refs`): this branch against the
+                    // current one
+                    if corvene_core::ref_compare::enabled(AppState::global(cx).read(cx)) {
+                        let base = branch.name.clone();
+                        let head = crate::history::current_ref(id, cx).filter(|_| !current);
+                        items.push(MenuItem::new("Compare with…", move |_, cx| {
+                            Dispatcher::show_compare_refs(id, Some(base.clone()), head.clone(), cx)
+                        }));
+                        items.push(MenuItem::separator());
+                    }
                     if let Some(base) = rebase_onto {
                         items.push(
                             MenuItem::new(

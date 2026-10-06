@@ -49,6 +49,7 @@ pub mod sparse;
 mod spawn;
 pub mod ssh;
 pub mod stash_ops;
+pub mod stats;
 pub mod status;
 mod status_gix;
 pub mod submodule;
@@ -131,8 +132,8 @@ pub use log::{
     get_commit_range_changed_files, get_commits, get_commits_from, get_commits_in_range,
     get_commits_with, local_commit_shas, local_only_commits, merge_base, merge_base_changed_files,
     merge_base_file_diff, most_recent_local_commit, parse_filtered_history,
-    parse_raw_log_with_numstat, parse_recent_authors, recent_authors, remerge_changed_files,
-    remerge_file_diff, resolve_commit, tag_names,
+    parse_raw_log_with_numstat, parse_recent_authors, range_changed_files, range_file_diff,
+    recent_authors, remerge_changed_files, remerge_file_diff, resolve_commit, tag_names,
 };
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,
@@ -206,6 +207,10 @@ pub use stash_ops::{
     apply_stash_entry_with, create_branch_from_stash, create_desktop_stash_of_files,
     create_stash_with_message, mark_conflicts_resolved, pop_stash_entry_with, stash_entry,
     store_stash, unmerged_paths,
+};
+pub use stats::{
+    Contributor, FileChurn, RepoStats, StatsScope, TOP_FILES, WeekBucket, repository_stats,
+    week_start,
 };
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,

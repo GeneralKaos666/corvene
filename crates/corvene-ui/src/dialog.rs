@@ -340,6 +340,8 @@ fn ghd_dialog_width(id: &str) -> Option<f32> {
         "dialog-preferences" => 600.,
         // Corvene: Language Extensions (list + details, three tabs)
         "language-extensions" => 760.,
+        // Corvene: an Actions job log (`347-actions-job-logs`), 100 columns
+        "actions-job-log" => 800.,
         _ => return None,
     })
 }

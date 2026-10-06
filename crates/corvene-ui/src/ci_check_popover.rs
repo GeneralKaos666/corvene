@@ -16,6 +16,10 @@
 //!
 //! Corvene addition (flag `334-branch-ci-status`): without a pull request it
 //! lists the checks of the current branch's pushed tip.
+//!
+//! Corvene addition (flag `347-actions-job-logs`): a job's step list gets a
+//! View log button, and its step rows open the log at that step
+//! (`dialogs::actions_job_log`); the per-step link to GitHub stays.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -41,6 +45,32 @@ use crate::widgets::button;
 pub(crate) type RerunChecks = Rc<dyn Fn(Vec<RefCheck>, bool, &mut App)>;
 /// Re-runs one job.
 pub(crate) type RerunJob = Rc<dyn Fn(&mut App)>;
+/// Opens a job's log in the app (`347-actions-job-logs`), at the named step
+/// or (`None`) the failure.
+pub(crate) type OpenLog = Rc<dyn Fn(Option<String>, &mut App)>;
+
+/// `347-actions-job-logs`: the log opener of `check` for `repo`, when the
+/// flag is on and the check is an Actions job (its id is the job id).
+pub(crate) fn open_log_for(
+    repo: u64,
+    github: &GitHubRepository,
+    check: &RefCheck,
+    cx: &App,
+) -> Option<OpenLog> {
+    let on = AppState::global(cx)
+        .read(cx)
+        .flags
+        .bool(corvene_core::flags::ids::ACTIONS_JOB_LOGS);
+    if !on || check.job_steps.is_none() {
+        return None;
+    }
+    let (github, check) = (github.clone(), check.clone());
+    Some(Rc::new(move |step, cx: &mut App| {
+        // the dialog takes the popover's place
+        Dispatcher::set_show_ci_status_popover(false, cx);
+        Dispatcher::show_job_log(repo, github.clone(), check.clone(), step, cx)
+    }))
+}
 
 /// `.ci-check-list-popover .popover-component { width: 440px }`
 #[allow(non_snake_case)]
@@ -382,6 +412,7 @@ impl CiCheckPopover {
                         Self::rerun(&snap_for_rerun, vec![rerun_check.clone()], false, cx)
                     }) as RerunJob
                 }),
+                open_log_for(snap.repo, &snap.github, check, cx),
                 cx,
             ));
         div()
@@ -538,11 +569,14 @@ pub(crate) fn check_run_group_header(name: String, cx: &App) -> Div {
 
 /// A check's job steps (`CICheckRunStepListHeader` +
 /// `CICheckRunActionsJobStepList`), or `CICheckRunNoStepItem` when it has
-/// none. `on_rerun_job` is `None` where single jobs cannot be re-run.
+/// none. `on_rerun_job` is `None` where single jobs cannot be re-run;
+/// `open_log` (`347-actions-job-logs`) adds View log and makes the step
+/// rows open the log.
 pub(crate) fn check_run_steps(
     check: &RefCheck,
     external_url: String,
     on_rerun_job: Option<RerunJob>,
+    open_log: Option<OpenLog>,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -586,6 +620,17 @@ pub(crate) fn check_run_steps(
                                 .on_click(move |_, _, cx| rerun(cx)),
                             )
                         })
+                        .when_some(open_log.clone(), |d, open| {
+                            d.child(
+                                icon_button(
+                                    "check-view-log",
+                                    Octicon::Terminal,
+                                    format!("View log of {}", check.name),
+                                    cx,
+                                )
+                                .on_click(move |_, _, cx| open(None, cx)),
+                            )
+                        })
                         .child(
                             icon_button(
                                 "check-view-external",
@@ -607,10 +652,24 @@ pub(crate) fn check_run_steps(
                     .map(corvene_core::format_precise_duration)
                     .unwrap_or_default();
                     let conclusion = effective_conclusion(step.status, step.conclusion);
+                    let open_step = open_log.clone();
+                    let step_name = step.name.clone();
+                    let hover_bg = t.box_selected_background;
                     div()
+                        .id(SharedString::from(format!(
+                            "step-row-{}-{}",
+                            check.id, step.number
+                        )))
                         .flex()
                         .flex_row()
                         .items_center()
+                        .when_some(open_step, |d, open| {
+                            d.cursor_pointer()
+                                .rounded(BORDER_RADIUS())
+                                .hover(move |s| s.bg(hover_bg))
+                                .icon_button_label(format!("View the log of {step_name}"))
+                                .on_click(move |_, _, cx| open(Some(step_name.clone()), cx))
+                        })
                         .child(
                             div()
                                 .flex_none()

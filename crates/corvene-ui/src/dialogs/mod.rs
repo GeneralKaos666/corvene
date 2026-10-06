@@ -5,6 +5,7 @@
 //! view is recreated only when its popup's value changes.
 
 mod acknowledgements;
+mod actions_job_log;
 mod add_embedded_repositories;
 mod add_existing;
 mod add_license;
@@ -15,6 +16,7 @@ mod change_repository_alias;
 mod ci_check_run_rerun;
 mod clean_untracked_files;
 pub(crate) mod clone_repository;
+mod compare_refs;
 mod confirm_commit_to_default_branch;
 mod confirm_delete_untrashable;
 mod confirm_force_unlock;
@@ -38,7 +40,7 @@ mod move_repository_to_group;
 mod move_to_applications_folder;
 mod move_to_shared_storage;
 mod new_issue;
-mod open_pull_request;
+pub(crate) mod open_pull_request;
 mod oversized_files;
 mod preferences;
 mod pull_request_notifications;
@@ -68,6 +70,7 @@ use corvene_core::{AppState, Popup};
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
+pub use actions_job_log::ActionsJobLogDialog;
 pub use add_embedded_repositories::AddEmbeddedRepositoriesDialog;
 pub use add_existing::AddExistingRepositoryDialog;
 pub use app_dialogs::{AboutDialog, ConfirmRemoveRepositoryDialog, IntegrationErrorDialog};
@@ -274,6 +277,23 @@ impl DialogHost {
                         checks.clone(),
                         git_ref.clone(),
                         *failed_only,
+                        cx,
+                    )
+                })
+                .into(),
+            Popup::ActionsJobLog {
+                github,
+                check,
+                step,
+                ..
+            } => cx
+                .new(|cx| {
+                    ActionsJobLogDialog::new(
+                        state,
+                        github.clone(),
+                        check.clone(),
+                        step.clone(),
+                        window,
                         cx,
                     )
                 })
@@ -564,6 +584,18 @@ impl DialogHost {
                 .into(),
             Popup::NewIssue { repo } => cx
                 .new(|cx| NewIssueDialog::new(state, *repo, window, cx))
+                .into(),
+            Popup::CompareRefs { repo, base, head } => cx
+                .new(|cx| {
+                    compare_refs::CompareRefsDialog::new(
+                        state,
+                        *repo,
+                        base.clone(),
+                        head.clone(),
+                        window,
+                        cx,
+                    )
+                })
                 .into(),
             Popup::CreateRelease { repo, tag, sha } => cx
                 .new(|cx| {
