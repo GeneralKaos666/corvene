@@ -293,6 +293,11 @@ jobs:
               echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUSTFLAGS=-C link-arg=-fuse-ld=lld"
             fi
           } >> "$GITHUB_ENV"
+          # a cross gcc's -fuse-ld=lld runs <triplet>-ld.lld from PATH
+          if [[ "${{ matrix.arch }}" == armhf ]]; then
+            sudo ln -sf "$(command -v ld.lld || ls /usr/lib/llvm-*/bin/ld.lld | tail -n 1)" \
+              "/usr/local/bin/${{ matrix.triplet }}-ld.lld"
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
