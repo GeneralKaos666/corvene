@@ -328,10 +328,17 @@ pub fn submodule_details(git: Arc<GitBinary>, workdir: &Path) -> Result<Vec<Subm
     let status = list_submodules(git.clone(), workdir).unwrap_or_default();
     let base = crate::remote_ops::config_value(git.clone(), workdir, "remote.origin.url")
         .unwrap_or_else(|| {
-            dunce::canonicalize(workdir)
+            let dir = dunce::canonicalize(workdir)
                 .unwrap_or_else(|_| workdir.to_path_buf())
                 .to_string_lossy()
-                .into_owned()
+                .into_owned();
+            // git's own working directory (`xgetcwd`) has forward slashes
+            // on Windows too
+            if cfg!(windows) {
+                dir.replace('\\', "/")
+            } else {
+                dir
+            }
         });
     Ok(gitlinks
         .into_iter()
