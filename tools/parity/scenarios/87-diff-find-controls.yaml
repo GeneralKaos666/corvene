@@ -1,0 +1,43 @@
+# The diff's ⌘F box with a count, previous / next and a case toggle (flag
+# 1305-diff-find-controls, off in the GitHub Desktop preset the harness
+# runs with). GHD's box is a bare text field, so the snaps are recorded,
+# not compared (deviations.md › Diff viewer). "world" is in src/main.rs
+# three times, "World" never.
+name: diff-find-controls
+description: Find in diff with "N of M", Enter and the arrows stepping, Aa matching case, a stale count while typing (Corvene only)
+setup: repo
+corvene_flags: 1305-diff-find-controls=on
+steps:
+  - click: [125, 300]
+    wait: 600
+  # into the diff, below its rows
+  - click: [900, 500]
+  - key: cmd-f
+    wait: 300
+  - snap: {name: open, corvene_only: true, note: "GHD's search box has no count or buttons (deviations.md, 1305-diff-find-controls)"}
+  - type: World
+  - key: enter
+    wait: 300
+  - snap: {name: first-match, corvene_only: true}
+  - key: enter
+    wait: 300
+  - snap: {name: enter-steps, corvene_only: true}
+  # Previous Match
+  - ghd: {skip: true}
+    corvene: {click: [1316, 130]}
+    wait: 300
+  - snap: {name: previous, corvene_only: true}
+  # Match Case: "World" no longer matches
+  - ghd: {skip: true}
+    corvene: {click: [1292, 130]}
+    wait: 300
+  - snap: {name: match-case, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [1292, 130]}
+    wait: 300
+  - type: s
+    wait: 300
+  - snap: {name: typed-not-searched, corvene_only: true}
+  - key: escape
+    wait: 300
+  - snap: closed

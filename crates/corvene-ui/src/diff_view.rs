@@ -89,6 +89,11 @@
 //! Deviation (`740-diff-loading-indicator`): while a working-directory diff
 //! takes longer than [`LOADING_INDICATOR_DELAY`] to compute, a spinner covers
 //! the pane (GHD keeps showing the previous diff, or nothing).
+//!
+//! Deviation (`1305-diff-find-controls`): the ⌘F box shows "N of M",
+//! previous / next buttons and an Aa (match case) toggle; GHD's
+//! `DiffSearchInput` is a bare text box that ignores case. Enter, ⇧Enter
+//! and Esc are unchanged.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -530,6 +535,9 @@ pub struct DiffView {
     search_query: String,
     hits: Vec<SearchHit>,
     selected_hit: Option<usize>,
+    /// `1305-diff-find-controls` as last rendered, and its Aa toggle.
+    find_controls: bool,
+    search_case_sensitive: bool,
     // Diff Settings popover (`DiffOptions`)
     options_open: bool,
     pub(crate) gear_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -619,6 +627,8 @@ impl DiffView {
             search_query: String::new(),
             hits: Vec::new(),
             selected_hit: None,
+            find_controls: false,
+            search_case_sensitive: false,
             options_open: false,
             gear_bounds: Rc::new(Cell::new(Bounds::default())),
             whitespace_hint: None,
@@ -1832,6 +1842,9 @@ impl DiffView {
                 cx.subscribe(&input, |this, _, ev: &InputEvent, cx| match ev {
                     InputEvent::PressEnter { shift, .. } => this.search(!*shift, cx),
                     InputEvent::Blur => this.close_search(cx),
+                    // `1305-diff-find-controls`: the count only describes the
+                    // text it was searched for
+                    InputEvent::Change if this.find_controls => cx.notify(),
                     _ => {}
                 })
                 .detach();
@@ -1880,7 +1893,7 @@ impl DiffView {
         }
         if query != self.search_query || self.hits.is_empty() {
             self.search_query = query;
-            self.hits = search_rows(&self.rows, &self.search_query);
+            self.hits = search_rows(&self.rows, &self.search_query, self.case_sensitive());
             self.selected_hit = (!self.hits.is_empty()).then_some(0);
         } else if let Some(ix) = self.selected_hit {
             let n = self.hits.len();
@@ -1890,6 +1903,12 @@ impl DiffView {
                 (ix + n - 1) % n
             });
         }
+        self.reveal_selected_hit();
+        cx.notify();
+    }
+
+    /// Scroll the selected search hit into view.
+    fn reveal_selected_hit(&mut self) {
         if let Some(hit) = self.selected_hit.and_then(|ix| self.hits.get(ix)) {
             let row = if self.split_mode {
                 self.unified_to_split
@@ -1901,7 +1920,111 @@ impl DiffView {
             };
             self.list_state.scroll_to_reveal_item(row);
         }
+    }
+
+    /// `1305-diff-find-controls`: the search matches case (Aa).
+    fn case_sensitive(&self) -> bool {
+        self.find_controls && self.search_case_sensitive
+    }
+
+    /// `1305-diff-find-controls`: Aa flips matching case and searches the
+    /// same text again, from the first hit.
+    fn toggle_search_case(&mut self, cx: &mut Context<Self>) {
+        self.search_case_sensitive = !self.search_case_sensitive;
+        if !self.search_query.is_empty() {
+            self.hits = search_rows(&self.rows, &self.search_query, self.case_sensitive());
+            self.selected_hit = (!self.hits.is_empty()).then_some(0);
+            self.reveal_selected_hit();
+        }
         cx.notify();
+    }
+
+    /// `1305-diff-find-controls`: what the count says, once the text in
+    /// the box has been searched for ("3 of 12", "No results").
+    fn search_status(&self, typed: &str) -> Option<String> {
+        if self.search_query.is_empty() || typed != self.search_query {
+            return None;
+        }
+        Some(match self.selected_hit {
+            Some(ix) => format!("{} of {}", ix + 1, self.hits.len()),
+            None => "No results".to_string(),
+        })
+    }
+
+    /// `1305-diff-find-controls`: count, Aa, previous and next after the
+    /// box. The buttons keep focus in the box (a blur closes the search).
+    fn find_controls_row(&self, typed: &str, cx: &Context<Self>) -> AnyElement {
+        let t = cx.ghd();
+        let status = self.search_status(typed);
+        // a new text is searched by the arrows as by Enter
+        let can_step = !typed.is_empty();
+        let case = self.search_case_sensitive;
+        let button = |id: &'static str, label: &'static str, on: bool, enabled: bool| {
+            div()
+                .id(id)
+                .icon_button_label(label)
+                .flex_none()
+                .size(zpx(22.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(BORDER_RADIUS())
+                .border_1()
+                .border_color(if on {
+                    t.box_border
+                } else {
+                    transparent_black()
+                })
+                .when(on, |d| d.bg(t.box_selected_background))
+                .when(enabled, |d| {
+                    d.cursor_pointer().hover(|d| d.bg(t.box_hover_background))
+                })
+                .when(!enabled, |d| d.opacity(0.5))
+                // keep the focus (and the search) in the text box
+                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+        };
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(zpx(2.))
+            .font_family(crate::theme::ui_font())
+            .text_size(FONT_SIZE_SM())
+            .child(
+                div()
+                    .id("diff-search-count")
+                    .flex_none()
+                    .min_w(zpx(58.))
+                    .text_color(t.text_secondary)
+                    .whitespace_nowrap()
+                    .children(status),
+            )
+            .child(
+                button("diff-search-case", "Match Case", case, true)
+                    .aria_toggled(if case { Toggled::True } else { Toggled::False })
+                    .text_color(t.text)
+                    .child("Aa")
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_search_case(cx))),
+            )
+            .child(
+                button("diff-search-previous", "Previous Match", false, can_step)
+                    .child(octicon(Octicon::ChevronUp, t.text))
+                    .when(can_step, |d| {
+                        d.on_click(cx.listener(|this, _, _, cx| this.search(false, cx)))
+                    }),
+            )
+            .child(
+                button("diff-search-next", "Next Match", false, can_step)
+                    .child(octicon(Octicon::ChevronDown, t.text))
+                    .when(can_step, |d| {
+                        d.on_click(cx.listener(|this, _, _, cx| this.search(true, cx)))
+                    }),
+            )
+            .into_any_element()
     }
 
     /// Recompute the hits for the same query after the rows changed.
@@ -1909,7 +2032,7 @@ impl DiffView {
         if self.search_query.is_empty() {
             return;
         }
-        self.hits = search_rows(&self.rows, &self.search_query);
+        self.hits = search_rows(&self.rows, &self.search_query, self.case_sensitive());
         self.selected_hit = self
             .selected_hit
             .filter(|ix| *ix < self.hits.len())
@@ -2940,6 +3063,11 @@ impl Render for DiffView {
             self.line_height_seen = line_height;
             self.list_state.remeasure();
         }
+        self.find_controls = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::DIFF_FIND_CONTROLS);
         let loading = self.loading_overlay(cx);
         self.sync_review_composer(window, cx);
         let Some(snap) = self.snapshot(cx) else {
@@ -3260,25 +3388,30 @@ impl DiffView {
             .clone()
             .filter(|_| self.searching)
             .map(|input| {
+                let text_box =
+                    crate::widgets::filter_text_box("diff-search", &input, None, window, cx);
                 // `.diff-search`: top right, hanging from the header
-                div()
+                let bar = div()
                     .absolute()
                     .top_0()
                     .right(SPACING())
-                    .w(zpx(250.))
                     .p(SPACING_HALF())
                     .bg(t.background)
                     .border_1()
                     .border_t_0()
                     .border_color(t.box_border)
-                    .rounded_b(BORDER_RADIUS())
-                    .child(crate::widgets::filter_text_box(
-                        "diff-search",
-                        &input,
-                        None,
-                        window,
-                        cx,
-                    ))
+                    .rounded_b(BORDER_RADIUS());
+                if !self.find_controls {
+                    return bar.w(zpx(250.)).child(text_box);
+                }
+                let typed = input.read(cx).value().to_string();
+                bar.w(zpx(340.))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING_HALF())
+                    .child(div().flex_1().min_w_0().child(text_box))
+                    .child(self.find_controls_row(&typed, cx))
             });
         div()
             .id("diff")

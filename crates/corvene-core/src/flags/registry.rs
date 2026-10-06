@@ -8028,6 +8028,21 @@ registry! {
         code: &["crates/corvene-core/src/stash_flows.rs", "crates/corvene-git/src/partial_stash.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
     },
 
+    /// The diff's ⌘F box shows a match count, arrows and a case toggle.
+    DIFF_FIND_CONTROLS = 1305 "diff-find-controls" {
+        title: "Find in diff controls",
+        summary: "The diff's search box (⌘F) shows which match is selected out of how many \
+                  (\"3 of 12\"), previous and next buttons, and an Aa button that makes the \
+                  search case-sensitive. Enter, ⇧Enter and Esc work as before.",
+        ghd_behaviour: "A bare text box: Enter and ⇧Enter move between matches with no count, \
+                        and the search ignores case.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
+    },
 }
 
 /// Ids and slugs that once existed; never reused.

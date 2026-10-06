@@ -490,17 +490,26 @@ pub fn spans_for_row(spans: Vec<Span>, raw: &str, text: &str) -> Vec<Span> {
 }
 
 /// GHD `calcSearchTokens`: case-insensitive substring hits, hunk rows skipped.
-pub fn search_rows(rows: &[Row], query: &str) -> Vec<SearchHit> {
+pub fn search_rows(rows: &[Row], query: &str, case_sensitive: bool) -> Vec<SearchHit> {
     if query.is_empty() {
         return Vec::new();
     }
-    let needle = query.to_ascii_lowercase();
+    // `1305-diff-find-controls`: Aa matches case; GHD always ignores it
+    // (ASCII folding keeps byte offsets)
+    let fold = |text: &str| {
+        if case_sensitive {
+            text.to_string()
+        } else {
+            text.to_ascii_lowercase()
+        }
+    };
+    let needle = fold(query);
     let mut hits = Vec::new();
     for (ix, row) in rows.iter().enumerate() {
         if row.kind == DiffLineKind::Hunk {
             continue;
         }
-        let hay = row.text.to_ascii_lowercase();
+        let hay = fold(&row.text);
         let mut from = 0;
         while let Some(pos) = hay[from..].find(&needle) {
             let start = from + pos;
@@ -2178,7 +2187,7 @@ mod tests {
     fn search_is_case_insensitive_and_skips_hunk_rows() {
         let x = crate::diff_expansion::from_hunks(&[hunk()], None);
         let rows = build_rows(&x);
-        let hits = search_rows(&rows, "BETA");
+        let hits = search_rows(&rows, "BETA", false);
         assert_eq!(
             hits,
             vec![
@@ -2192,8 +2201,18 @@ mod tests {
                 }
             ]
         );
-        assert!(search_rows(&rows, "@@").is_empty());
-        assert!(search_rows(&rows, "").is_empty());
+        assert!(search_rows(&rows, "@@", false).is_empty());
+        assert!(search_rows(&rows, "", false).is_empty());
+        // `1305-diff-find-controls`: Aa
+        assert!(search_rows(&rows, "BETA", true).is_empty());
+        let row_of = |q| {
+            search_rows(&rows, q, true)
+                .iter()
+                .map(|h| h.row)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(row_of("beta"), vec![2]);
+        assert_eq!(row_of("Beta"), vec![3]);
     }
 
     #[test]
