@@ -55,15 +55,20 @@ fn builds_a_grammar_from_a_local_tarball() {
     let mut stages = Vec::new();
     let verify = |library: &Path| -> Result<(), String> {
         // GNU nm (binutils) and llvm-nm both take --defined-only; macOS's
-        // -U means something else to binutils. No nm (MSVC): nothing to check.
-        let Ok(output) = std::process::Command::new("nm")
-            .args(["-g", "--defined-only"])
-            .arg(library)
-            .output()
-        else {
-            return Ok(());
-        };
-        let symbols = String::from_utf8_lossy(&output.stdout);
+        // -U means something else to binutils. A stripped ELF library keeps
+        // only its dynamic symbols, which need -D. No nm (MSVC): nothing to
+        // check.
+        let mut symbols = String::new();
+        for args in [["-g", "--defined-only"], ["-D", "--defined-only"]] {
+            let Ok(output) = std::process::Command::new("nm")
+                .args(args)
+                .arg(library)
+                .output()
+            else {
+                return Ok(());
+            };
+            symbols.push_str(&String::from_utf8_lossy(&output.stdout));
+        }
         if symbols.contains("corvene_grammars_v1") && symbols.contains("tree_sitter_csv") {
             Ok(())
         } else {
