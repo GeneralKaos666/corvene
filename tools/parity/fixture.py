@@ -429,11 +429,127 @@ def _stacked(repo: Path) -> None:
         _git(repo, "commit", "-q", "-m", summary, date=date)
 
 
+# `repo-diff-marks` (flags 1316-1320): files committed on top, then edited
+# so the working directory has a moved block and a reformatted call, a CSV
+# with edited, removed and added rows, a script made executable, a patch
+# whose index line and hunk numbers changed, and an image with a new square
+_MARKS_CONFIG = """import { readFile } from 'fs';
+
+function formatScore(score: number): string {
+  return `${Math.round(score * 100)} points`;
+}
+
+function parseConfig(text: string): Config {
+  const lines = text.split('\\n');
+  const pairs = lines.map(line => line.trim()).filter(Boolean);
+  return Object.fromEntries(pairs.map(pair => pair.split('=')));
+}
+
+export function main() {
+  const config = loadConfiguration('settings.json', { strict: true, cache: false });
+  console.log('starting', config);
+  run(config);
+}
+
+function run(config: Config) {
+  return startServer(config.port);
+}
+"""
+_MARKS_CONFIG_EDITED = """import { readFile } from 'fs';
+
+function parseConfig(text: string): Config {
+  const lines = text.split('\\n');
+  const pairs = lines.map(line => line.trim()).filter(Boolean);
+  return Object.fromEntries(pairs.map(pair => pair.split('=')));
+}
+
+export function main() {
+  const config = loadConfiguration(
+    "settings.json",
+    { strict: true, cache: false },
+  );
+  console.log("starting", config);
+  run(config, 8080);
+}
+
+function run(config: Config, port: number) {
+  return startServer(port);
+}
+
+function formatScore(score: number): string {
+  return `${Math.round(score * 100)} points`;
+}
+"""
+_MARKS_CSV = "id,name,city,score\n1,Alice,Paris,90\n2,Bob,London,85\n3,Carol,Berlin,77\n4,Dave,Madrid,60\n"
+_MARKS_CSV_EDITED = "id,name,city,score\n1,Alice,Paris,92\n3,Carol,Berlin,77\n4,Dave,\"Madrid, ES\",60\n5,Eve,Rome,88\n"
+_MARKS_PATCH = """From 1111111111111111111111111111111111111111 Mon Sep 17 00:00:00 2001
+From: Parity Bot <parity@example.com>
+Subject: [PATCH] Say hello louder
+
+diff --git a/src/main.rs b/src/main.rs
+index 1111111..2222222 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -10,2 +10,2 @@ fn main() {
+-    println!("hello");
++    println!("HELLO");
+-- 
+2.39.2
+"""
+
+
+def _png(width: int, height: int, pixel) -> bytes:
+    """A truecolour PNG of `pixel(x, y) -> (r, g, b)`."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+    raw = b"".join(b"\0" + bytes(c for x in range(width) for c in pixel(x, y)) for y in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
+def _marks_picture(square: bool):
+    def pixel(x: int, y: int):
+        if 40 <= x <= 120 and 40 <= y <= 120:
+            return (200, 30, 30)
+        if square and 180 <= x <= 210 and 130 <= y <= 160:
+            return (30, 120, 220)
+        return (30, 30, 30) if x % 20 == 0 else (250, 250, 250)
+    return pixel
+
+
+def _diff_marks(repo: Path) -> None:
+    files = {
+        "src/config.ts": _MARKS_CONFIG,
+        "data/scores.csv": _MARKS_CSV,
+        "run.sh": "#!/bin/sh\necho hello\n",
+        "patches/0001-hello.patch": _MARKS_PATCH,
+    }
+    for rel, text in files.items():
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    (repo / "assets").mkdir(exist_ok=True)
+    (repo / "assets" / "picture.png").write_bytes(_png(300, 200, _marks_picture(False)))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Add the config, scores, script and patch", date="2026-09-27T09:00:00+00:00")
+    (repo / "src" / "config.ts").write_text(_MARKS_CONFIG_EDITED)
+    (repo / "data" / "scores.csv").write_text(_MARKS_CSV_EDITED)
+    (repo / "run.sh").chmod(0o755)
+    (repo / "patches" / "0001-hello.patch").write_text(
+        _MARKS_PATCH.replace("1111111..2222222", "3333333..4444444").replace("-10,2 +10,2", "-12,2 +12,2"))
+    (repo / "assets" / "picture.png").write_bytes(_png(300, 200, _marks_picture(True)))
+
+
 def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bool = False,
           signed: bool = False, reflog: bool = False, tools: bool = False,
           structure: bool = False, lfs_url: str | None = None, remotes: bool = False,
           pull_request: bool = False, utf16: bool = False, stacked: bool = False,
-          forks: bool = False, mismatch: bool = False, codeowners: bool = False) -> Path:
+          forks: bool = False, mismatch: bool = False, codeowners: bool = False,
+          diff_marks: bool = False) -> Path:
     """(Re)create `<parent>/parity-fixture` and return its path.
 
     With `remote`, a bare `<parent>/parity-fixture.git` is added as `origin`
@@ -457,7 +573,8 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
     `_forks` (`1223-checkout-from-fork`). With `mismatch` (and `remote`),
     `issue-134` is checked out off main, tracking `origin/main`
     (`1222-push-target-guard`). With `codeowners`, a commit adds
-    `_CODEOWNERS` as `.github/CODEOWNERS` (`1314-code-owners`)."""
+    `_CODEOWNERS` as `.github/CODEOWNERS` (`1314-code-owners`). With `diff_marks`, see `_diff_marks`
+    and no other working changes (flags 1316-1320)."""
     repo = parent / NAME
     if repo.exists():
         remove_tree(repo)
@@ -575,6 +692,9 @@ def build(parent: Path, remote: bool = False, coauthors: bool = False, graph: bo
         _git(repo, "branch", "-q", "--set-upstream-to=origin/main", "issue-134")
     if stacked:
         _stacked(repo)
+        return repo
+    if diff_marks:
+        _diff_marks(repo)
         return repo
     for rel, text in _WORKING_CHANGES.items():
         p = repo / rel

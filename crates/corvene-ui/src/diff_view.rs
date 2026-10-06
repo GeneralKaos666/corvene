@@ -106,6 +106,7 @@
 //! `DiffSearchInput` is a bare text box that ignores case. Enter, ⇧Enter
 //! and Esc are unchanged.
 
+use corvene_core::diff_line_class::{ClassLine, ClassOptions, LineMark, classify};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
@@ -436,6 +437,18 @@ fn set_hide_whitespace(source: DiffSource, hide: bool, cx: &mut App) {
 }
 
 /// One render's snapshot of the repository state.
+/// `1316-diff-moved-lines` / `1317-diff-stylistic-changes`: one mark per
+/// unified row.
+type LineMarks = Rc<Vec<Option<LineMark>>>;
+
+/// [`LineMarks`] with the rows (kept alive, so their address is not reused)
+/// and options they were computed for.
+struct MarksCache {
+    rows: Rc<Vec<Row>>,
+    options: ClassOptions,
+    marks: LineMarks,
+}
+
 struct Snapshot {
     repo: u64,
     repo_path: std::path::PathBuf,
@@ -538,6 +551,10 @@ pub struct DiffView {
     unified_to_split: Rc<Vec<usize>>,
     /// Intra-line change ranges of the unified rows.
     unified_inner: Rc<Vec<Vec<std::ops::Range<usize>>>>,
+    /// `1316-diff-moved-lines` / `1317-diff-stylistic-changes`: the marks
+    /// of the unified rows, with the rows (kept alive, so their address is
+    /// not reused) and options they were computed for.
+    line_marks: Option<MarksCache>,
     /// Whether the list currently shows `split_rows`.
     split_mode: bool,
     /// `1304-diff-no-wrap`: lines stay on one row (as last rendered).
@@ -649,6 +666,7 @@ impl DiffView {
             split_rows: Rc::new(Vec::new()),
             unified_to_split: Rc::new(Vec::new()),
             unified_inner: Rc::new(Vec::new()),
+            line_marks: None,
             split_mode: false,
             no_wrap: false,
             h_scroll: HScroll::default(),
@@ -2209,6 +2227,18 @@ impl DiffView {
                 .bool(corvene_core::flags::ids::DIFF_NO_WRAP)
                 .then_some(s.settings.diff_wrap_lines)
         };
+        // `1316-diff-moved-lines` / `1317-diff-stylistic-changes`
+        let (mark_moved, mark_stylistic) = {
+            let s = self.state.read(cx);
+            (
+                s.flags
+                    .bool(corvene_core::flags::ids::DIFF_MOVED_LINES)
+                    .then_some(s.settings.diff_mark_moved_lines),
+                s.flags
+                    .bool(corvene_core::flags::ids::DIFF_STYLISTIC_CHANGES)
+                    .then_some(s.settings.diff_mark_stylistic_changes),
+            )
+        };
         let _ = window;
         let legend = |text: &str| {
             div()
@@ -2298,7 +2328,38 @@ impl DiffView {
                                 cx,
                             )))
                         }),
-                ),
+                )
+                .when(mark_moved.is_some() || mark_stylistic.is_some(), |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .mt(zpx(6.))
+                            .child(legend("Marks"))
+                            .when_some(mark_moved, |d, on| {
+                                d.child(checkbox_row(
+                                    "diff-mark-moved",
+                                    on,
+                                    mac_or("Mark Moved Lines", "Mark moved lines"),
+                                    |checked, _, cx| {
+                                        Dispatcher::set_diff_mark_moved_lines(checked, cx)
+                                    },
+                                    cx,
+                                ))
+                            })
+                            .when_some(mark_stylistic, |d, on| {
+                                d.child(div().mt(zpx(5.)).child(checkbox_row(
+                                    "diff-mark-stylistic",
+                                    on,
+                                    mac_or("Mark Stylistic Changes", "Mark stylistic changes"),
+                                    |checked, _, cx| {
+                                        Dispatcher::set_diff_mark_stylistic_changes(checked, cx)
+                                    },
+                                    cx,
+                                )))
+                            }),
+                    )
+                }),
             cx,
         )
         .with_priority(3)
@@ -3803,6 +3864,52 @@ impl DiffView {
         .inset_0()
     }
 
+    /// `1316-diff-moved-lines` / `1317-diff-stylistic-changes`: the marks
+    /// of the current rows (empty when both are off), recomputed when the
+    /// rows or the options change.
+    fn line_marks(&mut self, path: &str, cx: &App) -> LineMarks {
+        let options = AppState::try_global(cx)
+            .map(|s| {
+                let s = s.read(cx);
+                ClassOptions {
+                    moved: s.flags.bool(corvene_core::flags::ids::DIFF_MOVED_LINES)
+                        && s.settings.diff_mark_moved_lines,
+                    stylistic: s
+                        .flags
+                        .bool(corvene_core::flags::ids::DIFF_STYLISTIC_CHANGES)
+                        && s.settings.diff_mark_stylistic_changes,
+                }
+            })
+            .unwrap_or_default();
+        if let Some(cache) = &self.line_marks
+            && Rc::ptr_eq(&cache.rows, &self.rows)
+            && cache.options == options
+        {
+            return cache.marks.clone();
+        }
+        let marks = Rc::new(if options.any() {
+            let lines: Vec<ClassLine> = self
+                .rows
+                .iter()
+                .map(|r| ClassLine {
+                    kind: r.kind,
+                    text: &r.text,
+                    old: r.old,
+                    new: r.new,
+                })
+                .collect();
+            classify(&lines, path, options)
+        } else {
+            Vec::new()
+        });
+        self.line_marks = Some(MarksCache {
+            rows: self.rows.clone(),
+            options,
+            marks: marks.clone(),
+        });
+        marks
+    }
+
     /// Everything the rows need from the view this frame (`RowContext`).
     fn row_context(
         &mut self,
@@ -3838,6 +3945,7 @@ impl DiffView {
             view: cx.weak_entity(),
             tokens: self.tokens.clone(),
             inner: self.unified_inner.clone(),
+            marks: self.line_marks(&snap.path, cx),
             search: self.search_index(),
             show_check_marks: AppState::try_global(cx)
                 .is_none_or(|s| s.read(cx).settings.show_diff_check_marks),

@@ -702,6 +702,13 @@ pub struct GhdTheme {
     pub diff_delete_hover_text: Hsla,
     pub diff_empty_row_background: Hsla,
     pub diff_empty_row_gutter_background: Hsla,
+    /// Corvene `1316-diff-moved-lines`: the gutter bar of a moved block
+    /// and of the block next to it (zebra).
+    pub diff_moved_bar: Hsla,
+    pub diff_moved_bar_alternate: Hsla,
+    /// Corvene `1317-diff-stylistic-changes`: the gutter bar of a line
+    /// whose change is only whitespace or formatting.
+    pub diff_stylistic_bar: Hsla,
     /// `--file-warning-*`: the bidi / line-endings notice above a diff.
     pub file_warning_background: Hsla,
     pub file_warning: Hsla,

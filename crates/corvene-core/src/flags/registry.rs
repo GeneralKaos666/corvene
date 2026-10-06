@@ -8577,6 +8577,39 @@ registry! {
         upstream: &[],
         code: &["crates/corvene-git/src/stash_file_discard.rs", "crates/corvene-core/src/stash_list.rs", "crates/corvene-ui/src/stash_view.rs", "crates/corvene-ui/src/banner.rs"],
     },
+    /// Moved blocks of lines are marked apart from real removals and additions.
+    DIFF_MOVED_LINES = 1316 "diff-moved-lines" {
+        title: "Mark moved lines in diffs",
+        summary: "Lines removed in one place and added back in another (like `git diff \
+                  --color-moved`, indentation ignored, at least 20 letters or digits per block) \
+                  keep their red or green but are faded, with a blue bar in the gutter that \
+                  alternates shade between neighbouring blocks. Hovering the bar names the line \
+                  the block moved from or to. Diff Settings › Mark Moved Lines turns it off.",
+        ghd_behaviour: "A moved block shows as an unrelated removal and addition.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17002)],
+        code: &["crates/corvene-core/src/diff_line_class.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
+    },
+    /// Changes that only reformat code are marked apart from functional ones.
+    DIFF_STYLISTIC_CHANGES = 1317 "diff-stylistic-changes" {
+        title: "Mark stylistic changes in diffs",
+        summary: "Changed lines whose code tokens stay the same once whitespace, line breaks, \
+                  quote style, trailing commas and semicolons and parens around a whole value \
+                  are set aside (a reformatter re-wrapping or re-indenting code) are faded \
+                  with a grey gutter bar and no intra-line highlight, so the functional changes \
+                  stand out. Diff Settings › Mark Stylistic Changes turns it off.",
+        ghd_behaviour: "Every changed line looks the same. Hide Whitespace Changes only drops \
+                        changes within a line and turns off line selection.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(20361)],
+        code: &["crates/corvene-core/src/diff_line_class.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/diff_view_rows.rs"],
+    },
 
 }
 

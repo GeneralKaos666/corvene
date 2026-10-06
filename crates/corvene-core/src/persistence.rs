@@ -165,6 +165,13 @@ pub struct Settings {
     /// lines wrap, GHD's only behaviour).
     #[serde(default = "default_true")]
     pub diff_wrap_lines: bool,
+    /// Corvene `1316-diff-moved-lines`: Diff Settings › Mark Moved Lines.
+    #[serde(default = "default_true")]
+    pub diff_mark_moved_lines: bool,
+    /// Corvene `1317-diff-stylistic-changes`: Diff Settings › Mark
+    /// Stylistic Changes.
+    #[serde(default = "default_true")]
+    pub diff_mark_stylistic_changes: bool,
     /// Corvene `1310-file-list-tree`: View › Show Changes as Tree (file
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
@@ -512,6 +519,8 @@ impl Default for Settings {
             pull_request_file_list_width: 250.0,
             show_side_by_side_diff: false,
             diff_wrap_lines: true,
+            diff_mark_moved_lines: true,
+            diff_mark_stylistic_changes: true,
             file_list_tree: false,
             file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,

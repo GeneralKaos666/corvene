@@ -156,7 +156,7 @@ class Run:
         with_repo = setup in ("repo", "repo-remote", "repo-coauthors", "repo-graph", "repo-signed",
                              "repo-reflog", "repo-tools", "repo-structure", "repo-remotes",
                              "repo-pull-request", "repo-utf16", "repo-stacked", "repo-forks",
-                             "repo-mismatch", "repo-codeowners")
+                             "repo-mismatch", "repo-codeowners", "repo-diff-marks")
         pull_request = setup == "repo-pull-request"
         forks = setup == "repo-forks"
         mismatch = setup == "repo-mismatch"
@@ -172,16 +172,19 @@ class Run:
         stacked = setup == "repo-stacked"
         # `repo-codeowners`: `.github/CODEOWNERS` committed (`1314-code-owners`)
         codeowners = setup == "repo-codeowners"
+        # `repo-diff-marks`: moved and reformatted lines, a CSV, a mode-only
+        # change, a patch-metadata change and an image (flags 1316-1320)
+        diff_marks = setup == "repo-diff-marks"
         # `lfs_stub: true`: a stub Git LFS locking API (`lfs_stub.py`), the
         # fixtures' `lfs.url`
         self.lfs_stub = lfs_stub.start() if sc.get("lfs_stub") else None
         lfs_url = self.lfs_stub.url() if self.lfs_stub else None
         repo_g = fixture.build(work / "n", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
-                               codeowners) if with_repo else None
+                               codeowners, diff_marks) if with_repo else None
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
-                               codeowners) if with_repo else None
+                               codeowners, diff_marks) if with_repo else None
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues, Releases
         # and pull request review views (`github_stub.py`), reached by the

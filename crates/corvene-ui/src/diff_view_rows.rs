@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::rc::Rc;
 
+use corvene_core::diff_line_class::LineMark;
 use corvene_core::{DiffLineKind, DiffSelection, DiffSelectionType, Dispatcher};
 use corvene_highlight::{Span, TokenClass};
 use gpui_kit::prelude::*;
@@ -186,6 +187,9 @@ pub struct RowContext {
     pub tokens: Option<Rc<Vec<Vec<Span>>>>,
     /// Intra-line change ranges per unified row (`unified_inner`).
     pub inner: Rc<Vec<Vec<Range<usize>>>>,
+    /// `1316-diff-moved-lines` / `1317-diff-stylistic-changes`: moved and
+    /// stylistic marks per unified row (empty when both are off).
+    pub marks: Rc<Vec<Option<LineMark>>>,
     pub search: Option<Rc<SearchIndex>>,
     /// Settings › Accessibility › Show check marks in the diff.
     pub show_check_marks: bool,
@@ -454,6 +458,14 @@ fn review_in_range(
 }
 
 impl RowContext {
+    /// The moved / stylistic mark of a changed unified row.
+    pub fn mark(&self, unified: usize, kind: DiffLineKind) -> Option<LineMark> {
+        if !matches!(kind, DiffLineKind::Add | DiffLineKind::Delete) {
+            return None;
+        }
+        self.marks.get(unified).copied().flatten()
+    }
+
     /// The selected byte range of the text at (`list_ix`, `column`).
     fn selection_range(&self, list_ix: usize, column: Column, len: usize) -> Option<Range<usize>> {
         let sel = self.text_selection.as_ref()?;
@@ -994,6 +1006,60 @@ fn expansion_handle(
         .into_any_element()
 }
 
+/// `1316-diff-moved-lines` / `1317-diff-stylistic-changes`: how far a
+/// marked row's text fades.
+const MARKED_TEXT_OPACITY: f32 = 0.7;
+
+/// A marked row's background: its add/delete colour faded towards the
+/// diff background.
+fn faded(bg: Hsla, base: Hsla) -> Hsla {
+    base.blend(bg.opacity(0.45))
+}
+
+/// The bar at the start of a marked row's text, with a tooltip naming the
+/// mark (and where a moved line went or came from). The hover target is
+/// wider than the bar.
+fn mark_bar(
+    mark: LineMark,
+    kind: DiffLineKind,
+    id: (&'static str, usize),
+    t: &GhdTheme,
+) -> AnyElement {
+    let (color, tip) = match mark {
+        LineMark::Moved {
+            alternate,
+            counterpart,
+            ..
+        } => {
+            let color = if alternate {
+                t.diff_moved_bar_alternate
+            } else {
+                t.diff_moved_bar
+            };
+            let tip = match (kind, counterpart) {
+                (DiffLineKind::Delete, Some(n)) => format!("Moved to line {n}"),
+                (DiffLineKind::Add, Some(n)) => format!("Moved from line {n}"),
+                _ => "Moved".to_string(),
+            };
+            (color, tip)
+        }
+        LineMark::Stylistic => (
+            t.diff_stylistic_bar,
+            "Stylistic change: only whitespace or formatting differs".to_string(),
+        ),
+    };
+    div()
+        .id(id)
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left_0()
+        .w(zpx(8.))
+        .child(div().h_full().w(zpx(3.)).bg(color))
+        .ghd_tooltip(tip)
+        .into_any_element()
+}
+
 pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElement {
     let t = cx.ghd();
     let abs = row.abs;
@@ -1024,6 +1090,11 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
             t.diff_hunk_gutter_background,
             t.diff_hunk_gutter_background,
         ),
+    };
+    let mark = ctx.mark(ix, row.kind);
+    let row_bg = match mark {
+        Some(_) => faded(row_bg, t.background),
+        None => row_bg,
     };
     let prefix = match row.kind {
         DiffLineKind::Add => "  +  ",
@@ -1073,7 +1144,10 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
         } else {
             (t.diff_add_inner_background, t.diff_add_text)
         };
-        let ranges = ctx.inner.get(ix).map(Vec::as_slice).unwrap_or(&[]);
+        let ranges = match mark {
+            Some(_) => &[],
+            None => ctx.inner.get(ix).map(Vec::as_slice).unwrap_or(&[]),
+        };
         let inner_fg: Vec<(Range<usize>, Hsla)> =
             ranges.iter().map(|r| (r.clone(), inner_fg_color)).collect();
         let inner_bg: Vec<(Range<usize>, Hsla)> =
@@ -1098,7 +1172,14 @@ pub fn render_row(ctx: &RowContext, ix: usize, row: &Row, cx: &App) -> AnyElemen
                 .into_any_element(),
         );
     }
-    let content = row_text_area(ctx, area, parts);
+    let content = row_text_area(ctx, area, parts).when_some(mark, |d, mark| {
+        d.relative().opacity(MARKED_TEXT_OPACITY).child(mark_bar(
+            mark,
+            row.kind,
+            ("diff-mark", abs as usize),
+            t,
+        ))
+    });
     // `.has-check-all-control`: 16 px strip with check marks, 4 px without
     let check_marks = selectable && ctx.show_check_marks;
     let handle_width = match (selectable, check_marks) {
@@ -2253,10 +2334,15 @@ pub fn render_split_row(
                 .map(|s| &rows[s.unified])
                 .expect("a changed split row has a side");
             let side = |column: Column, side: Option<&SplitSide>| {
+                let mark = side.and_then(|s| ctx.mark(s.unified, rows[s.unified].kind));
                 let (bg, fg) = match (side.is_some(), column) {
                     (false, _) => (t.diff_empty_row_background, t.diff_text),
                     (true, Column::Before) => (t.diff_delete_background, t.diff_delete_text),
                     (true, Column::After) => (t.diff_add_background, t.diff_add_text),
+                };
+                let bg = match mark {
+                    Some(_) => faded(bg, t.background),
+                    None => bg,
                 };
                 let mut d = div()
                     .flex_1()
@@ -2287,15 +2373,38 @@ pub fn render_split_row(
                         } else {
                             (t.diff_add_inner_background, t.diff_add_text)
                         };
-                        let inner = Some((s.inner.as_slice(), inner_bg, inner_fg));
+                        let ranges: &[Range<usize>] = match mark {
+                            Some(_) => &[],
+                            None => s.inner.as_slice(),
+                        };
+                        let inner = Some((ranges, inner_bg, inner_fg));
                         let prefix = if column == Column::Before {
                             "  -  "
                         } else {
                             "  +  "
                         };
+                        let content = split_content(ctx, ix, column, r, prefix, inner, cx);
+                        let content = match mark {
+                            Some(mark) => {
+                                let id = match column {
+                                    Column::Before => "split-mark-before",
+                                    Column::After => "split-mark-after",
+                                };
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .opacity(MARKED_TEXT_OPACITY)
+                                    .child(content)
+                                    .child(mark_bar(mark, r.kind, (id, r.abs as usize), t))
+                                    .into_any_element()
+                            }
+                            None => content,
+                        };
                         (
                             split_line_number(ctx, r, number, column, true, false, cx),
-                            split_content(ctx, ix, column, r, prefix, inner, cx),
+                            content,
                         )
                     }
                     None => (

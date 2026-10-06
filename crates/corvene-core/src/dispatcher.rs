@@ -7049,6 +7049,17 @@ impl Dispatcher {
         Self::update_settings(cx, |s| s.diff_wrap_lines = wrap);
     }
 
+    /// Corvene `1316-diff-moved-lines`: Diff Settings › Mark Moved Lines.
+    pub fn set_diff_mark_moved_lines(on: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.diff_mark_moved_lines = on);
+    }
+
+    /// Corvene `1317-diff-stylistic-changes`: Diff Settings › Mark
+    /// Stylistic Changes.
+    pub fn set_diff_mark_stylistic_changes(on: bool, cx: &mut dyn Host) {
+        Self::update_settings(cx, |s| s.diff_mark_stylistic_changes = on);
+    }
+
     /// Modified-image diff tab (`_changeImageDiffType`).
     pub fn set_image_diff_type(kind: corvene_models::ImageDiffType, cx: &mut dyn Host) {
         Self::update_settings(cx, |s| s.image_diff_type = kind);

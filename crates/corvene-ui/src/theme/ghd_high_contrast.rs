@@ -216,6 +216,9 @@ pub fn theme() -> GhdTheme {
     t.diff_delete_hover_text = c(FG_DEFAULT);
     t.diff_empty_row_background = c(CANVAS_SUBTLE);
     t.diff_empty_row_gutter_background = c(CANVAS_SUBTLE);
+    t.diff_moved_bar = c(ACCENT_FG);
+    t.diff_moved_bar_alternate = c(BLUE_1);
+    t.diff_stylistic_bar = c(GRAY_3);
     t.file_warning = c(ATTENTION_FG);
     t.file_warning_border = c(ATTENTION_FG);
     t.file_warning_background = ca(ATTENTION_FG, 0.15);

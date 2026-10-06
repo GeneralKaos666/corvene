@@ -33,6 +33,7 @@ pub mod compare;
 pub mod crash_reports;
 pub mod delete_branches;
 pub mod diff_cache;
+pub mod diff_line_class;
 pub mod dispatcher;
 pub mod drafts;
 pub mod emoji;

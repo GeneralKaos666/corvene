@@ -1,0 +1,29 @@
+# Moved lines (1316-diff-moved-lines) and stylistic changes
+# (1317-diff-stylistic-changes), both off in the GitHub Desktop preset the
+# harness runs with (deviations.md › Diff viewer). `src/config.ts` moves a
+# function to the end and reformats a call; GHD marks neither, so the
+# shots are Corvene only.
+name: diff-marks
+description: Moved and stylistic lines marked in the unified and split diff, their tooltip and the Diff Settings checkboxes (Corvene only)
+setup: repo-diff-marks
+corvene_flags: 1316-diff-moved-lines=on,1317-diff-stylistic-changes=on
+steps:
+  - click: [125, 301]
+    wait: 800
+  - snap: {name: unified, corvene_only: true, note: "GHD shows moved and reformatted lines as plain changes (1316, 1317)"}
+  # the stylistic bar of the first reformatted line
+  - ghd: {skip: true}
+    corvene: {hover: [357, 405]}
+    wait: 1500
+  - snap: {name: stylistic-tooltip, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [1315, 97]}
+    wait: 500
+  - snap: {name: settings, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [1115, 353]}
+    wait: 400
+  - ghd: {skip: true}
+    corvene: {click: [800, 760]}
+    wait: 600
+  - snap: {name: split, corvene_only: true}
