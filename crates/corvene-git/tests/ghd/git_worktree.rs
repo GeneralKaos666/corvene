@@ -467,7 +467,7 @@ fn lists_worktrees_from_a_git_dir_after_a_linked_worktree_directory_is_removed()
 
     let worktrees = list_worktrees_from_git_dir(&git_dir);
     let main_worktree = worktrees.iter().find(|wt| wt.kind == WorktreeType::Main);
-    let repo_path = std::fs::canonicalize(repo.path()).unwrap();
+    let repo_path = dunce::canonicalize(repo.path()).unwrap();
     let resolved_worktree_path = with_suffix(&repo_path, "-wt-a");
 
     assert_eq!(main_worktree.map(|wt| wt.path.clone()), Some(repo_path));
@@ -508,7 +508,7 @@ fn setup_worktree() -> WorktreeSetup {
     let git_dir = git_dir_of(&worktree_path);
 
     WorktreeSetup {
-        main_path: std::fs::canonicalize(repo.path()).unwrap(),
+        main_path: dunce::canonicalize(repo.path()).unwrap(),
         repo,
         worktree_path,
         git_dir,

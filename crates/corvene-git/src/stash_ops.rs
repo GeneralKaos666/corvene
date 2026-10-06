@@ -727,6 +727,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         for args in [
             &["init", "-q", "-b", "main"][..],
+            // Git for Windows checks text out with CRLF unless told not to
+            &["config", "core.autocrlf", "false"],
             &["config", "commit.gpgsign", "false"],
             &["config", "user.name", "T"],
             &["config", "user.email", "t@example.com"],

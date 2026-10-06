@@ -447,6 +447,8 @@ mod tests {
         let p = dir.path();
         run(p, &["init", "-q", "-b", "main"]);
         for (k, v) in [
+            // Git for Windows checks text out with CRLF unless told not to
+            ("core.autocrlf", "false"),
             ("user.name", "T"),
             ("user.email", "t@example.com"),
             ("commit.gpgsign", "false"),

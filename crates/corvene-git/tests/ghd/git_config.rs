@@ -150,7 +150,7 @@ fn gets_the_config_path() {
     let path = get_global_config_path();
     assert_eq!(
         path,
-        std::fs::canonicalize(&setup.expected_config_path).unwrap()
+        dunce::canonicalize(&setup.expected_config_path).unwrap()
     );
 }
 

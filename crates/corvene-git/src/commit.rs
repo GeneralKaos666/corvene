@@ -991,6 +991,15 @@ mod tests {
     fn staging_reports_progress_for_every_file() {
         let (dir, git) = repo();
         let path = dir.path();
+        // Git for Windows refuses paths past MAX_PATH unless told not to
+        assert!(
+            Command::new("git")
+                .args(["config", "core.longpaths", "true"])
+                .current_dir(path)
+                .status()
+                .unwrap()
+                .success()
+        );
         // far more paths and verbose output than a pipe holds (~600 KB
         // each way): stdin and stdout must not wait on each other
         let folder = format!("many-{}", "x".repeat(180));

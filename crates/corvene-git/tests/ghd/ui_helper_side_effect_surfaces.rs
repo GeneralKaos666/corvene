@@ -15,12 +15,17 @@
 //! temporary directory instead: a lock file that exists, one that does not
 //! (`ENOENT`), and one in a read-only directory, which `unlink` refuses with
 //! `EACCES` (GitHub Desktop's mock throws `EACCES`, "permission denied").
+//! Windows ignores a read-only directory and `remove_file` deletes a
+//! read-only file there, so on Windows the lock is held open by a handle
+//! that does not share deletion instead (a sharing violation).
 //! The recorded unlinked paths become "the file is gone afterwards".
 //!
 //! The theme case of the file is skipped in `tools/ghd-tests/skips/ui1.tsv`.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use corvene_git::delete_config_lock_file;
 use corvene_test_support::create_temp_directory;
@@ -44,8 +49,10 @@ impl Callbacks {
 }
 
 /// Makes paths read-only, and writable again when dropped.
+#[cfg(unix)]
 struct ReadOnly(Vec<PathBuf>);
 
+#[cfg(unix)]
 impl ReadOnly {
     fn new(paths: Vec<PathBuf>) -> Self {
         for path in &paths {
@@ -55,6 +62,7 @@ impl ReadOnly {
     }
 }
 
+#[cfg(unix)]
 impl Drop for ReadOnly {
     fn drop(&mut self) {
         for path in self.0.iter().rev() {
@@ -65,6 +73,7 @@ impl Drop for ReadOnly {
     }
 }
 
+#[cfg(unix)]
 fn set_read_only(path: &Path, read_only: bool) {
     let mut permissions = std::fs::metadata(path).unwrap().permissions();
     permissions.set_readonly(read_only);
@@ -105,16 +114,37 @@ fn reports_config_lock_deletion_failures_other_than_enoent() {
     let lock = dir.join("repo.lock");
     std::fs::write(&lock, "").unwrap();
 
-    // unlink fails with EACCES: a read-only lock (Windows) in a read-only
-    // directory (Unix); write access comes back before the temporary
-    // directory is removed, even when the test fails
-    let _read_only = ReadOnly::new(vec![lock.clone(), dir.clone()]);
+    // unlink fails with EACCES: a lock in a read-only directory; write
+    // access comes back before the temporary directory is removed, even
+    // when the test fails
+    #[cfg(unix)]
+    let _read_only = ReadOnly::new(vec![dir.clone()]);
+    // Windows: a handle without FILE_SHARE_DELETE, closed before the
+    // temporary directory is removed
+    #[cfg(windows)]
+    let _open = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&lock)
+            .unwrap()
+    };
 
     let mut callbacks = Callbacks::default();
     callbacks.click_delete(&lock);
 
     assert_eq!(callbacks.deleted_count, 0);
-    // `errors` is `['permission denied']`, the EACCES error's message
+    assert!(lock.exists());
     let kinds: Vec<io::ErrorKind> = callbacks.errors.iter().map(io::Error::kind).collect();
+    // `errors` is `['permission denied']`, the EACCES error's message
+    #[cfg(unix)]
     assert_eq!(kinds, [io::ErrorKind::PermissionDenied]);
+    // the sharing violation has no `ErrorKind` of its own; it is reported
+    #[cfg(windows)]
+    assert!(
+        kinds.len() == 1 && kinds[0] != io::ErrorKind::NotFound,
+        "{:?}",
+        callbacks.errors
+    );
 }

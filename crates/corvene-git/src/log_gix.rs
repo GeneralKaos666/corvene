@@ -611,6 +611,9 @@ mod tests {
         let root = dir.path();
         run(root, &["init", "-q", "-b", "main"]);
         run(root, &["config", "commit.gpgsign", "false"]);
+        // Git for Windows turns autocrlf on globally; cases that want it
+        // set it below
+        run(root, &["config", "core.autocrlf", "false"]);
         for (key, value) in setup {
             run(root, &["config", key, value]);
         }
