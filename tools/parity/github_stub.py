@@ -28,12 +28,22 @@ token names its account (`stub-token-<login>`; plain `stub-token` is
 octocat), `/user` answers with that login, `permissions` (login → admin,
 write or read) sets what each sees of the repository, and `requests` logs
 (login, method, path) so a driver can check which account a call used.
+
+The Actions view (`351-actions`) reads two workflows (CI, and Release with
+`workflow_dispatch` inputs), five runs (one in progress; run 7 is the
+failed CI run whose jobs the check runs come from), their jobs, the
+branches, tags and environments, and the Release workflow's file. Re-run,
+cancel and delete-logs answer as GitHub does and change the stub's runs;
+a dispatch adds a queued run dated now. Runs and jobs carry an `ETag` and
+answer 304 to a matching `If-None-Match`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import time
 import re
 import subprocess
 import threading
@@ -330,6 +340,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_empty(self, status: int) -> None:
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.send_header("X-GitHub-Request-Id", "STUB:1")
+        self.end_headers()
+
+    def _send_etag(self, body) -> None:
+        """200 with an `ETag`, or 304 when `If-None-Match` matches it."""
+        data = json.dumps(body).encode()
+        etag = '"' + hashlib.md5(data).hexdigest() + '"'
+        if self.headers.get("If-None-Match") == etag:
+            self.server.not_modified += 1
+            return self._send_empty(304)
+        return self._send(200, body, {"ETag": etag})
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
@@ -393,10 +418,59 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, {"state": "pending", "total_count": 0, "statuses": []})
         if path.startswith(f"{repo}/commits/") and path.endswith("/check-runs"):
             return self._send(200, {"total_count": len(CHECK_RUNS), "check_runs": CHECK_RUNS})
-        if path == f"{repo}/actions/runs":
-            return self._send(200, {"total_count": 1, "workflow_runs": [WORKFLOW_RUN]})
-        if path == f"{repo}/actions/runs/{WORKFLOW_RUN['id']}/jobs":
-            return self._send(200, {"total_count": len(JOBS), "jobs": JOBS})
+        # Actions (`351-actions`)
+        if path == f"{repo}/actions/workflows":
+            return self._send(200, {"total_count": len(WORKFLOWS), "workflows": WORKFLOWS})
+        m = re.fullmatch(rf"{re.escape(repo)}/actions/(?:workflows/(\d+)/)?runs", path)
+        if m:
+            runs = self.server.runs
+            if "check_suite_id" in params:
+                # the check runs' workflow run (`334-branch-ci-status`)
+                runs = [r for r in runs if str(r.get("check_suite_id")) == params["check_suite_id"]]
+            if m.group(1):
+                runs = [r for r in runs if r["workflow_id"] == int(m.group(1))]
+            if params.get("branch"):
+                runs = [r for r in runs if r["head_branch"] == _unquote(params["branch"])]
+            if params.get("event"):
+                runs = [r for r in runs if r["event"] == params["event"]]
+            if params.get("status"):
+                st = params["status"]
+                runs = [r for r in runs if r["status"] == st or r["conclusion"] == st]
+            per_page, page = int(params.get("per_page", 30)), int(params.get("page", 1))
+            return self._send_etag({"total_count": len(runs),
+                                    "workflow_runs": runs[(page - 1) * per_page:page * per_page]})
+        m = re.fullmatch(rf"{re.escape(repo)}/actions/runs/(\d+)", path)
+        if m:
+            for r in self.server.runs:
+                if r["id"] == int(m.group(1)):
+                    return self._send(200, r)
+            return self._send(404, {"message": "Not Found"})
+        m = re.fullmatch(rf"{re.escape(repo)}/actions/runs/(\d+)/jobs", path)
+        if m:
+            jobs = JOBS if int(m.group(1)) == WORKFLOW_RUN["id"] else _jobs_for(self.server.run(int(m.group(1))))
+            return self._send_etag({"total_count": len(jobs), "jobs": jobs})
+        if path == f"{repo}/contents/.github/workflows/release.yml":
+            data = RELEASE_YML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return None
+        if path == f"{repo}/contents/.github/workflows/ci.yml":
+            data = CI_YML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return None
+        if path == f"{repo}/branches":
+            return self._send(200, [{"name": "main", "protected": True}, {"name": "feature/login", "protected": False}])
+        if path == f"{repo}/tags":
+            return self._send(200, [{"name": "v0.1.0"}])
+        if path == f"{repo}/environments":
+            return self._send(200, {"total_count": 2, "environments": [{"name": "staging"}, {"name": "production"}]})
         if path.startswith(f"{repo}/actions/jobs/") and path.endswith("/logs"):
             job_id = int(path.rsplit("/", 2)[1])
             if job_id != 101:
@@ -438,6 +512,35 @@ class _Handler(BaseHTTPRequestHandler):
             release["body"] = body.get("body", "")
             self.server.created_releases.insert(0, release)
             return self._send(201, release)
+        # Actions (`351-actions`)
+        m = re.fullmatch(rf"{re.escape(repo)}/actions/runs/(\d+)/(rerun|rerun-failed-jobs|cancel)", path)
+        if m:
+            run = self.server.run(int(m.group(1)))
+            if run is None:
+                return self._send(404, {"message": "Not Found"})
+            if m.group(2) == "cancel":
+                if run["status"] == "completed":
+                    return self._send(409, {"message": "Cannot cancel a workflow run that is completed."})
+                run.update(status="completed", conclusion="cancelled")
+                return self._send(202, {})
+            run.update(status="queued", conclusion=None, run_attempt=run["run_attempt"] + 1)
+            return self._send(201, {})
+        m = re.fullmatch(rf"{re.escape(repo)}/actions/jobs/(\d+)/rerun", path)
+        if m:
+            return self._send(201, {})
+        m = re.fullmatch(rf"{re.escape(repo)}/actions/workflows/(\d+)/dispatches", path)
+        if m:
+            wid = int(m.group(1))
+            if wid != 4:
+                return self._send(422, {"message": "Workflow does not have 'workflow_dispatch' trigger"})
+            unknown = [k for k in (body.get("inputs") or {}) if k not in ("version", "channel", "draft", "target")]
+            if unknown:
+                return self._send(422, {"message": f"Unexpected inputs provided: {unknown}"})
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            rid = 100 + len(self.server.runs)
+            self.server.runs.insert(0, _run(rid, 4, "Release", "Release", 13 + rid - 100, "queued", None,
+                                            body.get("ref", "main"), "workflow_dispatch", now, None))
+            return self._send_empty(204)
         if path == "/api/graphql":
             pr = self.server.pull_request
             if pr is None:
@@ -448,6 +551,24 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"message": "Not Found"})
             return self._send(201, {"id": 1, "title": body.get("title", ""), "key": body.get("key", "")})
         return self._send(404, {"message": f"stub: no POST {path}"})
+
+
+def _delete(self):  # noqa: N802
+    path = self.path.partition("?")[0]
+    repo = f"/api/v3/repos/{OWNER}/{NAME}"
+    self.server.posts.append((f"DELETE {path}", {}))
+    m = re.fullmatch(rf"{re.escape(repo)}/actions/runs/(\d+)/logs", path)
+    if m and self.server.run(int(m.group(1))) is not None:
+        return self._send_empty(204)
+    return self._send(404, {"message": f"stub: no DELETE {path}"})
+
+
+_Handler.do_DELETE = _delete
+
+
+def _unquote(text: str) -> str:
+    from urllib.parse import unquote
+    return unquote(text)
 
 
 def _check_run(run_id: int, name: str, conclusion: str, started: str, completed: str) -> dict:
@@ -463,8 +584,94 @@ CHECK_RUNS = [
     _check_run(103, "build (ubuntu-latest)", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:03:02Z"),
 ]
 
-WORKFLOW_RUN = {"id": 7, "workflow_id": 3, "name": "CI", "created_at": "2024-05-01T09:59:50Z",
-                "check_suite_id": 11, "event": "pull_request"}
+def _run(rid: int, workflow_id: int, name: str, title: str, number: int, status: str, conclusion: str | None,
+         branch: str, event: str, created: str, updated: str | None, suite: int | None = None) -> dict:
+    return {"id": rid, "workflow_id": workflow_id, "name": name, "display_title": title, "run_number": number,
+            "run_attempt": 1, "status": status, "conclusion": conclusion, "head_branch": branch,
+            "head_sha": f"{rid:04d}a1c0d5e7b9a3f1c2d4e6f8a0b1c3d5e7f9a", "event": event,
+            "actor": _user("octocat"), "triggering_actor": _user("octocat"),
+            "html_url": f"http://127.0.0.1/{OWNER}/{NAME}/actions/runs/{rid}", "created_at": created,
+            "updated_at": updated or created, "run_started_at": created, "check_suite_id": suite,
+            "path": ".github/workflows/release.yml" if workflow_id == 4 else ".github/workflows/ci.yml"}
+
+
+WORKFLOWS = [
+    {"id": 3, "name": "CI", "path": ".github/workflows/ci.yml", "state": "active",
+     "html_url": f"http://127.0.0.1/{OWNER}/{NAME}/blob/main/.github/workflows/ci.yml"},
+    {"id": 4, "name": "Release", "path": ".github/workflows/release.yml", "state": "active",
+     "html_url": f"http://127.0.0.1/{OWNER}/{NAME}/blob/main/.github/workflows/release.yml"},
+]
+
+WORKFLOW_RUN = _run(7, 3, "CI", "Explain flags in the README", 21, "completed", "failure", "feature/login",
+                    "pull_request", "2024-05-01T09:59:50Z", "2024-05-01T10:05:10Z", suite=11)
+
+
+def _runs() -> list[dict]:
+    """The runs, newest first (fresh copies: actions change them)."""
+    return [
+        _run(9, 3, "CI", "Add a logo", 23, "in_progress", None, "main", "push", "2024-05-03T10:00:00Z", None),
+        _run(8, 4, "Release", "Release", 12, "completed", "success", "main", "workflow_dispatch",
+             "2024-05-02T10:00:00Z", "2024-05-02T10:20:54Z"),
+        json.loads(json.dumps(WORKFLOW_RUN)),
+        _run(6, 3, "CI", "Initial commit", 20, "completed", "cancelled", "main", "push",
+             "2024-04-30T10:00:00Z", "2024-04-30T10:01:15Z"),
+        _run(5, 3, "CI", "Initial commit", 19, "completed", "success", "main", "schedule",
+             "2024-04-29T03:00:00Z", "2024-04-29T03:04:02Z"),
+    ]
+
+
+def _jobs_for(run: dict | None) -> list[dict]:
+    """One job for a run other than 7, in the run's state."""
+    if run is None:
+        return []
+    done = run["status"] == "completed"
+    return [{"id": 200 + run["id"], "name": "build", "status": run["status"], "conclusion": run["conclusion"],
+             "html_url": f"{run['html_url']}/job/{200 + run['id']}",
+             "started_at": run["created_at"], "completed_at": run["updated_at"] if done else None, "steps": [
+                 _step(1, "Set up job", "success", run["created_at"], run["created_at"]),
+                 {"name": "cargo build", "number": 2, "status": run["status"], "conclusion": run["conclusion"],
+                  "started_at": run["created_at"], "completed_at": run["updated_at"] if done else None}]}]
+
+
+CI_YML = """name: CI
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 3 * * *'
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+"""
+
+RELEASE_YML = """name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release
+        required: true
+        type: string
+      channel:
+        description: Channel
+        type: choice
+        options: [stable, beta]
+        default: beta
+      draft:
+        description: Create the release as a draft
+        type: boolean
+        default: true
+      target:
+        description: Deploy to
+        type: environment
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo releasing
+"""
 
 
 def _step(number: int, name: str, conclusion: str, started: str, completed: str) -> dict:
@@ -474,6 +681,7 @@ def _step(number: int, name: str, conclusion: str, started: str, completed: str)
 
 JOBS = [
     {"id": 101, "name": "test (macos-15)", "status": "completed", "conclusion": "failure",
+     "started_at": "2024-05-01T10:00:00Z", "completed_at": "2024-05-01T10:05:10Z",
      "html_url": CHECK_RUNS[0]["html_url"], "steps": [
          _step(1, "Set up job", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:00:02Z"),
          _step(2, "Checkout", "success", "2024-05-01T10:00:02Z", "2024-05-01T10:00:05Z"),
@@ -481,10 +689,12 @@ JOBS = [
          _step(4, "cargo test --workspace", "failure", "2024-05-01T10:01:39Z", "2024-05-01T10:05:10Z"),
          _step(5, "Post Checkout", "skipped", "2024-05-01T10:05:10Z", "2024-05-01T10:05:10Z")]},
     {"id": 102, "name": "lint", "status": "completed", "conclusion": "success",
+     "started_at": "2024-05-01T10:00:00Z", "completed_at": "2024-05-01T10:01:34Z",
      "html_url": CHECK_RUNS[1]["html_url"], "steps": [
          _step(1, "Set up job", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:00:02Z"),
          _step(2, "cargo fmt --check", "success", "2024-05-01T10:00:02Z", "2024-05-01T10:01:34Z")]},
     {"id": 103, "name": "build (ubuntu-latest)", "status": "completed", "conclusion": "success",
+     "started_at": "2024-05-01T10:00:00Z", "completed_at": "2024-05-01T10:03:02Z",
      "html_url": CHECK_RUNS[2]["html_url"], "steps": [
          _step(1, "Set up job", "success", "2024-05-01T10:00:00Z", "2024-05-01T10:00:02Z"),
          _step(2, "cargo build", "success", "2024-05-01T10:00:02Z", "2024-05-01T10:03:02Z")]},
@@ -531,11 +741,17 @@ class Stub(HTTPServer):
         # and what each login may do with the repository (admin by default)
         self.requests: list[tuple[str, str, str]] = []
         self.permissions: dict[str, str] = {}
+        # `351-actions`: the runs actions change, and 304 answers given
+        self.runs: list[dict] = _runs()
+        self.not_modified = 0
         # `348-pull-request-review`: pull request #7 over the fixture
         self.pull_request = PullRequestFixture(repo) if repo else None
         self.scopes: list[str] = os.environ.get(
             "GITHUB_STUB_SCOPES", "repo workflow read:user user:email").split()
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
+
+    def run(self, rid: int) -> dict | None:
+        return next((r for r in self.runs if r["id"] == rid), None)
 
     @property
     def port(self) -> int:

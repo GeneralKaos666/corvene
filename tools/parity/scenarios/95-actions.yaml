@@ -1,0 +1,70 @@
+# Corvene's Actions view and Run workflow (flag 351-actions, off in the
+# GitHub Desktop preset the harness runs with; desktop/desktop#17498). GHD
+# has no Actions view, so the snaps are recorded, not compared
+# (`corvene_only`; deviations.md › GitHub layer). Everything comes from the
+# stub GitHub API (`github_stub.py`): the CI and Release workflows, five
+# runs (#23 in progress, #21 the failed pull request run with three jobs),
+# the Release workflow's `workflow_dispatch` inputs, two branches, a tag and
+# two environments. Re-run and Run workflow change the stub's runs. The
+# in-progress run's "Running for" grows with the clock, so snaps of it are
+# only recorded.
+name: actions
+description: Repository › Actions… (workflows, runs, the failed run's jobs and steps, a step's log, the Status filter, Re-run failed jobs) and Run workflow's form, validation and dispatch (Corvene only, stub API)
+setup: repo-remote
+github_stub: true
+corvene_flags: 351-actions=on,347-actions-job-logs=on
+steps:
+  - ghd: {skip: true}
+    corvene: {github: stub}
+    wait: 500
+  - ghd: {skip: true}
+    corvene: {action: "corvene::ShowActions"}
+    wait: 3000
+  - snap: {name: view, corvene_only: true, note: "GHD has no Actions view (deviations.md, 351-actions)"}
+  # the failed pull request run: its failed job opens with its steps
+  - ghd: {skip: true}
+    corvene: {click: [445, 349]}
+    wait: 1500
+  - snap: {name: failed-run, corvene_only: true}
+  # its failed step's log (347-actions-job-logs), then back
+  - ghd: {skip: true}
+    corvene: {click: [993, 493]}
+    wait: 2500
+  - snap: {name: step-log, corvene_only: true, note: "the job log dialog opened at the step"}
+  - ghd: {skip: true}
+    corvene: {key: escape}
+    wait: 800
+  # Status › Failure
+  - ghd: {skip: true}
+    corvene: {click: [589, 195]}
+    wait: 600
+  - corvene_menu: status-filter
+  - corvene_menu_pick: "Failure"
+  - wait: 2000
+  - snap: {name: failed-only, corvene_only: true}
+  # Re-run failed jobs: the run is queued again, attempt 2
+  - ghd: {skip: true}
+    corvene: {click: [1025, 334]}
+    wait: 2500
+  - snap: {name: rerun, corvene_only: true, note: "a notice says what happened; the stub's run is queued"}
+  # the Release workflow and Run workflow
+  - ghd: {skip: true}
+    corvene: {click: [183, 248]}
+    wait: 2000
+  - snap: {name: release, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [769, 169]}
+    wait: 2500
+  - snap: {name: run-workflow, corvene_only: true, note: "the form built from the workflow file's inputs"}
+  # Run without the required version: validation
+  - ghd: {skip: true}
+    corvene: {click: [855, 590]}
+    wait: 800
+  - snap: {name: run-workflow-invalid, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {type: "1.2.0"}
+    wait: 300
+  - ghd: {skip: true}
+    corvene: {click: [855, 604]}
+    wait: 6000
+  - snap: {name: dispatched, corvene_only: true, note: "the new run found, selected and watched"}
