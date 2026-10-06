@@ -1013,6 +1013,31 @@ impl Client {
         })
     }
 
+    /// Corvene (`350-ssh-key-helper`): the OAuth scopes of the token, from
+    /// `GET /user`'s `X-OAuth-Scopes` header. `None` when the header is
+    /// missing (a fine-grained token or a GitHub App's, whose permissions
+    /// only show when a call is refused).
+    pub fn token_scopes(&self) -> Result<Option<Vec<String>>> {
+        let response = self.get_response("user", "application/vnd.github+json")?;
+        Ok(response
+            .headers()
+            .get("x-oauth-scopes")
+            .and_then(|v| v.to_str().ok())
+            .map(crate::parse_scopes))
+    }
+
+    /// Corvene (`350-ssh-key-helper`): `POST /user/keys`, add `key` (an
+    /// OpenSSH public key line) to the account's SSH keys as `title`. Needs
+    /// the `write:public_key` scope (or `admin:public_key`); GitHub answers
+    /// 422 when the key is already on an account.
+    pub fn add_ssh_key(&self, title: &str, key: &str) -> Result<()> {
+        let _: serde_json::Value = self.post_json(
+            "user/keys",
+            &serde_json::json!({ "title": title, "key": key }),
+        )?;
+        Ok(())
+    }
+
     /// `GET` whose error answers mean "not available" rather than an error
     /// (`fetchCombinedRefStatus`, `fetchRefCheckRuns`…), except a revoked
     /// token, which the caller reports (GHD emits it from `ghRequest`).

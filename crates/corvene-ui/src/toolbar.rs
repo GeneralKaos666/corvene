@@ -477,6 +477,13 @@ pub fn toolbar_models(
     let ab = repo_state
         .and_then(|s| s.ahead_behind)
         .or_else(|| implicit.map(|(_, ab)| ab));
+    // Corvene (`1109-remote-manager`): a push remote other than the
+    // upstream's takes the pushes; Pull and Fetch stay with the upstream
+    let push_target = repo.and_then(|r| Dispatcher::push_target_in(state, r.id));
+    let ab = repo.and_then(|r| Dispatcher::with_push_target(state, r.id, upstream.is_some(), ab));
+    let push_remote_name = push_target
+        .map(|t| t.remote.clone())
+        .unwrap_or_else(|| remote_name.clone());
     let last_fetched: SharedString = match repo_state.and_then(|s| s.last_fetched) {
         Some(at) => format!("Last fetched {}", relative(at)).into(),
         None => "Never fetched".into(),
@@ -599,7 +606,9 @@ pub fn toolbar_models(
             }
             Some(Tip::Valid { .. }) if upstream.is_none() => ToolbarButtonModel {
                 icon: Octicon::Upload,
-                description: if is_github {
+                description: if let Some(target) = push_target {
+                    format!("Publish this branch to {}", target.remote).into()
+                } else if is_github {
                     "Publish this branch to GitHub".into()
                 } else {
                     "Publish this branch to the remote".into()
@@ -617,7 +626,9 @@ pub fn toolbar_models(
                         title: format!("Fetch {remote_name}").into(),
                         ..base
                     }
-                } else if force_push == corvene_core::ForcePushState::Recommended {
+                } else if force_push == corvene_core::ForcePushState::Recommended
+                    && push_target.is_none()
+                {
                     ToolbarButtonModel {
                         icon: Octicon::ArrowUp,
                         description: last_fetched,
@@ -646,7 +657,7 @@ pub fn toolbar_models(
                     ToolbarButtonModel {
                         icon: Octicon::ArrowUp,
                         description: last_fetched,
-                        title: format!("Push {remote_name}").into(),
+                        title: format!("Push {push_remote_name}").into(),
                         badge: Some(ab),
                         arrow: true,
                         load_push_size: push_size.is_some(),

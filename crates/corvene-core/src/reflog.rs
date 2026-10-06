@@ -222,6 +222,7 @@ impl Dispatcher {
             Self::close_blame(id, cx);
             Self::close_issues(id, cx);
             Self::close_releases(id, cx);
+            Self::close_tags(id, cx);
             Self::load_reflog(id, cx);
         }
     }

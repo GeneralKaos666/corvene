@@ -185,6 +185,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         Popup::MoveToApplicationsFolder
         | Popup::Acknowledgements
         | Popup::ImportFromGitHubDesktop
+        | Popup::CreateSshKey
         | Popup::ConfirmExitTutorial => {}
         Popup::CrashReportFound { reports } => {
             f.list("reports", reports.iter().map(|p| p.to_string_lossy()));
@@ -252,6 +253,15 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         }
         Popup::SshKeyPassphrase { path, wrong } => {
             f.path("path", path).put("wrong", wrong);
+        }
+        Popup::SshKeyNeedsScope {
+            endpoint,
+            login,
+            title,
+        } => {
+            f.put("endpoint", endpoint)
+                .put("login", login)
+                .put("title", title);
         }
         Popup::CICheckRunRerun {
             repo: r,
@@ -442,9 +452,13 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
                 .put("ahead", ahead)
                 .put("dirty", dirty);
         }
-        Popup::ConfirmDeletePushedTag { repo: r, tag } => {
+        Popup::ConfirmDeletePushedTag {
+            repo: r,
+            tag,
+            remote_only,
+        } => {
             repo = Some(*r);
-            f.put("tag", tag);
+            f.put("tag", tag).put("remote_only", remote_only);
         }
         Popup::WarnTaggedCommitBeforeUndo {
             repo: r,

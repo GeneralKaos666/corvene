@@ -1168,7 +1168,7 @@ impl Corvene {
                 )
             }),
             autocrlf: autocrlf.map(|v| (!v.is_empty()).then_some(v)),
-            signing: None,
+            ..Default::default()
         };
         self.loop_
             .post(move |host| Dispatcher::save_repository_settings(repo, save, host));

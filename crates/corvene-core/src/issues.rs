@@ -320,6 +320,7 @@ impl Dispatcher {
             Self::close_blame(id, cx);
             Self::close_recent_activity(id, cx);
             Self::close_releases(id, cx);
+            Self::close_tags(id, cx);
             Self::load_issues(id, cx);
         }
     }

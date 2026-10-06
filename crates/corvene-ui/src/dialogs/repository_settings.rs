@@ -14,6 +14,12 @@
 //! make the repository sign in through git's credential helper.
 //! Deviation (flag `341-custom-autolinks`): an Autolinks tab lists the
 //! GitHub repository's autolinks and edits the repository's own.
+//! Deviation (flag `1109-remote-manager`): the Remote tab lists every
+//! remote (name and URL editable, Remove, Add Remote) instead of the
+//! primary one's URL, and picks where pushes go (`remote.pushDefault`, the
+//! current branch's `pushRemote`); `ui/repository-settings/remote.tsx` in
+//! GHD edits the primary remote's URL only. Changes apply on Save
+//! (`corvene_core::remote_manager`).
 
 use std::rc::Rc;
 
@@ -113,6 +119,64 @@ pub struct RepositorySettingsDialog {
     /// `focusFirstSuitableChild`: with nothing to type into on the first tab
     /// (no remote), Save holds focus until a mouse press moves it.
     default_focus: bool,
+    /// `1109-remote-manager`: every remote as edited (removed ones stay,
+    /// hidden), and the push remotes as row indexes.
+    remote_rows: Vec<RemoteRow>,
+    push_default: Option<usize>,
+    branch_push: Option<(String, Option<usize>)>,
+}
+
+/// `1109-remote-manager`: what picking a push remote (a row, or `None` for
+/// the default) does to the dialog.
+type PushPick = Rc<dyn Fn(&mut RepositorySettingsDialog, Option<usize>)>;
+
+/// `1109-remote-manager`: one remote of the Remote tab.
+struct RemoteRow {
+    original: Option<corvene_core::Remote>,
+    name: Entity<InputState>,
+    url: Entity<InputState>,
+    removed: bool,
+}
+
+impl RemoteRow {
+    fn new(
+        original: Option<corvene_core::Remote>,
+        window: &mut Window,
+        cx: &mut Context<RepositorySettingsDialog>,
+    ) -> Self {
+        let (name, url) = original
+            .as_ref()
+            .map(|r| (r.name.clone(), r.url.clone()))
+            .unwrap_or_default();
+        let name = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Name")
+                .default_value(name)
+        });
+        let url = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("URL")
+                .default_value(url)
+        });
+        for input in [&name, &url] {
+            cx.observe(input, |_, _, cx| cx.notify()).detach();
+        }
+        Self {
+            original,
+            name,
+            url,
+            removed: false,
+        }
+    }
+
+    fn edited(&self, cx: &App) -> corvene_core::remote_manager::EditedRemote {
+        corvene_core::remote_manager::EditedRemote {
+            original: self.original.clone(),
+            name: self.name.read(cx).value().trim().to_string(),
+            url: self.url.read(cx).value().trim().to_string(),
+            removed: self.removed,
+        }
+    }
 }
 
 /// `518-per-repo-editor` with `523-custom-editor-list`: Settings' custom
@@ -267,6 +331,9 @@ impl RepositorySettingsDialog {
             signing: corvene_core::SigningConfig::default(),
             signing_key,
             default_focus: true,
+            remote_rows: Vec::new(),
+            push_default: None,
+            branch_push: None,
         };
         this.fill(&state, window, cx);
         this
@@ -318,6 +385,22 @@ impl RepositorySettingsDialog {
         self.signing_key.update(cx, |s, cx| {
             s.set_value(data.local_signing.key.clone(), window, cx)
         });
+        // `1109-remote-manager`
+        self.remote_rows = data
+            .remotes
+            .iter()
+            .map(|r| RemoteRow::new(Some(r.clone()), window, cx))
+            .collect();
+        let row_of = |name: &Option<String>| {
+            let name = name.as_deref()?;
+            data.remotes.iter().position(|r| r.name == name)
+        };
+        self.push_default = row_of(&data.push_config.push_default);
+        self.branch_push = data
+            .push_config
+            .branch
+            .as_ref()
+            .map(|(branch, remote)| (branch.clone(), row_of(remote)));
         self.loaded = true;
         self.gitignore_edited = false;
     }
@@ -429,7 +512,15 @@ impl RepositorySettingsDialog {
         if stored_helper.is_some_and(|on| on != self.credential_helper) {
             Dispatcher::set_repository_credential_helper(self.repo, self.credential_helper, cx);
         }
-        if let Some(remote) = data.as_ref().and_then(|d| d.remote.clone()) {
+        if self.remote_manager(cx) {
+            // `1109-remote-manager`
+            let edited = self.edited_remotes(cx);
+            save.remote_edits = corvene_core::remote_manager::remote_edits(&edited);
+            let push_config = self.push_config(cx);
+            if data.as_ref().is_some_and(|d| d.push_config != push_config) {
+                save.push_config = Some(push_config);
+            }
+        } else if let Some(remote) = data.as_ref().and_then(|d| d.remote.clone()) {
             let url = self.remote_url.read(cx).value().trim().to_string();
             if url != remote.url {
                 save.remote_url = Some((remote.name, url));
@@ -480,8 +571,234 @@ impl RepositorySettingsDialog {
         Dispatcher::save_repository_settings(self.repo, save, cx);
     }
 
+    /// Flag `1109-remote-manager` is on.
+    fn remote_manager(&self, cx: &App) -> bool {
+        self.state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::REMOTE_MANAGER)
+    }
+
+    fn edited_remotes(&self, cx: &App) -> Vec<corvene_core::remote_manager::EditedRemote> {
+        self.remote_rows.iter().map(|r| r.edited(cx)).collect()
+    }
+
+    /// The push settings as picked, by the rows' names now (a removed
+    /// remote's pick falls back to the default).
+    fn push_config(&self, cx: &App) -> corvene_core::remote_manager::PushTargetConfig {
+        let name = |row: Option<usize>| {
+            let row = self.remote_rows.get(row?)?;
+            (!row.removed).then(|| row.name.read(cx).value().trim().to_string())
+        };
+        corvene_core::remote_manager::PushTargetConfig {
+            push_default: name(self.push_default),
+            branch: self
+                .branch_push
+                .as_ref()
+                .map(|(branch, row)| (branch.clone(), name(*row))),
+        }
+    }
+
+    /// Why Save is disabled on the Remote tab (`1109-remote-manager`).
+    fn remotes_error(&self, cx: &App) -> Option<String> {
+        if !self.remote_manager(cx) || !self.loaded {
+            return None;
+        }
+        corvene_core::remote_manager::edited_remotes_error(&self.edited_remotes(cx))
+    }
+
+    /// The message under the remotes: not for a row still being filled in,
+    /// whose empty field only holds Save back.
+    fn remotes_message(&self, cx: &App) -> Option<String> {
+        let edited = self.edited_remotes(cx);
+        let complete: Vec<_> = edited
+            .into_iter()
+            .filter(|r| r.removed || (!r.name.is_empty() && !r.url.is_empty()))
+            .collect();
+        self.remotes_error(cx)
+            .and(corvene_core::remote_manager::edited_remotes_error(
+                &complete,
+            ))
+    }
+
+    /// `1109-remote-manager`: the remotes, Add Remote, and the push selects.
+    fn remote_manager_tab(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
+        let t = cx.ghd();
+        let shown: Vec<usize> = (0..self.remote_rows.len())
+            .filter(|&i| !self.remote_rows[i].removed)
+            .collect();
+        let mut list = div().flex().flex_col().gap(SPACING_HALF());
+        for &ix in &shown {
+            let row = &self.remote_rows[ix];
+            let weak = cx.weak_entity();
+            list = list.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING_HALF())
+                    .child(div().w(zpx(110.)).flex_none().child(text_box(
+                        ("repo-settings-remote-name", ix),
+                        &row.name,
+                        None,
+                        window,
+                        cx,
+                    )))
+                    .child(div().flex_1().min_w_0().child(text_box(
+                        ("repo-settings-remote-url", ix),
+                        &row.url,
+                        None,
+                        window,
+                        cx,
+                    )))
+                    .child(
+                        crate::widgets::small_button(
+                            ("repo-settings-remote-remove", ix),
+                            "Remove",
+                            cx,
+                        )
+                        .flex_none()
+                        .on_click(move |_, _, cx| {
+                            weak.update(cx, |this, cx| {
+                                if let Some(row) = this.remote_rows.get_mut(ix) {
+                                    row.removed = true;
+                                }
+                                cx.notify();
+                            })
+                            .ok();
+                        }),
+                    ),
+            );
+        }
+        if shown.is_empty() {
+            list = list.child(
+                div()
+                    .text_color(t.text_secondary)
+                    .child("This repository has no remotes."),
+            );
+        }
+        let add = cx.weak_entity();
+        let add_button = crate::widgets::button(
+            "repo-settings-remote-add",
+            mac_or("Add Remote", "Add remote"),
+            cx,
+        )
+        .flex_none()
+        .on_click(move |_, window, cx| {
+            add.update(cx, |this, cx| {
+                let row = RemoteRow::new(None, window, cx);
+                let focus = row.name.read(cx).focus_handle(cx);
+                this.remote_rows.push(row);
+                window.focus(&focus, cx);
+                cx.notify();
+            })
+            .ok();
+        });
+        // the push selects: "the upstream's remote", then each remote kept
+        let names: Vec<(usize, String)> = shown
+            .iter()
+            .map(|&i| {
+                (
+                    i,
+                    self.remote_rows[i].name.read(cx).value().trim().to_string(),
+                )
+            })
+            .filter(|(_, n)| !n.is_empty())
+            .collect();
+        let select = |id: &'static str,
+                      default_label: &str,
+                      picked: Option<usize>,
+                      on_pick: PushPick,
+                      cx: &Context<Self>| {
+            let mut options: Vec<SharedString> = vec![default_label.to_string().into()];
+            options.extend(names.iter().map(|(_, n)| SharedString::from(n.clone())));
+            let selected = picked
+                .and_then(|row| names.iter().position(|(i, _)| *i == row))
+                .map_or(0, |p| p + 1);
+            let rows: Vec<usize> = names.iter().map(|(i, _)| *i).collect();
+            let weak = cx.weak_entity();
+            select_button(
+                id,
+                options[selected].clone(),
+                options,
+                Some(selected),
+                false,
+                Rc::new(move |ix, _, cx| {
+                    let row = ix.checked_sub(1).and_then(|i| rows.get(i).copied());
+                    let on_pick = on_pick.clone();
+                    weak.update(cx, |this, cx| {
+                        on_pick(this, row);
+                        cx.notify();
+                    })
+                    .ok();
+                }),
+                cx,
+            )
+        };
+        let repository_select = select(
+            "repo-settings-push-default",
+            "The upstream's remote",
+            self.push_default,
+            Rc::new(|this: &mut Self, row| this.push_default = row),
+            cx,
+        );
+        let branch_select = self.branch_push.as_ref().map(|(branch, picked)| {
+            let label = format!("Push {branch} to");
+            let el = select(
+                "repo-settings-branch-push",
+                "The repository's push remote",
+                *picked,
+                Rc::new(|this: &mut Self, row| {
+                    if let Some((_, picked)) = this.branch_push.as_mut() {
+                        *picked = row;
+                    }
+                }),
+                cx,
+            );
+            (label, el)
+        });
+        let s = self.state.read(cx);
+        div()
+            .flex()
+            .flex_col()
+            .gap(SPACING())
+            .child(section_heading("Remotes", cx))
+            .child(list)
+            .child(div().flex().flex_row().child(add_button))
+            .when_some(self.remotes_message(cx), |d, message| {
+                d.child(crate::widgets::input_error(message, cx))
+            })
+            .child(section_heading(mac_or("Push Remote", "Push remote"), cx))
+            .child(labeled("Push branches to", repository_select, cx))
+            .when_some(branch_select, |d, (label, el)| {
+                d.child(labeled(label, el, cx))
+            })
+            .child(
+                div()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(t.text_secondary)
+                    .child(
+                        "Push sends a branch to the same-named branch of its push remote; \
+                         Pull keeps following the branch's upstream.",
+                    ),
+            )
+            .when(
+                s.flags
+                    .bool(corvene_core::flags::ids::REPOSITORY_CREDENTIAL_HELPER)
+                    && !shown.is_empty(),
+                |d| d.child(self.credential_helper_option(cx)),
+            )
+            .into_any_element()
+    }
+
     fn remote_tab(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let data = self.data(cx);
+        // `1109-remote-manager`: once there is a remote (or one is being
+        // added); without, GHD's Publish call to action and Add Remote
+        let manager = self.remote_manager(cx) && self.loaded;
+        if manager && !self.remote_rows.is_empty() {
+            return self.remote_manager_tab(window, cx);
+        }
         match data.and_then(|d| d.remote) {
             Some(remote) => {
                 // flag `236-upstream-remote-in-settings` (Corvene addition,
@@ -544,7 +861,7 @@ impl RepositorySettingsDialog {
                     action: (action_title, NoRemoteAction::Publish),
                     ..
                 } = no_remote();
-                call_to_action(
+                let publish = call_to_action(
                     "repo-settings-publish",
                     paragraph(vec![
                         lead.into(),
@@ -556,8 +873,36 @@ impl RepositorySettingsDialog {
                     action_title,
                     move |_, cx| Dispatcher::show_popup(Popup::PublishRepository { repo }, cx),
                     cx,
-                )
-                .into_any_element()
+                );
+                if !manager {
+                    return publish.into_any_element();
+                }
+                let add = cx.weak_entity();
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(SPACING())
+                    .child(publish)
+                    .child(
+                        div().flex().flex_row().child(
+                            crate::widgets::button(
+                                "repo-settings-remote-add",
+                                mac_or("Add Remote", "Add remote"),
+                                cx,
+                            )
+                            .on_click(move |_, window, cx| {
+                                add.update(cx, |this, cx| {
+                                    let row = RemoteRow::new(None, window, cx);
+                                    let focus = row.name.read(cx).focus_handle(cx);
+                                    this.remote_rows.push(row);
+                                    window.focus(&focus, cx);
+                                    cx.notify();
+                                })
+                                .ok();
+                            }),
+                        ),
+                    )
+                    .into_any_element()
             }
         }
     }
@@ -1351,7 +1696,7 @@ impl Render for RepositorySettingsDialog {
             })
             .child(content.mx(zpx(0.)).my(zpx(0.)));
         let weak = cx.weak_entity();
-        let loaded = self.loaded && name_valid;
+        let loaded = self.loaded && name_valid && self.remotes_error(cx).is_none();
         let focus_save = self.default_focus
             && self.tab == RepositorySettingsTab::Remote
             && self.data(cx).is_some_and(|d| d.remote.is_none());

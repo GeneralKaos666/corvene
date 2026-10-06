@@ -621,6 +621,60 @@ pub fn remove_remote(git: Arc<GitBinary>, workdir: &Path, name: &str) -> Result<
     Ok(())
 }
 
+/// Corvene (`1109-remote-manager`): `git remote rename <old> <new>`, which
+/// also moves the remote-tracking branches and the `branch.*.remote`,
+/// `branch.*.pushRemote` and `remote.pushDefault` settings naming it.
+pub fn rename_remote(git: Arc<GitBinary>, workdir: &Path, old: &str, new: &str) -> Result<()> {
+    GitCommand::new(git)
+        .args(["remote", "rename", old, new])
+        .current_dir(workdir)
+        .run()?;
+    Ok(())
+}
+
+/// Corvene (`1109-remote-manager`): how many commits of `rev` no
+/// remote-tracking branch of `remote` has (`git rev-list --count <rev>
+/// --not --remotes=<remote>`), for a branch not on that remote yet.
+pub fn commits_not_on_remote(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    rev: &str,
+    remote: &str,
+) -> Result<u32> {
+    let out = GitCommand::new(git)
+        .args([
+            "rev-list".to_string(),
+            "--count".to_string(),
+            rev.to_string(),
+            "--not".to_string(),
+            format!("--remotes={remote}"),
+        ])
+        .current_dir(workdir)
+        .run()?;
+    Ok(out.stdout_string()?.trim().parse().unwrap_or(0))
+}
+
+/// Corvene (`1109-remote-manager`): whether `name` can name a remote, as
+/// `git remote add` checks it (`refs/remotes/<name>/test` must be a valid
+/// ref name). A cheap local check, no git run.
+pub fn remote_name_is_valid(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && !name.starts_with('.')
+        && !name.ends_with('.')
+        && !name.ends_with(".lock")
+        && !name.contains("..")
+        && !name.contains("@{")
+        && name != "@"
+        && !name.contains("//")
+        && !name.starts_with('/')
+        && !name.ends_with('/')
+        && !name.split('/').any(|part| part.starts_with('.'))
+        && !name.chars().any(|c| {
+            c.is_ascii_control() || matches!(c, ' ' | '~' | '^' | ':' | '?' | '*' | '[' | '\\')
+        })
+}
+
 /// GHD `updateRemoteHEAD`: `remote set-head -a <remote>` (best effort).
 pub fn update_remote_head(
     git: Arc<GitBinary>,
@@ -1702,6 +1756,18 @@ pub fn install_lfs_hooks(git: Arc<GitBinary>, workdir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checks_remote_names() {
+        for good in ["origin", "fork", "my-fork", "team/upstream", "a.b"] {
+            assert!(remote_name_is_valid(good), "{good}");
+        }
+        for bad in [
+            "", "-x", ".hidden", "a..b", "a b", "a:b", "a~1", "x.lock", "a/", "a//b", "@", "a/.b",
+        ] {
+            assert!(!remote_name_is_valid(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn push_size_counts_new_objects_and_lfs_pointers() {

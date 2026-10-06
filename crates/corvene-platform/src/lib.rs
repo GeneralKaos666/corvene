@@ -36,6 +36,7 @@ pub mod single_instance;
 #[path = "single_instance_windows.rs"]
 pub mod single_instance;
 pub mod spell;
+pub mod ssh_key;
 pub mod trash;
 pub mod updater;
 pub mod url_schemes;

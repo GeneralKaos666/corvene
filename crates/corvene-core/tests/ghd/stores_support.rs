@@ -76,6 +76,8 @@ pub fn app_state() -> TestAppState {
         sign_in_store: corvene_core::sign_in::SignInStore::new(sign_in_accounts.clone()),
         sign_in_accounts,
         authentication: None,
+        extra_oauth_scopes: Vec::new(),
+        ssh_key: Default::default(),
         watcher: None,
         watched_repo: None,
         banner: None,
