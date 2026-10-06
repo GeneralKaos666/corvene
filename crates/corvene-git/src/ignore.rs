@@ -363,6 +363,51 @@ pub fn append_ignore_files(workdir: &Path, paths: &[String], skip_existing: bool
     append_ignore_rules(workdir, &patterns, skip_existing)
 }
 
+/// Corvene `1308-ignore-oversized-files`: the ones of the
+/// repository-relative `paths` the index tracks (`git ls-files`), in order.
+pub fn tracked_paths(git: Arc<GitBinary>, workdir: &Path, paths: &[String]) -> Result<Vec<String>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let text = GitCommand::new(git)
+        .args(["ls-files", "-z", "--"])
+        .args(paths)
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .current_dir(workdir)
+        .run()?
+        .stdout_string()?;
+    let tracked: std::collections::HashSet<&str> =
+        text.split('\0').filter(|p| !p.is_empty()).collect();
+    Ok(paths
+        .iter()
+        .filter(|p| tracked.contains(p.as_str()))
+        .cloned()
+        .collect())
+}
+
+/// Corvene `1308-ignore-oversized-files`: ignore `paths` in the root
+/// `.gitignore` ([`append_ignore_files`]) and, with `untrack`, remove the
+/// tracked ones from the index (`git rm --cached`), so a file the last
+/// commit has becomes a deletion and the copy on disk stays.
+pub fn ignore_and_untrack(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    paths: &[String],
+    untrack: bool,
+    skip_existing: bool,
+) -> Result<()> {
+    append_ignore_files(workdir, paths, skip_existing)?;
+    if untrack && !paths.is_empty() {
+        GitCommand::new(git)
+            .args(["rm", "--cached", "-q", "--ignore-unmatch", "--"])
+            .args(paths)
+            .env("GIT_LITERAL_PATHSPECS", "1")
+            .current_dir(workdir)
+            .run()?;
+    }
+    Ok(())
+}
+
 /// Answers "would git ignore this worktree path?" the way `git status` does:
 /// the `.gitignore` files on the way to the path (read lazily as paths are
 /// asked about), `$GIT_DIR/info/exclude` and `core.excludesFile` (or the XDG
@@ -549,6 +594,28 @@ mod tests {
         assert!(!ignored(&mut m, "src/main.rs"));
         assert!(!ignored(&mut m, ".gitignore"));
         assert!(!ignored(&mut m, ""));
+    }
+
+    #[test]
+    fn ignores_and_untracks_oversized_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        write(root, "big.bin", "x");
+        write(root, "new.iso", "y");
+        write(root, "we[ird].dat", "z");
+        git(root, &["add", "big.bin", "we[ird].dat"]);
+        let bin = Arc::new(crate::detect::find_git().unwrap());
+        let paths = ["big.bin", "new.iso", "we[ird].dat"].map(String::from);
+        assert_eq!(
+            tracked_paths(bin.clone(), root, &paths).unwrap(),
+            vec!["big.bin", "we[ird].dat"]
+        );
+        ignore_and_untrack(bin.clone(), root, &paths, true, true).unwrap();
+        assert!(tracked_paths(bin.clone(), root, &paths).unwrap().is_empty());
+        assert!(root.join("big.bin").exists());
+        let text = std::fs::read_to_string(root.join(".gitignore")).unwrap();
+        assert_eq!(text, "big.bin\nnew.iso\nwe\\[ird\\].dat\n");
     }
 
     #[test]

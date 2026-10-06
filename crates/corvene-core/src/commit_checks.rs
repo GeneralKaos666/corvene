@@ -43,6 +43,8 @@ pub struct CommitChecks {
 struct Found {
     oversized: Vec<String>,
     lfs_patterns: Vec<String>,
+    /// `1308-ignore-oversized-files`: the oversized files the index tracks.
+    ignore_tracked: Option<Vec<String>>,
     embedded: Vec<corvene_git::EmbeddedRepository>,
 }
 
@@ -101,10 +103,11 @@ impl Dispatcher {
             checks.embedded = Some(Vec::new());
             return Self::create_commit(id, summary, description, checks, cx);
         }
-        let (suggest_lfs, hide_note) = {
+        let (suggest_lfs, suggest_ignore, hide_note) = {
             let s = Self::state(cx).read(cx);
             (
                 s.flags.bool(crate::flags::ids::SUGGEST_LFS_TRACKING),
+                s.flags.bool(crate::flags::ids::IGNORE_OVERSIZED_FILES),
                 s.settings.hide_embedded_repository_note,
             )
         };
@@ -116,6 +119,7 @@ impl Dispatcher {
                 let mut found = Found {
                     oversized: Vec::new(),
                     lfs_patterns: Vec::new(),
+                    ignore_tracked: None,
                     embedded: Vec::new(),
                 };
                 if check_size {
@@ -133,6 +137,13 @@ impl Dispatcher {
                     {
                         found.lfs_patterns = lfs_track_patterns(&found.oversized);
                     }
+                    // `1308-ignore-oversized-files`
+                    if suggest_ignore && !found.oversized.is_empty() {
+                        found.ignore_tracked = Some(
+                            corvene_git::tracked_paths(git.clone(), &workdir, &found.oversized)
+                                .unwrap_or_else(|_| found.oversized.clone()),
+                        );
+                    }
                 }
                 if check_embedded {
                     found.embedded = corvene_git::embedded_repositories(git, &workdir, &untracked);
@@ -149,6 +160,7 @@ impl Dispatcher {
                             summary,
                             description,
                             lfs_patterns: found.lfs_patterns,
+                            ignore_tracked: found.ignore_tracked,
                             checks,
                         },
                         cx,
@@ -238,6 +250,31 @@ impl Dispatcher {
             move |result, cx| {
                 if let Err(err) = result {
                     Self::show_error("Could not track the files in Git LFS", &err, cx);
+                }
+                Self::refresh_repository(id, cx);
+            },
+        );
+    }
+
+    /// `1308-ignore-oversized-files`: `OversizedFiles` › Add to .gitignore
+    /// (`untrack: false`) or Ignore and Untrack: ignore `files`
+    /// ([`corvene_git::ignore_and_untrack`]), then back to the commit form,
+    /// where `.gitignore` (and the untracked files' deletions) join the
+    /// changes.
+    pub fn ignore_oversized_files(id: u64, files: Vec<String>, untrack: bool, cx: &mut dyn Host) {
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        let skip_existing = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::IGNORE_SKIPS_EXISTING_RULES);
+        crate::remote::spawn_bg(
+            cx,
+            move || corvene_git::ignore_and_untrack(git, &workdir, &files, untrack, skip_existing),
+            move |result, cx| {
+                if let Err(err) = result {
+                    Self::show_error("Could not update .gitignore", &err, cx);
                 }
                 Self::refresh_repository(id, cx);
             },

@@ -1,0 +1,23 @@
+# Files Too Large (GHD `OversizedFiles`) with two sample files, then
+# Corvene's "Add to .gitignore" / "Ignore and Untrack" buttons
+# (1308-ignore-oversized-files, off in the GitHub Desktop preset;
+# desktop/desktop#18490), recorded, not compared.
+name: oversized-files
+description: Files Too Large dialog (GHD buttons)
+setup: repo
+steps:
+  - ghd: {eval: "(() => { const root = document.getElementById('desktop-app-container'); const key = Object.keys(root).find(k => k.startsWith('__reactContainer') || k === '_reactRootContainer'); const stack = [key === '_reactRootContainer' ? root._reactRootContainer._internalRoot.current : root[key]]; let store = null; while (stack.length && !store) { const f = stack.pop(); if (!f) continue; if (f.stateNode && f.stateNode.props && f.stateNode.props.appStore) store = f.stateNode.props.appStore; if (f.sibling) stack.push(f.sibling); if (f.child) stack.push(f.child); } store._showPopup({type: 'OversizedFiles', oversizedFiles: ['assets/intro-video.mp4', 'data/dump.bin'], context: {summary: 'Add the assets', description: null}, repository: store.selectedRepository}); })()"}
+    corvene: {popup: oversized-files}
+    wait: 700
+  - dump: {name: open, root: dialog}
+  - snap: open
+---
+name: oversized-files-ignore
+description: Files Too Large with Add to .gitignore and Ignore and Untrack (Corvene only)
+setup: repo
+corvene_flags: 1308-ignore-oversized-files=on
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: oversized-files}
+    wait: 700
+  - snap: {name: ignore-buttons, corvene_only: true, note: "GHD has only Cancel and Commit Anyway (deviations.md, 1308-ignore-oversized-files)"}

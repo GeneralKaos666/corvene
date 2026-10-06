@@ -368,6 +368,10 @@ pub enum Popup {
         summary: String,
         description: String,
         lfs_patterns: Vec<String>,
+        /// Corvene `1308-ignore-oversized-files`: `Some` (the files of
+        /// `files` the index tracks) offers "Add to .gitignore", and "Ignore
+        /// and Untrack" when it is not empty.
+        ignore_tracked: Option<Vec<String>>,
         /// The commit's checks so far (Commit Anyway goes on with them).
         checks: crate::commit_checks::CommitChecks,
     },

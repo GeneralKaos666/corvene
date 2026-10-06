@@ -556,7 +556,7 @@ pub(crate) fn main() {
         //   prompts, advanced, accessibility) | repository-settings | about | create
         //   clone | clone:<url>
         //   release-notes | move-to-applications | upstream-already-exists
-        //   push-needs-pull | initialize-lfs (for the selected repository)
+        //   push-needs-pull | initialize-lfs | oversized-files (for the selected repository)
         //   pr-review[:approved|:commented] (changes requested by default)
         //   pr-comment | pr-checks-failed
         //   job-log (the sample failed job's Actions log, flag 347)
@@ -1896,6 +1896,26 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         ("initialize-lfs", Some(id)) => {
             Dispatcher::show_popup(Popup::InitializeLFS { repos: vec![id] }, cx)
+        }
+        // GHD `OversizedFiles` with two sample files (one of them tracked
+        // for `1308-ignore-oversized-files`)
+        ("oversized-files", Some(id)) => {
+            let ignore = corvene_core::AppState::global(cx)
+                .read(cx)
+                .flags
+                .bool(corvene_core::flags::ids::IGNORE_OVERSIZED_FILES);
+            Dispatcher::show_popup(
+                Popup::OversizedFiles {
+                    repo: id,
+                    files: vec!["assets/intro-video.mp4".into(), "data/dump.bin".into()],
+                    summary: "Add the assets".into(),
+                    description: String::new(),
+                    lfs_patterns: Vec::new(),
+                    ignore_tracked: ignore.then(|| vec!["data/dump.bin".into()]),
+                    checks: Default::default(),
+                },
+                cx,
+            )
         }
         // GHD `showFakeUpstreamAlreadyExists` (test UI components):
         // an in-memory fork of desktop/desktop whose `upstream`

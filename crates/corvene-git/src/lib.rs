@@ -120,7 +120,8 @@ pub use history_ops::{
 };
 pub use ignore::{
     IgnoreTarget, append_ignore_files, append_ignore_rules, append_ignore_rules_to,
-    escape_gitignore_pattern, excludes_file, gitignore_dirs_above, read_gitignore, save_gitignore,
+    escape_gitignore_pattern, excludes_file, gitignore_dirs_above, ignore_and_untrack,
+    read_gitignore, save_gitignore, tracked_paths,
 };
 pub use index_lock::{index_lock_path, remove_stale_index_lock};
 pub use lfs_locks::{LfsLock, LfsLocks, lfs_lock, lfs_locks, lfs_unlock};

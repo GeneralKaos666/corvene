@@ -5,7 +5,9 @@
 //!
 //! Deviation: with `784-suggest-lfs-tracking` (Git LFS installed) a third
 //! button tracks the files' extensions in Git LFS and goes back to the
-//! commit form.
+//! commit form. With `1308-ignore-oversized-files`, "Add to .gitignore"
+//! ignores the files, and "Ignore and Untrack" (some of them tracked) also
+//! removes those from the index; both go back to the commit form.
 
 use corvene_core::Dispatcher;
 use corvene_core::commit_checks::CommitChecks;
@@ -30,6 +32,7 @@ pub struct OversizedFilesDialog {
     summary: String,
     description: String,
     lfs_patterns: Vec<String>,
+    ignore_tracked: Option<Vec<String>>,
     checks: CommitChecks,
 }
 
@@ -40,6 +43,7 @@ impl OversizedFilesDialog {
         summary: String,
         description: String,
         lfs_patterns: Vec<String>,
+        ignore_tracked: Option<Vec<String>>,
         checks: CommitChecks,
     ) -> Self {
         Self {
@@ -48,6 +52,7 @@ impl OversizedFilesDialog {
             summary,
             description,
             lfs_patterns,
+            ignore_tracked,
             checks,
         }
     }
@@ -119,7 +124,17 @@ impl Render for OversizedFilesDialog {
                     "Tracking them in Git LFS adds the patterns to .gitattributes, which \
                              goes into the commit with the files.",
                 ))
-            });
+            })
+            // `1308-ignore-oversized-files`
+            .when(
+                self.ignore_tracked.as_ref().is_some_and(|t| !t.is_empty()),
+                |d| {
+                    d.child(div().mt(SPACING()).text_color(t.text_secondary).child(
+                        "Ignore and Untrack also removes the tracked ones from the repository \
+                         in the commit; the files on disk stay.",
+                    ))
+                },
+            );
         let (repo, summary, description, checks) = (
             self.repo,
             self.summary.clone(),
@@ -175,6 +190,40 @@ impl Render for OversizedFilesDialog {
                     }),
                 },
             );
+        }
+        // `1308-ignore-oversized-files`: after the LFS button
+        if let Some(tracked) = &self.ignore_tracked {
+            let at = usize::from(!self.lfs_patterns.is_empty());
+            let files = self.files.clone();
+            buttons.insert(
+                at,
+                DialogButton {
+                    id: "oversized-files-ignore",
+                    label: "Add to .gitignore".into(),
+                    primary: false,
+                    disabled: false,
+                    on_click: Box::new(move |_, cx| {
+                        Dispatcher::close_popup(cx);
+                        Dispatcher::ignore_oversized_files(repo, files.clone(), false, cx);
+                    }),
+                },
+            );
+            if !tracked.is_empty() {
+                let files = self.files.clone();
+                buttons.insert(
+                    at + 1,
+                    DialogButton {
+                        id: "oversized-files-ignore-untrack",
+                        label: mac_or("Ignore and Untrack", "Ignore and untrack").into(),
+                        primary: false,
+                        disabled: false,
+                        on_click: Box::new(move |_, cx| {
+                            Dispatcher::close_popup(cx);
+                            Dispatcher::ignore_oversized_files(repo, files.clone(), true, cx);
+                        }),
+                    },
+                );
+            }
         }
         dialog_with_kind(
             "oversized-files",

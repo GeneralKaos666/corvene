@@ -8196,6 +8196,25 @@ registry! {
         upstream: &[Upstream::issue(19679)],
         code: &["crates/corvene-core/src/commit_progress.rs", "crates/corvene-git/src/commit.rs", "crates/corvene-core/src/dispatcher.rs", "crates/corvene-ui/src/changes.rs"],
     },
+
+    /// Files Too Large › Add to .gitignore / Ignore and Untrack.
+    IGNORE_OVERSIZED_FILES = 1308 "ignore-oversized-files" {
+        title: "Ignore files that are too large",
+        summary: "The Files Too Large warning before a commit has an \"Add to .gitignore\" \
+                  button that appends the files' paths to the repository's .gitignore and goes \
+                  back to the commit form. When some of them are already tracked, an \"Ignore \
+                  and Untrack\" button also removes those from the index (git rm --cached), so \
+                  the commit deletes them from the repository while the copies on disk stay.",
+        ghd_behaviour: "The warning offers only Cancel and Commit Anyway; ignoring the files is \
+                        up to the changes list's Ignore File menu item.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(18490)],
+        code: &["crates/corvene-ui/src/dialogs/oversized_files.rs", "crates/corvene-core/src/commit_checks.rs", "crates/corvene-git/src/ignore.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.
