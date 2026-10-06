@@ -747,7 +747,7 @@ impl Dispatcher {
         {
             Self::show_popup(
                 Popup::IndexLockExists {
-                    title: title.into(),
+                    title,
                     message: full,
                     lock,
                 },
@@ -758,7 +758,7 @@ impl Dispatcher {
         let ErrorMessage { text: message, git } = message;
         Self::show_popup(
             Popup::Error {
-                title: title.into(),
+                title,
                 message,
                 git,
             },
