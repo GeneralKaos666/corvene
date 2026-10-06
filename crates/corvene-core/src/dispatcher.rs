@@ -1995,9 +1995,14 @@ impl Dispatcher {
     pub fn select_file(id: u64, path: String, cx: &mut dyn Host) {
         let changed = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
+            // GHD `_selectWorkingDirectoryFiles`: picking a file leaves the stash
+            let left_stash = rs.leave_stash();
             let same_anchor = rs.selected_file.as_deref() == Some(path.as_str());
             let single = rs.selected_files.len() == 1 && rs.selected_files[0] == path;
             if same_anchor && single {
+                if left_stash {
+                    cx.notify();
+                }
                 return false;
             }
             rs.selected_files = vec![path.clone()];
@@ -2021,6 +2026,7 @@ impl Dispatcher {
     pub fn toggle_file_selection(id: u64, path: String, cx: &mut dyn Host) {
         let changed = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
+            rs.leave_stash();
             let before = rs.selected_file.clone();
             if let Some(pos) = rs.selected_files.iter().position(|p| *p == path) {
                 rs.selected_files.remove(pos);
@@ -2048,6 +2054,9 @@ impl Dispatcher {
             // `707-shift-click-keeps-selection`
             let keep = s.flags.bool(crate::flags::ids::SHIFT_CLICK_KEEPS_SELECTION);
             let rs = s.repo_state_mut(id);
+            if rs.leave_stash() {
+                cx.notify();
+            }
             let anchor = rs.selected_file.clone().unwrap_or_else(|| path.clone());
             if keep {
                 if let Some(selection) = crate::list_selection::extend_keeping(
@@ -2085,6 +2094,9 @@ impl Dispatcher {
     pub fn extend_file_selection_by(id: u64, delta: isize, order: Vec<String>, cx: &mut dyn Host) {
         let first = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
+            if rs.leave_stash() {
+                cx.notify();
+            }
             let anchor = rs
                 .selected_file
                 .clone()
@@ -2114,6 +2126,7 @@ impl Dispatcher {
             if order.is_empty() {
                 return false;
             }
+            rs.leave_stash();
             let before = rs.selected_file.clone();
             if !rs.selected_file.as_ref().is_some_and(|p| order.contains(p)) {
                 rs.selected_file = order.first().cloned();
@@ -5133,20 +5146,9 @@ impl Dispatcher {
     pub fn toggle_stash_view(id: u64, cx: &mut dyn Host) {
         let show = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
-            // `797-stash-list`: hiding forgets the entry picked in the list,
-            // showing shows the branch's own
-            if rs.viewed_stash.take().is_some() {
-                rs.stash_files = None;
-                rs.stash_files_sha = None;
-                rs.stash_diff = None;
-            }
-            if rs.stash.is_none() {
-                rs.showing_stash = false;
-                cx.notify();
-                return false;
-            }
-            rs.showing_stash = !rs.showing_stash;
+            let was_showing = rs.leave_stash();
             cx.notify();
+            rs.showing_stash = !was_showing && rs.stash.is_some();
             rs.showing_stash
         });
         if show {

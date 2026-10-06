@@ -85,11 +85,18 @@ impl Dispatcher {
             .cloned()
     }
 
-    /// A stash list row: show entry `sha` in the stash viewer.
+    /// A stash list row: show entry `sha` in the stash viewer, or leave
+    /// the viewer when it already shows it (GHD `onStashEntryClicked`
+    /// toggles the Stashed Changes row the same way).
     pub fn view_stash(id: u64, sha: String, cx: &mut dyn Host) {
         let load = Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             if !rs.stashes.iter().any(|e| e.sha == sha) {
+                return false;
+            }
+            if rs.showing_stash && rs.shown_stash().is_some_and(|e| e.sha == sha) {
+                rs.leave_stash();
+                cx.notify();
                 return false;
             }
             if rs.shown_stash().map(|e| &e.sha) != Some(&sha) {

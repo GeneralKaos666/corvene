@@ -1810,6 +1810,20 @@ impl RepositoryState {
 
     /// The stash the stash viewer shows: the entry picked in the stash list
     /// (`797-stash-list`), else [`Self::stash`].
+    /// Back from the stash viewer to the working directory's diff (GHD
+    /// `_selectWorkingDirectoryFiles` replaces a `ChangesSelectionKind.Stash`
+    /// selection). `797-stash-list`: the entry picked in the list is
+    /// forgotten, so showing again shows the branch's own. Whether the
+    /// stash was shown.
+    pub fn leave_stash(&mut self) -> bool {
+        if self.viewed_stash.take().is_some() {
+            self.stash_files = None;
+            self.stash_files_sha = None;
+            self.stash_diff = None;
+        }
+        std::mem::take(&mut self.showing_stash)
+    }
+
     pub fn shown_stash(&self) -> Option<&corvene_models::StashEntry> {
         self.viewed_stash
             .as_ref()
