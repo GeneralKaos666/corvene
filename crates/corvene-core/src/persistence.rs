@@ -724,6 +724,14 @@ pub trait StoreExt {
         &self,
         folders: &std::collections::HashMap<u64, Vec<String>>,
     ) -> Result<()>;
+    /// Changelists by repository id (flag `1313-changelists`).
+    fn changelists(
+        &self,
+    ) -> Result<std::collections::HashMap<u64, crate::changelists::Changelists>>;
+    fn save_changelists(
+        &self,
+        lists: &std::collections::HashMap<u64, crate::changelists::Changelists>,
+    ) -> Result<()>;
 
     fn accounts(&self) -> Result<Vec<Account>>;
     fn save_accounts(&self, accounts: &[Account]) -> Result<()>;
@@ -952,6 +960,19 @@ impl StoreExt for Store {
         folders: &std::collections::HashMap<u64, Vec<String>>,
     ) -> Result<()> {
         self.set("changes.collapsed_folders", folders)
+    }
+
+    fn changelists(
+        &self,
+    ) -> Result<std::collections::HashMap<u64, crate::changelists::Changelists>> {
+        Ok(self.get("changes.changelists")?.unwrap_or_default())
+    }
+
+    fn save_changelists(
+        &self,
+        lists: &std::collections::HashMap<u64, crate::changelists::Changelists>,
+    ) -> Result<()> {
+        self.set("changes.changelists", lists)
     }
 
     fn save_selected_repository(&self, id: Option<u64>) -> Result<()> {

@@ -621,6 +621,9 @@ pub(crate) fn main() {
         //   submodules (Repository › Submodules…, flag 1111)
         //   sparse-checkout (Repository › Sparse Checkout…, flag 1112)
         //   force-unlock:<path> (Force Unlock of an LFS lock, flag 1113)
+        //   new-changelist[:<path>[,<path>…]] (New Changelist… for those files, else
+        //   the selected ones; flag 1313), changelists:<Name>=<path>[,<path>…][;…]
+        //   (creates those changelists outright)
         if let Ok(popup) = std::env::var("CORVENE_POPUP") {
             // Deferred so a `CORVENE_ADD_REPO` repository has been added and refreshed.
             cx.spawn(async move |cx: &mut AsyncApp| {
@@ -2268,6 +2271,58 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         // `1113-lfs-locks`: `force-unlock:<path>`
         (other, Some(id)) if other.starts_with("force-unlock:") => {
             Dispatcher::request_force_unlock(id, other["force-unlock:".len()..].to_string(), cx)
+        }
+        // `1313-changelists`: `new-changelist[:<paths>]`, `changelists:<Name>=<paths>;…`
+        ("new-changelist", Some(id)) => {
+            let paths = corvene_core::AppState::global(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .map(|rs| rs.selected_files.clone())
+                .unwrap_or_default();
+            Dispatcher::show_popup(
+                Popup::NewChangelist {
+                    repo: id,
+                    paths,
+                    edit: None,
+                },
+                cx,
+            );
+        }
+        (other, Some(id)) if other.starts_with("new-changelist:") => {
+            let paths = other["new-changelist:".len()..]
+                .split(',')
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+                .collect();
+            Dispatcher::show_popup(
+                Popup::NewChangelist {
+                    repo: id,
+                    paths,
+                    edit: None,
+                },
+                cx,
+            );
+        }
+        (other, Some(id)) if other.starts_with("changelists:") => {
+            for spec in other["changelists:".len()..].split(';') {
+                let Some((name, paths)) = spec.split_once('=') else {
+                    continue;
+                };
+                let paths = paths
+                    .split(',')
+                    .filter(|p| !p.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                Dispatcher::create_changelist(
+                    id,
+                    name.to_string(),
+                    String::new(),
+                    paths,
+                    false,
+                    cx,
+                );
+            }
         }
         // `1106-apply-patch`: `apply-patch:<path>`, relative to the repository
         (other, Some(id)) if other.starts_with("apply-patch:") => {

@@ -497,10 +497,16 @@ pub fn working_stack(s: &AppState, rs: &RepositoryState) -> Option<Vec<StackedFi
     if !s.settings.stacked_diff_changes {
         return None;
     }
+    // `1313-changelists`: only the active list's files are committed
+    let lists = s
+        .repo_states
+        .iter()
+        .find(|(_, r)| std::ptr::eq(*r, rs))
+        .and_then(|(id, _)| crate::changelists::of(s, *id));
     let files: Vec<StackedFile> = status
         .files
         .iter()
-        .filter(|f| f.selection.kind() != corvene_models::DiffSelectionType::None)
+        .filter(|f| crate::changelists::committed(lists.as_deref(), f))
         .map(StackedFile::from)
         .collect();
     (!files.is_empty()).then_some(files)

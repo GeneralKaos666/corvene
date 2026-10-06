@@ -18,6 +18,7 @@ pub mod blame;
 pub mod bookmarks;
 pub mod branch_pruner;
 pub mod branch_tags;
+pub mod changelists;
 pub mod changes_state;
 pub mod clean_untracked;
 pub mod clone_info;

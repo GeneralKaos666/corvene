@@ -216,6 +216,7 @@ impl Dispatcher {
         };
         let options = Self::stash_pop_options(cx);
         let path = workdir.clone();
+        let restored = stash.sha.clone();
         spawn_bg(
             cx,
             move || {
@@ -238,7 +239,15 @@ impl Dispatcher {
             },
             move |result, cx| {
                 match result {
-                    Ok(kept) => Self::note_stash_pop(id, path, kept, cx),
+                    Ok(kept) => {
+                        Self::note_stash_pop(id, path, kept, cx);
+                        Self::note_changelist_stash_fate(
+                            id,
+                            &restored,
+                            crate::changelists::StashFate::Restored,
+                            cx,
+                        );
+                    }
                     Err(err) => Self::show_error("Could not restore stash", &err, cx),
                 }
                 Self::refresh_repository(id, cx);
@@ -521,6 +530,19 @@ impl Dispatcher {
 
     /// The selected changes of `files` into a stash ([`PartialStash`]).
     fn stash_partial(id: u64, files: Vec<WorkingDirectoryFileChange>, cx: &mut dyn Host) {
+        Self::stash_partial_then(id, files, None, |_, _| {}, cx);
+    }
+
+    /// [`Self::stash_partial`] with `message` in place of the generated one
+    /// (a Desktop stash keeps its marker message), then `then` with the new
+    /// entry's sha (`1313-changelists` records the list it was made from).
+    pub(crate) fn stash_partial_then(
+        id: u64,
+        files: Vec<WorkingDirectoryFileChange>,
+        message: Option<String>,
+        then: impl FnOnce(String, &mut dyn Host) + 'static,
+        cx: &mut dyn Host,
+    ) {
         if files.is_empty() {
             return;
         }
@@ -544,7 +566,7 @@ impl Dispatcher {
             return;
         };
         let message = match target {
-            Some(PartialStash::Listed) => partial_stash_message(&files),
+            Some(PartialStash::Listed) => message.unwrap_or_else(|| partial_stash_message(&files)),
             Some(PartialStash::Desktop) => corvene_git::desktop_stash_message(&branch),
             Some(PartialStash::Blocked) => {
                 Self::show_error(
@@ -556,16 +578,34 @@ impl Dispatcher {
             }
             None => return,
         };
-        Self::run_history_op(
-            id,
-            "Could not stash changes",
-            move |git, workdir| {
-                corvene_git::create_partial_stash(
-                    git, &workdir, &branch, &message, &files, options, guard,
-                )
-                .map(|_| ())
-            },
+        let Some((git, workdir)) = Self::repo_context(id, cx) else {
+            return;
+        };
+        spawn_bg(
             cx,
+            move || {
+                let made = corvene_git::create_partial_stash(
+                    git.clone(),
+                    &workdir,
+                    &branch,
+                    &message,
+                    &files,
+                    options,
+                    guard,
+                )?;
+                Ok::<_, corvene_git::GitError>(
+                    made.then(|| corvene_git::stash_tip(git, &workdir))
+                        .flatten(),
+                )
+            },
+            move |result, cx| {
+                match result {
+                    Ok(Some(sha)) => then(sha, cx),
+                    Ok(None) => {}
+                    Err(err) => Self::show_error("Could not stash changes", &err, cx),
+                }
+                Self::refresh_repository(id, cx);
+            },
         );
     }
 
@@ -836,10 +876,19 @@ impl Dispatcher {
 
     /// `DropKeptStash` › Drop Stash: drop the entry whose commit is `sha`.
     pub fn drop_stash_entry(id: u64, sha: String, cx: &mut dyn Host) {
-        Self::run_history_op(
+        let dropped = sha.clone();
+        Self::run_history_op_then(
             id,
             "Could not discard stash",
             move |git, workdir| corvene_git::drop_desktop_stash_entry(git, &workdir, &sha),
+            move |cx| {
+                Self::note_changelist_stash_fate(
+                    id,
+                    &dropped,
+                    crate::changelists::StashFate::Dropped,
+                    cx,
+                )
+            },
             cx,
         );
     }

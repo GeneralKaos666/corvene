@@ -629,6 +629,13 @@ pub enum Popup {
     StashWithMessage {
         repo: u64,
     },
+    /// Corvene (`1313-changelists`): New Changelist… holding `paths`, or
+    /// Edit Changelist… of list `edit`.
+    NewChangelist {
+        repo: u64,
+        paths: Vec<String>,
+        edit: Option<u64>,
+    },
     /// Corvene (`1105-clean-untracked-files`): the `git clean` dry run with
     /// a checkbox per path (`RepositoryState::clean_preview`).
     CleanUntrackedFiles {
@@ -868,6 +875,7 @@ impl Popup {
             | Self::DropKeptStash { repo, .. }
             | Self::ConfirmDropStashEntry { repo, .. }
             | Self::StashWithMessage { repo }
+            | Self::NewChangelist { repo, .. }
             | Self::CleanUntrackedFiles { repo }
             | Self::Submodules { repo }
             | Self::SparseCheckout { repo }
@@ -1959,6 +1967,8 @@ pub struct AppState {
     /// `1310-file-list-tree`: each repository's collapsed folders in the
     /// changes tree, as saved.
     pub collapsed_folders: HashMap<u64, std::sync::Arc<std::collections::BTreeSet<String>>>,
+    /// `1313-changelists`: each repository's changelists, as saved.
+    pub changelists: HashMap<u64, std::sync::Arc<crate::changelists::Changelists>>,
     /// `117-file-icons`: the extension icon theme the setting names, loaded
     /// (`None` for the built-in set, none, or while it loads).
     pub file_icon_theme: Option<std::sync::Arc<crate::file_icons::LoadedIconTheme>>,

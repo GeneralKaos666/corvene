@@ -14,6 +14,7 @@ mod app_dialogs;
 mod apply_patch;
 pub(crate) mod branch_dialogs;
 mod change_repository_alias;
+mod changelist_dialogs;
 mod checkout_from_fork;
 mod choose_repository_account;
 mod ci_check_run_rerun;
@@ -661,6 +662,18 @@ impl DialogHost {
                 .into(),
             Popup::StashWithMessage { repo } => cx
                 .new(|cx| stash_list_dialogs::StashWithMessageDialog::new(*repo, window, cx))
+                .into(),
+            Popup::NewChangelist { repo, paths, edit } => cx
+                .new(|cx| {
+                    changelist_dialogs::NewChangelistDialog::new(
+                        state,
+                        *repo,
+                        paths.clone(),
+                        *edit,
+                        window,
+                        cx,
+                    )
+                })
                 .into(),
             Popup::CleanUntrackedFiles { repo } => cx
                 .new(|cx| clean_untracked_files::CleanUntrackedFilesDialog::new(state, *repo, cx))

@@ -175,6 +175,7 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         | Popup::MoveRepositoryToGroup { repo: r }
         | Popup::ConfirmDiscardStash { repo: r }
         | Popup::StashWithMessage { repo: r }
+        | Popup::NewChangelist { repo: r, .. }
         | Popup::CleanUntrackedFiles { repo: r }
         | Popup::Submodules { repo: r }
         | Popup::SparseCheckout { repo: r }

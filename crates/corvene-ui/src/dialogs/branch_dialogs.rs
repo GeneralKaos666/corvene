@@ -1493,6 +1493,9 @@ pub struct StashAndSwitchBranchDialog {
     /// `865-switch-branch-discard`: "Discard my changes" is chosen
     /// (overrides `action`).
     discard: bool,
+    /// `1313-changelists`: per changelist, whether it stays stashed on the
+    /// current branch (`true`) or travels, when chosen apart from `action`.
+    list_choices: std::collections::HashMap<u64, bool>,
 }
 
 impl StashAndSwitchBranchDialog {
@@ -1503,7 +1506,26 @@ impl StashAndSwitchBranchDialog {
             branch,
             action: UncommittedChangesStrategy::StashOnCurrentBranch,
             discard: false,
+            list_choices: Default::default(),
         }
+    }
+
+    /// `1313-changelists`: the lists with changed files, each with whether
+    /// it stays (its own choice, else the main one).
+    fn list_rows(&self, cx: &App) -> Vec<(u64, String, usize, bool)> {
+        let s = self.state.read(cx);
+        let status = s
+            .repo_states
+            .get(&self.repo)
+            .and_then(|rs| rs.status.as_deref());
+        let main_leaves = self.action == UncommittedChangesStrategy::StashOnCurrentBranch;
+        corvene_core::changelists::lists_with_changes(s, self.repo, status)
+            .into_iter()
+            .map(|(id, name, n)| {
+                let leaves = self.list_choices.get(&id).copied().unwrap_or(main_leaves);
+                (id, name, n, leaves)
+            })
+            .collect()
     }
 }
 
@@ -1536,13 +1558,27 @@ impl Render for StashAndSwitchBranchDialog {
             .flags
             .bool(corvene_core::flags::ids::SWITCH_BRANCH_DISCARD);
         let discard = offer_discard && self.discard;
+        // `1313-changelists`: lists that stay or travel on their own
+        let list_rows = self.list_rows(cx);
+        let main_leaves = action == UncommittedChangesStrategy::StashOnCurrentBranch;
+        let split = !discard
+            && list_rows
+                .iter()
+                .any(|(_, _, _, leaves)| *leaves != main_leaves);
+        let any_leaves =
+            !discard && (main_leaves || list_rows.iter().any(|(_, _, _, leaves)| *leaves));
+        let leave_lists: Vec<u64> = list_rows
+            .iter()
+            .filter(|(_, _, _, leaves)| *leaves)
+            .map(|(id, _, _, _)| *id)
+            .collect();
         // `dialog#stash-changes` is 450 px wide
         let content = div()
             .w(crate::theme::fit_width(408.))
             .flex()
             .flex_col()
             .gap(SPACING())
-            .when(has_stash && !discard && action == UncommittedChangesStrategy::StashOnCurrentBranch, |d| {
+            .when(has_stash && any_leaves, |d| {
                 d.child(
                     div()
                         .flex()
@@ -1609,6 +1645,7 @@ impl Render for StashAndSwitchBranchDialog {
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.action = UncommittedChangesStrategy::StashOnCurrentBranch;
                                     this.discard = false;
+                                    this.list_choices.clear();
                                     cx.notify();
                                 })),
                             )
@@ -1625,6 +1662,7 @@ impl Render for StashAndSwitchBranchDialog {
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.action = UncommittedChangesStrategy::MoveToNewBranch;
                                     this.discard = false;
+                                    this.list_choices.clear();
                                     cx.notify();
                                 })),
                             )
@@ -1646,7 +1684,95 @@ impl Render for StashAndSwitchBranchDialog {
                                 )
                             }),
                     ),
-            );
+            )
+            // `1313-changelists`: a Leave / Bring choice per changelist
+            .when(!discard && !list_rows.is_empty(), |d| {
+                let current = current.clone();
+                let target = self.branch.clone();
+                d.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(SPACING_HALF())
+                        .child(
+                            div()
+                                .text_color(t.text_secondary)
+                                .text_size(FONT_SIZE_SM())
+                                .child("Changelists can stay or travel on their own:"),
+                        )
+                        .children(list_rows.iter().map(|(id, name, n, leaves)| {
+                            let (id, leaves) = (*id, *leaves);
+                            let choice = |label: &'static str, on: bool, value: bool| {
+                                div()
+                                    .id(SharedString::from(format!(
+                                        "switch-list-{id}-{label}"
+                                    )))
+                                    .px(SPACING())
+                                    .h(zpx(22.))
+                                    .flex()
+                                    .items_center()
+                                    .text_size(FONT_SIZE_SM())
+                                    .border_1()
+                                    .border_color(t.secondary_button_border)
+                                    .cursor_pointer()
+                                    .map(|d| {
+                                        if on {
+                                            d.bg(t.box_selected_active_background)
+                                                .text_color(t.box_selected_active_text)
+                                        } else {
+                                            d.bg(t.secondary_button_background)
+                                                .text_color(t.secondary_button_text)
+                                        }
+                                    })
+                                    .child(label)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.list_choices.insert(id, value);
+                                        cx.notify();
+                                    }))
+                            };
+                            div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(SPACING())
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .child(format!(
+                                            "{name} ({n} {})",
+                                            if *n == 1 { "file" } else { "files" }
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .child(
+                                            choice("Leave", leaves, true)
+                                                .rounded_l(BORDER_RADIUS())
+                                                .border_r_0(),
+                                        )
+                                        .child(
+                                            choice("Bring", !leaves, false)
+                                                .rounded_r(BORDER_RADIUS()),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .text_size(FONT_SIZE_SM())
+                                        .text_color(t.text_secondary)
+                                        .child(if leaves {
+                                            format!("stays on {current}")
+                                        } else {
+                                            format!("goes to {target}")
+                                        }),
+                                )
+                        })),
+                )
+            });
         dialog(
             "dialog-stash-and-switch",
             mac_or("Switch Branch", "Switch branch"),
@@ -1672,6 +1798,15 @@ impl Render for StashAndSwitchBranchDialog {
                         Dispatcher::close_popup(cx);
                         if discard {
                             Dispatcher::discard_all_and_checkout(repo, branch.clone(), cx);
+                        } else if split {
+                            // `1313-changelists`: some lists stay, the rest travel
+                            Dispatcher::checkout_branch_splitting_changelists(
+                                repo,
+                                branch.clone(),
+                                leave_lists.clone(),
+                                main_leaves,
+                                cx,
+                            );
                         } else {
                             Dispatcher::checkout_branch(repo, branch.clone(), Some(action), cx);
                         }

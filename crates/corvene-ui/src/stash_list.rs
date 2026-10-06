@@ -40,6 +40,8 @@ pub fn stash_list(
     let can_restore = rs.info.as_ref().and_then(|i| i.current_branch()).is_some()
         && rs.conflict_state.is_none()
         && !rs.committing;
+    // `1313-changelists`: stashes made from lists are named after them
+    let lists = corvene_core::changelists::of(corvene_core::AppState::global(cx).read(cx), id);
     let header = div()
         .id("stash-list-header")
         .flex_none()
@@ -88,6 +90,9 @@ pub fn stash_list(
                     entry,
                     shown.as_ref() == Some(&entry.sha),
                     can_restore,
+                    lists
+                        .as_deref()
+                        .and_then(|l| corvene_core::changelists::stash_label(l, &entry.sha)),
                     cx,
                 )
             }))
@@ -126,10 +131,13 @@ fn stash_row(
     entry: &StashEntry,
     selected: bool,
     can_restore: bool,
+    // `1313-changelists`: "Stash of <list>" for a stash made from a list
+    list_label: Option<String>,
     cx: &App,
 ) -> impl IntoElement {
     let t = cx.ghd();
-    let title = corvene_core::stash_list::stash_title(entry);
+    let from_list = list_label.is_some();
+    let title = list_label.unwrap_or_else(|| corvene_core::stash_list::stash_title(entry));
     let detail = stash_detail(entry);
     let desktop = entry.branch.is_some();
     let (text, muted) = if selected {
@@ -171,6 +179,10 @@ fn stash_row(
                 crate::native_menu::show_context_menu(items, ev.position, window, cx);
             },
         )
+        // `1313-changelists`: made from a changelist
+        .when(from_list, |d| {
+            d.child(octicon(Octicon::ListUnordered, muted))
+        })
         .child(
             div()
                 .flex_1()

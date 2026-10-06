@@ -143,6 +143,15 @@ impl Dispatcher {
                 .map(|(id, folders)| (id, std::sync::Arc::new(folders.into_iter().collect())))
                 .collect()
         };
+        // Corvene (`1313-changelists`): each repository's changelists
+        let changelists = {
+            let mut saved = store.changelists().unwrap_or_default();
+            saved.retain(|id, _| repositories.iter().any(|r| r.id == *id));
+            saved
+                .into_iter()
+                .map(|(id, lists)| (id, std::sync::Arc::new(lists)))
+                .collect()
+        };
         // `876-git-spawn-error-details`
         corvene_git::set_explain_missing_workdir(
             flags.bool(crate::flags::ids::GIT_SPAWN_ERROR_DETAILS),
@@ -227,6 +236,7 @@ impl Dispatcher {
             excluded_files,
             excluded_files_restored: std::collections::HashSet::new(),
             collapsed_folders,
+            changelists,
             file_icon_theme: None,
             hosts,
         });
@@ -1717,6 +1727,13 @@ impl Dispatcher {
                         .then(|| s.excluded_files.get(&id).cloned())
                         .flatten();
                     let mut status_applied = false;
+                    // `1313-changelists`: paths changed since the last status
+                    // join the active list, so they are only looked for with one
+                    let capture_new_paths = crate::changelists::enabled(s)
+                        && s.changelists
+                            .get(&id)
+                            .is_some_and(|l| l.active_list().is_some());
+                    let mut new_paths: Vec<String> = Vec::new();
                     let repo_state: &mut RepositoryState = s.repo_state_mut(id);
                     repo_state.loading = false;
                     repo_state.last_refresh = Some(Instant::now());
@@ -1814,6 +1831,19 @@ impl Dispatcher {
                                         repo_state.status.as_deref(),
                                     );
                                 }
+                                if capture_new_paths
+                                    && !same
+                                    && let Some(previous) = repo_state.status.as_deref()
+                                {
+                                    let known: std::collections::HashSet<&str> =
+                                        previous.files.iter().map(|f| f.path.as_str()).collect();
+                                    new_paths = status
+                                        .files
+                                        .iter()
+                                        .filter(|f| !known.contains(f.path.as_str()))
+                                        .map(|f| f.path.clone())
+                                        .collect();
+                                }
                                 // `767-persist-file-selection`
                                 if let Some(excluded) = &restore_excluded {
                                     crate::drafts::apply_excluded(
@@ -1875,6 +1905,7 @@ impl Dispatcher {
                     if status_applied {
                         s.excluded_files_restored.insert(id);
                         crate::drafts::note_excluded(s, id, cx);
+                        Self::capture_new_changelist_paths(s, id, new_paths, cx);
                     }
                     if let Some(main) = main_worktree
                         && let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
@@ -4412,6 +4443,8 @@ impl Dispatcher {
         );
         let task = cx.background_executor().spawn(async move {
             let mut kept: Option<(corvene_models::StashEntry, Vec<String>)> = None;
+            // `1313-changelists`: the stash `729` restored, for its lists
+            let mut popped: Option<String> = None;
             let result =
                 corvene_git::hooks::with_hook_callbacks(&hooks.callbacks, || match strategy {
                     UncommittedChangesStrategy::StashOnCurrentBranch => {
@@ -4511,6 +4544,7 @@ impl Dispatcher {
                             pop_options,
                         )
                         .map(|pop| {
+                            popped = Some(entry.sha.clone());
                             kept = Self::kept_after_pop(git, &workdir_for_submodules, &entry, pop);
                         }),
                         None => Ok(()),
@@ -4519,7 +4553,7 @@ impl Dispatcher {
                 }
                 _ => None,
             };
-            (result, submodule_error, pop_error, kept)
+            (result, submodule_error, pop_error, kept, popped)
         });
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).checkout_target = Some(target);
@@ -4527,11 +4561,19 @@ impl Dispatcher {
             cx.notify();
         });
         cx.spawn(async move |cx: &mut AsyncCtx| {
-            let (result, submodule_error, pop_error, kept) = task.await;
+            let (result, submodule_error, pop_error, kept, popped) = task.await;
             cx.update(|cx| {
                 Self::state(cx).update(cx, |s, _| s.repo_state_mut(id).checkout_target = None);
                 if let Err(err) = result {
                     Self::show_error("Could not switch branch", &err, cx);
+                }
+                if let Some(sha) = popped {
+                    Self::note_changelist_stash_fate(
+                        id,
+                        &sha,
+                        crate::changelists::StashFate::Restored,
+                        cx,
+                    );
                 }
                 if let Some(err) = submodule_error {
                     Self::show_error("Could not update submodules", &err, cx);
@@ -5305,10 +5347,19 @@ impl Dispatcher {
             return;
         }
         let sha = stash.sha;
-        Self::run_history_op(
+        let dropped = sha.clone();
+        Self::run_history_op_then(
             id,
             "Could not discard stash",
             move |git, workdir| corvene_git::drop_desktop_stash_entry(git, &workdir, &sha),
+            move |cx| {
+                Self::note_changelist_stash_fate(
+                    id,
+                    &dropped,
+                    crate::changelists::StashFate::Dropped,
+                    cx,
+                )
+            },
             cx,
         );
     }
@@ -6112,19 +6163,15 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let files: Vec<_> = Self::state(cx)
-            .read(cx)
-            .repo_states
-            .get(&id)
-            .and_then(|r| r.status.as_deref())
-            .map(|st| {
-                st.files
-                    .iter()
-                    .filter(|f| f.selection.kind() != DiffSelectionType::None)
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
+        // Corvene (`1313-changelists`): only the active list's ticked files
+        let files: Vec<_> = Self::committed_files(Self::state(cx).read(cx), id);
+        // the files that leave their changelists: a partly committed file
+        // is still changed
+        let committed_paths: Vec<String> = files
+            .iter()
+            .filter(|f| f.selection.kind() == DiffSelectionType::All)
+            .map(|f| f.path.clone())
+            .collect();
         // every changed file goes in whole: `reset -- .` would only unstage
         // what `update-index` stages again (one index rewrite fewer, ~120 ms
         // on a 50,000-file index). Not with an index entry the list leaves
@@ -6137,6 +6184,7 @@ impl Dispatcher {
             .is_some_and(|st| {
                 !st.has_conflicts()
                     && !st.hidden_index_entries
+                    && files.len() == st.files.len()
                     && st
                         .files
                         .iter()
@@ -6398,6 +6446,10 @@ impl Dispatcher {
                     cx.notify();
                 });
                 let committed = result.is_ok();
+                // `1313-changelists`: committed files leave their lists
+                if committed {
+                    Self::forget_changelist_paths(id, &committed_paths, cx);
+                }
                 if committed && let Some((_, target)) = &fixup {
                     Self::set_banner(
                         crate::mco::Banner::FixupCommitted {
@@ -6574,6 +6626,7 @@ impl Dispatcher {
             .read(cx)
             .settings
             .confirm_discard_changes_permanently;
+        let discarded: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
         Self::state(cx).update(cx, |s, cx| {
             s.repo_state_mut(id).discarding = true;
             cx.notify();
@@ -6597,7 +6650,17 @@ impl Dispatcher {
                 });
                 match result {
                     Err(err) => Self::show_error("Could not discard changes", err.to_string(), cx),
-                    Ok(untrashable) => Self::confirm_delete_untrashable(id, untrashable, cx),
+                    Ok(untrashable) => {
+                        // `1313-changelists`: discarded files leave their
+                        // lists (not the ones the Trash refused, still changed)
+                        let gone: Vec<String> = discarded
+                            .iter()
+                            .filter(|p| !untrashable.contains(p))
+                            .cloned()
+                            .collect();
+                        Self::forget_changelist_paths(id, &gone, cx);
+                        Self::confirm_delete_untrashable(id, untrashable, cx)
+                    }
                 }
                 Self::refresh_repository(id, cx);
             });

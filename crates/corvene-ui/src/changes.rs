@@ -116,6 +116,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use corvene_core::changelists::{Changelists, UNGROUPED};
 use corvene_core::commit_progress::{CommitPhase, CommitProgress};
 use corvene_core::filter::{no_results_message, option_count};
 use corvene_core::{
@@ -328,11 +329,16 @@ pub struct ChangesSidebar {
     windows_names_cache: RefCell<Option<(std::sync::Weak<Status>, WindowsNames)>>,
     /// `797-stash-list`: the Stashes section is collapsed.
     stash_list_collapsed: bool,
-    /// `1310-file-list-tree`: the visible files as a tree (rebuilt with them
-    /// or when a folder collapses).
-    tree_cache: RefCell<Option<Rc<TreeData>>>,
-    /// `1310-file-list-tree`: the folder row whose files the user selected.
-    tree_cursor: Option<String>,
+    /// `1310-file-list-tree` / `1313-changelists`: the visible files as
+    /// rows (a section per changelist, folder trees), rebuilt with them or
+    /// when a folder or a group collapses.
+    layout_cache: RefCell<Option<Rc<LayoutData>>>,
+    /// `1310-file-list-tree`: the folder row (its section and path) whose
+    /// files the user selected.
+    tree_cursor: Option<(usize, String)>,
+    /// `1313-changelists`: the group header row (its section) whose files
+    /// the user selected.
+    group_cursor: Option<usize>,
 }
 
 /// Included files Windows cannot check out: how many, and the first one
@@ -359,6 +365,8 @@ struct VisibleKey {
     mode: String,
     /// `793-hide-whitespace-only-files`: the files left out (by address).
     whitespace_only: Option<usize>,
+    /// `1313-changelists`: the repository's lists (by address).
+    lists: Option<usize>,
 }
 
 /// The cached part of [`VisibleFiles`]. It keeps the status only weakly:
@@ -368,9 +376,20 @@ struct VisibleData {
     key: VisibleKey,
     /// Pins the allocation `key.status` points at (never read).
     _status: Option<std::sync::Weak<Status>>,
+    /// Pins `key.lists` (never read).
+    _lists: Option<std::sync::Arc<Changelists>>,
+    /// In list order; grouped by changelist (`groups`) when there are lists.
     indices: Vec<usize>,
-    /// `getCheckAllValue` of the visible files.
+    /// `1313-changelists`: the groups `indices` fall in, in order, the
+    /// files in no list last. `None` without lists.
+    groups: Option<Vec<GroupInfo>>,
+    /// `1313-changelists`: the name of the one list whose changed files are
+    /// exactly what the next commit takes ("Commit <list> to main").
+    single_list: Option<SharedString>,
+    /// `getCheckAllValue` of the visible files (the active list's with one).
     include_all: Option<bool>,
+    /// Visible files whose checkbox counts (every one, or the active list's).
+    checkable: usize,
     /// Files included in the commit, and whether one of them is filtered out
     /// (GHD `isCommittingFileHiddenByFilter`).
     included: usize,
@@ -394,6 +413,7 @@ impl VisibleData {
         key: VisibleKey,
         status: Option<&std::sync::Arc<Status>>,
         whitespace_only: Option<&std::collections::HashSet<String>>,
+        lists: Option<&std::sync::Arc<Changelists>>,
     ) -> Self {
         let files = status.map_or(&[][..], |s| &s.files[..]);
         // `706-changes-hide-globs`
@@ -417,17 +437,73 @@ impl VisibleData {
             indices.retain(|&i| !paths.contains(&files[i].path));
             whitespace_hidden = before - indices.len();
         }
+        // `1313-changelists`: the visible files by group, the lists in
+        // their order and the files in no list last
+        let lists = lists.filter(|l| !l.is_empty());
+        let mut groups = None;
+        if let Some(lists) = lists {
+            let mut shown = vec![false; files.len()];
+            for &i in &indices {
+                shown[i] = true;
+            }
+            let mut group_of = vec![corvene_core::changelists::UNGROUPED; files.len()];
+            let mut totals: std::collections::HashMap<u64, usize> =
+                std::collections::HashMap::new();
+            for (i, f) in files.iter().enumerate() {
+                group_of[i] = lists.group_of(&f.path);
+                *totals.entry(group_of[i]).or_default() += 1;
+            }
+            let mut ordered = Vec::with_capacity(indices.len());
+            let mut infos = Vec::with_capacity(lists.lists.len() + 1);
+            let active = lists.active_list().map(|l| l.id);
+            let mut push = |id: u64, name: SharedString, description: String| {
+                let start = ordered.len();
+                ordered.extend(indices.iter().copied().filter(|&i| group_of[i] == id));
+                infos.push(GroupInfo {
+                    id,
+                    name,
+                    description,
+                    active: active == Some(id),
+                    checkable: active.is_none_or(|a| a == id),
+                    collapsed: lists.collapsed.contains(&id),
+                    range: start..ordered.len(),
+                    total: totals.get(&id).copied().unwrap_or(0),
+                });
+            };
+            for list in &lists.lists {
+                push(list.id, list.name.clone().into(), list.description.clone());
+            }
+            push(
+                corvene_core::changelists::UNGROUPED,
+                "Changes".into(),
+                String::new(),
+            );
+            indices = ordered;
+            groups = Some(infos);
+        }
         let kind = |i: &usize| files[*i].selection.kind();
-        // `getCheckAllValue`: the box reflects only the files passing the filter
-        let include_all = if indices.iter().all(|i| kind(i) == DiffSelectionType::All) {
+        // what the commit takes: every ticked file, or the active list's
+        let is_included = |f: &WorkingDirectoryFileChange| {
+            corvene_core::changelists::committed(lists.map(|l| &**l), f)
+        };
+        let checkable_index = |i: &usize| lists.is_none_or(|l| l.commits_path(&files[*i].path));
+        // `getCheckAllValue`: the box reflects only the files passing the
+        // filter (and in the active list, with one)
+        let checkable_indices: Vec<usize> =
+            indices.iter().copied().filter(checkable_index).collect();
+        let include_all = if checkable_indices
+            .iter()
+            .all(|i| kind(i) == DiffSelectionType::All)
+        {
             Some(true)
-        } else if indices.iter().all(|i| kind(i) == DiffSelectionType::None) {
+        } else if checkable_indices
+            .iter()
+            .all(|i| kind(i) == DiffSelectionType::None)
+        {
             Some(false)
         } else {
             None
         };
-        let is_included =
-            |f: &WorkingDirectoryFileChange| f.selection.kind() != DiffSelectionType::None;
         let included = files.iter().filter(|f| is_included(f)).count();
         let included_hidden = indices.len() != files.len() && {
             let mut shown = vec![false; files.len()];
@@ -439,11 +515,33 @@ impl VisibleData {
                 .zip(&shown)
                 .any(|(f, shown)| !shown && is_included(f))
         };
+        // `1313-changelists`: "Commit <list> to main" when the commit takes
+        // exactly one list's changed files
+        let single_list = lists.filter(|_| included > 0).and_then(|lists| {
+            let committed: Vec<&str> = files
+                .iter()
+                .filter(|f| is_included(f))
+                .map(|f| f.path.as_str())
+                .collect();
+            let list = lists
+                .lists
+                .iter()
+                .find(|l| committed.iter().all(|p| l.paths.contains(*p)))?;
+            let changed = files
+                .iter()
+                .filter(|f| list.paths.contains(&f.path))
+                .count();
+            (changed == committed.len()).then(|| SharedString::from(list.name.clone()))
+        });
         Self {
             key,
             _status: status.map(std::sync::Arc::downgrade),
+            _lists: lists.cloned(),
             indices,
+            groups,
+            single_list,
             include_all,
+            checkable: checkable_indices.len(),
             included,
             included_hidden,
             whitespace_hidden,
@@ -493,6 +591,30 @@ impl VisibleFiles {
         self.iter().map(|f| f.path.clone()).collect()
     }
 
+    /// `1313-changelists`: whether visible file `ix` goes into the next
+    /// commit when ticked (no active list, or in it).
+    fn checkable(&self, ix: usize) -> bool {
+        match (&self.data._lists, self.get(ix)) {
+            (Some(lists), Some(file)) => lists.commits_path(&file.path),
+            _ => true,
+        }
+    }
+
+    /// The paths the header checkbox ticks: the visible files whose
+    /// checkbox counts.
+    fn checkable_paths(&self) -> Vec<String> {
+        (0..self.len())
+            .filter(|&ix| self.checkable(ix))
+            .filter_map(|ix| self.get(ix))
+            .map(|f| f.path.clone())
+            .collect()
+    }
+
+    /// `1313-changelists`: the groups, when there are lists.
+    fn groups(&self) -> Option<&[GroupInfo]> {
+        self.data.groups.as_deref()
+    }
+
     fn position(&self, path: &str) -> Option<usize> {
         self.iter().position(|f| f.path == path)
     }
@@ -516,17 +638,192 @@ impl VisibleFiles {
     }
 }
 
-/// `1310-file-list-tree`: the visible files as folders.
-struct TreeData {
+/// `1313-changelists`: one group of the changes list: a changelist's
+/// visible files, or (last) the files in no list.
+struct GroupInfo {
+    /// The changelist's id, `UNGROUPED` for files in none.
+    id: u64,
+    name: SharedString,
+    description: String,
+    active: bool,
+    /// Whether its files' checkboxes count (no active list, or this is it).
+    checkable: bool,
+    /// Collapsed by the user (a filter text still expands it).
+    collapsed: bool,
+    /// Its visible files: `VisibleData::indices[range]`.
+    range: Range<usize>,
+    /// Its changed files, filtered or not.
+    total: usize,
+}
+
+/// `1310-file-list-tree` / `1313-changelists`: the rows of the changes
+/// list, built from the visible files: one section per group (with a header
+/// row when there are changelists), its files flat or as a folder tree.
+struct LayoutData {
     /// Built from these visible files (held, so the pointer stays theirs).
     visible: Rc<VisibleData>,
     /// The collapsed folders' set, by address (held in `_collapsed`).
     collapsed: Option<usize>,
     _collapsed: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
     expand_all: bool,
-    tree: corvene_core::file_tree::FileTree,
-    /// Each row's checkbox: its file's, or `getCheckAllValue` of a folder's.
+    tree_mode: bool,
+    sections: Vec<Section>,
+    rows: usize,
+    /// Each row's checkbox: its file's, or `getCheckAllValue` of a folder's
+    /// or a group's files.
     include: Vec<Option<bool>>,
+}
+
+/// One group's rows.
+struct Section {
+    /// Its group (`None`: no changelists, every file in this one section).
+    group: Option<usize>,
+    /// The header row.
+    header: Option<usize>,
+    /// The first row after the header, and how many follow (0 collapsed).
+    first: usize,
+    body: usize,
+    /// Its files' visible indices start here (tree items are relative).
+    offset: usize,
+    /// How many visible files it has.
+    len: usize,
+    /// The group is collapsed (no body rows).
+    collapsed: bool,
+    /// Its files as a tree, in tree mode.
+    tree: Option<corvene_core::file_tree::FileTree>,
+}
+
+/// What a row of the changes list is.
+#[derive(Clone, Debug, PartialEq)]
+enum RowRef {
+    /// A group's header (the section).
+    Header(usize),
+    /// A file (its visible index), at `depth` in a tree.
+    File {
+        visible: usize,
+        depth: Option<usize>,
+    },
+    /// A folder row of a section's tree (the tree's row).
+    Folder { section: usize, row: usize },
+}
+
+impl LayoutData {
+    /// Anything beyond a flat list of files: trees or group headers.
+    fn structured(&self) -> bool {
+        self.tree_mode || self.sections.iter().any(|s| s.header.is_some())
+    }
+
+    fn section_of_row(&self, ix: usize) -> Option<usize> {
+        self.sections
+            .iter()
+            .rposition(|s| s.header.unwrap_or(s.first) <= ix)
+    }
+
+    fn section_of_visible(&self, visible: usize) -> Option<usize> {
+        self.sections
+            .iter()
+            .rposition(|s| s.offset <= visible && visible < s.offset + s.len)
+    }
+
+    fn row(&self, ix: usize) -> Option<RowRef> {
+        use corvene_core::file_tree::TreeRow;
+        let section = self.section_of_row(ix)?;
+        let s = &self.sections[section];
+        if s.header == Some(ix) {
+            return Some(RowRef::Header(section));
+        }
+        let local = ix.checked_sub(s.first)?;
+        if local >= s.body {
+            return None;
+        }
+        match &s.tree {
+            Some(tree) => match tree.rows.get(local)? {
+                TreeRow::File { item, depth } => Some(RowRef::File {
+                    visible: s.offset + item,
+                    depth: Some(*depth),
+                }),
+                TreeRow::Folder { .. } => Some(RowRef::Folder {
+                    section,
+                    row: local,
+                }),
+            },
+            None => Some(RowRef::File {
+                visible: s.offset + local,
+                depth: None,
+            }),
+        }
+    }
+
+    /// The row showing visible file `visible` (`None` inside a collapsed
+    /// folder or group).
+    fn row_of_visible(&self, visible: usize) -> Option<usize> {
+        let s = &self.sections[self.section_of_visible(visible)?];
+        if s.body == 0 {
+            return None;
+        }
+        match &s.tree {
+            Some(tree) => tree.row_of_item(visible - s.offset).map(|r| s.first + r),
+            None => Some(s.first + visible - s.offset),
+        }
+    }
+
+    /// The visible files `ix` stands for: a header's group, a folder's
+    /// files, or the file.
+    fn row_items(&self, ix: usize) -> Vec<usize> {
+        match self.row(ix) {
+            Some(RowRef::Header(section)) => {
+                let s = &self.sections[section];
+                (s.offset..s.offset + s.len).collect()
+            }
+            Some(RowRef::Folder { section, row }) => {
+                let s = &self.sections[section];
+                s.tree
+                    .as_ref()
+                    .map(|t| t.row_items(row).iter().map(|&i| s.offset + i).collect())
+                    .unwrap_or_default()
+            }
+            Some(RowRef::File { visible, .. }) => vec![visible],
+            None => Vec::new(),
+        }
+    }
+
+    /// Every visible file in row order, collapsed ones included (the order
+    /// a ⇧-click range follows).
+    fn order(&self) -> Vec<usize> {
+        let mut order = Vec::with_capacity(self.visible.indices.len());
+        for s in &self.sections {
+            match &s.tree {
+                Some(tree) => order.extend(tree.order.iter().map(|&i| s.offset + i)),
+                None => order.extend(s.offset..s.offset + s.len),
+            }
+        }
+        order
+    }
+
+    /// The files on shown rows, in row order (⇧↑ / ⇧↓ steps).
+    fn visible_items(&self) -> Vec<usize> {
+        let mut items = Vec::new();
+        for s in self.sections.iter().filter(|s| s.body > 0) {
+            match &s.tree {
+                Some(tree) => items.extend(tree.visible_items().into_iter().map(|i| s.offset + i)),
+                None => items.extend(s.offset..s.offset + s.len),
+            }
+        }
+        items
+    }
+
+    /// The row of folder `folder` in section `section`.
+    fn folder_row(&self, section: usize, folder: &str) -> Option<usize> {
+        use corvene_core::file_tree::TreeRow;
+        let s = self.sections.get(section)?;
+        let local = s
+            .tree
+            .as_ref()?
+            .rows
+            .iter()
+            .position(|r| matches!(r, TreeRow::Folder { path, .. } if path == folder))?;
+        Some(s.first + local)
+    }
 }
 
 /// A file's checkbox value.
@@ -900,8 +1197,9 @@ impl ChangesSidebar {
             selected_cache: RefCell::new(None),
             windows_names_cache: RefCell::new(None),
             stash_list_collapsed: false,
-            tree_cache: RefCell::new(None),
+            layout_cache: RefCell::new(None),
             tree_cursor: None,
+            group_cursor: None,
         }
     }
 
@@ -1978,15 +2276,20 @@ impl ChangesSidebar {
         if files.is_empty() {
             return;
         }
-        // `1310-file-list-tree`: through the tree's rows, folders included
-        if let Some(t) = self.tree(cx) {
-            let count = t.tree.rows.len();
+        // `1310-file-list-tree` / `1313-changelists`: through the rows,
+        // folders and group headers included
+        let layout = self.layout(cx);
+        if layout.structured() {
+            let count = layout.rows;
+            if count == 0 {
+                return;
+            }
             let stop = self
                 .state
                 .read(cx)
                 .flags
                 .bool(corvene_core::flags::ids::LISTS_STOP_AT_ENDS);
-            let row = match self.current_tree_row(&t, cx) {
+            let row = match self.current_row(&layout, cx) {
                 // Home / End
                 _ if delta.unsigned_abs() >= count.max(2) => {
                     if delta < 0 {
@@ -1998,7 +2301,7 @@ impl ChangesSidebar {
                 Some(row) => crate::filter_list::list_step(row, delta, count, stop),
                 None => 0,
             };
-            self.select_tree_row(row, cx);
+            self.select_row(row, cx);
             return;
         }
         let (id, current) = {
@@ -2114,6 +2417,10 @@ impl ChangesSidebar {
             let Some(status) = rs.status.as_deref() else {
                 return;
             };
+            // `1313-changelists`: files outside the active list stay as they are
+            if let Some(lists) = corvene_core::changelists::of(s, id) {
+                paths.retain(|p| lists.commits_path(p));
+            }
             let wanted: std::collections::HashSet<&str> =
                 paths.iter().map(String::as_str).collect();
             let all_included = status
@@ -2131,20 +2438,21 @@ impl ChangesSidebar {
 
     /// ⇧↑ / ⇧↓: extend the range selection (GHD `List.addSelection`).
     fn extend_relative(&mut self, delta: isize, cx: &mut Context<Self>) {
-        // `1310-file-list-tree`: the file rows of the expanded tree
-        let order = match self.tree(cx) {
-            Some(t) => {
-                let visible = self.visible(cx);
-                t.tree
-                    .visible_items()
-                    .into_iter()
-                    .filter_map(|i| visible.get(i))
-                    .map(|f| f.path.clone())
-                    .collect()
-            }
-            None => self.visible(cx).paths(),
+        // `1310-file-list-tree` / `1313-changelists`: the file rows shown
+        let layout = self.layout(cx);
+        let visible = self.visible(cx);
+        let order: Vec<String> = if layout.structured() {
+            layout
+                .visible_items()
+                .into_iter()
+                .filter_map(|i| visible.get(i))
+                .map(|f| f.path.clone())
+                .collect()
+        } else {
+            visible.paths()
         };
         self.tree_cursor = None;
+        self.group_cursor = None;
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
@@ -2154,11 +2462,11 @@ impl ChangesSidebar {
             .read(cx)
             .selected_state()
             .and_then(|rs| rs.selected_files.last().cloned());
-        let index = match self.tree(cx) {
-            Some(t) => end
-                .and_then(|p| self.visible(cx).position(&p))
-                .and_then(|i| t.tree.row_of_item(i)),
-            None => end.and_then(|p| order.iter().position(|o| *o == p)),
+        let index = if layout.structured() {
+            end.and_then(|p| visible.position(&p))
+                .and_then(|i| layout.row_of_visible(i))
+        } else {
+            end.and_then(|p| order.iter().position(|o| *o == p))
         };
         if let Some(index) = index {
             self.list_scroll
@@ -2482,6 +2790,10 @@ impl ChangesSidebar {
         let status = rs.and_then(|rs| rs.status.clone());
         // `793-hide-whitespace-only-files` (set only while it applies)
         let whitespace_only = rs.and_then(|rs| rs.whitespace_only_files.clone());
+        // `1313-changelists`
+        let lists = s
+            .selected
+            .and_then(|id| corvene_core::changelists::of(s, id));
         let order = s.flags.text(corvene_core::flags::ids::CHANGES_SORT_ORDER);
         // `diff.orderFile` (path order when unset)
         let order_file = match order {
@@ -2509,6 +2821,7 @@ impl ChangesSidebar {
             whitespace_only: whitespace_only
                 .as_ref()
                 .map(|w| std::sync::Arc::as_ptr(w) as usize),
+            lists: lists.as_ref().map(|l| std::sync::Arc::as_ptr(l) as usize),
         };
         let cached = self
             .visible_cache
@@ -2521,6 +2834,7 @@ impl ChangesSidebar {
                 key,
                 status.as_ref(),
                 whitespace_only.as_deref(),
+                lists.as_ref(),
             ));
             *self.visible_cache.borrow_mut() = Some(data.clone());
             data
@@ -2528,83 +2842,145 @@ impl ChangesSidebar {
         Rc::new(VisibleFiles { status, data })
     }
 
-    /// `1310-file-list-tree`: the visible files as a tree, while file lists
-    /// show trees.
-    fn tree(&self, cx: &App) -> Option<Rc<TreeData>> {
+    /// `1310-file-list-tree` / `1313-changelists`: the visible files as
+    /// rows: a section per group, each a folder tree while file lists show
+    /// trees.
+    fn layout(&self, cx: &App) -> Rc<LayoutData> {
         use corvene_core::file_tree::{FileTree, TreeRow};
-        if !crate::file_tree_rows::tree_mode(cx) {
-            return None;
-        }
+        let tree_mode = crate::file_tree_rows::tree_mode(cx);
         let visible = self.visible(cx);
         let s = self.state.read(cx);
-        let collapsed = s
-            .selected
-            .and_then(|id| s.collapsed_folders.get(&id))
-            .cloned();
+        let collapsed = tree_mode
+            .then(|| {
+                s.selected
+                    .and_then(|id| s.collapsed_folders.get(&id))
+                    .cloned()
+            })
+            .flatten();
         // a filter shows every match, collapsed or not
         let expand_all = !self.filter.read(cx).value().trim().is_empty();
-        if let Some(hit) = self.tree_cache.borrow().as_ref().filter(|t| {
-            Rc::ptr_eq(&t.visible, &visible.data)
-                && t.collapsed
+        if let Some(hit) = self.layout_cache.borrow().as_ref().filter(|l| {
+            Rc::ptr_eq(&l.visible, &visible.data)
+                && l.collapsed
                     == collapsed
                         .as_ref()
                         .map(|c| std::sync::Arc::as_ptr(c) as usize)
-                && t.expand_all == expand_all
+                && l.expand_all == expand_all
+                && l.tree_mode == tree_mode
         }) {
-            return Some(hit.clone());
+            return hit.clone();
         }
-        let paths: Vec<&str> = visible.iter().map(|f| f.path.as_str()).collect();
-        let tree = FileTree::build(&paths, |folder| {
-            !expand_all && collapsed.as_ref().is_some_and(|c| c.contains(folder))
-        });
-        let include = tree
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(row, r)| match r {
-                TreeRow::File { item, .. } => visible.get(*item).and_then(include_value),
-                TreeRow::Folder { .. } => crate::file_tree_rows::check_value(
-                    tree.row_items(row)
-                        .iter()
-                        .filter_map(|&i| visible.get(i))
+        let groups: Vec<(Option<usize>, Range<usize>, bool)> = match visible.groups() {
+            Some(groups) => groups
+                .iter()
+                .enumerate()
+                .map(|(g, info)| (Some(g), info.range.clone(), info.collapsed && !expand_all))
+                .collect(),
+            None => vec![(None, 0..visible.len(), false)],
+        };
+        let mut sections = Vec::with_capacity(groups.len());
+        let mut include = Vec::with_capacity(visible.len() + groups.len());
+        let mut rows = 0;
+        for (group, range, group_collapsed) in groups {
+            let header = group.map(|_| {
+                let row = rows;
+                rows += 1;
+                include.push(crate::file_tree_rows::check_value(
+                    range
+                        .clone()
+                        .filter_map(|i| visible.get(i))
                         .map(include_value),
-                ),
-            })
-            .collect();
-        let data = Rc::new(TreeData {
+                ));
+                row
+            });
+            let first = rows;
+            let tree = (tree_mode && !group_collapsed).then(|| {
+                let paths: Vec<&str> = range
+                    .clone()
+                    .filter_map(|i| visible.get(i))
+                    .map(|f| f.path.as_str())
+                    .collect();
+                FileTree::build(&paths, |folder| {
+                    !expand_all && collapsed.as_ref().is_some_and(|c| c.contains(folder))
+                })
+            });
+            let body = if group_collapsed {
+                0
+            } else if let Some(tree) = &tree {
+                tree.rows.len()
+            } else {
+                range.len()
+            };
+            if let Some(tree) = &tree {
+                include.extend(tree.rows.iter().enumerate().map(|(row, r)| {
+                    match r {
+                        TreeRow::File { item, .. } => {
+                            visible.get(range.start + item).and_then(include_value)
+                        }
+                        TreeRow::Folder { .. } => crate::file_tree_rows::check_value(
+                            tree.row_items(row)
+                                .iter()
+                                .filter_map(|&i| visible.get(range.start + i))
+                                .map(include_value),
+                        ),
+                    }
+                }));
+            } else if body > 0 {
+                include.extend(
+                    range
+                        .clone()
+                        .map(|i| visible.get(i).and_then(include_value)),
+                );
+            }
+            rows += body;
+            sections.push(Section {
+                group,
+                header,
+                first,
+                body,
+                offset: range.start,
+                len: range.len(),
+                collapsed: group_collapsed,
+                tree,
+            });
+        }
+        let data = Rc::new(LayoutData {
             visible: visible.data.clone(),
             collapsed: collapsed
                 .as_ref()
                 .map(|c| std::sync::Arc::as_ptr(c) as usize),
             _collapsed: collapsed,
             expand_all,
-            tree,
+            tree_mode,
+            sections,
+            rows,
             include,
         });
-        *self.tree_cache.borrow_mut() = Some(data.clone());
-        Some(data)
+        *self.layout_cache.borrow_mut() = Some(data.clone());
+        data
     }
 
-    /// `1310-file-list-tree`: the order a ⇧-click range follows (the tree's
-    /// while it shows, collapsed folders' files included).
+    /// `1310-file-list-tree`: the order a ⇧-click range follows (the rows'
+    /// while they are structured, collapsed folders' files included).
     fn selection_order(&self, cx: &App) -> Vec<String> {
         let visible = self.visible(cx);
-        match self.tree(cx) {
-            Some(t) => t
-                .tree
-                .order
+        let layout = self.layout(cx);
+        if layout.structured() {
+            layout
+                .order()
                 .iter()
                 .filter_map(|&i| visible.get(i))
                 .map(|f| f.path.clone())
-                .collect(),
-            None => visible.paths(),
+                .collect()
+        } else {
+            visible.paths()
         }
     }
 
-    /// `1310-file-list-tree`: the files of tree row `row` (a folder's all).
-    fn tree_row_files(&self, t: &TreeData, row: usize, cx: &App) -> Vec<String> {
+    /// The files of row `row` (a folder's or a group's all).
+    fn row_files(&self, layout: &LayoutData, row: usize, cx: &App) -> Vec<String> {
         let visible = self.visible(cx);
-        t.tree
+        layout
             .row_items(row)
             .iter()
             .filter_map(|&i| visible.get(i))
@@ -2612,41 +2988,65 @@ impl ChangesSidebar {
             .collect()
     }
 
-    /// `1310-file-list-tree`: the row of folder `folder`.
-    fn folder_row_index(t: &TreeData, folder: &str) -> Option<usize> {
-        t.tree.rows.iter().position(|r| {
-            matches!(r, corvene_core::file_tree::TreeRow::Folder { path, .. } if path == folder)
-        })
-    }
-
-    /// `1310-file-list-tree`: the files of the folder row for `folder`.
-    fn folder_files(&self, folder: &str, cx: &App) -> Vec<String> {
-        self.tree(cx)
-            .and_then(|t| {
-                Self::folder_row_index(&t, folder).map(|row| self.tree_row_files(&t, row, cx))
-            })
+    /// `1310-file-list-tree`: the files of the folder row for `folder` in
+    /// section `section`.
+    fn folder_files(&self, section: usize, folder: &str, cx: &App) -> Vec<String> {
+        let layout = self.layout(cx);
+        layout
+            .folder_row(section, folder)
+            .map(|row| self.row_files(&layout, row, cx))
             .unwrap_or_default()
     }
 
-    /// `1310-file-list-tree`: select tree row `row` (a folder selects its
-    /// files) and keep it in view.
-    fn select_tree_row(&mut self, row: usize, cx: &mut Context<Self>) {
+    /// `1313-changelists`: the files of the group in section `section`.
+    fn section_files(&self, section: usize, cx: &App) -> Vec<String> {
+        let layout = self.layout(cx);
+        layout
+            .sections
+            .get(section)
+            .and_then(|s| s.header)
+            .map(|row| self.row_files(&layout, row, cx))
+            .unwrap_or_default()
+    }
+
+    /// Select row `row` (a folder or a group header selects its files) and
+    /// keep it in view.
+    fn select_row(&mut self, row: usize, cx: &mut Context<Self>) {
         use corvene_core::file_tree::TreeRow;
-        let Some(t) = self.tree(cx) else { return };
+        let layout = self.layout(cx);
         let Some(id) = self.state.read(cx).selected else {
             return;
         };
-        match t.tree.rows.get(row) {
-            Some(TreeRow::File { item, .. }) => {
-                let Some(path) = self.visible(cx).get(*item).map(|f| f.path.clone()) else {
+        match layout.row(row) {
+            Some(RowRef::File { visible, .. }) => {
+                let Some(path) = self.visible(cx).get(visible).map(|f| f.path.clone()) else {
                     return;
                 };
                 self.tree_cursor = None;
+                self.group_cursor = None;
                 Dispatcher::select_file(id, path, cx);
             }
-            Some(TreeRow::Folder { path, .. }) => {
-                let files = self.tree_row_files(&t, row, cx);
-                self.tree_cursor = Some(path.clone());
+            Some(RowRef::Folder {
+                section,
+                row: local,
+            }) => {
+                let Some(TreeRow::Folder { path, .. }) = layout.sections[section]
+                    .tree
+                    .as_ref()
+                    .and_then(|t| t.rows.get(local))
+                else {
+                    return;
+                };
+                let files = self.row_files(&layout, row, cx);
+                self.tree_cursor = Some((section, path.clone()));
+                self.group_cursor = None;
+                Dispatcher::select_all_files(id, files, cx);
+                cx.notify();
+            }
+            Some(RowRef::Header(section)) => {
+                let files = self.row_files(&layout, row, cx);
+                self.tree_cursor = None;
+                self.group_cursor = Some(section);
                 Dispatcher::select_all_files(id, files, cx);
                 cx.notify();
             }
@@ -2656,18 +3056,30 @@ impl ChangesSidebar {
             .scroll_to_item(row, ScrollStrategy::Nearest);
     }
 
-    /// `1310-file-list-tree`: the tree row the keyboard moves from.
-    fn current_tree_row(&self, t: &TreeData, cx: &App) -> Option<usize> {
+    /// The row the keyboard moves from: the group header or folder row the
+    /// user put the cursor on while its files are still the selection, else
+    /// the last selected file's row.
+    fn current_row(&self, layout: &LayoutData, cx: &App) -> Option<usize> {
         let s = self.state.read(cx);
         let rs = s.selected_state()?;
+        let n = rs.selected_files.len();
+        if let Some(section) = self.group_cursor
+            && let Some(sec) = layout.sections.get(section)
+            && let Some(header) = sec.header
+            && (sec.len == n || sec.len == 0)
+        {
+            return Some(header);
+        }
+        if let Some((section, folder)) = &self.tree_cursor
+            && let Some(sec) = layout.sections.get(*section)
+            && let Some(tree) = &sec.tree
+            && let Some(local) = crate::file_tree_rows::current_row(tree, Some(folder), n, None)
+        {
+            return Some(sec.first + local);
+        }
         let last = rs.selected_files.last().or(rs.selected_file.as_ref());
-        let item = last.and_then(|p| self.visible(cx).position(p));
-        crate::file_tree_rows::current_row(
-            &t.tree,
-            self.tree_cursor.as_deref(),
-            rs.selected_files.len(),
-            item,
-        )
+        let item = last.and_then(|p| self.visible(cx).position(p))?;
+        layout.row_of_visible(item)
     }
 
     /// `1310-file-list-tree`: collapse or expand `folders`.
@@ -2677,29 +3089,93 @@ impl ChangesSidebar {
         }
     }
 
-    /// `1310-file-list-tree`: ← collapses the folder or goes to its parent.
+    /// `1313-changelists`: collapse or expand group `group`.
+    fn set_group_collapsed(&mut self, group: u64, collapsed: bool, cx: &mut Context<Self>) {
+        if let Some(id) = self.state.read(cx).selected {
+            Dispatcher::set_changelist_collapsed(id, group, collapsed, cx);
+        }
+    }
+
+    /// The group id of section `section`'s header, when it has one.
+    fn section_group(&self, layout: &LayoutData, section: usize) -> Option<u64> {
+        let g = layout.sections.get(section)?.group?;
+        layout.visible.groups.as_ref()?.get(g).map(|info| info.id)
+    }
+
+    /// `1310-file-list-tree`: ← collapses the folder or goes to its parent
+    /// (`1313-changelists`: or collapses the group, or goes to its header).
     fn tree_left(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::file_tree_rows::LeftKey;
-        let Some(t) = self.tree(cx) else { return };
-        let Some(row) = self.current_tree_row(&t, cx) else {
+        let layout = self.layout(cx);
+        if !layout.structured() {
+            return;
+        }
+        let Some(row) = self.current_row(&layout, cx) else {
             return;
         };
-        match crate::file_tree_rows::left_key(&t.tree, row) {
+        let Some(section) = layout.section_of_row(row) else {
+            return;
+        };
+        let sec = &layout.sections[section];
+        if sec.header == Some(row) {
+            match self.section_group(&layout, section) {
+                Some(group) if !sec.collapsed => self.set_group_collapsed(group, true, cx),
+                _ => crate::file_tree_rows::focus_pane(false, window, cx),
+            }
+            return;
+        }
+        let key = sec.tree.as_ref().map_or(LeftKey::Nothing, |tree| {
+            crate::file_tree_rows::left_key(tree, row - sec.first)
+        });
+        let (header, first) = (sec.header, sec.first);
+        match key {
             LeftKey::Collapse(folder) => self.set_collapsed(vec![folder], true, cx),
-            LeftKey::Select(parent) => self.select_tree_row(parent, cx),
-            LeftKey::Nothing => crate::file_tree_rows::focus_pane(false, window, cx),
+            LeftKey::Select(parent) => self.select_row(first + parent, cx),
+            LeftKey::Nothing => match header {
+                Some(header) => self.select_row(header, cx),
+                None => crate::file_tree_rows::focus_pane(false, window, cx),
+            },
         }
     }
 
     /// `1310-file-list-tree`: → expands the folder or goes into it; on a file
-    /// it does what → does in the flat list.
+    /// it does what → does in the flat list (`1313-changelists`: expands a
+    /// group or goes to its first row).
     fn tree_right(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         use crate::file_tree_rows::RightKey;
-        let Some(t) = self.tree(cx) else { return };
-        let row = self.current_tree_row(&t, cx);
-        match row.and_then(|row| crate::file_tree_rows::right_key(&t.tree, row)) {
+        let layout = self.layout(cx);
+        if !layout.structured() {
+            return;
+        }
+        let Some(row) = self.current_row(&layout, cx) else {
+            crate::file_tree_rows::focus_pane(true, window, cx);
+            return;
+        };
+        let Some(section) = layout.section_of_row(row) else {
+            return;
+        };
+        let sec = &layout.sections[section];
+        if sec.header == Some(row) {
+            if sec.collapsed {
+                if let Some(group) = self.section_group(&layout, section) {
+                    self.set_group_collapsed(group, false, cx);
+                }
+            } else if sec.body > 0 {
+                let first = sec.first;
+                self.select_row(first, cx);
+            } else {
+                crate::file_tree_rows::focus_pane(true, window, cx);
+            }
+            return;
+        }
+        let key = sec
+            .tree
+            .as_ref()
+            .and_then(|tree| crate::file_tree_rows::right_key(tree, row - sec.first));
+        let first = sec.first;
+        match key {
             Some(RightKey::Expand(folder)) => self.set_collapsed(vec![folder], false, cx),
-            Some(RightKey::Select(row)) => self.select_tree_row(row, cx),
+            Some(RightKey::Select(local)) => self.select_row(first + local, cx),
             None => crate::file_tree_rows::focus_pane(true, window, cx),
         }
     }
@@ -3032,13 +3508,11 @@ impl ChangesSidebar {
         crate::native_menu::show_context_menu(items, position, window, cx);
     }
 
-    /// `1310-file-list-tree`: select the folder row for `folder`.
-    fn select_folder(&mut self, folder: &str, cx: &mut Context<Self>) {
-        if let Some(row) = self
-            .tree(cx)
-            .and_then(|t| Self::folder_row_index(&t, folder))
-        {
-            self.select_tree_row(row, cx);
+    /// `1310-file-list-tree`: select the folder row for `folder` in section
+    /// `section`.
+    fn select_folder(&mut self, section: usize, folder: &str, cx: &mut Context<Self>) {
+        if let Some(row) = self.layout(cx).folder_row(section, folder) {
+            self.select_row(row, cx);
         }
     }
 
@@ -3046,6 +3520,7 @@ impl ChangesSidebar {
     /// file inside.
     fn open_folder_menu(
         &mut self,
+        section: usize,
         folder: String,
         position: Point<Pixels>,
         window: &mut Window,
@@ -3088,10 +3563,12 @@ impl ChangesSidebar {
                 on_disk,
             )
         };
-        let paths = self.folder_files(&folder, cx);
+        let paths = self.folder_files(section, &folder, cx);
         if paths.is_empty() {
             return;
         }
+        // `1313-changelists`
+        let changelists = corvene_core::changelists::for_menu(self.state.read(cx), id);
         let ellipsis = if confirm { "…" } else { "" };
         let mut items = Vec::new();
         let discard = paths.clone();
@@ -3138,6 +3615,10 @@ impl ChangesSidebar {
             mac_or("Exclude Files in Folder", "Exclude files in folder"),
             move |_, cx| Dispatcher::set_files_included(id, exclude.clone(), false, cx),
         ));
+        // `1313-changelists`
+        if let Some(lists) = changelists.as_deref() {
+            items.push(changelist_submenu(id, paths.clone(), lists));
+        }
         items.push(MenuItem::separator());
         let full = repo_path.join(&folder);
         let absolute = full.to_string_lossy().into_owned();
@@ -3172,6 +3653,192 @@ impl ChangesSidebar {
             move |_, cx| Dispatcher::set_folders_collapsed(id, all.clone(), true, cx),
         ));
         self.open_menu(items, position, window, cx);
+    }
+
+    /// `1313-changelists`: a group header's menu.
+    fn open_group_menu(
+        &mut self,
+        section: usize,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let layout = self.layout(cx);
+        let Some(info) = layout
+            .sections
+            .get(section)
+            .and_then(|s| s.group)
+            .and_then(|g| layout.visible.groups.as_ref()?.get(g))
+        else {
+            return;
+        };
+        let (list_id, name, description, active, checkable, has_files) = (
+            info.id,
+            info.name.clone(),
+            info.description.clone(),
+            info.active,
+            info.checkable,
+            info.total > 0,
+        );
+        let files = self.section_files(section, cx);
+        let visible_files = !files.is_empty();
+        let (id, stash, all_included) = {
+            let s = self.state.read(cx);
+            let Some(id) = s.selected else { return };
+            let Some(rs) = s.selected_state() else { return };
+            if rs.committing {
+                return;
+            }
+            let wanted: std::collections::HashSet<&str> =
+                files.iter().map(String::as_str).collect();
+            let all_included = rs.status.as_deref().is_some_and(|st| {
+                st.files
+                    .iter()
+                    .filter(|f| wanted.contains(f.path.as_str()))
+                    .all(|f| f.selection.kind() == DiffSelectionType::All)
+            });
+            (
+                id,
+                corvene_core::stash_flows::PartialStash::of(s, rs),
+                all_included,
+            )
+        };
+        let named = list_id != UNGROUPED;
+        let mut items = Vec::new();
+        if named {
+            let weak = cx.weak_entity();
+            let (summary, body) = (name.to_string(), description.clone());
+            items.push(
+                MenuItem::new(
+                    mac_or("Commit Only This List", "Commit only this list"),
+                    move |window, cx| {
+                        Dispatcher::check_only_changelist(id, list_id, cx);
+                        weak.update(cx, |this, cx| {
+                            this.prefill_commit_message(&summary, &body, window, cx)
+                        })
+                        .ok();
+                    },
+                )
+                .enabled(has_files),
+            );
+            items.push(MenuItem::checkbox(
+                mac_or("Active Changelist", "Active changelist"),
+                active,
+                move |_, cx| {
+                    Dispatcher::set_active_changelist(id, (!active).then_some(list_id), cx)
+                },
+            ));
+            items.push(MenuItem::separator());
+        }
+        let include_label = match (all_included, named) {
+            (true, true) => mac_or("Exclude Files in List", "Exclude files in list"),
+            (false, true) => mac_or("Include Files in List", "Include files in list"),
+            (true, false) => mac_or("Exclude Files in Group", "Exclude files in group"),
+            (false, false) => mac_or("Include Files in Group", "Include files in group"),
+        };
+        let to_include = files.clone();
+        items.push(
+            MenuItem::new(include_label, move |_, cx| {
+                Dispatcher::set_files_included(id, to_include.clone(), !all_included, cx)
+            })
+            .enabled(visible_files && checkable),
+        );
+        if named {
+            if let Some(stash) = stash {
+                let label = mac_or("Stash This List", "Stash this list");
+                let label = if stash == corvene_core::stash_flows::PartialStash::Blocked {
+                    format!(
+                        "{label}{}",
+                        mac_or(
+                            " (Restore or Discard the Stash First)",
+                            " (restore or discard the stash first)"
+                        )
+                    )
+                } else {
+                    label.to_string()
+                };
+                items.push(
+                    MenuItem::new(label, move |_, cx| {
+                        Dispatcher::stash_changelist(id, list_id, cx)
+                    })
+                    .enabled(
+                        has_files && stash != corvene_core::stash_flows::PartialStash::Blocked,
+                    ),
+                );
+            }
+            items.push(MenuItem::separator());
+            items.push(MenuItem::new(
+                mac_or("Edit Changelist…", "Edit changelist…"),
+                move |_, cx| {
+                    Dispatcher::show_popup(
+                        Popup::NewChangelist {
+                            repo: id,
+                            paths: Vec::new(),
+                            edit: Some(list_id),
+                        },
+                        cx,
+                    )
+                },
+            ));
+            items.push(MenuItem::new(
+                mac_or("Delete Changelist", "Delete changelist"),
+                move |_, cx| Dispatcher::delete_changelist(id, list_id, cx),
+            ));
+        } else {
+            let to_list = files.clone();
+            items.push(
+                MenuItem::new(
+                    mac_or(
+                        "New Changelist from These Files…",
+                        "New changelist from these files…",
+                    ),
+                    move |_, cx| {
+                        Dispatcher::show_popup(
+                            Popup::NewChangelist {
+                                repo: id,
+                                paths: to_list.clone(),
+                                edit: None,
+                            },
+                            cx,
+                        )
+                    },
+                )
+                .enabled(visible_files),
+            );
+        }
+        self.open_menu(items, position, window, cx);
+    }
+
+    /// `1313-changelists` › Commit Only This List: an empty summary takes
+    /// the list's name and an empty description its description; the
+    /// summary gets focus.
+    fn prefill_commit_message(
+        &mut self,
+        name: &str,
+        description: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.summary.read(cx).value().trim().is_empty() {
+            self.replace_message_field(CommitField::Summary, name.to_string(), window, cx);
+            self.refresh_spelling(CommitField::Summary, cx);
+        }
+        if !description.is_empty()
+            && self
+                .field_text_and_caret(CommitField::Description, cx)
+                .0
+                .trim()
+                .is_empty()
+        {
+            self.replace_message_field(
+                CommitField::Description,
+                description.to_string(),
+                window,
+                cx,
+            );
+            self.refresh_spelling(CommitField::Description, cx);
+        }
+        self.focus_summary(window, cx);
     }
 
     /// GHD `onItemContextMenu`: the default menu, or the reduced one while a
@@ -3244,6 +3911,8 @@ impl ChangesSidebar {
         let full = repo_path.join(&path);
         let deleted = file.status.kind == FileStatusKind::Deleted;
         let editor_label = self.state.read(cx).editor_label();
+        // `1313-changelists`
+        let changelists = corvene_core::changelists::for_menu(self.state.read(cx), id);
         let discard_item = |paths: Vec<String>| {
             // `getDiscardChangesMenuItemLabel`
             let label = match paths.len() {
@@ -3393,6 +4062,11 @@ impl ChangesSidebar {
                 })
                 .enabled(can_stash && !has_stash),
             );
+        }
+        // `1313-changelists`: Move to Changelist ▸
+        if let Some(lists) = changelists.as_deref() {
+            items.push(MenuItem::separator());
+            items.push(changelist_submenu(id, paths.clone(), lists));
         }
         // `785-embedded-repo-commit`: status lists an untracked folder as
         // one entry only when it is a repository of its own
@@ -3880,6 +4554,23 @@ impl ChangesSidebar {
                 .enabled(has_changes && can_stash && other_worktree),
             );
         }
+        // `1313-changelists`
+        if corvene_core::changelists::enabled(self.state.read(cx)) {
+            items.push(MenuItem::separator());
+            items.push(MenuItem::new(
+                mac_or("New Changelist…", "New changelist…"),
+                move |_, cx| {
+                    Dispatcher::show_popup(
+                        Popup::NewChangelist {
+                            repo: id,
+                            paths: Vec::new(),
+                            edit: None,
+                        },
+                        cx,
+                    )
+                },
+            ));
+        }
         if clean_untracked {
             items.push(MenuItem::separator());
             items.push(MenuItem::new(
@@ -4111,12 +4802,13 @@ impl ChangesSidebar {
                     .child({
                         let visible = self.visible(cx);
                         let repo_id = self.state.read(cx).selected;
-                        let include_all = if visible.is_empty() {
+                        // `1313-changelists`: the active list's files only
+                        let include_all = if visible.data.checkable == 0 {
                             Some(true)
                         } else {
                             visible.include_all()
                         };
-                        let disabled = visible.total() == 0 || visible.is_empty();
+                        let disabled = visible.total() == 0 || visible.data.checkable == 0;
                         let include = include_all != Some(true);
                         let focus = self.check_all_focus.clone();
                         checkbox_tristate("check-all", include_all, disabled, cx)
@@ -4130,7 +4822,7 @@ impl ChangesSidebar {
                                 let weak = cx.weak_entity();
                                 d.on_click(move |_, _, cx| {
                                     if let Some(this) = weak.upgrade() {
-                                        let paths = this.read(cx).visible(cx).paths();
+                                        let paths = this.read(cx).visible(cx).checkable_paths();
                                         Dispatcher::set_files_included(id, paths, include, cx)
                                     }
                                 })
@@ -4252,11 +4944,12 @@ impl ChangesSidebar {
         // Shift+F10 / Menu: the row the arrows move from
         let anchor_path = selected.list.last().cloned();
         let menu_anchor = self.menu_anchor.clone();
-        // `1310-file-list-tree`
-        let tree = self.tree(cx);
-        let tree_anchor = tree.as_ref().and_then(|t| self.current_tree_row(t, cx));
+        // `1310-file-list-tree` / `1313-changelists`
+        let layout = self.layout(cx);
+        let anchor_row = self.current_row(&layout, cx);
         let tree_cursor = self.tree_cursor.clone();
-        let rows = tree.as_ref().map_or(files.len(), |t| t.tree.rows.len());
+        let group_cursor = self.group_cursor;
+        let rows = layout.rows;
         let query: SharedString = self.filter.read(cx).value().trim().to_string().into();
         let weak = cx.weak_entity();
         let list_focus = self.list_focus.clone();
@@ -4284,85 +4977,118 @@ impl ChangesSidebar {
             })
             .child(
                 uniform_list("changes-list-rows", rows, move |range, _, cx| {
+                    use corvene_core::file_tree::TreeRow;
                     let query = query.clone();
                     range
                         .filter_map(|ix| {
-                            if let Some(t) = &tree {
-                                use corvene_core::file_tree::TreeRow;
-                                let anchor = (tree_anchor == Some(ix)).then_some(&menu_anchor);
-                                return match t.tree.rows.get(ix)? {
-                                    TreeRow::File { item, depth } => {
-                                        let file = files.get(*item)?;
-                                        Some(file_row(
-                                            file,
-                                            line_stats
-                                                .as_ref()
-                                                .and_then(|m| m.get(&file.path))
-                                                .copied(),
-                                            selected.contains(&file.path),
-                                            list_focused,
-                                            &query,
-                                            repo_id,
-                                            weak.clone(),
-                                            list_focus.clone(),
-                                            anchor,
-                                            Some(*depth),
-                                            cx,
-                                        ))
-                                    }
-                                    TreeRow::Folder {
+                            let anchor = (anchor_row == Some(ix)).then_some(&menu_anchor);
+                            match layout.row(ix)? {
+                                RowRef::File { visible, depth } => {
+                                    let file = files.get(visible)?;
+                                    let anchor = if layout.structured() {
+                                        anchor
+                                    } else {
+                                        (anchor_path.as_ref() == Some(&file.path))
+                                            .then_some(&menu_anchor)
+                                    };
+                                    Some(file_row(
+                                        file,
+                                        line_stats
+                                            .as_ref()
+                                            .and_then(|m| m.get(&file.path))
+                                            .copied(),
+                                        selected.contains(&file.path),
+                                        list_focused,
+                                        &query,
+                                        repo_id,
+                                        weak.clone(),
+                                        list_focus.clone(),
+                                        anchor,
+                                        depth,
+                                        files.checkable(visible),
+                                        cx,
+                                    ))
+                                }
+                                RowRef::Folder { section, row } => {
+                                    let sec = &layout.sections[section];
+                                    let tree = sec.tree.as_ref()?;
+                                    let TreeRow::Folder {
                                         path,
                                         label,
                                         depth,
                                         items,
                                         expanded,
-                                    } => {
-                                        let first = t.tree.order.get(items.start);
-                                        let is_selected = tree_cursor.as_deref()
-                                            == Some(path.as_str())
-                                            && selected.list.len() == items.len()
-                                            && first
-                                                .and_then(|&i| files.get(i))
-                                                .is_some_and(|f| selected.contains(&f.path));
-                                        Some(folder_row(
-                                            FolderRow {
-                                                path,
-                                                label,
-                                                depth: *depth,
-                                                count: items.len(),
-                                                expanded: *expanded,
-                                                include: t
-                                                    .include
-                                                    .get(ix)
-                                                    .copied()
-                                                    .unwrap_or(Some(false)),
-                                            },
-                                            is_selected,
-                                            list_focused,
-                                            repo_id,
-                                            weak.clone(),
-                                            list_focus.clone(),
-                                            anchor,
-                                            cx,
-                                        ))
-                                    }
-                                };
+                                    } = tree.rows.get(row)?
+                                    else {
+                                        return None;
+                                    };
+                                    let first =
+                                        tree.order.get(items.start).map(|&i| sec.offset + i);
+                                    let is_selected = tree_cursor
+                                        .as_ref()
+                                        .is_some_and(|(s, p)| *s == section && p == path)
+                                        && selected.list.len() == items.len()
+                                        && first
+                                            .and_then(|i| files.get(i))
+                                            .is_some_and(|f| selected.contains(&f.path));
+                                    let checkable = sec
+                                        .group
+                                        .and_then(|g| files.groups()?.get(g))
+                                        .is_none_or(|info| info.checkable);
+                                    Some(folder_row(
+                                        FolderRow {
+                                            section,
+                                            path,
+                                            label,
+                                            depth: *depth,
+                                            count: items.len(),
+                                            expanded: *expanded,
+                                            include: layout
+                                                .include
+                                                .get(ix)
+                                                .copied()
+                                                .unwrap_or(Some(false)),
+                                            checkable,
+                                        },
+                                        is_selected,
+                                        list_focused,
+                                        repo_id,
+                                        weak.clone(),
+                                        list_focus.clone(),
+                                        anchor,
+                                        cx,
+                                    ))
+                                }
+                                RowRef::Header(section) => {
+                                    let sec = &layout.sections[section];
+                                    let info = files.groups()?.get(sec.group?)?;
+                                    let is_selected = group_cursor == Some(section)
+                                        && (info.range.is_empty()
+                                            || (selected.list.len() == info.range.len()
+                                                && files
+                                                    .get(info.range.start)
+                                                    .is_some_and(|f| selected.contains(&f.path))));
+                                    Some(group_row(
+                                        GroupRow {
+                                            section,
+                                            info,
+                                            include: layout
+                                                .include
+                                                .get(ix)
+                                                .copied()
+                                                .unwrap_or(Some(false)),
+                                            expanded: !sec.collapsed,
+                                        },
+                                        is_selected,
+                                        list_focused,
+                                        repo_id,
+                                        weak.clone(),
+                                        list_focus.clone(),
+                                        anchor,
+                                        cx,
+                                    ))
+                                }
                             }
-                            let file = files.get(ix)?;
-                            let is_selected = selected.contains(&file.path);
-                            Some(file_row(
-                                file,
-                                line_stats.as_ref().and_then(|m| m.get(&file.path)).copied(),
-                                is_selected,
-                                list_focused,
-                                &query,
-                                repo_id,
-                                weak.clone(),
-                                list_focus.clone(),
-                                (anchor_path.as_ref() == Some(&file.path)).then_some(&menu_anchor),
-                                None,
-                                cx,
-                            ))
                         })
                         .collect()
                 })
@@ -6101,7 +6827,10 @@ impl ChangesSidebar {
                             .and_then(|id| s.repository(id))
                             .is_some_and(|r| r.commit_options.push_after_commit)
                 };
-                let included = self.visible(cx).data.included;
+                let (included, single_list) = {
+                    let visible = self.visible(cx);
+                    (visible.data.included, visible.data.single_list.clone())
+                };
                 let (amending, committing, progress) = self
                     .state
                     .read(cx)
@@ -6115,10 +6844,13 @@ impl ChangesSidebar {
                     })
                     .unwrap_or((false, false, None));
                 // GHD `getFilesToBeCommittedButtonText`: "Commit 4 files to main"
-                let files = match included {
-                    0 => String::new(),
-                    1 => "1 file ".to_string(),
-                    n => format!("{n} files "),
+                // (Corvene `1313-changelists`: "Commit <list> to main" when
+                // the commit takes exactly one list's files)
+                let files = match (&single_list, included) {
+                    (Some(list), _) => format!("{list} "),
+                    (None, 0) => String::new(),
+                    (None, 1) => "1 file ".to_string(),
+                    (None, n) => format!("{n} files "),
                 };
                 let files = if push_after {
                     format!("{files}and push ")
@@ -6647,6 +7379,9 @@ fn file_row(
     menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
     // `1310-file-list-tree`: the row's depth in the tree
     depth: Option<usize>,
+    // `1313-changelists`: whether the checkbox counts (no active list, or
+    // the file is in it)
+    checkable: bool,
     cx: &App,
 ) -> AnyElement {
     let t = cx.ghd();
@@ -6715,10 +7450,14 @@ fn file_row(
                 "{}, {}{}",
                 file.path,
                 crate::widgets::status_label(&file.status),
-                match include_value {
-                    Some(true) => "",
-                    Some(false) => ", not included",
-                    None => ", partially included",
+                if !checkable {
+                    ", not in the active changelist"
+                } else {
+                    match include_value {
+                        Some(true) => "",
+                        Some(false) => ", not included",
+                        None => ", partially included",
+                    }
                 }
             ),
             is_selected,
@@ -6749,7 +7488,10 @@ fn file_row(
                 window.focus(&list_focus, cx);
                 if !is_selected && let Some(id) = repo_id {
                     weak_for_cursor
-                        .update(cx, |this, _| this.tree_cursor = None)
+                        .update(cx, |this, _| {
+                            this.tree_cursor = None;
+                            this.group_cursor = None;
+                        })
                         .ok();
                     Dispatcher::select_file(id, path.clone(), cx);
                 }
@@ -6772,7 +7514,11 @@ fn file_row(
                     return;
                 }
                 window.focus(&list_focus, cx);
-                weak.update(cx, |this, _| this.tree_cursor = None).ok();
+                weak.update(cx, |this, _| {
+                    this.tree_cursor = None;
+                    this.group_cursor = None;
+                })
+                .ok();
                 if !is_selected && let Some(id) = repo_id {
                     Dispatcher::select_file(id, path.clone(), cx);
                 }
@@ -6822,10 +7568,10 @@ fn file_row(
                 checkbox_tristate(
                     SharedString::from(format!("include-{}", file.path)),
                     include_value,
-                    false,
+                    !checkable,
                     cx,
                 )
-                .when_some(repo_id, move |d, id| {
+                .when_some(repo_id.filter(|_| checkable), move |d, id| {
                     d.on_click(move |_, window, cx| {
                         cx.stop_propagation();
                         // the click lands inside the focusable row
@@ -6921,14 +7667,320 @@ fn file_row(
         .into_any_element()
 }
 
+/// `1313-changelists`: what a group header row shows.
+struct GroupRow<'a> {
+    section: usize,
+    info: &'a GroupInfo,
+    /// `getCheckAllValue` of its visible files.
+    include: Option<bool>,
+    expanded: bool,
+}
+
+/// `1313-changelists`: a changelist's header row (or the "Changes" group of
+/// files in no list): a chevron, a checkbox for its files, the name, the
+/// count, an Active badge and the row menu. Clicking it selects its files.
+#[allow(clippy::too_many_arguments)]
+fn group_row(
+    group: GroupRow<'_>,
+    is_selected: bool,
+    list_focused: bool,
+    repo_id: Option<u64>,
+    weak: WeakEntity<ChangesSidebar>,
+    list_focus: FocusHandle,
+    menu_anchor: Option<&crate::context_menu::RowMenuAnchor>,
+    cx: &App,
+) -> AnyElement {
+    let t = cx.ghd();
+    let info = group.info;
+    let (section, id) = (group.section, info.id);
+    let hover_bg = t.list_item_hover_background;
+    let (text, muted) = match (is_selected, list_focused) {
+        (true, true) => (t.box_selected_active_text, t.box_selected_active_text),
+        (true, false) => (t.box_selected_text, t.box_selected_text),
+        _ => (t.text, t.text_secondary),
+    };
+    let toggle = {
+        let weak = weak.clone();
+        let expanded = group.expanded;
+        move |_: &mut Window, cx: &mut App| {
+            weak.update(cx, |this, cx| this.set_group_collapsed(id, expanded, cx))
+                .ok();
+        }
+    };
+    let toggle_on_double = toggle.clone();
+    let count = info.total;
+    let shown = info.range.len();
+    let count_label = if shown == count {
+        count.to_string()
+    } else {
+        format!("{shown} of {count}")
+    };
+    div()
+        .id(SharedString::from(format!("changelist-{id}")))
+        .group("changes-row")
+        .a11y_row(
+            format!(
+                "{}, changelist, {count} {}{}{}",
+                info.name,
+                if count == 1 { "file" } else { "files" },
+                if info.active { ", active" } else { "" },
+                if !info.checkable {
+                    ", not the active changelist"
+                } else {
+                    match group.include {
+                        Some(true) => "",
+                        Some(false) => ", not included",
+                        None => ", partially included",
+                    }
+                }
+            ),
+            is_selected,
+        )
+        .w_full()
+        .h(ROW_HEIGHT())
+        .flex_none()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(SPACING_HALF())
+        .px(SPACING())
+        .bg(t.box_alt_background)
+        .border_b_1()
+        .border_color(t.box_border)
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Right, {
+            let list_focus = list_focus.clone();
+            let weak = weak.clone();
+            move |ev: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                window.focus(&list_focus, cx);
+                let position = ev.position;
+                weak.update(cx, |this, cx| {
+                    if !is_selected
+                        && let Some(row) =
+                            this.layout(cx).sections.get(section).and_then(|s| s.header)
+                    {
+                        this.select_row(row, cx);
+                    }
+                    this.open_group_menu(section, position, window, cx)
+                })
+                .ok();
+            }
+        })
+        .on_mouse_down(MouseButton::Left, {
+            let list_focus = list_focus.clone();
+            let weak = weak.clone();
+            move |ev: &MouseDownEvent, window, cx| {
+                let m = ev.modifiers;
+                if m.secondary() || m.shift || m.control {
+                    return;
+                }
+                window.focus(&list_focus, cx);
+                if !is_selected {
+                    weak.update(cx, |this, cx| {
+                        if let Some(row) =
+                            this.layout(cx).sections.get(section).and_then(|s| s.header)
+                        {
+                            this.select_row(row, cx);
+                        }
+                    })
+                    .ok();
+                }
+            }
+        })
+        .when(is_selected, |d| {
+            if list_focused {
+                d.bg(t.box_selected_active_background)
+                    .text_color(t.box_selected_active_text)
+            } else {
+                d.bg(t.box_selected_background)
+                    .text_color(t.box_selected_text)
+            }
+        })
+        .when(
+            !(is_selected && (list_focused || crate::widgets::selection_keeps_colour_on_hover(cx))),
+            move |d| d.hover(move |s| s.bg(hover_bg)),
+        )
+        .when_some(repo_id, {
+            let weak = weak.clone();
+            let list_focus = list_focus.clone();
+            move |d, repo| {
+                d.on_click(move |ev: &ClickEvent, window, cx| {
+                    window.focus(&list_focus, cx);
+                    let Some(this) = weak.upgrade() else { return };
+                    let files = this.read(cx).section_files(section, cx);
+                    let modifiers = ev.modifiers();
+                    if modifiers.secondary() {
+                        this.update(cx, |this, _| {
+                            this.tree_cursor = None;
+                            this.group_cursor = None;
+                        });
+                        Dispatcher::toggle_files_selection(repo, files, cx)
+                    } else if modifiers.shift {
+                        let order = this.read(cx).selection_order(cx);
+                        if let Some(last) = files.last() {
+                            Dispatcher::extend_file_selection(repo, last.clone(), order, cx)
+                        }
+                    } else if ev.click_count() == 2 {
+                        toggle_on_double(window, cx);
+                    }
+                })
+            }
+        })
+        // the chevron: 16 px, collapses or expands the group
+        .child(
+            div()
+                .id(SharedString::from(format!("changelist-toggle-{id}")))
+                .flex_none()
+                .size(zpx(16.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(zpx(3.))
+                .hover(move |s| s.bg(t.box_selected_background))
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    toggle(window, cx)
+                })
+                .child(octicon(
+                    if group.expanded {
+                        Octicon::ChevronDown
+                    } else {
+                        Octicon::ChevronRight
+                    },
+                    muted,
+                )),
+        )
+        .child(
+            div().w(zpx(15.)).flex_none().child(
+                checkbox_tristate(
+                    SharedString::from(format!("include-changelist-{id}")),
+                    group.include,
+                    !info.checkable || shown == 0,
+                    cx,
+                )
+                .when_some(repo_id.filter(|_| info.checkable && shown > 0), {
+                    let weak = weak.clone();
+                    let include = group.include != Some(true);
+                    let list_focus = list_focus.clone();
+                    move |d, repo| {
+                        d.on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            window.focus(&list_focus, cx);
+                            let files = weak
+                                .upgrade()
+                                .map(|this| this.read(cx).section_files(section, cx))
+                                .unwrap_or_default();
+                            Dispatcher::set_files_included(repo, files, include, cx)
+                        })
+                    }
+                }),
+            ),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .text_size(FONT_SIZE())
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(text)
+                .child(info.name.clone()),
+        )
+        .child(
+            div()
+                .flex_none()
+                .text_size(FONT_SIZE_SM())
+                .text_color(muted)
+                .child(count_label),
+        )
+        .when(info.active, |d| {
+            // the Active badge: a small pill in the selection colour
+            d.child(
+                div()
+                    .flex_none()
+                    .px(zpx(5.))
+                    .rounded(zpx(8.))
+                    .bg(t.box_selected_active_background)
+                    .text_size(zpx(10.))
+                    .text_color(t.box_selected_active_text)
+                    .child("Active"),
+            )
+        })
+        .when(!info.description.is_empty(), |d| {
+            d.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(FONT_SIZE_SM())
+                    .text_color(muted)
+                    .child(info.description.clone()),
+            )
+        })
+        .child(div().flex_1())
+        // `621-context-menu-buttons`
+        .when(crate::context_menu::row_menu_buttons(cx), |d| {
+            d.child(
+                crate::context_menu::row_menu_button("row-menu", "changes-row", is_selected, muted)
+                    .ml(SPACING_HALF()),
+            )
+        })
+        .when_some(menu_anchor, |d, anchor| d.child(anchor.track()))
+        .into_any_element()
+}
+
+/// `1313-changelists`: the Move to Changelist ▸ submenu for `paths`: New
+/// Changelist…, then each list (ticked when every path is in it) and No
+/// Changelist.
+fn changelist_submenu(id: u64, paths: Vec<String>, lists: &Changelists) -> MenuItem {
+    let new_paths = paths.clone();
+    let mut items = vec![MenuItem::new(
+        mac_or("New Changelist…", "New changelist…"),
+        move |_, cx| {
+            Dispatcher::show_popup(
+                Popup::NewChangelist {
+                    repo: id,
+                    paths: new_paths.clone(),
+                    edit: None,
+                },
+                cx,
+            )
+        },
+    )];
+    if !lists.is_empty() {
+        items.push(MenuItem::separator());
+        for list in &lists.lists {
+            let all_in = paths.iter().all(|p| list.paths.contains(p));
+            let (list_id, to_move) = (list.id, paths.clone());
+            items.push(MenuItem::checkbox(
+                list.name.clone(),
+                all_in,
+                move |_, cx| Dispatcher::move_to_changelist(id, to_move.clone(), Some(list_id), cx),
+            ));
+        }
+        items.push(MenuItem::separator());
+        let ungrouped = paths.iter().all(|p| lists.group_of(p) == UNGROUPED);
+        let to_move = paths.clone();
+        items.push(MenuItem::checkbox(
+            mac_or("No Changelist", "No changelist"),
+            ungrouped,
+            move |_, cx| Dispatcher::move_to_changelist(id, to_move.clone(), None, cx),
+        ));
+    }
+    MenuItem::submenu(mac_or("Move to Changelist", "Move to changelist"), items)
+}
+
 /// `1310-file-list-tree`: what a folder row shows.
 struct FolderRow<'a> {
+    /// `1313-changelists`: the section (group) the folder is in.
+    section: usize,
     path: &'a str,
     label: &'a str,
     depth: usize,
     count: usize,
     expanded: bool,
     include: Option<bool>,
+    /// `1313-changelists`: whether the checkbox counts.
+    checkable: bool,
 }
 
 /// `1310-file-list-tree`: one folder row of the changes tree.
@@ -6946,6 +7998,8 @@ fn folder_row(
     let t = cx.ghd();
     let hover_bg = t.list_item_hover_background;
     let path = folder.path.to_string();
+    let section = folder.section;
+    let checkable = folder.checkable;
     let text_color = match (is_selected, list_focused) {
         (true, true) => Some(t.box_selected_active_text),
         (true, false) => Some(t.box_selected_text),
@@ -6964,7 +8018,7 @@ fn folder_row(
     };
     let toggle_on_double = toggle.clone();
     div()
-        .id(SharedString::from(format!("folder-{path}")))
+        .id(SharedString::from(format!("folder-{section}-{path}")))
         .group("changes-row")
         .a11y_row(
             format!(
@@ -6998,9 +8052,9 @@ fn folder_row(
                 let position = ev.position;
                 weak.update(cx, |this, cx| {
                     if !is_selected {
-                        this.select_folder(&path, cx);
+                        this.select_folder(section, &path, cx);
                     }
-                    this.open_folder_menu(path.clone(), position, window, cx)
+                    this.open_folder_menu(section, path.clone(), position, window, cx)
                 })
                 .ok();
             }
@@ -7016,7 +8070,7 @@ fn folder_row(
                 }
                 window.focus(&list_focus, cx);
                 if !is_selected {
-                    weak.update(cx, |this, cx| this.select_folder(&path, cx))
+                    weak.update(cx, |this, cx| this.select_folder(section, &path, cx))
                         .ok();
                 }
             }
@@ -7042,10 +8096,13 @@ fn folder_row(
                 d.on_click(move |ev: &ClickEvent, window, cx| {
                     window.focus(&list_focus, cx);
                     let Some(this) = weak.upgrade() else { return };
-                    let files = this.read(cx).folder_files(&path, cx);
+                    let files = this.read(cx).folder_files(section, &path, cx);
                     let modifiers = ev.modifiers();
                     if modifiers.secondary() {
-                        this.update(cx, |this, _| this.tree_cursor = None);
+                        this.update(cx, |this, _| {
+                            this.tree_cursor = None;
+                            this.group_cursor = None;
+                        });
                         Dispatcher::toggle_files_selection(id, files, cx)
                     } else if modifiers.shift {
                         let order = this.read(cx).selection_order(cx);
@@ -7061,12 +8118,12 @@ fn folder_row(
         .child(
             div().w(zpx(15.)).flex_none().child(
                 checkbox_tristate(
-                    SharedString::from(format!("include-folder-{path}")),
+                    SharedString::from(format!("include-folder-{section}-{path}")),
                     folder.include,
-                    false,
+                    !checkable,
                     cx,
                 )
-                .when_some(repo_id, {
+                .when_some(repo_id.filter(|_| checkable), {
                     let weak = weak.clone();
                     let path = path.clone();
                     let include = folder.include != Some(true);
@@ -7077,7 +8134,7 @@ fn folder_row(
                             window.focus(&list_focus, cx);
                             let files = weak
                                 .upgrade()
-                                .map(|this| this.read(cx).folder_files(&path, cx))
+                                .map(|this| this.read(cx).folder_files(section, &path, cx))
                                 .unwrap_or_default();
                             Dispatcher::set_files_included(id, files, include, cx)
                         })

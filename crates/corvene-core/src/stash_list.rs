@@ -124,12 +124,19 @@ impl Dispatcher {
             return;
         };
         let options = Self::stash_pop_options(cx);
+        let applied = sha.clone();
         spawn_bg(
             cx,
             move || corvene_git::apply_stash_entry_with(git, &workdir, &sha, options),
             move |result, cx| {
-                if let Err(err) = result {
-                    Self::show_error("Could not apply stash", &err, cx);
+                match result {
+                    Ok(()) => Self::note_changelist_stash_fate(
+                        id,
+                        &applied,
+                        crate::changelists::StashFate::Applied,
+                        cx,
+                    ),
+                    Err(err) => Self::show_error("Could not apply stash", &err, cx),
                 }
                 Self::refresh_repository(id, cx);
             },
@@ -158,6 +165,12 @@ impl Dispatcher {
             "Could not discard stash",
             move |git, workdir| corvene_git::drop_desktop_stash_entry(git, &workdir, &sha),
             move |cx| {
+                Self::note_changelist_stash_fate(
+                    id,
+                    &stash.sha,
+                    crate::changelists::StashFate::Dropped,
+                    cx,
+                );
                 Self::set_banner(
                     Banner::StashDropped {
                         repo: id,

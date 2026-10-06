@@ -8494,6 +8494,33 @@ registry! {
         code: &["crates/corvene-ui/src/stacked_diff_view.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
 
+    /// Named groups of changed files, committed or stashed one at a time.
+    CHANGELISTS = 1313 "changelists" {
+        title: "Changelists",
+        summary: "Changed files can be grouped into named changelists: a file row's menu has \
+                  Move to Changelist with New Changelist… (a name and an optional description) \
+                  and the lists so far; the changes list then shows each list under its own \
+                  header with a checkbox for its files, a count and a menu, and the files in \
+                  no list under Changes. A header's Commit Only This List ticks its files, \
+                  unticks the rest and puts the list's name and description into an empty \
+                  commit form; Set as Active Changelist makes it the list new changes join \
+                  and the only one the commit button commits (\"Commit <list> to <branch>\"), \
+                  until Clear Active Changelist. Stash This List stashes the list's files \
+                  (the stash list shows \"Stash of <list>\" and a restore brings a deleted \
+                  list back), and the Switch Branch dialog can leave some lists stashed on \
+                  the old branch while the rest travel. Files leave a list when they are \
+                  committed or discarded; a list stays, empty, until it is deleted. Lists \
+                  are saved per repository.",
+        ghd_behaviour: "One flat list of changed files; the checkboxes alone pick the next \
+                        commit, and a branch switch stashes or brings every change.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(16925)],
+        code: &["crates/corvene-core/src/changelists.rs", "crates/corvene-ui/src/changes.rs", "crates/corvene-ui/src/dialogs/changelist_dialogs.rs", "crates/corvene-ui/src/dialogs/branch_dialogs.rs", "crates/corvene-ui/src/stash_list.rs"],
+    },
+
 }
 
 /// Ids and slugs that once existed; never reused.

@@ -1,0 +1,24 @@
+# Changelists (1313-changelists, off in the GitHub Desktop preset;
+# desktop/desktop#16925): recorded, not compared (GHD has one flat list of
+# changed files).
+name: changelists
+description: Named groups of changed files in the Changes list, their menu and the New Changelist dialog (Corvene only)
+setup: repo
+corvene_flags: 1313-changelists=on
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: "changelists:Docs=README.md,docs/old.md;Code=src/lib.rs,src/main.rs"}
+    wait: 800
+  - snap: {name: grouped, corvene_only: true, note: "GHD lists changed files flat (deviations.md, 1313-changelists)"}
+  - ghd: {skip: true}
+    corvene: {click: [125, 213]}
+    wait: 400
+  - snap: {name: header-selected, corvene_only: true, note: "a header row selects the list's files"}
+  - ghd: {skip: true}
+    corvene: {key: left}
+    wait: 400
+  - snap: {name: collapsed, corvene_only: true, note: "← collapses the list"}
+  - ghd: {skip: true}
+    corvene: {popup: "new-changelist:notes.txt"}
+    wait: 800
+  - snap: {name: new-changelist, corvene_only: true, note: "New Changelist… for the file"}
