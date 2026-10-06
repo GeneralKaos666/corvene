@@ -729,6 +729,10 @@ mod tests {
                     "commit.gpgsign=false",
                     "-c",
                     "protocol.file.allow=always",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
                 ])
                 .args(args)
                 .current_dir(cwd)
