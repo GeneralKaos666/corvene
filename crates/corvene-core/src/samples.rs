@@ -16,9 +16,16 @@ use corvene_models::{
 
 /// `seconds` ago as the API's ISO-8601 UTC timestamp.
 pub fn iso_ago(seconds: u64) -> String {
-    let t = SystemTime::now()
-        .checked_sub(Duration::from_secs(seconds))
-        .unwrap_or(UNIX_EPOCH)
+    iso_at(
+        SystemTime::now()
+            .checked_sub(Duration::from_secs(seconds))
+            .unwrap_or(UNIX_EPOCH),
+    )
+}
+
+/// `time` as the API's ISO-8601 UTC timestamp (whole seconds).
+pub fn iso_at(time: SystemTime) -> String {
+    let t = time
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);

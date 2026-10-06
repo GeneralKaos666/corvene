@@ -37,6 +37,16 @@ cancel and delete-logs answer as GitHub does and change the stub's runs;
 a dispatch adds a queued run dated now. Runs and jobs carry an `ETag` and
 answer 304 to a matching `If-None-Match`.
 
+Pull request events (`354-pull-request-event-notifications`): `pr_events`
+serves pull requests of two other repositories (`octo-org/website`,
+`octo-org/api`) behind `/notifications` (`Last-Modified` / `If-Modified-Since`
+304s, `X-Poll-Interval`) and `/search/issues`. Nothing has happened until a
+driver calls `stub.pr_events.happen()`, which dates every event now: a review
+asked of the account, an approval and a merge by hubot of the account's pull
+request, a mention of the account and one of its team, a merge the account did
+itself (no notification) and an approval in the fixture repository. `pr_events.refuse = True` answers 403
+on `/notifications`, so Corvene falls back to the search.
+
 Repository rules (`1225-branch-rules-link`): creating a `release/*` branch
 is restricted by a rule nobody can bypass (ruleset 41); a `hotfix/*` name
 must end in a number by a ruleset the user always bypasses (42).
@@ -330,6 +340,143 @@ class PullRequestFixture:
         return {"createLinkedBranch": {"linkedBranch": {"id": "LB_stub"}}}
 
 
+def _now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+class PullRequestEvents:
+    """`354-pull-request-event-notifications`: other repositories' pull
+    requests and what happens on them (see the module doc)."""
+
+    def __init__(self):
+        self.refuse = False
+        self.version = 0
+        self.prs: dict[tuple[str, str, int], dict] = {}
+        self.reviews: dict[tuple[str, str, int], list[dict]] = {}
+        self.comments: dict[int, dict] = {}
+        self.threads: list[dict] = []
+        # the stub's own origin: comment URLs elsewhere are never fetched
+        self.base = "http://127.0.0.1"
+
+    def _pr(self, owner: str, name: str, number: int, title: str, author: str, now: str, **extra) -> dict:
+        web = f"http://127.0.0.1/{owner}/{name}"
+        repo = {"name": name, "owner": _user(owner), "html_url": web, "clone_url": f"{web}.git",
+                "default_branch": "main", "private": False, "fork": False, "parent": None}
+        pr = {"number": number, "title": title, "state": "open", "draft": False, "created_at": now,
+              "updated_at": now, "user": _user(author), "body": "", "assignees": [],
+              "requested_reviewers": [], "requested_teams": [], "merged_at": None, "merged_by": None,
+              "html_url": f"{web}/pull/{number}",
+              "head": {"ref": f"topic-{number}", "sha": "a" * 40, "repo": repo},
+              "base": {"ref": "main", "sha": "b" * 40, "repo": repo}}
+        pr.update(extra)
+        self.prs[(owner, name, number)] = pr
+        return pr
+
+    def _thread(self, reason: str, pr: dict, latest_comment: int | None = None) -> None:
+        owner, name = pr["base"]["repo"]["owner"]["login"], pr["base"]["repo"]["name"]
+        api = f"{self.base}/api/v3/repos/{owner}/{name}"
+        self.threads.insert(0, {
+            "id": str(len(self.threads) + 1), "reason": reason, "unread": True,
+            "updated_at": pr["updated_at"],
+            "subject": {"title": pr["title"], "type": "PullRequest", "url": f"{api}/pulls/{pr['number']}",
+                        "latest_comment_url": f"{api}/issues/comments/{latest_comment}"
+                        if latest_comment else f"{api}/pulls/{pr['number']}"},
+            "repository": {"name": name, "full_name": f"{owner}/{name}", "owner": _user(owner)},
+        })
+
+    def happen(self, login: str = "octocat", base: int = 0) -> None:
+        """Every event, dated now; `base` shifts the pull request numbers
+        and ids, so a second round is new to Corvene."""
+        now = _now()
+        n = lambda number: number + base  # noqa: E731
+        self._thread("review_requested", self._pr("octo-org", "website", n(21), "Redesign the landing page", "mona",
+                                                  now, requested_reviewers=[_user(login)]))
+        mine = self._pr("octo-org", "website", n(22), "Fix the footer links", login, now, state="closed",
+                        merged_at=now, merged_by=_user("hubot"))
+        self.reviews[("octo-org", "website", n(22))] = [
+            {"id": n(7001), "user": _user("hubot"), "body": "Looks good!", "state": "APPROVED",
+             "html_url": f"{mine['html_url']}#pullrequestreview-{n(7001)}", "submitted_at": now},
+            {"id": n(7002), "user": _user(login), "body": "", "state": "PENDING",
+             "html_url": f"{mine['html_url']}#pullrequestreview-{n(7002)}", "submitted_at": None},
+        ]
+        self._thread("author", mine)
+        mention = self._pr("octo-org", "api", n(23), "Rate limit the search endpoint", "mona", now)
+        self.comments[n(901)] = {"id": n(901), "body": f"@{login} could you check the limits?",
+                                 "user": _user("mona"), "created_at": now,
+                                 "html_url": f"{mention['html_url']}#issuecomment-{n(901)}",
+                                 "pr": ("octo-org", "api", n(23))}
+        self._thread("mention", mention, n(901))
+        team = self._pr("octo-org", "api", n(24), "Bump the API version", "mona", now)
+        self.comments[n(902)] = {"id": n(902), "body": "@octo-org/core please review", "user": _user("mona"),
+                                 "created_at": now, "html_url": f"{team['html_url']}#issuecomment-{n(902)}",
+                                 "pr": ("octo-org", "api", n(24))}
+        self._thread("team_mention", team, n(902))
+        self._thread("author", self._pr("octo-org", "api", n(25), "Tidy the changelog", login, now, state="closed",
+                                        merged_at=now, merged_by=_user(login)))
+        # the listed fixture repository: an approval of the account's pull request
+        listed = self._pr(OWNER, NAME, n(32), "Explain the --login flag", login, now)
+        self.reviews[(OWNER, NAME, n(32))] = [
+            {"id": n(7003), "user": _user("mona"), "body": "Ship it.", "state": "APPROVED",
+             "html_url": f"{listed['html_url']}#pullrequestreview-{n(7003)}", "submitted_at": now},
+        ]
+        self._thread("author", listed)
+        self.version += 1
+
+    def search(self, query: str, login: str) -> list[dict]:
+        def item(key, pr):
+            owner, name, _ = key
+            return {"number": pr["number"], "title": pr["title"], "updated_at": pr["updated_at"],
+                    "repository_url": f"http://stub/api/v3/repos/{owner}/{name}", "user": pr["user"]}
+        out = []
+        for key, pr in self.prs.items():
+            if "review-requested:@me" in query:
+                hit = pr["state"] == "open" and any(u["login"] == login for u in pr["requested_reviewers"])
+            elif "author:@me" in query:
+                hit = pr["user"]["login"] == login
+            elif "mentions:@me" in query:
+                hit = any(c["pr"] == key and f"@{login}" in c["body"] for c in self.comments.values())
+            else:
+                hit = False
+            if hit:
+                out.append(item(key, pr))
+        return out
+
+    def get(self, handler: "_Handler", path: str, params: dict, login: str) -> bool:
+        """Answer `path` when it is one of these routes."""
+        if path == "/api/v3/notifications":
+            if self.refuse:
+                handler._send(403, {"message": "Resource not accessible by personal access token"})
+                return True
+            headers = {"Last-Modified": f"stub-{self.version}", "X-Poll-Interval": "60"}
+            if handler.headers.get("If-Modified-Since") == headers["Last-Modified"]:
+                handler._send_empty(304, headers)
+            else:
+                handler._send(200, self.threads, headers)
+            return True
+        if path == "/api/v3/search/issues":
+            items = self.search(urllib.parse.unquote_plus(params.get("q", "")), login)
+            handler._send(200, {"total_count": len(items), "incomplete_results": False, "items": items})
+            return True
+        m = re.fullmatch(r"/api/v3/repos/([^/]+)/([^/]+)/pulls/(\d+)(/reviews)?", path)
+        if m and (m[1], m[2], int(m[3])) in self.prs:
+            key = (m[1], m[2], int(m[3]))
+            handler._send(200, self.reviews.get(key, []) if m[4] else self.prs[key])
+            return True
+        m = re.fullmatch(r"/api/v3/repos/[^/]+/[^/]+/issues/comments/(\d+)", path)
+        if m and int(m[1]) in self.comments:
+            c = dict(self.comments[int(m[1])])
+            c.pop("pr")
+            handler._send(200, c)
+            return True
+        m = re.fullmatch(r"/api/v3/repos/([^/]+)/([^/]+)/issues/(\d+)/comments", path)
+        if m and (m[1], m[2], int(m[3])) in self.prs:
+            key = (m[1], m[2], int(m[3]))
+            handler._send(200, [{k: v for k, v in c.items() if k != "pr"}
+                                for c in self.comments.values() if c["pr"] == key])
+            return True
+        return False
+
+
 class _Handler(BaseHTTPRequestHandler):
     server_version = "github-stub/1"
 
@@ -347,10 +494,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _send_empty(self, status: int) -> None:
+    def _send_empty(self, status: int, headers: dict | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Length", "0")
         self.send_header("X-GitHub-Request-Id", "STUB:1")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
 
     def _send_etag(self, body) -> None:
@@ -396,6 +545,8 @@ class _Handler(BaseHTTPRequestHandler):
                               {"X-OAuth-Scopes": ", ".join(self.server.scopes)})
         if path == "/api/v3/user/orgs":
             return self._send(200, [])
+        if self.server.pr_events.get(self, path, params, login):
+            return
         if path == repo:
             perm = self.server.permissions.get(login, "admin")
             return self._send(200, {"name": NAME, "owner": _user(OWNER), "html_url": f"http://127.0.0.1/{OWNER}/{NAME}",
@@ -789,6 +940,9 @@ class Stub(HTTPServer):
         self.not_modified = 0
         # `348-pull-request-review`: pull request #7 over the fixture
         self.pull_request = PullRequestFixture(repo) if repo else None
+        # `354-pull-request-event-notifications`
+        self.pr_events = PullRequestEvents()
+        self.pr_events.base = f"http://127.0.0.1:{self.server_address[1]}"
         self.scopes: list[str] = os.environ.get(
             "GITHUB_STUB_SCOPES", "repo workflow read:user user:email").split()
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)

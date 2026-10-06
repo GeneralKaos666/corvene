@@ -73,6 +73,7 @@ pub mod persistence;
 pub mod popup_manager;
 pub mod portable_paths;
 pub mod proxy;
+pub mod pull_request_events;
 pub mod pull_request_preview;
 pub mod pull_request_review;
 pub mod pull_requests;
@@ -141,8 +142,9 @@ pub use mco::{
 };
 pub use packs::{OFFERED_PACKS, PackProgress, PacksState, offered_packs};
 pub use persistence::{
-    CustomIntegration, DEFAULT_DATE_FORMAT, DEFAULT_NUMBER_FORMAT, DEFAULT_TIME_FORMAT, Settings,
-    StoreExt, TAB_SIZE_DEFAULT, UncommittedChangesStrategy,
+    CustomIntegration, DEFAULT_DATE_FORMAT, DEFAULT_NUMBER_FORMAT, DEFAULT_TIME_FORMAT,
+    NotificationClickAction, PullRequestEventNotifications, Settings, StoreExt, TAB_SIZE_DEFAULT,
+    UncommittedChangesStrategy,
 };
 pub use popup_manager::{AppError, PopupManager, PopupType, StackedPopup};
 pub use pull_request_preview::{MergeStatus, PreviewSlot, PullRequestPreview};

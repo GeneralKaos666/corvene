@@ -588,6 +588,8 @@ pub(crate) fn main() {
         //   sign-in (the GitHub.com sign-in dialog)
         //   alive:review|comment|checks-failed[:api] (an Alive event for the sample
         //   pull requests through the notification handler; sample data unless :api)
+        //   pr-event:review-requested|reviewed|merged|mentioned (a sample pull request
+        //   event notification for the selected repository, flag 354)
         //   update-available[:brew|:pkg][:about|:notes] (a sample update in the
         //   ready / Homebrew / package manager state: the banner, plus About or
         //   the Release Notes with "Install and Restart")
@@ -1351,6 +1353,8 @@ pub(crate) fn main() {
         Dispatcher::refresh_accounts(cx);
         // Alive subscriptions for pull request notifications (GHD AliveStore)
         Dispatcher::start_alive(cx);
+        // `354-pull-request-event-notifications` (idle while the flag is off)
+        Dispatcher::start_pull_request_event_polling(cx);
         Dispatcher::start_pull_request_updater(cx);
         Dispatcher::start_commit_status_refresh(cx);
         // flags 342-344: OAuth tokens of GitLab and Gitea accounts expire
@@ -2135,6 +2139,10 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
             };
             dev_samples::install_pull_requests(id, cx);
             Dispatcher::simulate_alive_event(id, kind, data, cx);
+        }
+        // `354-pull-request-event-notifications`: a sample event notification
+        (other, _) if other.starts_with("pr-event:") => {
+            Dispatcher::simulate_pull_request_event_notification(&other["pr-event:".len()..], cx);
         }
         // the sign-in dialog (device flow by default, browser flow link)
         ("sign-in", _) => Dispatcher::show_popup(Popup::SignIn { enterprise: false }, cx),

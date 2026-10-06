@@ -412,6 +412,24 @@ pub struct ApiPullRequest {
     pub assignees: Vec<ApiOwner>,
     #[serde(default, deserialize_with = "null_as_empty_vec")]
     pub requested_reviewers: Vec<ApiOwner>,
+    /// Corvene (`354-pull-request-event-notifications`): the teams asked
+    /// for a review, when it was merged and by whom, and its page.
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub requested_teams: Vec<ApiTeam>,
+    #[serde(default)]
+    pub merged_at: Option<String>,
+    #[serde(default)]
+    pub merged_by: Option<ApiOwner>,
+    #[serde(default)]
+    pub html_url: Option<String>,
+}
+
+/// A team asked for a review (`requested_teams[]`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApiTeam {
+    pub slug: String,
+    #[serde(default)]
+    pub name: String,
 }
 
 /// `null` → `[]` for lists the API may send as `null`.
@@ -1174,6 +1192,40 @@ impl Client {
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
         Ok(Some((response.body_mut().read_json()?, etag)))
+    }
+
+    /// Corvene (`354-pull-request-event-notifications`): a conditional
+    /// `GET` on `If-Modified-Since` (the notifications API's polling
+    /// contract). `None` for a 304, which costs no rate limit; the response
+    /// headers come back either way (`Last-Modified`, `X-Poll-Interval`,
+    /// `Date`).
+    pub(crate) fn get_json_if_modified_since<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        since: Option<&str>,
+    ) -> Result<(Option<T>, Vec<(String, String)>)> {
+        let url = self.endpoint.api(path);
+        debug!(%url, since, "GET");
+        let mut request = self
+            .agent
+            .get(&url)
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28");
+        if !self.token.is_empty() {
+            request = request.header("Authorization", &format!("Bearer {}", self.token));
+        }
+        if let Some(since) = since {
+            request = request.header("If-Modified-Since", since);
+        }
+        let mut response = request.call()?;
+        let headers = header_pairs(response.headers());
+        if response.status() == ureq::http::StatusCode::NOT_MODIFIED {
+            return Ok((None, headers));
+        }
+        if !response.status().is_success() {
+            return Err(self.api_error(&url, response));
+        }
+        Ok((Some(response.body_mut().read_json()?), headers))
     }
 
     /// Corvene (`351-actions`): a `POST` (with `body`, else empty) or a

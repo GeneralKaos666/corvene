@@ -3068,6 +3068,27 @@ registry! {
         code: &["crates/corvene-core/src/forks.rs", "crates/corvene-core/src/remote.rs"],
     },
 
+    /// Notifications for review requests, reviews, merges and mentions on
+    /// any repository.
+    PULL_REQUEST_EVENT_NOTIFICATIONS = 354 "pull-request-event-notifications" {
+        title: "Pull request event notifications",
+        summary: "Each signed-in account is polled for pull request events on any repository \
+                  it can see (GitHub's notifications API, or the issue search when the token is \
+                  refused it): a review asked of you or your team, an approval or changes \
+                  requested on your pull request, your pull request merged by someone else, and \
+                  a mention of you or your team. Settings › Notifications has a checkbox per \
+                  event and a choice of what a click opens (the repository in Corvene when it \
+                  is listed, or the pull request on GitHub). Works on GitHub Enterprise too.",
+        ghd_behaviour: "Only Alive's reviews, comments and failed checks of your own pull \
+                        requests in the selected repository are notified, and only on GitHub.com.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: OFF, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(21474)],
+        code: &["crates/corvene-core/src/pull_request_events.rs", "crates/corvene-github/src/pull_request_events.rs", "crates/corvene-core/src/notifications.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
+
     // ---- 400 Window & menus ----
 
     /// Help › Show Release Notes.

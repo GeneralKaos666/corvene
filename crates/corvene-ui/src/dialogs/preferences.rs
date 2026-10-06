@@ -2238,7 +2238,114 @@ impl PreferencesDialog {
                     .child(paragraph(parts).line_height(zpx(16.)))
                     .children(warning),
             )
+            .children(self.pull_request_events_section(cx))
             .into_any_element()
+    }
+
+    /// `354-pull-request-event-notifications`: which pull request events of
+    /// any repository notify, and what a click opens.
+    fn pull_request_events_section(&self, cx: &Context<Self>) -> Option<Div> {
+        if !self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::PULL_REQUEST_EVENT_NOTIFICATIONS)
+        {
+            return None;
+        }
+        let d = &self.draft;
+        let events = d.pull_request_event_notifications;
+        let click = d.pull_request_notification_click;
+        let clicks = [
+            (
+                corvene_core::NotificationClickAction::OpenInCorvene,
+                "prefs-pr-events-click-corvene",
+                "Open the repository in Corvene when it is in the list",
+            ),
+            (
+                corvene_core::NotificationClickAction::OpenOnGitHub,
+                "prefs-pr-events-click-github",
+                "Open the pull request on GitHub",
+            ),
+        ];
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .mt(SPACING())
+                        .child(section_heading("Pull request events", cx)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(SPACING_HALF())
+                        .child(checkbox_row(
+                            "prefs-pr-events-review-requested",
+                            events.review_requested,
+                            "Review requested from you or your team",
+                            self.edit(cx, |s, v| {
+                                s.pull_request_event_notifications.review_requested = v
+                            }),
+                            cx,
+                        ))
+                        .child(checkbox_row(
+                            "prefs-pr-events-reviews",
+                            events.reviews,
+                            "Your pull request approved or changes requested",
+                            self.edit(cx, |s, v| s.pull_request_event_notifications.reviews = v),
+                            cx,
+                        ))
+                        .child(checkbox_row(
+                            "prefs-pr-events-merged",
+                            events.merged,
+                            "Your pull request merged",
+                            self.edit(cx, |s, v| s.pull_request_event_notifications.merged = v),
+                            cx,
+                        ))
+                        .child(checkbox_row(
+                            "prefs-pr-events-mentions",
+                            events.mentions,
+                            "You or your team mentioned",
+                            self.edit(cx, |s, v| s.pull_request_event_notifications.mentions = v),
+                            cx,
+                        )),
+                )
+                .child(settings_description(cx).child(paragraph(vec![
+                    "Every signed-in account is checked for these events in any repository it can see, about once a minute."
+                        .into(),
+                ])))
+                .child(
+                    div()
+                        .mt(SPACING())
+                        .child(section_heading("When I click a notification...", cx)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(SPACING_HALF())
+                        .children(clicks.iter().map(|(value, id, label)| {
+                            let value = *value;
+                            let weak = cx.weak_entity();
+                            radio_row(
+                                id,
+                                click == value,
+                                *label,
+                                move |_, cx| {
+                                    weak.update(cx, |this, cx| {
+                                        this.draft.pull_request_notification_click = value;
+                                        cx.notify();
+                                    })
+                                    .ok();
+                                },
+                                cx,
+                            )
+                        })),
+                ),
+        )
     }
 
     fn prompts_tab(&self, cx: &Context<Self>) -> AnyElement {

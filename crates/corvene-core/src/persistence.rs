@@ -128,6 +128,13 @@ pub struct Settings {
     /// bar status item watches.
     #[serde(default)]
     pub menu_bar_repositories: Vec<u64>,
+    /// Corvene (`354-pull-request-event-notifications`): which pull request
+    /// events of any repository become notifications (Notifications tab).
+    #[serde(default)]
+    pub pull_request_event_notifications: PullRequestEventNotifications,
+    /// Corvene (`354`): what a click on one of those notifications opens.
+    #[serde(default)]
+    pub pull_request_notification_click: NotificationClickAction,
     /// GHD `useExternalCredentialHelper` (Git Credential Manager).
     #[serde(default)]
     pub use_external_credential_helper: bool,
@@ -385,6 +392,50 @@ fn default_zoom() -> f32 {
     1.0
 }
 
+/// Corvene (`354-pull-request-event-notifications`): the pull request
+/// events Settings › Notifications turns on, each on by default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PullRequestEventNotifications {
+    /// A review was asked of you or one of your teams.
+    pub review_requested: bool,
+    /// Your pull request was approved or got changes requested.
+    pub reviews: bool,
+    /// Someone else merged your pull request.
+    pub merged: bool,
+    /// You or one of your teams was mentioned in a pull request.
+    pub mentions: bool,
+}
+
+impl Default for PullRequestEventNotifications {
+    fn default() -> Self {
+        Self {
+            review_requested: true,
+            reviews: true,
+            merged: true,
+            mentions: true,
+        }
+    }
+}
+
+impl PullRequestEventNotifications {
+    pub fn any(&self) -> bool {
+        self.review_requested || self.reviews || self.merged || self.mentions
+    }
+}
+
+/// Corvene (`354`): where a click on a pull request event notification
+/// goes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NotificationClickAction {
+    /// The repository in Corvene when it is listed (its review view with
+    /// `348-pull-request-review`), else the pull request on GitHub.
+    #[default]
+    OpenInCorvene,
+    /// Always the pull request on GitHub.
+    OpenOnGitHub,
+}
+
 /// GHD `UncommittedChangesStrategy`
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UncommittedChangesStrategy {
@@ -435,6 +486,8 @@ impl Default for Settings {
             commit_spellcheck_enabled: true,
             repository_indicators_enabled: true,
             menu_bar_repositories: Vec::new(),
+            pull_request_event_notifications: PullRequestEventNotifications::default(),
+            pull_request_notification_click: NotificationClickAction::default(),
             use_external_credential_helper: false,
             underline_links: true,
             show_diff_check_marks: true,

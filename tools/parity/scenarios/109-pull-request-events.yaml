@@ -1,0 +1,18 @@
+# Settings › Notifications › Pull request events (354-pull-request-event-
+# notifications, off in the GitHub Desktop preset): the event checkboxes
+# and the click choice, before and after unticking one. The polled
+# notifications themselves are checked over CORVENE_CONTROL (`pr-events`,
+# `pr-events-poll`, github_stub's `pr_events`).
+name: 109-pull-request-events
+description: "Corvene-only: Settings › Notifications with the pull request event checkboxes (354)"
+setup: repo
+corvene_flags: 354-pull-request-event-notifications=on
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: "preferences:notifications"}
+    wait: 1000
+  - snap: {name: notifications, corvene_only: true, note: "GHD's Notifications tab has only Enable notifications (deviations.md, 354-pull-request-event-notifications)"}
+  - ghd: {skip: true}
+    corvene: {click: {text: "Your pull request merged", within: "dialog"}}
+    wait: 400
+  - snap: {name: merged-off, corvene_only: true, note: "the Merged checkbox cleared"}

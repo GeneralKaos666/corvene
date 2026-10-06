@@ -753,6 +753,29 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
                 .map_err(|e| format!("menu-bar-unwatch: {e}"))?;
             Dispatcher::set_menu_bar_repository(id, false, cx);
         }
+        // `354-pull-request-event-notifications`: the notifications posted
+        // (newest last) and each account's event source
+        "pr-events" => {
+            let s = corvene_core::AppState::global(cx).read(cx);
+            let events = &s.alive.pull_request_events;
+            return Ok(json!({"posted": events.recent, "sources": events.sources()}));
+        }
+        // ... and a poll of every account now
+        "pr-events-poll" => Dispatcher::poll_pull_request_events_now(cx),
+        // ... and a click on the newest one whose page contains `arg`
+        "pr-events-click" => {
+            let newest = corvene_core::AppState::global(cx)
+                .read(cx)
+                .alive
+                .pull_request_events
+                .recent
+                .iter()
+                .rev()
+                .find(|p| p.notification.html_url.contains(arg))
+                .map(|p| p.notification.clone())
+                .ok_or("no such pull request event notification was posted")?;
+            Dispatcher::open_pull_request_event(newest, cx);
+        }
         other => return Err(format!("unknown hook {other:?}")),
     }
     Ok(json!({}))

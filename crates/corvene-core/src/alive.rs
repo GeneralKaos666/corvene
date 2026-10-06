@@ -55,6 +55,9 @@ pub struct AliveState {
     pub skip_commit_shas: HashSet<String>,
     /// `skipCheckRuns`: check runs a notification was already shown for.
     pub skip_check_runs: HashSet<u64>,
+    /// Corvene (`354-pull-request-event-notifications`): the poller of
+    /// pull request events on every repository.
+    pub pull_request_events: crate::pull_request_events::PullRequestEventsState,
 }
 
 /// Where the review / comment / checks of an event come from.
@@ -544,6 +547,11 @@ fn client_token(account: &Account) -> String {
         .ok()
         .flatten()
         .unwrap_or_default()
+}
+
+/// The API client of `account` (`None` without a token).
+pub(crate) fn account_client(account: &Account) -> Option<Client> {
+    api_client(Some(account))
 }
 
 /// The API client for the account that owns the repository's endpoint.

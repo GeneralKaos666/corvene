@@ -7,6 +7,7 @@ pub mod api;
 pub mod auth;
 pub mod endpoint;
 pub mod error;
+pub mod pull_request_events;
 pub mod review;
 pub mod signatures;
 

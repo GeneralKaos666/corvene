@@ -12,9 +12,12 @@
 //! (`PullRequestReview`, `PullRequestComment`, `PullRequestChecksFailed`, or
 //! the CI status popover when the pull request's branch is checked out).
 //!
-//! Deviations: nothing produces events yet (GHD's Alive websocket is not
-//! ported); only the Test Notifications dialog posts them. The notification
-//! carries the dialog's data as JSON in its `userInfo`, so a click from an
+//! Events come from Alive ([`crate::alive`]) and the Test Notifications
+//! dialog; `354-pull-request-event-notifications` adds the polled events of
+//! [`crate::pull_request_events`], which share the review dedup and
+//! Settings › Notifications' review checkbox with Alive's reviews.
+//!
+//! Deviation: the notification carries the dialog's data as JSON in its `userInfo`, so a click from an
 //! earlier session opens the dialog without GHD's API round trip
 //! (`onNotificationEventReceived` re-fetches the review / comment / checks).
 
@@ -196,7 +199,7 @@ fn next_identifier() -> String {
 
 /// Should a click switch the repository / check out the pull request branch?
 /// (`shouldChangeRepository` / `shouldCheckoutBranch`)
-fn switch_flags(s: &AppState, repo: u64, pr: &PullRequest) -> (bool, bool) {
+pub(crate) fn switch_flags(s: &AppState, repo: u64, pr: &PullRequest) -> (bool, bool) {
     let current_branch = s
         .repo_states
         .get(&repo)
@@ -244,6 +247,10 @@ impl Dispatcher {
         if Self::actions_notification_clicked(payload, cx) {
             return;
         }
+        // `354-pull-request-event-notifications`
+        if Self::pull_request_event_notification_clicked(payload, cx) {
+            return;
+        }
         match serde_json::from_str::<PullRequestNotification>(payload) {
             Ok(notification) => Self::notification_clicked(notification, cx),
             Err(err) => warn!(%err, "unreadable notification payload"),
@@ -256,6 +263,34 @@ impl Dispatcher {
         if !Self::state(cx).read(cx).settings.notifications_enabled {
             debug!("notifications are disabled");
             return;
+        }
+        // `354-pull-request-event-notifications`: Settings › Notifications ›
+        // "Approved or changes requested" covers these reviews too, and one
+        // the poller showed already is not shown again
+        if let NotificationKind::PullRequestReview { review } = &notification.kind {
+            let state = Self::state(cx);
+            let (polling, reviews) = {
+                let s = state.read(cx);
+                (
+                    s.flags
+                        .bool(crate::flags::ids::PULL_REQUEST_EVENT_NOTIFICATIONS),
+                    s.settings.pull_request_event_notifications.reviews,
+                )
+            };
+            let opinionated = matches!(
+                review.state,
+                ApiPullRequestReviewState::Approved | ApiPullRequestReviewState::ChangesRequested
+            );
+            if polling {
+                if opinionated && !reviews {
+                    return;
+                }
+                let key = crate::pull_request_events::review_key(review.id);
+                if !state.update(cx, |s, _| s.alive.pull_request_events.seen.insert(key)) {
+                    debug!(review = review.id, "review notification shown already");
+                    return;
+                }
+            }
         }
         Self::post_pull_request_event(notification, cx);
     }
