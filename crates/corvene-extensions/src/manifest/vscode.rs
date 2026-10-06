@@ -8,7 +8,8 @@ use super::{GrammarRef, Language, Manifest, pattern, repository_url, suffix};
 use crate::ExtensionError;
 use crate::value::{Value, parse_json};
 
-/// `Ok(None)` unless `root/package.json` contributes grammars.
+/// `Ok(None)` unless `root/package.json` contributes grammars or file icon
+/// themes.
 pub fn read(root: &Path) -> Result<Option<Manifest>, ExtensionError> {
     let path = root.join("package.json");
     if !path.is_file() {
@@ -19,8 +20,11 @@ pub fn read(root: &Path) -> Result<Option<Manifest>, ExtensionError> {
     let Some(contributes) = package.get("contributes") else {
         return Ok(None);
     };
-    let Some(Value::List(grammars)) = contributes.get("grammars") else {
-        return Ok(None);
+    let icon_themes = crate::icon_theme::vscode_refs(&package);
+    let grammars = match contributes.get("grammars") {
+        Some(Value::List(grammars)) => &grammars[..],
+        _ if !icon_themes.is_empty() => &[],
+        _ => return Ok(None),
     };
     let mut manifest = Manifest {
         format: Some(super::Format::VsCode),
@@ -31,6 +35,7 @@ pub fn read(root: &Path) -> Result<Option<Manifest>, ExtensionError> {
         description: package.str_of("description").map(str::to_string),
         repository: repository_url(package.get("repository")),
         license: package.str_of("license").map(str::to_string),
+        icon_themes,
         ..Default::default()
     };
     // the display name may be an `%nls.key%` placeholder

@@ -240,6 +240,9 @@ impl Dispatcher {
         {
             Self::load_tree_sitter_packs(cx);
         }
+        if now.bool(ids::FILE_ICONS) != previous.bool(ids::FILE_ICONS) {
+            Self::load_file_icon_theme(true, cx);
+        }
         if now.bool(ids::LANGUAGE_EXTENSIONS) != previous.bool(ids::LANGUAGE_EXTENSIONS) {
             if now.bool(ids::LANGUAGE_EXTENSIONS) {
                 Self::load_language_extensions(cx);

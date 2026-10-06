@@ -68,6 +68,7 @@ fn candidate(item: &Value) -> Option<Candidate> {
             .and_then(|m| m.str_of("description"))
             .map(str::to_string),
         repository,
+        icon_themes: false,
         download_url: format!(
             "{BASE}/packages/{}/versions/{}/tarball",
             encode(name),

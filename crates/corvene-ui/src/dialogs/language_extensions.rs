@@ -116,10 +116,17 @@ impl LanguageExtensionsDialog {
         })
         .detach();
         let tab = match &focus {
-            Some(ExtensionsFocus::Suffix(_) | ExtensionsFocus::Find) => Tab::Find,
+            Some(
+                ExtensionsFocus::Suffix(_) | ExtensionsFocus::Find | ExtensionsFocus::IconThemes,
+            ) => Tab::Find,
             Some(ExtensionsFocus::Import) => Tab::Import,
             None => Tab::Installed,
         };
+        // `117-file-icons`: the Find tab lists icon themes when asked for them
+        let icon_themes = focus == Some(ExtensionsFocus::IconThemes);
+        if icon_themes || state.read(cx).extensions.search.icon_themes {
+            Dispatcher::set_extension_search_icon_themes(icon_themes, icon_themes, cx);
+        }
         let mut this = Self {
             state,
             tab,
@@ -267,10 +274,22 @@ impl LanguageExtensionsDialog {
             }
             file_types.push_str(&filenames.join(" "));
         }
+        // `117-file-icons`
+        let icon_themes: Vec<&str> = md.icon_themes.iter().map(|t| t.label.as_str()).collect();
+        if !icon_themes.is_empty() {
+            if !file_types.is_empty() {
+                file_types.push_str("  ·  ");
+            }
+            file_types.push_str(&format!("File icons: {}", icon_themes.join(", ")));
+        }
         if file_types.is_empty() {
             file_types = "no file types".to_string();
         }
-        let kind = grammar_kind_label(installed);
+        let kind = if md.grammars.is_empty() && !icon_themes.is_empty() {
+            "icon theme"
+        } else {
+            grammar_kind_label(installed)
+        };
         let error = extensions.errors.get(&md.id).cloned();
         let update = extensions.updates.get(&md.id).cloned();
         let build_flag = self
@@ -406,7 +425,8 @@ impl LanguageExtensionsDialog {
                             ))
                             .child(div().text_size(FONT_SIZE_SM()).child("Enabled")),
                     )
-                    .child(
+                    // `117-file-icons`: nothing to prefer without a grammar
+                    .when(!md.grammars.is_empty(), |d| d.child(
                         div()
                             .id(SharedString::from(format!("lang-ext-prefer-row-{}", md.id)))
                             .flex()
@@ -428,7 +448,7 @@ impl LanguageExtensionsDialog {
                             .on_click(move |_, _, cx| {
                                 Dispatcher::set_extension_preferred(&prefer_id, !prefer_now, cx)
                             }),
-                    )
+                    ))
                     .child(div().flex_1())
                     .child(
                         link_button(SharedString::from(format!("lang-ext-remove-{}", md.id)), "Remove", cx)
@@ -736,7 +756,16 @@ impl LanguageExtensionsDialog {
                     }),
             );
         }
-        panel = panel.child(heading("Grammars"));
+        // `117-file-icons`
+        if !md.icon_themes.is_empty() {
+            panel = panel.child(heading("File icon themes"));
+            for theme in &md.icon_themes {
+                panel = panel.child(line(theme.label.clone()));
+            }
+        }
+        if !md.grammars.is_empty() || md.icon_themes.is_empty() {
+            panel = panel.child(heading("Grammars"));
+        }
         for grammar in &md.grammars {
             let kind = match grammar.kind {
                 GrammarKind::TextMate => "TextMate",
@@ -980,7 +1009,10 @@ impl LanguageExtensionsDialog {
                 group_thousands(candidate.downloads)
             ));
         }
-        let files = if candidate.suffixes.is_empty() {
+        let files = if candidate.icon_themes && candidate.suffixes.is_empty() {
+            // `117-file-icons`
+            "File icon theme".to_string()
+        } else if candidate.suffixes.is_empty() {
             "File types: not listed by the registry (known once installed)".to_string()
         } else {
             let mut shown: Vec<String> = candidate
@@ -1134,7 +1166,7 @@ impl LanguageExtensionsDialog {
                 status.push(format!("{}: {err}", registry.title()));
             }
         }
-        let body: AnyElement = if search.query.is_empty() {
+        let body: AnyElement = if search.query.is_empty() && !search.icon_themes {
             div()
                 .p(SPACING())
                 .text_size(FONT_SIZE_SM())
@@ -1192,7 +1224,29 @@ impl LanguageExtensionsDialog {
                                 this.search(text, cx);
                             },
                         )),
-                    ),
+                    )
+                    // `117-file-icons`
+                    .child({
+                        let on = search.icon_themes;
+                        div()
+                            .id("lang-ext-icon-themes")
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(SPACING_HALF())
+                            .cursor_pointer()
+                            .text_size(FONT_SIZE_SM())
+                            .on_click(move |_, _, cx| {
+                                Dispatcher::set_extension_search_icon_themes(!on, true, cx)
+                            })
+                            .child(crate::widgets::checkbox(
+                                "lang-ext-icon-themes-check",
+                                on,
+                                false,
+                                cx,
+                            ))
+                            .child("File icon themes")
+                    }),
             )
             .children(status.into_iter().map(|s| {
                 div()
@@ -1309,6 +1363,10 @@ impl LanguageExtensionsDialog {
         if candidate.tree_sitter {
             meta.push("tree-sitter".to_string());
         }
+        // `117-file-icons`
+        if !candidate.icon_themes.is_empty() {
+            meta.push(format!("File icons: {}", candidate.icon_themes.join(", ")));
+        }
         let row_id = SharedString::from(format!(
             "lang-ext-import-row-{}",
             install::slug(&candidate.path.to_string_lossy())
@@ -1414,6 +1472,9 @@ fn extension_state(installed: &Installed, extensions: &ExtensionsState) -> (Hsla
         (hsla(0.12, 0.8, 0.5, 1.), "Updating…".to_string())
     } else if !md.enabled {
         (hsla(0., 0., 0.6, 1.), "Disabled".to_string())
+    } else if md.grammars.is_empty() && !md.icon_themes.is_empty() {
+        // `117-file-icons`: an icon theme alone has no grammar to use
+        (hsla(0.33, 0.6, 0.45, 1.), "Enabled".to_string())
     } else if !md.usable() {
         (hsla(0., 0.7, 0.5, 1.), "No usable grammar".to_string())
     } else if md.grammars.iter().any(|g| {

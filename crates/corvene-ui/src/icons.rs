@@ -118,6 +118,13 @@ pub enum Octicon {
     /// `1310-file-list-tree` folder rows.
     FileDirectoryFill,
     FileDirectoryOpenFill,
+    /// `117-file-icons` built-in set.
+    Book,
+    Container,
+    Database,
+    FileZip,
+    Law,
+    Markdown,
 }
 
 impl Octicon {
@@ -209,6 +216,12 @@ impl Octicon {
             Octicon::Stopwatch => "octicons/stopwatch-16.svg",
             Octicon::FileDirectoryFill => "octicons/file-directory-fill-16.svg",
             Octicon::FileDirectoryOpenFill => "octicons/file-directory-open-fill-16.svg",
+            Octicon::Book => "octicons/book-16.svg",
+            Octicon::Container => "octicons/container-16.svg",
+            Octicon::Database => "octicons/database-16.svg",
+            Octicon::FileZip => "octicons/file-zip-16.svg",
+            Octicon::Law => "octicons/law-16.svg",
+            Octicon::Markdown => "octicons/markdown-16.svg",
             Octicon::Telescope => "octicons/telescope-16.svg",
             Octicon::Zap => "octicons/zap-16.svg",
             Octicon::Terminal => "octicons/terminal-16.svg",

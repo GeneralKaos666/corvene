@@ -59,6 +59,8 @@ pub struct Manifest {
     pub license: Option<String>,
     pub languages: Vec<Language>,
     pub grammars: Vec<GrammarRef>,
+    /// File icon themes (`117-file-icons`).
+    pub icon_themes: Vec<crate::icon_theme::IconThemeRef>,
 }
 
 /// A language the extension adds: when it applies, and which grammar

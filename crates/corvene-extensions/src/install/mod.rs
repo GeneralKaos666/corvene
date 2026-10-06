@@ -170,6 +170,10 @@ pub struct Metadata {
     pub languages: Vec<Language>,
     #[serde(default)]
     pub grammars: Vec<GrammarStatus>,
+    /// `117-file-icons`: the file icon themes, paths relative to the
+    /// extension's folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub icon_themes: Vec<crate::icon_theme::IconThemeRef>,
     #[serde(default = "yes")]
     pub enabled: bool,
     #[serde(default = "yes")]
@@ -374,6 +378,7 @@ mod tests {
                 queries: None,
                 resolution: Resolution::Unresolved,
             }],
+            icon_themes: Vec::new(),
             enabled: true,
             prefer_over_builtin: false,
             license: None,

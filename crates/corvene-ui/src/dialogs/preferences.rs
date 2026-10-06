@@ -1923,6 +1923,91 @@ impl PreferencesDialog {
             .when(language_extensions, |d| {
                 d.child(self.language_extensions_field(cx))
             })
+            // Corvene addition: `117-file-icons`
+            .when(
+                self.state
+                    .read(cx)
+                    .flags
+                    .bool(corvene_core::flags::ids::FILE_ICONS),
+                |d| d.child(self.file_icons_field(language_extensions, cx)),
+            )
+            .into_any_element()
+    }
+
+    /// Appearance › File icons (`117-file-icons`): the built-in Octicons,
+    /// none, or an installed extension's icon theme, and a way to find more.
+    fn file_icons_field(&self, extensions: bool, cx: &Context<Self>) -> AnyElement {
+        use corvene_core::file_icons::{BUILTIN, NONE, choices};
+        let mut keys: Vec<String> = vec![BUILTIN.to_string(), NONE.to_string()];
+        let mut options: Vec<SharedString> = vec!["Octicons".into(), "None".into()];
+        let all = choices(self.state.read(cx));
+        for choice in &all {
+            // the same theme from VS Code and from Zed: say which
+            let twin = all
+                .iter()
+                .filter(|c| c.label == choice.label && c.extension == choice.extension)
+                .count()
+                > 1;
+            let label = match (choice.label == choice.extension, twin) {
+                (true, false) => choice.label.clone(),
+                (true, true) => format!("{} ({})", choice.label, choice.editor),
+                (false, false) => format!("{} ({})", choice.label, choice.extension),
+                (false, true) => {
+                    format!("{} ({}, {})", choice.label, choice.extension, choice.editor)
+                }
+            };
+            options.push(label.into());
+            keys.push(choice.key.clone());
+        }
+        let selected_ix = keys.iter().position(|k| *k == self.draft.file_icon_theme);
+        let value = selected_ix
+            .and_then(|ix| options.get(ix).cloned())
+            // a theme whose extension is gone or off
+            .unwrap_or_else(|| "Octicons".into());
+        let weak = cx.weak_entity();
+        let on_select: SelectHandler = Rc::new(move |ix, _, cx| {
+            if let Some(key) = keys.get(ix).cloned() {
+                weak.update(cx, |this, cx| {
+                    this.draft.file_icon_theme = key;
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
+        div()
+            .flex()
+            .flex_col()
+            .mt(SPACING())
+            .child(labeled(
+                mac_or("File Icons", "File icons"),
+                select_button(
+                    "prefs-file-icons",
+                    value,
+                    options,
+                    selected_ix,
+                    false,
+                    on_select,
+                    cx,
+                ),
+                cx,
+            ))
+            .child(settings_description(cx).mt(zpx(2.)).child(
+                "The icon before each file in the changes and history lists. Icon themes \
+                 come from VS Code and Zed extensions.",
+            ))
+            .when(extensions, |d| {
+                d.child(div().mt(SPACING()).flex().flex_row().child(
+                    button("prefs-find-icon-themes", "Find Icon Themes…", cx).on_click(
+                        |_, _, cx| {
+                            Dispatcher::open_language_extensions(
+                                Some(corvene_core::extensions::ExtensionsFocus::IconThemes),
+                                Some(corvene_core::PreferencesTab::Appearance),
+                                cx,
+                            )
+                        },
+                    ),
+                ))
+            })
             .into_any_element()
     }
 

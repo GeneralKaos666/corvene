@@ -13,6 +13,7 @@ pub mod cache;
 pub mod cson;
 pub mod github;
 pub mod http;
+pub mod icon_theme;
 pub mod importer;
 pub mod index;
 pub mod install;

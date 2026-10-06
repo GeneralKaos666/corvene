@@ -173,7 +173,22 @@ pub fn read(root: &Path) -> Result<Option<Manifest>, ExtensionError> {
             grammar,
         });
     }
-    if manifest.grammars.is_empty() && manifest.languages.is_empty() {
+    // `117-file-icons`
+    let icon_theme_files: Vec<String> = table
+        .get("icon_themes")
+        .and_then(|l| l.as_array())
+        .map(|l| {
+            l.iter()
+                .filter_map(|v| v.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    manifest.icon_themes = crate::icon_theme::zed_refs(root, &icon_theme_files);
+    if manifest.grammars.is_empty()
+        && manifest.languages.is_empty()
+        && manifest.icon_themes.is_empty()
+    {
         return Ok(None);
     }
     Ok(Some(manifest))

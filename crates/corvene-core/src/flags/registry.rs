@@ -631,6 +631,24 @@ registry! {
         code: &["crates/corvene-ui/src/widgets.rs"],
     },
 
+    /// File type icons in the file lists, from editor icon themes.
+    FILE_ICONS = 117 "file-icons" {
+        title: "File icons",
+        summary: "Rows of the changes list, a commit's files and a stash's files (and the \
+                  folder rows of their trees) start with an icon for the file's type. \
+                  Settings › Appearance › File icons picks the built-in Octicons or a file icon \
+                  theme from a VS Code or Zed extension (Material Icon Theme, vscode-icons, \
+                  Catppuccin…), installed, imported from an editor or found on Open VSX and \
+                  Zed's registry in Language Extensions. SVG, PNG and icon-font themes work.",
+        ghd_behaviour: "File rows show no file type icon.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-extensions/src/icon_theme.rs", "crates/corvene-core/src/file_icons.rs", "crates/corvene-ui/src/file_icons.rs"],
+    },
+
     // ---- 200 Repository ----
 
     /// `commit.template` prefills the commit description.

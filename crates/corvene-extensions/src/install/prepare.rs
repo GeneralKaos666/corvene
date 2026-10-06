@@ -144,9 +144,9 @@ pub fn prepare(
         grammars.push(status);
         report.grammars.push(grammar_report);
     }
-    if grammars.is_empty() {
+    if grammars.is_empty() && manifest.icon_themes.is_empty() {
         return Err(ExtensionError::NotAnExtension(
-            "no syntax grammars in this extension".to_string(),
+            "no syntax grammars or file icon themes in this extension".to_string(),
         ));
     }
     // languages that lost their grammar (rejected) still describe files;
@@ -174,6 +174,17 @@ pub fn prepare(
         format: manifest.format,
         languages,
         grammars,
+        // `117-file-icons`: the copy under `source/` (a theme the copy
+        // budget left out is dropped)
+        icon_themes: manifest
+            .icon_themes
+            .iter()
+            .map(|t| crate::icon_theme::IconThemeRef {
+                path: format!("source/{}", t.path),
+                ..t.clone()
+            })
+            .filter(|t| out.join(&t.path).is_file())
+            .collect(),
         enabled: true,
         prefer_over_builtin: true,
         license: manifest.license.clone(),

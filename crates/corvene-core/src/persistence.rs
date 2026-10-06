@@ -158,6 +158,10 @@ pub struct Settings {
     /// lists show folders; off: GHD's flat list).
     #[serde(default)]
     pub file_list_tree: bool,
+    /// Corvene `117-file-icons`: Appearance › File icons
+    /// (`corvene_core::file_icons`).
+    #[serde(default = "default_file_icon_theme")]
+    pub file_icon_theme: String,
     /// Corvene `1311-stacked-diff`: the Changes tab shows the included
     /// files' diffs stacked in one list.
     #[serde(default)]
@@ -362,6 +366,10 @@ fn default_file_list_width() -> f32 {
     250.0
 }
 
+fn default_file_icon_theme() -> String {
+    crate::file_icons::BUILTIN.to_string()
+}
+
 fn default_tab_size() -> u32 {
     TAB_SIZE_DEFAULT
 }
@@ -437,6 +445,7 @@ impl Default for Settings {
             show_side_by_side_diff: false,
             diff_wrap_lines: true,
             file_list_tree: false,
+            file_icon_theme: default_file_icon_theme(),
             stacked_diff_changes: false,
             stacked_diff_history: false,
             image_diff_type: corvene_models::ImageDiffType::TwoUp,

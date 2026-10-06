@@ -594,7 +594,7 @@ pub(crate) fn main() {
         //   flags[:<search>] (Corvene › Flags…, with the search box prefilled)
         //   remove-repositories (File › Remove Repositories…, the selected one ticked)
         //   repository-list (the repository foldout)
-        //   language-extensions[:find|:find=<suffix>|:import|:consent] (Settings › Appearance ›
+        //   language-extensions[:find|:find=<suffix>|:import|:icons|:consent] (Settings › Appearance ›
         //   Language extensions…; flag 111; :consent offers the first grammar waiting for a
         //   build from source, flag 1001)
         //   git-error[:raw|:known|:push|:plain] (the error dialog for a failed pull:
@@ -1909,6 +1909,8 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 Some("consent") => None,
                 Some("find") => Some(ExtensionsFocus::Find),
                 Some("import") => Some(ExtensionsFocus::Import),
+                // `117-file-icons`
+                Some("icons") => Some(ExtensionsFocus::IconThemes),
                 Some(rest) => rest
                     .strip_prefix("find=")
                     .map(|suffix| ExtensionsFocus::Suffix(suffix.to_string())),

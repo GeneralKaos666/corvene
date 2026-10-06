@@ -1959,6 +1959,9 @@ pub struct AppState {
     /// `1310-file-list-tree`: each repository's collapsed folders in the
     /// changes tree, as saved.
     pub collapsed_folders: HashMap<u64, std::sync::Arc<std::collections::BTreeSet<String>>>,
+    /// `117-file-icons`: the extension icon theme the setting names, loaded
+    /// (`None` for the built-in set, none, or while it loads).
+    pub file_icon_theme: Option<std::sync::Arc<crate::file_icons::LoadedIconTheme>>,
     /// Corvene (flags `342-gitlab`, `343-gitea`, `344-bitbucket`): GitLab,
     /// Gitea / Forgejo and Bitbucket accounts and data (`hosts.rs`).
     pub hosts: crate::hosts::HostsState,

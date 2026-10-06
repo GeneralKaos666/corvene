@@ -47,6 +47,19 @@ impl Registry {
         }
     }
 
+    /// `117-file-icons`: extensions with file icon themes matching `query`
+    /// (Pulsar has none it could read).
+    pub fn search_icon_themes(
+        self,
+        query: &str,
+    ) -> Result<Vec<Candidate>, crate::ExtensionError> {
+        match self {
+            Registry::OpenVsx => openvsx::search_icon_themes(query),
+            Registry::Zed => zed::search_icon_themes(query),
+            Registry::Pulsar => Ok(Vec::new()),
+        }
+    }
+
     /// Extensions for files with `suffix` (no dot).
     pub fn for_suffix(self, suffix: &str) -> Result<Vec<Candidate>, crate::ExtensionError> {
         match self {
@@ -90,6 +103,9 @@ pub struct Candidate {
     pub suffixes: Vec<String>,
     #[serde(default)]
     pub downloads: u64,
+    /// `117-file-icons`: it contributes file icon themes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub icon_themes: bool,
 }
 
 fn unknown() -> GrammarHint {

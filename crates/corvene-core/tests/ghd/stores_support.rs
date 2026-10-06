@@ -119,6 +119,7 @@ pub fn app_state() -> TestAppState {
         excluded_files: HashMap::new(),
         excluded_files_restored: HashSet::new(),
         collapsed_folders: HashMap::new(),
+        file_icon_theme: None,
         hosts: Default::default(),
     };
     TestAppState { state, _dir: dir }

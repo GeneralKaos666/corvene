@@ -413,6 +413,21 @@ fn stash_file_row(
     } else {
         color
     };
+    // `117-file-icons`
+    let file_icon = crate::file_icons::file_icons(cx).map(|icons| {
+        let color = match (is_selected, list_focused) {
+            (true, true) => t.box_selected_active_text,
+            (true, false) => t.box_selected_text,
+            _ => t.text_secondary,
+        };
+        div()
+            .flex_none()
+            .when_some(depth, |d, depth| {
+                d.ml(crate::file_tree_rows::file_label_margin(depth))
+            })
+            .child(crate::file_icons::file_icon(&icons, &file.path, color, cx))
+    });
+    let has_icon = file_icon.is_some();
     let path = file.path.clone();
     div()
         .id(SharedString::from(format!("stash-file-{}", file.path)))
@@ -453,6 +468,7 @@ fn stash_file_row(
             }
             Dispatcher::select_stash_file(id, path.clone(), cx)
         })
+        .children(file_icon)
         .child({
             // GHD `PathLabel`; `.list-item.selected .dirname` inherits the
             // row colour
@@ -473,7 +489,9 @@ fn stash_file_row(
                     directory_color,
                     arrow_color,
                 )
-                .ml(crate::file_tree_rows::file_label_margin(depth)),
+                .when(!has_icon, |d| {
+                    d.ml(crate::file_tree_rows::file_label_margin(depth))
+                }),
                 None => crate::path_label::path_label_element(
                     crate::path_label::path_label(
                         &file.path,

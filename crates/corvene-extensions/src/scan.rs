@@ -189,6 +189,12 @@ fn merge(dir: &Path, found: Vec<Scanned>) -> Scanned {
                 manifest.languages.push(language);
             }
         }
+        for mut theme in m.icon_themes {
+            theme.path = prefix.join(&theme.path).to_string_lossy().into_owned();
+            if !manifest.icon_themes.iter().any(|t| t.id == theme.id) {
+                manifest.icon_themes.push(theme);
+            }
+        }
     }
     Scanned {
         root: dir.to_path_buf(),

@@ -1,0 +1,13 @@
+# File type icons from the built-in Octicons set, and Settings ›
+# Appearance › File Icons (117-file-icons, off in the GitHub Desktop
+# preset): recorded, not compared (GHD rows have no file icon).
+name: file-icons
+description: Built-in file icons in the changes list and the File Icons setting (Corvene only)
+setup: repo
+corvene_flags: 117-file-icons=on
+steps:
+  - snap: {name: changes, corvene_only: true, note: "GHD rows have no file icon (deviations.md, 117-file-icons)"}
+  - ghd: {skip: true}
+    corvene: {popup: "preferences:appearance"}
+    wait: 800
+  - snap: {name: appearance, corvene_only: true, note: "Settings › Appearance › File Icons"}

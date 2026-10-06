@@ -227,6 +227,7 @@ impl Dispatcher {
             excluded_files,
             excluded_files_restored: std::collections::HashSet::new(),
             collapsed_folders,
+            file_icon_theme: None,
             hosts,
         });
         let state = StateHandle;
@@ -7780,6 +7781,8 @@ impl Dispatcher {
         if let Some(message) = failed {
             Self::show_error(TITLE, message, cx);
         }
+        // `117-file-icons`: a new icon theme choice loads (no-op otherwise)
+        Self::load_file_icon_theme(false, cx);
     }
 }
 

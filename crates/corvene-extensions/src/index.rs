@@ -130,6 +130,7 @@ mod tests {
             grammar: GrammarHint::TextMate,
             suffixes: Vec::new(),
             downloads: 0,
+            icon_themes: false,
         }
     }
 

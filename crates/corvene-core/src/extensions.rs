@@ -54,6 +54,8 @@ pub enum ExtensionsFocus {
     Suffix(String),
     Find,
     Import,
+    /// the Find tab listing file icon themes (`117-file-icons`)
+    IconThemes,
 }
 
 /// An install in flight, by stage.
@@ -160,6 +162,8 @@ pub struct SearchState {
     pub generation: u64,
     /// the search was a suffix lookup (`.foo`) rather than free text
     pub suffix: Option<String>,
+    /// `117-file-icons`: the Find tab looks for file icon themes
+    pub icon_themes: bool,
 }
 
 /// What a suffix lookup (the diff hint) found.
@@ -425,6 +429,8 @@ impl Dispatcher {
                     }
                     cx.notify();
                 });
+                // `117-file-icons`: the themes came or went with them
+                Self::load_file_icon_theme(true, cx);
             },
         );
     }
@@ -511,25 +517,32 @@ impl Dispatcher {
     /// own; a later search drops the earlier one's late answers.
     pub fn search_extensions(query: String, cx: &mut dyn Host) {
         let query = query.trim().to_string();
+        // `117-file-icons`: icon themes list the popular ones without a query
+        let icon_themes = Self::state(cx).read(cx).extensions.search.icon_themes;
         let suffix = query
             .strip_prefix('.')
-            .filter(|s| !s.is_empty() && !s.contains(char::is_whitespace))
+            .filter(|s| !icon_themes && !s.is_empty() && !s.contains(char::is_whitespace))
             .map(str::to_ascii_lowercase);
+        let registries: Vec<Registry> = if icon_themes {
+            vec![Registry::OpenVsx, Registry::Zed]
+        } else {
+            Registry::ALL.to_vec()
+        };
         let generation = Self::state(cx).update(cx, |s, cx| {
             s.extensions.search.generation += 1;
             s.extensions.search.query = query.clone();
             s.extensions.search.suffix = suffix.clone();
             s.extensions.search.results.clear();
             s.extensions.search.errors.clear();
-            s.extensions.search.in_flight = if query.is_empty() {
+            s.extensions.search.in_flight = if query.is_empty() && !icon_themes {
                 BTreeSet::new()
             } else {
-                Registry::ALL.into_iter().collect()
+                registries.iter().copied().collect()
             };
             cx.notify();
             s.extensions.search.generation
         });
-        if query.is_empty() {
+        if query.is_empty() && !icon_themes {
             return;
         }
         if let Some(suffix) = &suffix {
@@ -548,11 +561,12 @@ impl Dispatcher {
                 });
             }
         }
-        for registry in Registry::ALL {
+        for registry in registries {
             let (query, suffix) = (query.clone(), suffix.clone());
             spawn_bg(
                 cx,
                 move || match &suffix {
+                    _ if icon_themes => registry.search_icon_themes(&query),
                     Some(suffix) => registry.for_suffix(suffix),
                     None => registry.search(&query),
                 },
@@ -589,6 +603,25 @@ impl Dispatcher {
                     });
                 },
             );
+        }
+    }
+
+    /// `117-file-icons`: switch the Find tab between language extensions
+    /// and file icon themes; `search` searches again, else the old results
+    /// go.
+    pub fn set_extension_search_icon_themes(icon_themes: bool, search: bool, cx: &mut dyn Host) {
+        let query = Self::state(cx).update(cx, |s, cx| {
+            let search = &mut s.extensions.search;
+            search.icon_themes = icon_themes;
+            search.generation += 1;
+            search.results.clear();
+            search.in_flight.clear();
+            search.errors.clear();
+            cx.notify();
+            search.query.clone()
+        });
+        if search {
+            Self::search_extensions(query, cx);
         }
     }
 

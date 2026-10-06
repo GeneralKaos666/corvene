@@ -105,6 +105,8 @@ pub struct ImportCandidate {
     /// file suffixes it covers
     pub suffixes: Vec<String>,
     pub tree_sitter: bool,
+    /// `117-file-icons`: the file icon themes it adds
+    pub icon_themes: Vec<String>,
 }
 
 /// Scan every editor's folders under `home`.
@@ -145,6 +147,7 @@ fn scan_root(editor: Editor, root: &Path, out: &mut Vec<ImportCandidate>) {
                     languages: Vec::new(),
                     suffixes: Vec::new(),
                     tree_sitter: false,
+                    icon_themes: Vec::new(),
                 });
             }
             continue;
@@ -160,7 +163,7 @@ fn scan_root(editor: Editor, root: &Path, out: &mut Vec<ImportCandidate>) {
                 continue;
             }
         };
-        if manifest.grammars.is_empty() {
+        if manifest.grammars.is_empty() && manifest.icon_themes.is_empty() {
             continue;
         }
         let mut suffixes: Vec<String> = manifest
@@ -192,6 +195,11 @@ fn scan_root(editor: Editor, root: &Path, out: &mut Vec<ImportCandidate>) {
                 .grammars
                 .iter()
                 .any(|g| matches!(g, GrammarRef::TreeSitter { .. })),
+            icon_themes: manifest
+                .icon_themes
+                .iter()
+                .map(|t| t.label.clone())
+                .collect(),
         });
     }
 }

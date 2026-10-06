@@ -442,57 +442,76 @@ pub fn folder_cells(
     let t = cx.ghd();
     let secondary = text_color.unwrap_or(t.text_secondary);
     let icon_color = text_color.unwrap_or(t.text_secondary);
-    [
-        div()
-            .id("tree-chevron")
-            .ml(indent(depth))
-            .w(chevron_width())
-            .h_full()
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                cx.stop_propagation();
-                on_toggle(window, cx);
-            })
-            .child(
-                octicon(
-                    if expanded {
-                        Octicon::ChevronDown
-                    } else {
-                        Octicon::ChevronRight
-                    },
-                    secondary,
-                )
-                .size(zpx(12.)),
+    // `117-file-icons`: the theme's folder icon; a theme with
+    // `hidesExplorerArrows` draws it in the chevron's place
+    let icons = crate::file_icons::file_icons(cx);
+    let hides_arrows =
+        matches!(&icons, Some(crate::file_icons::FileIcons::Theme(t)) if t.theme.hides_arrows);
+    let folder = crate::file_icons::folder_icon(
+        icons.as_ref(),
+        label.rsplit('/').next().unwrap_or(label),
+        expanded,
+        icon_color,
+        cx,
+    );
+    // the folder icon goes in the chevron's slot or after it
+    let (chevron, folder): (AnyElement, Option<AnyElement>) = if hides_arrows {
+        (folder, None)
+    } else {
+        (
+            octicon(
+                if expanded {
+                    Octicon::ChevronDown
+                } else {
+                    Octicon::ChevronRight
+                },
+                secondary,
             )
+            .size(zpx(12.))
             .into_any_element(),
-        octicon(
-            if expanded {
-                Octicon::FileDirectoryOpenFill
-            } else {
-                Octicon::FileDirectoryFill
-            },
-            icon_color,
+            Some(folder),
         )
-        .into_any_element(),
-        div()
-            .flex_1()
-            .min_w_0()
-            .text_size(FONT_SIZE())
-            .truncate()
-            .child(label.to_string())
-            .into_any_element(),
-        div()
-            .flex_none()
-            .ml(SPACING_HALF())
-            .text_size(zpx(11.))
-            .text_color(secondary)
-            .child(count.to_string())
-            .into_any_element(),
+    };
+    let toggle = div()
+        .id("tree-chevron")
+        .ml(indent(depth))
+        .w(chevron_width())
+        .h_full()
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            cx.stop_propagation();
+            on_toggle(window, cx);
+        })
+        .child(chevron)
+        .into_any_element();
+    [
+        Some(toggle),
+        folder,
+        Some(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(FONT_SIZE())
+                .truncate()
+                .child(label.to_string())
+                .into_any_element(),
+        ),
+        Some(
+            div()
+                .flex_none()
+                .ml(SPACING_HALF())
+                .text_size(zpx(11.))
+                .text_color(secondary)
+                .child(count.to_string())
+                .into_any_element(),
+        ),
     ]
+    .into_iter()
+    .flatten()
 }
 
 /// The button at the end of the "N changed files" row that switches every

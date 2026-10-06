@@ -6686,6 +6686,21 @@ fn file_row(
         .map(|(_, hits)| hits)
         .unwrap_or_default();
     let lfs_lock = file_lfs_lock(repo_id, &file.path, cx);
+    // `117-file-icons`
+    let file_icon = crate::file_icons::file_icons(cx).map(|icons| {
+        let color = match (is_selected, list_focused) {
+            (true, true) => t.box_selected_active_text,
+            (true, false) => t.box_selected_text,
+            _ => t.text_secondary,
+        };
+        div()
+            .flex_none()
+            .when_some(depth, |d, depth| {
+                d.ml(crate::file_tree_rows::file_label_margin(depth))
+            })
+            .child(crate::file_icons::file_icon(&icons, &file.path, color, cx))
+    });
+    let has_icon = file_icon.is_some();
     let dir_len = directory.chars().count();
     let name_hits: Vec<usize> = hits
         .iter()
@@ -6820,6 +6835,7 @@ fn file_row(
                 }),
             ),
         )
+        .children(file_icon)
         .child(if let Some(depth) = depth {
             // `1310-file-list-tree`: the name under its folder
             let (name_color, arrow_color) = match (is_selected, list_focused) {
@@ -6837,7 +6853,9 @@ fn file_row(
                 name_color,
                 arrow_color,
             )
-            .ml(crate::file_tree_rows::file_label_margin(depth))
+            .when(!has_icon, |d| {
+                d.ml(crate::file_tree_rows::file_label_margin(depth))
+            })
             .text_size(FONT_SIZE())
         } else if names_only {
             div()

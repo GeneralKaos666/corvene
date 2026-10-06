@@ -1659,6 +1659,21 @@ fn commit_file_row(
     } else {
         color
     };
+    // `117-file-icons`
+    let file_icon = crate::file_icons::file_icons(cx).map(|icons| {
+        let color = match (is_selected, list_focused) {
+            (true, true) => t.box_selected_active_text,
+            (true, false) => t.box_selected_text,
+            _ => t.text_secondary,
+        };
+        div()
+            .flex_none()
+            .when_some(depth, |d, depth| {
+                d.ml(crate::file_tree_rows::file_label_margin(depth))
+            })
+            .child(crate::file_icons::file_icon(&icons, &file.path, color, cx))
+    });
+    let has_icon = file_icon.is_some();
     let path = file.path.clone();
     let menu_path = file.path.clone();
     let multi_select = AppState::global(cx)
@@ -1757,6 +1772,7 @@ fn commit_file_row(
                     .ok();
             }
         })
+        .children(file_icon)
         .child({
             // GHD `PathLabel`: `PathText` keeps the file name and shortens
             // the directory from its middle when the row is too narrow;
@@ -1778,7 +1794,9 @@ fn commit_file_row(
                     directory_color,
                     arrow_color,
                 )
-                .ml(crate::file_tree_rows::file_label_margin(depth)),
+                .when(!has_icon, |d| {
+                    d.ml(crate::file_tree_rows::file_label_margin(depth))
+                }),
                 None => crate::path_label::path_label_element(
                     crate::path_label::path_label(
                         &file.path,

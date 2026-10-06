@@ -18,8 +18,19 @@ pub fn search(query: &str) -> Result<Vec<Candidate>, ExtensionError> {
         encode(query.trim())
     );
     let mut found = parse_list(&crate::http::get_text(&url)?)?;
-    // language extensions only
-    found.retain(|c| c.grammar != GrammarHint::Unknown);
+    // language extensions and icon themes
+    found.retain(|c| c.grammar != GrammarHint::Unknown || c.icon_themes);
+    Ok(found)
+}
+
+/// `117-file-icons`: extensions that provide icon themes.
+pub fn search_icon_themes(query: &str) -> Result<Vec<Candidate>, ExtensionError> {
+    let url = format!(
+        "{BASE}/extensions?filter={}&provides=icon-themes&max_schema_version={MAX_SCHEMA_VERSION}",
+        encode(query.trim())
+    );
+    let mut found = parse_list(&crate::http::get_text(&url)?)?;
+    found.retain(|c| c.icon_themes);
     Ok(found)
 }
 
@@ -130,6 +141,7 @@ fn candidate(item: &Value) -> Option<Candidate> {
         repository: item.str_of("repository").map(str::to_string),
         download_url: download_url(id, version),
         grammar,
+        icon_themes: provides.iter().any(|p| p == "icon-themes"),
         suffixes,
         downloads: item
             .get("download_count")

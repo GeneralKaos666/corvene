@@ -18,6 +18,26 @@ pub fn search(query: &str) -> Result<Vec<Candidate>, ExtensionError> {
     Ok(found)
 }
 
+/// `117-file-icons`: Themes-category extensions tagged `icon-theme`
+/// (VS Code tags every extension that contributes `iconThemes`).
+pub fn search_icon_themes(query: &str) -> Result<Vec<Candidate>, ExtensionError> {
+    let query = query.trim();
+    let url = format!(
+        "{BASE}/-/search?query={}&category=Themes&size=20&sortBy={}&includeAllVersions=false",
+        encode(if query.is_empty() { "icon" } else { query }),
+        if query.is_empty() {
+            "downloadCount"
+        } else {
+            "relevance"
+        },
+    );
+    let mut found = parse_search(&crate::http::get_text(&url)?)?;
+    // the search answer has no tags: each detail has them
+    fill_suffixes(&mut found);
+    found.retain(|c| c.icon_themes);
+    Ok(found)
+}
+
 /// The search answer carries no tags; each extension's detail does
 /// (`__ext_<suffix>` from its `contributes.languages`). Fetched a few at a
 /// time so the Find tab shows what every result covers.
@@ -28,14 +48,19 @@ fn fill_suffixes(found: &mut [Candidate]) {
         .filter(|(_, c)| c.suffixes.is_empty())
         .map(|(i, c)| (i, c.id.clone()))
         .collect();
-    let mut details: Vec<(usize, Vec<String>)> = Vec::new();
+    let mut details: Vec<(usize, Vec<String>, bool)> = Vec::new();
     std::thread::scope(|scope| {
         let mut handles = Vec::new();
         for chunk in ids.chunks(4) {
             handles.push(scope.spawn(move || {
                 chunk
                     .iter()
-                    .filter_map(|(i, id)| latest(id).ok().flatten().map(|c| (*i, c.suffixes)))
+                    .filter_map(|(i, id)| {
+                        latest(id)
+                            .ok()
+                            .flatten()
+                            .map(|c| (*i, c.suffixes, c.icon_themes))
+                    })
                     .collect::<Vec<_>>()
             }));
         }
@@ -45,9 +70,10 @@ fn fill_suffixes(found: &mut [Candidate]) {
             }
         }
     });
-    for (i, suffixes) in details {
+    for (i, suffixes, icon_themes) in details {
         if let Some(candidate) = found.get_mut(i) {
             candidate.suffixes = suffixes;
+            candidate.icon_themes |= icon_themes;
         }
     }
 }
@@ -97,6 +123,8 @@ fn candidate(item: &Value) -> Option<Candidate> {
         repository: None,
         download_url: download.to_string(),
         grammar: GrammarHint::TextMate,
+        // `117-file-icons`
+        icon_themes: tags.iter().any(|t| t == "icon-theme"),
         suffixes,
         downloads: item
             .get("downloadCount")
