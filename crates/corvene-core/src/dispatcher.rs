@@ -5245,28 +5245,34 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let Some(file) = Self::state(cx)
-            .read(cx)
-            .repo_states
-            .get(&id)
-            .and_then(|rs| {
-                let path = rs.stash_selected_file.as_ref()?;
-                rs.stash_files
-                    .as_ref()?
-                    .iter()
-                    .find(|f| &f.path == path)
-                    .cloned()
-            })
+        // An untracked file of a `stash -u` entry carries the entry's
+        // untracked-files commit as its commitish (`stashed_files`), so its
+        // contents are read from that commit, not the stash commit.
+        let Some((stash_sha, file)) =
+            Self::state(cx)
+                .read(cx)
+                .repo_states
+                .get(&id)
+                .and_then(|rs| {
+                    let path = rs.stash_selected_file.as_ref()?;
+                    let file = rs
+                        .stash_files
+                        .as_ref()?
+                        .iter()
+                        .find(|f| &f.path == path)
+                        .cloned()?;
+                    Some((rs.shown_stash()?.sha.clone(), file))
+                })
         else {
             return;
         };
-        let key = (file.commitish.clone(), file.path.clone());
+        let key = (stash_sha, file.path.clone());
         let hide_whitespace = Self::state(cx)
             .read(cx)
             .settings
             .hide_whitespace_in_history_diff;
         let task = cx.background_executor().spawn(async move {
-            let diff = corvene_git::commit_file_diff(git.clone(), &workdir, &file, hide_whitespace);
+            let diff = corvene_git::stash_file_diff(git.clone(), &workdir, &file, hide_whitespace);
             let contents = (file.status.kind != corvene_models::FileStatusKind::Deleted)
                 .then(|| {
                     corvene_git::blob_lines(git.clone(), &workdir, &file.commitish, &file.path)

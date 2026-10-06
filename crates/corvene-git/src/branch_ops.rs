@@ -900,13 +900,14 @@ pub fn get_stashes(git: Arc<GitBinary>, workdir: &Path) -> Result<(Vec<StashEntr
     Ok((entries, total))
 }
 
-/// `getStashedFiles`: `stash show <sha> --raw --numstat -z`.
+/// `getStashedFiles`: `stash show <sha> --raw --numstat -z`, plus the
+/// untracked files of a `stash -u` entry (see [`stash_untracked_commit`]).
 pub fn stashed_files(
     git: Arc<GitBinary>,
     workdir: &Path,
     sha: &str,
 ) -> Result<corvene_models::ChangesetData> {
-    let out = GitCommand::new(git)
+    let out = GitCommand::new(git.clone())
         .args([
             "stash",
             "show",
@@ -920,7 +921,62 @@ pub fn stashed_files(
         ])
         .current_dir(workdir)
         .run()?;
-    Ok(crate::log::parse_raw_log_with_numstat(&out.stdout, sha))
+    let mut data = crate::log::parse_raw_log_with_numstat(&out.stdout, sha);
+    if let Some(untracked) = stash_untracked_commit(git.clone(), workdir, sha)? {
+        // Corvene `797-stash-list`: `stash push -u` keeps the untracked
+        // files in a root commit, the stash's third parent, which `stash
+        // show` leaves out before git 2.32 (`--include-untracked`). List them
+        // as new files with that commit as their commitish, so their
+        // contents are read from it. GHD's own stashes put new files in the
+        // index and never have this parent.
+        let out = GitCommand::new(git)
+            .args([
+                "diff-tree",
+                "--root",
+                "-r",
+                "--raw",
+                "--numstat",
+                "-z",
+                "--no-commit-id",
+                "--no-color",
+                &untracked,
+                "--",
+            ])
+            .current_dir(workdir)
+            .run()?;
+        let extra = crate::log::parse_raw_log_with_numstat(&out.stdout, &untracked);
+        data.lines_added += extra.lines_added;
+        data.lines_deleted += extra.lines_deleted;
+        for file in extra.files {
+            // a path can be both: removed from the index, then left untracked
+            if !data.files.iter().any(|f| f.path == file.path) {
+                data.files.push(file);
+            }
+        }
+    }
+    Ok(data)
+}
+
+/// The commit holding a stash entry's untracked files (`<sha>^3`, made by
+/// `stash push --include-untracked`), if it has one.
+fn stash_untracked_commit(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    sha: &str,
+) -> Result<Option<String>> {
+    let out = GitCommand::new(git)
+        .args([
+            "rev-parse",
+            "-q",
+            "--verify",
+            &format!("{sha}^3^{{commit}}"),
+        ])
+        .current_dir(workdir)
+        .allow_exit_code(1)
+        .run()?
+        .stdout_string()?;
+    let out = out.trim();
+    Ok((!out.is_empty()).then(|| out.to_string()))
 }
 
 /// The find half of `getLastDesktopStashEntryForBranch` over entries
@@ -1325,6 +1381,64 @@ eeee commit: something\n";
         pop_stash_entry(git.clone(), path, &stash.sha).unwrap();
         assert_eq!(get_stashes(git, path).unwrap().1, 0);
         assert!(path.join("new.txt").exists());
+    }
+
+    #[test]
+    fn stash_lists_untracked_files_of_a_stash_u_entry() {
+        let (dir, git) = repo();
+        let path = dir.path();
+        std::fs::write(path.join("a.txt"), "changed\n").unwrap();
+        std::fs::create_dir(path.join("dir")).unwrap();
+        std::fs::write(path.join("dir/new.txt"), "one\ntwo\n").unwrap();
+        let ok = Command::new("git")
+            .args(["stash", "push", "-q", "--include-untracked"])
+            .current_dir(path)
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let (stashes, _) = get_stashes(git.clone(), path).unwrap();
+        let sha = &stashes[0].sha;
+        let data = stashed_files(git.clone(), path, sha).unwrap();
+        let mut files: Vec<_> = data.files.iter().collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "a.txt");
+        assert_eq!(&files[0].commitish, sha);
+        assert_eq!(files[1].path, "dir/new.txt");
+        assert_eq!(files[1].status.kind, corvene_models::FileStatusKind::New);
+        let untracked = stash_untracked_commit(git.clone(), path, sha)
+            .unwrap()
+            .unwrap();
+        assert_eq!(files[1].commitish, untracked);
+        assert_eq!(data.lines_added, 3);
+        // the untracked file's patch comes from the root commit, even with
+        // `log.showRoot` off
+        let ok = Command::new("git")
+            .args(["config", "log.showRoot", "false"])
+            .current_dir(path)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        match crate::stash_file_diff(git.clone(), path, files[1], false).unwrap() {
+            corvene_models::Diff::Text { hunks, .. } => {
+                assert_eq!(hunks[0].new_lines, 2);
+            }
+            other => panic!("expected a text diff, got {other:?}"),
+        }
+        // a plain stash has no untracked parent
+        pop_stash_entry(git.clone(), path, sha).unwrap();
+        create_desktop_stash(git.clone(), path, "main", false).unwrap();
+        let (stashes, _) = get_stashes(git.clone(), path).unwrap();
+        assert_eq!(
+            stash_untracked_commit(git, path, &stashes[0].sha).unwrap(),
+            None
+        );
     }
 
     #[test]

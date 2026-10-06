@@ -1160,9 +1160,35 @@ pub fn commit_file_diff(
     file: &CommittedFileChange,
     hide_whitespace: bool,
 ) -> Result<Diff> {
+    committed_file_diff(git, workdir, file, hide_whitespace, false)
+}
+
+/// Corvene `797-stash-list`: [`commit_file_diff`] for a stash entry's file.
+/// An untracked file's commitish is the entry's untracked-files commit, a
+/// root commit, whose patch `git log` leaves out under `log.showRoot=false`
+/// unless asked with `--root`.
+pub fn stash_file_diff(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &CommittedFileChange,
+    hide_whitespace: bool,
+) -> Result<Diff> {
+    committed_file_diff(git, workdir, file, hide_whitespace, true)
+}
+
+fn committed_file_diff(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    file: &CommittedFileChange,
+    hide_whitespace: bool,
+    root: bool,
+) -> Result<Diff> {
     let mut args = vec!["log", file.commitish.as_str()];
     if hide_whitespace {
         args.push("-w");
+    }
+    if root {
+        args.push("--root");
     }
     args.extend([
         "-m",

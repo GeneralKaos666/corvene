@@ -137,7 +137,7 @@ pub use log::{
     merge_base_changed_files, merge_base_file_diff, most_recent_local_commit,
     parse_filtered_history, parse_raw_log_with_numstat, parse_recent_authors, range_changed_files,
     range_file_diff, recent_authors, remerge_changed_files, remerge_file_diff, resolve_commit,
-    stack_range, tag_names,
+    stack_range, stash_file_diff, tag_names,
 };
 pub use ops::{
     CloneOptions, CloneProgress, CloneProgressParser, InitOptions, PathStatus, clone,

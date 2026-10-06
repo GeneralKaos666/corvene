@@ -5,6 +5,8 @@
 //! Deviation (`797-stash-list`): the viewer shows the entry picked in the
 //! Stashes section under its own title, with Apply (keep the stash) between
 //! Restore and Discard; GHD's always shows the branch's Desktop stash.
+//! A `stash -u` entry's untracked files (its third parent) are listed as
+//! new files (`corvene_git::stashed_files`); GHD's stashes never have one.
 //!
 //! Deviation (`1310-file-list-tree`): the file list can show the stash's
 //! files as a folder tree (GHD `stash-diff-viewer.tsx` lists them flat).
