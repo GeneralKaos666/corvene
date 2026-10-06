@@ -631,6 +631,16 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
         Popup::NewIssue { repo: r } => {
             repo = Some(*r);
         }
+        Popup::ActionsJobLog {
+            repo: r,
+            check,
+            step,
+            ..
+        } => {
+            repo = Some(*r);
+            f.put("check", &check.name);
+            f.opt("step", step.as_deref());
+        }
         Popup::CompareRefs {
             repo: r,
             base,
