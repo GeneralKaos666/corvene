@@ -54,14 +54,11 @@ impl CreateSshKeyDialog {
             .read(cx)
             .accounts
             .iter()
-            .map(|a| {
-                (
-                    a.endpoint.clone(),
-                    format!("{} on {}", a.login, a.friendly_endpoint()),
-                )
-            })
+            .map(|a| (a.key(), format!("{} on {}", a.login, a.friendly_endpoint())))
             .collect();
-        accounts.sort_by_key(|(endpoint, _)| {
+        // `Account::key` is `endpoint|login` (`527-multiple-accounts`)
+        accounts.sort_by_key(|(key, _)| {
+            let endpoint = key.split_once('|').map_or(key.as_str(), |(e, _)| e);
             !corvene_github::Endpoint::from_api_base(endpoint).is_dotcom()
         });
         let handle = passphrase.read(cx).focus_handle(cx);

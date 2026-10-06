@@ -174,9 +174,12 @@ impl Dispatcher {
             pruner_generations: std::collections::HashMap::new(),
             shared_storage_move: None,
             pending_aliases: Vec::new(),
+            pending_accounts: Vec::new(),
+            account_probes: Default::default(),
             sign_in_store: SignInStore::new(sign_in_accounts.clone()),
             sign_in_accounts,
             authentication: None,
+            adding_account: false,
             extra_oauth_scopes: Vec::new(),
             ssh_key: Default::default(),
             watchers: std::collections::HashMap::new(),
@@ -591,11 +594,21 @@ impl Dispatcher {
         });
     }
 
+    /// Corvene (`527-multiple-accounts`): Settings › Accounts › Add
+    /// account. The sign-in dialog for another account beside the signed-in
+    /// ones; the browser shows GitHub's account picker, and the same
+    /// account coming back again is refused with a hint.
+    pub fn show_add_account_dialog(enterprise: bool, cx: &mut dyn Host) {
+        Self::show_sign_in_dialog(enterprise, None, cx);
+        Self::state(cx).update(cx, |s, _| s.adding_account = true);
+    }
+
     /// GHD `setSignInEndpoint`: the Enterprise address step's Continue.
     pub fn set_sign_in_endpoint(url: String, cx: &mut dyn Host) {
         Self::state(cx).update(cx, |s, cx| {
             s.sign_in_store.allow_plain_http =
                 s.flags.bool(crate::flags::ids::ENTERPRISE_PLAIN_HTTP);
+            s.sign_in_store.allow_multiple = s.multiple_accounts();
             sign_in_store(s).set_endpoint(&url);
             cx.notify();
         });
@@ -818,10 +831,13 @@ impl Dispatcher {
         let state = Self::state(cx);
         // `224-alias-when-adding`
         let alias = Self::take_pending_alias(&path, cx);
+        // `527-multiple-accounts`
+        let account = Self::take_pending_account(&path, cx);
         let then = move |id: u64, cx: &mut dyn Host| {
             if let Some(alias) = alias {
                 Self::change_repository_alias(id, Some(alias), cx);
             }
+            Self::settle_repository_account(id, account, cx);
             then(id, cx);
         };
         if let Some(existing) = state
@@ -3855,18 +3871,20 @@ impl Dispatcher {
     /// Corvene (`525-account-commit-email`): a repository just cloned or
     /// added that belongs to an account with a commit email in Settings ›
     /// Accounts gets it as its local `user.email`, unless it has one.
-    fn apply_account_commit_email(id: u64, cx: &mut dyn Host) {
+    pub(crate) fn apply_account_commit_email(id: u64, cx: &mut dyn Host) {
         let s = Self::state(cx).read(cx);
         if !s.flags.bool(crate::flags::ids::ACCOUNT_COMMIT_EMAIL) {
+            return;
+        }
+        // `527-multiple-accounts`: once its account is known
+        if Self::needs_account_lookup(s, id) {
             return;
         }
         let Some(repo) = s.repository(id) else {
             return;
         };
-        let email = repo
-            .github
-            .as_ref()
-            .and_then(|gh| s.account_for(&gh.endpoint))
+        let email = s
+            .account_for_repository(id)
             .and_then(|account| {
                 s.settings
                     .account_commit_emails
@@ -4513,7 +4531,7 @@ impl Dispatcher {
                     .collect()
             })
             .unwrap_or_default();
-        Some((skip, Self::askpass_env(cx)))
+        Some((skip, Self::askpass_env_for_repository(id, cx)))
     }
 
     /// How a branch checkout's submodules follow it: GHD 3.6.6
@@ -4528,7 +4546,7 @@ impl Dispatcher {
                 ..Default::default()
             },
             None => corvene_git::CheckoutOptions {
-                askpass: Self::askpass_env(cx),
+                askpass: Self::askpass_env_for_repository(id, cx),
                 ..Default::default()
             },
         }
@@ -4646,7 +4664,7 @@ impl Dispatcher {
                     Self::arm_credential_helper_for(id, &url, cx);
                     Self::askpass_env_for(id, &url, cx)
                 }
-                None => Self::askpass_env(cx),
+                None => Self::askpass_env_for_repository(id, cx),
             }
         });
         Self::run_history_op_then(
@@ -5702,6 +5720,13 @@ impl Dispatcher {
                         );
                     }
                 };
+                // `527-multiple-accounts`: the account that found it, unless
+                // the dialog named one
+                if let Some(login) = info.account.clone()
+                    && Self::pending_account(&path, cx).is_none()
+                {
+                    Self::account_when_added(&path, login, cx);
+                }
                 Self::start_clone(
                     info.url,
                     path,
@@ -5765,12 +5790,17 @@ impl Dispatcher {
         });
 
         // GHD `envForRemoteOperation`: the signed-in accounts' credentials
-        // (and the stalled-transfer timeout of `network-stall-timeout`)
+        // (and the stalled-transfer timeout of `network-stall-timeout`);
+        // `527-multiple-accounts`: the account the clone was picked from
         Self::arm_credential_helper(&url, cx);
+        let askpass = match Self::pending_account(&path, cx) {
+            Some(login) => Self::askpass_env_preferring(&url, &login, cx),
+            None => Self::askpass_env(cx),
+        };
         let options = corvene_git::CloneOptions {
             default_branch,
             depth,
-            askpass: Self::askpass_env(cx),
+            askpass,
             // `281-clone-updating-files-step`
             updating_files_step: state
                 .read(cx)
@@ -5857,10 +5887,12 @@ impl Dispatcher {
                     Err(corvene_git::GitError::Cancelled(_)) => {
                         info!("clone cancelled");
                         Self::take_pending_alias(&path, cx);
+                        Self::take_pending_account(&path, cx);
                         CloneOutcome::Cancelled
                     }
                     Err(err) => {
                         Self::take_pending_alias(&path, cx);
+                        Self::take_pending_account(&path, cx);
                         CloneOutcome::Failed(err)
                     }
                 };
@@ -7297,13 +7329,30 @@ impl Dispatcher {
                         return;
                     }
                 };
+                // `527-multiple-accounts`: Add account came back with an
+                // account that is signed in already (the browser was
+                // signed in to it)
+                let again = {
+                    let s = Self::state(cx).read(cx);
+                    (s.multiple_accounts()
+                        && s.adding_account
+                        && s.account_with_login(&account.endpoint, &account.login)
+                            .is_some())
+                    .then(|| already_signed_in_hint(&account))
+                };
+                if let Some(hint) = again {
+                    Self::set_sign_in_step(AuthenticationStep::Error(hint), cx);
+                    return;
+                }
                 let added = Self::state(cx).update(cx, |s, cx| {
+                    let multiple = s.multiple_accounts();
                     let added = crate::accounts::add_account(
                         &s.store,
                         &mut s.accounts,
                         account,
                         &token,
                         &crate::accounts::Keychain,
+                        multiple,
                     );
                     if let Ok(account) = &added {
                         info!(login = %account.login, endpoint = %account.endpoint, "signed in");
@@ -7416,12 +7465,22 @@ impl Dispatcher {
 
     /// GHD `removeAccount` for the account signed in to `endpoint`.
     pub fn sign_out(endpoint: String, cx: &mut dyn Host) {
+        let login = Self::state(cx)
+            .read(cx)
+            .account_for(&endpoint)
+            .map(|a| a.login.clone());
+        if let Some(login) = login {
+            Self::sign_out_account(endpoint, login, cx);
+        }
+    }
+
+    /// GHD `removeAccount` for `login`'s account on `endpoint`; the
+    /// endpoint's other accounts stay signed in (`527-multiple-accounts`).
+    /// Repositories that used it keep its login, so they use it again
+    /// after signing back in, and the endpoint's first account meanwhile.
+    pub fn sign_out_account(endpoint: String, login: String, cx: &mut dyn Host) {
         let failed = Self::state(cx).update(cx, |s, cx| {
-            let account = s
-                .accounts
-                .iter()
-                .find(|a| a.endpoint == endpoint)
-                .cloned()?;
+            let account = s.account_with_login(&endpoint, &login).cloned()?;
             let removed = crate::accounts::remove_account(
                 &s.store,
                 &mut s.accounts,
@@ -7652,6 +7711,7 @@ fn closed_popup(s: &mut AppState, popup: &Popup) {
         cancel_authentication(s);
         sign_in_store(s).reset();
         s.extra_oauth_scopes.clear();
+        s.adding_account = false;
     }
     // GHD `HookFailed.onDismissed`: `resolve('abort')` (a no-op once the
     // dialog answered)
@@ -7670,6 +7730,7 @@ fn sign_in_store(s: &mut AppState) -> &mut SignInStore {
 /// GHD `beginDotComSignIn` / `beginEnterpriseSignIn`.
 fn begin_sign_in_store(s: &mut AppState, enterprise: bool, callback: Option<ResultCallback>) {
     cancel_authentication(s);
+    s.sign_in_store.allow_multiple = s.multiple_accounts();
     let store = sign_in_store(s);
     if enterprise {
         store.begin_enterprise_sign_in(callback);
@@ -7701,12 +7762,26 @@ fn close_sign_in_popups(s: &mut AppState) {
         s.popups.remove_popup_by_id(popup_id);
     }
     sign_in_store(s).reset();
+    s.adding_account = false;
+}
+
+/// `527-multiple-accounts`: what Add account says when the browser signed
+/// in an account that is signed in already.
+fn already_signed_in_hint(account: &corvene_models::Account) -> String {
+    format!(
+        "You are already signed in as @{} on {}. To add another account, sign in to it \
+         on {} in your browser first (or pick it in the account picker there), then try \
+         again.",
+        account.login,
+        account.friendly_endpoint(),
+        account.friendly_endpoint(),
+    )
 }
 
 /// Corvene (`525-account-commit-email`): the key of `account`'s commit
 /// email in `Settings::account_commit_emails`.
 pub fn account_commit_email_key(account: &corvene_models::Account) -> String {
-    format!("{}|{}", account.endpoint, account.login)
+    account.key()
 }
 
 pub(crate) fn persist_repositories(s: &mut AppState) {

@@ -92,7 +92,7 @@ impl Dispatcher {
         {
             return;
         }
-        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &github, cx) else {
             return;
         };
         let (owner, name) = (github.owner.clone(), github.name.clone());
@@ -168,6 +168,11 @@ impl Dispatcher {
     }
 
     pub fn refresh_github_repository(id: u64, cx: &mut dyn Host) {
+        // `527-multiple-accounts`: a repository from before a second
+        // account signed in finds its account first (and refreshes then)
+        if Self::needs_account_lookup(Self::state(cx).read(cx), id) {
+            return Self::resolve_repository_account(id, cx);
+        }
         let Some(github) = Self::state(cx)
             .read(cx)
             .repository(id)
@@ -175,7 +180,7 @@ impl Dispatcher {
         else {
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &github, cx) else {
             return;
         };
         let (owner, name) = (github.owner.clone(), github.name.clone());
@@ -272,7 +277,7 @@ impl Dispatcher {
             then(Some("The repository has no GitHub remote.".into()), cx);
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &github, cx) else {
             then(Some("You are not signed in to GitHub.".into()), cx);
             return;
         };

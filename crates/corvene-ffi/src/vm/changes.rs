@@ -135,7 +135,11 @@ pub fn changes(s: &AppState, repo: u64) -> Option<ChangesVm> {
         .info
         .as_ref()
         .and_then(|i| i.current_branch().map(|b| b.name.clone()));
-    let author = s.accounts.first().map(|a| a.login.clone());
+    // the repository's account (`527-multiple-accounts`), else the first
+    let author = s
+        .account_for_repository(repo)
+        .or(s.accounts.first())
+        .map(|a| a.login.clone());
     Some(ChangesVm {
         repo,
         loading: rs.loading,

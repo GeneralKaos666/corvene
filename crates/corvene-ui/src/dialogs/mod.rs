@@ -13,6 +13,7 @@ mod app_dialogs;
 mod apply_patch;
 pub(crate) mod branch_dialogs;
 mod change_repository_alias;
+mod choose_repository_account;
 mod ci_check_run_rerun;
 mod clean_untracked_files;
 pub(crate) mod clone_repository;
@@ -532,6 +533,15 @@ impl DialogHost {
                 .new(|cx| {
                     change_repository_alias::ChangeRepositoryAliasDialog::new(
                         state, *repo, window, cx,
+                    )
+                })
+                .into(),
+            Popup::ChooseRepositoryAccount { repo, logins } => cx
+                .new(|_| {
+                    choose_repository_account::ChooseRepositoryAccountDialog::new(
+                        state,
+                        *repo,
+                        logins.clone(),
                     )
                 })
                 .into(),

@@ -129,7 +129,17 @@ impl Dispatcher {
         };
         // `350-ssh-key-helper` may ask for more
         let scopes = corvene_github::scopes_with(&Self::state(cx).read(cx).extra_oauth_scopes);
-        let authorize_url = flow.authorize_url(&endpoint, &client_id, &scopes);
+        // `527-multiple-accounts`: another account beside a signed-in one,
+        // so GitHub asks which account the browser should authorize
+        let pick_account = {
+            let s = Self::state(cx).read(cx);
+            s.multiple_accounts() && s.account_for(&endpoint.api_base).is_some()
+        };
+        let authorize_url = if pick_account {
+            flow.authorize_url_selecting_account(&endpoint, &client_id, &scopes)
+        } else {
+            flow.authorize_url(&endpoint, &client_id, &scopes)
+        };
         info!(redirect = %flow.redirect_uri, "starting the browser sign-in");
         state.update(cx, |s, cx| {
             if let Some(sign_in) = s.authentication.as_mut() {

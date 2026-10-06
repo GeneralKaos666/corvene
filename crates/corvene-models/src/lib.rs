@@ -72,6 +72,11 @@ pub struct Repository {
     /// `TICKET-123` in commit messages, set in Repository Settings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub autolinks: Vec<Autolink>,
+    /// Corvene (flag `527-multiple-accounts`): the login of the signed-in
+    /// account on the repository's host that this repository uses (git
+    /// sign-in, API calls); `None` = the host's first account, as in GHD.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 /// Corvene (flag `341-custom-autolinks`): a GitHub autolink reference
@@ -128,6 +133,7 @@ impl Repository {
             group: None,
             use_credential_helper: false,
             autolinks: Vec::new(),
+            account: None,
         }
     }
 
@@ -403,6 +409,12 @@ pub struct Account {
 }
 
 impl Account {
+    /// `endpoint|login`: one account among several on the same endpoint
+    /// (flag `527-multiple-accounts`), as settings and caches key it.
+    pub fn key(&self) -> String {
+        format!("{}|{}", self.endpoint, self.login)
+    }
+
     pub fn is_dotcom(&self) -> bool {
         self.endpoint == "https://api.github.com"
     }

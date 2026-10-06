@@ -536,7 +536,7 @@ impl Dispatcher {
             allow_forking: None,
             node_id: None,
         };
-        let Some((endpoint, token, _)) = Self::api_for(&gh, cx) else {
+        let Some((endpoint, token, login)) = Self::api_for(&gh, cx) else {
             Self::state(cx).update(cx, |s, _| {
                 s.commit_statuses.in_flight.remove(&key);
             });
@@ -597,7 +597,7 @@ impl Dispatcher {
                     cx.notify();
                 });
                 if auth_failed {
-                    Self::token_invalidated(&api_base, cx);
+                    Self::token_invalidated(&api_base, &login, cx);
                 }
             },
         );

@@ -686,6 +686,10 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
             repo = Some(*r);
             f.list("names", names);
         }
+        Popup::ChooseRepositoryAccount { repo: r, logins } => {
+            repo = Some(*r);
+            f.list("logins", logins);
+        }
         Popup::MoveToSharedStorage { repo: r, then } => {
             repo = Some(*r);
             f.put("then", format!("{then:?}"));

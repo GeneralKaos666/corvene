@@ -407,7 +407,7 @@ impl Dispatcher {
     /// The API client for the review's repository, or `None` signed out.
     fn review_client(id: u64, cx: &dyn Host) -> Option<(GitHubRepository, Client)> {
         let gh = Self::review_github(id, cx)?;
-        let (endpoint, token, _) = Self::api_for(&gh, cx)?;
+        let (endpoint, token, _) = Self::api_for_repository(id, &gh, cx)?;
         let s = Self::state(cx).read(cx);
         let client = Client::new(endpoint, token)
             .with_sso_hint(s.flags.bool(crate::flags::ids::API_SAML_SSO_HINT))
@@ -454,7 +454,7 @@ impl Dispatcher {
         }) else {
             return;
         };
-        let askpass = Self::askpass_env(cx);
+        let askpass = Self::askpass_env_for_repository(id, cx);
         let _ = local_branch;
         spawn_bg(
             cx,

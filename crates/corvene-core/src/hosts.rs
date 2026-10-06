@@ -196,6 +196,22 @@ impl AppState {
             .find(|a| a.endpoint.api_base == api_base)
     }
 
+    /// [`Self::host_account_for`] repository `id`: the account with the
+    /// login the repository uses (`527-multiple-accounts`), else the first.
+    pub fn host_account_for_repository(&self, id: u64, api_base: &str) -> Option<&HostAccount> {
+        let login = self
+            .repository(id)
+            .and_then(|r| r.account.as_deref())
+            .filter(|_| self.multiple_accounts());
+        login
+            .and_then(|login| {
+                self.host_accounts().find(|a| {
+                    a.endpoint.api_base == api_base && a.login.eq_ignore_ascii_case(login)
+                })
+            })
+            .or_else(|| self.host_account_for(api_base))
+    }
+
     /// The repository whose pull requests the Pull Requests tab lists: the
     /// GitHub one (`getNonForkGitHubRepository`), else the hosted one (its
     /// fork parent unless the fork is set up for its own work).
@@ -233,12 +249,16 @@ impl AppState {
 
     /// The askpass `host=user` pairs of the host accounts (after GitHub's,
     /// before the generic logins, which win for a host they share).
-    pub(crate) fn host_askpass_logins(&self) -> Vec<String> {
+    /// One per host: `preferred` (host, login), the account the repository
+    /// at hand uses, wins on its host (`527-multiple-accounts`).
+    pub(crate) fn host_askpass_logins(&self, preferred: Option<(&str, &str)>) -> Vec<String> {
         let github_hosts: Vec<String> = self.accounts.iter().map(|a| a.host()).collect();
-        self.host_accounts()
-            .filter(|a| !github_hosts.contains(&a.keychain_host()))
-            .map(|a| format!("{}={}", a.keychain_host(), a.git_username()))
-            .collect()
+        crate::accounts::askpass_pairs(
+            self.host_accounts()
+                .filter(|a| !github_hosts.contains(&a.keychain_host()))
+                .map(|a| (a.keychain_host(), a.git_username(), a.login.clone())),
+            preferred,
+        )
     }
 }
 
@@ -316,13 +336,19 @@ impl Dispatcher {
     /// A host call for `api_base`: its account and token, or anonymous on a
     /// public server without one. `None` for a self-hosted server nobody
     /// signed in to.
-    pub(crate) fn host_call(api_base: &str, cx: &dyn Host) -> Option<HostCall> {
+    ///
+    /// With repository `repo`, its account (`527-multiple-accounts`).
+    pub(crate) fn host_call(api_base: &str, repo: Option<u64>, cx: &dyn Host) -> Option<HostCall> {
         let s = Self::state(cx).read(cx);
         let endpoint = s
             .host_endpoints()
             .into_iter()
             .find(|e| e.api_base == api_base)?;
-        match s.host_account_for(api_base).cloned() {
+        let account = match repo {
+            Some(id) => s.host_account_for_repository(id, api_base),
+            None => s.host_account_for(api_base),
+        };
+        match account.cloned() {
             Some(account) => {
                 let token = corvene_platform::keychain::token(
                     &account.keychain_host(),
@@ -795,7 +821,7 @@ impl Dispatcher {
         if !due {
             return;
         }
-        let Some(call) = Self::host_call(&hosted.repo.endpoint, cx) else {
+        let Some(call) = Self::host_call(&hosted.repo.endpoint, Some(id), cx) else {
             return;
         };
         let (owner, name) = (hosted.repo.owner.clone(), hosted.repo.name.clone());
@@ -859,7 +885,7 @@ impl Dispatcher {
         if skip {
             return;
         }
-        let Some(call) = Self::host_call(&target.endpoint, cx) else {
+        let Some(call) = Self::host_call(&target.endpoint, Some(id), cx) else {
             Self::state(cx).update(cx, |s, cx| {
                 if let Some(c) = s.pull_requests.get_mut(&key) {
                     c.loading = false;
@@ -969,7 +995,7 @@ impl Dispatcher {
                 ),
             }
         };
-        let Some(call) = Self::host_call(&sub.api_base, cx) else {
+        let Some(call) = Self::host_call(&sub.api_base, None, cx) else {
             return finish(&key, cx);
         };
         let bg_call = call.clone();

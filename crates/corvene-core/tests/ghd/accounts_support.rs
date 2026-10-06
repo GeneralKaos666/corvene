@@ -127,6 +127,7 @@ impl AccountsStore {
             account,
             "",
             &self.secure_store,
+            false,
         )
         .ok()
     }

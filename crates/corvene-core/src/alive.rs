@@ -47,7 +47,8 @@ impl Drop for AliveHandle {
 /// `AliveStore` + the dedup sets of `NotificationsStore`.
 #[derive(Default)]
 pub struct AliveState {
-    /// Endpoint → subscription.
+    /// Account (`Account::key`, `endpoint|login`) → subscription; one per
+    /// endpoint in GHD, one per account with `527-multiple-accounts`.
     pub sessions: HashMap<String, AliveHandle>,
     sender: Option<async_channel::Sender<AliveEvent>>,
     /// `skipCommitShas`: commits already judged (not the user's, or unknown).
@@ -101,33 +102,28 @@ impl Dispatcher {
             return;
         };
         let wanted: HashMap<String, Account> = if enabled {
-            accounts
-                .into_iter()
-                .map(|a| (a.endpoint.clone(), a))
-                .collect()
+            accounts.into_iter().map(|a| (a.key(), a)).collect()
         } else {
             HashMap::new()
         };
         state.update(cx, |s, _| {
             // sign-outs and a disabled setting stop their threads
-            s.alive.sessions.retain(|endpoint, handle| {
-                let keep = wanted
-                    .get(endpoint)
-                    .is_some_and(|a| a.login == handle.login);
+            s.alive.sessions.retain(|key, handle| {
+                let keep = wanted.contains_key(key);
                 if !keep {
-                    info!(endpoint, login = %handle.login, "unsubscribed from the Alive channel");
+                    info!(key, login = %handle.login, "unsubscribed from the Alive channel");
                 }
                 keep
             });
         });
-        for (endpoint, account) in wanted {
-            if state.read(cx).alive.sessions.contains_key(&endpoint) {
+        for (key, account) in wanted {
+            if state.read(cx).alive.sessions.contains_key(&key) {
                 continue;
             }
             let stop = Arc::new(AtomicBool::new(false));
             state.update(cx, |s, _| {
                 s.alive.sessions.insert(
-                    endpoint.clone(),
+                    key.clone(),
                     AliveHandle {
                         stop: stop.clone(),
                         login: account.login.clone(),
@@ -180,7 +176,7 @@ impl Dispatcher {
             if let Err(err) = spawned {
                 warn!(%err, "could not start the Alive subscription thread");
                 state.update(cx, |s, _| {
-                    s.alive.sessions.remove(&endpoint);
+                    s.alive.sessions.remove(&key);
                 });
             }
         }
@@ -253,14 +249,7 @@ impl Dispatcher {
                 id,
                 github,
                 cached,
-                s.account_for(
-                    &repo
-                        .github
-                        .as_ref()
-                        .map(|g| g.endpoint.clone())
-                        .unwrap_or_default(),
-                )
-                .cloned(),
+                s.account_for_repository(id).cloned(),
                 repo.path.clone(),
             )
         };

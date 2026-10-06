@@ -649,6 +649,16 @@ fn state_summary(cx: &mut App) -> Value {
         // the "Committed … Undo" bar moves the commit form up
         "undo_bar": rs.last_commit.is_some(),
         "repository": state.selected_repository().map(|r| r.name()),
+        // `527-multiple-accounts`: the stored login and the one in use
+        "repository_account": state.selected_repository().and_then(|r| r.account.clone()),
+        "account_in_use": state
+            .selected
+            .and_then(|id| state.account_for_repository(id))
+            .map(|a| a.login.clone()),
+        "popup": state.popup().map(|p| {
+            let text = format!("{p:?}");
+            text.split([' ', '{', '(']).next().unwrap_or_default().to_string()
+        }),
         "section": format!("{:?}", rs.section),
         "foldout": state.foldout.map(|f| format!("{f:?}")),
         // `886-history-search`
@@ -736,7 +746,10 @@ fn hook(request: &Value, popup: PopupHook, cx: &mut App) -> Result<Value, String
 /// selected repository made the stub's `owner/name` GitHub repository, so
 /// the real API client runs against the stub (`345-issues`,
 /// `346-releases`). `{"permission": "admin" | "read"}` sets the
-/// repository permission (write otherwise).
+/// repository permission (write otherwise). `{"extra_logins": [..]}` signs
+/// in more accounts on the stub (token `stub-token-<login>`,
+/// `527-multiple-accounts`) and leaves the repository's account to be
+/// looked up, as for a repository added with several accounts.
 fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
     let fake: Value = serde_json::from_str(arg).map_err(|e| e.to_string())?;
     let owner = fake["owner"].as_str().unwrap_or("octocat").to_string();
@@ -798,16 +811,43 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
     // `41-ci-checks.yaml`)
     let point_origin = fake["remote"].as_bool().unwrap_or(false);
     let clone_url = github.clone_url.clone();
+    let extra: Vec<corvene_core::Account> = fake["extra_logins"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|_| with_account)
+        .enumerate()
+        .map(|(ix, extra_login)| {
+            corvene_platform::keychain::inject_token(
+                &account.host(),
+                extra_login,
+                &format!("stub-token-{extra_login}"),
+            );
+            corvene_core::Account {
+                id: 583232 + ix as u64,
+                login: extra_login.to_string(),
+                name: Some(format!("{extra_login} at work")),
+                emails: vec![format!("{extra_login}@example.com")],
+                ..account.clone()
+            }
+        })
+        .collect();
+    let lookup = !extra.is_empty();
     let (selected, retarget) = corvene_core::AppState::global(cx).update(cx, |s, cx| {
         s.accounts.retain(|a| a.endpoint != endpoint);
         if with_account {
             s.accounts.push(account);
+            s.accounts.extend(extra);
         }
         let mut retarget = None;
         if let Some(id) = s.selected
             && let Some(repo) = s.repositories.iter_mut().find(|r| r.id == id)
         {
             repo.github = Some(github);
+            // `527-multiple-accounts`: looked up again below
+            repo.account = None;
+            s.account_probes.probed.remove(&id);
             if point_origin && let Some(git) = s.git.clone() {
                 retarget = Some((git, repo.path.clone()));
             }
@@ -826,6 +866,9 @@ fn fake_github(arg: &str, cx: &mut App) -> Result<(), String> {
     // (Branch › Review Pull Request… needs the branch's pull request)
     if with_account && let Some(id) = corvene_core::AppState::global(cx).read(cx).selected {
         Dispatcher::refresh_pull_requests(id, true, cx);
+        if lookup {
+            Dispatcher::resolve_repository_account(id, cx);
+        }
     }
     Ok(())
 }
@@ -839,6 +882,17 @@ fn fake_accounts(arg: &str, cx: &mut App) -> Result<(), String> {
         serde_json::from_value(fake["accounts"].clone()).map_err(|e| e.to_string())?;
     let repositories: std::collections::HashMap<String, Vec<corvene_core::GitHubRepository>> =
         serde_json::from_value(fake["repositories"].clone()).map_err(|e| e.to_string())?;
+    // lists keyed by endpoint belong to its first account (`Account::key`)
+    let repositories = repositories
+        .into_iter()
+        .map(|(key, repos)| {
+            let key = match accounts.iter().find(|a| a.endpoint == key) {
+                Some(account) if !key.contains('|') => account.key(),
+                _ => key,
+            };
+            (key, repos)
+        })
+        .collect();
     corvene_core::AppState::global(cx).update(cx, |s, cx| {
         s.accounts = accounts;
         s.api_repositories = repositories;

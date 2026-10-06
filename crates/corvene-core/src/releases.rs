@@ -249,7 +249,9 @@ impl Dispatcher {
     /// a time; one asked for meanwhile runs after it.
     pub fn load_releases(id: u64, cx: &mut dyn Host) {
         let gh = Self::releases_target(id, cx);
-        let api = gh.as_ref().and_then(|gh| Self::api_for(gh, cx));
+        let api = gh
+            .as_ref()
+            .and_then(|gh| Self::api_for_repository(id, gh, cx));
         let (sso_hint, error_details) = {
             let s = Self::state(cx).read(cx);
             (
@@ -372,7 +374,7 @@ impl Dispatcher {
         let Some((git, workdir)) = Self::repo_context(id, cx) else {
             return;
         };
-        let api = Self::api_for(&gh, cx);
+        let api = Self::api_for_repository(id, &gh, cx);
         Self::state(cx).update(cx, |s, cx| {
             let rs = s.repo_state_mut(id);
             rs.generating_release_notes = true;
@@ -459,7 +461,7 @@ impl Dispatcher {
         let Some(gh) = Self::releases_target(id, cx) else {
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&gh, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &gh, cx) else {
             Self::show_error(
                 "Could not create release",
                 format!(

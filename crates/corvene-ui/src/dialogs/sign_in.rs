@@ -21,6 +21,12 @@
 //! Deviation (flag `enterprise-plain-http`, off in every preset): an
 //! Enterprise address typed with `http://` keeps plain HTTP (GHD's
 //! `validateURL` refuses any scheme but `https`, "Unsupported protocol").
+//!
+//! Deviation (flag `527-multiple-accounts`): an endpoint with an account
+//! skips ExistingAccountWarning and the new account is added beside it.
+//! Opened by Settings › Accounts › Add account, the dialog says to sign in
+//! to the other account in the browser first, the browser flow asks GitHub
+//! for its account picker, and the same account coming back is an error.
 
 use corvene_core::sign_in::{SignInState, SignInStep};
 use corvene_core::{AppState, AuthenticationStep, Dispatcher};
@@ -276,12 +282,30 @@ impl SignInDialog {
                 |(label, _)| label,
             );
         let this = cx.entity();
+        // `527-multiple-accounts`: Add account, beside a signed-in account
+        let adding = {
+            let s = self.state.read(cx);
+            (s.multiple_accounts() && s.adding_account)
+                .then(|| {
+                    s.accounts_for(&endpoint.api_base)
+                        .first()
+                        .map(|a| a.login.clone())
+                })
+                .flatten()
+        };
         match authentication.map(|s| s.step) {
             None => div()
                 .flex()
                 .flex_col()
                 .items_start()
                 .gap(SPACING())
+                .when_some(adding, |d, login| {
+                    d.child(div().text_color(t.text_secondary).child(format!(
+                        "You are signed in as @{login}. To add another account, sign in \
+                             to it in your browser first, or pick it when GitHub asks which \
+                             account to use."
+                    )))
+                })
                 .child(if browser_first {
                     "Corvene will open GitHub in your browser. Authorise this app there to \
                      sign in."

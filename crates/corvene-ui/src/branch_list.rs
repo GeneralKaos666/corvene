@@ -902,12 +902,12 @@ impl BranchFoldout {
         let login = s
             .repository(id)
             .and_then(|r| r.non_fork_github())
-            .and_then(|gh| s.account_for(&gh.endpoint))
+            .and_then(|gh| s.account_for_repository_on(id, &gh.endpoint))
             .map(|a| a.login.clone())
             // flags 342-344: the host account's login
             .or_else(|| {
                 s.pull_request_repository(id)
-                    .and_then(|gh| s.host_account_for(&gh.endpoint))
+                    .and_then(|gh| s.host_account_for_repository(id, &gh.endpoint))
                     .map(|a| a.login.clone())
             });
         (self.pr_list_filter, login)

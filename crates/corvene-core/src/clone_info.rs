@@ -94,6 +94,7 @@ pub fn resolve_local(input: &str) -> Option<Result<CloneInfo, &'static str>> {
                 path.display().to_string()
             },
             default_branch: None,
+            account: None,
         })
     })
 }
@@ -144,6 +145,9 @@ pub struct Candidate {
     pub is_dotcom: bool,
     /// `false` for `Account.anonymous()`.
     pub authenticated: bool,
+    /// The account's login (`None` for `Account.anonymous()`), handed back
+    /// in [`CloneInfo::account`].
+    pub login: Option<String>,
 }
 
 /// What to clone.
@@ -151,6 +155,9 @@ pub struct Candidate {
 pub struct CloneInfo {
     pub url: String,
     pub default_branch: Option<String>,
+    /// The login of the account that found the repository, so the clone
+    /// uses it (`527-multiple-accounts`); `None` when no account did.
+    pub account: Option<String>,
 }
 
 /// `lookup(candidate index, owner, name, ssh)` answers
@@ -183,12 +190,26 @@ pub fn find_account_for_remote_url(
     can_access: &mut dyn FnMut(usize, &str, &str) -> bool,
 ) -> Option<usize> {
     let input = input.trim();
-    // 1. an account for the URL's host is always the best bet
+    // 1. an account for the URL's host is always the best bet; of several
+    // signed-in ones (`527-multiple-accounts`) the first that can see it
     if let Some((host, _)) = split_remote(input)
         && let Some(ix) = candidates
             .iter()
             .position(|c| c.host.eq_ignore_ascii_case(&host))
     {
+        let signed_in: Vec<usize> = (0..candidates.len())
+            .filter(|&i| {
+                candidates[i].authenticated && candidates[i].host.eq_ignore_ascii_case(&host)
+            })
+            .collect();
+        if signed_in.len() > 1
+            && let Some(id) = parse_repository_identifier(input)
+            && let Some(&seen) = signed_in
+                .iter()
+                .find(|&&i| can_access(i, &id.owner, &id.name))
+        {
+            return Some(seen);
+        }
         return Some(ix);
     }
     // 2. the first account that can see `owner/name`
@@ -224,6 +245,7 @@ pub fn resolve_with(
     let as_is = || CloneInfo {
         url: input.to_string(),
         default_branch: None,
+        account: None,
     };
     if input.ends_with(".wiki.git") {
         return Ok(as_is());
@@ -253,6 +275,7 @@ pub fn resolve_with(
     let into_clone_info = |info: RepositoryCloneInfo| CloneInfo {
         url: info.url,
         default_branch: info.default_branch,
+        account: account.and_then(|ix| candidates.get(ix)?.login.clone()),
     };
     if let Some(info) = found {
         return Ok(into_clone_info(info));
@@ -301,6 +324,7 @@ impl Dispatcher {
                     host: endpoint.host().to_string(),
                     is_dotcom: endpoint.is_dotcom(),
                     authenticated: true,
+                    login: Some(account.login.clone()),
                 },
                 Client::new(endpoint, token),
             ));
@@ -312,6 +336,7 @@ impl Dispatcher {
                 host: anonymous.host().to_string(),
                 is_dotcom: true,
                 authenticated: false,
+                login: None,
             },
             Client::new(anonymous, ""),
         ));
@@ -363,6 +388,7 @@ mod tests {
             host: "github.com".into(),
             is_dotcom: true,
             authenticated,
+            login: authenticated.then(|| "me".into()),
         }
     }
 
@@ -371,6 +397,7 @@ mod tests {
             host: "ghe.corp".into(),
             is_dotcom: false,
             authenticated: true,
+            login: Some("work".into()),
         }
     }
 
@@ -415,6 +442,38 @@ mod tests {
         assert_eq!(got.default_branch.as_deref(), Some("trunk"));
         // signed-in GitHub.com first, Enterprise next, anonymous last
         assert_eq!(calls, vec![2, 1, 0]);
+    }
+
+    #[test]
+    fn a_url_goes_to_the_signed_in_account_that_sees_it() {
+        let mut work = dotcom(true);
+        work.login = Some("me-at-work".into());
+        let candidates = [dotcom(true), work, dotcom(false)];
+        let mut calls = Vec::new();
+        let mut lookup = |ix: usize, _: &str, _: &str, _: bool| {
+            calls.push(ix);
+            Ok((ix == 1)
+                .then(|| info("https://github.com/acme/app.git"))
+                .flatten())
+        };
+        let got = resolve("https://github.com/acme/app", &candidates, &mut lookup).unwrap();
+        assert_eq!(got.account.as_deref(), Some("me-at-work"));
+        assert_eq!(calls, vec![0, 1]);
+
+        // one signed-in account: GHD's, without asking it first
+        let mut calls = Vec::new();
+        let mut lookup = |ix: usize, _: &str, _: &str, _: bool| {
+            calls.push(ix);
+            Ok(info("https://github.com/acme/app.git"))
+        };
+        let got = resolve(
+            "https://github.com/acme/app",
+            &[dotcom(true), dotcom(false)],
+            &mut lookup,
+        )
+        .unwrap();
+        assert_eq!(got.account.as_deref(), Some("me"));
+        assert_eq!(calls, vec![0]);
     }
 
     #[test]

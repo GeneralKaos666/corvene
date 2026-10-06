@@ -363,7 +363,9 @@ impl Dispatcher {
     /// for meanwhile runs after it.
     pub fn load_issues(id: u64, cx: &mut dyn Host) {
         let gh = Self::issues_target(id, cx);
-        let api = gh.as_ref().and_then(|gh| Self::api_for(gh, cx));
+        let api = gh
+            .as_ref()
+            .and_then(|gh| Self::api_for_repository(id, gh, cx));
         let (sso_hint, error_details) = {
             let s = Self::state(cx).read(cx);
             (
@@ -490,7 +492,7 @@ impl Dispatcher {
         let Some(gh) = Self::issues_target(id, cx) else {
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&gh, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &gh, cx) else {
             return;
         };
         let start = Self::state(cx).update(cx, |s, cx| {
@@ -550,7 +552,7 @@ impl Dispatcher {
         let Some(gh) = Self::issues_target(id, cx) else {
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&gh, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &gh, cx) else {
             Self::show_error(
                 "Could not create issue",
                 format!("Sign in to {} first.", endpoint_host(&gh)),
@@ -703,7 +705,7 @@ impl Dispatcher {
         let Some(repo_node) = gh.node_id.clone() else {
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&gh, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &gh, cx) else {
             return;
         };
         let Some((git, workdir)) = Self::repo_context(id, cx) else {

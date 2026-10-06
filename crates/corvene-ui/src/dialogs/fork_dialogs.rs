@@ -141,9 +141,8 @@ impl Render for CreateForkDialog {
         let (github, login) = {
             let s = self.state.read(cx);
             let github = s.repository(self.repo).and_then(|r| r.github.clone());
-            let login = github
-                .as_ref()
-                .and_then(|gh| s.account_for(&gh.endpoint))
+            let login = s
+                .account_for_repository(self.repo)
                 .map(|a| a.login.clone())
                 .unwrap_or_default();
             (github, login)

@@ -459,6 +459,13 @@ pub enum Popup {
         tag: Option<String>,
         sha: Option<String>,
     },
+    /// Corvene `527-multiple-accounts`: several accounts can push to `repo`
+    /// (or see it while private); which one it uses (`logins`, the pick
+    /// first, already set).
+    ChooseRepositoryAccount {
+        repo: u64,
+        logins: Vec<String>,
+    },
     /// Corvene `1212-bisect`: stash the uncommitted changes on `branch`
     /// before bisecting (`mark` as for `Dispatcher::start_bisect`).
     StartBisect {
@@ -792,6 +799,7 @@ impl Popup {
             | Self::NewIssue { repo, .. }
             | Self::SubmitPullRequestReview { repo, .. }
             | Self::CreateRelease { repo, .. }
+            | Self::ChooseRepositoryAccount { repo, .. }
             | Self::CompareRefs { repo, .. }
             | Self::StartBisect { repo, .. }
             | Self::WarnLocalChangesBeforeUndo { repo, .. }
@@ -1775,6 +1783,11 @@ pub struct AppState {
     /// `224-alias-when-adding`: aliases typed in New / Add / Clone, applied
     /// when the repository at that (resolved) path is added.
     pub pending_aliases: Vec<(PathBuf, String)>,
+    /// `527-multiple-accounts`: the account logins repositories cloned or
+    /// added at these (resolved) paths use (`Dispatcher::account_when_added`).
+    pub pending_accounts: Vec<(PathBuf, String)>,
+    /// `527-multiple-accounts`: repositories whose account was looked up.
+    pub account_probes: crate::repository_accounts::AccountProbes,
     /// GHD `SignInStore`: the sign-in dialog's step.
     pub sign_in_store: crate::sign_in::SignInStore,
     /// The accounts `sign_in_store` reads (`AppState::accounts`, copied in
@@ -1782,6 +1795,9 @@ pub struct AppState {
     pub sign_in_accounts: std::rc::Rc<std::cell::RefCell<Vec<Account>>>,
     /// The authentication flow in progress.
     pub authentication: Option<AuthenticationFlow>,
+    /// Corvene (`527-multiple-accounts`): the sign-in dialog was opened by
+    /// Add account (`Dispatcher::show_add_account_dialog`).
+    pub adding_account: bool,
     /// Corvene `350-ssh-key-helper`: scopes the next sign-in asks for
     /// besides `corvene_github::SCOPES` (cleared when the dialog closes).
     pub extra_oauth_scopes: Vec<String>,
@@ -1804,7 +1820,8 @@ pub struct AppState {
     pub enterprise_oauth_apps: HashMap<String, String>,
     /// Avatar cache (`crate::avatars`).
     pub avatars: crate::avatars::Avatars,
-    /// Clone dialog: `GET /user/repos` per account endpoint (`ApiRepositoriesStore`).
+    /// Clone dialog: `GET /user/repos` per account (`ApiRepositoriesStore`),
+    /// keyed by `Account::key` (`endpoint|login`).
     pub api_repositories: HashMap<String, Vec<corvene_models::GitHubRepository>>,
     pub api_repositories_loading: std::collections::HashSet<String>,
     /// `#issue` / `@user` autocompletion caches (`IssuesStore`, `GitHubUserStore`).
@@ -2171,8 +2188,88 @@ impl AppState {
         self.editors.iter().any(|e| e.name == name).then_some(name)
     }
 
+    /// GHD `getAccountForEndpoint`: the endpoint's first account. Code that
+    /// works for a repository asks [`Self::account_for_repository`].
     pub fn account_for(&self, endpoint: &str) -> Option<&Account> {
         self.accounts.iter().find(|a| a.endpoint == endpoint)
+    }
+
+    /// Corvene (`527-multiple-accounts`): an endpoint can have several
+    /// accounts and each repository uses one of them.
+    pub fn multiple_accounts(&self) -> bool {
+        self.flags.bool(crate::flags::ids::MULTIPLE_ACCOUNTS)
+    }
+
+    /// The accounts signed in to `endpoint`, in list order (one in GHD).
+    pub fn accounts_for(&self, endpoint: &str) -> Vec<&Account> {
+        self.accounts
+            .iter()
+            .filter(|a| a.endpoint == endpoint)
+            .collect()
+    }
+
+    /// The account `login` signed in to `endpoint`.
+    pub fn account_with_login(&self, endpoint: &str, login: &str) -> Option<&Account> {
+        self.accounts
+            .iter()
+            .find(|a| a.endpoint == endpoint && a.login.eq_ignore_ascii_case(login))
+    }
+
+    /// GHD `getAccountForRepository` for repository `id` on `endpoint` (its
+    /// GitHub repository's, or a parent's on the same host): with
+    /// `527-multiple-accounts` the account the repository uses
+    /// (`Repository::account`) while it is signed in, else the endpoint's
+    /// first account.
+    pub fn account_for_repository_on(&self, id: u64, endpoint: &str) -> Option<&Account> {
+        self.chosen_account(id, endpoint)
+            .or_else(|| self.account_for(endpoint))
+    }
+
+    /// [`Self::account_for_repository_on`] the endpoint of repository
+    /// `id`'s GitHub repository; `None` for a repository not on GitHub.
+    pub fn account_for_repository(&self, id: u64) -> Option<&Account> {
+        let endpoint = self.repository(id)?.github.as_ref()?.endpoint.clone();
+        self.account_for_repository_on(id, &endpoint)
+    }
+
+    /// The account to call the API about `github` with when no repository
+    /// is at hand (commit status subscriptions, caches keyed by GitHub
+    /// repository): the account of a listed repository that is `github` or
+    /// a fork of it, the selected repository first; else the endpoint's
+    /// first account (`527-multiple-accounts`).
+    pub fn account_for_github(&self, github: &GitHubRepository) -> Option<&Account> {
+        if self.multiple_accounts() {
+            let same = |gh: &GitHubRepository| {
+                gh.endpoint == github.endpoint
+                    && gh.owner.eq_ignore_ascii_case(&github.owner)
+                    && gh.name.eq_ignore_ascii_case(&github.name)
+            };
+            let matches = |r: &&Repository| {
+                r.account.is_some()
+                    && r.github
+                        .as_ref()
+                        .is_some_and(|gh| same(gh) || gh.parent.as_deref().is_some_and(same))
+            };
+            let found = self
+                .selected_repository()
+                .filter(matches)
+                .or_else(|| self.repositories.iter().find(matches))
+                .and_then(|r| self.chosen_account(r.id, &github.endpoint));
+            if found.is_some() {
+                return found;
+            }
+        }
+        self.account_for(&github.endpoint)
+    }
+
+    /// The account repository `id` picked on `endpoint`, if it is still
+    /// signed in and the flag is on.
+    fn chosen_account(&self, id: u64, endpoint: &str) -> Option<&Account> {
+        if !self.multiple_accounts() {
+            return None;
+        }
+        let login = self.repository(id)?.account.as_deref()?;
+        self.account_with_login(endpoint, login)
     }
 
     pub fn dotcom_account(&self) -> Option<&Account> {

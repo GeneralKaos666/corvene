@@ -68,7 +68,7 @@ impl IssuesList {
         let login = s
             .repository(id)
             .and_then(|r| r.non_fork_github())
-            .and_then(|gh| s.account_for(&gh.endpoint))
+            .and_then(|gh| s.account_for_repository_on(id, &gh.endpoint))
             .map(|a| a.login.clone());
         let query = self.filter.read(cx).value().to_string();
         issues

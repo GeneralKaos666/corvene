@@ -270,7 +270,7 @@ impl Dispatcher {
                     .bool(crate::flags::ids::PROTECTED_BRANCH_BYPASS_NOTE),
             )
         };
-        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &github, cx) else {
             return;
         };
         let Some((git, workdir)) = Self::repo_context(id, cx) else {

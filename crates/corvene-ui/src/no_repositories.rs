@@ -278,10 +278,10 @@ impl NoRepositoriesView {
     fn ensure_loaded(&mut self, account: &Account, cx: &mut Context<Self>) {
         let known = {
             let s = self.state.read(cx);
-            s.api_repositories.contains_key(&account.endpoint)
-                || s.api_repositories_loading.contains(&account.endpoint)
+            s.api_repositories.contains_key(&account.key())
+                || s.api_repositories_loading.contains(&account.key())
         };
-        if !known && self.requested.insert(account.endpoint.clone()) {
+        if !known && self.requested.insert(account.key()) {
             let account = account.clone();
             cx.defer(move |cx| Dispatcher::load_api_repositories(account, cx));
         }
@@ -294,7 +294,7 @@ impl NoRepositoriesView {
             return;
         };
         let query = self.filter.read(cx).value().to_string();
-        let rows = match self.state.read(cx).api_repositories.get(&account.endpoint) {
+        let rows = match self.state.read(cx).api_repositories.get(&account.key()) {
             Some(repos) => group_rows(
                 &crate::cloneable_repositories::visible_repositories(repos, &account, cx),
                 &account.login,
@@ -337,9 +337,9 @@ impl NoRepositoriesView {
         let accounts = self.state.read(cx).accounts.clone();
         let (loading, loaded, rows) = {
             let s = self.state.read(cx);
-            let repos = s.api_repositories.get(&account.endpoint);
+            let repos = s.api_repositories.get(&account.key());
             (
-                s.api_repositories_loading.contains(&account.endpoint),
+                s.api_repositories_loading.contains(&account.key()),
                 repos.is_some(),
                 repos
                     .map(|r| {
@@ -498,7 +498,7 @@ impl NoRepositoriesView {
                                 self.state
                                     .read(cx)
                                     .api_repositories
-                                    .get(&account.endpoint)
+                                    .get(&account.key())
                                     .and_then(|repos| {
                                         crate::cloneable_repositories::owner_picker(
                                             "nr-owner", account, repos, cx,

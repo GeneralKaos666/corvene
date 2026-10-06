@@ -41,7 +41,7 @@ impl Dispatcher {
             Self::close_popup(cx);
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &github, cx) else {
             Self::show_error(
                 "Could not bypass push protection",
                 "You are not signed in to GitHub.",

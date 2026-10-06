@@ -28,6 +28,9 @@
 //!   an Enterprise address typed with `http://` keeps plain HTTP where
 //!   GHD's `validateURL` refuses it ("Unsupported protocol").
 //! - Errors are their messages (GHD keeps the `Error`).
+//! - Flag `527-multiple-accounts` ([`SignInStore::allow_multiple`]): an
+//!   endpoint that already has an account goes straight to
+//!   Authentication; the new account is added beside it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -165,6 +168,8 @@ pub struct SignInStore {
     listeners: Vec<Box<dyn FnMut(Option<SignInState>)>>,
     /// Flag `314-enterprise-plain-http` (see the module docs).
     pub allow_plain_http: bool,
+    /// Flag `527-multiple-accounts`: no ExistingAccountWarning.
+    pub allow_multiple: bool,
 }
 
 impl SignInStore {
@@ -176,6 +181,7 @@ impl SignInStore {
             accounts_store,
             listeners: Vec::new(),
             allow_plain_http: false,
+            allow_multiple: false,
         }
     }
 
@@ -221,7 +227,8 @@ impl SignInStore {
             .accounts_store
             .accounts()
             .into_iter()
-            .find(Account::is_dotcom);
+            .find(Account::is_dotcom)
+            .filter(|_| !self.allow_multiple);
 
         self.result_callback = result_callback;
         match existing_account {
@@ -295,7 +302,8 @@ impl SignInStore {
             .accounts_store
             .accounts()
             .into_iter()
-            .find(|a| a.endpoint == endpoint);
+            .find(|a| a.endpoint == endpoint)
+            .filter(|_| !self.allow_multiple);
 
         match existing_account {
             Some(existing_account) => self.set_state(Some(SignInState::existing_account_warning(

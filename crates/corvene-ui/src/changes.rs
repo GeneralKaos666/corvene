@@ -1213,10 +1213,7 @@ impl ChangesSidebar {
             .selected_state()
             .and_then(|rs| rs.info.as_ref())
             .and_then(|i| i.identity.email.clone());
-        let account = s
-            .selected_repository()
-            .and_then(|r| r.github.as_ref())
-            .and_then(|gh| s.account_for(&gh.endpoint));
+        let account = s.selected.and_then(|id| s.account_for_repository(id));
         let login = author.username();
         let email = match author {
             Author::Known { email, .. } => Some(email.as_str()),

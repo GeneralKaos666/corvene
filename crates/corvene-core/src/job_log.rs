@@ -309,7 +309,7 @@ impl Dispatcher {
         if !start {
             return;
         }
-        let Some((endpoint, token, _)) = Self::api_for(github, cx) else {
+        let Some((endpoint, token, login)) = Self::api_for(github, cx) else {
             Self::state(cx).update(cx, |s, cx| {
                 s.job_logs.entries.insert(
                     key,
@@ -342,7 +342,7 @@ impl Dispatcher {
                     cx.notify();
                 });
                 if auth_failed {
-                    Self::token_invalidated(&api_base, cx);
+                    Self::token_invalidated(&api_base, &login, cx);
                 }
             },
         );

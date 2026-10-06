@@ -3850,6 +3850,25 @@ registry! {
         code: &["crates/corvene-ui/src/changes.rs", "crates/corvene-git/src/git_errors.rs", "crates/corvene-core/src/integrations.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs"],
     },
 
+    /// Several accounts per host, and the account each repository uses.
+    MULTIPLE_ACCOUNTS = 527 "multiple-accounts" {
+        title: "Several accounts per host",
+        summary: "Sign in to more than one account on GitHub.com or a GitHub Enterprise host \
+                  (Settings › Accounts › Add account), say a personal and a work account. Each \
+                  repository uses one of them for fetching, pushing, pull requests, checks and \
+                  everything else from GitHub: the account that can push to it, picked when the \
+                  repository is added or cloned (asked once when several can), and changed in \
+                  Repository Settings › Remote or from the account button in the toolbar.",
+        ghd_behaviour: "One account per host: signing in to another GitHub.com account signs \
+                        the first one out.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(3707), Upstream::issue(21365)],
+        code: &["crates/corvene-core/src/accounts.rs", "crates/corvene-core/src/state.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-ui/src/dialogs/choose_repository_account.rs", "crates/corvene-ui/src/toolbar.rs"],
+    },
+
     // ---- 600 Keyboard & accessibility ----
 
     /// ⌘9 / ⌘8 announce the width after the step.

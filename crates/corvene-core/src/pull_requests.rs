@@ -329,7 +329,7 @@ impl Dispatcher {
         if skip {
             return;
         }
-        let Some((endpoint, token, _)) = Self::api_for(&target, cx) else {
+        let Some((endpoint, token, login)) = Self::api_for_repository(id, &target, cx) else {
             Self::state(cx).update(cx, |s, cx| {
                 if let Some(c) = s.pull_requests.get_mut(&key) {
                     c.loading = false;
@@ -417,7 +417,7 @@ impl Dispatcher {
                     auth_failed
                 });
                 if auth_failed {
-                    Self::token_invalidated(&api_base, cx);
+                    Self::token_invalidated(&api_base, &login, cx);
                 }
                 Self::prune_forked_remotes(id, cx);
                 Self::subscribe_current_pull_request_status(id, cx);
@@ -647,7 +647,7 @@ impl Dispatcher {
                 s.flags.bool(crate::flags::ids::PR_BRANCH_CASE_INSENSITIVE),
             )
         };
-        let askpass = Self::askpass_env(cx);
+        let askpass = Self::askpass_env_for_repository(id, cx);
         let number = pr.number;
         let head_ref = pr.head.ref_name.clone();
         let head_url = match &ssh_like {
@@ -793,7 +793,7 @@ impl Dispatcher {
             on_found(Err("The repository has no remote.".to_string()), cx);
             return;
         };
-        let askpass = Self::askpass_env(cx);
+        let askpass = Self::askpass_env_for_repository(id, cx);
         let name = format!("pr/{}", pr.number);
         let number = pr.number;
         // GitLab's is `refs/merge-requests/<n>/head`; Bitbucket has none
@@ -895,15 +895,20 @@ impl Dispatcher {
         );
     }
 
-    /// An API call answered 401: the token was revoked (`InvalidatedToken`).
-    /// The account is signed out and the user offered to sign in again.
-    pub(crate) fn token_invalidated(api_base: &str, cx: &mut dyn Host) {
-        let account = Self::state(cx).read(cx).account_for(api_base).cloned();
+    /// An API call answered 401: the token of `login`'s account was revoked
+    /// (`InvalidatedToken`). That account is signed out (the endpoint's
+    /// other accounts stay, `527-multiple-accounts`) and the user offered
+    /// to sign in again.
+    pub(crate) fn token_invalidated(api_base: &str, login: &str, cx: &mut dyn Host) {
+        let account = Self::state(cx)
+            .read(cx)
+            .account_with_login(api_base, login)
+            .cloned();
         let Some(account) = account else {
             return;
         };
         warn!(login = %account.login, endpoint = %api_base, "account token invalidated");
-        Self::sign_out(api_base.to_string(), cx);
+        Self::sign_out_account(api_base.to_string(), account.login.clone(), cx);
         Self::show_popup(crate::state::Popup::InvalidatedToken { account }, cx);
     }
 }
@@ -944,7 +949,7 @@ impl Dispatcher {
             s.repository(id).and_then(|r| r.non_fork_github().cloned())
         };
         let Some(target) = target else { return };
-        let Some((endpoint, token, _)) = Self::api_for(&target, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &target, cx) else {
             return;
         };
         Self::state(cx).update(cx, |s, cx| {
@@ -997,7 +1002,7 @@ impl Dispatcher {
             .repository(id)
             .and_then(|r| r.non_fork_github().cloned());
         let Some(target) = target else { return };
-        let Some((endpoint, token, _)) = Self::api_for(&target, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, &target, cx) else {
             return;
         };
         spawn_bg(

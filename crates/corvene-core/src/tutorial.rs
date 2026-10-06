@@ -245,7 +245,14 @@ impl Dispatcher {
         };
         let dir = Self::state(cx).read(cx).clone_dir();
         let path = dir.join(TUTORIAL_REPOSITORY_NAME);
-        let askpass = Self::askpass_env(cx);
+        // `527-multiple-accounts`: the account it is created on pushes it
+        // and is the repository's
+        let askpass = Self::askpass_env_preferring(
+            &format!("https://{}/", account.host()),
+            &account.login,
+            cx,
+        );
+        Self::account_when_added(&path, account.login.clone(), cx);
         let (tx, rx) = async_channel::unbounded::<(String, u8, Option<String>)>();
         let friendly = account.host();
         let endpoint = corvene_github::Endpoint::from_api_base(&account.endpoint);

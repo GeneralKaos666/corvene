@@ -319,8 +319,8 @@ impl CloneRepositoryDialog {
         };
         let loaded = {
             let s = self.state.read(cx);
-            s.api_repositories.contains_key(&account.endpoint)
-                || s.api_repositories_loading.contains(&account.endpoint)
+            s.api_repositories.contains_key(&account.key())
+                || s.api_repositories_loading.contains(&account.key())
         };
         if !loaded {
             Dispatcher::load_api_repositories(account, cx);
@@ -625,6 +625,12 @@ impl CloneRepositoryDialog {
             let depth =
                 (self.shallow && flags.bool(corvene_core::flags::ids::SHALLOW_CLONE)).then_some(1);
             let items = self.multi_targets(cx);
+            // `527-multiple-accounts`: the clones use the list's account
+            if let Some(account) = self.account(cx) {
+                for (_, path) in &items {
+                    Dispatcher::account_when_added(path, account.login.clone(), cx);
+                }
+            }
             Dispatcher::clone_repositories(items, prefer_ssh, depth, cx);
             return;
         }
@@ -661,17 +667,25 @@ impl CloneRepositoryDialog {
             let alias = self.alias.read(cx).value().to_string();
             Dispatcher::alias_when_added(&path, alias, cx);
         }
+        // `527-multiple-accounts`: a pick from an account's list uses that
+        // account, a URL the account that could see it
+        let list_account = self.account(cx).map(|a| a.login);
         Dispatcher::resolve_clone_info(
             input,
             prefer_ssh,
             move |result, cx| match result {
-                Ok(info) => Dispatcher::clone_repository_with(
-                    info.url,
-                    path,
-                    info.default_branch,
-                    depth,
-                    cx,
-                ),
+                Ok(info) => {
+                    if let Some(login) = list_account.or(info.account) {
+                        Dispatcher::account_when_added(&path, login, cx);
+                    }
+                    Dispatcher::clone_repository_with(
+                        info.url,
+                        path,
+                        info.default_branch,
+                        depth,
+                        cx,
+                    )
+                }
                 Err(message) => {
                     let Some(cx) = cx.gpui_app() else { return };
                     weak.update(cx, |this, cx| {
@@ -693,7 +707,7 @@ impl CloneRepositoryDialog {
             return;
         };
         let query = self.filter.read(cx).value().to_string();
-        let rows = match self.state.read(cx).api_repositories.get(&account.endpoint) {
+        let rows = match self.state.read(cx).api_repositories.get(&account.key()) {
             Some(repos) => group_rows(
                 &crate::cloneable_repositories::visible_repositories(repos, &account, cx),
                 &account.login,
@@ -909,9 +923,9 @@ impl CloneRepositoryDialog {
         };
         let (loading, loaded, rows) = {
             let s = self.state.read(cx);
-            let repos = s.api_repositories.get(&account.endpoint);
+            let repos = s.api_repositories.get(&account.key());
             (
-                s.api_repositories_loading.contains(&account.endpoint),
+                s.api_repositories_loading.contains(&account.key()),
                 repos.is_some(),
                 repos
                     .map(|r| {
@@ -931,7 +945,7 @@ impl CloneRepositoryDialog {
             .state
             .read(cx)
             .api_repositories
-            .get(&account.endpoint)
+            .get(&account.key())
             .and_then(|repos| {
                 crate::cloneable_repositories::owner_picker("clone-owner", &account, repos, cx)
             });

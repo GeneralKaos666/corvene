@@ -163,14 +163,24 @@ impl Dispatcher {
     }
 
     /// Add to GitHub: `POST /user/keys` with the account at `endpoint`,
-    /// after checking that its token may (`write:public_key`).
+    /// after checking that its token may (`write:public_key`). `endpoint`
+    /// may name the login too (`Account::key`, `endpoint|login`) when the
+    /// endpoint has several accounts (`527-multiple-accounts`).
     pub fn upload_ssh_key(endpoint: String, title: String, cx: &mut dyn Host) {
         let Some(key) = corvene_platform::ssh_key::ssh_public_key() else {
             return;
         };
+        let (endpoint, login) = match endpoint.split_once('|') {
+            Some((endpoint, login)) => (endpoint.to_string(), Some(login.to_string())),
+            None => (endpoint, None),
+        };
         let account = {
             let s = Self::state(cx).read(cx);
-            s.account_for(&endpoint).cloned()
+            match &login {
+                Some(login) => s.account_with_login(&endpoint, login),
+                None => s.account_for(&endpoint),
+            }
+            .cloned()
         };
         let Some(account) = account else {
             Self::show_error("Could not add the SSH key", "Sign in to GitHub first.", cx);
@@ -257,7 +267,9 @@ impl Dispatcher {
         let async_cx = cx.async_ctx();
         let callback: crate::sign_in::ResultCallback = Box::new(move |result| {
             if let SignInResult::Success { account } = result {
-                let endpoint = account.endpoint.clone();
+                // the account that signed in, among several on the
+                // endpoint (`527-multiple-accounts`)
+                let endpoint = account.key();
                 let title = title.clone();
                 // the store calls back in the middle of an `AppState` update
                 async_cx

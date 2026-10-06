@@ -1228,6 +1228,96 @@ fn open_in_buttons(cx: &App) -> Vec<AnyElement> {
     ]
 }
 
+/// Corvene (`527-multiple-accounts`): at the toolbar's right end, the
+/// avatar of the account the selected repository uses when its host has
+/// several; a click lists them to switch (Repository Settings › Remote has
+/// the same choice) and offers Add Account. GHD's toolbar has no account.
+fn account_button(cx: &App) -> Option<AnyElement> {
+    let s = corvene_core::AppState::global(cx).read(cx);
+    if !s.multiple_accounts() {
+        return None;
+    }
+    let repo = s.selected_repository()?;
+    let endpoint = repo.github.as_ref()?.endpoint.clone();
+    let accounts: Vec<corvene_core::Account> =
+        s.accounts_for(&endpoint).into_iter().cloned().collect();
+    if accounts.len() < 2 {
+        return None;
+    }
+    let current = s.account_for_repository(repo.id)?.clone();
+    let id = repo.id;
+    let t = cx.ghd();
+    let (hover_bg, hover_text) = (
+        t.toolbar_button_hover_background,
+        t.toolbar_button_hover_text,
+    );
+    let enterprise = !current.is_dotcom();
+    let current_login = current.login.clone();
+    let button = div()
+        .id("toolbar-account")
+        .h(TOOLBAR_BUTTON_HEIGHT())
+        .w(TOOLBAR_BUTTON_HEIGHT())
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .border_l_1()
+        .border_color(t.toolbar_button_border)
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover_bg).text_color(hover_text))
+        .child(crate::widgets::avatar_image(
+            current
+                .avatar_url
+                .as_deref()
+                .and_then(|u| crate::widgets::avatar_lookup_url(u, cx)),
+            zpx(20.),
+            cx,
+        ))
+        .on_click(move |ev, window, cx| {
+            let mut items: Vec<crate::context_menu::MenuItem> = accounts
+                .iter()
+                .map(|a| {
+                    let login = a.login.clone();
+                    let label = match &a.name {
+                        Some(name) if name != &a.login => format!("@{} ({name})", a.login),
+                        _ => format!("@{}", a.login),
+                    };
+                    crate::context_menu::MenuItem::checkbox(
+                        label,
+                        a.login == current_login,
+                        move |_, cx| {
+                            Dispatcher::set_repository_account(id, Some(login.clone()), cx)
+                        },
+                    )
+                })
+                .collect();
+            items.push(crate::context_menu::MenuItem::separator());
+            items.push(crate::context_menu::MenuItem::new(
+                mac_or("Add Account…", "Add account…"),
+                move |_, cx| Dispatcher::show_add_account_dialog(enterprise, cx),
+            ));
+            crate::native_menu::show_context_menu(items, ev.position(), window, cx);
+        });
+    Some(
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_row()
+            .justify_end()
+            .child(crate::widgets::with_directed_tooltip(
+                button,
+                format!(
+                    "This repository uses @{} on {}",
+                    current.login,
+                    current.friendly_endpoint()
+                ),
+                crate::widgets::TooltipDirection::South,
+            ))
+            .into_any_element(),
+    )
+}
+
 /// The toolbar row: 50 px tall including its 1 px bottom border.
 pub fn toolbar(
     buttons: Vec<ToolbarButtonModel>,
@@ -1251,6 +1341,7 @@ pub fn toolbar(
         .text_color(t.toolbar_text)
         .children(buttons.into_iter().map(|b| toolbar_button(b, resize, cx)))
         .children(open_in_buttons(cx))
+        .children(account_button(cx))
         .when(focus_visible(cx).is_some(), |d| {
             // a mouse press anywhere moves focus off the button
             d.child(canvas(

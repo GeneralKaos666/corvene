@@ -20,6 +20,9 @@
 //! current branch's `pushRemote`); `ui/repository-settings/remote.tsx` in
 //! GHD edits the primary remote's URL only. Changes apply on Save
 //! (`corvene_core::remote_manager`).
+//! Deviation (flag `527-multiple-accounts`): when the GitHub host has
+//! several accounts, the Remote tab's Account picks the one this repository
+//! uses (`corvene_core::repository_accounts`); GHD has one per endpoint.
 
 use std::rc::Rc;
 
@@ -106,6 +109,9 @@ pub struct RepositorySettingsDialog {
     custom_args: Entity<InputState>,
     /// `1102-repository-credential-helper`: the Remote tab's checkbox.
     credential_helper: bool,
+    /// `527-multiple-accounts`: the Remote tab's Account (a login of the
+    /// repository's host).
+    account: Option<String>,
     /// `341-custom-autolinks`: the repository's own autolinks as edited,
     /// and the Add form.
     autolinks: Vec<corvene_core::Autolink>,
@@ -320,6 +326,10 @@ impl RepositorySettingsDialog {
                 .read(cx)
                 .repository(repo)
                 .is_some_and(|r| r.use_credential_helper),
+            account: state
+                .read(cx)
+                .account_for_repository(repo)
+                .map(|a| a.login.clone()),
             autolinks: state
                 .read(cx)
                 .repository(repo)
@@ -407,11 +417,88 @@ impl RepositorySettingsDialog {
 
     fn account_emails(&self, cx: &App) -> Vec<String> {
         let s = self.state.read(cx);
-        let account = s
-            .repository(self.repo)
-            .and_then(|r| r.github.as_ref())
-            .and_then(|gh| s.account_for(&gh.endpoint));
-        account.map(|a| a.emails.clone()).unwrap_or_default()
+        s.account_for_repository(self.repo)
+            .map(|a| a.emails.clone())
+            .unwrap_or_default()
+    }
+
+    /// Corvene (`527-multiple-accounts`): the accounts of the repository's
+    /// host it can use, when there are several.
+    fn account_choices(&self, cx: &App) -> Vec<corvene_core::Account> {
+        let s = self.state.read(cx);
+        if !s.multiple_accounts() {
+            return Vec::new();
+        }
+        let Some(gh) = s.repository(self.repo).and_then(|r| r.github.as_ref()) else {
+            return Vec::new();
+        };
+        let accounts: Vec<corvene_core::Account> =
+            s.accounts_for(&gh.endpoint).into_iter().cloned().collect();
+        if accounts.len() > 1 {
+            accounts
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Corvene (`527-multiple-accounts`): Account, the signed-in account
+    /// fetch, push and everything from GitHub use for this repository.
+    fn account_option(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let accounts = self.account_choices(cx);
+        if accounts.is_empty() {
+            return None;
+        }
+        let t = cx.ghd();
+        let label = |a: &corvene_core::Account| match &a.name {
+            Some(name) if name != &a.login => format!("@{} ({name})", a.login),
+            _ => format!("@{}", a.login),
+        };
+        let selected = accounts.iter().position(|a| {
+            self.account
+                .as_deref()
+                .is_some_and(|l| a.login.eq_ignore_ascii_case(l))
+        });
+        let value = selected.map(|i| label(&accounts[i])).unwrap_or_default();
+        let options = accounts.iter().map(|a| label(a).into()).collect();
+        let logins: Vec<String> = accounts.iter().map(|a| a.login.clone()).collect();
+        let this = cx.entity().downgrade();
+        let on_select: crate::widgets::SelectHandler = std::rc::Rc::new(move |ix, _, cx| {
+            let login = logins.get(ix).cloned();
+            let _ = this.update(cx, |this, cx| {
+                this.account = login;
+                cx.notify();
+            });
+        });
+        let host = accounts[0].friendly_endpoint();
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(SPACING_HALF())
+                .child(labeled(
+                    "Account",
+                    select_button(
+                        "repo-settings-account",
+                        value,
+                        options,
+                        selected,
+                        false,
+                        on_select,
+                        cx,
+                    ),
+                    cx,
+                ))
+                .child(
+                    div()
+                        .text_size(FONT_SIZE_SM())
+                        .text_color(t.text_secondary)
+                        .child(format!(
+                            "The {host} account this repository fetches, pushes and talks to \
+                             GitHub with."
+                        )),
+                )
+                .into_any_element(),
+        )
     }
 
     /// `ForkSettings` tab: "I'll be using this fork…"
@@ -511,6 +598,16 @@ impl RepositorySettingsDialog {
             .map(|r| r.use_credential_helper);
         if stored_helper.is_some_and(|on| on != self.credential_helper) {
             Dispatcher::set_repository_credential_helper(self.repo, self.credential_helper, cx);
+        }
+        // `527-multiple-accounts`
+        let current = self
+            .state
+            .read(cx)
+            .account_for_repository(self.repo)
+            .map(|a| a.login.clone());
+        if !self.account_choices(cx).is_empty() && self.account.is_some() && self.account != current
+        {
+            Dispatcher::set_repository_account(self.repo, self.account.clone(), cx);
         }
         if self.remote_manager(cx) {
             // `1109-remote-manager`
@@ -788,6 +885,7 @@ impl RepositorySettingsDialog {
                     && !shown.is_empty(),
                 |d| d.child(self.credential_helper_option(cx)),
             )
+            .children(self.account_option(cx).filter(|_| !shown.is_empty()))
             .into_any_element()
     }
 
@@ -851,6 +949,7 @@ impl RepositorySettingsDialog {
                             .bool(corvene_core::flags::ids::REPOSITORY_CREDENTIAL_HELPER),
                         |d| d.child(self.credential_helper_option(cx)),
                     )
+                    .children(self.account_option(cx))
                     .into_any_element()
             }
             None => {

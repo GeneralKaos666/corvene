@@ -389,7 +389,7 @@ impl Dispatcher {
         let Some((github, shas)) = batch else {
             return;
         };
-        let Some((endpoint, token, _)) = Self::api_for(&github, cx) else {
+        let Some((endpoint, token, login)) = Self::api_for_repository(id, &github, cx) else {
             Self::apply_github_signatures(id, &shas, None, cx);
             return;
         };
@@ -415,7 +415,7 @@ impl Dispatcher {
                 };
                 Self::apply_github_signatures(id, &shas, found, cx);
                 if auth_failed {
-                    Self::token_invalidated(&api_base, cx);
+                    Self::token_invalidated(&api_base, &login, cx);
                 }
             },
         );

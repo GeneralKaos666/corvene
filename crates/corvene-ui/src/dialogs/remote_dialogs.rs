@@ -61,6 +61,9 @@ pub struct PublishRepositoryDialog {
     team: Option<(u64, String)>,
     teams: Vec<(u64, String)>,
     teams_loaded_for: Option<String>,
+    /// Corvene (`527-multiple-accounts`): the tab's account to publish
+    /// with, when it has several (`None`: the first).
+    account_login: Option<String>,
 }
 
 impl PublishRepositoryDialog {
@@ -132,6 +135,7 @@ impl PublishRepositoryDialog {
             team: None,
             teams: Vec::new(),
             teams_loaded_for: None,
+            account_login: None,
         }
     }
 
@@ -183,21 +187,37 @@ impl PublishRepositoryDialog {
     }
 
     fn account(&self, cx: &App) -> Option<Account> {
+        let accounts = self.tab_accounts(cx);
+        self.account_login
+            .as_deref()
+            .and_then(|login| accounts.iter().find(|a| a.login == login))
+            .or(accounts.first())
+            .cloned()
+    }
+
+    /// The accounts of the current tab: the first only, unless an endpoint
+    /// may have several (`527-multiple-accounts`).
+    fn tab_accounts(&self, cx: &App) -> Vec<Account> {
         let dotcom = self.tab == 0;
-        self.state
-            .read(cx)
+        let s = self.state.read(cx);
+        let accounts = s
             .accounts
             .iter()
-            .find(|a| is_dotcom(a) == dotcom)
-            .cloned()
+            .filter(|a| is_dotcom(a) == dotcom)
+            .cloned();
+        if s.multiple_accounts() {
+            accounts.collect()
+        } else {
+            accounts.take(1).collect()
+        }
     }
 
     /// `fetchOrgs` for the account picked on the current tab.
     fn load_orgs(&mut self, account: &Account, cx: &mut Context<Self>) {
-        if self.orgs_loaded_for.as_deref() == Some(account.endpoint.as_str()) {
+        if self.orgs_loaded_for.as_deref() == Some(account.key().as_str()) {
             return;
         }
-        self.orgs_loaded_for = Some(account.endpoint.clone());
+        self.orgs_loaded_for = Some(account.key());
         let Some(token) = corvene_platform::keychain::token(&account.host(), &account.login)
             .ok()
             .flatten()
@@ -276,6 +296,7 @@ impl Render for PublishRepositoryDialog {
                         this.org = None;
                         this.orgs.clear();
                         this.orgs_loaded_for = None;
+                        this.account_login = None;
                         cx.notify();
                     })
                     .ok();
@@ -325,10 +346,47 @@ impl Render for PublishRepositoryDialog {
                     Vec::new()
                 };
                 let weak = cx.weak_entity();
+                // `527-multiple-accounts`: which of the tab's accounts
+                let tab_accounts = self.tab_accounts(cx);
+                let account_picker = (tab_accounts.len() > 1).then(|| {
+                    let current = account.as_ref().map(|a| a.login.clone());
+                    let weak = cx.weak_entity();
+                    let label = |a: &Account| format!("@{}", a.login);
+                    let selected = tab_accounts
+                        .iter()
+                        .position(|a| Some(&a.login) == current.as_ref());
+                    let logins: Vec<String> =
+                        tab_accounts.iter().map(|a| a.login.clone()).collect();
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(SPACING_HALF())
+                        .child("Account")
+                        .child(crate::widgets::select_button(
+                            "publish-account",
+                            current.map(|l| format!("@{l}")).unwrap_or_default(),
+                            tab_accounts.iter().map(|a| label(a).into()).collect(),
+                            selected,
+                            false,
+                            std::rc::Rc::new(move |ix, _, cx| {
+                                let login = logins.get(ix).cloned();
+                                weak.update(cx, |this, cx| {
+                                    this.account_login = login;
+                                    this.org = None;
+                                    this.orgs.clear();
+                                    this.orgs_loaded_for = None;
+                                    cx.notify();
+                                })
+                                .ok();
+                            }),
+                            cx,
+                        ))
+                });
                 div()
                     .flex()
                     .flex_col()
                     .gap(SPACING())
+                    .children(account_picker)
                     .child(
                         div()
                             .flex()

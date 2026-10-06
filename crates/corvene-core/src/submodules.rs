@@ -138,7 +138,7 @@ impl Dispatcher {
             cx.notify();
             state.recursive
         });
-        let askpass = Self::askpass_env(cx);
+        let askpass = Self::askpass_env_for_repository(id, cx);
         spawn_bg(
             cx,
             move || match action {

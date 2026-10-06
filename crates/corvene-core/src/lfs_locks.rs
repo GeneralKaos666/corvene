@@ -100,7 +100,7 @@ impl Dispatcher {
                 }
             }
         });
-        let askpass = Self::askpass_env(cx);
+        let askpass = Self::askpass_env_for_repository(id, cx);
         spawn_bg(
             cx,
             move || corvene_git::lfs_locks(git, &workdir, askpass.as_ref()),
@@ -135,7 +135,7 @@ impl Dispatcher {
 
     /// Lock File(s): `git lfs lock` each path.
     pub fn lock_lfs_files(id: u64, paths: Vec<String>, cx: &mut dyn Host) {
-        let askpass = Self::askpass_env(cx);
+        let askpass = Self::askpass_env_for_repository(id, cx);
         Self::mark_lfs_locks_stale(id, cx);
         // the refresh after it asks for the locks again
         Self::run_history_op(
@@ -161,7 +161,7 @@ impl Dispatcher {
         if ids.is_empty() {
             return;
         }
-        let askpass = Self::askpass_env(cx);
+        let askpass = Self::askpass_env_for_repository(id, cx);
         Self::mark_lfs_locks_stale(id, cx);
         Self::run_history_op(
             id,

@@ -45,6 +45,7 @@ fn find_account_for_remote_url(
                 host: endpoint.host().to_string(),
                 is_dotcom: endpoint.is_dotcom(),
                 authenticated: ix < accounts.len(),
+                login: (ix < accounts.len()).then(|| account.login.clone()),
             }
         })
         .collect();

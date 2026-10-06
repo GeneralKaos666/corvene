@@ -206,6 +206,21 @@ impl WebFlow {
         )
     }
 
+    /// [`Self::authorize_url`] that makes GitHub show its account picker
+    /// (`prompt=select_account`), for signing in to another account than
+    /// the one the browser is signed in to.
+    pub fn authorize_url_selecting_account(
+        &self,
+        endpoint: &Endpoint,
+        client_id: &str,
+        scopes: &str,
+    ) -> String {
+        format!(
+            "{}&prompt=select_account",
+            self.authorize_url(endpoint, client_id, scopes)
+        )
+    }
+
     /// `requestOAuthToken`: the code from the callback → token (+ scopes).
     /// `client_secret` is what GHD sends; without one the verifier must do.
     pub fn exchange_code(
@@ -520,6 +535,10 @@ mod web_flow_tests {
         assert_eq!(
             url,
             "https://github.com/login/oauth/authorize?client_id=abc&scope=repo%20workflow%20read%3Auser%20user%3Aemail&state=st%20ate&redirect_uri=x-corvene-auth%3A%2F%2Foauth&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"
+        );
+        assert!(
+            flow.authorize_url_selecting_account(&Endpoint::github_com(), "abc", crate::SCOPES)
+                .ends_with("&code_challenge_method=S256&prompt=select_account")
         );
         let fresh = WebFlow::new(SCHEME_REDIRECT_URI).unwrap();
         assert!(fresh.state.len() >= 32 && fresh.code_verifier.len() >= 43);

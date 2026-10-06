@@ -128,10 +128,14 @@ pub struct CloneableRepositoriesVm {
 }
 
 pub fn cloneable_repositories(s: &AppState, endpoint: &str) -> CloneableRepositoriesVm {
+    // the lists are per account (`Account::key`); the endpoint's first
+    let key = s
+        .account_for(endpoint)
+        .map_or_else(|| endpoint.to_string(), |a| a.key());
     CloneableRepositoriesVm {
         endpoint: endpoint.to_string(),
-        loading: s.api_repositories_loading.contains(endpoint),
-        repositories: s.api_repositories.get(endpoint).map(|repos| {
+        loading: s.api_repositories_loading.contains(&key),
+        repositories: s.api_repositories.get(&key).map(|repos| {
             repos
                 .iter()
                 .map(|r| CloneableRepositoryVm {

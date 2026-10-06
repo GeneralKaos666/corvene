@@ -78,6 +78,7 @@ pub mod remote;
 pub mod remote_manager;
 pub mod repo_rules;
 pub mod repositories_store;
+pub mod repository_accounts;
 pub mod repository_list_file;
 pub mod review_anchor;
 pub mod round;

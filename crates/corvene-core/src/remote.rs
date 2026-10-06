@@ -233,23 +233,30 @@ impl Dispatcher {
     /// `GIT_ASKPASS` environment: one login per host from the signed-in
     /// accounts and the generic credentials the user saved.
     pub(crate) fn askpass_env(cx: &dyn Host) -> Option<AskpassEnv> {
-        Self::askpass_env_except(None, cx)
+        Self::askpass_env_with(None, None, cx)
     }
 
-    /// [`Self::askpass_env`] without the signed-in accounts of `host`.
-    fn askpass_env_except(host: Option<&str>, cx: &dyn Host) -> Option<AskpassEnv> {
+    /// [`Self::askpass_env`] without the signed-in accounts of `except`'s
+    /// host, and with `preferred` (host, login) answering for its host when
+    /// that host has several accounts (`527-multiple-accounts`).
+    fn askpass_env_with(
+        except: Option<&str>,
+        preferred: Option<(&str, &str)>,
+        cx: &dyn Host,
+    ) -> Option<AskpassEnv> {
         let s = Self::state(cx).read(cx);
-        let mut logins: Vec<String> = s
-            .accounts
-            .iter()
-            .filter(|a| host.is_none_or(|host| a.host() != host))
-            .map(|a| format!("{}={}", a.host(), a.login))
-            .collect();
+        let mut logins: Vec<String> = crate::accounts::askpass_pairs(
+            s.accounts
+                .iter()
+                .filter(|a| except.is_none_or(|host| a.host() != host))
+                .map(|a| (a.host(), a.login.clone(), a.login.clone())),
+            preferred,
+        );
         // flags 342-344: GitLab, Gitea and Bitbucket accounts
         logins.extend(
-            s.host_askpass_logins()
+            s.host_askpass_logins(preferred)
                 .into_iter()
-                .filter(|pair| host.is_none_or(|host| !pair.starts_with(&format!("{host}=")))),
+                .filter(|pair| except.is_none_or(|host| !pair.starts_with(&format!("{host}=")))),
         );
         logins.extend(
             s.generic_logins
@@ -281,11 +288,54 @@ impl Dispatcher {
     /// that signs in through the credential helper leaves the account of the
     /// remote's host out, so the helper (or a login saved in Corvene for
     /// that host) answers (`1102-repository-credential-helper`).
+    ///
+    /// The account the repository uses (`527-multiple-accounts`) answers
+    /// for the remote's host.
     pub(crate) fn askpass_env_for(id: u64, remote_url: &str, cx: &dyn Host) -> Option<AskpassEnv> {
-        if Self::uses_credential_helper(Self::state(cx).read(cx), id) {
-            Self::askpass_env_except(Some(&host_of(remote_url)), cx)
+        let host = host_of(remote_url);
+        let (helper, login) = {
+            let s = Self::state(cx).read(cx);
+            let login = s
+                .repository(id)
+                .and_then(|r| r.account.clone())
+                .filter(|_| s.multiple_accounts());
+            (Self::uses_credential_helper(s, id), login)
+        };
+        let preferred = login.as_deref().map(|login| (host.as_str(), login));
+        if helper {
+            Self::askpass_env_with(Some(&host), preferred, cx)
         } else {
-            Self::askpass_env(cx)
+            Self::askpass_env_with(None, preferred, cx)
+        }
+    }
+
+    /// [`Self::askpass_env`] with `login`'s account answering for `url`'s
+    /// host (`527-multiple-accounts`: a clone from that account).
+    pub(crate) fn askpass_env_preferring(
+        url: &str,
+        login: &str,
+        cx: &dyn Host,
+    ) -> Option<AskpassEnv> {
+        let host = host_of(url);
+        Self::askpass_env_with(None, Some((host.as_str(), login)), cx)
+    }
+
+    /// [`Self::askpass_env_for`] the current remote of repository `id` (its
+    /// GitHub repository's clone URL without one): for git commands that
+    /// reach the repository's host outside a fetch or push (LFS locks,
+    /// submodules, pull request refs).
+    pub(crate) fn askpass_env_for_repository(id: u64, cx: &dyn Host) -> Option<AskpassEnv> {
+        let url = {
+            let s = Self::state(cx).read(cx);
+            Self::current_remote_in(s, id).map(|r| r.url).or_else(|| {
+                s.repository(id)
+                    .and_then(|r| r.github.as_ref())
+                    .map(|gh| gh.clone_url.clone())
+            })
+        };
+        match url {
+            Some(url) => Self::askpass_env_for(id, &url, cx),
+            None => Self::askpass_env(cx),
         }
     }
 
@@ -1125,6 +1175,8 @@ impl Dispatcher {
                         Self::fetch_options(s, r.id),
                         // `1102-repository-credential-helper`
                         Self::uses_credential_helper(s, r.id),
+                        // `527-multiple-accounts`
+                        r.account.clone().filter(|_| s.multiple_accounts()),
                     )
                 })
                 .collect();
@@ -1165,7 +1217,7 @@ impl Dispatcher {
                 let mut summary = PullAllSummary::default();
                 // `288-dead-remote-indicator`: (id, fetch error or `None`)
                 let mut outcomes = Vec::new();
-                for (id, name, path, options, own_helper) in repos {
+                for (id, name, path, options, own_helper, login) in repos {
                     let Ok(info) = corvene_git::open_repository(&path) else {
                         continue;
                     };
@@ -1183,10 +1235,15 @@ impl Dispatcher {
                     corvene_git::set_credential_helper(
                         own_helper || (use_helper && !github_hosts.contains(&host)),
                     );
-                    let own_askpass = askpass
-                        .as_ref()
-                        .filter(|_| own_helper)
-                        .map(|a| without_accounts_of(a, &accounts, &host));
+                    let own_askpass = askpass.as_ref().and_then(|a| {
+                        if own_helper {
+                            Some(without_accounts_of(a, &accounts, &host))
+                        } else {
+                            login
+                                .as_deref()
+                                .map(|login| with_account_of(a, &accounts, &host, login))
+                        }
+                    });
                     match corvene_git::fetch_with(
                         git.clone(),
                         &info.workdir,
@@ -2375,6 +2432,9 @@ impl Dispatcher {
             cx.notify();
         });
         let endpoint = corvene_github::Endpoint::from_api_base(&account.endpoint);
+        // `527-multiple-accounts`: the repository uses the account it was
+        // published with
+        let login = account.login.clone();
         let (error_details, sso_hint) = {
             let flags = &Self::state(cx).read(cx).flags;
             (
@@ -2404,8 +2464,12 @@ impl Dispatcher {
                     Ok(repo) => {
                         info!(id, name = %repo.name, "published repository");
                         Self::state(cx).update(cx, |s, cx| {
+                            let multiple = s.multiple_accounts();
                             if let Some(r) = s.repositories.iter_mut().find(|r| r.id == id) {
                                 r.github = Some(repo);
+                                if multiple {
+                                    r.account = Some(login);
+                                }
                             }
                             let _ = s.store.save_repositories(&s.repositories);
                             cx.notify();
@@ -2686,7 +2750,7 @@ impl Dispatcher {
             // and deleted branches do not move `pushed_at`)
             if let (Some(github), Some(last_fetched)) = (skip_unchanged, last_fetched)
                 && age.is_some_and(|age| age < FORCED_FETCH_INTERVAL)
-                && let Some(api) = Self::api_for(&github, cx)
+                && let Some(api) = Self::api_for_repository(id, &github, cx)
             {
                 return Self::fetch_if_pushed(id, github, api, last_fetched, true, cx);
             }
@@ -2697,7 +2761,7 @@ impl Dispatcher {
         let (Some(github), Some(last_fetched)) = (known_push, last_fetched) else {
             return;
         };
-        let Some(api) = Self::api_for(&github, cx) else {
+        let Some(api) = Self::api_for_repository(id, &github, cx) else {
             return;
         };
         Self::fetch_if_pushed(id, github, api, last_fetched, false, cx);
@@ -2879,23 +2943,31 @@ impl Dispatcher {
 
     /// Clone dialog: fetch the account's repositories (`ApiRepositoriesStore.loadRepositories`).
     pub fn load_api_repositories(account: Account, cx: &mut dyn Host) {
-        let endpoint = account.endpoint.clone();
+        // per account (`Account::key`): an endpoint can have several
+        // (`527-multiple-accounts`)
+        let key = account.key();
         let already = Self::state(cx).update(cx, |s, cx| {
-            if s.api_repositories_loading.contains(&endpoint) {
+            if s.api_repositories_loading.contains(&key) {
                 return true;
             }
             // `ApiRepositoriesStore`: the last list shows right away while
-            // the fresh one loads
-            if !s.api_repositories.contains_key(&endpoint)
-                && let Ok(Some(cached)) =
-                    s.store
-                        .get::<Vec<corvene_models::GitHubRepository>>(&format!(
-                            "api-repositories:{endpoint}"
-                        ))
+            // the fresh one loads (kept under the endpoint before 527)
+            if !s.api_repositories.contains_key(&key)
+                && let Ok(Some(cached)) = s
+                    .store
+                    .get::<Vec<corvene_models::GitHubRepository>>(&format!(
+                        "api-repositories:{key}"
+                    ))
+                    .and_then(|found| match found {
+                        Some(found) => Ok(Some(found)),
+                        None => s
+                            .store
+                            .get(&format!("api-repositories:{}", account.endpoint)),
+                    })
             {
-                s.api_repositories.insert(endpoint.clone(), cached);
+                s.api_repositories.insert(key.clone(), cached);
             }
-            s.api_repositories_loading.insert(endpoint.clone());
+            s.api_repositories_loading.insert(key.clone());
             cx.notify();
             false
         });
@@ -2907,13 +2979,12 @@ impl Dispatcher {
             .flatten()
         else {
             Self::state(cx).update(cx, |s, cx| {
-                s.api_repositories_loading.remove(&endpoint);
+                s.api_repositories_loading.remove(&key);
                 cx.notify();
             });
             return;
         };
-        let api = corvene_github::Endpoint::from_api_base(&endpoint);
-        let endpoint_for_result = endpoint.clone();
+        let api = corvene_github::Endpoint::from_api_base(&account.endpoint);
         spawn_bg(
             cx,
             move || {
@@ -2923,17 +2994,15 @@ impl Dispatcher {
             },
             move |result, cx| {
                 Self::state(cx).update(cx, |s, cx| {
-                    s.api_repositories_loading.remove(&endpoint_for_result);
+                    s.api_repositories_loading.remove(&key);
                     match result {
                         Ok(repos) => {
-                            if let Err(err) = s
-                                .store
-                                .set(&format!("api-repositories:{endpoint_for_result}"), &repos)
+                            if let Err(err) =
+                                s.store.set(&format!("api-repositories:{key}"), &repos)
                             {
                                 warn!(%err, "could not cache the repository list");
                             }
-                            s.api_repositories
-                                .insert(endpoint_for_result.clone(), repos);
+                            s.api_repositories.insert(key.clone(), repos);
                         }
                         Err(err) => warn!(%err, "could not load repositories"),
                     }
@@ -3033,6 +3102,37 @@ fn without_accounts_of(askpass: &AskpassEnv, accounts: &[String], host: &str) ->
     }
 }
 
+/// `527-multiple-accounts`: `askpass` answering for `host` with `login`,
+/// the account a repository uses, when that is one of `accounts`
+/// (`host=login` pairs of every signed-in account).
+fn with_account_of(
+    askpass: &AskpassEnv,
+    accounts: &[String],
+    host: &str,
+    login: &str,
+) -> AskpassEnv {
+    let pair = format!("{host}={login}");
+    let known = accounts.iter().any(|a| a.eq_ignore_ascii_case(&pair));
+    let logins: Vec<&str> = askpass
+        .logins
+        .split(';')
+        .map(|l| {
+            if known
+                && l.split_once('=').is_some_and(|(h, _)| h == host)
+                && accounts.iter().any(|a| a == l)
+            {
+                pair.as_str()
+            } else {
+                l
+            }
+        })
+        .collect();
+    AskpassEnv {
+        program: askpass.program.clone(),
+        logins: logins.join(";"),
+    }
+}
+
 /// `github.com` from `https://github.com/a/b.git` or `git@github.com:a/b.git`.
 pub fn host_of(url: &str) -> String {
     let without_scheme = url.split("://").nth(1).unwrap_or(url);
@@ -3097,6 +3197,24 @@ mod tests {
         let accounts = ["github.com=octocat".to_string(), "ghe.corp=me".to_string()];
         let env = without_accounts_of(&askpass, &accounts, "github.com");
         assert_eq!(env.logins, "ghe.corp=me;github.com=saved");
+    }
+
+    #[test]
+    fn pull_all_answers_with_the_repository_s_account() {
+        let askpass = AskpassEnv {
+            program: "/x".into(),
+            logins: "github.com=me;ghe.corp=work".into(),
+        };
+        let accounts = [
+            "github.com=me".to_string(),
+            "ghe.corp=work".to_string(),
+            "github.com=me-at-work".to_string(),
+        ];
+        let env = with_account_of(&askpass, &accounts, "github.com", "me-at-work");
+        assert_eq!(env.logins, "github.com=me-at-work;ghe.corp=work");
+        // a login that is not signed in changes nothing
+        let env = with_account_of(&askpass, &accounts, "github.com", "gone");
+        assert_eq!(env.logins, askpass.logins);
     }
 
     #[test]

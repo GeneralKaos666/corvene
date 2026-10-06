@@ -376,20 +376,27 @@ impl Dispatcher {
         );
     }
 
+    /// The endpoint, token and login to call the API about `github` with:
+    /// the account of the listed repository it belongs to
+    /// (`AppState::account_for_github`, `527-multiple-accounts`). Code that
+    /// knows the repository asks [`Self::api_for_repository`].
     pub(crate) fn api_for(
         github: &GitHubRepository,
         cx: &dyn Host,
     ) -> Option<(corvene_github::Endpoint, String, String)> {
         let s = Self::state(cx).read(cx);
-        let account = s.account_for(&github.endpoint)?;
-        let token = corvene_platform::keychain::token(&account.host(), &account.login)
-            .ok()
-            .flatten()?;
-        Some((
-            corvene_github::Endpoint::from_api_base(&account.endpoint),
-            token,
-            account.login.clone(),
-        ))
+        api_with(s.account_for_github(github)?)
+    }
+
+    /// [`Self::api_for`] with the account repository `id` uses on
+    /// `github`'s endpoint (`AppState::account_for_repository_on`).
+    pub(crate) fn api_for_repository(
+        id: u64,
+        github: &GitHubRepository,
+        cx: &dyn Host,
+    ) -> Option<(corvene_github::Endpoint, String, String)> {
+        let s = Self::state(cx).read(cx);
+        api_with(s.account_for_repository_on(id, &github.endpoint)?)
     }
 
     /// GHD `refreshIssues`, throttled to once a minute per repository: the
@@ -621,7 +628,7 @@ impl Dispatcher {
                 cx.notify();
             });
         }
-        let Some((endpoint, token, _)) = Self::api_for(github, cx) else {
+        let Some((endpoint, token, _)) = Self::api_for_repository(id, github, cx) else {
             mark_error(id, &username, cx);
             return;
         };
@@ -675,9 +682,23 @@ impl Dispatcher {
     pub fn own_login_for(github: &GitHubRepository, cx: &dyn Host) -> Option<String> {
         Self::state(cx)
             .read(cx)
-            .account_for(&github.endpoint)
+            .account_for_github(github)
             .map(|a| a.login.clone())
     }
+}
+
+/// `account`'s endpoint, token (from the Keychain) and login.
+fn api_with(
+    account: &corvene_models::Account,
+) -> Option<(corvene_github::Endpoint, String, String)> {
+    let token = corvene_platform::keychain::token(&account.host(), &account.login)
+        .ok()
+        .flatten()?;
+    Some((
+        corvene_github::Endpoint::from_api_base(&account.endpoint),
+        token,
+        account.login.clone(),
+    ))
 }
 
 /// `223-add-local-path-completion`: the folders completing a typed path,

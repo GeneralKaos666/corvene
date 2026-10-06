@@ -24,6 +24,10 @@
 //! With flag `350-ssh-key-helper` Integrations ends in the SSH key section
 //! Android always has: the key in `~/.ssh`, Create SSH Key…, Add to
 //! ssh-agent and Add to GitHub (`corvene_core::ssh_keys`; GHD has none).
+//! With flag `527-multiple-accounts` Accounts lists every account of a host,
+//! each with its own Sign Out, and Add GitHub.com Account / Add GitHub
+//! Enterprise Account (GHD `ui/preferences/accounts.tsx` shows the one
+//! account per endpoint `accounts-store.ts` keeps).
 
 use std::path::Path;
 use std::rc::Rc;
@@ -550,15 +554,28 @@ impl PreferencesDialog {
     fn accounts_tab(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
         let s = self.state.read(cx);
-        let dotcom = s.dotcom_account().cloned();
+        // `527-multiple-accounts`: every GitHub.com account, each with its
+        // own Sign Out, and Add account
+        let multiple = s.multiple_accounts();
+        let dotcom_accounts: Vec<corvene_core::Account> = if multiple {
+            s.accounts
+                .iter()
+                .filter(|a| a.is_dotcom())
+                .cloned()
+                .collect()
+        } else {
+            s.dotcom_account().cloned().into_iter().collect()
+        };
+        let dotcom = dotcom_accounts.first().cloned();
         let enterprise: Vec<_> = s
             .accounts
             .iter()
             .filter(|a| !a.is_dotcom())
             .cloned()
             .collect();
-        let account_row = |account: &corvene_core::Account, id: &'static str| {
+        let account_row = |account: &corvene_core::Account, id: ElementId| {
             let endpoint = account.endpoint.clone();
+            let login = account.login.clone();
             let (title, subtitle) = if account.is_dotcom() {
                 (
                     account
@@ -610,8 +627,13 @@ impl PreferencesDialog {
                         ),
                 )
                 .child(
-                    button(id, mac_or("Sign Out", "Sign out"), cx)
-                        .on_click(move |_, _, cx| Dispatcher::sign_out(endpoint.clone(), cx)),
+                    button(id, mac_or("Sign Out", "Sign out"), cx).on_click(move |_, _, cx| {
+                        if multiple {
+                            Dispatcher::sign_out_account(endpoint.clone(), login.clone(), cx)
+                        } else {
+                            Dispatcher::sign_out(endpoint.clone(), cx)
+                        }
+                    }),
                 )
         };
         div()
@@ -619,9 +641,32 @@ impl PreferencesDialog {
             .flex_col()
             .child(section_heading("GitHub.com", cx))
             .child(match &dotcom {
-                Some(account) => div()
-                    .child(account_row(account, "prefs-signout-dotcom"))
-                    .children(self.commit_email_field(account, window, cx))
+                Some(_) => div()
+                    .children(dotcom_accounts.iter().enumerate().map(|(ix, account)| {
+                        let id = if ix == 0 {
+                            ElementId::from("prefs-signout-dotcom")
+                        } else {
+                            ElementId::from(("prefs-signout-dotcom", ix))
+                        };
+                        div()
+                            .child(account_row(account, id))
+                            .children(self.commit_email_field(account, window, cx))
+                    }))
+                    .when(multiple, |d| {
+                        d.child(
+                            div().flex().mb(SPACING()).child(
+                                button(
+                                    "prefs-add-dotcom",
+                                    mac_or("Add GitHub.com Account", "Add GitHub.com account"),
+                                    cx,
+                                )
+                                .on_click(|_, _, cx| {
+                                    Dispatcher::close_popup(cx);
+                                    Dispatcher::show_add_account_dialog(false, cx)
+                                }),
+                            ),
+                        )
+                    })
                     .into_any_element(),
                 None => accounts_call_to_action(
                     "prefs-signin-dotcom",
@@ -642,9 +687,15 @@ impl PreferencesDialog {
             .children(
                 enterprise
                     .iter()
-                    .map(|account| {
+                    .enumerate()
+                    .map(|(ix, account)| {
+                        let id = if ix == 0 {
+                            ElementId::from("prefs-signout-enterprise")
+                        } else {
+                            ElementId::from(("prefs-signout-enterprise", ix))
+                        };
                         div()
-                            .child(account_row(account, "prefs-signout-enterprise"))
+                            .child(account_row(account, id))
                             .children(self.commit_email_field(account, window, cx))
                     }),
             )
@@ -661,6 +712,26 @@ impl PreferencesDialog {
                     cx,
                 )
                 .into_any_element()
+            } else if multiple {
+                // `527-multiple-accounts`: like GitHub.com's Add button
+                div()
+                    .flex()
+                    .mb(SPACING())
+                    .child(
+                        button(
+                            "prefs-add-enterprise",
+                            mac_or(
+                                "Add GitHub Enterprise Account",
+                                "Add GitHub Enterprise account",
+                            ),
+                            cx,
+                        )
+                        .on_click(|_, _, cx| {
+                            Dispatcher::close_popup(cx);
+                            Dispatcher::show_add_account_dialog(true, cx)
+                        }),
+                    )
+                    .into_any_element()
             } else {
                 button("prefs-add-enterprise", "Add GitHub Enterprise account", cx)
                     .on_click(|_, _, cx| {
@@ -3021,9 +3092,11 @@ fn ssh_key_section(cx: &App) -> AnyElement {
         .accounts
         .iter()
         .filter(|_| helper)
-        .map(|a| (a.endpoint.clone(), a.login.clone(), a.friendly_endpoint()))
+        .map(|a| (a.key(), a.login.clone(), a.friendly_endpoint()))
         .collect();
-    accounts.sort_by_key(|(endpoint, _, _)| {
+    // `Account::key` is `endpoint|login` (`527-multiple-accounts`)
+    accounts.sort_by_key(|(key, _, _)| {
+        let endpoint = key.split_once('|').map_or(key.as_str(), |(e, _)| e);
         !corvene_github::Endpoint::from_api_base(endpoint).is_dotcom()
     });
     let busy = s.ssh_key.busy.clone();
