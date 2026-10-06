@@ -114,9 +114,34 @@ enum GitTab {
 /// `OtherEmailSelectValue`
 const OTHER_EMAIL: &str = "Other";
 
+/// What Advanced's proxy section shows (`528-proxy-credentials`).
+fn proxy_snapshot(
+    state: &Entity<AppState>,
+    cx: &App,
+) -> (
+    Option<corvene_core::proxy::ProxyStatus>,
+    Vec<(String, String)>,
+) {
+    let s = state.read(cx);
+    let mut logins: Vec<(String, String)> = s
+        .proxy
+        .logins
+        .iter()
+        .map(|(proxy, user)| (proxy.clone(), user.clone()))
+        .collect();
+    logins.sort();
+    (s.proxy.status.clone(), logins)
+}
+
 pub struct PreferencesDialog {
     state: Entity<AppState>,
     tab: PreferencesTab,
+    /// `528-proxy-credentials`: Advanced's proxy line and saved logins as
+    /// last drawn (the state is observed for these alone).
+    proxy_seen: (
+        Option<corvene_core::proxy::ProxyStatus>,
+        Vec<(String, String)>,
+    ),
     /// The Accounts tab's `dialog-preferred-focus` button shows its focus
     /// ring until a mouse press moves focus without `:focus-visible`.
     preferred_focus_visible: bool,
@@ -160,6 +185,14 @@ impl PreferencesDialog {
     ) -> Self {
         // `350-ssh-key-helper`: a key made outside Corvene since
         corvene_platform::ssh_key::forget_public_key();
+        // `528-proxy-credentials`: Advanced's proxy line
+        if state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::PROXY_CREDENTIALS)
+        {
+            Dispatcher::refresh_proxy_status(cx);
+        }
         let mut draft = state.read(cx).settings.clone();
         // `Integrations.componentDidMount`: with no editor (shell) found the
         // select shows the custom entry, and its form, from the start
@@ -282,9 +315,19 @@ impl PreferencesDialog {
             cx.notify();
         })
         .detach();
+        let proxy_seen = proxy_snapshot(&state, cx);
+        cx.observe(&state, |this: &mut Self, state, cx| {
+            let seen = proxy_snapshot(&state, cx);
+            if seen != this.proxy_seen {
+                this.proxy_seen = seen;
+                cx.notify();
+            }
+        })
+        .detach();
         let mut this = Self {
             state: state.clone(),
             tab,
+            proxy_seen,
             preferred_focus_visible: true,
             git_tab: GitTab::Author,
             draft,
@@ -2337,9 +2380,69 @@ impl PreferencesDialog {
             }))
     }
 
+    /// Settings › Advanced › Proxy (`528-proxy-credentials`): the proxy
+    /// requests to GitHub.com go through and where it was found, and the
+    /// saved proxy passwords, each with Forget.
+    fn proxy_section(&self, cx: &Context<Self>) -> Div {
+        let t = cx.ghd();
+        let (status, logins) = &self.proxy_seen;
+        let line = match status {
+            None => "Looking up the proxy…".to_string(),
+            Some(status) => match &status.proxy {
+                None => "Requests to GitHub.com connect directly, without a proxy.".to_string(),
+                Some(proxy) => format!(
+                    "Requests to GitHub.com go through the proxy {proxy}, from {}.",
+                    status.source
+                ),
+            },
+        };
+        let empty = logins.is_empty();
+        div()
+            .mt(SPACING())
+            .flex()
+            .flex_col()
+            .child(section_heading("Proxy", cx))
+            .child(settings_description(cx).mt_0().child(line))
+            .child(settings_description(cx).mb(SPACING()).child(
+                "When a proxy asks for a username and password, Corvene asks you once, \
+                 keeps them in the keychain and uses them for Git and for its own requests.",
+            ))
+            .children(logins.iter().map(|(proxy, user)| {
+                let id = SharedString::from(format!("prefs-proxy-forget-{proxy}"));
+                let forget = proxy.clone();
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(SPACING())
+                    .mb(SPACING_HALF())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(FONT_SIZE())
+                            .child(format!("{user} at {proxy}")),
+                    )
+                    .child(
+                        button(id, "Forget", cx).on_click(move |_, _, cx| {
+                            Dispatcher::forget_proxy_credentials(forget.clone(), cx)
+                        }),
+                    )
+            }))
+            .when(empty, |d| {
+                d.child(
+                    div()
+                        .text_size(FONT_SIZE_SM())
+                        .text_color(t.text_secondary)
+                        .child("No proxy passwords saved."),
+                )
+            })
+    }
+
     fn advanced_tab(&self, cx: &Context<Self>) -> AnyElement {
         let t = cx.ghd();
-        let (crash_reports, offered_packs, clone_location, settings_file, menu_bar) = {
+        let (crash_reports, offered_packs, clone_location, settings_file, menu_bar, proxy) = {
             use corvene_core::flags::ids;
             let flags = &self.state.read(cx).flags;
             (
@@ -2348,6 +2451,7 @@ impl PreferencesDialog {
                 flags.bool(ids::DEFAULT_CLONE_LOCATION),
                 flags.bool(ids::SETTINGS_FILE),
                 cfg!(target_os = "macos") && flags.bool(ids::MENU_BAR_STATUS_ITEM),
+                flags.bool(ids::PROXY_CREDENTIALS),
             )
         };
         div()
@@ -2395,6 +2499,8 @@ impl PreferencesDialog {
                 .text_size(FONT_SIZE_SM())
                 .text_color(t.text_secondary),
             )
+            // Corvene addition: `528-proxy-credentials`
+            .when(proxy, |d| d.child(self.proxy_section(cx)))
             // Corvene addition: `428-menu-bar-status-item`
             .when(menu_bar, |d| d.child(self.menu_bar_section(cx)))
             // Corvene addition: `514-default-clone-location`

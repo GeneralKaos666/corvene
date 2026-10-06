@@ -698,6 +698,9 @@ pub trait StoreExt {
     fn save_accounts(&self, accounts: &[Account]) -> Result<()>;
     /// Generic git server logins (host → username); passwords live in the keychain.
     fn generic_logins(&self) -> Result<std::collections::HashMap<String, String>>;
+    /// `528-proxy-credentials`: the username saved per proxy `host:port`.
+    fn proxy_logins(&self) -> Result<std::collections::HashMap<String, String>>;
+    fn save_proxy_logins(&self, logins: &std::collections::HashMap<String, String>) -> Result<()>;
     fn save_generic_logins(&self, logins: &std::collections::HashMap<String, String>)
     -> Result<()>;
     /// OAuth app client IDs entered per GitHub Enterprise host (host →
@@ -937,6 +940,14 @@ impl StoreExt for Store {
 
     fn generic_logins(&self) -> Result<std::collections::HashMap<String, String>> {
         Ok(self.get("generic_git_logins")?.unwrap_or_default())
+    }
+
+    fn proxy_logins(&self) -> Result<std::collections::HashMap<String, String>> {
+        Ok(self.get("proxy_logins")?.unwrap_or_default())
+    }
+
+    fn save_proxy_logins(&self, logins: &std::collections::HashMap<String, String>) -> Result<()> {
+        self.set("proxy_logins", logins)
     }
 
     fn save_generic_logins(

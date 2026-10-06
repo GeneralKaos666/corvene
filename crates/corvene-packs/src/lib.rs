@@ -294,14 +294,16 @@ pub fn manifest_url() -> String {
 }
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        // the system proxy too (`corvene_platform::proxy`)
-        .proxy(corvene_platform::proxy::agent_proxy())
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .http_status_as_error(false)
-        .user_agent(USER_AGENT)
-        .build()
-        .new_agent()
+    corvene_platform::proxy::agent(
+        ureq::Agent::config_builder()
+            // the system proxy, PAC scripts and saved proxy credentials
+            // (`corvene_platform::proxy`)
+            .middleware(corvene_platform::proxy::per_request)
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .http_status_as_error(false)
+            .user_agent(USER_AGENT)
+            .build(),
+    )
 }
 
 fn fetch_bytes(url: &str, limit: u64) -> Result<Vec<u8>, PackError> {

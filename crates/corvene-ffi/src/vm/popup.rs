@@ -581,6 +581,17 @@ pub fn popup(s: &AppState) -> Option<PopupVm> {
                 .opt("username", username.as_ref())
                 .put("retry", format!("{retry:?}"));
         }
+        Popup::ProxyAuthentication {
+            proxy,
+            username,
+            rejected,
+            retry,
+        } => {
+            f.put("proxy", proxy)
+                .opt("username", username.as_ref())
+                .put("rejected", rejected)
+                .put("retry", format!("{retry:?}"));
+        }
         Popup::InitializeLFS { repos } => {
             f.list("repos", repos);
         }

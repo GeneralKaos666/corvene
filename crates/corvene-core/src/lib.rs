@@ -69,6 +69,7 @@ pub mod packs;
 pub mod persistence;
 pub mod popup_manager;
 pub mod portable_paths;
+pub mod proxy;
 pub mod pull_request_preview;
 pub mod pull_request_review;
 pub mod pull_requests;

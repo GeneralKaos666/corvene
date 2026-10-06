@@ -2098,6 +2098,29 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
                 cx,
             )
         }
+        // `528-proxy-credentials`: a proxy wants a username and password
+        // (`:user` with a saved username whose password was refused,
+        // `:fetch` with a fetch of the selected repository to retry)
+        (name, selected) if name == "proxy-auth" || name.starts_with("proxy-auth:") => {
+            let parts: Vec<&str> = name.split(':').skip(1).collect();
+            let retry = match selected {
+                Some(id) if parts.contains(&"fetch") => corvene_core::proxy::ProxyRetry::Remote {
+                    repo: id,
+                    action: corvene_core::RetryAction::Fetch,
+                },
+                _ => corvene_core::proxy::ProxyRetry::None,
+            };
+            let user = parts.contains(&"user");
+            Dispatcher::show_popup(
+                Popup::ProxyAuthentication {
+                    proxy: "proxy.example.com:3128".into(),
+                    username: user.then(|| "octocat".into()),
+                    rejected: user,
+                    retry,
+                },
+                cx,
+            )
+        }
         ("ssh-key-passphrase", _) => Dispatcher::show_popup(
             Popup::SshKeyPassphrase {
                 path: "/Users/octocat/.ssh/id_ed25519".into(),

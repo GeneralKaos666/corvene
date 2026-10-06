@@ -684,6 +684,29 @@ impl Dispatcher {
             info!(id, "remote operation stopped");
             return;
         }
+        // `528-proxy-credentials`: the proxy wants a username and password
+        // (background fetches ask too, until the prompt is cancelled)
+        if corvene_git::remote_failure(&err) == RemoteFailure::ProxyAuthenticationRequired
+            && Self::state(cx)
+                .read(cx)
+                .flags
+                .bool(crate::flags::ids::PROXY_CREDENTIALS)
+            && let Some((git, workdir)) = Self::repo_context(id, cx)
+        {
+            warn!(id, %err, "the proxy wants credentials");
+            Self::git_proxy_auth_required(
+                git,
+                Some(workdir),
+                remote_url,
+                crate::proxy::ProxyRetry::Remote {
+                    repo: id,
+                    action: retry,
+                },
+                !background,
+                cx,
+            );
+            return;
+        }
         if background {
             warn!(id, %err, "background remote operation failed");
             return;
@@ -2632,6 +2655,7 @@ impl Dispatcher {
     /// Start the periodic background fetch and sidebar indicator refresh
     /// (`BackgroundFetcher`, `RepositoryIndicatorUpdater`). Call once.
     pub fn start_background_tasks(cx: &mut dyn Host) {
+        Self::start_proxy(cx);
         // the API's proxy falls back to git's `http.proxy` (GHD's requests
         // go through Chromium's proxy resolution, `corvene_platform::proxy`)
         if let Some(git) = Self::state(cx).read(cx).git.clone() {

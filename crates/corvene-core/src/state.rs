@@ -719,6 +719,17 @@ pub enum Popup {
         username: Option<String>,
         retry: RetryAction,
     },
+    /// Corvene (`528-proxy-credentials`): a proxy answered 407 Proxy
+    /// Authentication Required.
+    ProxyAuthentication {
+        /// `host:port`.
+        proxy: String,
+        /// The username saved for it, if any.
+        username: Option<String>,
+        /// The saved credentials were refused.
+        rejected: bool,
+        retry: crate::proxy::ProxyRetry,
+    },
     /// `InitializeLFS`
     InitializeLFS {
         repos: Vec<u64>,
@@ -1875,6 +1886,9 @@ pub struct AppState {
     pub indicators: HashMap<u64, crate::remote::RepoIndicator>,
     /// Generic git server logins (host → username) for the askpass helper.
     pub generic_logins: HashMap<String, String>,
+    /// `528-proxy-credentials`: saved proxy usernames, cancelled prompts,
+    /// Settings › Advanced's proxy line.
+    pub proxy: crate::proxy::ProxyState,
     /// OAuth app client IDs entered per GitHub Enterprise host (host →
     /// client ID), `Dispatcher::set_enterprise_oauth_app`.
     pub enterprise_oauth_apps: HashMap<String, String>,

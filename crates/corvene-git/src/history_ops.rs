@@ -10,7 +10,12 @@ use crate::process::GitCommand;
 
 /// `revertCommit`: `git revert [-m 1] <sha>` (mainline 1 for merge commits).
 pub fn revert_commit(git: Arc<GitBinary>, workdir: &Path, sha: &str, is_merge: bool) -> Result<()> {
+    // GHD: `envForRemoteOperation(getFallbackUrlForProxyResolve)`
+    let proxy_env = crate::proxy::env_for_fallback(git.clone(), workdir, false);
     let mut cmd = GitCommand::new(git).args(["revert"]).current_dir(workdir);
+    for (key, value) in proxy_env {
+        cmd = cmd.env(key, value);
+    }
     if is_merge {
         cmd = cmd.args(["-m", "1"]);
     }

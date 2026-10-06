@@ -47,9 +47,14 @@ pub fn update_submodules_after_operation(
     allow_file_protocol: bool,
     askpass: Option<&AskpassEnv>,
 ) -> Result<()> {
+    // GHD: `envForRemoteOperation(getFallbackUrlForProxyResolve)`
+    let proxy_env = crate::proxy::env_for_fallback(git.clone(), workdir, askpass.is_some());
     let mut cmd = GitCommand::new(git)
         .current_dir(workdir)
         .expected_errors(AUTHENTICATION_ERRORS);
+    for (key, value) in proxy_env {
+        cmd = cmd.env(key, value);
+    }
     if allow_file_protocol {
         cmd = cmd.args(["-c", "protocol.file.allow=always"]);
     }

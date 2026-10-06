@@ -309,6 +309,8 @@ fn ghd_dialog_width(id: &str) -> Option<f32> {
         | "dialog-about"
         | "push-branch-commits"
         | "dialog-generic-git-auth"
+        // Corvene (`528-proxy-credentials`), built like the one above
+        | "dialog-proxy-auth"
         | "dialog-change-repository-alias"
         | "dialog-confirm-remove-repository" => 450.,
         "create-repository"

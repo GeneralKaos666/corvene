@@ -161,7 +161,8 @@ pub use process::{
     set_network_stall_timeout, with_cancel_token,
 };
 pub use proxy::{
-    env_for_proxy, env_for_remote_operation, parse_pac_string, resolve_git_proxy,
+    GitProxy, GitProxySource, effective_proxy, env_for_proxy, env_for_remote_operation,
+    is_proxy_auth_failure, parse_pac_string, resolve_git_proxy, set_proxy_logins,
     set_system_proxy_resolver,
 };
 pub use rebase_ops::{

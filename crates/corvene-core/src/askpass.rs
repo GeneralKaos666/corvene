@@ -45,7 +45,62 @@ pub fn parse_logins(logins: &str) -> HashMap<String, String> {
 
 /// Answer one prompt, or `None` when Corvene knows nothing about the host.
 pub fn answer(prompt: &str) -> Option<String> {
-    answer_with(prompt, logins())
+    let proxies = std::env::var("CORVENE_ASKPASS_PROXIES").unwrap_or_default();
+    match answer_proxy(prompt, &proxies) {
+        Some(answer) => answer,
+        None => answer_with(prompt, logins()),
+    }
+}
+
+/// Corvene (`528-proxy-credentials`): git asks for the password of a proxy
+/// whose URL Corvene gave the saved username (`Password for
+/// 'http://user@proxy:3128': `); `proxies` (`CORVENE_ASKPASS_PROXIES`)
+/// names those proxies (`host:port`, comma-separated). `None` when the
+/// prompt is not about one of them; else the keychain's password, if any
+/// (a proxy's prompt never gets a git host's credentials).
+pub fn answer_proxy(prompt: &str, proxies: &str) -> Option<Option<String>> {
+    let (kind, host, user) = parse_prompt(prompt)?;
+    let is_proxy = proxies
+        .split(',')
+        .any(|proxy| !proxy.is_empty() && proxy.trim().eq_ignore_ascii_case(&host));
+    if !is_proxy {
+        return None;
+    }
+    if kind != "password" {
+        return Some(None);
+    }
+    let Some(user) = user else {
+        return Some(None);
+    };
+    Some(
+        corvene_platform::keychain::proxy_password(&host, &percent_decode(&user))
+            .ok()
+            .flatten(),
+    )
+}
+
+/// git shows the proxy URL's user as written, percent escapes included.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = bytes
+            .get(i + 1..i + 3)
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match (bytes[i], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                i += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// [`answer`] with the host → login map given (Android: the helper process
@@ -154,6 +209,21 @@ mod tests {
             Some(("password", "github.com".into(), Some("octocat".into())))
         );
         assert_eq!(parse_prompt("Enter passphrase for key '/x': "), None);
+    }
+
+    #[test]
+    fn proxy_prompts_need_a_listed_proxy() {
+        let proxies = "proxy.corp:3128";
+        assert_eq!(
+            answer_proxy("Password for 'https://octocat@github.com': ", proxies),
+            None
+        );
+        // a listed proxy's username question gets nothing, not a login
+        assert_eq!(
+            answer_proxy("Username for 'http://proxy.corp:3128': ", proxies),
+            Some(None)
+        );
+        assert_eq!(percent_decode("dom%5Cme%"), "dom\\me%");
     }
 
     #[test]

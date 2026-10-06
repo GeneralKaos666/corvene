@@ -873,14 +873,16 @@ pub fn get_next_page_path_with_increasing_page_size(headers: &ResponseHeaders) -
 
 impl Client {
     pub fn new(endpoint: Endpoint, token: impl Into<String>) -> Self {
-        let agent = ureq::Agent::config_builder()
-            // the system proxy too (`corvene_platform::proxy`)
-            .proxy(corvene_platform::proxy::agent_proxy())
-            .timeout_global(Some(Duration::from_secs(30)))
-            .http_status_as_error(false)
-            .user_agent(USER_AGENT)
-            .build()
-            .new_agent();
+        let agent = corvene_platform::proxy::agent(
+            ureq::Agent::config_builder()
+                // the system proxy, PAC scripts and saved proxy credentials
+                // (`corvene_platform::proxy`)
+                .middleware(corvene_platform::proxy::per_request)
+                .timeout_global(Some(Duration::from_secs(30)))
+                .http_status_as_error(false)
+                .user_agent(USER_AGENT)
+                .build(),
+        );
         Self {
             agent,
             endpoint,

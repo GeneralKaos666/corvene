@@ -3931,6 +3931,24 @@ registry! {
         upstream: &[Upstream::issue(3707), Upstream::issue(21365)],
         code: &["crates/corvene-core/src/accounts.rs", "crates/corvene-core/src/state.rs", "crates/corvene-core/src/remote.rs", "crates/corvene-ui/src/dialogs/preferences.rs", "crates/corvene-ui/src/dialogs/repository_settings.rs", "crates/corvene-ui/src/dialogs/choose_repository_account.rs", "crates/corvene-ui/src/toolbar.rs"],
     },
+    /// Proxies that want a username and password (desktop#10026).
+    PROXY_CREDENTIALS = 528 "proxy-credentials" {
+        title: "Sign in to proxies that ask for a password",
+        summary: "When a proxy answers \"407 Proxy Authentication Required\" to a fetch, push, \
+                  pull or clone, or to a request to GitHub, Corvene asks for the proxy's \
+                  username and password, keeps them in the keychain and tries again. Git and \
+                  Corvene's own requests both use them. Settings › Advanced shows the proxy in \
+                  use and forgets a saved password.",
+        ghd_behaviour: "Shows Git's \"CONNECT tunnel failed, response 407\" error, and requests to \
+                        GitHub fail; the only way through is a proxy address with the password \
+                        written into it.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: ON, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(10026)],
+        code: &["crates/corvene-core/src/proxy.rs", "crates/corvene-platform/src/proxy.rs", "crates/corvene-git/src/proxy.rs", "crates/corvene-core/src/askpass.rs", "crates/corvene-ui/src/dialogs/proxy_authentication.rs", "crates/corvene-ui/src/dialogs/preferences.rs"],
+    },
 
     // ---- 600 Keyboard & accessibility ----
 

@@ -322,6 +322,9 @@ pub type ProgressFn<'a> = &'a mut dyn FnMut(f32, String);
 /// The remote-operation failures Corvene reacts to (dugite's `GitError`s).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RemoteFailure {
+    /// Corvene (`528-proxy-credentials`): the proxy answered 407 Proxy
+    /// Authentication Required.
+    ProxyAuthenticationRequired,
     /// `! [rejected] … (fetch first)` / `non-fast-forward`.
     PushNotFastForward,
     /// HTTPS authentication failed or a username could not be read.
@@ -344,6 +347,11 @@ pub enum RemoteFailure {
 /// Classify a failed remote command from its stderr.
 pub fn classify_remote_failure(stderr: &str) -> RemoteFailure {
     let s = stderr;
+    // before the authentication failures: git's "could not read Password
+    // for 'http://user@proxy:3128'" is about the proxy too
+    if crate::proxy::is_proxy_auth_failure(s) {
+        return RemoteFailure::ProxyAuthenticationRequired;
+    }
     if s.contains("GITHUB PUSH PROTECTION") && s.contains("Push cannot contain secrets") {
         return RemoteFailure::PushWithSecretDetected;
     }
@@ -488,14 +496,17 @@ pub(crate) fn remote_operation(
 }
 
 /// The proxy variables for a remote operation on `remote`, a remote's name
-/// or a URL ([`crate::proxy::env_for_remote_operation`]). The URL is only
-/// read while a system proxy lookup is set.
+/// or a URL ([`crate::proxy::env_for_remote_operation_with`]: the system
+/// proxy and the saved proxy credentials). The URL is only read while
+/// either is on.
 fn proxy_env_for_remote(
     git: Arc<GitBinary>,
     workdir: &Path,
     remote: &str,
 ) -> Vec<(String, String)> {
-    crate::proxy::env_for_remote_operation_with(|| Some(remote_url_for_proxy(git, workdir, remote)))
+    crate::proxy::env_for_remote_operation_with(git.clone(), Some(workdir), || {
+        Some(remote_url_for_proxy(git, workdir, remote))
+    })
 }
 
 /// `remote`'s configured `remote.<name>.url` (GHD resolves the proxy for
@@ -537,7 +548,13 @@ pub fn update_submodules(
     if paths.is_empty() {
         return Ok(());
     }
-    remote_command(git, workdir, askpass)
+    let proxy_env = crate::proxy::env_for_fallback(git.clone(), workdir, askpass.is_some());
+    proxy_env
+        .into_iter()
+        .fold(
+            remote_command(git, workdir, askpass),
+            |cmd, (key, value)| cmd.env(key, value),
+        )
         .args(["submodule", "update", "--init", "--recursive", "--"])
         .args(&paths)
         .run()?;

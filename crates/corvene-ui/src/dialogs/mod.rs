@@ -48,6 +48,7 @@ mod new_issue;
 pub(crate) mod open_pull_request;
 mod oversized_files;
 mod preferences;
+mod proxy_authentication;
 mod pull_request_notifications;
 mod push_branch_commits;
 mod push_protection;
@@ -120,6 +121,7 @@ pub use preferences::PreferencesDialog;
 pub use pull_request_notifications::{
     PullRequestChecksFailedDialog, PullRequestCommentDialog, PullRequestReviewDialog,
 };
+pub use proxy_authentication::ProxyAuthenticationDialog;
 pub use push_branch_commits::PushBranchCommitsDialog;
 pub use push_protection::{BypassPushProtectionDialog, PushProtectionErrorDialog};
 pub use reauth_dialogs::{
@@ -755,6 +757,23 @@ impl DialogHost {
                         remote_url.clone(),
                         host.clone(),
                         username.clone(),
+                        retry.clone(),
+                        window,
+                        cx,
+                    )
+                })
+                .into(),
+            Popup::ProxyAuthentication {
+                proxy,
+                username,
+                rejected,
+                retry,
+            } => cx
+                .new(|cx| {
+                    ProxyAuthenticationDialog::new(
+                        proxy.clone(),
+                        username.clone(),
+                        *rejected,
                         retry.clone(),
                         window,
                         cx,

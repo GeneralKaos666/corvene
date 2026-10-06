@@ -42,17 +42,19 @@ pub const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_SOURCE_BYTES: u64 = 128 * 1024 * 1024;
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        // the system proxy too (`corvene_platform::proxy`)
-        .proxy(corvene_platform::proxy::agent_proxy())
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_global(Some(Duration::from_secs(600)))
-        .http_status_as_error(false)
-        .https_only(true)
-        .max_redirects(5)
-        .user_agent(USER_AGENT)
-        .build()
-        .new_agent()
+    corvene_platform::proxy::agent(
+        ureq::Agent::config_builder()
+            // the system proxy, PAC scripts and saved proxy credentials
+            // (`corvene_platform::proxy`)
+            .middleware(corvene_platform::proxy::per_request)
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_global(Some(Duration::from_secs(600)))
+            .http_status_as_error(false)
+            .https_only(true)
+            .max_redirects(5)
+            .user_agent(USER_AGENT)
+            .build(),
+    )
 }
 
 /// The host of `url`, lowercase, when it is an `https://` URL.

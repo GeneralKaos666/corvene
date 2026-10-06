@@ -584,13 +584,15 @@ pub fn clone_with_options(
         Some(branch) => branch.clone(),
         None => crate::branch_ops::configured_default_branch(git.clone()),
     };
+    let proxy_env =
+        crate::proxy::env_for_remote_operation_with(git.clone(), None, || Some(url.to_string()));
     let mut cmd = GitCommand::new(git)
         .args([
             "-c".to_string(),
             format!("init.defaultBranch={default_branch}"),
         ])
         .env("GIT_CLONE_PROTECTION_ACTIVE", "false");
-    for (key, value) in crate::proxy::env_for_remote_operation(url) {
+    for (key, value) in proxy_env {
         cmd = cmd.env(key, value);
     }
     if let Some(askpass) = &options.askpass {

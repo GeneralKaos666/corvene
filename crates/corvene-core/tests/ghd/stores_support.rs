@@ -88,6 +88,7 @@ pub fn app_state() -> TestAppState {
         watcher_generation: 0,
         indicators: HashMap::new(),
         generic_logins: HashMap::new(),
+        proxy: Default::default(),
         enterprise_oauth_apps: HashMap::new(),
         avatars: HashMap::new(),
         api_repositories: HashMap::new(),

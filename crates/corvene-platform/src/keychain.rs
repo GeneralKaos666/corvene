@@ -109,6 +109,34 @@ pub fn generic_password(host: &str, username: &str) -> Result<Option<String>> {
     }
 }
 
+/// Corvene (`528-proxy-credentials`): a proxy's password, one item per
+/// (proxy `host:port`, username).
+fn proxy_entry(proxy: &str, username: &str) -> Result<Entry> {
+    ensure_store()?;
+    Ok(Entry::new(SERVICE, &format!("proxy:{username}@{proxy}"))?)
+}
+
+pub fn store_proxy_password(proxy: &str, username: &str, password: &str) -> Result<()> {
+    debug!(proxy, username, "storing proxy password in keychain");
+    proxy_entry(proxy, username)?.set_password(password)?;
+    Ok(())
+}
+
+pub fn proxy_password(proxy: &str, username: &str) -> Result<Option<String>> {
+    match proxy_entry(proxy, username)?.get_password() {
+        Ok(password) => Ok(Some(password)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+pub fn delete_proxy_password(proxy: &str, username: &str) -> Result<()> {
+    match proxy_entry(proxy, username)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
+
 pub fn delete_token(host: &str, login: &str) -> Result<()> {
     match entry(host, login)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),

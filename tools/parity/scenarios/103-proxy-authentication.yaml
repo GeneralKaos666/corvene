@@ -1,0 +1,36 @@
+# Corvene's proxy sign-in dialog (flag 528-proxy-credentials, off in the
+# GitHub Desktop preset the harness runs with; desktop/desktop#10026). GHD
+# has no such dialog (a proxy's 407 is git's plain error), so the snaps are
+# recorded, not compared (`corvene_only`; deviations.md › Repository). It is
+# built like `GenericGitAuthentication` (55-generic-git-auth): same width,
+# fields and buttons. Settings › Advanced's Proxy section depends on the
+# machine's proxy settings, so it has no snap here.
+name: proxy-authentication
+description: Proxy Authentication Required, username and masked password, Save (Corvene only)
+setup: repo
+corvene_flags: 528-proxy-credentials=on
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: proxy-auth}
+    wait: 700
+  - snap: {name: open, corvene_only: true, note: "GHD has no proxy sign-in (deviations.md, 528-proxy-credentials)"}
+  - ghd: {skip: true}
+    corvene: {type: proxyuser}
+  - ghd: {skip: true}
+    corvene: {key: tab}
+  - ghd: {skip: true}
+    corvene: {type: hunter2}
+  - snap: {name: filled, corvene_only: true}
+---
+name: proxy-authentication-retry
+description: Proxy Authentication Required after refused credentials, a fetch to retry (Save and Retry), Corvene only
+setup: repo
+corvene_flags: 528-proxy-credentials=on
+steps:
+  - ghd: {skip: true}
+    corvene: {popup: "proxy-auth:user:fetch"}
+    wait: 700
+  - snap: {name: open, corvene_only: true, note: "GHD has no proxy sign-in (deviations.md, 528-proxy-credentials)"}
+  - ghd: {skip: true}
+    corvene: {type: hunter2}
+  - snap: {name: masked, corvene_only: true}

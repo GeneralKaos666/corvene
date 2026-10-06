@@ -5,20 +5,33 @@
 //! GHD asks Electron (Chromium's system proxy resolution: the OS proxy
 //! settings, PAC scripts, WPAD) for the PAC string of a remote's URL, turns
 //! the first proxy it names into `http_proxy` / `https_proxy` for git, and
-//! leaves the environment alone when the user already set one. Corvene has
-//! no system proxy lookup yet (`.docs/TODO.md` › Platform):
-//! [`set_system_proxy_resolver`] is where the platform plugs one in. Until
-//! it does, [`env_for_remote_operation`] adds nothing and git uses the proxy
-//! its environment and configuration name, as before. Clone and the remote
-//! operations of `remote_ops` (fetch, pull, push, tag pushes and deletes,
-//! `remote set-head`, `remote prune`) and `delete_remote_branch` apply it;
-//! checkout, revert and submodule updates (GHD
-//! `getFallbackUrlForProxyResolve`) do not yet.
+//! leaves the environment alone when the user already set one. Corvene's
+//! lookup is `corvene_platform::proxy::system_pac_string`, plugged in with
+//! [`set_system_proxy_resolver`] at launch. Clone, the remote operations of
+//! `remote_ops` (fetch, pull, push, tag pushes and deletes, `remote
+//! set-head`, `remote prune`), `delete_remote_branch`, and (by GHD's
+//! `getFallbackUrlForProxyResolve`, [`env_for_fallback`]) checkout, revert
+//! and submodule updates apply it. The environment git sees includes the
+//! login shell's (`hook_env`), so a proxy set there counts as set (GHD
+//! looks at its own `process.env` only).
+//!
+//! Corvene (`528-proxy-credentials`, desktop#10026): with a username saved
+//! for the proxy git will use ([`set_proxy_logins`], [`effective_proxy`]),
+//! the operation gets that proxy with the username in its URL as
+//! `http.<remote URL>.proxy` (through `GIT_CONFIG_COUNT`, which beats
+//! `http.proxy` and the environment), so git asks `GIT_ASKPASS` for the
+//! password (`Password for 'http://user@host:port': `), which the askpass
+//! answers from the keychain (`CORVENE_ASKPASS_PROXIES` names the proxies).
+//! A 407 is `RemoteFailure::ProxyAuthenticationRequired`.
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::path::Path;
+use std::sync::{Arc, RwLock};
 
 use tracing::{info, warn};
+
+use crate::detect::GitBinary;
+use crate::process::GitCommand;
 
 /// The PAC string (`"PROXY host:port; DIRECT"`) of the system proxy for a
 /// URL: Electron's `session.resolveProxy`, which GHD's `resolveGitProxy`
@@ -144,13 +157,34 @@ pub fn env_for_proxy(
 /// of a remote operation on `remote_url`. Empty while no system proxy lookup
 /// is set ([`set_system_proxy_resolver`]).
 pub fn env_for_remote_operation(remote_url: &str) -> Vec<(String, String)> {
+    env_for_remote_operation_in(remote_url, &git_environment())
+}
+
+/// [`env_for_remote_operation`] over the environment `env`.
+fn env_for_remote_operation_in(
+    remote_url: &str,
+    env: &HashMap<String, String>,
+) -> Vec<(String, String)> {
     let Some(system) = system_proxy_resolver() else {
         return Vec::new();
     };
+    env_for_proxy(remote_url, env, &|url| Ok(resolve_git_proxy(url, system)))
+        .map(|vars| vars.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// The environment git commands start from: Corvene's own plus the login
+/// shell's (`hook_env`, which `process` puts on every command).
+fn git_environment() -> HashMap<String, String> {
     let mut env = HashMap::new();
-    for (key, value) in std::env::vars_os() {
-        let key = key.to_string_lossy().into_owned();
-        let value = value.to_string_lossy().into_owned();
+    let shell = crate::hook_env::hook_env().unwrap_or_default();
+    let own = std::env::vars_os().map(|(key, value)| {
+        (
+            key.to_string_lossy().into_owned(),
+            value.to_string_lossy().into_owned(),
+        )
+    });
+    for (key, value) in own.chain(shell) {
         // Windows: Node's `process.env` (and cURL) ignore the case of names
         if cfg!(windows) {
             env.insert(key.to_lowercase(), value.clone());
@@ -158,23 +192,365 @@ pub fn env_for_remote_operation(remote_url: &str) -> Vec<(String, String)> {
         }
         env.insert(key, value);
     }
-    env_for_proxy(remote_url, &env, &|url| Ok(resolve_git_proxy(url, system)))
-        .map(|vars| vars.into_iter().collect())
-        .unwrap_or_default()
+    env
 }
 
 /// [`env_for_remote_operation`] for the URL `remote_url` gives, which is
-/// only asked for while a system proxy lookup is set (it may read the
-/// repository's configuration).
+/// only asked for while a system proxy lookup is set or proxy credentials
+/// are on (it may read the repository's configuration), plus the saved
+/// proxy credentials ([`credential_env`]). `workdir` is the repository's
+/// (`None` for a clone).
 pub fn env_for_remote_operation_with(
+    git: Arc<GitBinary>,
+    workdir: Option<&Path>,
     remote_url: impl FnOnce() -> Option<String>,
 ) -> Vec<(String, String)> {
-    if system_proxy_resolver().is_none() {
+    proxy_env(git, workdir, remote_url, true)
+}
+
+/// The proxy variables for `remote_url`'s operation, the saved proxy
+/// credentials only with `credentials` (the command has `GIT_ASKPASS` to
+/// answer the password question).
+fn proxy_env(
+    git: Arc<GitBinary>,
+    workdir: Option<&Path>,
+    remote_url: impl FnOnce() -> Option<String>,
+    credentials: bool,
+) -> Vec<(String, String)> {
+    let logins = proxy_logins().filter(|logins| credentials && !logins.is_empty());
+    if system_proxy_resolver().is_none() && logins.is_none() {
         return Vec::new();
     }
-    remote_url()
-        .map(|url| env_for_remote_operation(&url))
-        .unwrap_or_default()
+    let Some(url) = remote_url() else {
+        return Vec::new();
+    };
+    let base = git_environment();
+    let mut env = env_for_remote_operation_in(&url, &base);
+    if let Some(logins) = logins
+        && let Some(proxy) = effective_proxy_in(git, workdir, &url, &base, &env)
+    {
+        let count = base.get("GIT_CONFIG_COUNT");
+        env.extend(credential_env_at(&proxy, &url, &logins, count));
+    }
+    env
+}
+
+/// GHD `getFallbackUrlForProxyResolve` for the operations that are not
+/// about one remote but may still download (checkout and revert run LFS
+/// filters, submodule updates clone): the proxy environment for `origin`'s
+/// URL (an SSH remote counts as `https://<its host>`, GHD takes the GitHub
+/// repository's page), else `https://github.com`.
+///
+/// The saved proxy credentials come along only with `askpass` (git asks it
+/// for the password); checkout and revert run without one.
+pub fn env_for_fallback(
+    git: Arc<GitBinary>,
+    workdir: &Path,
+    askpass: bool,
+) -> Vec<(String, String)> {
+    proxy_env(
+        git.clone(),
+        Some(workdir),
+        || {
+            let origin = crate::remote_ops::config_value(git, workdir, "remote.origin.url");
+            Some(
+                origin
+                    .as_deref()
+                    .and_then(https_url_for)
+                    .unwrap_or_else(|| "https://github.com".to_string()),
+            )
+        },
+        askpass,
+    )
+}
+
+/// A remote URL as the https URL its proxy is looked up for: http(s) as
+/// is, `ssh://[user@]host[:port]/…` and `user@host:path` as
+/// `https://host`; `None` for paths and other schemes.
+fn https_url_for(url: &str) -> Option<String> {
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Some(url.to_string());
+    }
+    let host = if let Some(rest) = lower.strip_prefix("ssh://") {
+        let authority = rest.split('/').next()?;
+        let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+        host.split(':').next()?.to_string()
+    } else if !lower.contains("://") && !lower.starts_with('/') {
+        // scp-like `user@host:path`
+        let (before, _) = lower.split_once(':')?;
+        let host = before.rsplit_once('@').map_or(before, |(_, h)| h);
+        if host.is_empty() || host.contains('/') || host.contains('\\') {
+            return None;
+        }
+        host.to_string()
+    } else {
+        return None;
+    };
+    (!host.is_empty()).then(|| format!("https://{host}"))
+}
+
+// ---------------------------------------------------------------------------
+// credentials (`528-proxy-credentials`)
+// ---------------------------------------------------------------------------
+
+/// `None` while proxy credentials are off; else the saved username per
+/// proxy `host:port`.
+static PROXY_LOGINS: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
+
+/// Turns proxy credentials on (`Some`, the usernames saved per proxy
+/// `host:port`) or off.
+pub fn set_proxy_logins(logins: Option<HashMap<String, String>>) {
+    if let Ok(mut slot) = PROXY_LOGINS.write() {
+        *slot = logins.map(|logins| {
+            logins
+                .into_iter()
+                .map(|(key, user)| (key.to_ascii_lowercase(), user))
+                .collect()
+        });
+    }
+}
+
+fn proxy_logins() -> Option<HashMap<String, String>> {
+    PROXY_LOGINS.read().ok().and_then(|slot| slot.clone())
+}
+
+/// Where git's proxy for a URL comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GitProxySource {
+    /// `http.proxy` / `http.<url>.proxy`.
+    Config,
+    /// `https_proxy` and friends (the system proxy Corvene sets included).
+    Environment,
+}
+
+/// The proxy git connects to for a remote URL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitProxy {
+    /// `http`, `https`, `socks5`, …
+    pub scheme: String,
+    /// `host:port` (cURL's default port when none is given: 443 for an
+    /// HTTPS proxy, else 1080).
+    pub key: String,
+    /// The value names a user (`http://user[:pass]@host`): git asks for or
+    /// sends those credentials itself.
+    pub has_user: bool,
+    pub source: GitProxySource,
+}
+
+/// The proxy git uses for `remote_url` in `workdir` (`None`: anywhere,
+/// for a clone), with the proxy environment Corvene would add.
+pub fn effective_proxy(
+    git: Arc<GitBinary>,
+    workdir: Option<&Path>,
+    remote_url: &str,
+) -> Option<GitProxy> {
+    let base = git_environment();
+    let added = env_for_remote_operation_in(remote_url, &base);
+    effective_proxy_in(git, workdir, remote_url, &base, &added)
+}
+
+/// git's (cURL's) choice for `remote_url`: `http.<url>.proxy` /
+/// `http.proxy` (`git config --get-urlmatch`; empty means none), else the
+/// environment (`added` over `base`), with `no_proxy`. `None` for SSH and
+/// local remotes.
+fn effective_proxy_in(
+    git: Arc<GitBinary>,
+    workdir: Option<&Path>,
+    remote_url: &str,
+    base: &HashMap<String, String>,
+    added: &[(String, String)],
+) -> Option<GitProxy> {
+    let scheme_end = remote_url.find("://")?;
+    let protocol = remote_url[..scheme_end].to_ascii_lowercase();
+    if protocol != "http" && protocol != "https" {
+        return None;
+    }
+    let mut cmd = GitCommand::new(git)
+        .args(["config", "--get-urlmatch", "http.proxy", remote_url])
+        .allow_exit_code(1);
+    if let Some(workdir) = workdir {
+        cmd = cmd.current_dir(workdir);
+    }
+    let configured = cmd
+        .run()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| out.stdout_string().ok())
+        .map(|value| value.trim().to_string());
+    if let Some(value) = configured {
+        return (!value.is_empty())
+            .then(|| parse_proxy_value(&value, GitProxySource::Config))
+            .flatten();
+    }
+    let var = |key: &str| {
+        added
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
+            .or_else(|| base.get(key))
+            .filter(|v| !v.trim().is_empty())
+            .cloned()
+    };
+    let value = if protocol == "https" {
+        var("https_proxy").or_else(|| var("HTTPS_PROXY"))
+    } else {
+        var("http_proxy")
+    }
+    .or_else(|| var("all_proxy"))
+    .or_else(|| var("ALL_PROXY"))?;
+    let host = url_host(remote_url)?;
+    let no_proxy = var("no_proxy").or_else(|| var("NO_PROXY"));
+    if no_proxy.is_some_and(|list| no_proxy_matches(&list, &host)) {
+        return None;
+    }
+    parse_proxy_value(&value, GitProxySource::Environment)
+}
+
+/// A proxy value as cURL reads it: `[scheme://][user[:pass]@]host[:port]`.
+fn parse_proxy_value(value: &str, source: GitProxySource) -> Option<GitProxy> {
+    let value = value.trim();
+    let (scheme, rest) = value.split_once("://").unwrap_or(("http", value));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let (user, host_port) = match authority.rsplit_once('@') {
+        Some((user, host_port)) => (!user.is_empty(), host_port),
+        None => (false, authority),
+    };
+    let (host, port) = split_host_port(host_port)?;
+    let scheme = scheme.to_ascii_lowercase();
+    // cURL: 1080 for every proxy type but HTTPS (443)
+    let port = port.unwrap_or(if scheme == "https" { 443 } else { 1080 });
+    let key = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    Some(GitProxy {
+        scheme,
+        key,
+        has_user: user,
+        source,
+    })
+}
+
+fn split_host_port(value: &str) -> Option<(String, Option<u16>)> {
+    if let Some(rest) = value.strip_prefix('[') {
+        let (host, after) = rest.split_once(']')?;
+        let port = after.strip_prefix(':').and_then(|p| p.parse().ok());
+        return (!host.is_empty()).then(|| (host.to_ascii_lowercase(), port));
+    }
+    let (host, port) = match value.rsplit_once(':') {
+        Some((host, port)) if !host.contains(':') => (host, port.parse().ok()),
+        _ => (value, None),
+    };
+    (!host.is_empty()).then(|| (host.to_ascii_lowercase(), port))
+}
+
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    split_host_port(host_port).map(|(host, _)| host)
+}
+
+/// cURL's `no_proxy` (as `corvene_platform::proxy` reads it).
+fn no_proxy_matches(list: &str, host: &str) -> bool {
+    list.split([',', ' '])
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .any(|entry| {
+            if entry == "*" {
+                return true;
+            }
+            let entry = split_host_port(entry).map_or_else(|| entry.to_string(), |(h, _)| h);
+            let entry = entry.trim_start_matches('.');
+            host == entry || host.ends_with(&format!(".{entry}"))
+        })
+}
+
+/// The variables that make git use `proxy` with its saved username for
+/// `remote_url` (see the module doc); nothing when the proxy's value names
+/// a user already or none is saved.
+pub fn credential_env(
+    proxy: &GitProxy,
+    remote_url: &str,
+    logins: &HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let base = git_environment();
+    credential_env_at(proxy, remote_url, logins, base.get("GIT_CONFIG_COUNT"))
+}
+
+/// [`credential_env`] after the `GIT_CONFIG_COUNT` entries git already
+/// gets (`count`).
+fn credential_env_at(
+    proxy: &GitProxy,
+    remote_url: &str,
+    logins: &HashMap<String, String>,
+    count: Option<&String>,
+) -> Vec<(String, String)> {
+    if proxy.has_user || !matches!(proxy.scheme.as_str(), "http" | "https") {
+        return Vec::new();
+    }
+    let Some(user) = logins.get(&proxy.key) else {
+        return Vec::new();
+    };
+    // the URL as git matches `http.<url>.*`: no credentials, query or
+    // fragment
+    let match_url = {
+        let (scheme, rest) = remote_url
+            .split_once("://")
+            .unwrap_or(("https", remote_url));
+        let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+        let rest = match rest.split_once('/') {
+            Some((authority, path)) => format!(
+                "{}/{path}",
+                authority.rsplit_once('@').map_or(authority, |(_, h)| h)
+            ),
+            None => rest.rsplit_once('@').map_or(rest, |(_, h)| h).to_string(),
+        };
+        format!("{scheme}://{rest}")
+    };
+    let index = count
+        .and_then(|n| n.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    vec![
+        (
+            format!("GIT_CONFIG_KEY_{index}"),
+            format!("http.{match_url}.proxy"),
+        ),
+        (
+            format!("GIT_CONFIG_VALUE_{index}"),
+            format!("{}://{}@{}", proxy.scheme, percent_encode(user), proxy.key),
+        ),
+        ("GIT_CONFIG_COUNT".to_string(), (index + 1).to_string()),
+        ("CORVENE_ASKPASS_PROXIES".to_string(), proxy.key.clone()),
+    ]
+}
+
+/// RFC 3986 userinfo: everything but unreserved characters escaped.
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// git's 407 messages (cURL's wording changed over the years).
+pub fn is_proxy_auth_failure(stderr: &str) -> bool {
+    [
+        "CONNECT tunnel failed, response 407",
+        "Received HTTP code 407 from proxy",
+        "The requested URL returned error: 407",
+        "407 Proxy Authentication Required",
+    ]
+    .iter()
+    .any(|needle| stderr.contains(needle))
 }
 
 #[cfg(test)]
@@ -195,13 +571,81 @@ mod tests {
     #[test]
     fn no_resolver_no_variables() {
         set_system_proxy_resolver(None);
+        set_proxy_logins(None);
         assert!(env_for_remote_operation("https://github.com/a/b.git").is_empty());
         // the remote's URL is not even read
         let read = std::cell::Cell::new(false);
-        let env = env_for_remote_operation_with(|| {
+        let git = Arc::new(crate::find_git().unwrap());
+        let env = env_for_remote_operation_with(git, None, || {
             read.set(true);
             Some("https://github.com/a/b.git".to_string())
         });
         assert!(env.is_empty() && !read.get());
+    }
+
+    #[test]
+    fn proxy_values_and_credentials() {
+        let proxy = parse_proxy_value("Proxy.Corp:3128", GitProxySource::Config).unwrap();
+        assert_eq!(
+            (proxy.scheme.as_str(), proxy.key.as_str()),
+            ("http", "proxy.corp:3128")
+        );
+        assert!(
+            parse_proxy_value("http://u@p", GitProxySource::Config)
+                .unwrap()
+                .has_user
+        );
+        assert_eq!(
+            parse_proxy_value("p", GitProxySource::Config).unwrap().key,
+            "p:1080"
+        );
+        let logins = HashMap::from([("proxy.corp:3128".to_string(), "dom\\me".to_string())]);
+        let env: HashMap<_, _> =
+            credential_env(&proxy, "https://tok@github.com/o/r.git?x=1", &logins)
+                .into_iter()
+                .collect();
+        let index = env["GIT_CONFIG_COUNT"].parse::<usize>().unwrap() - 1;
+        assert_eq!(
+            env[&format!("GIT_CONFIG_KEY_{index}")],
+            "http.https://github.com/o/r.git.proxy"
+        );
+        assert_eq!(
+            env[&format!("GIT_CONFIG_VALUE_{index}")],
+            "http://dom%5Cme@proxy.corp:3128"
+        );
+        assert_eq!(env["CORVENE_ASKPASS_PROXIES"], "proxy.corp:3128");
+        let with_user = GitProxy {
+            has_user: true,
+            ..proxy
+        };
+        assert!(credential_env(&with_user, "https://github.com", &logins).is_empty());
+    }
+
+    #[test]
+    fn fallback_urls() {
+        assert_eq!(
+            https_url_for("git@github.com:o/r.git").as_deref(),
+            Some("https://github.com")
+        );
+        assert_eq!(
+            https_url_for("ssh://git@ghe.corp:2222/o/r").as_deref(),
+            Some("https://ghe.corp")
+        );
+        assert_eq!(https_url_for("https://x/y").as_deref(), Some("https://x/y"));
+        assert_eq!(https_url_for("/srv/repo.git"), None);
+        assert_eq!(https_url_for("file:///srv/repo.git"), None);
+    }
+
+    #[test]
+    fn proxy_auth_failures() {
+        assert!(is_proxy_auth_failure(
+            "fatal: unable to access 'https://github.com/o/r/': CONNECT tunnel failed, response 407"
+        ));
+        assert!(is_proxy_auth_failure(
+            "fatal: unable to access 'x': Received HTTP code 407 from proxy after CONNECT"
+        ));
+        assert!(!is_proxy_auth_failure(
+            "fatal: Authentication failed for 'x'"
+        ));
     }
 }

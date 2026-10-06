@@ -82,6 +82,7 @@ impl Dispatcher {
         let accounts = crate::accounts::sort_accounts(store.accounts().unwrap_or_default());
         let sign_in_accounts = std::rc::Rc::new(std::cell::RefCell::new(accounts.clone()));
         let generic_logins = store.generic_logins().unwrap_or_default();
+        let proxy = crate::proxy::ProxyState::load(&store);
         let enterprise_oauth_apps = store.enterprise_oauth_apps().unwrap_or_default();
 
         // Synchronous: a few `git --version` probes (~10 ms), started on a
@@ -186,6 +187,7 @@ impl Dispatcher {
             watcher_generation: 0,
             indicators,
             generic_logins,
+            proxy,
             enterprise_oauth_apps,
             avatars: std::collections::HashMap::new(),
             api_repositories: std::collections::HashMap::new(),
@@ -5646,6 +5648,12 @@ impl Dispatcher {
         }
         Self::close_popup(cx);
         let (failed_url, failed_path) = (url.clone(), path.clone());
+        let retry = crate::proxy::ProxyRetry::Clone {
+            url: url.clone(),
+            path: path.clone(),
+            default_branch: default_branch.clone(),
+            depth,
+        };
         Self::start_clone(
             url,
             path,
@@ -5660,11 +5668,36 @@ impl Dispatcher {
                     cx,
                 ),
                 CloneOutcome::Failed(err) => {
-                    Self::show_clone_error(failed_url, failed_path, err, cx)
+                    if !Self::clone_proxy_login(&failed_url, &err, retry, cx) {
+                        Self::show_clone_error(failed_url, failed_path, err, cx)
+                    }
                 }
             },
             cx,
         );
+    }
+
+    /// `528-proxy-credentials`: a clone the proxy refused with 407 asks for
+    /// the proxy's credentials (then `retry`); false when it was something
+    /// else or the flag is off.
+    fn clone_proxy_login(
+        url: &str,
+        err: &GitError,
+        retry: crate::proxy::ProxyRetry,
+        cx: &mut dyn Host,
+    ) -> bool {
+        let s = Self::state(cx).read(cx);
+        let Some(git) = s.git.clone() else {
+            return false;
+        };
+        if corvene_git::remote_failure(err)
+            != corvene_git::RemoteFailure::ProxyAuthenticationRequired
+            || !s.flags.bool(crate::flags::ids::PROXY_CREDENTIALS)
+        {
+            return false;
+        }
+        Self::git_proxy_auth_required(git, None, url.to_string(), retry, true, cx);
+        true
     }
 
     /// A clone failed: `235-clone-failure-keeps-input` reopens the dialog,
@@ -5765,6 +5798,7 @@ impl Dispatcher {
                 {
                     Self::account_when_added(&path, login, cx);
                 }
+                let clone_url = info.url.clone();
                 Self::start_clone(
                     info.url,
                     path,
@@ -5788,7 +5822,16 @@ impl Dispatcher {
                             CloneOutcome::SubmodulesFailed(_) => failures.push(format!(
                                 "{name}: cloned, but some of its submodules could not be cloned"
                             )),
-                            CloneOutcome::Failed(err) => failures.push(format!("{name}: {err}")),
+                            CloneOutcome::Failed(err) => {
+                                // `528-proxy-credentials`: ask, the queue goes on
+                                Self::clone_proxy_login(
+                                    &clone_url,
+                                    &err,
+                                    crate::proxy::ProxyRetry::None,
+                                    cx,
+                                );
+                                failures.push(format!("{name}: {err}"))
+                            }
                         }
                         Self::clone_queue_step(items, ix + 1, prefer_ssh, depth, failures, cx);
                     },

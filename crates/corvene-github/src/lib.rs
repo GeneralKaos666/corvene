@@ -127,13 +127,15 @@ pub const USER_AGENT: &str = concat!("Corvene/", env!("CARGO_PKG_VERSION"));
 
 /// Plain GET of a small binary resource (avatars); 5 s per phase, no auth.
 pub fn download(url: &str) -> Result<Vec<u8>> {
-    let agent = ureq::Agent::config_builder()
-        // the system proxy too (`corvene_platform::proxy`)
-        .proxy(corvene_platform::proxy::agent_proxy())
-        .timeout_global(Some(std::time::Duration::from_secs(10)))
-        .user_agent(USER_AGENT)
-        .build()
-        .new_agent();
+    let agent = corvene_platform::proxy::agent(
+        ureq::Agent::config_builder()
+            // the system proxy, PAC scripts and saved proxy credentials
+            // (`corvene_platform::proxy`)
+            .middleware(corvene_platform::proxy::per_request)
+            .timeout_global(Some(std::time::Duration::from_secs(10)))
+            .user_agent(USER_AGENT)
+            .build(),
+    );
     let mut response = agent.get(url).call()?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
@@ -145,13 +147,15 @@ pub fn download(url: &str) -> Result<Vec<u8>> {
 
 /// `GET /emojis` (no authentication needed on GitHub.com): emoji name → image URL.
 pub fn public_emojis(endpoint: &Endpoint) -> Result<std::collections::HashMap<String, String>> {
-    let agent = ureq::Agent::config_builder()
-        // the system proxy too (`corvene_platform::proxy`)
-        .proxy(corvene_platform::proxy::agent_proxy())
-        .timeout_global(Some(std::time::Duration::from_secs(15)))
-        .user_agent(USER_AGENT)
-        .build()
-        .new_agent();
+    let agent = corvene_platform::proxy::agent(
+        ureq::Agent::config_builder()
+            // the system proxy, PAC scripts and saved proxy credentials
+            // (`corvene_platform::proxy`)
+            .middleware(corvene_platform::proxy::per_request)
+            .timeout_global(Some(std::time::Duration::from_secs(15)))
+            .user_agent(USER_AGENT)
+            .build(),
+    );
     let url = endpoint.api("emojis");
     let mut response = agent
         .get(&url)

@@ -792,6 +792,19 @@ impl Corvene {
         });
     }
 
+    /// `ProxyAuthentication` › Save (`528-proxy-credentials`): keeps the
+    /// proxy's credentials and retries what the open dialog came from.
+    pub fn submit_proxy_auth(&self, username: String, password: String) {
+        self.loop_.post(move |host| {
+            let Some(corvene_core::state::Popup::ProxyAuthentication { proxy, retry, .. }) =
+                host.state_ref().popup().cloned()
+            else {
+                return;
+            };
+            Dispatcher::save_proxy_credentials(proxy, username, password, retry, host);
+        });
+    }
+
     /// `LocalChangesOverwritten` › the retry button of the open dialog.
     pub fn retry_popup_action(&self) {
         self.loop_.post(move |host| {

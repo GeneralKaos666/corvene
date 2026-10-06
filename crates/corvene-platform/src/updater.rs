@@ -136,15 +136,17 @@ pub fn feed_url() -> String {
 }
 
 fn agent(global_timeout: Option<Duration>) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        // the system proxy too (`corvene_platform::proxy`)
-        .proxy(crate::proxy::agent_proxy())
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_global(global_timeout)
-        .http_status_as_error(false)
-        .user_agent(USER_AGENT)
-        .build()
-        .new_agent()
+    crate::proxy::agent(
+        ureq::Agent::config_builder()
+            // the system proxy, PAC scripts and saved proxy credentials
+            // (`corvene_platform::proxy`)
+            .middleware(crate::proxy::per_request)
+            .timeout_connect(Some(Duration::from_secs(30)))
+            .timeout_global(global_timeout)
+            .http_status_as_error(false)
+            .user_agent(USER_AGENT)
+            .build(),
+    )
 }
 
 /// Ask the feed for the latest release; `Ok(None)` when it is not newer

@@ -163,9 +163,13 @@ pub fn checkout_branch_with(
     branch: &Branch,
     options: &CheckoutOptions,
 ) -> Result<()> {
+    // GHD `checkoutBranch`: `envForRemoteOperation(getFallbackUrlForProxyResolve)`
     let mut cmd = GitCommand::new(git.clone())
         .args(["checkout"])
         .current_dir(workdir);
+    for (key, value) in crate::proxy::env_for_fallback(git.clone(), workdir, false) {
+        cmd = cmd.env(key, value);
+    }
     cmd = match branch.kind {
         BranchKind::Local => cmd.arg(&branch.name).arg("--"),
         BranchKind::Remote => cmd
