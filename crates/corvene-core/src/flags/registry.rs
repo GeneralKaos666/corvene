@@ -7486,6 +7486,25 @@ registry! {
         code: &["crates/corvene-core/src/apply_patch.rs", "crates/corvene-git/src/patch_import.rs", "crates/corvene-ui/src/dialogs/apply_patch.rs"],
     },
 
+    /// Repository › Insights…: contributors, commits per week, file churn.
+    REPOSITORY_INSIGHTS = 1110 "repository-insights" {
+        title: "Repository insights",
+        summary: "Repository › Insights… shows, in place of the diff, who contributed to the \
+                  current branch (or every branch, or any branch picked) and how much (commits, \
+                  lines added and removed), the commits of every week as bars, and the files \
+                  with the most changed lines, over the past week, month, 3 or 6 months, year \
+                  or all time. Merge commits are not counted. The numbers are read in the \
+                  background with git log, can be stopped, and are kept for the session until \
+                  the branch moves.",
+        ghd_behaviour: "No statistics: the contributors and activity of a repository are only \
+                        on GitHub's Insights pages, for its default branch.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[],
+        code: &["crates/corvene-git/src/stats.rs", "crates/corvene-core/src/insights.rs", "crates/corvene-ui/src/insights_view.rs"],
+    },
 
     // ---- 1200 History & branches (overflow) ----
 

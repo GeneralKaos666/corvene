@@ -580,6 +580,7 @@ pub(crate) fn main() {
         //   failure GHD describes, a push a protected branch rejected, or an error
         //   git did not produce)
         //   recent-activity (Repository › Recent Activity…, flag 1216),
+        //   insights[:all] (Repository › Insights…, :all over all time; flag 1110),
         //   compare-refs[:<base>[:<head>[:...]]] (Branch › Compare…, or with
         //   both refs the comparison itself, `...` for base...head; flag 1218)
         //   issues | new-issue (Repository › Issues… with sample issues, New
@@ -1271,6 +1272,12 @@ pub(crate) fn main() {
                 Dispatcher::show_recent_activity(id, cx);
             }
         });
+        // `1110-repository-insights`
+        on_menu_action(cx, move |_: &ShowInsights, cx| {
+            if let Some(id) = selected(cx) {
+                Dispatcher::show_insights(id, cx);
+            }
+        });
         // `1218-compare-refs`: the current branch as the second ref
         on_menu_action(cx, move |_: &CompareRefs, cx| {
             if let Some(id) = selected(cx) {
@@ -1937,6 +1944,12 @@ fn open_dev_popup(popup: &str, cx: &mut App) {
         }
         // `1216-recent-activity`
         ("recent-activity", Some(id)) => Dispatcher::show_recent_activity(id, cx),
+        // `1110-repository-insights`
+        ("insights", Some(id)) => Dispatcher::show_insights(id, cx),
+        ("insights:all", Some(id)) => {
+            Dispatcher::show_insights(id, cx);
+            Dispatcher::set_insights_range(id, corvene_core::insights::InsightsRange::AllTime, cx);
+        }
         // `1218-compare-refs`: `compare-refs[:<base>[:<head>[:...]]]`
         (other, Some(id)) if other == "compare-refs" || other.starts_with("compare-refs:") => {
             let mut parts = other.split(':').skip(1).map(str::to_string);

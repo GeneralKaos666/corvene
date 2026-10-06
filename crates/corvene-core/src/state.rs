@@ -1470,6 +1470,12 @@ pub struct RepositoryState {
     /// The combined diff of the two compared refs.
     pub ref_compare_changes: Option<crate::pull_request_preview::PullRequestPreview>,
 
+    // ---- `1110-repository-insights` ----
+    /// Repository › Insights…, shown in place of the tab's content.
+    pub insights: Option<crate::insights::InsightsState>,
+    /// Finished statistics by scope, range and tips (newest last).
+    pub insights_cache: Vec<(crate::insights::InsightsKey, Arc<corvene_git::RepoStats>)>,
+
     // ---- `1216-recent-activity` ----
     /// Repository › Recent Activity…: History lists the reflog instead.
     pub reflog: Option<crate::reflog::ReflogState>,

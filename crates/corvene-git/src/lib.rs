@@ -47,6 +47,7 @@ pub mod signature;
 mod spawn;
 pub mod ssh;
 pub mod stash_ops;
+pub mod stats;
 pub mod status;
 mod status_gix;
 pub mod submodule;
@@ -199,6 +200,10 @@ pub use stash_ops::{
     apply_stash_entry_with, create_branch_from_stash, create_desktop_stash_of_files,
     create_stash_with_message, mark_conflicts_resolved, pop_stash_entry_with, stash_entry,
     store_stash, unmerged_paths,
+};
+pub use stats::{
+    Contributor, FileChurn, RepoStats, StatsScope, TOP_FILES, WeekBucket, repository_stats,
+    week_start,
 };
 pub use status::{
     IgnoreSubmodules, LineStats, StatusOptions, get_status, get_status_in_process, get_status_with,

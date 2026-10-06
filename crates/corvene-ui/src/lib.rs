@@ -33,6 +33,7 @@ pub mod github_list;
 pub mod history;
 pub mod icons;
 pub mod image_diff;
+pub mod insights_view;
 pub mod issue_view;
 pub mod issues_list;
 pub mod keymap;

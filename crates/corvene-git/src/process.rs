@@ -55,6 +55,8 @@ pub struct GitCommand {
     ok_codes: Vec<i32>,
     /// Every exit code counts as success ([`GitCommand::allow_any_exit_code`]).
     any_code: bool,
+    /// [`GitCommand::forget_streamed`]
+    forget_streamed: bool,
     /// Bytes written to git's stdin (`commit -F -`, `update-index --stdin`).
     stdin: Option<Vec<u8>>,
     /// Variables removed from the inherited environment (`GIT_SEQUENCE_EDITOR`).
@@ -348,6 +350,7 @@ impl GitCommand {
             env: Vec::new(),
             ok_codes: vec![0],
             any_code: false,
+            forget_streamed: false,
             stdin: None,
             env_removed: Vec::new(),
             cancel: None,
@@ -485,6 +488,14 @@ impl GitCommand {
     /// exit code, is still an error.
     pub fn allow_any_exit_code(mut self) -> Self {
         self.any_code = true;
+        self
+    }
+
+    /// A streamed run hands each line to its callback only: the output it
+    /// returns has no streamed text (a long `log --numstat` would
+    /// otherwise be held in memory twice).
+    pub fn forget_streamed(mut self) -> Self {
+        self.forget_streamed = true;
         self
     }
 
@@ -768,8 +779,10 @@ impl GitCommand {
             if !line.is_empty() {
                 on_line(line);
             }
-            streamed_all.push_str(line);
-            streamed_all.push('\n');
+            if !self.forget_streamed {
+                streamed_all.push_str(line);
+                streamed_all.push('\n');
+            }
         }
 
         let status = child.wait();
