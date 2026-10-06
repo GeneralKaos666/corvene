@@ -7958,6 +7958,22 @@ registry! {
         code: &["crates/corvene-git/src/history_ops.rs", "crates/corvene-core/src/tag_manager.rs", "crates/corvene-ui/src/tags_list.rs"],
     },
 
+    /// `committer:` and `path:` terms in History's search box.
+    HISTORY_SEARCH_TERMS = 1220 "history-search-terms" {
+        title: "Search History by committer and path",
+        summary: "History's \"Search commits\" box also understands committer:<name> (who \
+                  committed, git log --committer) and path:<file or folder> (only commits that \
+                  touched it, following renames like a file's history; selecting a commit \
+                  selects the file). The box's tooltip lists every term.",
+        ghd_behaviour: "History cannot be searched.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(22866)],
+        code: &["crates/corvene-core/src/history_filter.rs", "crates/corvene-git/src/log.rs", "crates/corvene-ui/src/history.rs"],
+    },
+
     // ---- 1300 Changes & diffs (overflow) ----
 
     /// A Conventional Commits type menu next to the commit summary.
@@ -8011,6 +8027,7 @@ registry! {
         upstream: &[Upstream::issue(21882), Upstream::issue(21378)],
         code: &["crates/corvene-core/src/stash_flows.rs", "crates/corvene-git/src/partial_stash.rs", "crates/corvene-ui/src/diff_view.rs", "crates/corvene-ui/src/changes.rs"],
     },
+
 }
 
 /// Ids and slugs that once existed; never reused.

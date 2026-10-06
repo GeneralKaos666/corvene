@@ -352,12 +352,16 @@ pub struct HistoryQuery {
     pub words: Vec<String>,
     /// `--author`, a fixed string matched in any case.
     pub author: Option<String>,
+    /// Corvene `1220-history-search-terms`: `--committer`, matched like
+    /// `author`.
+    pub committer: Option<String>,
     /// `--before` / `--after`: a date git understands (`2024-05-01`,
     /// `2.weeks.ago`).
     pub before: Option<String>,
     pub after: Option<String>,
-    /// `887-file-history`: the commits that touched this file, following
-    /// renames (`--follow -- <path>`).
+    /// `887-file-history` (or a `path:` term, `1220-history-search-terms`):
+    /// the commits that touched this file or folder, following renames
+    /// (`--follow -- <path>`).
     pub path: Option<String>,
 }
 
@@ -365,6 +369,7 @@ impl HistoryQuery {
     pub fn is_empty(&self) -> bool {
         self.words.is_empty()
             && self.author.is_none()
+            && self.committer.is_none()
             && self.before.is_none()
             && self.after.is_none()
             && self.path.is_none()
@@ -396,7 +401,7 @@ pub struct LoggedCommit {
 
 /// Corvene `886-history-search`: the commits reachable from `tip` that
 /// match the query's `git log` limits, newest first (`git log -i -F
-/// --format=%H [--author] [--before] [--after] <tip> [--follow --name-only
+/// --format=%H [--author] [--committer] [--before] [--after] <tip> [--follow --name-only
 /// -- <path>]`). Free words are left to [`filtered_history_page`].
 pub fn filtered_history(
     git: Arc<GitBinary>,
@@ -419,6 +424,9 @@ pub fn filtered_history(
     }
     if let Some(author) = &query.author {
         args.push(format!("--author={author}"));
+    }
+    if let Some(committer) = &query.committer {
+        args.push(format!("--committer={committer}"));
     }
     if let Some(before) = &query.before {
         args.push(format!("--before={before}"));

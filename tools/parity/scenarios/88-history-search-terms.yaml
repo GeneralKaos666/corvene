@@ -1,0 +1,35 @@
+# History's search box with committer: and path: terms (flag
+# 1220-history-search-terms over 886-history-search, both off in the
+# GitHub Desktop preset the harness runs with). GHD cannot search History,
+# so the snaps are recorded, not compared (deviations.md › History). In the
+# `repo-coauthors` fixture "Apply the review" is committed by Octo Cat.
+name: history-search-terms
+description: History searched by committer, by a file (selecting a match selects the file), by a folder (Corvene only)
+setup: repo-coauthors
+corvene_flags: 886-history-search=on,1220-history-search-terms=on
+steps:
+  - click: [187, 97]
+    wait: 800
+  - ghd: {skip: true}
+    corvene: {click: [123, 163]}
+  - ghd: {skip: true}
+    corvene: {type: "committer:octo"}
+    wait: 1200
+  - snap: {name: committer, corvene_only: true, note: "GHD cannot search History (deviations.md, 1220-history-search-terms)"}
+  - ghd: {skip: true}
+    corvene: {key: cmd-a backspace}
+  - ghd: {skip: true}
+    corvene: {type: "path:docs/old.md"}
+    wait: 1200
+  - ghd: {skip: true}
+    corvene: {click: [120, 195]}
+    wait: 1000
+  - snap: {name: file-selected, corvene_only: true}
+  - ghd: {skip: true}
+    corvene: {click: [123, 163]}
+  - ghd: {skip: true}
+    corvene: {key: cmd-a backspace}
+  - ghd: {skip: true}
+    corvene: {type: "path:src"}
+    wait: 1200
+  - snap: {name: folder, corvene_only: true}

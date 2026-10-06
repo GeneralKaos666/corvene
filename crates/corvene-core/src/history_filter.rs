@@ -17,6 +17,11 @@
 //! the same search to that file (`git log --follow -- <path>`, shown as a
 //! removable chip), and selecting one of its commits selects the file under
 //! the name it had there.
+//!
+//! `1220-history-search-terms`: `committer:<name>` (`git log --committer`)
+//! and `path:<file or folder>` terms, the path followed like a file history
+//! (`--follow -- <path>`; the chip wins over a typed `path:`). With the
+//! flag off they are free words.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -98,38 +103,48 @@ impl HistoryFilter {
         !self.query.is_empty()
     }
 
-    /// `887-file-history`: the file's path in commit `sha` of a file history.
+    /// `887-file-history`: the file's path in commit `sha` of a file history
+    /// (or of a `path:` search, `1220-history-search-terms`).
     pub fn file_path_at(&self, sha: &str) -> Option<&str> {
-        self.path.as_ref()?;
+        let path = self.query.path.as_deref()?;
         self.logged
             .as_ref()?
             .commits
             .iter()
             .find(|c| c.sha == sha)
             .and_then(|c| c.path.as_deref())
-            .or(self.path.as_deref())
+            .or(Some(path))
     }
 
-    /// What the text and the file ask for.
-    fn wanted(&self) -> HistoryQuery {
-        let mut query = parse_history_query(&self.text);
-        query.path = self.path.clone();
+    /// What the text and the file ask for (`terms`:
+    /// `1220-history-search-terms`); the file history's chip wins over a
+    /// typed `path:`.
+    fn wanted(&self, terms: bool) -> HistoryQuery {
+        let mut query = parse_history_query(&self.text, terms);
+        if self.path.is_some() {
+            query.path = self.path.clone();
+        }
         query
     }
 }
 
+/// The terms [`parse_history_query`] knows; the last two only with
+/// `1220-history-search-terms`.
+const TERMS: [&str; 5] = ["author:", "before:", "after:", "committer:", "path:"];
+
 /// Split the filter text into terms: `author:<name>`, `before:<date>` and
 /// `after:<date>` (a date git understands, `2024-05-01` or `2.weeks.ago`),
-/// everything else free words (lower case). Double quotes keep spaces
-/// together (`author:"Mona Lisa"`, `"fix login"`); a term without a value
-/// is ignored while it is being typed.
-pub fn parse_history_query(text: &str) -> HistoryQuery {
+/// with `terms` (`1220-history-search-terms`) also `committer:<name>` and
+/// `path:<file or folder>`; everything else free words (lower case).
+/// Double quotes keep spaces together (`author:"Mona Lisa"`, `"fix
+/// login"`); a term without a value is ignored while it is being typed, and
+/// a repeated term keeps its last value.
+pub fn parse_history_query(text: &str, terms: bool) -> HistoryQuery {
+    let known = if terms { &TERMS[..] } else { &TERMS[..3] };
     let mut query = HistoryQuery::default();
     for token in tokens(text) {
         let lower = token.to_lowercase();
-        let term = ["author:", "before:", "after:"]
-            .into_iter()
-            .find(|key| lower.starts_with(key));
+        let term = known.iter().copied().find(|key| lower.starts_with(key));
         match term {
             Some(key) => {
                 let value = token[key.len()..].trim().to_string();
@@ -139,7 +154,9 @@ pub fn parse_history_query(text: &str) -> HistoryQuery {
                 match key {
                     "author:" => query.author = Some(value),
                     "before:" => query.before = Some(value),
-                    _ => query.after = Some(value),
+                    "after:" => query.after = Some(value),
+                    "committer:" => query.committer = Some(value),
+                    _ => query.path = Some(value.trim_start_matches("./").to_string()),
                 }
             }
             None => query.words.push(lower),
@@ -176,6 +193,7 @@ impl Dispatcher {
     /// to the plain History once nothing is left to filter by.
     pub fn set_history_filter_text(id: u64, text: String, cx: &mut dyn Host) {
         let request = Self::state(cx).update(cx, |s, _| {
+            let terms = s.flags.bool(crate::flags::ids::HISTORY_SEARCH_TERMS);
             let filter = &mut s.repo_state_mut(id).history_filter;
             if filter.text == text {
                 return None;
@@ -184,7 +202,7 @@ impl Dispatcher {
             // search runs
             filter.text = text;
             filter.debounce += 1;
-            let query = filter.wanted();
+            let query = filter.wanted(terms);
             // back to what was searched for: nothing new to search
             (filter.query != query).then_some((filter.debounce, query))
         });
@@ -220,11 +238,12 @@ impl Dispatcher {
         Self::exit_compare(id, cx);
         Self::show_section(id, corvene_models::Section::History, cx);
         let query = Self::state(cx).update(cx, |s, cx| {
+            let terms = s.flags.bool(crate::flags::ids::HISTORY_SEARCH_TERMS);
             let filter = &mut s.repo_state_mut(id).history_filter;
             filter.path = Some(path);
             filter.debounce += 1;
             cx.notify();
-            filter.wanted()
+            filter.wanted(terms)
         });
         Self::run_history_filter(id, query, true, cx);
     }
@@ -232,11 +251,12 @@ impl Dispatcher {
     /// `887-file-history`: the chip's ×; the filter box's terms stay.
     pub fn clear_file_history(id: u64, cx: &mut dyn Host) {
         let query = Self::state(cx).update(cx, |s, cx| {
+            let terms = s.flags.bool(crate::flags::ids::HISTORY_SEARCH_TERMS);
             let filter = &mut s.repo_state_mut(id).history_filter;
             filter.path = None;
             filter.debounce += 1;
             cx.notify();
-            filter.wanted()
+            filter.wanted(terms)
         });
         if query.is_empty() {
             Self::clear_history_filter(id, cx);
@@ -507,7 +527,10 @@ mod tests {
 
     #[test]
     fn terms_and_words_are_split() {
-        let q = parse_history_query("Fix  author:mona before:2024-05-01 after:2.weeks.ago LOGIN");
+        let q = parse_history_query(
+            "Fix  author:mona before:2024-05-01 after:2.weeks.ago LOGIN",
+            true,
+        );
         assert_eq!(q.words, vec!["fix".to_string(), "login".to_string()]);
         assert_eq!(q.author.as_deref(), Some("mona"));
         assert_eq!(q.before.as_deref(), Some("2024-05-01"));
@@ -516,17 +539,54 @@ mod tests {
 
     #[test]
     fn quotes_keep_spaces_and_empty_terms_are_ignored() {
-        let q = parse_history_query("author:\"Mona Lisa\" \"fix login\" before:");
+        let q = parse_history_query("author:\"Mona Lisa\" \"fix login\" before:", true);
         assert_eq!(q.author.as_deref(), Some("Mona Lisa"));
         assert_eq!(q.words, vec!["fix login".to_string()]);
         assert_eq!(q.before, None);
-        assert!(parse_history_query("   ").is_empty());
-        assert!(parse_history_query("author:").is_empty());
+        assert!(parse_history_query("   ", true).is_empty());
+        assert!(parse_history_query("author:", true).is_empty());
+    }
+
+    #[test]
+    fn committer_and_path_terms_need_the_flag() {
+        let q = parse_history_query("committer:Octo path:\"docs/user guide.md\" fix", true);
+        assert_eq!(q.committer.as_deref(), Some("Octo"));
+        assert_eq!(q.path.as_deref(), Some("docs/user guide.md"));
+        assert_eq!(q.words, vec!["fix".to_string()]);
+        assert_eq!(
+            parse_history_query("path:./src/main.rs", true)
+                .path
+                .as_deref(),
+            Some("src/main.rs")
+        );
+        let off = parse_history_query("committer:octo path:src", false);
+        assert_eq!(off.committer, None);
+        assert_eq!(off.path, None);
+        assert_eq!(
+            off.words,
+            vec!["committer:octo".to_string(), "path:src".to_string()]
+        );
+    }
+
+    #[test]
+    fn the_file_history_chip_wins_over_a_typed_path() {
+        let filter = HistoryFilter {
+            text: "path:docs".into(),
+            path: Some("src/main.rs".into()),
+            ..HistoryFilter::default()
+        };
+        assert_eq!(filter.wanted(true).path.as_deref(), Some("src/main.rs"));
+        let typed = HistoryFilter {
+            text: "path:docs".into(),
+            ..HistoryFilter::default()
+        };
+        assert_eq!(typed.wanted(true).path.as_deref(), Some("docs"));
+        assert_eq!(typed.wanted(false).path, None);
     }
 
     #[test]
     fn keys_ignore_case() {
-        let q = parse_history_query("Author:Hubot");
+        let q = parse_history_query("Author:Hubot", true);
         assert_eq!(q.author.as_deref(), Some("Hubot"));
         assert!(q.words.is_empty());
     }

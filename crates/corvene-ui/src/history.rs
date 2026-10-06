@@ -489,12 +489,22 @@ impl HistorySidebar {
     /// `886`: the filter text box itself.
     fn filter_box(&self, focused: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.ghd().clone();
+        // `1220-history-search-terms`: committer: and path: too
+        let terms = self
+            .state
+            .read(cx)
+            .flags
+            .bool(corvene_core::flags::ids::HISTORY_SEARCH_TERMS);
+        let tooltip = if terms {
+            "Words match the message, author or SHA. Narrow with author:name, \
+             committer:name, path:file-or-folder, before:date or after:date."
+        } else {
+            "Words match the message, author or SHA. Narrow with author:name, \
+             before:date or after:date."
+        };
         div()
             .id("history-filter-box")
-            .ghd_tooltip(
-                "Words match the message, author or SHA. Narrow with author:name, \
-                 before:date or after:date.",
-            )
+            .ghd_tooltip(tooltip)
             .child(
                 crate::widgets::filter_text_box(
                     "history-filter",
