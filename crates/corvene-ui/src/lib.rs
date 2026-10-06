@@ -88,6 +88,7 @@ pub mod title_bar;
 #[cfg(windows)]
 pub mod title_bar_windows;
 pub mod toolbar;
+pub mod trivial_change;
 pub mod tutorial_panel;
 #[cfg(not(target_os = "macos"))]
 pub mod views_menu;

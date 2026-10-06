@@ -1588,6 +1588,8 @@ pub struct RepositoryState {
     /// instead of [`Self::stash`] (see [`Self::shown_stash`]).
     pub viewed_stash: Option<String>,
     pub stash_files: Option<Vec<corvene_models::CommittedFileChange>>,
+    /// Corvene `1319-trivial-change-icon`: `stash_files`' trivial changes.
+    pub stash_trivial: std::collections::BTreeMap<String, corvene_models::TrivialChange>,
     /// The stash whose files `stash_files` holds or is loading
     /// (`stashEntry.files` Loading / Loaded).
     pub stash_files_sha: Option<String>,

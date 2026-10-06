@@ -1277,6 +1277,11 @@ impl Dispatcher {
                 ),
             )
         };
+        // Corvene `1319-trivial-change-icon`
+        let trivial_working = state
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::TRIVIAL_CHANGE_ICON);
         // GHD `_refreshRepository`: a path that is gone may be a deleted
         // linked worktree; fall back to its main worktree before giving up
         if !path.exists() {
@@ -1443,7 +1448,13 @@ impl Dispatcher {
                         .ok()
                         .flatten()
                     });
-                    let status = join(status)?;
+                    let mut status = join(status)?;
+                    if trivial_working {
+                        status.trivial = corvene_git::trivial_change::classify_working(
+                            &info.workdir,
+                            &status.files,
+                        );
+                    }
                     // `status --branch` reports the same counts `rev-list
                     // --left-right --count branch...upstream` would
                     let ahead_behind = info
@@ -3108,9 +3119,15 @@ impl Dispatcher {
             s.flags.bool(crate::flags::ids::HIDE_WHITESPACE_ONLY_FILES)
                 && s.settings.hide_whitespace_in_history_diff
         };
+        // Corvene `1319-trivial-change-icon`
+        let trivial = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::TRIVIAL_CHANGE_ICON);
         // a commit's files never change: shown in this same frame
         if !hide_whitespace_only
             && let Some(data) = crate::diff_cache::changeset(&workdir, &ordered)
+            && (!trivial || data.trivial_read)
         {
             Self::apply_changeset(id, &ordered, false, Ok(data), 0, cx);
             return;
@@ -3118,9 +3135,11 @@ impl Dispatcher {
         let key = ordered.clone();
         let task = cx.background_executor().spawn(async move {
             let data = match crate::diff_cache::changeset(&workdir, &ordered) {
+                Some(data) if trivial => with_trivial_changes(&workdir, &ordered, data),
                 Some(data) => data,
                 None => {
-                    let data = compute_changeset(git.clone(), &workdir, &ordered, in_process)?;
+                    let data =
+                        compute_changeset(git.clone(), &workdir, &ordered, in_process, trivial)?;
                     crate::diff_cache::store_changeset(&workdir, &ordered, data.clone());
                     data
                 }
@@ -3387,6 +3406,7 @@ impl Dispatcher {
         let hide_whitespace = s.settings.hide_whitespace_in_history_diff;
         let diff_options = CommitDiffOptions::of(s);
         let in_process = s.flags.bool(crate::flags::ids::IN_PROCESS_COMMIT_FILES);
+        let trivial = s.flags.bool(crate::flags::ids::TRIVIAL_CHANGE_ICON);
         let (Some(git), Some(rs)) = (s.git.clone(), s.repo_states.get(&id)) else {
             return;
         };
@@ -3418,9 +3438,13 @@ impl Dispatcher {
                     let data = match crate::diff_cache::changeset(&workdir, &shas) {
                         Some(data) => data,
                         None => {
-                            let Ok(data) =
-                                compute_changeset(git.clone(), &workdir, &shas, in_process)
-                            else {
+                            let Ok(data) = compute_changeset(
+                                git.clone(),
+                                &workdir,
+                                &shas,
+                                in_process,
+                                trivial,
+                            ) else {
                                 continue;
                             };
                             crate::diff_cache::store_changeset(&workdir, &shas, data.clone());
@@ -5201,9 +5225,25 @@ impl Dispatcher {
             return;
         }
         let sha_for_task = sha.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { corvene_git::stashed_files(git, &workdir, &sha_for_task) });
+        // Corvene `1319-trivial-change-icon`
+        let trivial = Self::state(cx)
+            .read(cx)
+            .flags
+            .bool(crate::flags::ids::TRIVIAL_CHANGE_ICON);
+        let task = cx.background_executor().spawn(async move {
+            corvene_git::stashed_files(git, &workdir, &sha_for_task).map(|mut data| {
+                if !trivial {
+                    return data;
+                }
+                data.trivial = corvene_git::trivial_change::classify_committed(
+                    &workdir,
+                    &format!("{sha_for_task}^1"),
+                    &sha_for_task,
+                    &data.files,
+                );
+                data
+            })
+        });
         cx.spawn(async move |cx: &mut AsyncCtx| {
             let result = task.await;
             cx.update(|cx| {
@@ -5215,6 +5255,7 @@ impl Dispatcher {
                     match result {
                         Ok(data) => {
                             rs.stash_selected_file = data.files.first().map(|f| f.path.clone());
+                            rs.stash_trivial = data.trivial;
                             rs.stash_files = Some(data.files);
                         }
                         Err(err) => {
@@ -8360,18 +8401,59 @@ fn without_whitespace_only_files(
 
 /// The changed files of one commit or of a contiguous range (oldest first).
 /// `in_process`: flag `907-in-process-commit-files`.
+/// Corvene `1319-trivial-change-icon` (`trivial`): the files' trivial
+/// changes are read with them.
 fn compute_changeset(
     git: Arc<corvene_git::GitBinary>,
     workdir: &Path,
     ordered: &[String],
     in_process: bool,
+    trivial: bool,
 ) -> corvene_git::error::Result<Arc<corvene_models::ChangesetData>> {
-    if ordered.len() > 1 {
+    let mut data = if ordered.len() > 1 {
         corvene_git::get_commit_range_changed_files(git, workdir, ordered, in_process)
     } else {
         corvene_git::get_changed_files(git, workdir, &ordered[0], in_process)
+    }?;
+    if trivial {
+        read_trivial_changes(workdir, ordered, &mut data);
     }
-    .map(Arc::new)
+    Ok(Arc::new(data))
+}
+
+/// Corvene `1319-trivial-change-icon`: classify the files of `ordered`
+/// (one commit or a range, oldest first) against the oldest one's parent.
+fn read_trivial_changes(
+    workdir: &Path,
+    ordered: &[String],
+    data: &mut corvene_models::ChangesetData,
+) {
+    if let (Some(oldest), Some(newest)) = (ordered.first(), ordered.last()) {
+        data.trivial = corvene_git::trivial_change::classify_committed(
+            workdir,
+            &format!("{oldest}^"),
+            newest,
+            &data.files,
+        );
+    }
+    data.trivial_read = true;
+}
+
+/// Corvene `1319-trivial-change-icon`: a cached changeset loaded while the
+/// flag was off, classified now (and cached again).
+fn with_trivial_changes(
+    workdir: &Path,
+    ordered: &[String],
+    data: Arc<corvene_models::ChangesetData>,
+) -> Arc<corvene_models::ChangesetData> {
+    if data.trivial_read {
+        return data;
+    }
+    let mut data = Arc::unwrap_or_clone(data);
+    read_trivial_changes(workdir, ordered, &mut data);
+    let data = Arc::new(data);
+    crate::diff_cache::store_changeset(workdir, ordered, data.clone());
+    data
 }
 
 /// What a committed file's diff depends on besides the commits.

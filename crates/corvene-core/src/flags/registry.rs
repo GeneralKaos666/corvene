@@ -8627,6 +8627,22 @@ registry! {
         upstream: &[Upstream::issue(21518)],
         code: &["crates/corvene-core/src/csv_diff.rs", "crates/corvene-ui/src/csv_table_diff.rs", "crates/corvene-ui/src/diff_view.rs"],
     },
+    /// A grey icon for files whose change is only their mode or patch metadata.
+    TRIVIAL_CHANGE_ICON = 1319 "trivial-change-icon" {
+        title: "Grey icon for mode-only and patch-metadata changes",
+        summary: "In the Changes, History and stash file lists, a modified file whose only \
+                  change is its mode (chmod) shows a grey modified icon, as does a .patch or \
+                  .diff file whose only changed lines are patch metadata (index lines, hunk \
+                  line numbers, the From commit id, the git version), which happens to a \
+                  stack of patches when an earlier one is edited. The icon's tooltip says why.",
+        ghd_behaviour: "Every modified file has the same yellow icon.",
+        nature: Nature::Feature,
+        kind: Kind::Bool,
+        corvene: ON, ghd: OFF, familiar: OFF, max: ON,
+        restart: false, visible: true, availability: available,
+        upstream: &[Upstream::issue(17573)],
+        code: &["crates/corvene-git/src/trivial_change.rs", "crates/corvene-ui/src/trivial_change.rs", "crates/corvene-core/src/dispatcher.rs"],
+    },
 
 }
 

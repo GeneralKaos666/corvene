@@ -1374,6 +1374,10 @@ pub struct WorkingDirectoryStatus {
     /// A `git bisect` is in progress (Corvene `1212-bisect`).
     #[serde(default)]
     pub bisect: Option<BisectState>,
+    /// Corvene `1319-trivial-change-icon`: the files (by path) whose change
+    /// is trivial.
+    #[serde(default)]
+    pub trivial: std::collections::BTreeMap<String, TrivialChange>,
 }
 
 /// A `git bisect` in progress (Corvene `1212-bisect`; GitHub Desktop has no
@@ -1641,6 +1645,18 @@ pub fn recent_commit_messages(commits: &[Commit], limit: usize) -> Vec<(String, 
     out
 }
 
+/// Corvene `1319-trivial-change-icon` (desktop/desktop#17573): a modified
+/// file whose change does not touch what it does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TrivialChange {
+    /// Only the file mode changed (`chmod +x`), the contents are the same.
+    ModeOnly,
+    /// A `.patch` / `.diff` file whose only changed lines are patch
+    /// metadata: `index` lines, hunk header line numbers, the `From <sha>`
+    /// line and the git version under the signature.
+    PatchMetadata,
+}
+
 /// `CommittedFileChange`
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedFileChange {
@@ -1656,6 +1672,13 @@ pub struct ChangesetData {
     pub files: Vec<CommittedFileChange>,
     pub lines_added: u64,
     pub lines_deleted: u64,
+    /// Corvene `1319-trivial-change-icon`: the files (by path) whose change
+    /// is trivial.
+    #[serde(default)]
+    pub trivial: std::collections::BTreeMap<String, TrivialChange>,
+    /// Whether `trivial` was read (the flag was on when it was loaded).
+    #[serde(default)]
+    pub trivial_read: bool,
 }
 
 impl CommittedFileChange {

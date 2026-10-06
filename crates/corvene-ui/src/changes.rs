@@ -7664,7 +7664,21 @@ fn file_row(
                 cx,
             ))
         })
-        .child(octicon(icon, color))
+        // `1319-trivial-change-icon`
+        .child(crate::trivial_change::status_icon(
+            icon,
+            color,
+            is_selected && list_focused,
+            repo_id.and_then(|repo| {
+                crate::trivial_change::lookup(
+                    repo,
+                    crate::trivial_change::FileList::Changes,
+                    &file.path,
+                    cx,
+                )
+            }),
+            cx,
+        ))
         // `621-context-menu-buttons`
         .when(crate::context_menu::row_menu_buttons(cx), |d| {
             d.child(

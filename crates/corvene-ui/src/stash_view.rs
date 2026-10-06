@@ -26,7 +26,6 @@ use crate::actions::{
     SelectPreviousFile,
 };
 use crate::diff_view::{DiffSource, DiffView, status_icon};
-use crate::icons::octicon;
 use crate::scrollbar::ScrollbarExt;
 use crate::theme::ActiveGhdTheme;
 use crate::theme::sizes::*;
@@ -529,7 +528,19 @@ fn stash_file_row(
             }
             .text_size(FONT_SIZE())
         })
-        .child(octicon(icon, color))
+        // `1319-trivial-change-icon`
+        .child(crate::trivial_change::status_icon(
+            icon,
+            color,
+            is_selected && list_focused,
+            crate::trivial_change::lookup(
+                id,
+                crate::trivial_change::FileList::Stash,
+                &file.path,
+                cx,
+            ),
+            cx,
+        ))
         // `621-context-menu-buttons`
         .when(menu && crate::context_menu::row_menu_buttons(cx), |d| {
             d.child(

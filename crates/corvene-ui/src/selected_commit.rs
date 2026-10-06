@@ -1837,7 +1837,19 @@ fn commit_file_row(
                 ))
             },
         )
-        .child(octicon(icon, color))
+        // `1319-trivial-change-icon`
+        .child(crate::trivial_change::status_icon(
+            icon,
+            color,
+            is_selected && list_focused,
+            crate::trivial_change::lookup(
+                id,
+                crate::trivial_change::FileList::Commit,
+                &file.path,
+                cx,
+            ),
+            cx,
+        ))
         // `621-context-menu-buttons`
         .when(crate::context_menu::row_menu_buttons(cx), |d| {
             d.child(

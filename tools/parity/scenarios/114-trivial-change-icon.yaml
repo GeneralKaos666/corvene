@@ -1,0 +1,16 @@
+# The grey icon of a mode-only change (`run.sh`) and of a patch whose
+# changed lines are only patch metadata (1319-trivial-change-icon, off in
+# the GitHub Desktop preset; deviations.md › Changes list). GHD shows both
+# with the yellow modified icon.
+name: trivial-change-icon
+description: Grey modified icons and their tooltip for a mode-only change and a patch-metadata change (Corvene only)
+setup: repo-diff-marks
+corvene_flags: 1319-trivial-change-icon=on
+steps:
+  - click: [125, 243]
+    wait: 800
+  - snap: {name: changes, corvene_only: true, note: "GHD gives every modified file the same icon (1319-trivial-change-icon)"}
+  - ghd: {skip: true}
+    corvene: {hover: [230, 272]}
+    wait: 1500
+  - snap: {name: mode-only-tooltip, corvene_only: true}
