@@ -727,8 +727,8 @@ pub fn backup_on_version_change(store: &Store, version: &str) -> Option<PathBuf>
             }
         }
         let backup = dir.join(name);
-        match std::fs::copy(store.path(), &backup) {
-            Ok(_) => Some(backup),
+        match store.copy_to(&backup) {
+            Ok(()) => Some(backup),
             Err(err) => {
                 warn!(%err, "could not back up the store");
                 None

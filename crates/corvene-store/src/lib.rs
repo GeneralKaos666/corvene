@@ -100,6 +100,16 @@ impl Pending {
     }
 }
 
+fn open_database(path: &Path) -> Result<Database> {
+    let mut builder = Database::builder();
+    builder.set_repair_callback(|session| {
+        if session.progress() == 0.0 {
+            tracing::info!("repairing the store, it was not closed cleanly");
+        }
+    });
+    Ok(builder.create(path)?)
+}
+
 impl Store {
     /// Open (or create) the database at `dir/corvene.redb`.
     pub fn open_in(dir: impl AsRef<Path>) -> Result<Self> {
@@ -110,13 +120,7 @@ impl Store {
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        let mut builder = Database::builder();
-        builder.set_repair_callback(|session| {
-            if session.progress() == 0.0 {
-                tracing::info!("repairing the store, it was not closed cleanly");
-            }
-        });
-        let db = builder.create(&path)?;
+        let db = open_database(&path)?;
         let store = Self {
             shared: Arc::new(Shared {
                 db: RwLock::new(Some(db)),
@@ -200,6 +204,21 @@ impl Store {
             drop(db);
             tracing::debug!(ms = started.elapsed().as_millis(), "store closed");
         }
+    }
+
+    /// Copy the database file to `dest`. The database is closed for the
+    /// copy, so the file is consistent (and Windows, which locks an open
+    /// database against reads, lets it be read), then opened again.
+    pub fn copy_to(&self, dest: &Path) -> Result<()> {
+        self.flush();
+        let mut slot = self.shared.db.write().unwrap_or_else(|e| e.into_inner());
+        if slot.take().is_none() {
+            return Err(StoreError::Closed);
+        }
+        let copied = std::fs::copy(&self.path, dest);
+        *slot = Some(open_database(&self.path)?);
+        copied?;
+        Ok(())
     }
 
     fn ensure_schema(&self) -> Result<()> {
