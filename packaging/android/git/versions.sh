@@ -1,5 +1,6 @@
 # Sources of the bundled git toolchain. `build.sh` checks every download
-# against the SHA-256 here; bump a version and its hash together.
+# against the SHA-256 here; bump a version and its hash together. A URL may
+# be a space-separated list of mirrors, tried in order.
 GIT_VERSION=2.56.0
 GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/git-$GIT_VERSION.tar.xz"
 GIT_SHA256=26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
@@ -17,7 +18,8 @@ CURL_URL="https://curl.se/download/curl-$CURL_VERSION.tar.xz"
 CURL_SHA256=f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7
 
 LIBICONV_VERSION=1.18
-LIBICONV_URL="https://ftp.gnu.org/pub/gnu/libiconv/libiconv-$LIBICONV_VERSION.tar.gz"
+# ftp.gnu.org is often unreachable from CI runners: a mirror first
+LIBICONV_URL="https://mirrors.kernel.org/gnu/libiconv/libiconv-$LIBICONV_VERSION.tar.gz https://ftpmirror.gnu.org/gnu/libiconv/libiconv-$LIBICONV_VERSION.tar.gz https://ftp.gnu.org/pub/gnu/libiconv/libiconv-$LIBICONV_VERSION.tar.gz"
 LIBICONV_SHA256=3b08f5f4f9b4eb82f151a7040bfd6fe6c6fb922efe4b1659c66ea933276965e8
 
 OPENSSH_VERSION=10.5p1

@@ -48,11 +48,18 @@ sha256() {
   else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-# fetch <url> <sha256>: the verified tarball's path
+# fetch <urls> <sha256>: the verified tarball's path (urls: mirrors, in order)
 fetch() {
-  local file="$DOWNLOADS/${1##*/}"
+  local urls="$1" url file
+  file="$DOWNLOADS/${urls##*/}"
   mkdir -p "$DOWNLOADS"
-  [ -f "$file" ] || curl -fsSL --retry 3 -o "$file" "$1"
+  if [ ! -f "$file" ]; then
+    for url in $urls; do
+      curl -fsSL --retry 3 --connect-timeout 30 -o "$file.part" "$url" && mv "$file.part" "$file" && break
+      echo "download failed: $url" >&2
+    done
+  fi
+  [ -f "$file" ] || exit 1
   local actual
   actual="$(sha256 "$file")"
   if [ "$actual" != "$2" ]; then
@@ -64,6 +71,8 @@ fetch() {
 
 # unpack <tarball> <dir>: a fresh source tree
 unpack() {
+  # an empty name: fetch failed inside its command substitution
+  [ -n "$1" ] || exit 1
   rm -rf "$2"
   mkdir -p "$2"
   tar -xf "$1" -C "$2" --strip-components 1
