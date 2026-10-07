@@ -364,8 +364,9 @@ jobs:
       - name: flatpak-builder
         run: |
           sudo apt-get update
-          # elfutils: flatpak-builder strips with eu-strip
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
+          # elfutils: flatpak-builder strips with eu-strip; librsvg2-common:
+          # the export checks the SVG icon with the host's gdk-pixbuf
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils librsvg2-common
       - name: build
         run: |
           packaging/flatpak/build.sh linux/*-linux-${{ matrix.arch }}.tar.gz target/flatpak-out
