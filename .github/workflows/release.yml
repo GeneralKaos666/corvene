@@ -714,8 +714,12 @@ jobs:
             rm -f "$RUNNER_TEMP/corvene.jks"
             copy_apks foss Corvene-Full
           else
+            # the Play bundle first, on its own: AGP refuses a bundle while
+            # per-ABI APK splits are on
+            ./gradlew "${common[@]/-Pcorvene.splitApks=true/-Pcorvene.splitApks=false}" :app:bundlePlayRelease
+            cp "$out"/bundle/playRelease/*.aab "$RUNNER_TEMP/assets/Corvene-$VERSION-android-play$suffix.aab"
             ./gradlew "${common[@]}" \
-              :app:assembleFossRelease :app:assemblePlayRelease :app:bundlePlayRelease \
+              :app:assembleFossRelease :app:assemblePlayRelease \
               :app:checkElfAlignmentFossRelease :app:checkElfAlignmentPlayRelease
             rm -f "$RUNNER_TEMP/corvene.jks"
             for flavour in foss play; do
@@ -723,7 +727,6 @@ jobs:
               universal="$(ls "$out/apk/$flavour/release/"*universal*.apk | head -1)"
               cp "$universal" "$RUNNER_TEMP/assets/Corvene-$VERSION-android-$flavour-universal$suffix.apk"
             done
-            cp "$out"/bundle/playRelease/*.aab "$RUNNER_TEMP/assets/Corvene-$VERSION-android-play$suffix.aab"
           fi
           ls -l "$RUNNER_TEMP/assets"
       - uses: actions/upload-artifact@v4
