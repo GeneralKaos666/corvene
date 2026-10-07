@@ -1,0 +1,70 @@
+name: Disk images
+
+# Rebuilds the macOS disk images of an existing release from its own .zip
+# assets (packaging/dmg.sh), so the app inside is the released, signed one
+# byte for byte and only the image's packaging changes. Takes a screenshot of
+# the opened image in light and dark mode (the `dmg-screenshots` artifact)
+# and, with `replace`, swaps the release's .dmg assets for the new ones.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: The release whose disk images to rebuild (its tag, like v0.1.0)
+        type: string
+        required: true
+      replace:
+        description: Replace the release's .dmg assets (else only the workflow artifacts)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    name: disk images (${{ inputs.release }})
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE: ${{ inputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: download the zips
+        run: gh release download "$RELEASE" --pattern '*-macos-*.zip' --dir zips
+      - name: build the disk images
+        run: |
+          mkdir -p dmgs
+          for zip in zips/*.zip; do
+            base="$(basename "$zip" .zip)"
+            rm -rf app && mkdir app
+            ditto -x -k "$zip" app
+            packaging/dmg.sh app/Corvene.app "dmgs/$base.dmg"
+            echo "$base.dmg: $(stat -f%z "dmgs/$base.dmg") bytes"
+          done
+      - name: screenshots
+        continue-on-error: true
+        run: |
+          mkdir -p shots
+          dmg="$(ls dmgs/Corvene-*-macos-universal.dmg | head -1)"
+          for mode in false true; do
+            osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $mode" || true
+            osascript -e 'tell application "Finder" to close every window' || true
+            open "$dmg"
+            sleep 5
+            screencapture -x "shots/dmg-$([[ $mode == true ]] && echo dark || echo light).png"
+            hdiutil detach -quiet /Volumes/Corvene || true
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg-screenshots
+          path: shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmgs
+          path: dmgs
+          compression-level: 0
+      - name: replace the release's disk images
+        if: inputs.replace
+        run: gh release upload "$RELEASE" dmgs/*.dmg --clobber

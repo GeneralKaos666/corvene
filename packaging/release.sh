@@ -81,7 +81,7 @@ ZIP="$OUT/$BASE.zip"
 DMG="$OUT/$BASE.dmg"
 rm -f "$ZIP" "$DMG"
 (cd "$(dirname "$APP")" && ditto -c -k --sequesterRsrc --keepParent "$(basename "$APP")" "$ZIP")
-hdiutil create -quiet -volname Corvene -srcfolder "$APP" -ov -format UDZO "$DMG"
+"$ROOT/packaging/dmg.sh" "$APP" "$DMG"
 echo "zip: $ZIP ($(stat -f%z "$ZIP") bytes)"
 echo "dmg: $DMG"
 

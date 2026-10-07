@@ -45,7 +45,14 @@ packaging/signing-cert.sh create   # → login keychain, ~/.corvene-signing/corv
    `packaging/bundle.sh release`, the universal binary when both target
    directories exist, `Corvene-<version>-macos-universal.zip` (+ `.dmg`), the
    `Corvene-Full-…` variant when `FULL=1`, and the cask's sha256. Output
-   lands in `target/release-assets/`.
+   lands in `target/release-assets/`. The `.dmg` comes from
+   `packaging/dmg.sh`: the app beside an `/Applications` link over
+   `assets/dmg/background.tiff` (regenerate it from `background.svg` with
+   `packaging/dmg.sh --background`), laid out by Finder over AppleScript,
+   so it needs a logged-in session. The **Disk images** workflow
+   (`dmg.yml`, run by hand) rebuilds a published release's `.dmg` assets
+   from its own `.zip` assets, screenshots one, and with `replace` swaps
+   them in.
 3. Create the GitHub release for the tag and upload the `.zip` and `.dmg`
    files in `target/release-assets/`. The self-updater reads
    `GET /repos/wasi-master/corvene/releases/latest`, picks the `-macos-` `.zip`
