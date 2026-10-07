@@ -47,7 +47,16 @@ VOL="Corvene-dmg-$$"
 hdiutil create -quiet -volname "$VOL" -srcfolder "$STAGE" -fs HFS+ -format UDRW -ov "$RW"
 DEV="$(hdiutil attach -readwrite -noverify -noautoopen "$RW" | awk '/Apple_HFS/ {print $1; exit}')"
 MNT="/Volumes/$VOL"
-detach() { hdiutil detach -quiet "$DEV" || hdiutil detach -quiet -force "$DEV"; }
+# Finder or Spotlight can hold the volume for a moment after the layout
+# (EBUSY), so detaching retries before forcing it
+detach() {
+  local i
+  for i in 1 2 3 4 5; do
+    hdiutil detach -quiet "$DEV" && return 0
+    sleep 2
+  done
+  hdiutil detach -quiet -force "$DEV"
+}
 
 if [[ "${DMG_PLAIN:-0}" != "1" ]]; then
   # the window is 540×380 points of content (the background's size) under a
