@@ -104,13 +104,11 @@ jobs:
               {"name": "linux-x86_64", "runner": "ubuntu-24.04", "targets": ["linux-x86_64"]},
               {"name": "linux-aarch64", "runner": "ubuntu-24.04-arm", "targets": ["linux-aarch64"]},
               # the 32-bit ones, cross-built with the target's gcc toolchain
-              # (which clang finds) on the runner of the same family
+              # and libc headers (which clang finds) on the runner of the same family
               {"name": "linux-i686", "runner": "ubuntu-24.04", "targets": ["linux-i686"], "optional": True,
-               "pack_targets": "i686-unknown-linux-gnu", "apt": "gcc-i686-linux-gnu", "nm": "i686-linux-gnu-nm",
-               "sysroot": "/usr/i686-linux-gnu"},
+               "pack_targets": "i686-unknown-linux-gnu", "apt": "gcc-i686-linux-gnu libc6-dev-i386-cross", "nm": "i686-linux-gnu-nm"},
               {"name": "linux-armv7", "runner": "ubuntu-24.04-arm", "targets": ["linux-armv7"], "optional": True,
-               "pack_targets": "armv7-unknown-linux-gnueabihf", "apt": "gcc-arm-linux-gnueabihf", "nm": "arm-linux-gnueabihf-nm",
-               "sysroot": "/usr/arm-linux-gnueabihf"},
+               "pack_targets": "armv7-unknown-linux-gnueabihf", "apt": "gcc-arm-linux-gnueabihf libc6-dev-armhf-cross", "nm": "arm-linux-gnueabihf-nm"},
               {"name": "android", "runner": "ubuntu-24.04", "targets": ["android-aarch64", "android-armv7a", "android-x86_64", "android-i686"]},
               {"name": "windows-x86_64", "runner": "windows-latest", "targets": ["windows-x86_64"]},
               # Git Bash is x64 there, so uname -m says x86_64
@@ -802,7 +800,6 @@ jobs:
         env:
           # the 32-bit packs: cross-built for these Rust targets
           PACK_TARGETS: ${{ matrix.pack_targets }}
-          CORVENE_SYSROOT: ${{ matrix.sysroot }}
           NM: ${{ matrix.nm || 'nm' }}
         run: |
           packaging/packs.sh target/packs

@@ -131,11 +131,6 @@ def main(argv: list[str]) -> int:
         arch = ["-target", target]
     else:
         arch = []
-    # a Debian cross toolchain (gcc-i686-linux-gnu): its libc lives in
-    # /usr/<triplet>, and clang would take the host's /usr/include otherwise
-    sysroot = os.environ.get("CORVENE_SYSROOT")
-    if sysroot:
-        arch += [f"--sysroot={sysroot}", "--gcc-toolchain=/usr"]
     # a cross compiler (the Android NDK's) instead of the host's clang
     cc = os.environ.get("CORVENE_CC", "clang")
     cxx = os.environ.get("CORVENE_CXX", "clang++")
