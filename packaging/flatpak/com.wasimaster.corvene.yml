@@ -12,6 +12,10 @@ runtime: org.freedesktop.Platform
 runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 command: corvene
+# the x86_64 SDK's appstreamcli compose fails with a bare file-read-error on
+# the same files the aarch64 one accepts; the bundle still carries the
+# metainfo, and only Flathub needs the composed catalog
+appstream-compose: false
 finish-args:
   - --share=ipc
   - --share=network
