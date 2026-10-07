@@ -165,7 +165,8 @@ build_units() {
     lib="$out/$unit.$LIB_EXT"
     if ! python3 "$ROOT/tools/ts-queries/build_unit.py" "$unit" "$lib" --target "$t" 2>"$WORK/build-$unit.log"; then
       echo "warning: the $unit grammar did not build for $arch; left out:" >&2
-      tail -3 "$WORK/build-$unit.log" >&2
+      # the compiler's own error, not the Python traceback after it
+      grep -m 3 -E 'error|fatal' "$WORK/build-$unit.log" >&2 || tail -3 "$WORK/build-$unit.log" >&2
       continue
     fi
     if [[ "$PACK_OS" == macos ]]; then
