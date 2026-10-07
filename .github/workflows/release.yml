@@ -106,12 +106,16 @@ jobs:
               # the 32-bit ones, cross-built with the target's gcc toolchain
               # (which clang finds) on the runner of the same family
               {"name": "linux-i686", "runner": "ubuntu-24.04", "targets": ["linux-i686"], "optional": True,
-               "pack_targets": "i686-unknown-linux-gnu", "apt": "gcc-i686-linux-gnu", "nm": "i686-linux-gnu-nm"},
+               "pack_targets": "i686-unknown-linux-gnu", "apt": "gcc-i686-linux-gnu", "nm": "i686-linux-gnu-nm",
+               "sysroot": "/usr/i686-linux-gnu"},
               {"name": "linux-armv7", "runner": "ubuntu-24.04-arm", "targets": ["linux-armv7"], "optional": True,
-               "pack_targets": "armv7-unknown-linux-gnueabihf", "apt": "gcc-arm-linux-gnueabihf", "nm": "arm-linux-gnueabihf-nm"},
+               "pack_targets": "armv7-unknown-linux-gnueabihf", "apt": "gcc-arm-linux-gnueabihf", "nm": "arm-linux-gnueabihf-nm",
+               "sysroot": "/usr/arm-linux-gnueabihf"},
               {"name": "android", "runner": "ubuntu-24.04", "targets": ["android-aarch64", "android-armv7a", "android-x86_64", "android-i686"]},
               {"name": "windows-x86_64", "runner": "windows-latest", "targets": ["windows-x86_64"]},
-              {"name": "windows-aarch64", "runner": "windows-11-arm", "targets": ["windows-aarch64"]},
+              # Git Bash is x64 there, so uname -m says x86_64
+              {"name": "windows-aarch64", "runner": "windows-11-arm", "targets": ["windows-aarch64"],
+               "pack_targets": "aarch64-pc-windows-msvc"},
               {"name": "windows-i686", "runner": "windows-latest", "targets": ["windows-i686"], "optional": True,
                "pack_targets": "i686-pc-windows-msvc"},
           ]
@@ -798,6 +802,7 @@ jobs:
         env:
           # the 32-bit packs: cross-built for these Rust targets
           PACK_TARGETS: ${{ matrix.pack_targets }}
+          CORVENE_SYSROOT: ${{ matrix.sysroot }}
           NM: ${{ matrix.nm || 'nm' }}
         run: |
           packaging/packs.sh target/packs
