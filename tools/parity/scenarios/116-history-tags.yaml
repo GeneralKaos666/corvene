@@ -1,0 +1,14 @@
+# A History row with two tags: the pill shows the first tag's name and the
+# second peeks out behind it (`.tag-indicator-more`)
+name: history-tags
+description: History row with two tags on one commit
+setup: repo
+tags: {packs: HEAD~1}
+steps:
+  - click: [187, 97]
+    wait: 600
+  - dump: open
+  - snap: open
+  - click: [124, 275]
+    wait: 600
+  - snap: tagged-selected

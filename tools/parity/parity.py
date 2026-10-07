@@ -185,6 +185,11 @@ class Run:
         repo_c = fixture.build(work / "u", remote, coauthors, graph, signed, reflog, tools, structure,
                                lfs_url, remotes, pull_request, utf16, stacked, forks, mismatch,
                                codeowners, diff_marks) if with_repo else None
+        # `tags: {name: rev}`: lightweight tags added to both fixtures before
+        # either app opens them
+        for repo in (repo_g, repo_c) if with_repo else ():
+            for name, rev in sc.get("tags", {}).items():
+                fixture._git(repo, "tag", name, rev)
 
         # `github_stub: true`: a stub GitHub API for Corvene's Issues, Releases
         # and pull request review views (`github_stub.py`), reached by the

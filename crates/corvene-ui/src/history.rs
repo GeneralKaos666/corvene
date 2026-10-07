@@ -2932,17 +2932,35 @@ fn commit_row_contents_with(
         })
         // `.commit-indicators .tag-indicator`: the first tag as a 16 px pill
         // (5 px padding, 6 px radius, no icon); more tags peek out behind it
-        // as a 10 px tab (`.tag-indicator-more`)
+        // as a 10 px tab (`.tag-indicator-more`), 5 px past the pill and cut
+        // off by the pill's 1 px `box-shadow` in the background colour. The
+        // tab is absolute: a negative margin pushed the whole pill past the
+        // row's end, where the list clipped it
         .when(!commit.tags.is_empty(), |d| {
+            let more = commit.tags.len() > 1;
             let pill = div()
+                .relative()
                 .ml(SPACING())
                 .h(zpx(16.))
                 .max_w(gpui_kit::relative(0.5))
+                .when(more, |d| d.pr(SPACING_HALF()))
                 .flex()
                 .flex_row()
                 .text_color(badge_text)
                 .text_size(FONT_SIZE())
                 .line_height(zpx(16.))
+                .when(more, |d| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .w(SPACING())
+                            .h(zpx(16.))
+                            .rounded_r(BORDER_RADIUS())
+                            .bg(badge_bg),
+                    )
+                })
                 .child(
                     div()
                         .min_w_0()
@@ -2950,20 +2968,18 @@ fn commit_row_contents_with(
                         .h(zpx(16.))
                         .rounded(BORDER_RADIUS())
                         .bg(badge_bg)
+                        .when(more, |d| {
+                            d.shadow(vec![BoxShadow {
+                                color: t.background,
+                                offset: point(zpx(1.), zpx(0.)),
+                                blur_radius: zpx(0.),
+                                spread_radius: zpx(0.),
+                                inset: false,
+                            }])
+                        })
                         .truncate()
                         .child(commit.tags[0].clone()),
-                )
-                .when(commit.tags.len() > 1, |d| {
-                    d.child(
-                        div()
-                            .flex_none()
-                            .w(SPACING())
-                            .ml(zpx(-5.))
-                            .h(zpx(16.))
-                            .rounded_r(BORDER_RADIUS())
-                            .bg(badge_bg),
-                    )
-                });
+                );
             // `806`: hovering the pill lists every tag
             if tags_tooltip(cx) {
                 d.child(

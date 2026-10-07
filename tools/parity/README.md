@@ -88,6 +88,7 @@ setup: repo            # repo (fixture added + selected) | repo-remote (the same
 corvene_flags: 1213-commit-graph=on   # optional: flags for Corvene after the GHD preset (a surface GHD lacks)
 github_stub: true                     # optional: a stub GitHub API for Corvene (`github_stub.py`), reached by the `github: stub` step
 lfs_stub: true                        # optional: a stub Git LFS locking API (`lfs_stub.py`), the fixtures' `lfs.url`
+tags: {packs: HEAD~1}                 # optional: lightweight tags added to both fixtures before the apps open them
 ssh_key: true                         # optional: a fixed public key in Corvene's private SSH dir (Corvene always runs with `CORVENE_SSH_DIR=<data>/ssh`, never the user's ~/.ssh)
 ghd_env: {GITHUB_DESKTOP_PREVIEW_FEATURES: 1}   # optional: extra env for GHD (test-* popups need this; it also turns on beta features)
 threshold: 1.0         # optional per-scenario defaults: threshold, tolerance, radius, settle, width, height
