@@ -38,7 +38,7 @@ corvene-test-support = { path = "crates/corvene-test-support" }
 corvene-ui = { path = "crates/corvene-ui" }
 
 # Git
-gix = "0.88"
+gix = "0.90"
 
 # Network + secrets
 ureq = { version = "3.4", features = ["json"] }
