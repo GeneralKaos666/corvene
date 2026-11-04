@@ -24,7 +24,7 @@ tracing.workspace = true
 ureq.workspace = true
 # .vsix, .sublime-package and plugin archives; entries are read one by one
 # and written by this crate, never by the library's extractor
-zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # syntect's YAML reader; also emits the converted grammars and reads
 # `.YAML-tmLanguage` sources
 yaml-rust = "0.4"
